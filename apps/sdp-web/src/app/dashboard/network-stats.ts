@@ -29,7 +29,10 @@ export interface NetworkMetric {
 }
 
 export interface NetworkSnapshot {
-  health: "healthy" | "degraded";
+  /** The network's live health; null when no health check backs the snapshot. */
+  health: "healthy" | "degraded" | null;
+  /** Figures for review rather than a live read: the section labels them as sample data. */
+  sample?: boolean;
   updatedAt: string;
   metrics: readonly NetworkMetric[];
 }

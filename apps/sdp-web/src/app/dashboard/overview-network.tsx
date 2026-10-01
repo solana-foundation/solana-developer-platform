@@ -135,6 +135,39 @@ function formatUpdated(iso: string, locale: string, now = Date.now()): string {
 }
 
 /**
+ * The badge beside the title: the network's live health, "Sample data" for review figures, and
+ * nothing when the snapshot carries no health check, so a sample never reads as a live status.
+ */
+function NetworkStatus({ snapshot }: { snapshot: NetworkSnapshot }) {
+  const t = useTranslations();
+  if (snapshot.sample) {
+    return (
+      <span className="text-body text-tertiary" data-network-status="sample">
+        {t("Shared.homeWorkspace.network.sample")}
+      </span>
+    );
+  }
+  if (snapshot.health === null) return null;
+  const healthy = snapshot.health === "healthy";
+  return (
+    <span
+      className="flex items-center gap-1.5 text-body text-secondary"
+      data-network-status={snapshot.health}
+    >
+      <span
+        aria-hidden="true"
+        className={
+          healthy ? "size-1.5 rounded-full bg-success" : "size-1.5 rounded-full bg-warning"
+        }
+      />
+      {t(
+        healthy ? "Shared.homeWorkspace.network.healthy" : "Shared.homeWorkspace.network.degraded"
+      )}
+    </span>
+  );
+}
+
+/**
  * Solana network context under the organization's own figures: stablecoin supply, transfers,
  * share of activity and cost per transaction over 30 days, 90 days or a year.
  *
@@ -148,7 +181,6 @@ export function OverviewNetwork({
   const t = useTranslations();
   const locale = useLocale();
   const [range, setRange] = useState<NetworkRange>("1y");
-  const healthy = snapshot.health === "healthy";
 
   return (
     <section
@@ -161,19 +193,7 @@ export function OverviewNetwork({
           <h2 id="overview-network-title" className="text-subheading font-medium text-primary">
             {t("Shared.homeWorkspace.network.title")}
           </h2>
-          <span className="flex items-center gap-1.5 text-body text-secondary">
-            <span
-              aria-hidden="true"
-              className={
-                healthy ? "size-1.5 rounded-full bg-success" : "size-1.5 rounded-full bg-warning"
-              }
-            />
-            {t(
-              healthy
-                ? "Shared.homeWorkspace.network.healthy"
-                : "Shared.homeWorkspace.network.degraded"
-            )}
-          </span>
+          <NetworkStatus snapshot={snapshot} />
         </div>
         <div className="flex flex-wrap items-center gap-3 sm:ml-auto">
           <span className="flex items-center gap-2 text-body text-tertiary">

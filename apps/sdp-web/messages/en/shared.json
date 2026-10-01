@@ -485,6 +485,7 @@
       "title": "Solana network",
       "healthy": "Healthy",
       "degraded": "Degraded",
+      "sample": "Sample data",
       "updated": "Updated {when}",
       "rangeLabel": "Time range",
       "range30d": "30D",

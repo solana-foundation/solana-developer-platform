@@ -36,6 +36,231 @@ function readingForKey(key: string, from: number, last: number): number | null {
   }
 }
 
+/** The plot's vertical scale: a value's distance from the top, in percent of the plot. */
+function verticalScale(ticks: readonly number[]) {
+  const floor = ticks[0] ?? 0;
+  const ceiling = ticks.at(-1) ?? 1;
+  const span = ceiling - floor || 1;
+  return {
+    floor,
+    ceiling,
+    topPercent: (value: number) => ((ceiling - value) / span) * 100,
+  };
+}
+
+/** A reading's horizontal position, inside the plot's inset. */
+function horizontalScale(last: number) {
+  const fractionOf = (index: number) => (last === 0 ? 1 : index / last);
+  return {
+    fractionOf,
+    leftOf: (index: number) =>
+      `calc(${INSET_PX}px + (100% - ${INSET_PX * 2}px) * ${fractionOf(index)})`,
+  };
+}
+
+/** The reading the pointer or the keyboard picked, or null while the chart is at rest. */
+function useChartReading(last: number) {
+  const [active, setActive] = useState<number | null>(null);
+  const plotRef = useRef<HTMLDivElement>(null);
+  const shown = active ?? last;
+
+  function pickAt(clientX: number) {
+    const plot = plotRef.current;
+    if (!plot || last === 0) {
+      return;
+    }
+    const box = plot.getBoundingClientRect();
+    const width = box.width - INSET_PX * 2;
+    if (width <= 0) {
+      return;
+    }
+    const ratio = (clientX - box.left - INSET_PX) / width;
+    setActive(Math.max(0, Math.min(last, Math.round(ratio * last))));
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      setActive(null);
+      return;
+    }
+    const next = readingForKey(event.key, shown, last);
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    setActive(next);
+  }
+
+  return { active, shown, plotRef, pickAt, handleKeyDown, clear: () => setActive(null) };
+}
+
+/** Dotted gridlines on the ticks over a solid baseline. */
+function ChartGridlines({
+  ticks,
+  topPercent,
+}: {
+  ticks: readonly number[];
+  topPercent: (value: number) => number;
+}) {
+  return ticks.map((tick, index) => (
+    <span
+      key={tick}
+      aria-hidden="true"
+      style={{ top: `${topPercent(tick)}%` }}
+      className={cn(
+        "pointer-events-none absolute inset-x-0 h-px",
+        index === 0
+          ? "bg-border-default"
+          : "bg-[repeating-linear-gradient(to_right,var(--color-border-default)_0_2px,transparent_2px_6px)]"
+      )}
+    />
+  ));
+}
+
+const LINE_STROKE = {
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinejoin: "round",
+  strokeLinecap: "round",
+  vectorEffect: "non-scaling-stroke",
+} as const;
+
+/** The line over its fading fill; with a reading picked, lit up to it and dimmed past it. */
+function ChartLines({
+  values,
+  floor,
+  ceiling,
+  activeFraction,
+}: {
+  values: readonly number[];
+  floor: number;
+  ceiling: number;
+  /** How far along the picked reading sits, or null while the chart is at rest. */
+  activeFraction: number | null;
+}) {
+  // SVG references go through url(#…), so the id keeps to characters that need no escaping.
+  const id = useId().replace(/[^\w-]/g, "");
+  const gradientId = `${id}-fill`;
+  const clipId = `${id}-upto`;
+  const line = toPath(values, floor, ceiling);
+  const area = `${line} L${VIEW} ${VIEW} L0 ${VIEW} Z`;
+  const picked = activeFraction !== null;
+
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox={`0 0 ${VIEW} ${VIEW}`}
+      preserveAspectRatio="none"
+      style={{ left: INSET_PX, right: INSET_PX }}
+      className="pointer-events-none absolute inset-y-0 h-full w-[calc(100%-14px)] overflow-visible text-primary"
+    >
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="currentColor" stopOpacity="0.15" />
+          <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+        </linearGradient>
+        <clipPath id={clipId}>
+          <rect x={0} y={-VIEW} width={(activeFraction ?? 0) * VIEW} height={VIEW * 3} />
+        </clipPath>
+      </defs>
+      <path
+        d={area}
+        fill={`url(#${gradientId})`}
+        clipPath={picked ? `url(#${clipId})` : undefined}
+      />
+      <path
+        d={line}
+        {...LINE_STROKE}
+        className={cn(
+          "transition-opacity motion-reduce:transition-none",
+          picked ? "opacity-25" : "opacity-100"
+        )}
+      />
+      {picked ? <path d={line} {...LINE_STROKE} clipPath={`url(#${clipId})`} /> : null}
+    </svg>
+  );
+}
+
+/** Where the reading card sits: pinned to an edge near either end, centred between. */
+function readingCardShift(fraction: number): string {
+  if (fraction < 1 / 6) return "-translate-x-1";
+  if (fraction > 5 / 6) return "-translate-x-[calc(100%-var(--spacing))]";
+  return "-translate-x-1/2";
+}
+
+/** The card naming the picked reading's date and value. */
+function ChartReadingCard({
+  left,
+  atFoot,
+  fraction,
+  date,
+  value,
+}: {
+  left: string;
+  atFoot: boolean;
+  fraction: number;
+  date: string;
+  value: string;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      data-chart-reading=""
+      style={{ left }}
+      className={cn(
+        "pointer-events-none absolute z-10 flex flex-col gap-0.5 rounded-control bg-primary px-3 py-1.5 text-meta whitespace-nowrap text-surface-raised tabular-nums",
+        atFoot ? "bottom-2" : "top-0",
+        readingCardShift(fraction)
+      )}
+    >
+      <span className="opacity-60">{date}</span>
+      <span className="font-medium">{value}</span>
+    </span>
+  );
+}
+
+/** Tick labels in the 48px column right of the plot. */
+function ChartTickColumn({
+  ticks,
+  topPercent,
+  formatTick,
+}: {
+  ticks: readonly number[];
+  topPercent: (value: number) => number;
+  formatTick: (value: number) => string;
+}) {
+  return (
+    <div aria-hidden="true" className="relative h-[182px]">
+      {ticks.map((tick) => (
+        <span
+          key={tick}
+          style={{ top: `${topPercent(tick)}%` }}
+          className="absolute left-0 -translate-y-1/2 text-meta whitespace-nowrap text-tertiary tabular-nums"
+        >
+          {formatTick(tick)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** The range's first, middle and last dates under the plot. */
+function ChartDateRow({ dateLabels }: { dateLabels: readonly [string, string, string] }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{ paddingLeft: INSET_PX, paddingRight: INSET_PX }}
+      className="mt-2 flex justify-between gap-2 text-meta whitespace-nowrap text-tertiary tabular-nums"
+    >
+      {dateLabels.map((dateLabel, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: the three positions are fixed.
+        <span key={index}>{dateLabel}</span>
+      ))}
+    </div>
+  );
+}
+
 /**
  * A single-series area chart in the design's grammar: dotted gridlines on the ticks with a solid
  * baseline, a 2px line over a fill that fades to nothing at the floor, a dot on the latest
@@ -73,25 +298,11 @@ export function OverviewAreaChart({
   className?: string;
 }) {
   const t = useTranslations();
-  const [active, setActive] = useState<number | null>(null);
-  const plotRef = useRef<HTMLDivElement>(null);
-  // SVG references go through url(#…), so the id keeps to characters that need no escaping.
-  const id = useId().replace(/[^\w-]/g, "");
-  const gradientId = `${id}-fill`;
-  const clipId = `${id}-upto`;
-  const floor = ticks[0] ?? 0;
-  const ceiling = ticks.at(-1) ?? 1;
-  const span = ceiling - floor || 1;
-  const topPercent = (value: number) => ((ceiling - value) / span) * 100;
-  const line = toPath(values, floor, ceiling);
-  const area = `${line} L${VIEW} ${VIEW} L0 ${VIEW} Z`;
   const last = Math.max(values.length - 1, 0);
-  const shown = active ?? last;
+  const { active, shown, plotRef, pickAt, handleKeyDown, clear } = useChartReading(last);
+  const { floor, ceiling, topPercent } = verticalScale(ticks);
+  const { fractionOf, leftOf } = horizontalScale(last);
   const shownValue = values[shown];
-  const fractionOf = (index: number) => (last === 0 ? 1 : index / last);
-  const leftOf = (index: number) =>
-    `calc(${INSET_PX}px + (100% - ${INSET_PX * 2}px) * ${fractionOf(index)})`;
-  const insetBox = { left: INSET_PX, right: INSET_PX } as const;
   const reading =
     shownValue === undefined
       ? undefined
@@ -99,44 +310,14 @@ export function OverviewAreaChart({
           value: formatValue(shownValue),
           date: formatDate(shown),
         });
-
-  function pickAt(clientX: number) {
-    const plot = plotRef.current;
-    if (!plot || last === 0) {
-      return;
-    }
-    const box = plot.getBoundingClientRect();
-    const width = box.width - INSET_PX * 2;
-    if (width <= 0) {
-      return;
-    }
-    const ratio = (clientX - box.left - INSET_PX) / width;
-    setActive(Math.max(0, Math.min(last, Math.round(ratio * last))));
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      setActive(null);
-      return;
-    }
-    const next = readingForKey(event.key, shown, last);
-    if (next === null) {
-      return;
-    }
-    event.preventDefault();
-    setActive(next);
-  }
-
   const activeValue = active === null ? undefined : values[active];
-  const cardAtFoot = activeValue !== undefined && topPercent(activeValue) < 45;
-  const activeFraction = active === null ? 0 : fractionOf(active);
 
   return (
     // Leaving the whole chart, not just the plot, clears the reading, so the pointer can run
     // into the tick column to reach the last one.
     <div
       className={cn("grid grid-cols-[minmax(0,1fr)_48px] gap-x-2.5", className)}
-      onPointerLeave={() => setActive(null)}
+      onPointerLeave={clear}
     >
       <div
         ref={plotRef}
@@ -150,22 +331,10 @@ export function OverviewAreaChart({
         data-chart-plot=""
         onPointerMove={(event) => pickAt(event.clientX)}
         onKeyDown={handleKeyDown}
-        onBlur={() => setActive(null)}
+        onBlur={clear}
         className="relative h-[182px] touch-pan-y outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
-        {ticks.map((tick, index) => (
-          <span
-            key={tick}
-            aria-hidden="true"
-            style={{ top: `${topPercent(tick)}%` }}
-            className={cn(
-              "pointer-events-none absolute inset-x-0 h-px",
-              index === 0
-                ? "bg-border-default"
-                : "bg-[repeating-linear-gradient(to_right,var(--color-border-default)_0_2px,transparent_2px_6px)]"
-            )}
-          />
-        ))}
+        <ChartGridlines ticks={ticks} topPercent={topPercent} />
         {active === null ? null : (
           <span
             aria-hidden="true"
@@ -174,53 +343,12 @@ export function OverviewAreaChart({
             className="pointer-events-none absolute inset-y-0 w-px bg-tertiary/60"
           />
         )}
-        <svg
-          aria-hidden="true"
-          viewBox={`0 0 ${VIEW} ${VIEW}`}
-          preserveAspectRatio="none"
-          style={insetBox}
-          className="pointer-events-none absolute inset-y-0 h-full w-[calc(100%-14px)] overflow-visible text-primary"
-        >
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="currentColor" stopOpacity="0.15" />
-              <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-            </linearGradient>
-            <clipPath id={clipId}>
-              <rect x={0} y={-VIEW} width={activeFraction * VIEW} height={VIEW * 3} />
-            </clipPath>
-          </defs>
-          <path
-            d={area}
-            fill={`url(#${gradientId})`}
-            clipPath={active === null ? undefined : `url(#${clipId})`}
-          />
-          <path
-            d={line}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-            className={cn(
-              "transition-opacity motion-reduce:transition-none",
-              active === null ? "opacity-100" : "opacity-25"
-            )}
-          />
-          {active === null ? null : (
-            <path
-              d={line}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              vectorEffect="non-scaling-stroke"
-              clipPath={`url(#${clipId})`}
-            />
-          )}
-        </svg>
+        <ChartLines
+          values={values}
+          floor={floor}
+          ceiling={ceiling}
+          activeFraction={active === null ? null : fractionOf(active)}
+        />
         {shownValue === undefined ? null : (
           <span
             aria-hidden="true"
@@ -229,46 +357,17 @@ export function OverviewAreaChart({
           />
         )}
         {active === null || activeValue === undefined ? null : (
-          <span
-            aria-hidden="true"
-            data-chart-reading=""
-            style={{ left: leftOf(active) }}
-            className={cn(
-              "pointer-events-none absolute z-10 flex flex-col gap-0.5 rounded-control bg-primary px-3 py-1.5 text-meta whitespace-nowrap text-surface-raised tabular-nums",
-              cardAtFoot ? "bottom-2" : "top-0",
-              activeFraction < 1 / 6
-                ? "-translate-x-1"
-                : activeFraction > 5 / 6
-                  ? "-translate-x-[calc(100%-var(--spacing))]"
-                  : "-translate-x-1/2"
-            )}
-          >
-            <span className="opacity-60">{formatDate(active)}</span>
-            <span className="font-medium">{formatValue(activeValue)}</span>
-          </span>
+          <ChartReadingCard
+            left={leftOf(active)}
+            atFoot={topPercent(activeValue) < 45}
+            fraction={fractionOf(active)}
+            date={formatDate(active)}
+            value={formatValue(activeValue)}
+          />
         )}
       </div>
-      <div aria-hidden="true" className="relative h-[182px]">
-        {ticks.map((tick) => (
-          <span
-            key={tick}
-            style={{ top: `${topPercent(tick)}%` }}
-            className="absolute left-0 -translate-y-1/2 text-meta whitespace-nowrap text-tertiary tabular-nums"
-          >
-            {formatTick(tick)}
-          </span>
-        ))}
-      </div>
-      <div
-        aria-hidden="true"
-        style={{ paddingLeft: INSET_PX, paddingRight: INSET_PX }}
-        className="mt-2 flex justify-between gap-2 text-meta whitespace-nowrap text-tertiary tabular-nums"
-      >
-        {dateLabels.map((dateLabel, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: the three positions are fixed.
-          <span key={index}>{dateLabel}</span>
-        ))}
-      </div>
+      <ChartTickColumn ticks={ticks} topPercent={topPercent} formatTick={formatTick} />
+      <ChartDateRow dateLabels={dateLabels} />
     </div>
   );
 }

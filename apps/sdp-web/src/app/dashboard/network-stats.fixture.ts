@@ -76,7 +76,9 @@ function metric(
 
 // Year-end figures and year-on-year changes as the prototype prints them.
 export const NETWORK_STATS_FIXTURE: NetworkSnapshot = {
-  health: "healthy",
+  // No live health check backs the fixture, so it claims no health and reads as sample data.
+  health: null,
+  sample: true,
   updatedAt: "2026-09-23T12:00:00Z",
   metrics: [
     metric(

@@ -8,7 +8,7 @@ import type {
 } from "@sdp/types";
 import { CoinsIcon, KeyIcon, ReceiptIcon, WalletIcon } from "lucide-react";
 import Link from "next/link";
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start.redesign";
 import { TokenMark } from "@/components/token-mark";
 import { ActionTile } from "@/components/ui/action-tile";
@@ -335,6 +335,23 @@ function OverviewActions({ tiles }: { tiles: readonly OverviewTile[] }) {
   );
 }
 
+const ACTIVITY_TIMESTAMP_FORMAT: Intl.DateTimeFormatOptions = {
+  dateStyle: "medium",
+  timeStyle: "short",
+};
+
+/**
+ * "Sep 25, 2026, 10:00 AM" in the viewer's own timezone. It renders only inside an open tooltip,
+ * so only in the browser after hydration: the server's timezone never reaches the markup.
+ */
+function ActivityTimestamp({ date, locale }: { date: Date; locale: string }) {
+  const formatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, ACTIVITY_TIMESTAMP_FORMAT),
+    [locale]
+  );
+  return <time dateTime={date.toISOString()}>{formatter.format(date)}</time>;
+}
+
 function activityStatusLabel(
   row: HomeActivityRow,
   t: ReturnType<typeof useTranslations>,
@@ -437,12 +454,7 @@ function RecentActivity({
             <TableBody>
               {rows.map((row) => {
                 const createdAt = new Date(row.createdAt);
-                const timeTooltip = Number.isNaN(createdAt.getTime())
-                  ? null
-                  : new Intl.DateTimeFormat(locale, {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    }).format(createdAt);
+                const hasTimestamp = !Number.isNaN(createdAt.getTime());
                 const timeLabel = formatRelativeTime(row.createdAt, locale);
                 // `row.token` is resolved against issued tokens only; the balances carry the
                 // symbols for everything else.
@@ -457,13 +469,13 @@ function RecentActivity({
                 return (
                   <TableRow key={row.id}>
                     <TableCell className="text-primary">
-                      {timeTooltip ? (
+                      {hasTimestamp ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span>{timeLabel}</span>
                           </TooltipTrigger>
                           <TooltipContent side="top" className="text-xs">
-                            {timeTooltip}
+                            <ActivityTimestamp date={createdAt} locale={locale} />
                           </TooltipContent>
                         </Tooltip>
                       ) : (
