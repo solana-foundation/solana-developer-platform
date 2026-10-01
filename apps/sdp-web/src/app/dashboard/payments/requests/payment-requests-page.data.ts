@@ -163,18 +163,23 @@ type PaymentRequestsScan = PaymentRequestsResult & {
 };
 
 /**
- * The newest payment requests of every status, up to {@link PAYMENT_REQUESTS_SCAN_CAP}, read
- * in pages of {@link PAYMENT_REQUESTS_PAGE_SIZE}. Listing reconciles each open request it
- * reads, and saves any that has been paid, so the rows carry the status the list shows.
+ * The newest payment requests, up to {@link PAYMENT_REQUESTS_SCAN_CAP}, read in pages of
+ * {@link PAYMENT_REQUESTS_PAGE_SIZE}. Listing reconciles each open request it reads, and saves
+ * any that has been paid, so the rows carry the status the list shows.
  *
- * The pages are read without a status filter. Under one, a request that settles, expires or is
- * canceled while the pages are read leaves the filtered set, so every later offset moves up a
- * row and a page skips one. Newest first across every status, a row only moves when a request
- * is created: that pushes the rest down, so a page repeats a row (dropped here) and the total
- * grows (read on to cover it).
+ * With no stored status the pages are read across every status. Under one, a request that
+ * settles, expires or is canceled while the pages are read leaves the filtered set, so every
+ * later offset moves up a row and a page skips one. Newest first across every status, a row only
+ * moves when a request is created: that pushes the rest down, so a page repeats a row (dropped
+ * here) and the total grows (read on to cover it). A stored status is read only to reach past
+ * the cap of that unfiltered read; see {@link loadPaymentRequestsList}.
  */
-async function scanPaymentRequests(request: SdpApiClient["request"]): Promise<PaymentRequestsScan> {
-  const first = await fetchPaymentRequests(request, { page: 1 });
+async function scanPaymentRequests(
+  request: SdpApiClient["request"],
+  storedStatus?: PaymentRequest["status"]
+): Promise<PaymentRequestsScan> {
+  const statusOption = storedStatus ? { status: storedStatus } : {};
+  const first = await fetchPaymentRequests(request, { page: 1, ...statusOption });
   if (!first.ok) return { ...first, capped: false };
   const pages = [first];
   let total = first.total;
@@ -185,7 +190,7 @@ async function scanPaymentRequests(request: SdpApiClient["request"]): Promise<Pa
     if (pages.length >= needed) break;
     const read = await Promise.all(
       Array.from({ length: needed - pages.length }, (_, index) =>
-        fetchPaymentRequests(request, { page: pages.length + index + 1 })
+        fetchPaymentRequests(request, { page: pages.length + index + 1, ...statusOption })
       )
     );
     const failed = read.find((result) => !result.ok);
@@ -272,7 +277,9 @@ function pageOf(
  * otherwise be missed by Paid and shown as paid under Awaiting payment. The API has no search,
  * so a search matches here too. Both read up to {@link PAYMENT_REQUESTS_SCAN_CAP} requests;
  * past it, a status filter with no search goes back to the API's pages, the newest requests
- * already settled.
+ * already settled. A search under a status past it also reads that status's newest requests
+ * (Paid reads the open ones too, settling any that has been paid), so a request older than the
+ * unfiltered read is still found.
  *
  * @param request - Authenticated SDP API fetcher.
  * @param state - The list's page, size, status and search.
@@ -300,14 +307,56 @@ export async function loadPaymentRequestsList(
   const scan = await scanPaymentRequests(request);
   if (!scan.ok) return listFailure(scan);
   if (search === null && scan.capped) return pageFromApi();
+  const read = status !== null && scan.capped ? await readPastScan(request, scan, status) : scan;
+  if (!read.ok) return listFailure(read);
   const counterpartyNames =
     search !== null && options.counterpartyNames ? await options.counterpartyNames() : new Map();
-  const rows = scan.data.filter(
+  const rows = read.data.filter(
     (row) =>
       (status === null || row.status === status) &&
       (search === null || paymentRequestMatchesSearch(row, search, counterpartyNames))
   );
-  return pageOf(rows, state, search !== null && scan.capped);
+  return pageOf(rows, state, search !== null && read.capped);
+}
+
+/** Newest first by creation, keeping the order of requests created at the same time. */
+function byNewest(a: PaymentRequest, b: PaymentRequest): number {
+  return a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0;
+}
+
+/**
+ * The capped unfiltered read, followed by the older requests that may show `status`, read by
+ * stored status up to {@link PAYMENT_REQUESTS_SCAN_CAP} each. A request shows Paid once
+ * listing settles it, so Paid also reads the open requests: any of them that has been paid
+ * comes back paid.
+ *
+ * @returns Every request read, once each, newest first; `capped` when a status read was.
+ */
+async function readPastScan(
+  request: SdpApiClient["request"],
+  scan: PaymentRequestsScan,
+  status: PaymentRequest["status"]
+): Promise<PaymentRequestsScan> {
+  const storedStatuses: PaymentRequest["status"][] =
+    status === "paid" ? ["awaiting_payment", "paid"] : [status];
+  const reads = await Promise.all(
+    storedStatuses.map((storedStatus) => scanPaymentRequests(request, storedStatus))
+  );
+  const failed = reads.find((read) => !read.ok);
+  if (failed) return failed;
+  const seen = new Set(scan.data.map((row) => row.id));
+  const older = new Map(
+    reads
+      .flatMap((read) => read.data)
+      .filter((row) => !seen.has(row.id))
+      .map((row) => [row.id, row])
+  );
+  return {
+    ok: true,
+    data: [...scan.data, ...[...older.values()].sort(byNewest)],
+    total: scan.total,
+    capped: reads.some((read) => read.capped),
+  };
 }
 
 export type PaymentRequestDetailResult =

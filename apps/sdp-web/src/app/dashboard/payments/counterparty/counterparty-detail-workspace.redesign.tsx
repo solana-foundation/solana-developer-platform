@@ -511,7 +511,13 @@ export function CounterpartyDetailWorkspace({
   const t = useTranslations();
   const router = useRouter();
   const providerAccounts = useCounterpartyProviderAccounts(counterparty.id);
-  const [accounts, setAccounts] = useState(initialAccounts);
+  // Addresses added here since the page loaded. The list follows the page's read, so a Retry
+  // or other refresh shows what it loaded; an added address the read now holds is shown once.
+  const [added, setAdded] = useState<CounterpartyAccount[]>([]);
+  const accounts = [
+    ...added.filter((account) => !initialAccounts.some((loaded) => loaded.id === account.id)),
+    ...initialAccounts,
+  ];
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<PaymentTransferSummary | null>(null);
@@ -611,7 +617,7 @@ export function CounterpartyDetailWorkspace({
       <AddExternalAccountDialog
         isOpen={addOpen}
         counterpartyId={counterparty.id}
-        onAdded={(account) => setAccounts((prev) => [account, ...prev])}
+        onAdded={(account) => setAdded((prev) => [account, ...prev])}
         onClose={() => setAddOpen(false)}
       />
 
