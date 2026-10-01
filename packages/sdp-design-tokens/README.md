@@ -43,7 +43,12 @@ In a Tailwind v4 stylesheet, import the tokens before anything that reads them:
 @import "@sdp/design-tokens/theme.css";
 ```
 
-Opt a surface into the refresh design with the attribute:
+`apps/sdp-web/src/app/globals.css` imports them this way, so the dashboard reads the base
+palette from the package. Nothing in sdp-web renders a refresh scope yet: every screen stays on the
+base palette until a surface opts in.
+
+Opt a surface into the refresh design with the attribute. On `<html>` it adopts the design
+app-wide, in light and dark:
 
 ```tsx
 import { refreshThemeProps } from "@sdp/design-tokens";
@@ -51,12 +56,8 @@ import { refreshThemeProps } from "@sdp/design-tokens";
 <section {...refreshThemeProps}>…</section>
 ```
 
-In the dashboard the shell sets the attribute on `<main>` from the route
-(`src/lib/theme-scope-routes.ts`), so on a Payments or Privacy route the whole screen, sidebar
-included, renders in the design; other routes keep the base shell. `ThemeScopeProvider`
-(`apps/sdp-web/src/components/theme-scope.tsx`) carries the scope to portaled content
-(modals, menus, popovers), which re-stamps it through `useThemeScopeAttributes` because a
-portal leaves the scoped subtree.
+Content portaled out of that element (modals, menus, popovers) leaves the scope, so it has to
+carry the attribute itself.
 
 When a component needs different styling inside a refresh surface, use the variant rather
 than a second component:
@@ -65,24 +66,19 @@ than a second component:
 <div className="rounded-lg bg-fill-subtle refresh:rounded-card refresh:bg-transparent" />
 ```
 
-Where the structure differs as well, read `useThemeScope() === "refresh"` in a client
-component.
-
 ### Fonts
 
-`tokens.css` expects the app to load the files in `src/assets/fonts` and expose them as
-`--font-season-sans` and `--font-geist-mono`. The dashboard does that with `next/font/local` in
-`apps/sdp-web/src/app/layout.tsx`, which also gives them a system fallback with matching
-metrics. A Storybook or a static page can declare the same two variables from `@font-face`
-rules pointing at the same files. Without either, the refresh stack falls back to the installed
-family name, then the system stack.
+The refresh stacks read `--font-season-sans` and `--font-geist-mono`, so the app loads the
+files in `src/assets/fonts` and exposes them under those names. In Next.js, load each with
+`next/font/local`, set `variable` to that name, and put the font's `variable` class on
+`<html>`. Elsewhere, declare `@font-face` rules for the same files and set the two variables
+on `:root`. Without either, the stack falls back to the installed family name, then the system
+stack. sdp-web doesn't load them yet.
 
 ### Page column
 
-`max-w-page` is the design's content column (852px, which with the shell's 24px gutters is the
-design's 900px column). `max-w-flow` is the wizard and settings form column (660px). The shell
-lays the title, tabs and content in one column with one gutter, so they share a left edge at
-every width.
+`max-w-page` is the design's content column (852px, which with 24px gutters is the design's
+900px column). `max-w-flow` is the wizard and settings form column (660px).
 
 ### Class merging
 
