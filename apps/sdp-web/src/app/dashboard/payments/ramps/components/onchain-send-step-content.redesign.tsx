@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard.redesign";
 import { walletComboboxOptions } from "../wallet-options";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
+import { AmountFields, SourceWalletField } from "./payment-form-fields";
 
 /** Whether this project can send privately, for the "Send privately" row; null hides it. */
 export interface PrivateSendStatus {
@@ -260,7 +261,7 @@ function DestinationFields({
 }
 
 /** The wallet the payment leaves from, and why it may not be able to sign. */
-function SourceWalletField({ wizard }: { wizard: OnchainSendWizard }) {
+function PaySourceWalletField({ wizard }: { wizard: OnchainSendWizard }) {
   const t = useTranslations();
   const { liveWallets, walletsLoading, fields, selectWallet, sourceWalletHint } = wizard;
   const walletOptions = useMemo(
@@ -271,25 +272,21 @@ function SourceWalletField({ wizard }: { wizard: OnchainSendWizard }) {
     [liveWallets, t]
   );
   return (
-    <div className="space-y-2">
-      <Combobox
-        label={t("DashboardPayments.onchainSend.sourceWallet")}
-        value={fields.walletId === "" ? null : fields.walletId}
-        onChange={selectWallet}
-        options={walletOptions}
-        placeholder={t("DashboardPayments.onchainSend.selectSourceWallet")}
-        searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
-        isLoading={walletsLoading}
-      />
+    <SourceWalletField
+      value={fields.walletId}
+      onChange={selectWallet}
+      options={walletOptions}
+      isLoading={walletsLoading}
+    >
       <p hidden={!sourceWalletHint} className="text-meta text-warning">
         {sourceWalletHint}
       </p>
-    </div>
+    </SourceWalletField>
   );
 }
 
 /** The amount, its Max, the token, and the balance the amount is checked against. */
-function AmountFields({ wizard }: { wizard: OnchainSendWizard }) {
+function PayAmountFields({ wizard }: { wizard: OnchainSendWizard }) {
   const t = useTranslations();
   const locale = useLocale();
   const { assetOptions, availableAmount, selectedAsset, exceedsBalance, fields, setField } = wizard;
@@ -300,44 +297,23 @@ function AmountFields({ wizard }: { wizard: OnchainSendWizard }) {
   const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
   const canMax = availableAmount !== null && compareDecimalAmounts(availableAmount, "0") > 0;
   return (
-    <div className="space-y-2">
-      <div className="grid items-end gap-x-4 gap-y-4 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,0.9fr)]">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="onchain-send-amount">{t("DashboardPayments.onchainSend.amount")}</Label>
-          <Input
-            id="onchain-send-amount"
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="any"
-            value={fields.amount}
-            onChange={(event) => setField("amount", event.currentTarget.value)}
-            placeholder="0.00"
-            size="xl"
-          />
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="mb-1 self-end"
-          disabled={!canMax}
-          onClick={() => {
-            if (availableAmount !== null) setField("amount", availableAmount);
-          }}
-        >
-          {t("DashboardPayments.payForm.max")}
-        </Button>
-        <Combobox
-          label={t("DashboardPayments.payForm.token")}
-          value={fields.asset === "" ? null : fields.asset}
-          onChange={(value) => setField("asset", value)}
-          options={assetSelectOptions}
-          placeholder={t("DashboardPayments.onchainSend.selectAsset")}
-          searchable={false}
-          disabled={fields.walletId === "" || assetSelectOptions.length === 0}
-        />
-      </div>
+    <AmountFields
+      id="onchain-send-amount"
+      label={t("DashboardPayments.onchainSend.amount")}
+      value={fields.amount}
+      onChange={(amount) => setField("amount", amount)}
+      onMax={() => {
+        if (availableAmount !== null) setField("amount", availableAmount);
+      }}
+      maxDisabled={!canMax}
+      token={{
+        value: fields.asset,
+        onChange: (value) => setField("asset", value),
+        options: assetSelectOptions,
+        placeholder: t("DashboardPayments.onchainSend.selectAsset"),
+        disabled: fields.walletId === "" || assetSelectOptions.length === 0,
+      }}
+    >
       {availableAmount === null ? null : (
         <p className={cn("text-meta", exceedsBalance ? "text-error" : "text-tertiary")}>
           {t("DashboardPayments.payForm.available", {
@@ -347,7 +323,7 @@ function AmountFields({ wizard }: { wizard: OnchainSendWizard }) {
         </p>
       )}
       <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
-    </div>
+    </AmountFields>
   );
 }
 
@@ -372,8 +348,8 @@ function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
   return (
     <div className="space-y-6">
       <DestinationFields wizard={wizard} contact={contact} onPayByBank={onPayByBank} />
-      <SourceWalletField wizard={wizard} />
-      <AmountFields wizard={wizard} />
+      <PaySourceWalletField wizard={wizard} />
+      <PayAmountFields wizard={wizard} />
       <MemoField wizard={wizard} />
       <PrivateSendOption status={privateSend ?? null} />
     </div>
