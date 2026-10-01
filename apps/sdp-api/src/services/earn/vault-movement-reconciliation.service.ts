@@ -293,7 +293,7 @@ async function reconcileEnvironment(
   let currentBlockHeight: bigint | null = null;
   if (needsBlockHeight) {
     try {
-      currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
+      currentBlockHeight = await rpc.getBlockHeight({ commitment: "finalized" }).send();
     } catch (error) {
       // Unknown signatures cannot be rebroadcast or expired without a height,
       // so those rows are left for the next tick; the tick still must not
@@ -423,25 +423,7 @@ async function reconcileMovement(
     chain.currentBlockHeight !== null &&
     chain.currentBlockHeight > BigInt(lastValidBlockHeight)
   ) {
-    // A `requested` row was never broadcast, so past its blockhash it genuinely
-    // cannot land: expire it on the first observation. A `submitted` row is
-    // different (PRO-1904): RPC history is not complete, and the `confirmed`
-    // guard above exists for exactly that reason, so one null answer is not
-    // proof the transaction did not land. Expiring a landed movement is a
-    // terminal false `failed` with the shares sitting in the vault, so the
-    // sweep parks the row on the first null observation and expires it only
-    // when a LATER tick sees the signature unknown again. A tick that finds
-    // the signature in between moves the row forward through the branches
-    // above and the mark becomes inert.
-    if (movement.status === "submitted" && movement.unknown_signature_observed_at === null) {
-      await ledger.recordUnknownSignatureObservation({
-        movementId: movement.id,
-        organizationId: movement.organization_id,
-      });
-      return "unchanged";
-    }
-    await failMovement(ledger, movement, "Transaction blockhash expired before confirmation");
-    return "failed";
+    return reconcileExpiredMovement(env, ledger, movement, chain);
   }
   if (chain.currentBlockHeight === null) return "unchanged";
 
@@ -455,6 +437,53 @@ async function reconcileMovement(
   return "resubmitted";
 }
 
+async function reconcileExpiredMovement(
+  env: Env,
+  ledger: EarnMovementsLedger,
+  movement: EarnMovementRow,
+  chain: ChainObservation
+): Promise<MovementOutcome> {
+  // A timed-out broadcast can have landed while its durable row still says
+  // requested. The status cache is not sufficient negative evidence: consult
+  // finalized transaction history before closing either kind of intent.
+  // A history outage throws and leaves the movement recoverable.
+  const transaction = await getTransaction(chain.rpc, movement.signature as Signature, "finalized");
+  if (transaction) {
+    if (!transaction.executionResultKnown) {
+      throw new Error(`Earn vault movement ${movement.id} has no historical execution result`);
+    }
+    if (transaction.err !== null) {
+      await failMovement(ledger, movement, describeVaultSimulationError(transaction.err).message);
+      return "failed";
+    }
+    return reconcileMovement(
+      env,
+      ledger,
+      movement,
+      {
+        slot: transaction.slot,
+        confirmations: null,
+        err: null,
+        confirmationStatus: "finalized",
+      },
+      chain
+    );
+  }
+  if (movement.unknown_signature_observed_at === null) {
+    // Treat an uncertain requested broadcast as submitted before recording
+    // the observation, using the existing guarded writer and schema. Neither
+    // state proves absence from the chain; both get a later recovery tick.
+    await markSubmitted(ledger, movement);
+    await ledger.recordUnknownSignatureObservation({
+      movementId: movement.id,
+      organizationId: movement.organization_id,
+    });
+    return "unchanged";
+  }
+  await failMovement(ledger, movement, "Transaction blockhash expired before confirmation");
+  return "failed";
+}
+
 /**
  * Whether Solana finality records only the opening leg of a provider-managed
  * order rather than economic settlement, for a provider the CURRENT registry
@@ -463,7 +492,7 @@ async function reconcileMovement(
  * Hastra DEX builds cannot change how an already-recorded withdrawal settles.
  *
  * A future Connect order reconciler must correlate and authenticate provider
- * completion before the settled surface can close one of these rows — chain
+ * completion before the settled surface can close one of these rows. Chain
  * finalization never does.
  */
 function isKnownProviderOrderSettlement(env: Env, movement: EarnMovementRow): boolean {

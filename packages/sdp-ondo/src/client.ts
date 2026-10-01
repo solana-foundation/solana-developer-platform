@@ -17,6 +17,7 @@ import type {
   EarnVaultWithdrawQuoteInput,
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
+import { deriveAssociatedTokenAddress, isAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/types/ondo-programs";
@@ -50,6 +51,9 @@ import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner }
 
 /** Both sides of the pair carry 6 decimals; the catalogue read enforces USDY's. */
 const TOKEN_DECIMALS = 6;
+const MAX_TOKEN_ATOMS = (1n << 64n) - 1n;
+// biome-ignore lint/security/noSecrets: public SPL token program address.
+const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
 const COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111";
 // biome-ignore lint/security/noSecrets: public on-chain program id, not a secret.
@@ -135,20 +139,22 @@ function canonicalAmount(value: string, label: string): { text: string; atoms: b
     }
     throw error;
   }
-  if (atoms <= 0n) {
-    throw new SdpOndoError("INVALID_AMOUNT", `${label} must be greater than zero`);
+  if (atoms <= 0n || atoms > MAX_TOKEN_ATOMS) {
+    throw new SdpOndoError("INVALID_AMOUNT", `${label} must fit a positive SPL token amount`);
   }
   return { text: formatDecimalAmount(atoms, TOKEN_DECIMALS), atoms };
 }
 
-interface RpcTokenAccountsResponse {
-  value?: {
-    account?: {
-      data?: {
-        parsed?: { info?: { tokenAmount?: { amount?: string } } };
-      };
-    };
-  }[];
+interface OndoTokenAccount {
+  address: string;
+  atoms: bigint;
+  frozen: boolean;
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 export class OndoVaultDirectClient
@@ -533,7 +539,23 @@ export class OndoVaultDirectClient
         for (const reference of references) {
           assertActive();
           this.assertKnownReference(config, reference);
-          const atoms = await this.readOwnerTokenBalance(runtime, input.owner, reference);
+          const accounts = await this.tokenAccounts(runtime, input.owner, reference);
+          const associatedAddress = await deriveAssociatedTokenAddress(
+            input.owner,
+            reference,
+            TOKEN_PROGRAM_ID
+          );
+          const atoms = accounts.reduce((total, account) => total + account.atoms, 0n);
+          if (atoms > MAX_TOKEN_ATOMS) {
+            throw new SdpOndoError(
+              "POSITION_UNREADABLE",
+              "The USDY balance exceeds the SPL token supply range"
+            );
+          }
+          const spendable = accounts.find(
+            (account) => account.address === associatedAddress && !account.frozen
+          );
+          const withdrawableShares = formatDecimalAmount(spendable?.atoms ?? 0n, TOKEN_DECIMALS);
           if (readAllHoldings && atoms === 0n) continue;
           const shares = formatDecimalAmount(atoms, TOKEN_DECIMALS);
 
@@ -560,8 +582,9 @@ export class OndoVaultDirectClient
             owner: input.owner,
             cluster: runtime.cluster,
             shares,
-            // No lock: the whole balance is exitable on the open market.
-            withdrawableShares: shares,
+            // Jupiter spends only the initialized owner ATA; issuer-frozen and
+            // auxiliary token accounts remain holdings, not executable exits.
+            withdrawableShares,
             ...(tokenValue === undefined ? {} : { tokenValue }),
             tokenMint: config.depositMint,
             shareMint: config.deployment.usdyMint,
@@ -578,35 +601,15 @@ export class OndoVaultDirectClient
     mint: string
   ): Promise<boolean> {
     const accounts = await this.tokenAccounts(runtime, owner, mint);
-    return accounts.length > 0;
-  }
-
-  private async readOwnerTokenBalance(
-    runtime: OndoRuntime,
-    owner: string,
-    mint: string
-  ): Promise<bigint> {
-    const accounts = await this.tokenAccounts(runtime, owner, mint);
-    let total = 0n;
-    for (const entry of accounts) {
-      const raw = entry.account?.data?.parsed?.info?.tokenAmount?.amount;
-      if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
-        throw new SdpOndoError(
-          "POSITION_UNREADABLE",
-          `A token account for ${mint} returned no exact raw balance; refusing to report a ` +
-            "partial position."
-        );
-      }
-      total += BigInt(raw);
-    }
-    return total;
+    const associatedAddress = await deriveAssociatedTokenAddress(owner, mint, TOKEN_PROGRAM_ID);
+    return accounts.some((account) => account.address === associatedAddress);
   }
 
   private async tokenAccounts(
     runtime: OndoRuntime,
     owner: string,
     mint: string
-  ): Promise<NonNullable<RpcTokenAccountsResponse["value"]>> {
+  ): Promise<OndoTokenAccount[]> {
     let response: Response;
     try {
       response = await fetch(runtime.rpcUrl, {
@@ -616,7 +619,7 @@ export class OndoVaultDirectClient
           jsonrpc: "2.0",
           id: 1,
           method: "getTokenAccountsByOwner",
-          params: [owner, { mint }, { encoding: "jsonParsed" }],
+          params: [owner, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }],
         }),
         signal: AbortSignal.timeout(RPC_READ_TIMEOUT_MS),
       });
@@ -629,14 +632,54 @@ export class OndoVaultDirectClient
         `The Solana RPC answered HTTP ${response.status} reading token accounts`
       );
     }
-    const body = (await response.json()) as { result?: RpcTokenAccountsResponse; error?: unknown };
-    if (body.error || body.result?.value === undefined) {
+    let body: Record<string, unknown> | undefined;
+    try {
+      body = record(await response.json());
+    } catch (cause) {
+      throw new SdpOndoError(
+        "POSITION_UNREADABLE",
+        "The Solana RPC returned unreadable token accounts",
+        { cause }
+      );
+    }
+    const values = record(body?.result)?.value;
+    if (body?.error || !Array.isArray(values)) {
       throw new SdpOndoError(
         "POSITION_UNREADABLE",
         "The Solana RPC returned an error reading token accounts"
       );
     }
-    return body.result.value;
+    const seen = new Set<string>();
+    return values.map((value: unknown) => {
+      const entry = record(value);
+      const account = record(entry?.account);
+      const parsed = record(record(account?.data)?.parsed);
+      const info = record(parsed?.info);
+      const amount = record(info?.tokenAmount);
+      const raw = amount?.amount;
+      const accountAddress = entry?.pubkey;
+      if (
+        typeof accountAddress !== "string" ||
+        !isAddress(accountAddress) ||
+        seen.has(accountAddress) ||
+        account?.owner !== TOKEN_PROGRAM_ID ||
+        parsed?.type !== "account" ||
+        info?.owner !== owner ||
+        info?.mint !== mint ||
+        amount?.decimals !== TOKEN_DECIMALS ||
+        (info?.state !== "initialized" && info?.state !== "frozen") ||
+        typeof raw !== "string" ||
+        !/^\d{1,20}$/.test(raw) ||
+        BigInt(raw) > MAX_TOKEN_ATOMS
+      ) {
+        throw new SdpOndoError(
+          "POSITION_UNREADABLE",
+          `The Solana RPC returned an invalid token account for ${mint}; refusing a partial position`
+        );
+      }
+      seen.add(accountAddress);
+      return { address: accountAddress, atoms: BigInt(raw), frozen: info.state === "frozen" };
+    });
   }
 }
 

@@ -46,7 +46,7 @@ pnpm test:integration -- --verbose
 **Notes:**
 - Surfpool-backed shards still configure SDP with `FEE_PAYMENT_PROVIDER=kora`; the harness swaps hosted Kora for a local Kora-compatible endpoint.
 - Live Kora smoke validates Kora connectivity and fee-payer balance up front so it fails fast if Kora is unreachable or underfunded.
-- The live smoke suite initializes a Privy signer for the integration org and uses DB-backed default signer resolution.
+- The live smoke suite seeds tenant and API-key state, then initializes its own project-scoped Privy signer. Its signer-check simulation does not need a funded organization wallet. Other integration suites retain funded custody setup.
 
 ### Surfpool vs Live Kora Ownership
 
@@ -56,9 +56,9 @@ The default SDP CI split is local-first. New token, issuance, Mosaic, access, an
 |---|---|---|---|
 | Surfpool/local | `Surfpool / Issuance`, `Surfpool / Mosaic`, `Surfpool / Token Flows`, `Surfpool / Access` | Deterministic API integration shards for token deploy/mint/burn/freeze, issuance endpoints, Mosaic flows, API-key/access scope, and local custody execution. | `pnpm kora:surfpool:integration -- <test-files...>` |
 | Surfpool/local browser | `Dashboard E2E (Surfpool Local)`, `Issuance E2E (Surfpool Shards)` | Dashboard issuance, payments, wallet activity, and other browser flows that can run against the local API plus Surfpool. | `pnpm kora:surfpool:run -- pnpm --filter sdp-web run test:e2e:dashboard` or `pnpm kora:surfpool:e2e:issuance` |
-| Kora/devnet smoke | `Kora / Live Smoke` | Hosted Kora client/adapter checks and one reduced sponsored-submission flow against live devnet. | `pnpm kora:devnet:test` |
+| Kora/devnet smoke | `Kora / Live Smoke` | Hosted Kora client/adapter checks and a signed signer-check simulation against live devnet. | `pnpm kora:devnet:test` |
 
-Keep the Kora/devnet smoke suite intentionally small. It proves that SDP can still talk to hosted Kora and that a real sponsored submission works; token lifecycle behavior and dashboard activity rendering are already covered more deterministically in the Surfpool lanes.
+Keep the Kora/devnet smoke suite intentionally small. It proves that SDP can still talk to hosted Kora, obtain real signatures, and simulate a signer-check memo without broadcasting; token lifecycle behavior and dashboard activity rendering are already covered more deterministically in the Surfpool lanes.
 
 ### Environment Variables
 
