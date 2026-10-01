@@ -73,13 +73,6 @@ function sidebarThemeScope(newDesign: boolean, pageScope: ThemeScope | null): Th
   return newDesign ? "refresh" : pageScope;
 }
 
-// On NEW DESIGN the sidebar is the refresh design's on every route, whatever the page beside it
-// is built on: its container carries the scope, and its menus re-stamp it through the provider
-// when they portal out. The previous design's sidebar takes the page's scope.
-function sidebarThemeScope(newDesign: boolean, pageScope: ThemeScope | null): ThemeScope | null {
-  return newDesign ? "refresh" : pageScope;
-}
-
 // The refresh sidebar is the design's: 40px rows touching, 6px corners, a 20px icon then 16px to
 // the 15px medium label, an ink wash for the active row and a lighter one on hover, no border.
 const navItemBase =
