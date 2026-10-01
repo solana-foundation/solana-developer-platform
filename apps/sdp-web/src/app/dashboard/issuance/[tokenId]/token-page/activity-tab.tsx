@@ -167,6 +167,7 @@ export function TokenActivityTab({ token }: { token: Token }) {
           ))}
         </div>
       ) : null}
+      <ActivityRefreshNote history={history} />
       {history.error ? (
         <ListEmptyState message={t("DashboardIssuance.newDesign.activity.loadFailed")} />
       ) : history.loaded && events.length === 0 ? (
@@ -285,6 +286,22 @@ function ActivityMore({ history }: { history: ReturnType<typeof useTokenActivity
         onClick={() => void history.loadOlder()}
       >
         {t("DashboardIssuance.newDesign.activity.loadOlder")}
+      </Button>
+    </div>
+  );
+}
+
+/** Shown while the loaded events could not be refreshed: they stay, marked as possibly stale. */
+function ActivityRefreshNote({ history }: { history: ReturnType<typeof useTokenActivityWindows> }) {
+  const t = useTranslations();
+  if (!history.refreshFailed) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <p className="text-meta text-warning">
+        {t("DashboardIssuance.newDesign.activity.refreshFailed")}
+      </p>
+      <Button variant="outline" size="sm" onClick={() => void history.retry()}>
+        {t("DashboardIssuance.newDesign.activity.retry")}
       </Button>
     </div>
   );

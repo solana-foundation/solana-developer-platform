@@ -51,7 +51,8 @@ export const TOKEN_ACTIVITY_WINDOW = 100;
  * The token's audit history read 100 events at a time, newest first: the tab searches and
  * pages what is loaded, and `loadOlder` reads the next window while `hasMore` says the API
  * holds older events. A window that fails to load keeps the ones before it (`olderFailed`),
- * and `loadOlder` then retries it.
+ * and `loadOlder` then retries it; a failed refresh of the loaded windows keeps them on screen
+ * and says so (`refreshFailed`).
  */
 export function useTokenActivityWindows(
   tokenId: string,
@@ -93,6 +94,8 @@ export function useTokenActivityWindows(
     // Nothing to show: the newest window itself failed.
     error: loadedWindows === 0 ? error : undefined,
     olderFailed: loadedWindows > 0 && error !== undefined && size > loadedWindows,
+    refreshFailed: loadedWindows > 0 && error !== undefined && size <= loadedWindows,
+    retry: () => mutate(),
     hasMore,
     loadingOlder,
     loadOlder: () => (size > loadedWindows ? mutate() : setSize(size + 1)),

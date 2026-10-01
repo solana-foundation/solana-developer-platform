@@ -36,13 +36,16 @@ async function gotoToken(page: Page, tokenId: string, tab: TokenTab = "overview"
   );
 }
 
-/** The value beside a record line's label, e.g. "Issued supply". */
+/**
+ * The value beside a record line's label, e.g. "Issued supply": the `dd` right after that
+ * `dt`. A `div` filter would also match the blocks around the line and return their first
+ * line's value instead.
+ */
 function recordValue(page: Page, label: string) {
   return page
-    .locator("div")
-    .filter({ has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }) })
-    .locator("dd")
-    .first();
+    .locator("dt", { hasText: new RegExp(`^${label}$`) })
+    .first()
+    .locator("xpath=following-sibling::dd[1]");
 }
 
 function operationButton(page: Page, operation: string) {

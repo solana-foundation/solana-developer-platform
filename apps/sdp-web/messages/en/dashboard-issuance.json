@@ -1840,7 +1840,9 @@
           "revoke": "Authority given up"
         },
         "loadOlder": "Load older events",
-        "olderFailed": "Older events could not be loaded. The events above are still current."
+        "olderFailed": "Older events could not be loaded. The events above are still current.",
+        "refreshFailed": "This activity could not be refreshed, so it may be out of date.",
+        "retry": "Try again"
       },
       "localDrafts": {
         "title": "Unfinished drafts",

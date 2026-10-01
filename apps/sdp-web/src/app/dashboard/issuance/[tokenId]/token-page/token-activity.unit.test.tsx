@@ -64,4 +64,32 @@ describe("useTokenActivityWindows", () => {
     expect(result.current.olderFailed).toBe(false);
     expect(result.current.hasMore).toBe(false);
   });
+
+  it("keeps the loaded events and flags them when a refresh fails", async () => {
+    let failing = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        failing
+          ? new Response(JSON.stringify({ data: [], error: "Audit API 503" }), { status: 503 })
+          : new Response(
+              JSON.stringify({ data: [event("newest")], error: null, total: 1, hasMore: false }),
+              { status: 200 }
+            )
+      )
+    );
+
+    const { result } = renderHook(() => useTokenActivityWindows("token_2", {}), { wrapper });
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.refreshFailed).toBe(false);
+
+    failing = true;
+    await act(async () => {
+      await result.current.retry().catch(() => undefined);
+    });
+    await waitFor(() => expect(result.current.refreshFailed).toBe(true));
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.olderFailed).toBe(false);
+    expect(result.current.events.map((entry) => entry.id)).toEqual(["newest"]);
+  });
 });
