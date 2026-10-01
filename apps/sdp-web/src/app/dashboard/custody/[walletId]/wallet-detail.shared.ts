@@ -27,12 +27,6 @@ export function formatPolicyDate(iso: string, locale: string): string {
   return format.format(new Date(iso));
 }
 
-/**
- * How many rows the wallet's activity feed returns, newest first: the cap
- * `loadWalletActivity` (custody/wallet-activity.data.ts) reads with.
- */
-export const WALLET_ACTIVITY_FEED_LIMIT = 20;
-
 /** The Transactions ledger narrowed to one wallet, where its whole history pages. */
 export function walletTransactionsHref(custodyWalletId: string): string {
   return `/dashboard/payments/transactions?${new URLSearchParams({ custodyWalletId })}`;

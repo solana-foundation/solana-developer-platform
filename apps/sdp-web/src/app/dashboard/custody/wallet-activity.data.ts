@@ -27,6 +27,11 @@ export interface WalletActivityPayload {
   activityRows: WalletActivityRow[];
   activityError: string | null;
   activityNotice: string | null;
+  /**
+   * Whether the wallet has activity older than these rows: either source filled the window
+   * it was asked for, or the merge dropped rows past it. Reading a larger `limit` reaches them.
+   */
+  hasMore?: boolean;
 }
 
 export interface WalletActivityIdentity {
@@ -41,7 +46,12 @@ interface DashboardWalletActivityEnvelope {
   };
 }
 
-const WALLET_ACTIVITY_LIMIT = 20;
+/** Rows the feed reads by default: the Overview's recent rows and the Activity tab's first window. */
+export const WALLET_ACTIVITY_LIMIT = 20;
+/** The largest window the activity route reads, which bounds the work behind each 20s refresh. */
+export const WALLET_ACTIVITY_MAX_LIMIT = 500;
+/** `/v1/payments/transfers` serves at most this many rows a page. */
+const PAYMENT_TRANSFERS_MAX_PAGE_SIZE = 100;
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 function resolvePaymentOperation(transfer: PaymentTransferSummary, t: Translate): string {
@@ -165,6 +175,36 @@ export async function fetchWalletIssuanceActivity(
   }
 }
 
+/**
+ * The wallet's newest `limit` transfers. Transfers serve 100 rows a page, so a larger window
+ * reads its pages in parallel and fails as a whole when any page fails.
+ */
+async function fetchWalletPaymentActivity(
+  request: SdpApiClient["request"],
+  custodyWalletId: string,
+  limit: number
+): Promise<FetchResult<PaymentTransferSummary[]>> {
+  const options = { custodyWalletId, includeObserved: true };
+  if (limit <= PAYMENT_TRANSFERS_MAX_PAGE_SIZE) {
+    return fetchPaymentTransfers(request, limit, options);
+  }
+
+  const pageCount = Math.ceil(limit / PAYMENT_TRANSFERS_MAX_PAGE_SIZE);
+  const pages = await Promise.all(
+    Array.from({ length: pageCount }, (_, index) =>
+      fetchPaymentTransfers(request, PAYMENT_TRANSFERS_MAX_PAGE_SIZE, {
+        ...options,
+        page: index + 1,
+      })
+    )
+  );
+  const failed = pages.find((page) => !page.ok);
+  if (failed) {
+    return failed;
+  }
+  return { ok: true, data: pages.flatMap((page) => page.data ?? []).slice(0, limit) };
+}
+
 export async function loadWalletActivity(
   request: SdpApiClient["request"],
   wallet: WalletActivityIdentity,
@@ -174,19 +214,17 @@ export async function loadWalletActivity(
   const pageSize = options.pageSize ?? WALLET_ACTIVITY_LIMIT;
 
   const [paymentsResult, issuanceResult] = await Promise.all([
-    fetchPaymentTransfers(request, pageSize, {
-      custodyWalletId: wallet.custodyWalletId,
-      includeObserved: true,
-    }),
+    fetchWalletPaymentActivity(request, wallet.custodyWalletId, pageSize),
     fetchWalletIssuanceActivity(request, wallet.custodyWalletId, t, pageSize),
   ]);
 
-  const activityRows = buildWalletActivityRows(
-    paymentsResult.data ?? [],
-    issuanceResult.data ?? [],
-    t,
-    pageSize
-  );
+  const transfers = paymentsResult.data ?? [];
+  const issuanceTransactions = issuanceResult.data ?? [];
+  const activityRows = buildWalletActivityRows(transfers, issuanceTransactions, t, pageSize);
+  const hasMore =
+    transfers.length >= pageSize ||
+    issuanceTransactions.length >= pageSize ||
+    transfers.length + issuanceTransactions.length > pageSize;
   const hasAvailableSource = paymentsResult.ok || issuanceResult.ok;
   const noticeParts: string[] = [];
 
@@ -211,15 +249,21 @@ export async function loadWalletActivity(
       activityRows,
       activityError,
       activityNotice: noticeParts.length > 0 ? noticeParts.join(" ") : null,
+      hasMore,
     },
   };
 }
 
 export async function fetchWalletActivity(
   walletId: string,
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; limit?: number } = {}
 ): Promise<WalletActivityPayload> {
-  const response = await fetch(`/api/dashboard/wallets/${encodeURIComponent(walletId)}/activity`, {
+  const path = `/api/dashboard/wallets/${encodeURIComponent(walletId)}/activity`;
+  const query =
+    options.limit === undefined || options.limit === WALLET_ACTIVITY_LIMIT
+      ? ""
+      : `?${new URLSearchParams({ limit: String(options.limit) })}`;
+  const response = await fetch(`${path}${query}`, {
     method: "GET",
     cache: "no-store",
     signal: options.signal,
@@ -233,5 +277,6 @@ export async function fetchWalletActivity(
     activityRows: body.data?.activityRows ?? [],
     activityError: body.data?.activityError ?? null,
     activityNotice: body.data?.activityNotice ?? null,
+    hasMore: body.data?.hasMore ?? false,
   };
 }

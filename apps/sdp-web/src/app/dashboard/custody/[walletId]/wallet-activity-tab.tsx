@@ -9,26 +9,31 @@ import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
 import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { toTitleCase } from "../../activity-format-utils";
+import { WALLET_ACTIVITY_LIMIT, WALLET_ACTIVITY_MAX_LIMIT } from "../wallet-activity.data";
 import { useWalletActivity } from "./use-wallet-activity";
 import { WalletActivityTable } from "./wallet-activity-table";
 import {
   activityDisplayId,
   type IssuedTokensByMint,
   symbolsByMint,
-  WALLET_ACTIVITY_FEED_LIMIT,
   type WalletBalancesResult,
   walletTransactionsHref,
 } from "./wallet-detail.shared";
 import { EmptyNote } from "./wallet-overview-tab";
+
+/** How many more rows each "Load older activity" asks the feed for. */
+const WALLET_ACTIVITY_LOAD_STEP = 100;
 
 function distinct(values: readonly string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
 /**
- * The wallet's latest activity as the feed returns it, searchable and filterable by type and
- * status, a page at a time. The feed holds only the newest rows, so once it is full the tab
- * says so and links to the Transactions ledger, where the wallet's whole history pages.
+ * The wallet's activity, newest first, searchable and filterable by type and status, a page at
+ * a time. The feed starts with the latest rows; at the end of what it holds, "Load older
+ * activity" widens it to older ones, up to the feed's largest window. Search and filters cover
+ * the loaded rows, so while older ones remain the tab says so and links to the Transactions
+ * ledger narrowed to this wallet, which searches and pages its whole history on the server.
  */
 export function WalletActivityTab({
   walletId,
@@ -45,7 +50,8 @@ export function WalletActivityTab({
   const { balances } = use(balancesPromise);
   const issued = use(issuedTokensPromise);
   const symbols = useMemo(() => symbolsByMint(balances, issued), [balances, issued]);
-  const { data, error } = useWalletActivity(walletId);
+  const [limit, setLimit] = useState(WALLET_ACTIVITY_LIMIT);
+  const { data, error, isLoading } = useWalletActivity(walletId, limit);
   const [query, setQuery] = useState("");
   const [type, setType] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>();
@@ -89,7 +95,7 @@ export function WalletActivityTab({
   if (!data && !error) {
     return <div className="h-40 animate-pulse rounded-control bg-fill-subtle" aria-hidden="true" />;
   }
-  if (error || data?.activityError) {
+  if ((error && !data) || data?.activityError) {
     return (
       <p className="text-body text-tertiary">
         {data?.activityError ?? t("DashboardCustody.walletActivityUnavailable")}
@@ -105,6 +111,10 @@ export function WalletActivityTab({
   }
 
   const anyLabel = t("Shared.SharedComponents.any");
+  const hasOlder = data?.hasMore === true;
+  // A widened window keeps the narrower one's rows on screen while it loads.
+  const loadingOlder = isLoading && data !== undefined;
+  const canLoadOlder = hasOlder && limit < WALLET_ACTIVITY_MAX_LIMIT && currentPage === pageCount;
   return (
     <div className="flex min-w-0 flex-col gap-5" data-wallet-activity-tab>
       <ListToolbar
@@ -158,7 +168,10 @@ export function WalletActivityTab({
       {data?.activityNotice ? (
         <p className="text-meta text-tertiary">{data.activityNotice}</p>
       ) : null}
-      {rows.length >= WALLET_ACTIVITY_FEED_LIMIT ? (
+      {error ? (
+        <p className="text-meta text-tertiary">{t("DashboardCustody.walletActivityUnavailable")}</p>
+      ) : null}
+      {hasOlder ? (
         <p className="text-meta text-tertiary" data-wallet-activity-capped>
           {t("DashboardCustody.walletActivityLatestOnly", { count: rows.length })}{" "}
           <Link
@@ -193,6 +206,23 @@ export function WalletActivityTab({
       )}
       {filtered.length > pageSize ? (
         <ArrowPagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
+      ) : null}
+      {canLoadOlder ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="self-center"
+          disabled={loadingOlder}
+          onClick={() =>
+            setLimit((current) =>
+              Math.min(WALLET_ACTIVITY_MAX_LIMIT, current + WALLET_ACTIVITY_LOAD_STEP)
+            )
+          }
+          data-wallet-activity-load-older
+        >
+          {t("DashboardCustody.walletActivityLoadOlder")}
+        </Button>
       ) : null}
     </div>
   );
