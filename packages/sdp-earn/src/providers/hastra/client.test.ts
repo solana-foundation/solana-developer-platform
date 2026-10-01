@@ -107,7 +107,7 @@ describe("HastraEarnClient", () => {
     assert.equal(snapshot.providerReference, MAINNET.primeMint);
     assert.equal(snapshot.name, "Hastra PRIME");
     assert.equal(snapshot.sourceKind, "rwa");
-    assert.equal(snapshot.underlyingSource, "figure-democratized-prime-heloc");
+    assert.equal(snapshot.underlyingSource, "figure-democratized-prime-home-equity");
     assert.deepEqual(snapshot.depositMints, [wellKnownMint("USDC", "mainnet-beta")]);
     assert.equal(snapshot.shareMint, MAINNET.primeMint);
     assert.equal(snapshot.hostCluster, "mainnet-beta");
@@ -118,7 +118,7 @@ describe("HastraEarnClient", () => {
     assert.deepEqual(snapshot.riskMetadata, {
       curator: "hastra",
       issuer: "Hastra",
-      yieldSource: "Figure Democratized Prime HELOC pool",
+      yieldSource: "Figure Democratized Prime home equity pool",
       wrapperAsset: "wYLDS",
       priceOracle: "Chainlink Data Streams",
       programRelease: "v0.0.6",

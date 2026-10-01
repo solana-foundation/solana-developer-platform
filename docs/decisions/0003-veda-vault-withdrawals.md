@@ -35,6 +35,104 @@ submits, and history require an API key. Custody queue routes remain internal.
 Production remains fail-closed until Veda names approved mainnet vaults for SDP
 rather than the shared Test Vault.
 
+## 2026-09-29 withdrawal audit
+
+Scope: the SDP Veda adapter, custody and external-wallet queue routes,
+signed-transaction verification, durable request/action storage, reconciliation,
+payout projection, and dashboard recovery. Base: main commit
+`f31813d81d8b0a1cfcf40886cd2ba67e100d8fce`. This is a Critical-tier change because
+it affects fund tracking and recovery. It is not an audit of Veda's onchain
+program or a production approval.
+
+### Corrections
+
+- An RPC rejection could terminate a request before the transaction was
+  finalized. Reconciliation now waits for a finalized rejection. A rejected
+  create can also recover from an intervening absent-PDA observation, while
+  provider-proven requests cannot be discarded as failed.
+- Veda's confirmed account reads could persist fork-dependent nonce, quote, and
+  timing as immutable landed terms. Durable request reads now use finalized
+  state. Previews and transaction builders still use confirmed state.
+- A transaction accepted by an RPC but subsequently dropped was never
+  rebroadcast once marked submitted. Unknown submitted requests and
+  cancellations now retry the original signed bytes within their blockhash
+  lifetime.
+- A stale provider read could reset an in-flight cancellation to an eligible
+  state and admit another cancellation. Normal provider observations now
+  preserve the cancellation state; action-failure recovery remains atomic.
+- A solver transaction fulfilling multiple requests collided with the ledger's
+  unique signature index. Migration 0119 identifies observed payouts by their
+  durable withdrawal request, retaining signature uniqueness for initiated
+  movements. Both request settlement and payout insertion remain one transaction.
+
+### Change threat model
+
+The affected value is escrowed vault shares and the recorded asset payout.
+The existing boundaries remain caller authentication and project/wallet scope,
+owner or custody signatures, provider program execution, RPC observations, and
+the Postgres ledger. No caller authority or payout destination is added.
+
+The RPC may omit history, return an unfinalized observation, or fail completely.
+Unknown outcomes remain open; rebroadcast uses identical signed bytes; only a
+matching finalized provider event establishes payout or returned shares.
+The event decoder still requires the configured queue program's active log
+frame and matches request identity, owner, mint, nonce, and shares.
+
+No external dependency was added or changed. A compromised RPC can falsify
+observations and mislead accounting; finality labels do not authenticate an
+untrusted RPC. A compromised Veda program or upgrade authority can affect
+escrowed funds independently of these API checks. Provider-authority and
+RPC-trust assurance remain launch review responsibilities.
+
+### Validation and remaining gates
+
+Validation on the patched tree:
+
+- 1,213 tests across 53 Earn and tenant-isolation API suites passed.
+- The final request-repository and reconciler regression run passed 49 tests.
+- 143 offline Veda package tests passed; live-only tests remain gated.
+- 44 dashboard async-withdrawal tests passed.
+- The containerized Surfpool test, using the actual devnet programs cloned
+  into a local ledger, passed deposit, share escrow, early-cancel refusal,
+  expired cancellation, returned-share balance checks, and event decoding.
+- API and Veda typechecks, changed-file lint/format checks, module boundaries,
+  Veda dependency isolation, and migration expansion checks passed.
+- The migration upgrade test backfills an existing payout and accepts the
+  previous writer. The repository tests preserve initiated-signature
+  uniqueness and prove batched payouts are counted once per request.
+- Dependency audit reported no High or Critical findings. It reported one
+  existing Moderate finding in `undici@7.29.0` through the testcontainers
+  development dependency (GHSA-3wwx-pv8p-q78v).
+- The repository-wide `pnpm check` stops on 36 existing SVG accessibility
+  errors. Every affected file is unchanged from the base; changed-file checks
+  pass. The root integration command loses `TEST_DATABASE_URL` through Turbo;
+  invoking its explicit test-path mode reaches preflight but requires a
+  configured Kora or Private Channels suite. Neither run executes integration
+  tests. Migration 0119 does apply successfully to an isolated local Postgres.
+
+**Open Medium finding: idempotency namespaces.** Reusing a caller key across
+direct and queued withdrawals can admit two intents but later fail the queued
+payout insert on `idx_earn_movements_vault_request`. The new repository
+regression proves the failure rolls back without falsely marking the request
+fulfilled, but the real payout then stays unresolved in SDP. Use distinct
+idempotency keys per intent. A full fix needs coordinated request-key
+namespacing and compatibility with the old writer's explicit `ON CONFLICT`
+target; replacing that index in this migration would break running older API
+instances. This finding needs an assigned owner and remediation before launch.
+
+Apply migration 0119 before deploying the new payout writer. Older binaries can
+still run on the expanded schema, but retain the corrected bugs; rollback must
+keep the migration and reconcile again after restoring the corrected binary.
+The migration rebuilds an index under a table lock, so deployment must account
+for its duration on the target dataset.
+
+Independent code/security review and applicable CI remain required. Real
+solver fulfillment has not been exercised end to end: its event authentication
+and payout accounting have offline/database coverage, while the real-program
+test covers cancellation. Obtain a provider-assisted fulfillment proof before
+production approval. No production transaction, migration, or deployment was
+performed for this audit.
+
 ## Context
 
 SDP can now move money INTO a non-custodial vault and not back out. That is

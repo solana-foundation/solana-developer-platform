@@ -5,12 +5,13 @@ import {
   earnCuratorLabel,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 /**
  * Shared strategy presentation helpers for every Earn surface (overview,
  * deposit flow, and future program views). All helpers are pure over live
  * `EarnStrategy` catalogue rows — callers fetch the rows from the strategies
- * BFF and pass them in; nothing here holds module-level data.
+ * BFF and pass them in; nothing here holds module-level strategy data.
  *
  * Every value is read from a field the provider actually publishes. The
  * reports **no** risk tier, rating, or grade on a yield source (its own docs:
@@ -38,8 +39,21 @@ export function strategyToken(strategy: EarnStrategy): EarnPortfolioToken | unde
   return undefined;
 }
 
+/**
+ * Underlying sources whose label describes the asset rather than naming a
+ * brand. That makes it copy, so it is translated like any other.
+ */
+const DESCRIBED_SOURCE_LABELS = new Map<string, MessageKey>([
+  ["figure-democratized-prime-home-equity", "DashboardEarn.deposit.vaultBackingFigureHomeEquity"],
+]);
+
 /** Display label for the protocol or fund the strategy sits on. */
-export function strategySourceLabel(strategy: EarnStrategy): string | undefined {
+export function strategySourceLabel(
+  strategy: Pick<EarnStrategy, "underlyingSource">,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): string | undefined {
   const source = strategy.underlyingSource?.trim();
-  return source ? earnCuratorLabel(source) : undefined;
+  if (!source) return undefined;
+  const described = DESCRIBED_SOURCE_LABELS.get(source);
+  return described ? t(described) : earnCuratorLabel(source);
 }

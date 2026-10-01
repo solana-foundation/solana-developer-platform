@@ -10,7 +10,7 @@ On-ramp = a counterparty buys crypto with fiat, delivered to an SDP-known wallet
 
 `createOnrampQuote` is **optional** on `RampProvider` — implement it only if your provider has a lockable quote step.
 
-Choose the closest package client by delivery mode: manual instructions, hosted URL, or session widget — all three are represented under `packages/sdp-payments/src/ramps/providers/`. Provider-specific DB helpers live in `apps/sdp-api/src/routes/payments/handlers/ramps/<id>.ts`.
+Choose the closest package client by delivery mode: manual instructions, hosted URL, or session widget — all three are represented under `packages/sdp-payments/src/ramps/providers/`. Provider-specific DB helpers live in `apps/sdp-api/src/routes/payments/ramps/providers/<id>.ts`.
 
 ## Contract
 
@@ -26,10 +26,10 @@ Prefer the upstream quote/session id. If the upstream does not mint one, use `ra
 
 ## Handler wiring (the DB side)
 
-Add a branch to `apps/sdp-api/src/routes/payments/handlers/ramps.ts`. The handler owns all DB work:
+Add a branch to `apps/sdp-api/src/routes/payments/ramps/onramp/handlers.ts`. The handler owns all DB work:
 
 - resolves the counterparty + destination wallet,
-- ensures any provider-side customer/account exists (DB-touching `ensure*` helpers live in `apps/sdp-api/src/routes/payments/handlers/ramps/<id>.ts`),
+- ensures any provider-side customer/account exists (DB-touching `ensure*` helpers live in `apps/sdp-api/src/routes/payments/ramps/providers/<id>.ts`),
 - calls your HTTP-only `createOnrampQuote` with pre-resolved inputs,
 - persists the transfer via `persistRampQuoteTransfer` (dedups by `(provider, providerReference)`; `rampQuoteTransferStatus` maps a `manual_instructions` + `pending` quote to `awaiting_payment`). A `reservedTransferId` is minted before the provider call so it can travel upstream as the reference; a provider whose failed calls must still be attributable to a row pre-creates the pending transfer instead and skips the post-quote persist.
 

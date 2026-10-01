@@ -1,8 +1,18 @@
-import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import {
+  decimalScale,
+  formatDecimalAmount,
+  isDecimalString,
+  parseDecimalAmount,
+} from "@sdp/solana/amount";
+import {
+  type EarnVaultPositionIntermediate,
+  isEarnVaultHoldingEmpty,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import { isIntlDecimalLiteral } from "../earn/earn-format";
 import { earnStrategyReferenceKey, sumDecimalStrings } from "../earn/earn-market-presentation";
+import { earnVaultHoldingValue } from "../earn/earn-vault-holding";
 
 /**
  * Portfolio-level allocation for the Treasury overview (PRO-1723): available
@@ -53,6 +63,7 @@ export interface TreasuryAllocationPosition {
   shares?: string;
   tokenMint: string;
   tokenValue?: string;
+  parIntermediate?: Pick<EarnVaultPositionIntermediate, "mint" | "amount" | "tokenValue">;
 }
 
 /**
@@ -77,14 +88,19 @@ export interface VaultShareMintVocabulary {
 }
 
 /**
- * A position is open while it is not closed and its shares are not provably
- * zero. Shared with the Active-positions table so the summary and the rows
- * beneath it always describe the same set.
+ * A position is open while it is not closed and its holding is not provably
+ * empty: shares and any par intermediate both zero, by the rule the API's
+ * close-out uses. Shared with the Active-positions table so the summary and
+ * the rows beneath it always describe the same set.
  */
 export function isOpenVaultPosition(position: TreasuryAllocationPosition): boolean {
   return (
     position.closedAt === null &&
-    (position.shares === undefined || compareUnsignedDecimals(position.shares, "0") !== 0)
+    (position.shares === undefined ||
+      !isEarnVaultHoldingEmpty({
+        shares: position.shares,
+        parIntermediate: position.parIntermediate,
+      }))
   );
 }
 
@@ -118,6 +134,11 @@ export interface TreasuryAllocation {
   deployedValue: string | undefined;
   /** Set exactly when `deployedValue` is absent. */
   deployedAbsence: DeployedAbsence | undefined;
+  /**
+   * Each custody row's cash line, keyed by wallet id and read from that row's
+   * own balances; undefined when they are unavailable.
+   */
+  cashByWalletId: ReadonlyMap<string, string | undefined>;
   /** Each custody row's deployment line, keyed by wallet id. */
   deploymentByWalletId: ReadonlyMap<string, WalletDeploymentDisplay>;
   /**
@@ -182,28 +203,98 @@ function walletsByPublicKey(
   return distinct;
 }
 
-function availableStableCash(
-  wallets: readonly TreasuryAllocationWallet[] | undefined
+/** `left - right` floored at zero, or undefined when either side is malformed. */
+function subtractFloored(left: string, right: string): string | undefined {
+  if (!isDecimalString(left) || !isDecimalString(right)) return undefined;
+  const scale = Math.max(decimalScale(left), decimalScale(right));
+  const difference = parseDecimalAmount(left, scale) - parseDecimalAmount(right, scale);
+  return formatDecimalAmount(difference > 0n ? difference : 0n, scale);
+}
+
+/**
+ * What one wallet's open positions hold as a par intermediate, summed per
+ * mint. Undefined marks a malformed amount.
+ */
+function parIntermediateAmounts(
+  open: readonly TreasuryAllocationPosition[]
+): Map<string, string | undefined> {
+  const byMint = new Map<string, string | undefined>();
+  for (const { parIntermediate } of open) {
+    if (parIntermediate === undefined) continue;
+    const prior = byMint.has(parIntermediate.mint) ? byMint.get(parIntermediate.mint) : "0";
+    byMint.set(
+      parIntermediate.mint,
+      prior === undefined ? undefined : sumDecimalStrings([prior, parIntermediate.amount])
+    );
+  }
+  return byMint;
+}
+
+/**
+ * One wallet's USD-stable cash. A par intermediate its OWN open positions hold
+ * is already deployed value, so that amount comes off this wallet's balance of
+ * the mint and nowhere else: the same mint in another wallet is still cash.
+ * A balance short of the recorded amount (the two reads landed at different
+ * moments) floors at zero rather than overstating cash.
+ */
+function walletStableCash(
+  wallet: TreasuryAllocationWallet,
+  parIntermediates: ReadonlyMap<string, string | undefined>
 ): string | undefined {
-  if (wallets === undefined) return undefined;
+  if (wallet.balances === undefined) return undefined;
+  const unmatched = new Map(parIntermediates);
   const amounts: string[] = [];
-  for (const wallet of walletsByPublicKey(wallets).values()) {
-    // One wallet whose balances could not be read makes the TOTAL unknowable.
-    if (wallet.balances === undefined) return undefined;
-    for (const balance of wallet.balances) {
-      if (isUsdStableBalance(balance)) amounts.push(balance.uiAmount);
+  for (const balance of wallet.balances) {
+    if (!isUsdStableBalance(balance)) continue;
+    if (!unmatched.has(balance.mint)) {
+      amounts.push(balance.uiAmount);
+      continue;
     }
+    const held = unmatched.get(balance.mint);
+    const free = held === undefined ? undefined : subtractFloored(balance.uiAmount, held);
+    const rest = held === undefined ? undefined : subtractFloored(held, balance.uiAmount);
+    // Without both amounts this wallet's cash is unknowable, not whole.
+    if (free === undefined || rest === undefined) return undefined;
+    amounts.push(free);
+    unmatched.set(balance.mint, rest);
   }
   // No stable balances is a real zero; `sumDecimalStrings` reserves undefined
   // for a malformed amount, which is an unavailable read, not an empty one.
   return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
 }
 
-/** One wallet's available USD-stable cash, using the same classification as the portfolio total. */
-export function availableTreasuryCashForWallet(
-  wallet: TreasuryAllocationWallet
+/**
+ * Each custody row's cash line from its OWN balance read. Rows that share an
+ * address share its par intermediates but not a read: one can fail while the
+ * other lands.
+ */
+function cashByWallet(
+  wallets: readonly TreasuryAllocationWallet[],
+  positions: readonly TreasuryAllocationPosition[] | undefined
+): Map<string, string | undefined> {
+  const openByPublicKey = openPositionsByPublicKey(wallets, positions ?? []);
+  return new Map(
+    wallets.map((wallet) => [
+      wallet.id,
+      walletStableCash(wallet, parIntermediateAmounts(openByPublicKey.get(wallet.publicKey) ?? [])),
+    ])
+  );
+}
+
+/** Portfolio cash: one line per distinct address, so a wallet with several rows counts once. */
+function availableStableCash(
+  wallets: readonly TreasuryAllocationWallet[] | undefined,
+  cashByWalletId: ReadonlyMap<string, string | undefined>
 ): string | undefined {
-  return availableStableCash([wallet]);
+  if (wallets === undefined) return undefined;
+  const amounts: string[] = [];
+  for (const wallet of walletsByPublicKey(wallets).values()) {
+    const cash = cashByWalletId.get(wallet.id);
+    // One wallet whose balances could not be read makes the TOTAL unknowable.
+    if (cash === undefined) return undefined;
+    amounts.push(cash);
+  }
+  return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
 }
 
 interface TreasuryRateStrategy {
@@ -231,6 +322,9 @@ export function estimatedTreasuryApy({
   if (positions === undefined || strategies === undefined) return undefined;
   const open = positions.filter(isOpenVaultPosition);
   if (open.length === 0) return undefined;
+  // A par intermediate earns no strategy rate this page can state, so it
+  // poisons the estimate the way a missing rate does.
+  if (open.some((position) => position.parIntermediate !== undefined)) return undefined;
 
   const strategyByReference = new Map(
     strategies.map((strategy) => [
@@ -279,9 +373,10 @@ function deployedVaultValue(
   if (positions === undefined) return undefined;
   const amounts: string[] = [];
   for (const position of positions.filter(isOpenVaultPosition)) {
-    if (position.tokenValue === undefined) return undefined;
+    const value = earnVaultHoldingValue(position);
+    if (value === undefined) return undefined;
     if (!WELL_KNOWN_TOKEN_BY_MINT.get(position.tokenMint)?.isUsdStable) return undefined;
-    amounts.push(position.tokenValue);
+    amounts.push(value);
   }
   return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
 }
@@ -406,7 +501,8 @@ export function summarizeTreasuryAllocation({
   shareMints: VaultShareMintVocabulary;
   wallets: readonly TreasuryAllocationWallet[] | undefined;
 }): TreasuryAllocation {
-  const availableCash = availableStableCash(wallets);
+  const cashByWalletId = cashByWallet(wallets ?? [], positions);
+  const availableCash = availableStableCash(wallets, cashByWalletId);
   const { deploymentByWalletId, someWalletUnreadable, unrecordedShareMints } =
     resolveWalletCoverage({ positions, shareMints, wallets });
 
@@ -426,6 +522,7 @@ export function summarizeTreasuryAllocation({
           certified || readFailed
           ? "unreadable"
           : "unreconciled",
+    cashByWalletId,
     deploymentByWalletId,
     unrecordedShareMints,
   };

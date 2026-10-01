@@ -87,6 +87,22 @@ function notInDemo(): Response {
   );
 }
 
+/**
+ * Paths only the demo answers (Simulate verification): the SDP API has none of them, so outside
+ * the demo they are refused here rather than sent upstream.
+ */
+function isDemoOnlyPath(path: string): boolean {
+  const segments = demoPathParts(path)?.segments ?? [];
+  return segments[0] === "payments" && segments[1] === "demo";
+}
+
+function onlyInDemo(): Response {
+  return Response.json(
+    { error: { code: "not_found", message: "Only demo mode answers this request." } },
+    { status: 404 }
+  );
+}
+
 function parseBody(body: RequestInit["body"]): unknown {
   if (typeof body !== "string" || body.length === 0) return {};
   try {
@@ -142,7 +158,8 @@ async function demoProviderAccess(upstream: () => Promise<Response>): Promise<Re
 
 /**
  * The demo's answer to an SDP API request, or null to send it upstream. `upstream` sends it
- * for real, for the one read the demo adjusts rather than replaces.
+ * for real, for the one read the demo adjusts rather than replaces. A demo-only path is never
+ * sent upstream, in the demo or out of it.
  */
 export async function paymentsDemoResponse(
   method: string,
@@ -152,7 +169,7 @@ export async function paymentsDemoResponse(
   upstream: () => Promise<Response>
 ): Promise<Response | null> {
   if (!(await demoRequested(projectId))) {
-    return null;
+    return isDemoOnlyPath(path) ? onlyInDemo() : null;
   }
   const parts = demoPathParts(path);
   const verb = method.toUpperCase();

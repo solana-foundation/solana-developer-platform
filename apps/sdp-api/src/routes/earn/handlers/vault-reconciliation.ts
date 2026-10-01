@@ -25,7 +25,10 @@ import { listReadableEarnVaultWallets } from "./vault";
  * an org sign from the same wallet outside SDP. This read enumerates each
  * scoped wallet's SPL balances, attributes share mints through the stored
  * catalogue, and reports the two disagreements — a held share balance with no
- * visible claim, and a claim whose wallet holds none of its shares.
+ * visible claim, and a claim whose wallet holds none of its shares. A
+ * zero-share claim with an open queued withdrawal request is listed apart, in
+ * `queuedWithdrawalPositions`, since the request explains only the shares it
+ * covers.
  *
  * REPORT-ONLY: it writes nothing, adopts nothing, closes nothing (the service
  * header carries the why). NO provider gate, same ADR 0002 reason as the
@@ -56,7 +59,12 @@ export async function getEarnVaultShareReconciliation(c: AppContext) {
     }
   }
   if (walletsById.size === 0) {
-    return success(c, { unrecordedHoldings: [], unbackedPositions: [], unreadableWallets: [] });
+    return success(c, {
+      unrecordedHoldings: [],
+      unbackedPositions: [],
+      queuedWithdrawalPositions: [],
+      unreadableWallets: [],
+    });
   }
 
   const cluster = earnClusterFor(environment);
