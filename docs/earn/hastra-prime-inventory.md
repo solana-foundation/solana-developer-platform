@@ -1,17 +1,25 @@
 # Hastra PRIME engineering inventory
 
-Hastra is the Solana wrapper/operator layer; Figure supplies the underlying
-YLDS and Democratized Prime HELOC exposure. SDP fronts exactly one strategy:
-PRIME funded with mainnet USDC through wYLDS. The provider is registered but
-remains deliberately unsurfaced until its production release review and live
-end-to-end checks are complete. SDP's default USDC exit is Hastra's at-par
-operator redemption. The market-liquidity exit through Jupiter is retained as
-an explicit deployment opt-in, not a fallback SDP selects for the caller.
+Hastra is the Solana wrapper/operator layer; Figure supplies the underlying YLDS
+and the Democratized Prime home equity lending behind it. SDP fronts exactly one
+strategy: PRIME funded with mainnet USDC through wYLDS. The provider is
+registered but remains deliberately unsurfaced until its production release
+review and live end-to-end checks are complete. SDP's default USDC exit is
+Hastra's at-par operator redemption. The market-liquidity exit through Jupiter
+is retained as an explicit deployment opt-in, not a fallback SDP selects for the
+caller.
 
 This inventory follows Hastra's public Solana integration guide and the exact
 [`v0.0.6` source revision](https://github.com/provenance-io/hastra-sol-vault/tree/121e4cc600b976a97faa018359e00bda48113ec2).
 Where prose and program differ, the pinned program source is authoritative.
 Mutable operator and security-review claims were last checked 2026-09-22.
+The pool's naming was last checked 2026-09-29. Figure's Democratized Prime
+pools page (published 2026-04-01) lists it as "YLDS HELOC", Hastra's PRIME
+explainer describes HELOC lending, and Hastra's fee article prices PRIME off a
+"HELOC+" rate; all three are under Primary references. The catalogue says
+"home equity", which is true of all three and adds no loan type beyond what
+they state. It names specific collateral only once Figure confirms the pool's
+composition in writing.
 
 ## Pinned mainnet deployment
 
@@ -37,7 +45,7 @@ each quote/build.
 | Optional DEX exit | Atomic receipt of at least the caller's USDC floor | When `EARN_HASTRA_DEX_EXIT_ENABLED` is truthy and `JUPITER_SWAP_API_KEY` is configured, one transaction burns PRIME, transfers wYLDS from the stake vault to the owner, then executes an admitted Jupiter ExactIn wYLDS→USDC route. Any failed native or swap instruction rolls the whole transaction back. This route is disabled by default. |
 | Default par request | A request exists, **not** a USDC payout | One transaction burns PRIME for wYLDS and calls `vault-mint.request_redeem`. That call creates one owner-derived request PDA and delegates the requested wYLDS amount to Hastra's redeem authority. The wYLDS is not burned or escrowed at request time. |
 | Par completion | Operator-delivered USDC | A Hastra rewards administrator calls `complete_redeem(expected_amount)`. The program burns the delegated wYLDS, transfers the same raw amount of USDC from the separately funded redemption vault to the owner's USDC account, and closes the request PDA. |
-| Par cancellation | Request released; owner keeps wYLDS | The owner calls `cancel_redeem`. The program revokes its delegate when that delegate is still present, closes the request, and refunds its rent to the owner. Cancellation does not mint PRIME back. If Hastra has frozen the wYLDS account while its delegate is present, SPL Token can reject that revocation until the account is thawed. |
+| Par cancellation | Request released; owner keeps wYLDS | The owner calls `cancel_redeem`. The program revokes its delegate when that delegate is still present, closes the request, and refunds its rent to the owner. Cancellation does not mint PRIME back. SDP keeps that wYLDS on the PRIME position: position reads report it as `parIntermediate`, and the holding does not close while it remains. If Hastra has frozen the wYLDS account while its delegate is present, SPL Token can reject that revocation until the account is thawed. |
 
 The at-par path is asynchronous because the USDC payout comes from a separate
 operator-funded redemption vault. Hastra's guide describes off-chain YLDS
@@ -143,7 +151,10 @@ still need written confirmation before SDP's production launch.
   higher output fails the close. The transaction rolls back in either case and
   must be rebuilt at the new rate. Pre-existing or concurrently received wYLDS
   in the canonical ATA remains outside this equality check and is not included
-  in the fixed swap or delegation amount.
+  in the fixed swap or delegation amount. Position reads report that residual
+  as the position's `parIntermediate`: the canonical ATA balance minus any
+  amount delegated to Hastra's redeem authority, which belongs to the open
+  request.
 - Hastra can freeze wYLDS and PRIME token accounts. A frozen balance still
   belongs to the wallet but cannot be transferred or burned until thawed.
 - The price is `wYLDS per PRIME × price_scale`. Both stake directions floor
@@ -182,4 +193,6 @@ not evidence of STRIDE completion.
 - [Hastra Solana programmatic integration guide](https://help.hastra.io/integration-guides/hastra-sol-programmatic-integration-guide)
 - [`hastra-sol-vault` v0.0.6 source](https://github.com/provenance-io/hastra-sol-vault/tree/121e4cc600b976a97faa018359e00bda48113ec2)
 - [Hastra explanation of the PRIME rate and annual 0.50% fee](https://help.hastra.io/537c06bd5c2e82d398e0014be2ff02b2)
+- [Hastra: What is PRIME (Staked wYLDS)?](https://help.hastra.io/prime/what-is-prime-%28staked-wylds%29)
+- [Figure: Democratized Prime pools](https://www.figure.com/blog/democratized-prime-pools/)
 - [STRIDE framework](https://stride.asymmetric.re/) and its [aggregate first findings](https://stride.asymmetric.re/first-findings)

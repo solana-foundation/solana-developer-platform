@@ -21,8 +21,8 @@ import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
-import { formatProviderAmount, formatUsd, shortenMarketAddress } from "./earn-format";
-import { earnMintAsset, TransactionLink } from "./earn-market-presentation";
+import { formatProviderAmount, formatTokenValue, shortenMarketAddress } from "./earn-format";
+import { TransactionLink } from "./earn-market-presentation";
 import {
   cancelEarnVaultWithdrawalRequest,
   createEarnVaultWithdrawalRequest,
@@ -268,22 +268,14 @@ function ParRedemptionResultDetails({
       <div className="flex items-baseline justify-between gap-5">
         <dt className="text-tertiary">{t("DashboardEarn.parRedemption.quotedAmount")}</dt>
         <dd className="text-right tabular-nums text-primary">
-          {formatProviderAmount(
-            request.quotedAssets,
-            locale,
-            earnMintAsset(request.assetMint).symbol
-          )}
+          {formatTokenValue(request.quotedAssets, request.assetMint, locale)}
         </dd>
       </div>
       {request.intermediateAmount && request.intermediateMint ? (
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.parRedemption.intermediateAmount")}</dt>
           <dd className="text-right tabular-nums text-primary">
-            {formatProviderAmount(
-              request.intermediateAmount,
-              locale,
-              earnMintAsset(request.intermediateMint).symbol
-            )}
+            {formatTokenValue(request.intermediateAmount, request.intermediateMint, locale)}
           </dd>
         </div>
       ) : null}
@@ -390,6 +382,7 @@ function ParRedemptionDetails({
   onMax,
   overAvailableAmount,
   terms,
+  tokenMint,
 }: {
   amount: string;
   availableAmount: string | undefined;
@@ -401,6 +394,7 @@ function ParRedemptionDetails({
   onMax: () => void;
   overAvailableAmount: boolean;
   terms: EarnVaultParRedemptionTerms;
+  tokenMint: string;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -435,7 +429,7 @@ function ParRedemptionDetails({
         <p className="text-xs text-tertiary">
           {availableAmount
             ? t("DashboardEarn.vaultWithdraw.amountAvailable", {
-                amount: formatUsd(availableAmount, locale),
+                amount: formatTokenValue(availableAmount, tokenMint, locale),
               })
             : t("DashboardEarn.vaultWithdraw.amountUnavailable")}
         </p>
@@ -510,21 +504,13 @@ function ParRedemptionReview({
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.parRedemption.expectedAmount")}</dt>
             <dd className="text-right tabular-nums text-primary">
-              {formatProviderAmount(
-                preview.assets,
-                locale,
-                earnMintAsset(preview.assetMint).symbol
-              )}
+              {formatTokenValue(preview.assets, preview.assetMint, locale)}
             </dd>
           </div>
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.parRedemption.intermediateAmount")}</dt>
             <dd className="text-right tabular-nums text-primary">
-              {formatProviderAmount(
-                preview.intermediateAmount,
-                locale,
-                earnMintAsset(preview.intermediateMint).symbol
-              )}
+              {formatTokenValue(preview.intermediateAmount, preview.intermediateMint, locale)}
             </dd>
           </div>
         </dl>
@@ -615,6 +601,7 @@ function ParRedemptionForm({
   step,
   submitting,
   terms,
+  tokenMint,
 }: {
   amount: string;
   availableAmount: string | undefined;
@@ -634,6 +621,7 @@ function ParRedemptionForm({
   step: FormStep;
   submitting: boolean;
   terms: EarnVaultParRedemptionTerms;
+  tokenMint: string;
 }) {
   return (
     <>
@@ -656,6 +644,7 @@ function ParRedemptionForm({
           onMax={onMax}
           overAvailableAmount={overAvailableAmount}
           terms={terms}
+          tokenMint={tokenMint}
         />
       ) : (
         <ParRedemptionReview
@@ -738,6 +727,7 @@ export function EarnVaultParRedemptionModal({
               step={step}
               submitting={submitting}
               terms={terms}
+              tokenMint={position.tokenMint}
             />
           )}
         </EarnFlowTransition>

@@ -3,6 +3,10 @@ import {
   buildLightsparkAccountInfo,
   buildLightsparkBusinessInfo,
   buildLightsparkIndividualInfo,
+  lightsparkCollectAccountRequirements,
+  lightsparkOfframpReady,
+  lightsparkOnrampReady,
+  lightsparkPurposeOfPaymentRequirement,
 } from "@sdp/payments/ramps/providers/lightspark/counterparty";
 import {
   isLightsparkExternalAccountActive,
@@ -10,13 +14,14 @@ import {
   LIGHTSPARK_PURPOSE_OF_PAYMENT_LABELS,
   type LightsparkPurposeOfPayment,
   readLightsparkData,
+  readLightsparkPaymentRail,
   readLightsparkPurposeOfPayment,
 } from "@sdp/payments/ramps/providers/lightspark/provider-data";
 import type { LightsparkCustomerResolution } from "@sdp/payments/ramps/types";
 import { type CountryCode, isCountryCode } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
-import type { CollectedFieldData } from "@sdp/types/ramp-requirements";
+import type { CollectedFieldData, CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
@@ -31,7 +36,10 @@ import {
   internalError,
 } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
+import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
 import { logEvent } from "@/runtime/money-path-events";
+import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
+import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
 import { type AppContext, rampRuntime } from "../../context";
 
 /**
@@ -378,4 +386,140 @@ export async function ensureLightsparkPayoutAccount(
     destination_country: completed.destination_country,
   });
   return completed;
+}
+
+type ScopedLightsparkRequirementsInput = Extract<
+  SubmitCounterpartyRequirementsInput,
+  { provider: "lightspark" }
+> & {
+  counterparty: CounterpartyRow;
+  projectId: string;
+};
+
+/**
+ * Advances a Lightspark customer through purpose and payout-account setup.
+ *
+ * @param c - Request context for database and provider access.
+ * @param input - Scoped Lightspark requirements submission.
+ * @returns The resulting Lightspark requirements state.
+ */
+export async function advanceLightsparkRequirements(
+  c: AppContext,
+  input: ScopedLightsparkRequirementsInput
+): Promise<CounterpartyRequirements> {
+  const [customer, purposeOfPayment] = await Promise.all([
+    ensureLightsparkCustomer(c, {
+      counterparty: input.counterparty,
+      projectId: input.projectId,
+      collectedData: input.collectedData,
+    }),
+    ensureLightsparkPurposeOfPayment(c, {
+      counterparty: input.counterparty,
+      projectId: input.projectId,
+      collectedData: input.collectedData,
+    }),
+  ]);
+  if (purposeOfPayment === null) {
+    return lightsparkPurposeOfPaymentRequirement(input.direction);
+  }
+  if (input.direction === "onramp") {
+    return lightsparkOnrampReady();
+  }
+  const collectedData = input.collectedData;
+  const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  if (collectedData === undefined || collectedData.destinationCountry === undefined) {
+    const rows = await repository.listExternalAccounts({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      fiatCurrency: input.fiatCurrency,
+    });
+    const enriched = await enrichCounterpartyProviderAccounts(rampRuntime(c), rows);
+    return lightsparkCollectAccountRequirements(
+      input.assetRail,
+      input.fiatCurrency,
+      mapPayoutRequirementAccounts(rows, enriched)
+    );
+  }
+  if (!isCountryCode(collectedData.destinationCountry)) {
+    throw badRequest("destinationCountry must be a supported ISO 3166-1 alpha-2 country code.");
+  }
+  if (input.providerAccountId !== undefined) {
+    const selected = await requireLightsparkPayoutAccountById(c, {
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      providerAccountId: input.providerAccountId,
+      fiatCurrency: input.fiatCurrency,
+      destinationCountry: collectedData.destinationCountry,
+    });
+    return lightsparkOfframpReady(selected.id);
+  }
+  if (collectedData.paymentRails === undefined) {
+    const accounts = await repository.listActiveExternalAccounts({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      fiatCurrency: input.fiatCurrency,
+      destinationCountry: collectedData.destinationCountry,
+    });
+    const existing = selectLightsparkPayoutAccount(
+      accounts,
+      input.fiatCurrency,
+      collectedData.destinationCountry
+    );
+    if (existing === null || existing.external_account_reference === null) {
+      throw badRequest('Missing required field "paymentRails" for Lightspark off-ramp.');
+    }
+    if (existing.provider_status === null) {
+      throw badRequest("Lightspark payout account has no provider status yet.");
+    }
+    if (
+      isLightsparkExternalAccountActive(existing.provider_status) &&
+      existing.payment_rail !== null
+    ) {
+      return lightsparkOfframpReady(existing.id);
+    }
+    const refreshed = await RAMP_PROVIDER_CLIENTS.lightspark.getExternalAccount(rampRuntime(c), {
+      accountId: existing.external_account_reference,
+    });
+    const paymentRail =
+      existing.payment_rail === null ? readLightsparkPaymentRail(refreshed) : undefined;
+    if (refreshed.status !== existing.provider_status || paymentRail !== undefined) {
+      await repository.updateExternalAccountStatus({
+        organizationId: input.counterparty.organization_id,
+        projectId: input.projectId,
+        counterpartyId: input.counterparty.id,
+        provider: "lightspark",
+        id: existing.id,
+        providerStatus: refreshed.status,
+        paymentRail,
+      });
+    }
+    if (isLightsparkExternalAccountActive(refreshed.status)) {
+      return lightsparkOfframpReady(existing.id);
+    }
+    throw badRequest(
+      `Lightspark payout account is not active yet (status: ${refreshed.status}). Retry once it is verified.`
+    );
+  }
+  const account = await ensureLightsparkPayoutAccount(c, {
+    counterparty: input.counterparty,
+    projectId: input.projectId,
+    customer,
+    cryptoRail: input.assetRail,
+    fiatCurrency: input.fiatCurrency,
+    collectedData,
+  });
+  if (account.provider_status === null) {
+    throw badRequest("Lightspark payout account has no provider status yet.");
+  }
+  if (isLightsparkExternalAccountActive(account.provider_status)) {
+    return lightsparkOfframpReady(account.id);
+  }
+  throw badRequest(
+    `Lightspark payout account was created but is not active yet (status: ${account.provider_status}). Retry once it is verified.`
+  );
 }

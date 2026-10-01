@@ -1,4 +1,6 @@
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
+import { getLogger } from "@/runtime/logger";
 import type { VaultDeadline } from "@/services/earn/vault-deadline";
 
 /**
@@ -38,6 +40,23 @@ export interface ReconcilableVaultClaim {
   share_mint: string | null;
   label: string;
   has_unsettled_movements: boolean;
+  open_withdrawal_request_ids: readonly string[];
+  redemption_intermediates: readonly ReconcilableRedemptionIntermediate[];
+}
+
+/**
+ * What one claim's operator redemptions account for in the wallet for one
+ * intermediate mint (Hastra wYLDS), in decimal token units: `retained` by
+ * cancelled requests (cancellation never recreates the burned shares, so it
+ * still backs the claim), `in_flight` delegated by landed open requests, and
+ * `unresolved` for requests that may or may not hold theirs (not yet landed,
+ * or closed with no identified outcome).
+ */
+export interface ReconcilableRedemptionIntermediate {
+  mint: string;
+  retained: string;
+  in_flight: string;
+  unresolved: string;
 }
 
 export interface ReconcilableShareMintedStrategy {
@@ -79,6 +98,23 @@ export interface UnbackedVaultPosition {
   vaultAddress: string | null;
   shareMint: string | null;
   label: string;
+  /**
+   * True when the wallet holds intermediate a cancelled operator redemption on
+   * this claim may have left, but an unresolved request or another claim's
+   * redemption could own it, so the report cannot tell whether it backs this
+   * claim.
+   */
+  ambiguousBacking: boolean;
+}
+
+/**
+ * A zero-share claim with open queued withdrawal requests. The requests
+ * escrowed or burned shares ahead of the payout, but only the shares they
+ * cover, and the ledger holds no per-claim share total to check that
+ * against, so the claim is listed beside its requests rather than judged.
+ */
+export interface QueuedWithdrawalVaultPosition extends UnbackedVaultPosition {
+  withdrawalRequestIds: string[];
 }
 
 export interface UnreadableVaultWallet {
@@ -89,11 +125,120 @@ export interface UnreadableVaultWallet {
 export interface VaultShareReconciliationReport {
   unrecordedHoldings: UnrecordedVaultHolding[];
   unbackedPositions: UnbackedVaultPosition[];
+  queuedWithdrawalPositions: QueuedWithdrawalVaultPosition[];
   unreadableWallets: UnreadableVaultWallet[];
 }
 
 /** Same bound the positions hydration fan-out uses for per-owner reads. */
 const BALANCE_READ_CONCURRENCY = 8;
+
+type VaultShareBalances = Awaited<ReturnType<VaultShareBalanceReader>>;
+
+type IntermediateBacking = "backed" | "ambiguous" | "none";
+
+const atomsOf = (amount: string): bigint => (/^\d+$/.test(amount) ? BigInt(amount) : 0n);
+
+const isPositiveDecimal = (amount: string): boolean => /[1-9]/.test(amount);
+
+/** Ledger decimals summed in the mint's atoms; null when one cannot be read at that scale. */
+function sumAtoms(mint: string, amounts: readonly string[], decimals: number): bigint | null {
+  let total = 0n;
+  for (const amount of amounts) {
+    try {
+      total += parseDecimalAmount(amount, decimals);
+    } catch (error) {
+      getLogger().warn(
+        { mint, amount, decimals, error },
+        "share reconciliation could not read a redemption's intermediate amount"
+      );
+      return null;
+    }
+  }
+  return total;
+}
+
+/**
+ * Whether each intermediate mint in one wallet backs the claims whose
+ * cancelled operator redemptions left it. Landed open requests own what they
+ * delegated. What remains backs a sole retaining claim outright, even if every
+ * unresolved request's amount is there too: presence, like the share rule, so
+ * one atom backs it and a mostly drained claim reads as backed. Claims sharing
+ * the mint need it to cover all of them. Anything short of certain is
+ * `ambiguous`, never a guess.
+ */
+function intermediateBacking(
+  claims: readonly ReconcilableVaultClaim[],
+  balances: VaultShareBalances
+): Map<string, IntermediateBacking> {
+  const ledger = new Map<
+    string,
+    { retained: string[]; delegated: string[]; unresolved: string[] }
+  >();
+  for (const claim of claims) {
+    for (const intermediate of claim.redemption_intermediates) {
+      const entry = ledger.get(intermediate.mint) ?? {
+        retained: [],
+        delegated: [],
+        unresolved: [],
+      };
+      if (isPositiveDecimal(intermediate.retained)) entry.retained.push(intermediate.retained);
+      entry.delegated.push(intermediate.in_flight);
+      entry.unresolved.push(intermediate.unresolved);
+      ledger.set(intermediate.mint, entry);
+    }
+  }
+
+  const backing = new Map<string, IntermediateBacking>();
+  for (const [mint, entry] of ledger) {
+    const balance = balances.find((candidate) => candidate.mint === mint);
+    const held = balance ? atomsOf(balance.amount) : 0n;
+    if (!balance || held === 0n) {
+      backing.set(mint, "none");
+      continue;
+    }
+    const delegated = sumAtoms(mint, entry.delegated, balance.decimals);
+    const unresolved = sumAtoms(mint, entry.unresolved, balance.decimals);
+    const needed =
+      entry.retained.length > 1 ? sumAtoms(mint, entry.retained, balance.decimals) : 1n;
+    if (delegated === null || unresolved === null || needed === null) {
+      backing.set(mint, "ambiguous");
+      continue;
+    }
+    const free = held - delegated;
+    if (free <= 0n) backing.set(mint, "none");
+    else if (free - unresolved >= needed) backing.set(mint, "backed");
+    else backing.set(mint, "ambiguous");
+  }
+  return backing;
+}
+
+/**
+ * One wallet's judgeable claims that hold none of their shares and that no
+ * intermediate a cancelled operator redemption left provably backs, in claim
+ * order, each flagged when its backing cannot be decided.
+ */
+function claimsWithoutBacking(
+  claims: readonly ReconcilableVaultClaim[],
+  balances: VaultShareBalances
+): Array<{ claim: ReconcilableVaultClaim; ambiguous: boolean }> {
+  const heldMints = new Set(balances.map((balance) => balance.mint));
+  const backing = intermediateBacking(claims, balances);
+  const findings: Array<{ claim: ReconcilableVaultClaim; ambiguous: boolean }> = [];
+  for (const claim of claims) {
+    // A claim without a share mint cannot be judged against balances, and an
+    // in-flight movement already explains a chain/record disagreement — the
+    // sweep settles it within about a minute either way.
+    if (!claim.share_mint || claim.has_unsettled_movements) continue;
+    if (heldMints.has(claim.share_mint)) continue;
+    // A cancelled redemption left its intermediate in place of the shares.
+    const verdicts = claim.redemption_intermediates
+      .filter((intermediate) => isPositiveDecimal(intermediate.retained))
+      .map((intermediate) => backing.get(intermediate.mint) ?? "none");
+    if (verdicts.includes("backed")) continue;
+    findings.push({ claim, ambiguous: verdicts.includes("ambiguous") });
+  }
+  return findings;
+}
 
 /**
  * All catalogue rows claiming one share mint, with the attribution the report
@@ -164,6 +309,7 @@ export async function reconcileVaultShareHoldings(input: {
   const report: VaultShareReconciliationReport = {
     unrecordedHoldings: [],
     unbackedPositions: [],
+    queuedWithdrawalPositions: [],
     unreadableWallets: [],
   };
 
@@ -185,7 +331,6 @@ export async function reconcileVaultShareHoldings(input: {
       return;
     }
 
-    const balancesByMint = new Map(outcome.value.map((balance) => [balance.mint, balance]));
     const recordedShareMints = new Set(
       walletClaims.map((claim) => claim.share_mint).filter((mint) => mint !== null)
     );
@@ -208,13 +353,8 @@ export async function reconcileVaultShareHoldings(input: {
       });
     }
 
-    for (const claim of walletClaims) {
-      // A claim without a share mint cannot be judged against balances, and an
-      // in-flight movement already explains a chain/record disagreement — the
-      // sweep settles it within about a minute either way.
-      if (!claim.share_mint || claim.has_unsettled_movements) continue;
-      if (balancesByMint.has(claim.share_mint)) continue;
-      report.unbackedPositions.push({
+    for (const { claim, ambiguous } of claimsWithoutBacking(walletClaims, outcome.value)) {
+      const finding: UnbackedVaultPosition = {
         positionId: claim.id,
         custodyWalletId: wallet.id,
         walletAddress: wallet.publicKey,
@@ -222,7 +362,16 @@ export async function reconcileVaultShareHoldings(input: {
         vaultAddress: claim.vault_address,
         shareMint: claim.share_mint,
         label: claim.label,
-      });
+        ambiguousBacking: ambiguous,
+      };
+      if (claim.open_withdrawal_request_ids.length > 0) {
+        report.queuedWithdrawalPositions.push({
+          ...finding,
+          withdrawalRequestIds: [...claim.open_withdrawal_request_ids],
+        });
+      } else {
+        report.unbackedPositions.push(finding);
+      }
     }
   });
 

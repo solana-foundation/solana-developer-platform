@@ -39,8 +39,6 @@
   "src/app/dashboard/payments/ramps/components/payment-method-step.tsx:69:7:onchain",
   "src/app/dashboard/payments/ramps/components/payment-method-step.tsx:75:7:ramp",
   "src/app/dashboard/payments/ramps/components/ramp-status-panel.tsx:145:7:size-4",
-  "src/app/not-found.tsx:11:45:Solana",
-  "src/app/not-found.tsx:18:9:The page you&apos;re looking for doesn&apos;t exist or may have moved.",
   "src/app/pay/[token]/loading.tsx:32:13:public-pay-detail-expiry",
   "src/app/pay/[token]/loading.tsx:32:13:public-pay-detail-to",
   "src/app/pay/[token]/loading.tsx:32:13:public-pay-detail-token",

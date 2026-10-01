@@ -8,7 +8,7 @@ const hastraRow: EarnStrategyRow = {
   provider_reference: "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7",
   name: "Hastra PRIME",
   source_kind: "rwa",
-  underlying_source: "figure-democratized-prime-heloc",
+  underlying_source: "figure-democratized-prime-home-equity",
   deposit_mints: ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"],
   share_mint: "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7",
   apy_type: "variable",

@@ -1,3 +1,4 @@
+import { wellKnownMint } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   earnProviderLabel,
@@ -5,15 +6,40 @@ import {
   formatEpochSeconds,
   formatProviderAmount,
   formatTokenQuantity,
+  formatTokenValue,
   formatUsd,
 } from "./earn-format";
+
+const USDC_MINT = wellKnownMint("USDC", "mainnet-beta") ?? "";
+const SOL_MINT = wellKnownMint("SOL", "mainnet-beta") ?? "";
 
 describe("Earn display formatting", () => {
   it("renders provider decimals exactly, past the safe-integer boundary", () => {
     expect(formatProviderAmount("9007199254740993.129", "en-US", "USDC", 3, 3)).toBe(
       "9,007,199,254,740,993.129 USDC"
     );
-    expect(formatUsd("9007199254740993.129", "en-US")).toBe("$9,007,199,254,740,993.129");
+    expect(formatUsd("9007199254740993.129", "en-US")).toBe("$9,007,199,254,740,993.12");
+  });
+
+  it("renders dollars to the cent, truncating, and never a sub-cent value as nothing", () => {
+    expect(formatUsd("1234.5", "en-US")).toBe("$1,234.50");
+    expect(formatUsd("1.999", "en-US")).toBe("$1.99");
+    expect(formatUsd("0", "en-US")).toBe("$0.00");
+    expect(formatUsd("0.004", "en-US")).toBe("<$0.01");
+    expect(formatUsd("0.0000001", "de-DE")).toBe("<$0,01");
+    expect(formatUsd("0.01", "en-US")).toBe("$0.01");
+  });
+
+  it("renders a deposit-token amount as dollars only for a USD-stable mint", () => {
+    expect(USDC_MINT).not.toBe("");
+    expect(SOL_MINT).not.toBe("");
+    expect(formatTokenValue("1250.4212", USDC_MINT, "en-US")).toBe("$1,250.42");
+    expect(formatTokenValue("1.5", SOL_MINT, "en-US")).toBe("1.5 SOL");
+    expect(formatTokenValue("1.5", "NotAWellKnownMint111111111111111111111111", "en-US")).toBe(
+      "1.5 NotA…1111"
+    );
+    expect(formatTokenValue("1.5", undefined, "en-US")).toBe("1.5");
+    expect(formatTokenValue(undefined, USDC_MINT, "en-US")).toBe("—");
   });
 
   it("truncates rather than rounding a balance up", () => {
