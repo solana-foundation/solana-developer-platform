@@ -407,6 +407,23 @@ describe("Policy", () => {
     expect(screen.getByRole("button", { name: "Disable policy…" })).toBeTruthy();
   });
 
+  it("reaches the policy's history from its revisions before it has made a decision", async () => {
+    mocks.tab = "policy";
+    await act(async () => {
+      renderView({
+        policyPromise: Promise.resolve({
+          policy: { ...policy, audit: { recentEvaluations: [] } } as PaymentWalletPolicy,
+          error: null,
+        }),
+      });
+    });
+    await screen.findByText("Revision #2 has been enforcing since Aug 12, 2026.");
+    expect(document.querySelector("[data-wallet-decisions]")).toBeNull();
+    expect(screen.getByRole("link", { name: "Policy audit" }).getAttribute("href")).toBe(
+      "/dashboard/wallets/wallet_one/policy/audit"
+    );
+  });
+
   it("keeps Disable away from someone who cannot manage custody", async () => {
     mocks.tab = "policy";
     await act(async () => {

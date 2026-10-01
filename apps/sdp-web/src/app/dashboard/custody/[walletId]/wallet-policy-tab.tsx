@@ -173,7 +173,11 @@ function RecordTable({
   );
 }
 
-function RevisionsBlock({ result }: { result: WalletRevisionsResult }) {
+/**
+ * The revisions the policy has been through, with the way into its full history (the audit
+ * page, where each revision opens with its changes) whether or not it has made a decision yet.
+ */
+function RevisionsBlock({ walletId, result }: { walletId: string; result: WalletRevisionsResult }) {
   const t = useTranslations();
   const locale = useLocale();
   const revisions = result.history?.revisions ?? [];
@@ -186,7 +190,16 @@ function RevisionsBlock({ result }: { result: WalletRevisionsResult }) {
   }
   if (revisions.length === 0) return null;
   return (
-    <RecordBlock title={t("DashboardCustody.policyAuditRevisions")}>
+    <RecordBlock
+      title={t("DashboardCustody.policyAuditRevisions")}
+      aside={
+        <Button asChild variant="outline" size="sm">
+          <Link href={walletPolicyHref(walletId, "/audit")}>
+            {t("DashboardCustody.policyAuditTitle")}
+          </Link>
+        </Button>
+      }
+    >
       <RecordTable
         data-wallet-revisions
         columns={[
@@ -395,7 +408,7 @@ export function WalletPolicyTab({
     <RecordStack>
       <PolicyBand walletId={wallet.walletId} policy={policy} />
       {policy.controlProfile ? <RulesBlock policy={policy} symbols={symbols} /> : null}
-      <RevisionsBlock result={revisions} />
+      <RevisionsBlock walletId={wallet.walletId} result={revisions} />
       <DecisionsBlock
         walletId={wallet.walletId}
         evaluations={policy.audit?.recentEvaluations ?? []}
