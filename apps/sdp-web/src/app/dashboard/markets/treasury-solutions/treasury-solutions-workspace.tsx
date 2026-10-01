@@ -53,7 +53,11 @@ import {
   type EarnFundingWallet,
   useEarnFundingWallets,
 } from "../earn/deposit/earn-funding-wallets";
-import { compareUnsignedDecimals, sortByOptionalDecimal } from "../earn/earn-decimal";
+import {
+  compareUnsignedDecimals,
+  isPositiveDecimal,
+  sortByOptionalDecimal,
+} from "../earn/earn-decimal";
 import {
   type EarnDepositAvailabilityLabels,
   earnProviderLabel,
@@ -95,6 +99,7 @@ import {
   SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "../earn/earn-surfacing";
 import { earnVaultHoldingValue } from "../earn/earn-vault-holding";
+import type { EarnVaultParRedemptionSource } from "../earn/earn-vault-par-redemption-modal";
 import {
   earnVaultDepositUiState,
   earnVaultPositionStatusLabels,
@@ -1044,7 +1049,7 @@ function ActiveVaultPositionsCard({
   deposits: readonly TrackedVaultDeposit[];
   error: unknown;
   isLoading: boolean;
-  onWithdraw: (position: EarnVaultPosition) => void;
+  onWithdraw: (position: EarnVaultPosition, parSource?: EarnVaultParRedemptionSource) => void;
   positions: readonly EarnVaultPosition[] | undefined;
   positionsReads: readonly VaultPositionsRead[];
   unrecordedShareMints: ReadonlySet<string> | undefined;
@@ -1250,30 +1255,47 @@ function TreasuryPositionActions({
   onWithdraw,
   position,
 }: {
-  onWithdraw: (position: EarnVaultPosition) => void;
+  onWithdraw: (position: EarnVaultPosition, parSource?: EarnVaultParRedemptionSource) => void;
   position: EarnVaultPosition;
 }) {
   const t = useTranslations();
-  // The exit route (PRO-1702). Deliberately NOT gated on availability,
+  // The exit routes (PRO-1702). Deliberately NOT gated on availability,
   // surfacing, or environment: money out beats money off (ADR 0002), so the
-  // verb stays live wherever a position exists. A provider whose exit SDP
+  // verbs stay live wherever a position exists. A provider whose exit SDP
   // cannot build yet answers 501 with a clear error inside the modal rather
   // than a silently dead button. Unhydrated shares may still exist, so only a
-  // provable zero (a row kept open by its par intermediate) hides it.
+  // provable zero (a row kept open by its par intermediate) hides the share
+  // exit; a held par intermediate gets its own verb, since only the par route
+  // can redeem it.
   const holdsShares =
     position.shares === undefined || !isEarnVaultHoldingEmpty({ shares: position.shares });
-  if (!holdsShares) return null;
+  const redeemable = position.parIntermediate?.withdrawableAmount;
+  const holdsIntermediate = redeemable !== undefined && isPositiveDecimal(redeemable);
   return (
-    <Button
-      data-earn-vault-withdraw-focus-fallback={position.id}
-      iconLeft={<ArrowUpRightIcon />}
-      onClick={() => onWithdraw(position)}
-      size="sm"
-      type="button"
-      variant="secondary"
-    >
-      {t("DashboardMarkets.treasury.withdraw")}
-    </Button>
+    <div className="flex justify-end gap-2">
+      {holdsIntermediate ? (
+        <Button
+          onClick={() => onWithdraw(position, "intermediate")}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          {t("DashboardMarkets.treasury.redeemIntermediate")}
+        </Button>
+      ) : null}
+      {holdsShares ? (
+        <Button
+          data-earn-vault-withdraw-focus-fallback={position.id}
+          iconLeft={<ArrowUpRightIcon />}
+          onClick={() => onWithdraw(position)}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          {t("DashboardMarkets.treasury.withdraw")}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -1685,7 +1707,10 @@ interface TreasuryWorkspaceContentProps {
   mainnetCatalogueLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
-  onWithdrawPosition: (position: EarnVaultPosition) => void;
+  onWithdrawPosition: (
+    position: EarnVaultPosition,
+    parSource?: EarnVaultParRedemptionSource
+  ) => void;
   onWithdrawProgram: (program: EarnProgram) => void;
   portfolioApy: string | undefined;
   positions: readonly EarnVaultPosition[] | undefined;
@@ -1954,6 +1979,15 @@ export function TreasurySolutionsWorkspace({
   const [depositStrategy, setDepositStrategy] = useState<EarnStrategy | null>(null);
   const [withdrawProgram, setWithdrawProgram] = useState<EarnProgram | null>(null);
   const [withdrawPosition, setWithdrawPosition] = useState<EarnVaultPosition | null>(null);
+  const [withdrawParSource, setWithdrawParSource] =
+    useState<EarnVaultParRedemptionSource>("shares");
+  const openVaultExit = useCallback(
+    (position: EarnVaultPosition, parSource: EarnVaultParRedemptionSource = "shares") => {
+      setWithdrawParSource(parSource);
+      setWithdrawPosition(position);
+    },
+    []
+  );
   const [withdrawalWatches, setWithdrawalWatches] = useState<readonly EarnWithdrawalWatch[]>([]);
   const settledWithdrawalKeys = useRef(new Set<string>());
   const vaultActivityOrder = useRef(0);
@@ -2150,7 +2184,7 @@ export function TreasurySolutionsWorkspace({
         mainnetCatalogueLoading={mainnetCatalogueLoading}
         onDeposit={setDepositStrategy}
         onRefresh={refreshTreasury}
-        onWithdrawPosition={setWithdrawPosition}
+        onWithdrawPosition={openVaultExit}
         onWithdrawProgram={setWithdrawProgram}
         portfolioApy={portfolioApy}
         positions={positions}
@@ -2253,6 +2287,7 @@ export function TreasurySolutionsWorkspace({
             refreshWalletBalances();
           }}
           onAsyncRequestSettled={refreshTreasury}
+          parSource={withdrawParSource}
           position={withdrawPosition}
           projectId={selectedProjectId}
         />

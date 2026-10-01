@@ -335,7 +335,9 @@ For a solver queue, require `options.queued`, `options.queueAsset`, and `queueAs
 - `minimumSecondsToDeadline` through `maximumSecondsToDeadline`
 - `secondsToMaturity`
 
-For an operator redemption, require `options.parRedemption`. Show `minimumShares`, `intermediateMint`, `assetMint`, and whether `cancelable` is true. `operatorSettled: true` means the request transaction is not the payout.
+For an operator redemption, require `options.parRedemption`. Show `minimumShares`, `intermediateMint`, `assetMint`, and whether `cancelable` is true. `operatorSettled: true` means the request transaction is not the payout. `minimumShares` is null while the provider's rate is unavailable; a share-sourced preview then names the blocking issue.
+
+A position can hold the intermediate token outside any request, reported as `parIntermediate` (for example, wYLDS left by a cancelled operator redemption). Redeem it with the same routes by sending `intermediateAmount` instead of `shares`, never both, up to `parIntermediate.withdrawableAmount` and at least `minimumIntermediateAmount`. That request converts nothing and records `shares: "0"`; its fulfilled movement is denominated in the intermediate mint.
 
 Use exact decimal comparison for shares. Do not convert token quantities to JavaScript numbers. The maximum solver window is currently 90 days, but integrations should always honor the live `maximumSecondsToDeadline` rather than copying that value.
 
@@ -446,7 +448,7 @@ if (canRecover) {
 }
 ```
 
-A request transaction and a cancellation transaction are lifecycle actions, not payouts. Never add either to the customer's available payout-asset balance. Only `fulfilled` creates the corresponding withdrawal movement. On `cancelled`, refresh the original share balance for a solver request or the intermediate-token balance for an operator redemption.
+A request transaction and a cancellation transaction are lifecycle actions, not payouts. Never add either to the customer's available payout-asset balance. Only `fulfilled` creates the corresponding withdrawal movement. On `cancelled`, refresh the original share balance for a solver request, or the position's `parIntermediate` for an operator redemption, which can then be redeemed with `intermediateAmount`.
 
 ## Floors and previews
 

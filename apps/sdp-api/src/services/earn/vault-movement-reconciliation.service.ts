@@ -294,7 +294,7 @@ async function reconcileEnvironment(
   let currentBlockHeight: bigint | null = null;
   if (needsBlockHeight) {
     try {
-      currentBlockHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
+      currentBlockHeight = await rpc.getBlockHeight({ commitment: "finalized" }).send();
     } catch (error) {
       // Unknown signatures cannot be rebroadcast or expired without a height,
       // so those rows are left for the next tick; the tick still must not
@@ -424,21 +424,7 @@ async function reconcileMovement(
     chain.currentBlockHeight !== null &&
     chain.currentBlockHeight > BigInt(lastValidBlockHeight)
   ) {
-    // A requested row can have landed after an ambiguous broadcast or a crash
-    // before the submitted write. Both states need corroborating observations:
-    // one missing RPC result must not turn a successful transfer into a failure.
-    if (movement.unknown_signature_observed_at === null) {
-      if (movement.status === "requested" && !(await markSubmitted(ledger, movement))) {
-        return "unchanged";
-      }
-      await ledger.recordUnknownSignatureObservation({
-        movementId: movement.id,
-        organizationId: movement.organization_id,
-      });
-      return "unchanged";
-    }
-    await failMovement(ledger, movement, "Transaction blockhash expired before confirmation");
-    return "failed";
+    return reconcileExpiredMovement(env, ledger, movement, chain);
   }
   if (chain.currentBlockHeight === null) return "unchanged";
 
@@ -452,6 +438,53 @@ async function reconcileMovement(
   return "resubmitted";
 }
 
+async function reconcileExpiredMovement(
+  env: Env,
+  ledger: EarnMovementsLedger,
+  movement: EarnMovementRow,
+  chain: ChainObservation
+): Promise<MovementOutcome> {
+  // A timed-out broadcast can have landed while its durable row still says
+  // requested. The status cache is not sufficient negative evidence: consult
+  // finalized transaction history before closing either kind of intent.
+  // A history outage throws and leaves the movement recoverable.
+  const transaction = await getTransaction(chain.rpc, movement.signature as Signature, "finalized");
+  if (transaction) {
+    if (!transaction.executionResultKnown) {
+      throw new Error(`Earn vault movement ${movement.id} has no historical execution result`);
+    }
+    if (transaction.err !== null) {
+      await failMovement(ledger, movement, describeVaultSimulationError(transaction.err).message);
+      return "failed";
+    }
+    return reconcileMovement(
+      env,
+      ledger,
+      movement,
+      {
+        slot: transaction.slot,
+        confirmations: null,
+        err: null,
+        confirmationStatus: "finalized",
+      },
+      chain
+    );
+  }
+  if (movement.unknown_signature_observed_at === null) {
+    // Treat an uncertain requested broadcast as submitted before recording
+    // the observation, using the existing guarded writer and schema. Neither
+    // state proves absence from the chain; both get a later recovery tick.
+    await markSubmitted(ledger, movement);
+    await ledger.recordUnknownSignatureObservation({
+      movementId: movement.id,
+      organizationId: movement.organization_id,
+    });
+    return "unchanged";
+  }
+  await failMovement(ledger, movement, "Transaction blockhash expired before confirmation");
+  return "failed";
+}
+
 /**
  * Whether Solana finality records only the opening leg of a provider-managed
  * order rather than economic settlement, for a provider the CURRENT registry
@@ -460,7 +493,7 @@ async function reconcileMovement(
  * Hastra DEX builds cannot change how an already-recorded withdrawal settles.
  *
  * A future Connect order reconciler must correlate and authenticate provider
- * completion before the settled surface can close one of these rows — chain
+ * completion before the settled surface can close one of these rows. Chain
  * finalization never does.
  */
 function isKnownProviderOrderSettlement(env: Env, movement: EarnMovementRow): boolean {

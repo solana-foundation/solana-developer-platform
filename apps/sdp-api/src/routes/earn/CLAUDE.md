@@ -149,7 +149,12 @@ and `advanceRequest` reopens the holding on every cancellation, not only a
 solver queue's, so a stale zero-share snapshot cannot retire it. Values that
 sum a holding (earnings `currentValue`, the summary totals) add the
 intermediate through `hydratedHoldingTokenValue`; `tokenValue` itself stays the
-shares' value. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
+shares' value. A par request redeems either shares or that held intermediate
+(`intermediateAmount`, exactly one of the two in every body schema). The
+intermediate source records `shares = '0'` (migration 0120 admits it for
+operator redemptions only), its policy candidate names the intermediate mint
+as the asset, and its idempotency fingerprint adds `intermediateAmount` without
+changing a shares fingerprint by a byte. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
 signed action rows. Only a provider-authenticated terminal fulfillment is
 projected into movement/activity reads, using the closing transaction's
 signature and payout; request and cancel transactions remain request history
@@ -1064,32 +1069,25 @@ Pinned by the "sweep telemetry" describe in
 `../../services/jobs/reconcile-earn-vault-movements.test.ts`, whose
 `runWithCronRunEvent` test composes the real wrapper.
 
-**Expiring a `requested` or `submitted` movement takes TWO unknown-signature
-observations** (PRO-1904, migration 0092).
+**Expiring an unknown vault movement takes TWO observations.** A broadcast
+response can be lost after landing while the durable row still says `requested`.
+The sweep therefore uses finalized block height, checks finalized transaction
+history after a null signature status, and recovers a historical receipt through
+the normal settlement path only when its execution result is known. Missing
+execution metadata or an unavailable history read leaves the row recoverable and
+fails the tick visibly; neither establishes success, failure, or signature absence.
 
-- `requested` means the submitted write has not succeeded. An ambiguous
-  broadcast or a crash after sending can leave a LANDED transaction in this
-  state. On its first expired unknown observation, the sweep advances it to
-  `submitted` under the normal status guard, then records the observation.
-- `confirmed` demonstrably landed. A null status is RPC history forgetting, so
-  it is never expired (PRO-1716).
-- `submitted` was broadcast or has an unknown broadcast outcome and MAY have landed. RPC history is not complete
-  (the `confirmed` rule exists for exactly that reason), so one null answer is
-  evidence, not proof, and a false `failed` is terminal with the shares still
-  in the vault. The first null observation past the window writes
-  `unknown_signature_observed_at` and returns `unchanged`; only a LATER tick
-  that sees the signature unknown again fails the row. A tick that finds the
-  signature in between advances it normally and the mark becomes inert.
+When neither status nor history observes the transaction past its window, a
+`requested` row moves conservatively to `submitted` through the guarded writer.
+The sweep records `unknown_signature_observed_at` on that submitted row. Only a
+later tick with another absent status and absent finalized receipt can expire it.
+A positive observation in between advances it normally. The migration 0092
+constraint and single-writer rule remain intact; no migration is required.
 
-The mark is written only by the sweep (the interactive read-through passes no
-block height and can neither park nor expire), only on a `submitted` row, and
-only once (COALESCE), so a burst of ticks cannot count as two observations. An
-unavailable block-height read is not an observation either: the row is left for
-the next tick (ADR 0002 exit safety). Cost: a genuinely dead submitted
-movement fails one tick later than before. These observations tolerate a
-transient history miss; two misses from the same incomplete endpoint are still
-not proof that a transaction never landed. Pinned by the expiry and ambiguous
-broadcast cases in the same test file.
+A `confirmed` row has positive inclusion evidence and is never expired for an
+absent signature. Interactive GET reads pass no block height and cannot expire
+or mark an unknown signature. Tests live in the ambiguous-broadcast recovery and
+expiry describes of `services/jobs/reconcile-earn-vault-movements.test.ts`.
 
 ### Vault withdrawals — the exit half (PRO-1702)
 

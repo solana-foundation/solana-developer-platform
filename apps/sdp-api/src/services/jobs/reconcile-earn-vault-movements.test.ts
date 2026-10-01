@@ -22,7 +22,9 @@ vi.mock("@sdp/kamino", async (importOriginal) => ({
 
 vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
-  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+  createRpc: () => ({
+    getBlockHeight: (config: unknown) => ({ send: () => getBlockHeight(config) }),
+  }),
   getSignatureStatuses,
   getTransaction,
 }));
@@ -940,39 +942,119 @@ describe("reconcileEarnVaultMovements", () => {
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
-  it("keeps an ambiguous requested broadcast reconcilable when RPC history temporarily misses it", async () => {
-    const seeded = await seedMovement("100");
-    getSignatureStatuses.mockResolvedValue([null]);
-    getBlockHeight.mockResolvedValue(101n);
+  describe.each(["requested", "submitted"] as const)("ambiguous %s broadcast recovery", (state) => {
+    async function ambiguousMovement(direction: "deposit" | "withdrawal" = "deposit") {
+      const seeded =
+        direction === "deposit" ? await seedMovement("100") : await seedWithdrawal("100");
+      if (state === "submitted")
+        await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+          movementId: seeded.movement.id,
+          organizationId: ORG,
+          toStatus: "submitted",
+        });
+      getSignatureStatuses.mockResolvedValue([null]);
+      getBlockHeight.mockResolvedValue(101n);
+      return seeded;
+    }
 
-    await reconcileEarnVaultMovements(env);
-
-    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
-      status: "submitted",
-      failure_reason: null,
-      unknown_signature_observed_at: expect.any(String),
+    it("recovers finalized history before expiring an unknown signature", async () => {
+      const seeded = await ambiguousMovement();
+      getTransaction.mockResolvedValue({ slot: 1n, err: null, executionResultKnown: true });
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "finalized",
+        failure_reason: null,
+        amount_settled: "1",
+      });
+      expect(getTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        seeded.movement.signature,
+        "finalized"
+      );
+      expect(getBlockHeight).toHaveBeenCalledWith({ commitment: "finalized" });
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
     });
-    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
 
-    getSignatureStatuses.mockResolvedValue([
-      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
-    ]);
-    await reconcileEarnVaultMovements(env);
+    it("records an actual finalized transaction error without claiming settlement", async () => {
+      const seeded = await ambiguousMovement();
+      getTransaction.mockResolvedValue({
+        slot: 1n,
+        err: "InsufficientFundsForFee",
+        executionResultKnown: true,
+      });
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "failed",
+        amount_settled: null,
+      });
+    });
 
-    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
-      status: "finalized",
-      failure_reason: null,
+    it.each(["deposit", "withdrawal"] as const)(
+      "keeps a %s recoverable until historical execution metadata is available",
+      async (direction) => {
+        const seeded = await ambiguousMovement(direction);
+        getTransaction.mockResolvedValue({ slot: 1n, err: null, executionResultKnown: false });
+
+        await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+        await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+        await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+          status: state,
+          settled_at: null,
+          amount_settled: null,
+          failure_reason: null,
+          unknown_signature_observed_at: null,
+          chain_finalized_at: null,
+        });
+        expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+
+        getTransaction.mockResolvedValue({ slot: 1n, err: null, executionResultKnown: true });
+        await reconcileEarnVaultMovements(env);
+        await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+          status: "finalized",
+          failure_reason: null,
+        });
+      }
+    );
+
+    it("leaves the movement recoverable when historical evidence cannot be read", async () => {
+      const seeded = await ambiguousMovement();
+      getTransaction.mockRejectedValue(new Error("history unavailable"));
+      await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: state,
+        failure_reason: null,
+      });
+    });
+
+    it("waits for another observation and accepts a late finality response", async () => {
+      const seeded = await ambiguousMovement();
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "submitted",
+        failure_reason: null,
+        unknown_signature_observed_at: expect.any(String),
+      });
+      getSignatureStatuses.mockResolvedValue([
+        { slot: 1n, err: null, confirmations: null, confirmationStatus: "finalized" },
+      ]);
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "finalized",
+        failure_reason: null,
+      });
     });
   });
 
-  it("fails a missing requested signature only after corroborating its expiry", async () => {
+  it("expires an unknown intent only after finalized history and a later observation", async () => {
     const seeded = await seedMovement("100");
     getSignatureStatuses.mockResolvedValue([null]);
     getBlockHeight.mockResolvedValue(101n);
 
     await reconcileEarnVaultMovements(env);
-
-    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "submitted",
+      failure_reason: null,
+    });
     await reconcileEarnVaultMovements(env);
 
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({

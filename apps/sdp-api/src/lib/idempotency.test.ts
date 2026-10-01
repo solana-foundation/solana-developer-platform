@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import {
   buildEarnVaultDepositFingerprint,
+  buildEarnVaultParRedemptionFingerprint,
   buildPaymentTransferFingerprint,
   buildTransferBatchFingerprint,
   normalizeForFingerprint,
@@ -222,6 +223,31 @@ describe("buildTransferBatchFingerprint", () => {
         recipients: [firstRecipient],
         options: { preflight: false, maxRecipientsPerTransaction: 10 },
       })
+    );
+  });
+});
+
+describe("buildEarnVaultParRedemptionFingerprint", () => {
+  const base = { environment: "production", provider: "hastra", positionId: "earn_position_1" };
+
+  it("keeps a shares-sourced fingerprint byte-identical to the recorded format", () => {
+    // Replays and approval executions compare against fingerprints stored
+    // before a par request could be sourced from held intermediate.
+    expect(buildEarnVaultParRedemptionFingerprint({ ...base, shares: "1600.50" })).toBe(
+      '{"environment":"production","positionId":"earn_position_1","provider":"hastra",' +
+        '"scope":"earn_vault_par_redemption_request","shares":"1600.5","transactionId":null}'
+    );
+  });
+
+  it("never lets an intermediate-sourced request replay a shares-sourced one", () => {
+    const intermediate = buildEarnVaultParRedemptionFingerprint({
+      ...base,
+      intermediateAmount: "1600.5",
+    });
+    expect(intermediate).toContain('"intermediateAmount":"1600.5"');
+    expect(intermediate).not.toContain('"shares"');
+    expect(intermediate).not.toBe(
+      buildEarnVaultParRedemptionFingerprint({ ...base, shares: "1600.5" })
     );
   });
 });

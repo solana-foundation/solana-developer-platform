@@ -65,15 +65,18 @@ export function ondoPercentToDecimalString(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw internalError(`Ondo USDY apy is not a non-negative number: ${String(value)}`);
   }
-  // `toFixed` avoids exponent notation for tiny values; 12 places is well past
-  // the API's own precision. Dividing by 100 is a two-place shift, so the
-  // digit string carries 14 implied fraction places from here on.
-  const [whole = "0", fraction = ""] = value.toFixed(12).split(".");
-  const digits = `${whole}${fraction}`.padStart(15, "0");
-  const intPart = digits.slice(0, -14).replace(/^0+(?=\d)/, "");
-  const kept = digits.slice(-14, -14 + APY_DECIMAL_PLACES);
-  const rebuilt = `${intPart}.${kept}`.replace(/\.?0+$/, "");
-  return rebuilt === "" ? "0" : rebuilt;
+  // Keep the supplied decimal digits: toFixed rounds before truncation and
+  // can raise a rate across the retained precision boundary.
+  const [coefficient = "0", exponent = "0"] = String(value).split("e");
+  const [whole = "0", fraction = ""] = coefficient.split(".");
+  const digits = BigInt(`${whole}${fraction}`);
+  const scale = Number(exponent) - fraction.length - 2 + APY_DECIMAL_PLACES;
+  const retained = scale >= 0 ? digits * 10n ** BigInt(scale) : digits / 10n ** BigInt(-scale);
+  const text = retained.toString().padStart(APY_DECIMAL_PLACES + 1, "0");
+  return `${text.slice(0, -APY_DECIMAL_PLACES)}.${text.slice(-APY_DECIMAL_PLACES)}`.replace(
+    /\.?0+$/,
+    ""
+  );
 }
 
 export async function readOndoUsdyRate(

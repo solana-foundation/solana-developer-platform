@@ -323,14 +323,16 @@ export const buildEarnVaultQueuedWithdrawalFingerprint = (
     })
   );
 
-export interface EarnVaultParRedemptionFingerprintInput {
+export type EarnVaultParRedemptionFingerprintInput = {
   environment: string;
   provider: string;
   positionId: string;
-  shares: string;
   /** Exact unsigned build consumed by an external-wallet submit. */
   transactionId?: string;
-}
+} & (
+  | { shares: string; intermediateAmount?: undefined }
+  | { intermediateAmount: string; shares?: undefined }
+);
 
 /** Intent identity for an operator-completed par-redemption request. */
 export const buildEarnVaultParRedemptionFingerprint = (
@@ -342,7 +344,14 @@ export const buildEarnVaultParRedemptionFingerprint = (
       environment: input.environment,
       provider: input.provider,
       positionId: input.positionId,
-      shares: normalizeDecimalString(input.shares),
+      // Exactly one is set; the absent key drops out, so a shares-sourced
+      // fingerprint stays byte-identical to the one recorded before wYLDS
+      // could be redeemed directly.
+      shares: input.shares === undefined ? undefined : normalizeDecimalString(input.shares),
+      intermediateAmount:
+        input.intermediateAmount === undefined
+          ? undefined
+          : normalizeDecimalString(input.intermediateAmount),
       transactionId: input.transactionId ?? null,
     })
   );

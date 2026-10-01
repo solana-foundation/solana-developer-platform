@@ -48,8 +48,11 @@ Things that will bite:
   write.** Resolve or open the holding before writing the movement. The custodial
   holding for a program is minted when its provider wallet is linked.
 - **Amounts carry a `denomination`** (`usd`, the token mint, or the SHARE mint
-  on a vault withdrawal, whose exact intent-time quantity is shares). No read
-  may sum across rows without grouping by denomination.
+  on a vault withdrawal, whose exact intent-time quantity is shares). A par
+  fulfillment whose request burned no shares (it redeemed held intermediate)
+  is denominated in the intermediate mint; `fulfilledQueueQuantity` decides for
+  both the writer and the read projection. No read may sum across rows
+  without grouping by denomination.
 - **A direct vault withdrawal is one signed movement.** The movement owns the requested
   shares, actor, idempotency key, signature, signed bytes and blockhash window.
   It is recorded before broadcast and reconciled through the same outbox path
@@ -64,6 +67,15 @@ Things that will bite:
   advancement to an eligible state excludes active cancel actions. Only atomic
   action-failure recovery may reopen it. A failed create cannot discard a
   request once its nonce or creation timestamp establishes provider existence.
+- **Retained par intermediate excludes redeemed or reserved amounts.**
+  Reconciliation adds intermediate from cancelled share-sourced requests and
+  subtracts fulfilled or open zero-share requests for the same position and mint,
+  in lifecycle order, flooring the balance at zero after each debit. An older
+  redemption cannot consume backing created by a later cancellation. Cancelling
+  held intermediate proves the balance is at least the released amount, even
+  without prior SDP history; repeated cancellations never add the same tokens.
+  Open and unknown requests reserve their amounts separately, never a second time
+  through retained backing.
 - **Ids are heterogeneous by design.** History keeps the ids the projection
   preserved, so nothing may parse an id for its kind — read `execution_model`.
 - **`getUnsettledVaultMovementStats` duplicates `claimUnsettledVaultMovements`'

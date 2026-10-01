@@ -17,6 +17,8 @@ if (!MAINNET) throw new Error("test premise: mainnet deployment filled in");
 const USDY = MAINNET.usdyMint;
 const USDC = wellKnownMint("USDC", "mainnet-beta") as string;
 const OWNER = "C4XGF8r1gQP7p2PeKcRAFNwGAU1gCxiinRufqddY1m98";
+const USDY_ATA = "AM5oZfoUpUUpokKFVQgE23hmPAVw3dtEQatFHnMNP8DP";
+const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const CTX: EarnRuntimeContext = { env: {}, environment: "production" };
 
 function leg(minOutAmount: string, quotedAmount = minOutAmount): OndoSwapLeg {
@@ -48,21 +50,30 @@ function makeClient(port: Partial<OndoSwapPort>) {
   );
 }
 
-function stubTokenAccounts(amounts: string[]) {
+function tokenAccount(amount: string, pubkey = USDY_ATA, state = "initialized") {
+  return {
+    pubkey,
+    account: {
+      owner: TOKEN_PROGRAM,
+      data: {
+        parsed: {
+          type: "account",
+          info: { mint: USDY, owner: OWNER, state, tokenAmount: { amount, decimals: 6 } },
+        },
+      },
+    },
+  };
+}
+
+function stubAccounts(value: unknown) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () =>
-      Response.json({
-        jsonrpc: "2.0",
-        id: 1,
-        result: {
-          value: amounts.map((amount) => ({
-            account: { data: { parsed: { info: { tokenAmount: { amount } } } } },
-          })),
-        },
-      })
-    )
+    vi.fn(async () => Response.json({ jsonrpc: "2.0", id: 1, result: { value } }))
   );
+}
+
+function stubTokenAccounts(amounts: string[]) {
+  stubAccounts(amounts.map((amount, index) => tokenAccount(amount, index === 0 ? USDY_ATA : USDC)));
 }
 
 afterEach(() => {
@@ -186,6 +197,21 @@ describe("buildVaultDeposit", () => {
     expect(plan.createsShareAccount).toBe(false);
   });
 
+  it("reports ATA rent when only a non-associated USDY account exists", async () => {
+    stubAccounts([tokenAccount("1000000", USDC)]);
+    const client = makeClient({
+      quoteSwap: async () => ({ outAmount: "87.5", priceImpactPct: "0" }),
+      buildSwapLeg: async () => leg("87.1"),
+    });
+    const plan = await client.buildVaultDeposit(CTX, {
+      providerReference: USDY,
+      owner: OWNER,
+      amount: "100",
+      minSharesOut: "87",
+    });
+    expect(plan.createsShareAccount).toBe(true);
+  });
+
   it("refuses when even zero tolerance cannot reach the floor", async () => {
     stubTokenAccounts(["1"]);
     const buildSwapLeg = vi.fn<OndoSwapPort["buildSwapLeg"]>().mockResolvedValue(leg("86.9"));
@@ -282,12 +308,66 @@ describe("readVaultPositions", () => {
         owner: OWNER,
         cluster: "mainnet-beta",
         shares: "3.5",
-        withdrawableShares: "3.5",
+        withdrawableShares: "1",
         tokenValue: "4.006",
         tokenMint: USDC,
         shareMint: USDY,
       },
     ]);
+  });
+
+  it.each(["frozen", "non-associated"])(
+    "preserves %s holdings without promising an executable exit",
+    async (kind) => {
+      stubAccounts([
+        tokenAccount(
+          "1000000",
+          kind === "frozen" ? USDY_ATA : USDC,
+          kind === "frozen" ? "frozen" : "initialized"
+        ),
+      ]);
+      const positions = await makeClient({}).readVaultPositions(CTX, {
+        owner: OWNER,
+        providerReferences: [USDY],
+      });
+      expect(positions[0]?.shares).toBe("1");
+      expect(positions[0]?.withdrawableShares).toBe("0");
+    }
+  );
+
+  it.each(["owner", "mint", "program", "decimals", "state", "overflow", "duplicate", "shape"])(
+    "refuses untrustworthy %s data instead of fabricating a balance",
+    async (field) => {
+      const account = tokenAccount("1000000");
+      const info = account.account.data.parsed.info;
+      if (field === "owner") info.owner = USDC;
+      if (field === "mint") info.mint = USDC;
+      if (field === "program") account.account.owner = USDC;
+      if (field === "decimals") info.tokenAmount.decimals = 9;
+      if (field === "state") info.state = "uninitialized";
+      if (field === "overflow") info.tokenAmount.amount = "18446744073709551616";
+      stubAccounts(field === "shape" ? {} : field === "duplicate" ? [account, account] : [account]);
+      await expect(
+        makeClient({}).readVaultPositions(CTX, { owner: OWNER, providerReferences: [USDY] })
+      ).rejects.toMatchObject({ code: "POSITION_UNREADABLE" });
+    }
+  );
+
+  it("refuses an aggregate balance above the mint supply range", async () => {
+    stubTokenAccounts(["18446744073709551615", "1"]);
+    await expect(
+      makeClient({}).readVaultPositions(CTX, { owner: OWNER, providerReferences: [USDY] })
+    ).rejects.toMatchObject({ code: "POSITION_UNREADABLE" });
+  });
+
+  it("retains exact balances above the safe integer range", async () => {
+    stubTokenAccounts(["9007199254740993"]);
+    const positions = await makeClient({}).readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [USDY],
+    });
+    expect(positions[0]?.shares).toBe("9007199254.740993");
+    expect(positions[0]?.withdrawableShares).toBe("9007199254.740993");
   });
 
   it("keeps the holding when the valuation fails", async () => {
