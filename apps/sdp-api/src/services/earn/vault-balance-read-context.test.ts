@@ -25,6 +25,7 @@ const movement = {
   environment: "sandbox",
   project_id: "project",
   custody_wallet_id: "wallet",
+  position_id: "position",
   signature: "signature",
 };
 const status = (slot: bigint) => ({ slot, confirmationStatus: "confirmed", err: null });
@@ -41,9 +42,22 @@ describe("vault balance confirmation context", () => {
     await expect(resolveVaultBalanceReadContext({} as Env, input)).resolves.toEqual({
       afterMovementIds: input.movementIds,
       minimumSlot: 103,
+      minimumSlotByPositionId: new Map([["position", 103]]),
     });
     expect(mocks.movement).toHaveBeenCalledWith({ movementId: "one", organizationId: "org" });
     expect(mocks.prove).toHaveBeenCalledWith({}, "devnet", "https://rpc.invalid");
+  });
+
+  it("keeps each position's bound separate while retaining the overall wallet bound", async () => {
+    mocks.movement.mockResolvedValueOnce({ ...movement, position_id: "other" });
+    await expect(resolveVaultBalanceReadContext({} as Env, input)).resolves.toEqual({
+      afterMovementIds: input.movementIds,
+      minimumSlot: 103,
+      minimumSlotByPositionId: new Map([
+        ["other", 100],
+        ["position", 103],
+      ]),
+    });
   });
 
   it.each([

@@ -79,12 +79,55 @@ describe("Treasury confirmed balances", () => {
       syncing: false,
     });
   });
-  it("does not reuse an older value when the latest valuation is unavailable", () => {
+  it("keeps a newly confirmed transfer updating while its valuation is unavailable", () => {
     const unavailable = read(12, undefined, "20", ["deposit"]);
     unavailable.positions = [{ id: "position", shares: "20" }];
     expect(displayedVaultBalance([read(5, "10"), unavailable], "position", [activity()])).toEqual({
       value: undefined,
+      syncing: true,
+    });
+  });
+  it("retains an unrelated holding's last verified value through missing valuations", () => {
+    const unavailable = read(12);
+    unavailable.positions = [{ id: "position" }];
+    expect(displayedVaultBalance([read(5, "10"), unavailable], "position", [])).toEqual({
+      value: "10",
       syncing: false,
+      lastVerifiedAt: 6,
+    });
+    expect(
+      displayedVaultBalance([read(5, "10"), unavailable, read(15, "10.01")], "position", [])
+    ).toEqual({
+      value: "10.01",
+      syncing: false,
+    });
+  });
+  it("preserves an acknowledged balance through a later failed read, but not a new transfer", () => {
+    const verified = read(11, "19.98", "20", ["deposit"]);
+    const unavailable = {
+      ...read(12),
+      positions: [{ id: "position" }],
+      afterMovementIds: ["deposit"],
+    };
+    expect(displayedVaultBalance([verified, unavailable], "position", [activity()])).toEqual({
+      value: "19.98",
+      syncing: false,
+      lastVerifiedAt: 12,
+    });
+    expect(
+      displayedVaultBalance([verified, unavailable], "position", [activity(), activity("next", 13)])
+    ).toEqual({
+      value: undefined,
+      syncing: true,
+    });
+  });
+  it("labels an HTTP revalidation failure instead of presenting cached data as live", () => {
+    expect(
+      displayedVaultBalance([read(5, "10")], "position", [], new Error("read failed"))
+    ).toEqual({
+      value: "10",
+      syncing: false,
+      lastVerifiedAt: 6,
     });
   });
   it("does not claim absent data is zero, but honors a successful read of a closed position", () => {

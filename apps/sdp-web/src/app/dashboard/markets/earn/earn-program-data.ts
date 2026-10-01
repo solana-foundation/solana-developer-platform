@@ -51,6 +51,7 @@ import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { earnQueryKeys } from "./earn-query-key";
+import { earnVaultHoldingValue } from "./earn-vault-holding";
 import { isEarnVaultQueuedWithdrawalTerminal } from "./earn-vault-queued-withdrawal-presentation";
 
 export type {
@@ -445,15 +446,29 @@ async function readEarnVaultPositions(
   return { positions, startedAt, landedAt: Date.now(), afterMovementIds, minimumSlot };
 }
 
-/** Bound recent snapshots while keeping confirmation acknowledgments available to the UI. */
-const RECENT_VAULT_POSITIONS_READS = 12;
-
-function appendVaultPositionsRead(
+/** Retain one last verified value per current position, plus the newest raw read. */
+export function appendVaultPositionsRead(
   reads: readonly EarnVaultPositionsRead[],
   read: EarnVaultPositionsRead
 ): readonly EarnVaultPositionsRead[] {
-  if (reads[reads.length - 1]?.startedAt === read.startedAt) return reads;
-  return [...reads, read].slice(-RECENT_VAULT_POSITIONS_READS);
+  if (reads[reads.length - 1] === read) return reads;
+  const missing = new Set(
+    read.positions
+      .filter((position) => earnVaultHoldingValue(position) === undefined)
+      .map(({ id }) => id)
+  );
+  const retained: EarnVaultPositionsRead[] = [];
+  for (let index = reads.length - 1; index >= 0 && missing.size > 0; index -= 1) {
+    const previous = reads[index];
+    if (!previous) continue;
+    const positions = previous.positions.filter((position) => {
+      if (!missing.has(position.id) || earnVaultHoldingValue(position) === undefined) return false;
+      missing.delete(position.id);
+      return true;
+    });
+    if (positions.length > 0) retained.unshift({ ...previous, positions });
+  }
+  return [...retained, read];
 }
 
 /** Live position values refresh while the surface is mounted; `reads` keeps the recent history, newest last. */

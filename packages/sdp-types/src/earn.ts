@@ -365,7 +365,7 @@ export interface EarnVaultPositionsPage {
   positions: EarnVaultPosition[];
   hasMore: boolean;
   nextCursor: string | null;
-  /** Present when afterMovementIds constrained every successful provider read. */
+  /** Present when afterMovementIds constrained reads of their affected positions. */
   balanceReadContext?: { afterMovementIds: string[]; minimumSlot: number };
 }
 

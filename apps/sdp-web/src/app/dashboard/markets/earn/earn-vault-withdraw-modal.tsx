@@ -30,6 +30,7 @@ import {
   fetchEarnVaultWithdrawalsByRequestId,
   useEarnVaultWithdrawalOutcome,
 } from "./earn-program-data";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
 
 export { EarnVaultWithdrawalOutcomeTracker } from "./earn-outcome-trackers";
 
@@ -491,6 +492,7 @@ function WithdrawalResult({
 }
 
 export interface EarnVaultWithdrawModalProps {
+  onSubmissionStart?: VaultSubmissionObserver;
   position: EarnVaultPosition;
   environment: SdpEnvironment;
   /** Part of the request fingerprint — see `vaultWithdrawalRequestFingerprint`. */
@@ -841,6 +843,7 @@ export function EarnVaultWithdrawModal({
   projectId,
   onClose,
   onWithdrawn,
+  onSubmissionStart,
   onMovementUpdated,
   settlement = "atomic",
 }: EarnVaultWithdrawModalProps) {
@@ -1052,6 +1055,7 @@ export function EarnVaultWithdrawModal({
     requestControllerRef.current = controller;
     submittingRef.current = true;
     setSubmitting(true);
+    const finishSubmission = onSubmissionStart?.(position.custodyWalletId);
     setSubmitError(null);
 
     try {
@@ -1066,6 +1070,7 @@ export function EarnVaultWithdrawModal({
       }
     } finally {
       if (requestControllerRef.current === controller) requestControllerRef.current = null;
+      finishSubmission?.();
       submittingRef.current = false;
       setSubmitting(false);
     }

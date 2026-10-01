@@ -70,6 +70,23 @@ describe("fetchFundingWallets", () => {
 });
 
 describe("live funding wallet balances", () => {
+  it("constrains only affected wallets and other bindings of the same chain address", async () => {
+    const affected = wallet({ id: "affected" });
+    const alias = wallet({ id: "alias" });
+    const unrelated = wallet({ id: "unrelated", publicKey: "11111111111111111111111111111111" });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      Response.json({
+        data: { balanceReadContext: { minimumSlot: 101 }, walletBalances: { balances: [] } },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await refreshFundingWalletBalances([affected, alias, unrelated], new Map([[affected.id, 101]]));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/dashboard/payments/wallets/provider-affected/balances?minimumSlot=101",
+      "/api/dashboard/payments/wallets/provider-alias/balances?minimumSlot=101",
+      "/api/dashboard/payments/wallets/provider-unrelated/balances",
+    ]);
+  });
   it("requires the wallet API to acknowledge the position confirmation slot", async () => {
     const fetchMock = vi
       .fn()

@@ -16,7 +16,14 @@ export async function resolveVaultBalanceReadContext(
     environment: SdpEnvironment;
     custodyWalletIds: readonly string[];
   }
-): Promise<{ afterMovementIds: string[]; minimumSlot: number } | undefined> {
+): Promise<
+  | {
+      afterMovementIds: string[];
+      minimumSlot: number;
+      minimumSlotByPositionId: ReadonlyMap<string, number>;
+    }
+  | undefined
+> {
   if (input.movementIds.length === 0) return undefined;
   const repo = createPostgresEarnMovementsRepository(getDb(env));
   const afterMovementIds = [...new Set(input.movementIds)];
@@ -37,7 +44,8 @@ export async function resolveVaultBalanceReadContext(
     ) {
       throw notFound("Earn vault movement");
     }
-    if (!movement.signature) throw providerUnavailable("Earn balance confirmation is unavailable");
+    if (!movement.signature || !movement.position_id)
+      throw providerUnavailable("Earn balance confirmation is unavailable");
     movements.push(movement);
   }
   const cluster = earnClusterFor(input.environment);
@@ -53,7 +61,8 @@ export async function resolveVaultBalanceReadContext(
     throw providerUnavailable("Earn balance confirmation is unavailable");
   }
   let minimumSlot = 0;
-  for (const status of statuses) {
+  const minimumSlotByPositionId = new Map<string, number>();
+  for (const [index, status] of statuses.entries()) {
     const slot = Number(status?.slot);
     if (
       !status ||
@@ -65,6 +74,13 @@ export async function resolveVaultBalanceReadContext(
       throw providerUnavailable("Earn balance confirmation is unavailable");
     }
     minimumSlot = Math.max(minimumSlot, slot);
+    const positionId = movements[index]?.position_id;
+    if (positionId) {
+      minimumSlotByPositionId.set(
+        positionId,
+        Math.max(minimumSlotByPositionId.get(positionId) ?? 0, slot)
+      );
+    }
   }
-  return { afterMovementIds, minimumSlot };
+  return { afterMovementIds, minimumSlot, minimumSlotByPositionId };
 }

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { address, createSolanaRpcFromTransport, type RpcTransport } from "@solana/kit";
 import {
   contextAwareRpcFetch,
   observeRpcRead,
   prepareRpcRead,
   withMinimumRpcSlot,
+  withRpcReadContext,
 } from "./read-context";
 
 const request = {
@@ -157,6 +159,68 @@ describe("confirmed balance read contexts", () => {
       }),
       /behind/
     );
+  });
+
+  it("preserves the SDK array contract after validating a program-account context", async () => {
+    const transport: RpcTransport = async <T>(config: Parameters<RpcTransport>[0]) => {
+      assert.equal(
+        (config.payload as { params: [string, { withContext: boolean }] }).params[1].withContext,
+        true
+      );
+      return { jsonrpc: "2.0", id: 1, ...answer(101) } as T;
+    };
+    const rpc = createSolanaRpcFromTransport(withRpcReadContext(transport));
+    await withMinimumRpcSlot(101, async () => {
+      // Veda's listAssets calls .filter on this actual kit result.
+      const accounts = await rpc
+        .getProgramAccounts(address("11111111111111111111111111111111"), {
+          encoding: "base64",
+          withContext: false,
+        })
+        .send();
+      assert.deepEqual(
+        accounts.filter(() => true),
+        []
+      );
+      const contextual = await rpc
+        .getProgramAccounts(address("11111111111111111111111111111111"), {
+          encoding: "base64",
+          withContext: true,
+        })
+        .send();
+      assert.equal(contextual.context.slot, 101n);
+    });
+  });
+
+  it("preserves direct JSON program-account shape only after checking the slot", async (t) => {
+    let slot = 101;
+    const mock = t.mock.method(globalThis, "fetch", async () => Response.json(answer(slot)));
+    const program = {
+      ...request,
+      method: "getProgramAccounts",
+      params: ["program", { withContext: false }],
+    };
+    try {
+      await withMinimumRpcSlot(101, async () => {
+        const response = await contextAwareRpcFetch("https://rpc.example", {
+          method: "POST",
+          body: JSON.stringify(program),
+        });
+        assert.deepEqual(await response.json(), { result: [] });
+      });
+      slot = 100;
+      await assert.rejects(
+        withMinimumRpcSlot(101, () =>
+          contextAwareRpcFetch("https://rpc.example", {
+            method: "POST",
+            body: JSON.stringify(program),
+          })
+        ),
+        /behind/
+      );
+    } finally {
+      mock.mock.restore();
+    }
   });
 
   it("refuses missing, malformed and unsafe context slots", async () => {

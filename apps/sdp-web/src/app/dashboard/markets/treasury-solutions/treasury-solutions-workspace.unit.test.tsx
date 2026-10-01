@@ -1276,8 +1276,8 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.livePositionTokenValue = "135.25";
     mocks.positionsAfterMovementIds = ["earn_vault_movement_between_1"];
     rerenderWorkspace(view);
-    expect(syncingBalanceText(livePositionRow())).toBeUndefined();
-    expect(within(livePositionRow()).getByText("$135.25")).toBeTruthy();
+    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
+    expect(within(livePositionRow()).queryByText("$135.25")).toBeNull();
 
     // The second confirmation requires another balance read.
     vi.setSystemTime(new Date("2026-09-24T12:00:03.000Z"));
@@ -1293,7 +1293,7 @@ describe("TreasurySolutionsWorkspace", () => {
       "earn_vault_movement_between_2",
     ];
     rerenderWorkspace(view);
-    expect(syncingBalanceText(livePositionRow())).toBeUndefined();
+    await waitFor(() => expect(syncingBalanceText(livePositionRow())).toBeUndefined());
     expect(within(livePositionRow()).getByText("$140.25")).toBeTruthy();
   });
 
@@ -1337,7 +1337,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsReadStartedAt = Date.now() + 1;
     mocks.positionsReadLandedAt = Date.now() + 2;
     rerenderWorkspace(view);
-    expect(syncingBalanceText(livePositionRow())).toBeUndefined();
+    await waitFor(() => expect(syncingBalanceText(livePositionRow())).toBeUndefined());
     expect(within(livePositionRow()).getByText("$135.24")).toBeTruthy();
 
     vi.setSystemTime(new Date("2026-09-24T12:00:05.000Z"));
@@ -1373,7 +1373,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsReadStartedAt = Date.now() + 1;
     mocks.positionsReadLandedAt = Date.now() + 2;
     rerenderWorkspace(view);
-    expect(syncingBalanceText(livePositionRow())).toBeUndefined();
+    await waitFor(() => expect(syncingBalanceText(livePositionRow())).toBeUndefined());
     expect(within(livePositionRow()).getByText("$129.24")).toBeTruthy();
   });
 
@@ -1452,7 +1452,7 @@ describe("TreasurySolutionsWorkspace", () => {
         name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
       })
     ).toBeTruthy();
-    expect(within(pendingRow).getByText("$0.00")).toBeTruthy();
+    expect(within(pendingRow).getByText("Updating balance…")).toBeTruthy();
 
     act(() => {
       mocks.vaultDepositModal?.onMovementUpdated?.({
@@ -1628,14 +1628,14 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.queryAllByRole("status", { name: "Updating balance…" })).toHaveLength(0);
   });
 
-  it("keeps a refresh failure visible instead of restoring stale wallet and position amounts", async () => {
+  it("keeps positions visible and updating when a wallet refresh fails", async () => {
     const movementId = "earn_refresh_error";
     mocks.vaultDeposits = [
       { movementId, positionId: "earn_vault_position_live", status: "submitted" },
     ];
     mocks.refreshWalletBalances.mockRejectedValueOnce(new Error("balance RPC unavailable"));
     renderWorkspace();
-    expect(within(livePositionRow()).getByText("$125.25")).toBeTruthy();
+    expect(within(livePositionRow()).getByText("Updating balance…")).toBeTruthy();
     await waitFor(() => expect(mocks.vaultDepositTrackers[movementId]).toBeTruthy());
     await act(async () => {
       mocks.vaultDepositTrackers[movementId]?.onSettled?.({
@@ -1646,7 +1646,9 @@ describe("TreasurySolutionsWorkspace", () => {
       });
     });
     await waitFor(() => expect(screen.queryByText("$125.25")).toBeNull());
-    expect(screen.getByText("Vault positions unavailable")).toBeTruthy();
+    expect(screen.queryByText("Vault positions unavailable")).toBeNull();
+    expect(within(livePositionRow()).getByText("Updating balance…")).toBeTruthy();
+    expect(screen.getByText("$5.25")).toBeTruthy();
     await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
   });
@@ -2225,6 +2227,10 @@ describe("TreasurySolutionsWorkspace", () => {
   it("keeps a deployed wallet honest when the positions read fails", () => {
     mocks.positionsError = true;
     renderWorkspace();
+
+    expect(within(livePositionRow()).getByText("$125.25")).toBeTruthy();
+    expect(within(livePositionRow()).getByText("Last verified balance")).toBeTruthy();
+    expect(livePositionRow().querySelector('[data-earn-vault-balance="stale"]')).toBeTruthy();
 
     // Summary side: deployed unavailable, never zero.
     expect(screen.getByLabelText("A position value could not be read")).toBeTruthy();

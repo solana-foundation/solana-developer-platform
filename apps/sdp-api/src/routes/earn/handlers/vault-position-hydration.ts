@@ -48,7 +48,7 @@ export function hydratedHoldingTokenValue(
 
 export interface VaultPositionHydrationOptions {
   ownerKind: "custody" | "external-wallet";
-  minimumSlot?: number;
+  minimumSlotByPositionId?: ReadonlyMap<string, number>;
 }
 
 /**
@@ -88,14 +88,21 @@ export async function hydrateVaultPositions(
   }> = [];
 
   for (const [provider, providerPositions] of byProvider) {
-    const byOwner = new Map<string, HydratableVaultPosition[]>();
+    const byOwner = new Map<
+      string,
+      { owner: string; minimumSlot?: number; positions: HydratableVaultPosition[] }
+    >();
     for (const position of providerPositions) {
-      const ownerPositions = byOwner.get(position.ownerAddress);
-      if (ownerPositions) ownerPositions.push(position);
-      else byOwner.set(position.ownerAddress, [position]);
+      const minimumSlot = options.minimumSlotByPositionId?.get(position.id);
+      // A transfer in one vault must not constrain another holding, even when
+      // both belong to the same owner and provider.
+      const key = JSON.stringify([position.ownerAddress, minimumSlot]);
+      const batch = byOwner.get(key);
+      if (batch) batch.positions.push(position);
+      else byOwner.set(key, { owner: position.ownerAddress, minimumSlot, positions: [position] });
     }
 
-    for (const [owner, ownerPositions] of byOwner) {
+    for (const { owner, minimumSlot, positions: ownerPositions } of byOwner.values()) {
       const trustedByReference = new Map<string, HydratableVaultPosition[]>();
       for (const position of ownerPositions) {
         const trusted = trustedByReference.get(position.providerReference);
@@ -114,9 +121,9 @@ export async function hydrateVaultPositions(
               owner,
               providerReferences: [...trustedByReference.keys()],
             });
-          const snapshots = await (options.minimumSlot === undefined
+          const snapshots = await (minimumSlot === undefined
             ? read()
-            : withMinimumRpcSlot(options.minimumSlot, read));
+            : withMinimumRpcSlot(minimumSlot, read));
           for (const snapshot of snapshots) {
             const trustedPositions = trustedByReference.get(snapshot.providerReference);
             if (

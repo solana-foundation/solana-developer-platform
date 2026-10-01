@@ -36,6 +36,7 @@ import {
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
 } from "./earn-vault-async-withdrawal-tracking";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import {
   earnVaultParRedemptionStatusPresentation,
   isEarnVaultParRedemptionCancelable,
@@ -55,6 +56,7 @@ interface EarnVaultParRedemptionModalProps {
   environment: SdpEnvironment;
   onClose: () => void;
   onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  onSubmissionStart?: VaultSubmissionObserver;
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
   position: EarnVaultPosition;
   projectId: string | null;
@@ -244,6 +246,8 @@ function useParRedemptionPreview(
 }
 
 function useParRedemptionSubmission(options: {
+  onSubmissionStart?: VaultSubmissionObserver;
+  custodyWalletId: string;
   onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
   projectId: string | null;
   setError: (error: string | null) => void;
@@ -258,6 +262,7 @@ function useParRedemptionSubmission(options: {
   ) {
     if (!input || !preview || preview.blockingIssues.length > 0) return;
     setSubmitting(true);
+    const finishSubmission = options.onSubmissionStart?.(options.custodyWalletId);
     options.setError(null);
     try {
       const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
@@ -288,6 +293,7 @@ function useParRedemptionSubmission(options: {
         options.setError(result.error);
       }
     } finally {
+      finishSubmission?.();
       setSubmitting(false);
     }
   }
@@ -759,6 +765,7 @@ export function EarnVaultParRedemptionModal({
   environment,
   onClose,
   onRequested,
+  onSubmissionStart,
   onSettled,
   position,
   projectId,
@@ -778,6 +785,8 @@ export function EarnVaultParRedemptionModal({
   );
   const { preview, loading, error, setError } = useParRedemptionPreview(input, step === "review");
   const { submitting, outcome, submit } = useParRedemptionSubmission({
+    onSubmissionStart,
+    custodyWalletId: position.custodyWalletId,
     onRequested,
     projectId,
     setError,

@@ -583,11 +583,21 @@ describe("EarnVaultDepositModal", () => {
       })
     );
 
+    const finishSubmission = vi.fn();
+    const onSubmissionStart = vi.fn(() => finishSubmission);
     const view = render(
-      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={strategy}
+        onClose={vi.fn()}
+        onSubmissionStart={onSubmissionStart}
+      />
     );
     await enterDepositAmount();
     await vi.waitFor(() => expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(1));
+
+    expect(onSubmissionStart).toHaveBeenCalledWith("wallet_1");
+    expect(finishSubmission).not.toHaveBeenCalled();
 
     // Browser Back / project switch: the component is gone before the answer.
     view.unmount();
@@ -598,6 +608,8 @@ describe("EarnVaultDepositModal", () => {
     });
     // Let the in-flight submit continuation run.
     await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(finishSubmission).toHaveBeenCalledTimes(1);
 
     // The hold reached the store: two hours later — far past the default TTL —
     // the same fingerprint still claims the SAME key.

@@ -31,6 +31,17 @@ export function isCommittedVaultMovement(movement: Pick<TrackedVaultMovement, "s
   return movement.status === "confirmed" || movement.status === "finalized";
 }
 
+export function hasUnconfirmedVaultMovement(
+  activities: readonly VaultActivity[],
+  positionId?: string
+): boolean {
+  return activities.some(
+    ({ movement }) =>
+      (positionId === undefined || movement.positionId === positionId) &&
+      ["pending", "requested", "submitted"].includes(movement.status)
+  );
+}
+
 export function observeVaultMovementCommit<Movement extends TrackedVaultMovement>(
   movement: Movement,
   now = Date.now()
@@ -60,12 +71,18 @@ export function pendingVaultBalanceReads<Activity extends VaultActivity>(
   positionId?: string
 ): Activity[] {
   const acknowledgedMovements = new Set(read?.afterMovementIds);
+  const unreadablePositions = new Set(
+    read?.positions
+      .filter((position) => earnVaultHoldingValue(position) === undefined)
+      .map(({ id }) => id)
+  );
   return activities.filter(
     ({ movement }) =>
       (positionId === undefined || movement.positionId === positionId) &&
       isCommittedVaultMovement(movement) &&
       movement.committedObservedAt !== undefined &&
-      !acknowledgedMovements.has(movement.movementId)
+      (!acknowledgedMovements.has(movement.movementId) ||
+        unreadablePositions.has(movement.positionId))
   );
 }
 
@@ -73,16 +90,33 @@ export function pendingVaultBalanceReads<Activity extends VaultActivity>(
  * Status can finish at confirmation. Amounts always come from a live provider
  * read whose RPC contexts meet the confirmed movements' slots. Request timing
  * and a changed share count are not freshness proofs. The provider's observed
- * value is displayed without requested-amount arithmetic or an older fallback.
+ * value is displayed without requested-amount arithmetic. Unaffected holdings
+ * retain a clearly labelled last verified value through a failed refresh.
  */
 export function displayedVaultBalance(
   reads: readonly VaultPositionsRead[],
   positionId: string,
-  activities: readonly VaultActivity[]
-): { value: string | undefined; syncing: boolean } {
+  activities: readonly VaultActivity[],
+  readError?: unknown
+): { value: string | undefined; syncing: boolean; lastVerifiedAt?: number } {
+  if (hasUnconfirmedVaultMovement(activities, positionId))
+    return { value: undefined, syncing: true };
   const latest = reads[reads.length - 1];
   const syncing = pendingVaultBalanceReads(activities, latest, positionId).length > 0;
-  if (syncing || latest === undefined) return { value: undefined, syncing };
+  if (latest === undefined) return { value: undefined, syncing };
   const position = latest.positions.find((candidate) => candidate.id === positionId);
-  return { value: position ? earnVaultHoldingValue(position) : "0", syncing: false };
+  const value = position ? earnVaultHoldingValue(position) : "0";
+  if (value !== undefined && !readError && !syncing) return { value, syncing: false };
+  for (let index = reads.length - 1; index >= 0; index -= 1) {
+    const read = reads[index];
+    const previous = read?.positions.find((candidate) => candidate.id === positionId);
+    const previousValue = previous ? earnVaultHoldingValue(previous) : undefined;
+    if (
+      previousValue !== undefined &&
+      pendingVaultBalanceReads(activities, read, positionId).length === 0
+    ) {
+      return { value: previousValue, syncing: false, lastVerifiedAt: read?.landedAt };
+    }
+  }
+  return { value: undefined, syncing };
 }

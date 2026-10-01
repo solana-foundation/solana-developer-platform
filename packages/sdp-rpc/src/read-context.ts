@@ -102,14 +102,39 @@ export function observeRpcRead(payload: unknown, response: unknown): void {
   if (method !== "getSlot") context.observations += 1;
 }
 
+/** Verify the context on the wire without changing the SDK's requested result shape. */
+function restoreRpcResponse(payload: unknown, response: unknown): unknown {
+  const request = record(payload);
+  if (!reads.getStore() || request?.method !== "getProgramAccounts") return response;
+  const config = Array.isArray(request.params) ? record(request.params[1]) : undefined;
+  if (config?.withContext === true) return response;
+  const envelope = record(response);
+  const result = record(envelope?.result);
+  return Array.isArray(result?.value) ? { ...envelope, result: result.value } : response;
+}
+
 /** web3.js accepts a fetch seam; kit and direct JSON clients use the helpers above. */
 export const contextAwareRpcFetch: typeof fetch = async (input, init) => {
   if (!reads.getStore() || typeof init?.body !== "string") return fetch(input, init);
-  const payload = prepareRpcRead(JSON.parse(init.body));
+  const originalPayload: unknown = JSON.parse(init.body);
+  const payload = prepareRpcRead(originalPayload);
   try {
     const response = await fetch(input, { ...init, body: JSON.stringify(payload) });
-    if (response.ok) observeRpcRead(payload, await response.clone().json());
-    else {
+    if (response.ok) {
+      const body: unknown = await response.clone().json();
+      observeRpcRead(payload, body);
+      const restored = restoreRpcResponse(originalPayload, body);
+      if (restored !== body) {
+        const headers = new Headers(response.headers);
+        headers.delete("content-length");
+        headers.delete("content-encoding");
+        return new Response(JSON.stringify(restored), {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      }
+    } else {
       const context = reads.getStore();
       if (context) context.stale = true;
     }
@@ -128,7 +153,7 @@ export function withRpcReadContext(transport: RpcTransport): RpcTransport {
     try {
       const response = await transport<T>({ ...request, payload });
       observeRpcRead(payload, response);
-      return response;
+      return restoreRpcResponse(request.payload, response) as T;
     } catch (error) {
       const context = reads.getStore();
       if (context) context.stale = true;

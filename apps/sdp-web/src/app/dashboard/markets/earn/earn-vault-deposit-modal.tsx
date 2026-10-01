@@ -49,6 +49,7 @@ import {
   fetchEarnVaultDepositPreview,
   useEarnVaultDepositOutcome,
 } from "./earn-program-data";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
 
 export { EarnVaultDepositOutcomeTracker } from "./earn-outcome-trackers";
 
@@ -701,6 +702,7 @@ function DepositResult({
 }
 
 export interface EarnVaultDepositModalProps {
+  onSubmissionStart?: VaultSubmissionObserver;
   strategy: EarnStrategy;
   /**
    * The project this deposit belongs to, which is part of what makes two
@@ -1212,6 +1214,7 @@ export function EarnVaultDepositModal({
   projectId,
   onClose,
   onDeposited,
+  onSubmissionStart,
   onMovementUpdated,
 }: EarnVaultDepositModalProps) {
   const t = useTranslations();
@@ -1518,6 +1521,7 @@ export function EarnVaultDepositModal({
     // raced by a second press.
     submittingRef.current = true;
     setSubmitting(true);
+    const finishSubmission = onSubmissionStart?.(selectedWallet.id);
     setSubmitError(null);
 
     try {
@@ -1532,6 +1536,7 @@ export function EarnVaultDepositModal({
       }
     } finally {
       if (requestControllerRef.current === controller) requestControllerRef.current = null;
+      finishSubmission?.();
       submittingRef.current = false;
       if (!controller.signal.aborted) setSubmitting(false);
     }

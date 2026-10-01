@@ -1704,8 +1704,14 @@ Authenticated `GET /vault-positions?afterMovementIds=id1,id2` accepts at most 10
 movement ids. Resolve organization, project, environment and readable custody
 wallet scope before looking up their confirmed/finalized signature slots. The
 response's `balanceReadContext` acknowledges the ids and maximum slot.
+Only affected positions receive their own maximum confirmation slot. Hydration
+batches separate differing bounds even within the same provider and owner.
 `@sdp/rpc/read-context` scopes provider RPC reads to confirmed state, requests
 `minContextSlot` where supported, and rejects missing or older response contexts.
+For `getProgramAccounts`, validate the contextual response before restoring the
+array shape when the SDK requested `withContext: false` (or omitted it). Never
+change the SDK result contract to collect freshness evidence. Both kit transports
+and direct JSON/web3 fetches use this rule across all providers.
 Unscoped execution/reconciliation commitment is unchanged. A failed hydration
 omits value fields. Request timing and unchanged/changed balances prove nothing.
 Treasury forwards the slot to the Payments wallet-balance endpoint; that endpoint

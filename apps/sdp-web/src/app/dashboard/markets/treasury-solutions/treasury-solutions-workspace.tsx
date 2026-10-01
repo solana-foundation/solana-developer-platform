@@ -49,10 +49,7 @@ import {
 } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import {
-  type EarnFundingWallet,
-  useEarnFundingWallets,
-} from "../earn/deposit/earn-funding-wallets";
+import type { EarnFundingWallet } from "../earn/deposit/earn-funding-wallets";
 import {
   compareUnsignedDecimals,
   isPositiveDecimal,
@@ -89,7 +86,6 @@ import {
   useEarnProgramWithdrawals,
   useEarnStrategies,
   useEarnVaultDeposits,
-  useEarnVaultPositions,
   useEarnVaultWithdrawals,
 } from "../earn/earn-program-data";
 import {
@@ -125,14 +121,13 @@ import {
   type VaultShareMintVocabulary,
 } from "./treasury-allocation";
 import {
-  displayedVaultBalance,
   observeVaultMovementCommit,
-  pendingVaultBalanceReads,
   type TrackedVaultMovement,
   type VaultMovementBalanceState,
-  type VaultPositionsRead,
   vaultActivities,
 } from "./treasury-vault-balance";
+
+import { type TreasuryPositionBalance, useTreasuryBalances } from "./use-treasury-balances";
 
 // The three transaction surfaces account for most of this route's client
 // module graph. They are not needed to inspect a portfolio, so load each only
@@ -1074,7 +1069,7 @@ function ActiveVaultPositionsCard({
   isLoading,
   onWithdraw,
   positions,
-  positionsReads,
+  balanceOf,
   unrecordedShareMints,
   wallets,
   withdrawals,
@@ -1084,7 +1079,7 @@ function ActiveVaultPositionsCard({
   isLoading: boolean;
   onWithdraw: (position: EarnVaultPosition, parSource?: EarnVaultParRedemptionSource) => void;
   positions: readonly EarnVaultPosition[] | undefined;
-  positionsReads: readonly VaultPositionsRead[];
+  balanceOf: (position: EarnVaultPosition) => TreasuryPositionBalance;
   unrecordedShareMints: ReadonlySet<string> | undefined;
   wallets: readonly EarnFundingWallet[];
   withdrawals: readonly TrackedVaultWithdrawal[];
@@ -1102,14 +1097,12 @@ function ActiveVaultPositionsCard({
     () => displayedVaultPositions(positions, deposits),
     [deposits, positions]
   );
-  const balanceOf = useCallback(
-    (position: EarnVaultPosition) => displayedVaultBalance(positionsReads, position.id, activities),
-    [activities, positionsReads]
-  );
   const activePositions = useMemo(
     () =>
       sortByOptionalDecimal(
-        positionsWithProvisionalDeposits.filter(isOpenVaultPosition),
+        positionsWithProvisionalDeposits.filter(
+          (position) => isOpenVaultPosition(position) || balanceOf(position).syncing
+        ),
         (position) => knownWireDecimal(balanceOf(position).value),
         balanceSortDirection
       ),
@@ -1131,7 +1124,7 @@ function ActiveVaultPositionsCard({
             <SkeletonBlock className="h-14 rounded-xl" />
             <SkeletonBlock className="h-14 rounded-xl" />
           </div>
-        ) : error ? (
+        ) : error && activePositions.length === 0 ? (
           <ListEmptyState
             description={t("DashboardMarkets.treasury.vaultPositionsErrorDescription")}
             icon={<InfoIcon aria-hidden="true" className="size-5" />}
@@ -1223,6 +1216,7 @@ function ActiveVaultPositionsCard({
                         formattedBalance={formattedBalance}
                         parIntermediate={position.parIntermediate}
                         syncing={balance.syncing}
+                        lastVerifiedAt={balance.lastVerifiedAt}
                       />
                       <TableCell className="text-sm text-secondary">
                         {wallet?.label?.trim() ||
@@ -1250,10 +1244,12 @@ function TreasuryPositionBalanceCell({
   formattedBalance,
   parIntermediate,
   syncing,
+  lastVerifiedAt,
 }: {
   formattedBalance: string;
   parIntermediate: EarnVaultPosition["parIntermediate"];
   syncing: boolean;
+  lastVerifiedAt?: number;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -1263,14 +1259,24 @@ function TreasuryPositionBalanceCell({
         className={
           syncing ? "inline-block motion-safe:animate-pulse motion-reduce:opacity-100" : undefined
         }
-        data-earn-vault-balance={syncing ? "syncing" : "live"}
+        data-earn-vault-balance={
+          syncing ? "syncing" : lastVerifiedAt !== undefined ? "stale" : "live"
+        }
         title={syncing ? t("DashboardMarkets.treasury.positionBalanceSyncing") : undefined}
       >
         <span data-earn-vault-balance-value>
           {syncing ? t("DashboardMarkets.treasury.positionBalanceSyncing") : formattedBalance}
         </span>
       </span>
-      {parIntermediate ? (
+      {lastVerifiedAt !== undefined ? (
+        <span
+          className="mt-0.5 block text-xs text-tertiary"
+          title={new Date(lastVerifiedAt).toLocaleString(locale)}
+        >
+          {t("DashboardMarkets.treasury.positionBalanceLastVerified")}
+        </span>
+      ) : null}
+      {parIntermediate && lastVerifiedAt === undefined && !syncing ? (
         <span className="mt-0.5 block text-xs text-tertiary" data-earn-vault-par-intermediate>
           {t("DashboardEarn.parRedemption.positionIntermediate", {
             amount: formatProviderAmount(parIntermediate.amount, locale),
@@ -1746,7 +1752,7 @@ interface TreasuryWorkspaceContentProps {
   positions: readonly EarnVaultPosition[] | undefined;
   positionsError: unknown;
   positionsLoading: boolean;
-  positionsReads: readonly VaultPositionsRead[];
+  balanceOf: (position: EarnVaultPosition) => TreasuryPositionBalance;
   programs: readonly EarnProgram[];
   programsLoading: boolean;
   programsUnavailable: boolean;
@@ -1779,7 +1785,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
     positions,
     positionsError,
     positionsLoading,
-    positionsReads,
+    balanceOf,
     programs,
     programsLoading,
     programsUnavailable,
@@ -1792,9 +1798,6 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
     walletsLoading,
   } = props;
   const t = useTranslations();
-
-  // A failed positions read hides the rows rather than hinting at a portfolio.
-  const readablePositions = positionsError ? undefined : positions;
 
   return (
     <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-16">
@@ -1818,8 +1821,8 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         error={positionsError}
         isLoading={positionsLoading}
         onWithdraw={onWithdrawPosition}
-        positions={readablePositions}
-        positionsReads={positionsReads}
+        positions={positions}
+        balanceOf={balanceOf}
         unrecordedShareMints={allocation.unrecordedShareMints}
         wallets={activeWallets}
         withdrawals={vaultWithdrawals}
@@ -1837,7 +1840,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         mainnetLoading={mainnetCatalogueLoading}
         onDeposit={onDeposit}
         onRefresh={onRefresh}
-        positions={readablePositions}
+        positions={positionsError ? undefined : positions}
         providerAccess={providerAccess}
         strategies={catalogueStrategies}
         unrecordedShareMints={allocation.unrecordedShareMints}
@@ -1975,12 +1978,6 @@ export function TreasurySolutionsWorkspace({
 }) {
   const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
   const {
-    wallets,
-    error: fundingWalletsError,
-    isLoading: walletsLoading,
-    refreshBalances: refreshWalletBalances,
-  } = useEarnFundingWallets();
-  const {
     catalogueCluster,
     catalogueStrategies,
     catalogueError,
@@ -1996,46 +1993,11 @@ export function TreasurySolutionsWorkspace({
     strategiesLoading,
   } = useTreasuryCatalogueShelves(sdpEnvironment);
   const {
-    positions,
-    reads: positionsReads,
-    error: vaultPositionsError,
-    isLoading: positionsLoading,
-    refresh: refreshPositions,
-  } = useEarnVaultPositions();
-  const {
     state: programsState,
     error: programsError,
     isLoading: programsLoading,
     refresh: refreshPrograms,
   } = useEarnPrograms();
-  const [balanceRefreshes, setBalanceRefreshes] = useState(0);
-  const [balanceRefreshError, setBalanceRefreshError] = useState<Error>();
-  const balanceRefreshGeneration = useRef(0);
-  const walletsError = fundingWalletsError || balanceRefreshError;
-  const positionsError = vaultPositionsError || balanceRefreshError;
-  const refreshTreasuryBalances = useCallback(
-    async (afterMovementIds?: readonly string[]) => {
-      const generation = ++balanceRefreshGeneration.current;
-      setBalanceRefreshes((count) => count + 1);
-      try {
-        const positionRead = Promise.resolve(refreshPositions(afterMovementIds));
-        const results = await Promise.allSettled([
-          positionRead,
-          positionRead.then((read) => refreshWalletBalances(read?.minimumSlot)),
-        ]);
-        if (generation === balanceRefreshGeneration.current) {
-          setBalanceRefreshError(
-            results.some((result) => result.status === "rejected")
-              ? new Error("Treasury balances could not be refreshed")
-              : undefined
-          );
-        }
-      } finally {
-        setBalanceRefreshes((count) => count - 1);
-      }
-    },
-    [refreshPositions, refreshWalletBalances]
-  );
   const { deposits: discoveredVaultDeposits } = useEarnVaultDeposits();
   const { withdrawals: discoveredVaultWithdrawals } = useEarnVaultWithdrawals();
   const [depositStrategy, setDepositStrategy] = useState<EarnStrategy | null>(null);
@@ -2120,6 +2082,19 @@ export function TreasurySolutionsWorkspace({
     [vaultDepositWatches, vaultWithdrawalWatches]
   );
 
+  const {
+    positions,
+    positionsError,
+    positionsLoading,
+    wallets,
+    walletsError,
+    walletsLoading,
+    balancesRefreshing,
+    balanceOf,
+    beginSubmission,
+    refresh: refreshTreasuryBalances,
+  } = useTreasuryBalances(trackedActivities);
+
   // A provisional row stands in only until the API lists the position itself.
   useEffect(() => {
     const listed = new Set(positions?.map((position) => position.id));
@@ -2136,25 +2111,6 @@ export function TreasurySolutionsWorkspace({
       return changed ? next : current;
     });
   }, [positions]);
-
-  // Confirmation and recovery refresh both sides of the transfer. A read
-  // must acknowledge the movement slots before supplying completed balances.
-  const latestPositionsRead = positionsReads[positionsReads.length - 1];
-  const refreshRequestedFor = useRef(new Set<string>());
-  useEffect(() => {
-    const unrequested = pendingVaultBalanceReads(trackedActivities, latestPositionsRead).filter(
-      ({ movement }) => !refreshRequestedFor.current.has(movement.movementId)
-    );
-    if (unrequested.length === 0) return;
-    for (const { movement } of unrequested) refreshRequestedFor.current.add(movement.movementId);
-    void refreshTreasuryBalances(
-      trackedActivities
-        .filter(
-          ({ movement }) => movement.status === "confirmed" || movement.status === "finalized"
-        )
-        .map(({ movement }) => movement.movementId)
-    );
-  }, [latestPositionsRead, refreshTreasuryBalances, trackedActivities]);
 
   const activeWallets = useMemo(() => wallets ?? [], [wallets]);
   // Every share mint the page knows about, from positions AND the catalogue:
@@ -2256,17 +2212,13 @@ export function TreasurySolutionsWorkspace({
         positions={positions}
         positionsError={positionsError}
         positionsLoading={positionsLoading}
-        positionsReads={positionsReads}
+        balanceOf={balanceOf}
         programs={programs}
         programsLoading={programsLoading}
         programsUnavailable={Boolean(programsError || programsState?.kind === "unconfigured")}
         providerAccess={providerAccess}
         summaryLoading={summaryLoading}
-        balancesRefreshing={
-          balanceRefreshes > 0 ||
-          (!balanceRefreshError &&
-            pendingVaultBalanceReads(trackedActivities, latestPositionsRead).length > 0)
-        }
+        balancesRefreshing={balancesRefreshing}
         vaultDeposits={vaultDepositWatches}
         vaultWithdrawals={vaultWithdrawalWatches}
         walletsError={walletsError}
@@ -2300,6 +2252,13 @@ export function TreasurySolutionsWorkspace({
             ]);
             void refreshTreasuryBalances();
           }}
+          onSubmissionStart={(custodyWalletId) =>
+            beginSubmission({
+              provider: depositStrategy.provider,
+              providerReference: depositStrategy.providerReference,
+              custodyWalletId,
+            })
+          }
           onMovementUpdated={updateVaultDepositWatch}
           strategy={depositStrategy}
         />
@@ -2334,6 +2293,7 @@ export function TreasurySolutionsWorkspace({
             ]);
             void refreshTreasuryBalances();
           }}
+          onSubmissionStart={() => beginSubmission(withdrawPosition)}
           onMovementUpdated={updateVaultWithdrawalWatch}
           onAsyncRequest={() => {
             // An asynchronous request can move or escrow shares without paying

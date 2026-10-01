@@ -11,8 +11,10 @@ import type {
 } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  appendVaultPositionsRead,
   createEarnVaultDeposit,
   createEarnVaultWithdrawalRequest,
+  type EarnVaultPositionsRead,
   earnExternalWalletSummaryRefreshInterval,
   earnProgramsRefreshInterval,
   earnVaultMovementRefreshInterval,
@@ -30,6 +32,46 @@ import {
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+describe("last verified vault values", () => {
+  it("retains a value through repeated partial reads without retaining unbounded history", () => {
+    const position: EarnVaultPosition = {
+      id: "position",
+      provider: "veda",
+      providerReference: "vault",
+      custodyWalletId: "wallet",
+      tokenMint: USDC,
+      shareMint: "share",
+      label: "Veda",
+      createdAt: TIMESTAMP,
+      closedAt: null,
+      shares: "10",
+      tokenValue: "9.98",
+      feeSponsored: false,
+    };
+    let history: readonly EarnVaultPositionsRead[] = [
+      { positions: [position], startedAt: 1, landedAt: 2 },
+    ];
+    for (let at = 3; at < 100; at += 1) {
+      history = appendVaultPositionsRead(history, {
+        positions: [{ ...position, tokenValue: undefined }],
+        startedAt: at,
+        landedAt: at + 1,
+      });
+      expect(history).toHaveLength(2);
+      expect(history[0]?.positions[0]?.tokenValue).toBe("9.98");
+      expect(history[1]?.positions[0]?.tokenValue).toBeUndefined();
+    }
+    const recovered = {
+      positions: [{ ...position, tokenValue: "10.01" }],
+      startedAt: 101,
+      landedAt: 102,
+    };
+    expect(appendVaultPositionsRead(history, recovered)).toEqual([recovered]);
+    const closed = { positions: [], startedAt: 103, landedAt: 104 };
+    expect(appendVaultPositionsRead(history, closed)).toEqual([closed]);
+  });
+});
 
 function strategy(id: string): EarnStrategy {
   return {

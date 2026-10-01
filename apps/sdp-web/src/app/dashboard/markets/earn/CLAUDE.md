@@ -508,19 +508,30 @@ either is non-zero (`isEarnVaultHoldingEmpty`, the API close-out's own rule),
 so a cancelled Hastra request's wYLDS never drops out of Treasury.
 
 Treasury's balance display lives in `../treasury-solutions/treasury-vault-balance.ts`.
-Atomic movements show Done at confirmation. The same transition requests live
-positions and uncached wallet balances together; summary amounts wait for both.
-A position displays Updating balance until a read starts after confirmation.
-Only the latest provider value is displayed, including actual fees and slippage;
-never add requested amounts or fall back to an older successful valuation.
-Overlapping confirmations each trigger refresh, including recovery after reload.
-Post-confirmation position reads send `afterMovementIds`; the API scopes those
-movements and bounds every provider account read by their confirmed slots.
-`balanceReadContext` acknowledges that bound on every page. Client timestamps or
-changed share counts are not freshness evidence. Wallet balance reads then use
-`minimumSlot` from that acknowledgment, and subsequent revalidation keeps the bound.
-A missing acknowledgment or any wallet RPC failure preserves the unavailable state;
-it never restores cached amounts or substitutes zero.
+`use-treasury-balances.ts` coordinates modal submission, the shared movement
+cache, and paired wallet/position refreshes. Submission observers start before
+any POST and release only their own attempt. An early chain read cannot reveal
+changed balances while that movement is still pending. Atomic movements show
+Done at confirmation; affected amounts wait for a verified read and the paired
+wallet refresh. Overlapping confirmations each trigger refresh, including recovery.
+
+Post-confirmation position reads send `afterMovementIds`. The API authorizes the
+movements and bounds only the affected positions by each position's maximum
+confirmed slot. Unrelated owners, vaults and providers keep independent reads.
+`balanceReadContext` acknowledges that bound on every page. Request timestamps
+and changed share counts are not freshness evidence. Funding-wallet reads carry
+the minimum slot only for affected wallets (including aliases of the same chain
+address), and subsequent revalidation keeps those bounds.
+
+A transient failure retains an unaffected holding's last verified value, explicitly
+labelled with its observation time. It never becomes a current API value or enters
+fresh portfolio totals. A new movement still waits for evidence covering its own
+confirmation; requested amounts are never added to balances. Missing values with
+no verified history stay unknown, never zero. Wallet errors do not erase position
+rows; failed paired refreshes retry automatically. The history retains at most one
+verified value per current holding plus the latest raw read, including across a
+prolonged outage. Fresh data clears the label; removed holdings drop their history.
+
 These are observed values, not an atomic portfolio snapshot: provider/RPC
 freshness remains an external dependency.
 

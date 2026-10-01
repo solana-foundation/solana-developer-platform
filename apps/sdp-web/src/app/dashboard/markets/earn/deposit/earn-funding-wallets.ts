@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import useSWR from "swr";
 import { z } from "zod";
 import { earnQueryKeys } from "../earn-query-key";
@@ -143,11 +143,24 @@ export async function fetchLiveFundingWalletBalance(
  */
 export async function refreshFundingWalletBalances(
   wallets: readonly EarnFundingWallet[],
-  minimumSlot?: number
+  minimumSlot?: number | ReadonlyMap<string, number>
 ): Promise<EarnFundingWallet[]> {
+  const slotsByAddress = new Map<string, number>();
+  if (typeof minimumSlot === "object") {
+    for (const wallet of wallets) {
+      const slot = minimumSlot.get(wallet.id);
+      if (slot !== undefined)
+        slotsByAddress.set(
+          wallet.publicKey,
+          Math.max(slotsByAddress.get(wallet.publicKey) ?? 0, slot)
+        );
+    }
+  }
   return Promise.all(
     wallets.map(async (wallet) => {
-      const balances = await fetchLiveFundingWalletBalance(wallet.walletId, minimumSlot);
+      const slot =
+        typeof minimumSlot === "number" ? minimumSlot : slotsByAddress.get(wallet.publicKey);
+      const balances = await fetchLiveFundingWalletBalance(wallet.walletId, slot);
       return { ...wallet, balances };
     })
   );
@@ -155,29 +168,45 @@ export async function refreshFundingWalletBalances(
 
 export function useEarnFundingWallets() {
   const minimumSlot = useRef<number | undefined>(undefined);
+  const walletMinimumSlots = useRef(new Map<string, number>());
   const read = async () => {
     const wallets = await fetchFundingWallets();
-    return minimumSlot.current === undefined
+    return minimumSlot.current === undefined && walletMinimumSlots.current.size === 0
       ? wallets
-      : refreshFundingWalletBalances(wallets, minimumSlot.current);
+      : refreshFundingWalletBalances(wallets, minimumSlot.current ?? walletMinimumSlots.current);
   };
   const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.fundingWallets(), read);
-  return {
-    wallets: data,
-    error,
-    isLoading,
-    refresh: () => void mutate(),
-    refreshBalances: (slot?: number) => {
-      if (slot !== undefined) minimumSlot.current = Math.max(minimumSlot.current ?? 0, slot);
+  const refreshBalances = useCallback(
+    (slot?: number, custodyWalletIds?: readonly string[]) => {
+      if (slot !== undefined) {
+        if (custodyWalletIds && minimumSlot.current === undefined) {
+          for (const id of custodyWalletIds)
+            walletMinimumSlots.current.set(
+              id,
+              Math.max(walletMinimumSlots.current.get(id) ?? 0, slot)
+            );
+        } else
+          minimumSlot.current = Math.max(
+            minimumSlot.current ?? 0,
+            slot,
+            ...walletMinimumSlots.current.values()
+          );
+      }
       return mutate(
-        async () => refreshFundingWalletBalances(await fetchFundingWallets(), minimumSlot.current),
+        async () =>
+          refreshFundingWalletBalances(
+            await fetchFundingWallets(),
+            minimumSlot.current ?? walletMinimumSlots.current
+          ),
         {
           revalidate: false,
           throwOnError: true,
         }
       );
     },
-  };
+    [mutate]
+  );
+  return { wallets: data, error, isLoading, refresh: () => void mutate(), refreshBalances };
 }
 
 // --- Display helpers -------------------------------------------------------

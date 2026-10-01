@@ -1151,7 +1151,7 @@ export async function listEarnVaultPositions(c: AppContext) {
         shareMint: row.shareMint,
       };
     }),
-    { ownerKind: "custody", minimumSlot: balanceReadContext?.minimumSlot }
+    { ownerKind: "custody", minimumSlotByPositionId: balanceReadContext?.minimumSlotByPositionId }
   );
   await closeEmptyHydratedPositions(
     (positionId, observedUpdatedAt) =>
@@ -1173,7 +1173,12 @@ export async function listEarnVaultPositions(c: AppContext) {
   const feeSponsored = isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment));
 
   return success(c, {
-    balanceReadContext,
+    balanceReadContext: balanceReadContext
+      ? {
+          afterMovementIds: balanceReadContext.afterMovementIds,
+          minimumSlot: balanceReadContext.minimumSlot,
+        }
+      : undefined,
     positions: rows.map((row) => {
       const hydrated = live.get(row.id);
       return {

@@ -228,6 +228,46 @@ afterEach(() => {
 });
 
 describe("GET /v1/earn/vault-positions", () => {
+  it.each(["veda", "kamino", "ondo", "hastra", "jupiter_lend", "wisdomtree"])(
+    "does not constrain an unrelated %s position after a Kamino deposit",
+    async (provider) => {
+      const affected = await createPosition({ provider: "kamino", providerReference: "affected" });
+      const unrelated = await createPosition({ provider, providerReference: "unrelated" });
+      signatureStatuses.mockResolvedValue([
+        { slot: 101n, err: null, confirmationStatus: "confirmed" },
+      ]);
+      const originalRead = readVaultPositions.getMockImplementation();
+      if (!originalRead) throw new Error("Missing provider fixture");
+      readVaultPositions.mockImplementation(async (context, input) => {
+        const affectedRead = input.providerReferences.includes("affected");
+        const transport: RpcTransport = async <T>(request: Parameters<RpcTransport>[0]) => {
+          const payload = request.payload as { params: [string, { minContextSlot?: number }] };
+          expect(payload.params[1].minContextSlot).toBe(affectedRead ? 101 : undefined);
+          return {
+            jsonrpc: "2.0",
+            id: 1,
+            result: { context: { slot: affectedRead ? 101 : 100 }, value: null },
+          } as T;
+        };
+        const rpc = createRpcFromTransport(transport, { wrapTransport: withRpcReadContext });
+        await getAccountInfo(rpc, input.owner as Address);
+        return originalRead(context, input);
+      });
+      const response = await getPositions(`?afterMovementIds=${affected.movement.id}`);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { positions: { id: string; tokenValue?: string }[] };
+      };
+      expect(body.data.positions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: affected.position.id, tokenValue: "1" }),
+          expect.objectContaining({ id: unrelated.position.id, tokenValue: "1" }),
+        ])
+      );
+      expect(readVaultPositions).toHaveBeenCalledTimes(2);
+    }
+  );
+
   it.each([100, 101])(
     "only exposes balances whose RPC bank covers confirmation: bank %s",
     async (slot) => {

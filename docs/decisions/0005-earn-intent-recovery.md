@@ -80,12 +80,24 @@ release gates. No zero-loss guarantee follows from passing local tests.
 Treasury keeps atomic confirmation as Done and requests wallet and position
 balances with a common confirmation bound. The positions API authorizes every
 requested movement before resolving confirmed signature slots. Request-local RPC
-contexts enforce the maximum slot across provider account reads, and each page
+contexts enforce each affected position's maximum slot, and each page
 acknowledges the bound. Wallet reads then enforce that same minimum slot. A late
 HTTP response alone cannot clear the updating state. Partial RPC failure is
-unavailable, never a cached or fabricated zero balance. Subsequent polling keeps
+absent from the API, never a cached or fabricated zero balance. The UI retains
+explicitly labelled last verified values for unaffected holdings, excluding them
+from current totals. One Treasury coordinator gates affected amounts from before
+submission through confirmation and the paired refresh. Subsequent polling keeps
 the bound; execution and reconciliation keep their existing commitments. It does not project requested amounts into
 holdings or availability. The bank example also separates requested amounts
 from observed payouts and excludes queue quotes from current value and earnings.
 Provider-order confirmation stays pending; the external-wallet movement contract
 now explicitly identifies atomic versus provider-order settlement.
+
+
+A devnet read reproduced a response-shape regression in Veda: adding RPC context
+changed `getProgramAccounts` from an array to an envelope, breaking the SDK's
+`listAssets().filter` path. The shared transport now verifies the bank slot and
+then restores the caller's requested shape. Live public-fixture reads passed
+with the fix; regressions cover kit and JSON transports, stale-slot rejection,
+and isolation of same-provider and cross-provider holdings. Embedded Yield uses
+the same provider transports, so the repair does not depend on the Treasury UI.

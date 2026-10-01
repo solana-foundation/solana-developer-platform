@@ -42,6 +42,7 @@ import {
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
 } from "./earn-vault-async-withdrawal-tracking";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import {
   earnVaultQueuedWithdrawalStatusPresentation,
   isEarnVaultQueuedWithdrawalTerminal,
@@ -58,6 +59,7 @@ interface QueuedWithdrawalModalProps {
   environment: SdpEnvironment;
   onClose: () => void;
   onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  onSubmissionStart?: VaultSubmissionObserver;
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
   position: EarnVaultPosition;
   projectId: string | null;
@@ -215,6 +217,8 @@ function useQueuedWithdrawalPreview(
  * retry key.
  */
 function useQueuedWithdrawalSubmission(options: {
+  onSubmissionStart?: VaultSubmissionObserver;
+  custodyWalletId: string;
   onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
   projectId: string | null;
   setError: (error: string | null) => void;
@@ -229,6 +233,7 @@ function useQueuedWithdrawalSubmission(options: {
   ) {
     if (!previewInput || !preview || preview.blockingIssues.length > 0) return;
     setSubmitting(true);
+    const finishSubmission = options.onSubmissionStart?.(options.custodyWalletId);
     options.setError(null);
     try {
       const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
@@ -263,6 +268,7 @@ function useQueuedWithdrawalSubmission(options: {
         options.setError(result.error);
       }
     } finally {
+      finishSubmission?.();
       setSubmitting(false);
     }
   }
@@ -760,6 +766,7 @@ export function EarnVaultQueuedWithdrawModal({
   environment,
   onClose,
   onRequested,
+  onSubmissionStart,
   onSettled,
   position,
   projectId,
@@ -798,6 +805,8 @@ export function EarnVaultQueuedWithdrawModal({
     step === "review"
   );
   const { submitting, outcome, submit } = useQueuedWithdrawalSubmission({
+    onSubmissionStart,
+    custodyWalletId: position.custodyWalletId,
     onRequested,
     projectId,
     setError,
