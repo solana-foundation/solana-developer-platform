@@ -114,6 +114,19 @@ describe("scope", () => {
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
   });
 
+  it("refuses a demo-only write outside the demo instead of sending it to the API", async () => {
+    const verify = () =>
+      call("POST", "/v1/payments/demo/verifications", {
+        provider: "bvnk",
+        counterpartyId: "demo_cpty_jane",
+      });
+    browser.demoMode = false;
+    expect((await verify()).status).toBe(404);
+    browser.demoMode = true;
+    browser.jar.delete("sdp-payments-demo");
+    expect((await verify()).status).toBe(404);
+  });
+
   it("answers anything about payment data itself, and lets project reads through", async () => {
     expect((await call("GET", "/v1/counterparties/cpty_real")).status).toBe(404);
     expect((await call("GET", "/v1/payments/transfers/xfr_real")).status).toBe(404);
@@ -312,11 +325,8 @@ describe("ramps", () => {
     );
     expect(waiting.transfer.status).toBe("awaiting_payment");
 
-    const paid = await call("POST", "/v1/payments/ramps/sandbox/simulate", {
-      provider: "lightspark",
-      payload: { quoteId: quote.id, currencyCode: "USD" },
-    });
-    expect(paid.status).toBe(200);
+    const paid = await call("POST", "/v1/payments/ramps/sandbox/simulate", { transferId });
+    expect(paid.status).toBe(204);
     expect(
       (await data<{ transfer: { status: string } }>(`/v1/payments/transfers/${transferId}`))
         .transfer.status
@@ -470,11 +480,8 @@ describe("every ramp provider", () => {
       const { quote, transferId } = quoted.body.data;
       expect(quote).toMatchObject({ provider, deliveryMode: mode });
 
-      const paid = await call("POST", "/v1/payments/ramps/sandbox/simulate", {
-        provider,
-        payload: { transferId },
-      });
-      expect(paid.status).toBe(200);
+      const paid = await call("POST", "/v1/payments/ramps/sandbox/simulate", { transferId });
+      expect(paid.status).toBe(204);
       expect(await statusAfterSettling(transferId)).toMatchObject({
         status: "completed",
         provider,
@@ -487,8 +494,7 @@ describe("every ramp provider", () => {
     const deposit = await onrampQuote("moneygram", "usdc.solana");
     expect(deposit.body.data.quote.deliveryMode).toBe("session_widget");
     await call("POST", "/v1/payments/ramps/sandbox/simulate", {
-      provider: "moneygram",
-      payload: { transferId: deposit.body.data.transferId },
+      transferId: deposit.body.data.transferId,
     });
     expect((await statusAfterSettling(deposit.body.data.transferId)).status).toBe("completed");
 
@@ -529,10 +535,7 @@ describe("every ramp provider", () => {
         ...extra,
       });
     const simulateVerification = (counterpartyId = "demo_cpty_jane", provider = "bvnk") =>
-      call("POST", "/v1/payments/ramps/sandbox/simulate", {
-        provider,
-        payload: { counterpartyId, verification: "approved" },
-      });
+      call("POST", "/v1/payments/demo/verifications", { provider, counterpartyId });
 
     expect(await status()).toBe("counterparty_collect_agreement");
     expect((await advance({ collectedData: {} })).body.data.status).toBe(
@@ -566,10 +569,7 @@ describe("every ramp provider", () => {
       kind: "fiat_funding",
       onboardingStatus: "ready",
     });
-    await call("POST", "/v1/payments/ramps/sandbox/simulate", {
-      provider: "bvnk",
-      payload: { transferId },
-    });
+    await call("POST", "/v1/payments/ramps/sandbox/simulate", { transferId });
     expect((await statusAfterSettling(transferId)).status).toBe("completed");
   });
 
@@ -584,8 +584,7 @@ describe("every ramp provider", () => {
     });
     expect(quoted.body.data.quote.paymentInstructions[0].bankDetails.bankName).toBeTruthy();
     await call("POST", "/v1/payments/ramps/sandbox/simulate", {
-      provider: "mural",
-      payload: { counterpartyId: "demo_cpty_acme", amount: 250, fiatCurrency: "USD" },
+      transferId: quoted.body.data.transferId,
     });
     expect((await statusAfterSettling(quoted.body.data.transferId)).status).toBe("completed");
   });

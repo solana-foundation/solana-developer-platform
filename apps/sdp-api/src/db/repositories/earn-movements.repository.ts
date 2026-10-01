@@ -353,7 +353,12 @@ export interface EarnMovementsRepository {
    * The COMPLETE set of claims `listVaultPositions` would serve (same
    * visibility predicate, unpaged — a reconciliation over a page would clear
    * discrepancies it never looked at), each with whether any of its movements
-   * is still unsettled. Read-only input to share reconciliation (PRO-1741);
+   * is still unsettled, the ids of its open queued withdrawal requests, and,
+   * per intermediate mint, how much its operator redemptions left in the
+   * wallet (`retained`: cancelled), delegated there (`in_flight`: landed and
+   * still open) or may hold there (`unresolved`: not yet landed, or closed
+   * unidentified), in decimal token units. Read-only input to share
+   * reconciliation (PRO-1741);
    * empty wallet scope answers empty rather than throwing, because "this key
    * sees no wallets" is a legitimate reconciliation answer.
    */
@@ -361,7 +366,20 @@ export interface EarnMovementsRepository {
     organizationId: string;
     environment: SdpEnvironment;
     custodyWalletIds: readonly string[];
-  }): Promise<Array<EarnPositionRow & { has_unsettled_movements: boolean }>>;
+  }): Promise<
+    Array<
+      EarnPositionRow & {
+        has_unsettled_movements: boolean;
+        open_withdrawal_request_ids: string[];
+        redemption_intermediates: Array<{
+          mint: string;
+          retained: string;
+          in_flight: string;
+          unresolved: string;
+        }>;
+      }
+    >
+  >;
   /** External-wallet vault claims, exact-project scoped, newest first. */
   listExternalWalletPositions(params: {
     organizationId: string;
@@ -468,8 +486,9 @@ export interface EarnMovementsRepository {
    * (PRO-1772): finalized deposit total and finalized withdrawal payout total
    * (both in deposit-token units, from `token_amount_settled`, so the SUMs
    * never cross denominations), how many finalized withdrawals carry NO
-   * observed payout, and how many movements are still unsettled. Failed
-   * movements are ignored: that money never moved.
+   * observed payout, how many movements are still unsettled, and how many
+   * queued withdrawal requests are still open. Failed movements are ignored:
+   * that money never moved.
    */
   aggregateExternalWalletMovements(params: {
     organizationId: string;
@@ -777,6 +796,11 @@ export interface ExternalWalletMovementTotals {
   /** Finalized withdrawals whose payout was never observed (NULL column). */
   unvaluedWithdrawalCount: number;
   unsettledMovementCount: number;
+  /**
+   * Non-terminal queued withdrawal requests: shares escrowed or burned out of
+   * the owner's wallet whose payout the ledger does not yet hold.
+   */
+  openWithdrawalRequestCount: number;
 }
 
 export interface AdvanceVaultMovementInput {
@@ -1377,22 +1401,109 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // (finalized|failed are the only terminal statuses). A claim with an
       // in-flight movement is excluded from zero-share reporting by the
       // service: the ledger already explains why chain and record disagree,
-      // and the every-minute sweep will settle it either way.
+      // and the every-minute sweep will settle it either way. Open queued
+      // requests (the same predicate closeVaultPositionIfEmpty uses) come back
+      // by id so the service can name them beside a claim they may explain.
+      // A cancelled operator redemption never recreates the shares it burned:
+      // the owner keeps the intermediate it delegated (Hastra wYLDS), and an
+      // open one's delegated intermediate still sits in the wallet. The
+      // amounts come back per status class so the service can tell which
+      // balance is provably whose. Requests are aggregated once per tenant
+      // (the tenant/created index) and joined by position, because the
+      // request table has no position index and the claim set is unpaged.
       const result = await db
         .prepare(
-          `SELECT *,
+          `WITH open_requests AS (
+             SELECT queued.position_id,
+                    array_agg(queued.id ORDER BY queued.created_at, queued.id) AS ids
+               FROM earn_vault_withdrawal_requests queued
+              WHERE queued.organization_id = ?
+                AND queued.environment = ?
+                AND queued.status IN (
+                  'creating', 'pending', 'fulfillable',
+                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                )
+              GROUP BY queued.position_id
+           ),
+           redemption_amounts AS (
+             SELECT redemption.position_id,
+                    redemption.intermediate_mint,
+                    COALESCE(SUM(redemption.intermediate_amount::numeric)
+                      FILTER (WHERE redemption.status = 'cancelled'), 0)::text
+                      AS retained,
+                    COALESCE(SUM(redemption.intermediate_amount::numeric)
+                      FILTER (WHERE redemption.status IN (
+                        'pending', 'fulfillable', 'expired_cancelable', 'cancelling'
+                      )), 0)::text
+                      AS in_flight,
+                    -- May or may not hold its intermediate: a 'creating'
+                    -- request can land before the request row advances, and a
+                    -- 'closed_or_unknown' one was either burned or cancelled.
+                    COALESCE(SUM(redemption.intermediate_amount::numeric)
+                      FILTER (WHERE redemption.status IN (
+                        'creating', 'closed_or_unknown'
+                      )), 0)::text
+                      AS unresolved
+               FROM earn_vault_withdrawal_requests redemption
+              WHERE redemption.organization_id = ?
+                AND redemption.environment = ?
+                AND redemption.mechanism = 'operator_redemption'
+                AND redemption.intermediate_mint IS NOT NULL
+                AND redemption.status IN (
+                  'cancelled', 'creating', 'pending', 'fulfillable',
+                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                )
+              GROUP BY redemption.position_id, redemption.intermediate_mint
+           ),
+           intermediates_by_position AS (
+             SELECT position_id,
+                    json_agg(json_build_object(
+                      'mint', intermediate_mint,
+                      'retained', retained,
+                      'in_flight', in_flight,
+                      'unresolved', unresolved
+                    ) ORDER BY intermediate_mint) AS intermediates
+               FROM redemption_amounts
+              GROUP BY position_id
+           )
+           SELECT earn_positions.*,
                   EXISTS (
                     SELECT 1
                     FROM earn_movements unsettled
                     WHERE unsettled.position_id = earn_positions.id
                       AND unsettled.status IN ('requested', 'submitted', 'confirmed')
-                  ) AS has_unsettled_movements
+                  ) AS has_unsettled_movements,
+                  COALESCE(open_requests.ids, ARRAY[]::text[]) AS open_withdrawal_request_ids,
+                  COALESCE(intermediates_by_position.intermediates, '[]'::json)
+                    AS redemption_intermediates
              FROM earn_positions
+             LEFT JOIN open_requests ON open_requests.position_id = earn_positions.id
+             LEFT JOIN intermediates_by_position
+               ON intermediates_by_position.position_id = earn_positions.id
              WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
-             ORDER BY created_at DESC, id DESC`
+             ORDER BY earn_positions.created_at DESC, earn_positions.id DESC`
         )
-        .bind(params.organizationId, params.environment, params.custodyWalletIds)
-        .all<EarnPositionRow & { has_unsettled_movements: boolean }>();
+        .bind(
+          params.organizationId,
+          params.environment,
+          params.organizationId,
+          params.environment,
+          params.organizationId,
+          params.environment,
+          params.custodyWalletIds
+        )
+        .all<
+          EarnPositionRow & {
+            has_unsettled_movements: boolean;
+            open_withdrawal_request_ids: string[];
+            redemption_intermediates: Array<{
+              mint: string;
+              retained: string;
+              in_flight: string;
+              unresolved: string;
+            }>;
+          }
+        >();
       return result.results ?? [];
     },
 
@@ -1712,13 +1823,16 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                                AND token_amount_settled IS NULL
                          THEN 1 ELSE 0 END AS unvalued_withdrawal_count,
                     CASE WHEN status IN ('requested', 'submitted', 'confirmed')
-                         THEN 1 ELSE 0 END AS unsettled_movement_count
+                         THEN 1 ELSE 0 END AS unsettled_movement_count,
+                    0 AS open_withdrawal_request_count
                FROM earn_movements
               WHERE organization_id = ?
                 AND project_id = ?
                 AND environment = ?
                 AND owner_address = ?
               UNION ALL
+              -- Its own counter, not an unsettled movement: an open request can
+              -- stay open for days, and the reason it drives says so.
               SELECT request.position_id,
                      0::numeric,
                      CASE WHEN request.status = 'fulfilled'
@@ -1727,6 +1841,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                      CASE WHEN request.status = 'fulfilled' THEN 1 ELSE 0 END,
                      CASE WHEN request.status = 'fulfilled' AND request.assets_paid IS NULL
                           THEN 1 ELSE 0 END,
+                     0,
                      CASE WHEN request.status IN (
                             'creating', 'pending', 'fulfillable',
                             'expired_cancelable', 'cancelling', 'closed_or_unknown'
@@ -1753,7 +1868,9 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                   COALESCE(SUM(finalized_withdrawals), 0)::text AS finalized_withdrawals,
                   COALESCE(SUM(finalized_withdrawal_count), 0) AS finalized_withdrawal_count,
                   COALESCE(SUM(unvalued_withdrawal_count), 0) AS unvalued_withdrawal_count,
-                  COALESCE(SUM(unsettled_movement_count), 0) AS unsettled_movement_count
+                  COALESCE(SUM(unsettled_movement_count), 0) AS unsettled_movement_count,
+                  COALESCE(SUM(open_withdrawal_request_count), 0)
+                    AS open_withdrawal_request_count
              FROM facts
             GROUP BY position_id`
         )
@@ -1774,6 +1891,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           finalized_withdrawal_count: number;
           unvalued_withdrawal_count: number;
           unsettled_movement_count: number;
+          open_withdrawal_request_count: number;
         }>();
       const totals = new Map<string, ExternalWalletMovementTotals>();
       for (const row of result.results ?? []) {
@@ -1783,6 +1901,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           finalizedWithdrawalCount: Number(row.finalized_withdrawal_count),
           unvaluedWithdrawalCount: Number(row.unvalued_withdrawal_count),
           unsettledMovementCount: Number(row.unsettled_movement_count),
+          openWithdrawalRequestCount: Number(row.open_withdrawal_request_count),
         });
       }
       return totals;

@@ -5,6 +5,7 @@ import {
   type Token,
   type TokenTransaction,
 } from "@sdp/types";
+import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
@@ -389,11 +390,13 @@ test.describe
       await page.keyboard.press("Escape");
       await expect(drawer).toBeHidden({ timeout: E2E_POLL_TIMEOUT_MS });
 
-      await page.goto(walletHref, { waitUntil: "domcontentloaded" });
-      await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
-      await page.locator(`a[href="${auditHref}"]`).click();
+      // The wallet's policy history opens from its Policy tab, beside the revisions (the
+      // previous design ignores the tab and shows the same link on the wallet's page).
+      const auditLink = page.getByRole("link", { name: "Policy audit", exact: true });
+      await page.goto(`${walletHref}?tab=policy`, { waitUntil: "domcontentloaded" });
+      await expect(auditLink).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(auditLink).toHaveAttribute("href", auditHref);
+      await auditLink.click();
       await expect(page).toHaveURL(new RegExp(`${auditHref.replaceAll("/", "\\/")}$`));
       await expect(page.getByRole("button", { name: "Revision history" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
@@ -759,55 +762,58 @@ test.describe
         });
       });
 
-      await page.setViewportSize({ width: 1280, height: 500 });
-      await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
+      // The page runs on Playwright's clock (time still flows) so the test can step past SWR's
+      // dedupe window instead of sleeping through it.
+      await page.clock.install();
+
+      // The wallet's page opens on Overview, whose recent activity reads the feed straight away;
+      // the whole feed is on the Activity tab (`?tab=activity`). Both read the same window.
+      await page.goto(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`, {
+        waitUntil: "domcontentloaded",
+      });
       await expect(page.getByRole("heading", { name: wallet.label ?? "Treasury" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
-      await expect(page.getByRole("button", { name: "Actions" })).toBeEnabled();
-      const activityRegion = page.locator("[data-wallet-activity-state]");
-      await expect(activityRegion).not.toBeInViewport();
-      await page.evaluate(
-        () =>
-          new Promise<void>((resolve) => {
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-          })
-      );
-      await expect(activityRegion).toHaveAttribute("data-wallet-activity-state", "deferred");
-      expect(activityRequestCount).toBe(0);
-
-      await activityRegion.scrollIntoViewIfNeeded();
-      await expect(activityRegion).toHaveAttribute("data-wallet-activity-state", "mounted");
-      await expect.poll(() => activityRequestCount).toBe(1);
-
-      const activityRow = page.locator("tr").filter({ hasText: "5.00 USDC" });
+      const rowSelector = '[data-wallet-activity-row="payment-e2e-refresh"]';
+      const activityRow = page.locator(rowSelector);
       await expect(activityRow).toBeVisible({ timeout: 120_000 });
       await expect(activityRow).toContainText("Incoming");
-      await expect(activityRow.getByRole("link")).toHaveCount(1);
+      await expect(activityRow).toContainText("+5 USDC");
+      expect(activityRequestCount).toBeGreaterThan(0);
 
-      await page
-        .getByRole("heading", { name: wallet.label ?? "Treasury" })
-        .scrollIntoViewIfNeeded();
-      await expect(activityRegion).not.toBeInViewport();
-      await expect(activityRegion).toHaveAttribute("data-wallet-activity-visible", "false");
-      const requestCountBeforeReconnect = activityRequestCount;
-      await page.evaluate(() => {
-        window.dispatchEvent(new Event("offline"));
-        window.dispatchEvent(new Event("online"));
-      });
-      await page.waitForTimeout(1_000);
-      expect(activityRequestCount).toBe(requestCountBeforeReconnect);
+      await page.getByRole("tab", { name: "Activity", exact: true }).click();
+      await expect(page).toHaveURL(/[?&]tab=activity(?:&|$)/);
+      const activityTab = page.locator("[data-wallet-activity-tab]");
+      await expect(activityTab).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(activityTab.locator(rowSelector)).toBeVisible();
 
-      await activityRegion.scrollIntoViewIfNeeded();
-      await expect(activityRegion).toHaveAttribute("data-wallet-activity-visible", "true");
-      await expect.poll(() => activityRequestCount).toBe(requestCountBeforeReconnect + 1);
-
+      // The feed refreshes itself every 20s, and at once on reconnecting; that read now fails.
+      // SWR serves any read within `dedupingInterval` of the last one from that read, so a
+      // reconnect straight after the Activity tab loaded would never reach the route. Each try
+      // jumps the page clock past that window, then reconnects; a 20s poll that comes due on the
+      // way is a failing refresh too. Further tries only add more failing reads.
       failNextActivityRequest = true;
-      const refreshButton = page.getByRole("button", { name: "Refresh" });
-      await expect(refreshButton).toBeEnabled({ timeout: E2E_POLL_TIMEOUT_MS });
-      await refreshButton.click();
+      const requestCountBeforeFailure = activityRequestCount;
+      const dedupeWindowMs = DASHBOARD_SWR_CONFIG.dedupingInterval ?? 2_000;
+      await expect
+        .poll(async () => {
+          await page.clock.fastForward(dedupeWindowMs + 1_000);
+          await page.evaluate(() => {
+            window.dispatchEvent(new Event("offline"));
+            window.dispatchEvent(new Event("online"));
+          });
+          return activityRequestCount;
+        }, E2E_POLL_OPTIONS)
+        .toBeGreaterThan(requestCountBeforeFailure);
 
-      await expect(page.getByText("Activity refresh failed")).toBeVisible();
+      const refreshFailed = page.getByText("Wallet activity is unavailable right now.");
+      await expect(refreshFailed).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(activityTab.locator(rowSelector)).toBeVisible();
+
+      // Overview's recent rows keep the loaded window too.
+      await page.getByRole("tab", { name: "Overview", exact: true }).click();
+      await expect(page).not.toHaveURL(/[?&]tab=/);
+      await expect(refreshFailed).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
       await expect(activityRow).toBeVisible();
     });
   });

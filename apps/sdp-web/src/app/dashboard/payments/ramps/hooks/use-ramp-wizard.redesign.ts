@@ -24,7 +24,7 @@ import {
   cancelRampTransfer,
   fetchAllCounterparties,
   getApiError,
-  simulateSandboxTransfer,
+  simulateDemoVerification,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -524,10 +524,7 @@ export function useRampWizard<TId extends string>(
     if (!demo || fields.provider !== "bvnk" || !counterpartyId) return;
     setVerificationSimulating(true);
     try {
-      await simulateSandboxTransfer(
-        { provider: "bvnk", payload: { counterpartyId, verification: "approved" } },
-        t
-      );
+      await simulateDemoVerification({ provider: "bvnk", counterpartyId }, t);
       await requirements.refreshOnboarding();
     } catch (error) {
       toast.error(

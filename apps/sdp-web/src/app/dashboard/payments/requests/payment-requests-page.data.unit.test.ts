@@ -109,14 +109,16 @@ interface StoredRequest {
   landed?: boolean;
   reference?: string;
   counterpartyId?: string | null;
+  createdAt?: string;
 }
 
 /**
  * The list API over stored requests, newest first: it filters by the stored status, then
  * reconciles each open request it returns, saving any that has landed as paid, as the real
- * handler does. It records each call's page and status.
+ * handler does. It records each call's page and status, then runs `afterRead` with that call's
+ * page, so a test can change the requests between pages.
  */
-function reconcilingApi(stored: StoredRequest[]) {
+function reconcilingApi(stored: StoredRequest[], afterRead?: (page: number) => void) {
   const calls: { page: number; status: string | null }[] = [];
   const request = async (path: string) => {
     const query = new URL(path, "https://sdp.test").searchParams;
@@ -135,8 +137,10 @@ function reconcilingApi(stored: StoredRequest[]) {
         destinationAddress: "dest",
         reference: row.reference ?? `ref_${row.id}`,
         counterpartyId: row.counterpartyId ?? null,
+        createdAt: row.createdAt,
       } as PaymentRequest;
     });
+    afterRead?.(page);
     return Response.json({
       data: { paymentRequests: served, total: matching.length, page, pageSize },
     });
@@ -178,10 +182,7 @@ describe("loadPaymentRequestsList", () => {
     const result = await loadPaymentRequestsList(api.request, listState({ status: "paid" }));
     expect(ids(result.data)).toEqual(["preq_landed", "preq_paid"]);
     expect(result.total).toBe(2);
-    expect(api.calls).toEqual([
-      { page: 1, status: "awaiting_payment" },
-      { page: 1, status: "paid" },
-    ]);
+    expect(api.calls).toEqual([{ page: 1, status: null }]);
   });
 
   it("leaves out of Awaiting payment a request that settles as it is read", async () => {
@@ -195,7 +196,57 @@ describe("loadPaymentRequestsList", () => {
     );
     expect(ids(result.data)).toEqual(["preq_open"]);
     expect(result.total).toBe(1);
-    expect(api.calls).toEqual([{ page: 1, status: "awaiting_payment" }]);
+    expect(api.calls).toEqual([{ page: 1, status: null }]);
+  });
+
+  it("skips no request when open ones leave Awaiting payment between pages", async () => {
+    // 250 open requests. Reading the first page settles every other one of its 100; then,
+    // before the next page, someone cancels a request already read and creates a new one.
+    const loadPage = (page: number) => {
+      const stored: StoredRequest[] = Array.from({ length: 250 }, (_, index) => ({
+        id: `preq_${index}`,
+        status: "awaiting_payment",
+        landed: index < 100 && index % 2 === 0,
+      }));
+      const api = reconcilingApi(stored, (readPage) => {
+        if (readPage !== 1 || stored[0]?.id === "preq_created") return;
+        const read = stored.find((row) => row.id === "preq_1");
+        if (read) read.status = "canceled";
+        stored.unshift({ id: "preq_created", status: "awaiting_payment" });
+      });
+      return loadPaymentRequestsList(
+        api.request,
+        listState({ status: "awaiting_payment", page, pageSize: 100 })
+      );
+    };
+
+    const [first, second] = await Promise.all([loadPage(1), loadPage(2)]);
+    // Every request still open when its page was read, once each, newest first.
+    const openIds = Array.from({ length: 250 }, (_, index) => index)
+      .filter((index) => index >= 100 || index % 2 === 1)
+      .map((index) => `preq_${index}`);
+    expect([...ids(first.data), ...ids(second.data)]).toEqual(openIds);
+    expect(first.total).toBe(openIds.length);
+  });
+
+  it("reads on when a request created mid-read pushes the oldest onto another page", async () => {
+    const stored: StoredRequest[] = Array.from({ length: 200 }, (_, index) => ({
+      id: `preq_${index}`,
+      status: "canceled",
+    }));
+    const api = reconcilingApi(stored, (page) => {
+      if (page === 1) stored.unshift({ id: "preq_created", status: "canceled" });
+    });
+    const result = await loadPaymentRequestsList(
+      api.request,
+      listState({ search: "preq_", page: 2, pageSize: 100 })
+    );
+    // The second page repeated preq_99, which is shown once; a third page held preq_199.
+    expect(ids(result.data)).toEqual(
+      Array.from({ length: 100 }, (_, index) => `preq_${100 + index}`)
+    );
+    expect(result.total).toBe(200);
+    expect(api.calls.map((call) => call.page)).toEqual([1, 2, 3]);
   });
 
   it("searches requests past the page it shows, and pages the matches", async () => {
@@ -238,6 +289,84 @@ describe("loadPaymentRequestsList", () => {
     expect(result.total).toBe(PAYMENT_REQUESTS_SCAN_CAP);
     expect(result.searchCapped).toBe(true);
     expect(api.calls).toHaveLength(PAYMENT_REQUESTS_SCAN_CAP / PAYMENT_REQUESTS_PAGE_SIZE);
+  });
+
+  /** `count` canceled requests, newest first, each a second older than the one before. */
+  function olderRequests(count: number): StoredRequest[] {
+    return Array.from({ length: count }, (_, index) => ({
+      id: `preq_${index}`,
+      status: "canceled",
+      createdAt: new Date(Date.UTC(2026, 0, 1) - index * 1000).toISOString(),
+    }));
+  }
+
+  it("finds under a status a request older than the unfiltered read", async () => {
+    const total = PAYMENT_REQUESTS_SCAN_CAP + 100;
+    const place = (index: number, changes: Partial<StoredRequest>) => {
+      stored[index] = { ...(stored[index] as StoredRequest), ...changes };
+    };
+    const stored = olderRequests(total);
+    place(540, { status: "paid", reference: "REF-MATCH" });
+    place(560, { status: "awaiting_payment", landed: true, reference: "REF-MATCH" });
+    place(580, { status: "awaiting_payment", reference: "REF-MATCH" });
+    place(590, { status: "canceled", reference: "REF-MATCH" });
+    place(10, { status: "paid", reference: "REF-MATCH" });
+    const search = "ref-match";
+
+    const paid = await loadPaymentRequestsList(
+      reconcilingApi(stored).request,
+      listState({ status: "paid", search })
+    );
+    // preq_560 was still stored open, and only the open read settles it as paid.
+    expect(ids(paid.data)).toEqual(["preq_10", "preq_540", "preq_560"]);
+    expect(paid.searchCapped).toBe(false);
+
+    const open = await loadPaymentRequestsList(
+      reconcilingApi(stored).request,
+      listState({ status: "awaiting_payment", search })
+    );
+    expect(ids(open.data)).toEqual(["preq_580"]);
+    expect(open.searchCapped).toBe(false);
+  });
+
+  it("skips no older request when reading a status's pages settles some of them", async () => {
+    // Past the unfiltered read's 500, 300 older open requests, every fourth already paid on
+    // chain: each page of the open read settles a quarter of its rows, which leave the set.
+    const loadPage = (status: "awaiting_payment" | "paid", page: number) => {
+      const stored = olderRequests(PAYMENT_REQUESTS_SCAN_CAP + 300).map(
+        (row, index): StoredRequest =>
+          index < PAYMENT_REQUESTS_SCAN_CAP
+            ? row
+            : { ...row, status: "awaiting_payment", landed: index % 4 === 0 }
+      );
+      return loadPaymentRequestsList(
+        reconcilingApi(stored).request,
+        listState({ status, search: "preq_", page, pageSize: 100 })
+      );
+    };
+    const olderIds = (landed: boolean) =>
+      Array.from({ length: 300 }, (_, offset) => PAYMENT_REQUESTS_SCAN_CAP + offset)
+        .filter((index) => (index % 4 === 0) === landed)
+        .map((index) => `preq_${index}`);
+
+    const open = await Promise.all([1, 2, 3].map((page) => loadPage("awaiting_payment", page)));
+    expect(open.flatMap((result) => ids(result.data))).toEqual(olderIds(false));
+    expect(open[0]?.total).toBe(225);
+
+    const paid = await loadPage("paid", 1);
+    expect(ids(paid.data)).toEqual(olderIds(true));
+  });
+
+  it("says when a status's own read stopped at the cap", async () => {
+    const stored = olderRequests(PAYMENT_REQUESTS_SCAN_CAP + 100).map(
+      (row): StoredRequest => ({ ...row, status: "paid" })
+    );
+    const result = await loadPaymentRequestsList(
+      reconcilingApi(stored).request,
+      listState({ status: "paid", search: "preq_" })
+    );
+    expect(result.total).toBe(PAYMENT_REQUESTS_SCAN_CAP);
+    expect(result.searchCapped).toBe(true);
   });
 
   it("reports a failed read instead of a partial list", async () => {

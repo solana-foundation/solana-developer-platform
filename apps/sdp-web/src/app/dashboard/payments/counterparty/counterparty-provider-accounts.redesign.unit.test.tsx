@@ -1,5 +1,6 @@
 import {
   BVNK_FUNDING_WALLET_STATUS,
+  type CounterpartyAccount,
   type CounterpartyProviderAccount,
   type PaymentTransferSummary,
 } from "@sdp/types";
@@ -36,8 +37,9 @@ vi.mock("@/i18n/provider", () => ({
 
 vi.mock("next/image", () => ({ default: () => null }));
 
+const routerRefresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), refresh: routerRefresh }),
   usePathname: () => "/dashboard/payments/counterparty/cpty_test",
 }));
 
@@ -130,41 +132,49 @@ describe("counterparty provider accounts table", () => {
     vi.unstubAllGlobals();
     await environment.teardown(globalThis);
   });
-  async function renderAccounts(
-    accounts: CounterpartyProviderAccount[],
-    history: {
-      transfers?: PaymentTransferSummary[];
-      transfersTotal?: number;
-      transfersFailed?: boolean;
-    } = {}
-  ) {
+  interface History {
+    transfers?: PaymentTransferSummary[];
+    transfersFailed?: boolean;
+    payouts?: PaymentTransferSummary[];
+    payoutsTotal?: number;
+    payoutsFailed?: boolean;
+    addresses?: CounterpartyAccount[];
+    addressesTotal?: number;
+    addressesFailed?: boolean;
+  }
+  function workspace(history: History) {
+    return (
+      <CounterpartyDetailWorkspace
+        counterparty={{
+          id: "cpty_test",
+          organizationId: "org_test",
+          projectId: "prj_test",
+          externalId: null,
+          entityType: "individual",
+          displayName: "Test Customer",
+          status: "active",
+          createdBy: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        }}
+        initialAccounts={history.addresses ?? []}
+        accountsTotal={history.addressesTotal}
+        accountsFailed={history.addressesFailed}
+        initialTransfers={history.transfers ?? []}
+        transfersFailed={history.transfersFailed}
+        payouts={history.payouts ?? []}
+        payoutsTotal={history.payoutsTotal}
+        payoutsFailed={history.payoutsFailed}
+      />
+    );
+  }
+  async function renderAccounts(accounts: CounterpartyProviderAccount[], history: History = {}) {
     accountState.accounts = accounts;
     container = document.createElement("div");
     document.body.append(container);
     const { createRoot } = await import("react-dom/client");
     root = createRoot(container);
-    await act(async () =>
-      root.render(
-        <CounterpartyDetailWorkspace
-          counterparty={{
-            id: "cpty_test",
-            organizationId: "org_test",
-            projectId: "prj_test",
-            externalId: null,
-            entityType: "individual",
-            displayName: "Test Customer",
-            status: "active",
-            createdBy: null,
-            createdAt: "2026-01-01T00:00:00.000Z",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-          }}
-          initialAccounts={[]}
-          initialTransfers={history.transfers ?? []}
-          transfersTotal={history.transfersTotal}
-          transfersFailed={history.transfersFailed}
-        />
-      )
-    );
+    await act(async () => root.render(workspace(history)));
   }
   async function renderWallet(account: CounterpartyProviderAccount) {
     await renderAccounts([account]);
@@ -289,29 +299,85 @@ describe("counterparty provider accounts table", () => {
 
   it("adds payouts as decimals, so the total does not pick up float rounding", async () => {
     await renderAccounts([], {
-      transfers: [payout("tx_1", "0.1"), payout("tx_2", "0.2"), payout("tx_3", "9007199254740993")],
+      payouts: [payout("tx_1", "0.1"), payout("tx_2", "0.2"), payout("tx_3", "9007199254740993")],
     });
     expect(container.textContent).toContain("9,007,199,254,740,993.30 USDC");
   });
 
-  it("does not say a contact was never paid when older transfers were not loaded", async () => {
+  it("totals payouts older than the latest transfers", async () => {
+    // The latest transfers hold no settled payout; the payout read still has an older one.
     await renderAccounts([], {
-      transfers: [{ ...payout("tx_1", "5"), status: "failed" }],
-      transfersTotal: 80,
+      transfers: [{ ...payout("tx_new", "5"), status: "failed" }],
+      payouts: [{ ...payout("tx_old", "12"), createdAt: "2025-06-01T00:00:00.000Z" }],
     });
-    expect(container.textContent).not.toContain("DashboardPayments.counterparty.detail.notPaidYet");
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.notPaidYet");
+    expect(text).toContain("DashboardPayments.counterparty.detail.paidSummary 12.00 USDC");
+  });
+
+  it("qualifies the total when the payout read stopped at its cap", async () => {
+    await renderAccounts([], {
+      payouts: [payout("tx_1", "5"), payout("tx_2", "6")],
+      payoutsTotal: 900,
+    });
     expect(container.textContent).toContain(
-      "DashboardPayments.counterparty.detail.notPaidInLatest 1"
+      "DashboardPayments.counterparty.detail.paidSummaryPartial 11.00 USDC"
     );
   });
 
   it("says the payment history was not loaded when the transfers read failed", async () => {
-    await renderAccounts([], { transfers: [], transfersTotal: 0, transfersFailed: true });
+    await renderAccounts([], { transfersFailed: true, payoutsFailed: true });
     const text = container.textContent ?? "";
     expect(text).not.toContain("DashboardPayments.counterparty.detail.notPaidYet");
     expect(text).not.toContain("DashboardPayments.counterparty.detail.noPayments");
     expect(text.split("DashboardPayments.counterparty.detail.paymentsNotLoaded")).toHaveLength(3);
     expect(text).toContain("DashboardPayments.counterparty.detail.paymentsLoadFailed");
     expect(text).toContain("Shared.SharedComponents.retry");
+  });
+
+  function savedAddress(id: string): CounterpartyAccount {
+    return {
+      id,
+      organizationId: "org_test",
+      projectId: "prj_test",
+      counterpartyId: "cpty_test",
+      accountKind: "crypto_wallet",
+      label: null,
+      details: { address: "So11111111111111111111111111111111111111112" },
+      providerAccountData: {},
+      status: "active",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+  }
+
+  it("does not say no addresses are saved when the address read failed", async () => {
+    await renderAccounts([], { addressesFailed: true });
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.noAddresses");
+    expect(text).toContain("DashboardPayments.counterparty.detail.addressesLoadFailed");
+  });
+
+  it("shows the addresses a successful Retry loads after a failed read", async () => {
+    await renderAccounts([], { addressesFailed: true });
+    const retry = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Shared.SharedComponents.retry"
+    );
+    if (retry === undefined) throw new Error("Expected a retry button");
+    await act(async () => retry.click());
+    expect(routerRefresh).toHaveBeenCalled();
+    // The refresh hands the page the read it retried.
+    await act(async () => root.render(workspace({ addresses: [savedAddress("cpa_1")] })));
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.addressesLoadFailed");
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.noAddresses");
+    expect(text).toContain("DashboardPayments.counterparty.detail.unnamedAddress");
+  });
+
+  it("says how many saved addresses it left out when the read was capped", async () => {
+    await renderAccounts([], { addresses: [savedAddress("cpa_1")], addressesTotal: 140 });
+    expect(container.textContent).toContain(
+      "DashboardPayments.counterparty.detail.addressesCapped 1"
+    );
   });
 });

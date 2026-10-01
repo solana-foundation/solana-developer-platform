@@ -9,8 +9,8 @@ import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
 import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { toTitleCase } from "../../activity-format-utils";
-import { WALLET_ACTIVITY_LIMIT, WALLET_ACTIVITY_MAX_LIMIT } from "../wallet-activity.data";
-import { useWalletActivity } from "./use-wallet-activity";
+import type { WalletActivityRow } from "../wallet-activity.data";
+import { useWalletActivityWindow } from "./use-wallet-activity-window";
 import { WalletActivityTable } from "./wallet-activity-table";
 import {
   activityDisplayId,
@@ -21,11 +21,116 @@ import {
 } from "./wallet-detail.shared";
 import { EmptyNote } from "./wallet-overview-tab";
 
-/** How many more rows each "Load older activity" asks the feed for. */
-const WALLET_ACTIVITY_LOAD_STEP = 100;
-
 function distinct(values: readonly string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+function matchesActivity(
+  row: WalletActivityRow,
+  { needle, type, status }: { needle: string; type?: string; status?: string }
+): boolean {
+  if (type !== undefined && row.operationLabel !== type) return false;
+  if (status !== undefined && row.status !== status) return false;
+  if (!needle) return true;
+  return [
+    row.operationLabel,
+    activityDisplayId(row.id),
+    row.id,
+    row.status,
+    row.amount,
+    row.address,
+  ]
+    .join(" ")
+    .toLowerCase()
+    .includes(needle);
+}
+
+/** Search, type and status filters over the loaded rows, a page at a time. */
+function useActivityFilters(rows: readonly WalletActivityRow[]) {
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState<string | undefined>();
+  const [status, setStatus] = useState<string | undefined>();
+  const [pageSize, setPageSize] = useState(25);
+  const [page, setPage] = useState(1);
+  const types = useMemo(() => distinct(rows.map((row) => row.operationLabel)), [rows]);
+  const statuses = useMemo(() => distinct(rows.map((row) => row.status)), [rows]);
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return rows.filter((row) => matchesActivity(row, { needle, type, status }));
+  }, [rows, query, type, status]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const resetPage =
+    <T,>(set: (value: T) => void) =>
+    (value: T) => {
+      set(value);
+      setPage(1);
+    };
+  return {
+    query,
+    type,
+    status,
+    pageSize,
+    types,
+    statuses,
+    filtered,
+    pageCount,
+    currentPage,
+    visible: filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    setPage,
+    setQuery: resetPage(setQuery),
+    setType: resetPage(setType),
+    setStatus: resetPage(setStatus),
+    setPageSize: resetPage(setPageSize),
+    clear: () => {
+      setQuery("");
+      setType(undefined);
+      setStatus(undefined);
+      setPage(1);
+    },
+  };
+}
+
+/**
+ * "Load older activity" under the last page. After a wider read fails it says so and the same
+ * button retries that size; the rows above stay the window that last loaded.
+ */
+function LoadOlderActivity({
+  loadedCount,
+  loading,
+  failed,
+  onLoad,
+}: {
+  loadedCount: number;
+  loading: boolean;
+  failed: boolean;
+  onLoad: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="flex flex-col items-center gap-2">
+      {failed ? (
+        <p className="text-meta text-tertiary" role="status" data-wallet-activity-older-failed>
+          {t("DashboardCustody.walletActivityLoadOlderFailed", { count: loadedCount })}
+        </p>
+      ) : null}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={loading}
+        onClick={onLoad}
+        data-wallet-activity-load-older
+      >
+        {t(
+          failed
+            ? "DashboardCustody.walletActivityRetryLoadOlder"
+            : "DashboardCustody.walletActivityLoadOlder"
+        )}
+      </Button>
+    </div>
+  );
 }
 
 /**
@@ -50,57 +155,21 @@ export function WalletActivityTab({
   const { balances } = use(balancesPromise);
   const issued = use(issuedTokensPromise);
   const symbols = useMemo(() => symbolsByMint(balances, issued), [balances, issued]);
-  const [limit, setLimit] = useState(WALLET_ACTIVITY_LIMIT);
-  const { data, error, isLoading } = useWalletActivity(walletId, limit);
-  const [query, setQuery] = useState("");
-  const [type, setType] = useState<string | undefined>();
-  const [status, setStatus] = useState<string | undefined>();
-  const [pageSize, setPageSize] = useState(25);
-  const [page, setPage] = useState(1);
+  const activity = useWalletActivityWindow(walletId);
+  const { data } = activity;
   const feedRows = data?.activityRows;
   const rows = useMemo(() => feedRows ?? [], [feedRows]);
-  const types = useMemo(() => distinct(rows.map((row) => row.operationLabel)), [rows]);
-  const statuses = useMemo(() => distinct(rows.map((row) => row.status)), [rows]);
+  const filters = useActivityFilters(rows);
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return rows.filter((row) => {
-      if (type !== undefined && row.operationLabel !== type) return false;
-      if (status !== undefined && row.status !== status) return false;
-      if (!needle) return true;
-      return [
-        row.operationLabel,
-        activityDisplayId(row.id),
-        row.id,
-        row.status,
-        row.amount,
-        row.address,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle);
-    });
-  }, [rows, query, type, status]);
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const currentPage = Math.min(page, pageCount);
-  const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const resetPage =
-    <T,>(set: (value: T) => void) =>
-    (value: T) => {
-      set(value);
-      setPage(1);
-    };
-
-  if (!data && !error) {
-    return <div className="h-40 animate-pulse rounded-control bg-fill-subtle" aria-hidden="true" />;
-  }
-  if ((error && !data) || data?.activityError) {
-    return (
-      <p className="text-body text-tertiary">
-        {data?.activityError ?? t("DashboardCustody.walletActivityUnavailable")}
-      </p>
+  if (!data) {
+    return activity.error ? (
+      <p className="text-body text-tertiary">{t("DashboardCustody.walletActivityUnavailable")}</p>
+    ) : (
+      <div className="h-40 animate-pulse rounded-control bg-fill-subtle" aria-hidden="true" />
     );
+  }
+  if (data.activityError) {
+    return <p className="text-body text-tertiary">{data.activityError}</p>;
   }
   if (rows.length === 0) {
     return (
@@ -111,10 +180,7 @@ export function WalletActivityTab({
   }
 
   const anyLabel = t("Shared.SharedComponents.any");
-  const hasOlder = data?.hasMore === true;
-  // A widened window keeps the narrower one's rows on screen while it loads.
-  const loadingOlder = isLoading && data !== undefined;
-  const canLoadOlder = hasOlder && limit < WALLET_ACTIVITY_MAX_LIMIT && currentPage === pageCount;
+  const { type, status, filtered, pageSize, currentPage, pageCount } = filters;
   return (
     <div className="flex min-w-0 flex-col gap-5" data-wallet-activity-tab>
       <ListToolbar
@@ -131,8 +197,8 @@ export function WalletActivityTab({
                   <FilterMenuOptions
                     value={type}
                     anyLabel={anyLabel}
-                    options={types.map((value) => ({ value, label: value }))}
-                    onChange={(value) => resetPage(setType)(value ?? undefined)}
+                    options={filters.types.map((value) => ({ value, label: value }))}
+                    onChange={(value) => filters.setType(value ?? undefined)}
                   />
                 ),
               },
@@ -144,8 +210,11 @@ export function WalletActivityTab({
                   <FilterMenuOptions
                     value={status}
                     anyLabel={anyLabel}
-                    options={statuses.map((value) => ({ value, label: toTitleCase(value) }))}
-                    onChange={(value) => resetPage(setStatus)(value ?? undefined)}
+                    options={filters.statuses.map((value) => ({
+                      value,
+                      label: toTitleCase(value),
+                    }))}
+                    onChange={(value) => filters.setStatus(value ?? undefined)}
                   />
                 ),
               },
@@ -153,25 +222,25 @@ export function WalletActivityTab({
           />
         }
       >
-        <RowsPerPageSelect value={pageSize} onChange={resetPage(setPageSize)} />
+        <RowsPerPageSelect value={pageSize} onChange={filters.setPageSize} />
         <SearchInput
-          value={query}
-          onChange={(event) => resetPage(setQuery)(event.target.value)}
+          value={filters.query}
+          onChange={(event) => filters.setQuery(event.target.value)}
           clear={{
             label: t("DashboardCustody.walletClearActivitySearch"),
-            onClear: () => resetPage(setQuery)(""),
+            onClear: () => filters.setQuery(""),
           }}
           placeholder={t("DashboardCustody.walletSearchActivity")}
           className="min-w-0 flex-1 sm:w-56 sm:flex-none"
         />
       </ListToolbar>
-      {data?.activityNotice ? (
+      {data.activityNotice ? (
         <p className="text-meta text-tertiary">{data.activityNotice}</p>
       ) : null}
-      {error ? (
+      {activity.refreshFailed ? (
         <p className="text-meta text-tertiary">{t("DashboardCustody.walletActivityUnavailable")}</p>
       ) : null}
-      {hasOlder ? (
+      {data.hasMore ? (
         <p className="text-meta text-tertiary" data-wallet-activity-capped>
           {t("DashboardCustody.walletActivityLatestOnly", { count: rows.length })}{" "}
           <Link
@@ -187,42 +256,23 @@ export function WalletActivityTab({
           <EmptyNote title={t("DashboardCustody.walletNothingMatches")}>
             {t("DashboardCustody.walletNothingMatchesBody")}
           </EmptyNote>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setQuery("");
-              setType(undefined);
-              setStatus(undefined);
-              setPage(1);
-            }}
-          >
+          <Button type="button" variant="outline" size="sm" onClick={filters.clear}>
             {t("DashboardCustody.walletClearFilters")}
           </Button>
         </div>
       ) : (
-        <WalletActivityTable rows={visible} symbols={symbols} />
+        <WalletActivityTable rows={filters.visible} symbols={symbols} />
       )}
       {filtered.length > pageSize ? (
-        <ArrowPagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
+        <ArrowPagination page={currentPage} pageCount={pageCount} onPageChange={filters.setPage} />
       ) : null}
-      {canLoadOlder ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="self-center"
-          disabled={loadingOlder}
-          onClick={() =>
-            setLimit((current) =>
-              Math.min(WALLET_ACTIVITY_MAX_LIMIT, current + WALLET_ACTIVITY_LOAD_STEP)
-            )
-          }
-          data-wallet-activity-load-older
-        >
-          {t("DashboardCustody.walletActivityLoadOlder")}
-        </Button>
+      {activity.canLoadOlder && currentPage === pageCount ? (
+        <LoadOlderActivity
+          loadedCount={rows.length}
+          loading={activity.loadingOlder}
+          failed={activity.olderFailed}
+          onLoad={activity.loadOlder}
+        />
       ) : null}
     </div>
   );

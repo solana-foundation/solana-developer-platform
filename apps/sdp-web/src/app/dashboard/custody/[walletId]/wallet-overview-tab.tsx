@@ -318,26 +318,37 @@ function RecentActivityRows({
   const issued = use(issuedTokensPromise);
   const { data, error } = useWalletActivity(walletId);
   if (!data && !error) return <PartSkeleton />;
-  if (error || data?.activityError) {
+  if (!data || data.activityError) {
     return (
       <p className="text-body text-tertiary">
         {data?.activityError ?? t("DashboardCustody.walletActivityUnavailable")}
       </p>
     );
   }
-  const rows = data?.activityRows ?? [];
+  // A refresh that fails after the rows loaded keeps them, with a note, as the Activity tab does
+  // (the block lays its children out in a column).
+  const refreshFailed = error ? (
+    <p className="text-meta text-tertiary">{t("DashboardCustody.walletActivityUnavailable")}</p>
+  ) : null;
+  const rows = data.activityRows;
   if (rows.length === 0) {
     return (
-      <EmptyNote title={t("DashboardCustody.walletNoActivityTitle")}>
-        {t("DashboardCustody.walletNoActivityBody")}
-      </EmptyNote>
+      <>
+        {refreshFailed}
+        <EmptyNote title={t("DashboardCustody.walletNoActivityTitle")}>
+          {t("DashboardCustody.walletNoActivityBody")}
+        </EmptyNote>
+      </>
     );
   }
   return (
-    <WalletActivityTable
-      rows={rows.slice(0, RECENT_ACTIVITY)}
-      symbols={symbolsByMint(balances, issued)}
-    />
+    <>
+      {refreshFailed}
+      <WalletActivityTable
+        rows={rows.slice(0, RECENT_ACTIVITY)}
+        symbols={symbolsByMint(balances, issued)}
+      />
+    </>
   );
 }
 

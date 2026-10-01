@@ -402,6 +402,10 @@ function PaymentRequestCreateForm({
   const [pickedFrom, setPickedFrom] = useState(ANYONE);
   const [expiry, setExpiry] = useState<string>("none");
   const [submitting, setSubmitting] = useState(false);
+  // Once the link exists the page stays busy: it is on its way to the request, and a second
+  // press must not make a second link.
+  const [linkCreated, setLinkCreated] = useState(false);
+  const busy = submitting || linkCreated;
 
   // A pick that is no longer on offer (another cluster's mint, another project's wallet) falls
   // back rather than being sent.
@@ -411,16 +415,13 @@ function PaymentRequestCreateForm({
   const wallet = wallets.find((option) => option.walletId === pickedWallet) ?? null;
   const contact = contacts.find((option) => option.id === pickedFrom) ?? null;
 
-  const canCreate = isValidAmount(amount) && token !== null && wallet !== null && !submitting;
+  const canCreate = isValidAmount(amount) && token !== null && wallet !== null && !busy;
 
   async function create() {
     if (!canCreate || token === null || wallet === null) {
       return;
     }
     setSubmitting(true);
-    // Once the link exists the page stays busy: it is on its way to the request, and a second
-    // press must not make a second link. Anything short of that frees the form again.
-    let linkCreated = false;
     let created: PaymentRequest | undefined;
     try {
       const expiresAtOnSubmit = resolveExpiryDate(expiry);
@@ -441,12 +442,10 @@ function PaymentRequestCreateForm({
         toast.error(res.error);
         return;
       }
-      linkCreated = true;
+      setLinkCreated(true);
       created = res.data?.data;
     } finally {
-      if (!linkCreated) {
-        setSubmitting(false);
-      }
+      setSubmitting(false);
     }
     // A demo request lives in this browser only, so the public pay page can't open its link.
     const copied =
@@ -471,11 +470,7 @@ function PaymentRequestCreateForm({
       progressLabel=""
       hideProgress
       footer={
-        <CreateFooter
-          canCreate={canCreate}
-          submitting={submitting}
-          onCreate={() => void create()}
-        />
+        <CreateFooter canCreate={canCreate} submitting={busy} onCreate={() => void create()} />
       }
     >
       {/* The design sets a single-page form 3px nearer the title than the frame's stepped

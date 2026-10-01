@@ -1178,6 +1178,7 @@ export async function listEarnVaultPositions(c: AppContext) {
         withdrawableShares: hydrated?.withdrawableShares,
         unlockTimestamp: hydrated?.unlockTimestamp,
         tokenValue: hydrated?.tokenValue,
+        parIntermediate: hydrated?.parIntermediate,
       };
     }),
     hasMore,

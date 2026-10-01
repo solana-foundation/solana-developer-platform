@@ -11,7 +11,6 @@ import type {
   ListProjectCounterpartyAccountsEnvelope,
   ListProjectCounterpartyAccountsResponse,
   MoneygramRampEvent,
-  MuralSandboxPayinCurrency,
   PaymentRampEstimateEnvelope,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferBatch,
@@ -24,7 +23,6 @@ import type {
   RampEventProvider,
   RampFiatCurrency,
   RampProviderEstimateResult,
-  RampProviderId,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -257,19 +255,6 @@ interface WalletBalancesEnvelope {
         address?: string;
         balances?: PaymentWalletBalance[];
       };
-  error?: {
-    message?: string;
-  };
-}
-
-interface SandboxTransferSimulationEnvelope {
-  data?: {
-    transaction?: {
-      id?: string;
-      status?: string;
-      quoteId?: string;
-    };
-  };
   error?: {
     message?: string;
   };
@@ -833,43 +818,12 @@ export async function fetchCounterpartyAccounts(
   return body.data?.accounts ?? [];
 }
 
-type SandboxTransferSimulationInput =
-  | {
-      provider: "lightspark";
-      payload: {
-        quoteId: string;
-        currencyCode?: "USD" | "USDC";
-        currencyAmount?: number;
-      };
-    }
-  | {
-      /**
-       * BVNK's sandbox, and demo mode's stand-in for every provider's pay-in (Mural's in any
-       * currency, since the demo needs no sandbox to pay in).
-       */
-      provider: Exclude<RampProviderId, "lightspark">;
-      payload: {
-        transferId: string;
-      };
-    }
-  | {
-      provider: "mural";
-      payload: {
-        counterpartyId: string;
-        amount: number;
-        fiatCurrency: MuralSandboxPayinCurrency;
-      };
-    }
-  | {
-      /** Demo mode only: BVNK approves the contact's identity check (Simulate verification). */
-      provider: "bvnk";
-      payload: {
-        counterpartyId: string;
-        verification: "approved";
-      };
-    };
+type SandboxTransferSimulationInput = { transferId: string };
 
-export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput, t: Translate) {
+export async function simulateSandboxTransfer(
+  input: SandboxTransferSimulationInput,
+  t: Translate
+): Promise<void> {
   const response = await fetch("/api/dashboard/payments/ramps/sandbox/simulate", {
     method: "POST",
     headers: {
@@ -877,20 +831,44 @@ export async function simulateSandboxTransfer(input: SandboxTransferSimulationIn
     },
     body: JSON.stringify(input),
   });
-  const body = (await response.json().catch(() => ({}))) as SandboxTransferSimulationEnvelope;
 
   if (!response.ok) {
     throw new Error(
       getApiError(
-        body,
+        await response.json().catch(() => null),
         t("DashboardPayments.workspace.sandboxSimulationRequestFailed", {
           status: response.status,
         })
       )
     );
   }
+}
 
-  return body.data?.transaction ?? null;
+/**
+ * Demo mode only: the provider approves the contact's identity check (Simulate verification).
+ * Its own path, which only demo mode answers: outside the demo it is refused before reaching
+ * the SDP API, whose sandbox has no such step.
+ */
+export async function simulateDemoVerification(
+  input: { provider: "bvnk"; counterpartyId: string },
+  t: Translate
+): Promise<void> {
+  const response = await fetch("/api/dashboard/payments/demo/verifications", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        await response.json().catch(() => null),
+        t("DashboardPayments.demo.verification.failed")
+      )
+    );
+  }
 }
 
 export async function runComplianceCheck(

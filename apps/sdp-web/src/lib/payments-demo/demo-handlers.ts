@@ -1034,29 +1034,21 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   );
 }
 
-const simulateSchema = z.object({
+const verificationSchema = z.object({
   provider: z.string(),
-  // Loose: each provider's sandbox payload carries fields of its own the demo doesn't read.
-  payload: z.looseObject({
-    quoteId: z.string().optional(),
-    transferId: z.string().optional(),
-    counterpartyId: z.string().optional(),
-    /** Demo mode's Simulate verification: the provider approves the contact's identity check. */
-    verification: z.literal("approved").optional(),
-  }),
+  counterpartyId: z.string().min(1),
 });
 
-/** Simulate verification: BVNK approves the identity check of a contact that accepted its terms. */
-function approveVerification(
-  provider: string,
-  counterpartyId: string | undefined,
-  world: DemoWorld,
-  now: Date
-): DemoWriteResult {
+/**
+ * Simulate verification, a demo-only write (the SDP API has no such endpoint): BVNK approves the
+ * identity check of a contact that accepted its terms.
+ */
+function approveVerification({ body, world, now }: WriteContext): DemoWriteResult {
+  const input = parse(verificationSchema, body);
+  if ("failure" in input) return input.failure;
+  const { provider, counterpartyId } = input.data;
   if (provider !== "bvnk") return error(400, "Only BVNK asks for an identity check in the demo.");
-  if (!counterpartyId || !contactById(world, counterpartyId)) {
-    return error(404, "Contact not found.", "not_found");
-  }
+  if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
   const status = bvnkStanding(world, counterpartyId, "onramp", now).status;
   if (status === "counterparty_collect_agreement") {
     return error(409, "The contact hasn't accepted BVNK's agreements yet.", "conflict");
@@ -1069,31 +1061,26 @@ function approveVerification(
   );
 }
 
-/** The sandbox's "the customer paid": the on-ramp it names settles a few seconds later. */
+/** As the API takes it: the transfer alone, whatever the provider. */
+const simulateSchema = z.object({ transferId: z.string().min(1) });
+
+/**
+ * The sandbox's "the customer paid", for every provider: the on-ramp the transfer names settles a
+ * few seconds later. Like the API, the provider and amount come from the transfer itself.
+ */
 function simulatePayIn({ body, world, ops, now }: WriteContext): DemoWriteResult {
   const input = parse(simulateSchema, body);
   if ("failure" in input) return input.failure;
-  const { quoteId, transferId, counterpartyId, verification } = input.data.payload;
-  if (verification === "approved") {
-    return approveVerification(input.data.provider, counterpartyId, world, now);
-  }
-  const rampOps = ops.filter((op) => op.k === "ramp" && op.dir === "onramp");
-  const match =
-    rampOps.find((op) => op.k === "ramp" && (op.quote === quoteId || op.id === transferId)) ??
-    [...rampOps]
-      .reverse()
-      .find(
-        (op) =>
-          op.k === "ramp" &&
-          op.cp === counterpartyId &&
-          transferById(world, op.id)?.status === "awaiting_payment"
-      );
-  const target = match ? transferById(world, match.id) : undefined;
-  if (!match || !target) return error(404, "No deposit is waiting for that payment.", "not_found");
+  const { transferId } = input.data;
+  const isDeposit = ops.some(
+    (op) => op.k === "ramp" && op.dir === "onramp" && op.id === transferId
+  );
+  const target = isDeposit ? transferById(world, transferId) : undefined;
+  if (!target) return error(404, "No deposit is waiting for that payment.", "not_found");
   if (target.status !== "awaiting_payment") {
     return error(409, "That deposit has already been paid.", "conflict");
   }
-  return record([{ k: "ramp-paid", id: match.id, at: now.getTime() }], () => ok({ data: {} }));
+  return record([{ k: "ramp-paid", id: target.id, at: now.getTime() }], () => ({ status: 204 }));
 }
 
 const cancelRampSchema = z.object({ transferId: z.string().min(1) });
@@ -1478,6 +1465,7 @@ const WRITE_ROUTES: ReadonlyArray<[method: string, shape: string, handler: Handl
   ["POST", "payments/ramps/*/estimate", estimate],
   ["POST", "payments/ramps/*/quote", quote],
   ["POST", "payments/ramps/sandbox/simulate", simulatePayIn],
+  ["POST", "payments/demo/verifications", approveVerification],
   ["POST", "payments/ramps/transfers/cancel", cancelRamp],
   ["POST", "payments/ramps/*/events", () => record([], () => ({ status: 204 }))],
   ["POST", "payments/requests", createRequest],

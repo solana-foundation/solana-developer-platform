@@ -1,5 +1,11 @@
+import { addDecimalAmounts } from "@sdp/payments/decimal";
 import { isDecimalString } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types";
+import {
+  type EarnVaultPositionIntermediate,
+  isEarnVaultHoldingEmpty,
+  type SdpEnvironment,
+} from "@sdp/types";
+import { isAddress } from "@solana/kit";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
@@ -23,6 +29,20 @@ export interface HydratedVaultPositionValue {
   tokenValue: string | undefined;
   /** Provider-reported Unix epoch seconds; null means no active lock. */
   unlockTimestamp?: string | null;
+  parIntermediate?: EarnVaultPositionIntermediate;
+}
+
+/**
+ * The holding's whole deposit-token value: its shares plus any par
+ * intermediate. Undefined whenever the shares' own value is.
+ */
+export function hydratedHoldingTokenValue(
+  value: HydratedVaultPositionValue | undefined
+): string | undefined {
+  if (value?.tokenValue === undefined) return undefined;
+  return value.parIntermediate
+    ? addDecimalAmounts(value.tokenValue, value.parIntermediate.tokenValue)
+    : value.tokenValue;
 }
 
 export interface VaultPositionHydrationOptions {
@@ -101,7 +121,8 @@ export async function hydrateVaultPositions(
               !isBoundedSnapshotAmount(snapshot.withdrawableShares) ||
               (snapshot.tokenValue !== undefined &&
                 !isBoundedSnapshotAmount(snapshot.tokenValue)) ||
-              !isBoundedOptionalEpoch(snapshot.unlockTimestamp)
+              !isBoundedOptionalEpoch(snapshot.unlockTimestamp) ||
+              !isBoundedOptionalIntermediate(snapshot.parIntermediate)
             ) {
               getLogger().warn(
                 {
@@ -131,6 +152,7 @@ export async function hydrateVaultPositions(
                 withdrawableShares: snapshot.withdrawableShares,
                 tokenValue: snapshot.tokenValue,
                 unlockTimestamp: snapshot.unlockTimestamp,
+                ...(snapshot.parIntermediate ? { parIntermediate: snapshot.parIntermediate } : {}),
               });
             }
             if (!matched) {
@@ -189,6 +211,19 @@ function isBoundedSnapshotAmount(value: unknown): value is string {
   return typeof value === "string" && value.length <= 128 && isDecimalString(value);
 }
 
+function isBoundedOptionalIntermediate(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== "object" || value === null) return false;
+  const intermediate = value as Partial<Record<keyof EarnVaultPositionIntermediate, unknown>>;
+  return (
+    typeof intermediate.mint === "string" &&
+    isAddress(intermediate.mint) &&
+    isBoundedSnapshotAmount(intermediate.amount) &&
+    isBoundedSnapshotAmount(intermediate.withdrawableAmount) &&
+    isBoundedSnapshotAmount(intermediate.tokenValue)
+  );
+}
+
 function isBoundedOptionalEpoch(value: unknown): value is string | null | undefined {
   if (value === undefined || value === null) return true;
   if (typeof value !== "string" || value.length > 20 || !/^\d+$/.test(value)) return false;
@@ -214,9 +249,10 @@ export async function closeEmptyHydratedPositions(
   positions: ReadonlyArray<{ id: string; closedAt: string | null; updatedAt: string }>,
   live: ReadonlyMap<string, HydratedVaultPositionValue>
 ): Promise<void> {
-  const empty = positions.filter(
-    (position) => position.closedAt === null && live.get(position.id)?.shares === "0"
-  );
+  const empty = positions.filter((position) => {
+    const value = live.get(position.id);
+    return position.closedAt === null && value !== undefined && isEarnVaultHoldingEmpty(value);
+  });
   const settled = await mapSettledWithConcurrency(empty, 8, (position) =>
     // `updatedAt` was read with the row, BEFORE the live balance: it is the
     // snapshot boundary the repository checks under the position lock.

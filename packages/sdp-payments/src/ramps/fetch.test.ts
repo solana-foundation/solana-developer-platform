@@ -1,11 +1,53 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { extractProviderErrorMessage, providerFetch } from "./fetch";
+import { SdpPaymentsError } from "../errors";
+import { extractProviderErrorMessage, isDefinitiveProviderRejection, providerFetch } from "./fetch";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+describe("isDefinitiveProviderRejection", () => {
+  for (const [name, error, expected] of [
+    [
+      "400",
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 400 }),
+      true,
+    ],
+    [
+      "409",
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 409 }),
+      false,
+    ],
+    [
+      "408",
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 408 }),
+      false,
+    ],
+    [
+      "499",
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 499 }),
+      true,
+    ],
+    [
+      "500",
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 500 }),
+      false,
+    ],
+    [
+      "details without providerStatus",
+      new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural" }),
+      false,
+    ],
+    ["no details", new SdpPaymentsError("BAD_REQUEST", "x"), false],
+    ["plain Error", new Error("x"), false],
+  ] as const) {
+    it(`returns ${expected} for ${name}`, () => {
+      assert.equal(isDefinitiveProviderRejection(error), expected);
+    });
+  }
 });
 
 describe("extractProviderErrorMessage", () => {

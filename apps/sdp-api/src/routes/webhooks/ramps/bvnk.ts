@@ -46,8 +46,8 @@ import {
   type BvnkProvisioningAudit,
   ensureBvnkFundingWallet,
   refreshBvnkCustomerAccount,
-} from "@/routes/payments/handlers/ramps/bvnk";
-import { applyTerminalBvnkPayoutObservation } from "@/routes/payments/handlers/ramps/bvnk-settlement";
+} from "@/routes/payments/ramps/providers/bvnk";
+import { applyTerminalBvnkPayoutObservation } from "@/routes/payments/ramps/providers/bvnk-settlement";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";

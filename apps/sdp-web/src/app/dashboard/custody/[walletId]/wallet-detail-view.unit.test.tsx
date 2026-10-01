@@ -20,6 +20,10 @@ const mocks = vi.hoisted(() => ({
     hasMore: false as boolean,
   },
   activityLimits: [] as (number | undefined)[],
+  widerActivityFails: false,
+  /** The loaded window's latest refresh fails, so SWR holds its rows and an error. */
+  activityRefreshFails: false,
+  retryActivity: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -56,12 +60,38 @@ vi.mock("@/app/dashboard/payments/payments-workspace.data", () => ({
 vi.mock("@/app/dashboard/custody/wallet-provider-mark", () => ({
   WalletProviderMark: () => <span data-testid="mark" />,
 }));
-vi.mock("./use-wallet-activity", () => ({
-  useWalletActivity: (_walletId: string, limit?: number) => {
-    mocks.activityLimits.push(limit);
-    return { data: mocks.activity, error: undefined, isLoading: false };
-  },
-}));
+vi.mock("./use-wallet-activity", async () => {
+  const { useEffect } = await import("react");
+  return {
+    useWalletActivity: (
+      _walletId: string,
+      limit?: number,
+      callbacks: { onSuccess?: (data: unknown) => void; onError?: (error: Error) => void } = {}
+    ) => {
+      mocks.activityLimits.push(limit);
+      const fails = mocks.widerActivityFails && limit !== 20;
+      // Like SWR, report how the read this hook started settled.
+      useEffect(() => {
+        if (fails) callbacks.onError?.(new Error("unavailable"));
+        else callbacks.onSuccess?.(mocks.activity);
+      }, [limit]);
+      if (fails) {
+        return {
+          data: undefined,
+          error: new Error("unavailable"),
+          isValidating: false,
+          mutate: mocks.retryActivity,
+        };
+      }
+      return {
+        data: mocks.activity,
+        error: mocks.activityRefreshFails ? new Error("Activity refresh failed") : undefined,
+        isValidating: false,
+        mutate: vi.fn(),
+      };
+    },
+  };
+});
 
 const { WalletDetailView } = await import("./wallet-detail-view");
 
@@ -207,6 +237,8 @@ beforeEach(() => {
     hasMore: false,
   };
   mocks.activityLimits = [];
+  mocks.widerActivityFails = false;
+  mocks.activityRefreshFails = false;
 });
 afterEach(() => {
   cleanup();
@@ -246,6 +278,17 @@ describe("Overview", () => {
     expect(mocks.replaceSearchParams).toHaveBeenCalledWith({ tab: "activity" });
   });
 
+  it("keeps the recent rows when a refresh fails, and says the activity is unavailable", async () => {
+    mocks.activityRefreshFails = true;
+    await act(async () => {
+      renderView();
+    });
+    expect(await screen.findByText("Wallet activity is unavailable right now.")).toBeTruthy();
+    const activity = document.querySelector("[data-wallet-activity-table]") as HTMLElement;
+    expect(within(activity).getByText("−500.00 USDC")).toBeTruthy();
+    expect(within(activity).getByText("+1250.00 USDC")).toBeTruthy();
+  });
+
   it("says a restricted wallet cannot sign, and offers no faucet", async () => {
     await act(async () => {
       renderView({ wallet: { ...wallet, isRuntimeExecutionAllowed: false } });
@@ -279,6 +322,16 @@ describe("Activity", () => {
     expect(screen.queryByRole("button", { name: "Load older activity" })).toBeNull();
   });
 
+  it("keeps the loaded rows when a refresh fails, and says the activity is unavailable", async () => {
+    mocks.tab = "activity";
+    mocks.activityRefreshFails = true;
+    await act(async () => {
+      renderView();
+    });
+    expect(await screen.findByText("Wallet activity is unavailable right now.")).toBeTruthy();
+    expect(screen.getAllByText(/xfr_/)).toHaveLength(2);
+  });
+
   it("loads older activity and points the full history at this wallet's ledger", async () => {
     mocks.tab = "activity";
     const [first] = mocks.activity.activityRows as { id: string }[];
@@ -307,6 +360,36 @@ describe("Activity", () => {
       fireEvent.click(screen.getByRole("button", { name: "Load older activity" }));
     });
     expect(mocks.activityLimits.at(-1)).toBe(120);
+  });
+
+  it("keeps the loaded rows when older activity fails, and retries the same window", async () => {
+    mocks.tab = "activity";
+    mocks.widerActivityFails = true;
+    const [first] = mocks.activity.activityRows as { id: string }[];
+    mocks.activity = {
+      ...mocks.activity,
+      activityRows: Array.from({ length: 20 }, (_, index) => ({
+        ...first,
+        id: `payment-xfr_row_${index}`,
+      })),
+      hasMore: true,
+    };
+    await act(async () => {
+      renderView();
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Load older activity" }));
+    });
+    expect(
+      screen.getByText("Older activity didn't load. The latest 20 transactions are still shown.")
+    ).toBeTruthy();
+    expect(screen.getAllByText(/xfr_row_/)).toHaveLength(20);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try loading older activity again" }));
+    });
+    expect(mocks.retryActivity).toHaveBeenCalledTimes(1);
+    expect(Math.max(...mocks.activityLimits.map((limit) => limit ?? 20))).toBe(120);
   });
 
   it("offers older activity only from the last page of what is loaded", async () => {
@@ -351,6 +434,23 @@ describe("Policy", () => {
       "/dashboard/wallets/wallet_one/policy/audit"
     );
     expect(screen.getByRole("button", { name: "Disable policy…" })).toBeTruthy();
+  });
+
+  it("reaches the policy's history from its revisions before it has made a decision", async () => {
+    mocks.tab = "policy";
+    await act(async () => {
+      renderView({
+        policyPromise: Promise.resolve({
+          policy: { ...policy, audit: { recentEvaluations: [] } } as PaymentWalletPolicy,
+          error: null,
+        }),
+      });
+    });
+    await screen.findByText("Revision #2 has been enforcing since Aug 12, 2026.");
+    expect(document.querySelector("[data-wallet-decisions]")).toBeNull();
+    expect(screen.getByRole("link", { name: "Policy audit" }).getAttribute("href")).toBe(
+      "/dashboard/wallets/wallet_one/policy/audit"
+    );
   });
 
   it("keeps Disable away from someone who cannot manage custody", async () => {

@@ -292,6 +292,55 @@ function InstructionBadge({ children }: { children: ReactNode }) {
   );
 }
 
+/** An instruction's badges with its action, when it has one, at the trailing edge. */
+function InstructionHeader({
+  action,
+  children,
+}: {
+  action?: InstructionAction;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <InstructionBadges>{children}</InstructionBadges>
+      {action ? <InstructionActionButton action={action} /> : null}
+    </div>
+  );
+}
+
+/** The provider's free-text notes under an instruction. */
+function InstructionNotes({ children }: { children: ReactNode }) {
+  const t = useTranslations();
+  return (
+    <div className="rounded-xl bg-fill-subtle px-4 py-3">
+      <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
+        {t("DashboardPayments.manualInstructions.notes")}
+      </p>
+      <p className="mt-1 text-sm text-primary">{children}</p>
+    </div>
+  );
+}
+
+/** The square icon tile that leads the funding header and BVNK's verification notices. */
+function InstructionIconTile({
+  tone,
+  children,
+}: {
+  tone: "primary" | "secondary";
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle",
+        tone === "primary" ? "text-primary" : "text-secondary"
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 function LightsparkInstruction({
   instruction,
   showAction,
@@ -348,12 +397,7 @@ function LightsparkInstruction({
         </div>
       ) : null}
       {instruction.instructionsNotes ? (
-        <div className="rounded-xl bg-fill-subtle px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
-            {t("DashboardPayments.manualInstructions.notes")}
-          </p>
-          <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
-        </div>
+        <InstructionNotes>{instruction.instructionsNotes}</InstructionNotes>
       ) : null}
     </div>
   );
@@ -369,17 +413,14 @@ function BvnkCryptoDepositInstruction({
   const t = useTranslations();
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <InstructionBadges>
-          <InstructionBadge>
-            {t("DashboardPayments.manualInstructions.cryptoDeposit", {
-              currency: instruction.cryptoCurrency,
-            })}
-          </InstructionBadge>
-          <InstructionBadge>{instruction.network}</InstructionBadge>
-        </InstructionBadges>
-        {action ? <InstructionActionButton action={action} /> : null}
-      </div>
+      <InstructionHeader action={action}>
+        <InstructionBadge>
+          {t("DashboardPayments.manualInstructions.cryptoDeposit", {
+            currency: instruction.cryptoCurrency,
+          })}
+        </InstructionBadge>
+        <InstructionBadge>{instruction.network}</InstructionBadge>
+      </InstructionHeader>
       <PaymentInstructionField
         label={t("DashboardPayments.manualInstructions.depositAddress")}
         value={instruction.destinationAddress}
@@ -388,12 +429,7 @@ function BvnkCryptoDepositInstruction({
         label={t("DashboardPayments.manualInstructions.reference")}
         value={instruction.reference}
       />
-      <div className="rounded-xl bg-fill-subtle px-4 py-3">
-        <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
-          {t("DashboardPayments.manualInstructions.notes")}
-        </p>
-        <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
-      </div>
+      <InstructionNotes>{instruction.instructionsNotes}</InstructionNotes>
     </div>
   );
 }
@@ -417,23 +453,20 @@ function BvnkInstruction({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <InstructionBadges>
-          <InstructionBadge>
-            {t("DashboardPayments.manualInstructions.virtualAccount", {
-              currency: instruction.fiatCurrency,
-            })}
-          </InstructionBadge>
-          <InstructionBadge>{instruction.network}</InstructionBadge>
-        </InstructionBadges>
-        {isReady && action ? <InstructionActionButton action={action} /> : null}
-      </div>
+      <InstructionHeader action={isReady ? action : undefined}>
+        <InstructionBadge>
+          {t("DashboardPayments.manualInstructions.virtualAccount", {
+            currency: instruction.fiatCurrency,
+          })}
+        </InstructionBadge>
+        <InstructionBadge>{instruction.network}</InstructionBadge>
+      </InstructionHeader>
 
       {needsVerification ? (
         <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-primary">
+          <InstructionIconTile tone="primary">
             <ShieldCheckIcon className="size-5" />
-          </span>
+          </InstructionIconTile>
           <div className="min-w-0 flex-1">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
@@ -462,9 +495,9 @@ function BvnkInstruction({
 
       {!isReady && !needsVerification ? (
         <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
+          <InstructionIconTile tone="secondary">
             <Clock3 className="size-5" />
-          </span>
+          </InstructionIconTile>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-primary">
               {t("DashboardPayments.manualInstructions.verificationInReview")}
@@ -509,12 +542,7 @@ function BvnkInstruction({
               value={bank?.bankName}
             />
           </div>
-          <div className="rounded-xl bg-fill-subtle px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
-              {t("DashboardPayments.manualInstructions.notes")}
-            </p>
-            <p className="mt-1 text-sm text-primary">{instruction.instructionsNotes}</p>
-          </div>
+          <InstructionNotes>{instruction.instructionsNotes}</InstructionNotes>
         </>
       ) : null}
     </div>
@@ -533,19 +561,16 @@ function MuralInstruction({
   const t = useTranslations();
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <InstructionBadges>
-          <InstructionBadge>
-            {t("DashboardPayments.manualInstructions.payin", {
-              currency: instruction.fiatCurrency,
-            })}
-          </InstructionBadge>
-          {instruction.payinRails.map((rail) => (
-            <InstructionBadge key={rail}>{rail}</InstructionBadge>
-          ))}
-        </InstructionBadges>
-        {showAction && action ? <InstructionActionButton action={action} /> : null}
-      </div>
+      <InstructionHeader action={showAction ? action : undefined}>
+        <InstructionBadge>
+          {t("DashboardPayments.manualInstructions.payin", {
+            currency: instruction.fiatCurrency,
+          })}
+        </InstructionBadge>
+        {instruction.payinRails.map((rail) => (
+          <InstructionBadge key={rail}>{rail}</InstructionBadge>
+        ))}
+      </InstructionHeader>
       <div className="grid gap-3 lg:grid-cols-2">
         {Object.entries(instruction.bankDetails).map(([key, value]) => (
           <PaymentInstructionField key={key} label={humanizeFieldLabel(key)} value={value} />
@@ -639,9 +664,9 @@ export function ManualInstructionsQuote({
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-fill-subtle text-primary">
+        <InstructionIconTile tone="primary">
           <LandmarkIcon className="size-5" />
-        </span>
+        </InstructionIconTile>
         <div>
           <p className="text-sm font-medium text-primary">
             {t("DashboardPayments.manualInstructions.manualFundingInstructions")}

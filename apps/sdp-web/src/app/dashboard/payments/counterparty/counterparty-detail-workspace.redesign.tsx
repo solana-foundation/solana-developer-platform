@@ -1,12 +1,7 @@
 "use client";
 
 import { addDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
-import type {
-  Counterparty,
-  CounterpartyAccount,
-  PaymentTransferStatus,
-  PaymentTransferSummary,
-} from "@sdp/types";
+import type { Counterparty, CounterpartyAccount, PaymentTransferSummary } from "@sdp/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
@@ -39,6 +34,7 @@ import {
   PAYMENT_STATUS_TONE,
 } from "../payments-presentation";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
+import { SETTLED_PAYOUT_STATUSES } from "./counterparty-detail.data";
 import { CounterpartyProviderAccounts } from "./counterparty-provider-accounts.redesign";
 import { TransferDetailModal } from "./counterparty-transactions";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
@@ -49,30 +45,35 @@ type Translate = ReturnType<typeof useTranslations>;
 interface CounterpartyDetailWorkspaceProps {
   counterparty: Counterparty;
   initialAccounts: CounterpartyAccount[];
+  /** How many addresses the contact has saved; more than `initialAccounts` when cut short. */
+  accountsTotal?: number;
+  /** True when the addresses could not be read: none loaded is not none saved. */
+  accountsFailed?: boolean;
+  /** The latest transfers, for the Payments block. */
   initialTransfers: PaymentTransferSummary[];
-  /** How many transfers the contact has in all; more than `initialTransfers` when cut short. */
-  transfersTotal?: number;
   /** True when the transfers could not be read: the history is unknown, not empty. */
   transfersFailed?: boolean;
+  /** The contact's settled outbound payouts, newest first, for Last paid and Paid so far. */
+  payouts: PaymentTransferSummary[];
+  /** How many payouts the contact has in all; more than `payouts` when the read was capped. */
+  payoutsTotal?: number;
+  /** True when the payouts could not all be read. */
+  payoutsFailed?: boolean;
 }
 
 /** The design shows the latest three payments; Transactions has the rest. */
 const RECENT_PAYMENTS = 3;
 
-const SETTLED_STATUSES: ReadonlySet<PaymentTransferStatus> = new Set([
-  "completed",
-  "confirmed",
-  "finalized",
-]);
+const SETTLED_STATUSES = new Set(SETTLED_PAYOUT_STATUSES);
 
 function isInbound(transfer: PaymentTransferSummary): boolean {
   return transfer.type === "onramp" || transfer.direction === "inbound";
 }
 
 /**
- * What has been paid to the contact, read from the transfers the page loaded: the settled
- * outbound ones, their totals per token (added as decimal strings, so no float rounding), and
- * when the latest went out.
+ * What has been paid to the contact, read from the payouts the page loaded: the settled
+ * outbound ones (the read asks for only those; this holds to it), their totals per token (added
+ * as decimal strings, so no float rounding), and when the latest went out.
  */
 function summarizePayouts(transfers: PaymentTransferSummary[]) {
   const payouts = transfers.filter(
@@ -169,40 +170,29 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
-/**
- * What the record says when nothing settled was paid out in the loaded transfers: "Not yet" only
- * when the whole history was read; otherwise how much was read, or that none of it was.
- */
-function noPayoutLabel(
-  t: Translate,
-  history: { failed: boolean; partial: boolean; loaded: number }
-): string {
-  if (history.failed) return t("DashboardPayments.counterparty.detail.paymentsNotLoaded");
-  if (history.partial) {
-    return t("DashboardPayments.counterparty.detail.notPaidInLatest", { count: history.loaded });
-  }
-  return t("DashboardPayments.counterparty.detail.notPaidYet");
-}
-
 function ContactRecord({
   counterparty,
-  transfers,
-  transfersTotal,
-  transfersFailed,
+  payouts,
+  payoutsTotal,
+  payoutsFailed,
 }: {
   counterparty: Counterparty;
-  transfers: PaymentTransferSummary[];
-  transfersTotal: number;
-  transfersFailed: boolean;
+  payouts: PaymentTransferSummary[];
+  payoutsTotal: number;
+  payoutsFailed: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const summary = summarizePayouts(transfers);
-  // Only the latest transfers were loaded: older ones may hold payouts these do not.
-  const partial = transfersTotal > transfers.length;
+  const summary = summarizePayouts(payouts);
+  // Only the latest payouts were read (the cap, or a later page failed): older ones are not in
+  // the total.
+  const partial = payoutsTotal > payouts.length;
+  // With nothing read, a failed read is not "never paid".
   const notYet = (
     <span className="text-tertiary">
-      {noPayoutLabel(t, { failed: transfersFailed, partial, loaded: transfers.length })}
+      {payoutsFailed
+        ? t("DashboardPayments.counterparty.detail.paymentsNotLoaded")
+        : t("DashboardPayments.counterparty.detail.notPaidYet")}
     </span>
   );
   return (
@@ -300,6 +290,59 @@ function AddressesTable({ accounts }: { accounts: CounterpartyAccount[] }) {
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+/**
+ * The saved addresses, or why there are none. A failed read offers a retry rather than say none
+ * are saved; a capped one says how many of them it shows.
+ */
+function SavedAddresses({
+  accounts,
+  read,
+  addAddressButton,
+}: {
+  accounts: CounterpartyAccount[];
+  /** How many saved addresses the page read of how many there are; null when the read failed. */
+  read: { count: number; total: number } | null;
+  addAddressButton: ReactNode;
+}) {
+  const t = useTranslations();
+  const router = useRouter();
+  if (accounts.length === 0 && read === null) {
+    return (
+      <ListEmptyState
+        message={t("DashboardPayments.counterparty.detail.addressesLoadFailed")}
+        description={t("DashboardPayments.counterparty.detail.addressesLoadFailedDescription")}
+        action={
+          <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
+            {t("Shared.SharedComponents.retry")}
+          </Button>
+        }
+      />
+    );
+  }
+  if (accounts.length === 0) {
+    return (
+      <ListEmptyState
+        message={t("DashboardPayments.counterparty.detail.noAddresses")}
+        description={t("DashboardPayments.counterparty.detail.noAddressesDescription")}
+        action={addAddressButton}
+      />
+    );
+  }
+  let notice: string | null = null;
+  if (read === null) {
+    // The read failed and the user has added one since: the rest are still unread.
+    notice = t("DashboardPayments.counterparty.detail.addressesLoadFailed");
+  } else if (read.total > read.count) {
+    notice = t("DashboardPayments.counterparty.detail.addressesCapped", read);
+  }
+  return (
+    <>
+      <AddressesTable accounts={accounts} />
+      {notice === null ? null : <p className="text-meta text-tertiary">{notice}</p>}
+    </>
   );
 }
 
@@ -457,14 +500,24 @@ function RecentPayments({
 export function CounterpartyDetailWorkspace({
   counterparty,
   initialAccounts,
+  accountsTotal = initialAccounts.length,
+  accountsFailed = false,
   initialTransfers,
-  transfersTotal = initialTransfers.length,
   transfersFailed = false,
+  payouts,
+  payoutsTotal = payouts.length,
+  payoutsFailed = false,
 }: CounterpartyDetailWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
   const providerAccounts = useCounterpartyProviderAccounts(counterparty.id);
-  const [accounts, setAccounts] = useState(initialAccounts);
+  // Addresses added here since the page loaded. The list follows the page's read, so a Retry
+  // or other refresh shows what it loaded; an added address the read now holds is shown once.
+  const [added, setAdded] = useState<CounterpartyAccount[]>([]);
+  const accounts = [
+    ...added.filter((account) => !initialAccounts.some((loaded) => loaded.id === account.id)),
+    ...initialAccounts,
+  ];
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<PaymentTransferSummary | null>(null);
@@ -497,24 +550,21 @@ export function CounterpartyDetailWorkspace({
       <div className="flex flex-col gap-6" data-counterparty-detail>
         <ContactRecord
           counterparty={counterparty}
-          transfers={initialTransfers}
-          transfersTotal={transfersTotal}
-          transfersFailed={transfersFailed}
+          payouts={payouts}
+          payoutsTotal={payoutsTotal}
+          payoutsFailed={payoutsFailed}
         />
 
         <DetailBlock
           title={t("DashboardPayments.counterparty.detail.addresses")}
-          aside={accounts.length === 0 ? undefined : addAddressButton}
+          // The empty state holds the add button; a failed read's holds a retry instead.
+          aside={accounts.length === 0 && !accountsFailed ? undefined : addAddressButton}
         >
-          {accounts.length === 0 ? (
-            <ListEmptyState
-              message={t("DashboardPayments.counterparty.detail.noAddresses")}
-              description={t("DashboardPayments.counterparty.detail.noAddressesDescription")}
-              action={addAddressButton}
-            />
-          ) : (
-            <AddressesTable accounts={accounts} />
-          )}
+          <SavedAddresses
+            accounts={accounts}
+            read={accountsFailed ? null : { count: initialAccounts.length, total: accountsTotal }}
+            addAddressButton={addAddressButton}
+          />
         </DetailBlock>
 
         <DetailBlock title={t("DashboardPayments.counterparty.detail.providerAccounts")}>
@@ -567,7 +617,7 @@ export function CounterpartyDetailWorkspace({
       <AddExternalAccountDialog
         isOpen={addOpen}
         counterpartyId={counterparty.id}
-        onAdded={(account) => setAccounts((prev) => [account, ...prev])}
+        onAdded={(account) => setAdded((prev) => [account, ...prev])}
         onClose={() => setAddOpen(false)}
       />
 

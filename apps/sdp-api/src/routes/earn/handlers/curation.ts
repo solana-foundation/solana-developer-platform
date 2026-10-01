@@ -74,19 +74,18 @@ export const HIDDEN_VAULTS: Partial<
   Record<SolanaCluster, readonly `${EarnProviderId}:${string}`[]>
 > = {
   "mainnet-beta": [
-    // Ethena PYUSD lane, hidden (2026-09-14): Ethena PYUSD Prime and Sentora
-    // PYUSD stay stored and stay catalogued by the sync, but are absent from
-    // every public strategy read. Both were also dropped from the curated
-    // shelf below; this denylist is what keeps them hidden even if the shelf
-    // is ever relaxed wholesale rather than re-picked vault by vault.
+    // Ethena PYUSD Prime, hidden (2026-09-14): stays stored and catalogued by
+    // the sync, but is absent from every public strategy read. Also off the
+    // curated shelf below; this denylist keeps it hidden even if the shelf is
+    // ever relaxed wholesale rather than re-picked vault by vault. Sentora
+    // PYUSD was hidden alongside it and returned to the shelf on 2026-09-24.
     // biome-ignore lint/security/noSecrets: vault address constant, not a secret
     "kamino:4TwKA9JXEGeLEpAPLoarhSQoQwoiu12dkDCjSuVvHQUf",
-    // biome-ignore lint/security/noSecrets: vault address constant, not a secret
-    "kamino:A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK",
   ],
   devnet: [
-    // PyUSDC — the devnet PYUSD coverage vault, hidden with the lane above so
-    // no environment keeps a PYUSD door the other lost.
+    // PyUSDC — the devnet PYUSD coverage vault, hidden with the Ethena lane on
+    // 2026-09-14. Mainnet regained a PYUSD door (Sentora, 2026-09-24); whether
+    // the sandbox follows is a separate pick.
     // biome-ignore lint/security/noSecrets: vault address constant, not a secret
     "kamino:EHW185wryv6BrQX2bmEyMTRN9GjxcqszU6DjeJuFhf11",
   ],
@@ -108,8 +107,8 @@ export const HIDDEN_VAULTS: Partial<
  * Near-name traps, so un-curating stays a decision rather than a guess: the
  * commodity vault has a same-named USDG twin at
  * `DM5ECR3UY28yFhnqvGu7RTducR9k9oVgYXJ7foB3PydK` (under $1 of AUM, dropped by
- * the TVL floor), and "Ethena Prime" (USDG) is NOT the Ethena PYUSD pick —
- * that lane was un-surfaced wholesale and now lives in `HIDDEN_VAULTS`.
+ * the TVL floor), and "Ethena Prime" (USDG) is NOT Ethena PYUSD Prime, which
+ * is hidden (`HIDDEN_VAULTS`); the PYUSD lane's pick is Sentora PYUSD.
  */
 export const CURATED_VAULTS: Partial<
   Record<SolanaCluster, Partial<Record<EarnProviderId, readonly string[]>>>
@@ -133,6 +132,11 @@ export const CURATED_VAULTS: Partial<
       // the same name (see the near-name traps above).
       // biome-ignore lint/security/noSecrets: vault address constant, not a secret
       "B5pjfZAiKjyUEuqB2694NHrsjcaM67uuJaWqjzTVtzR6",
+      // Sentora PYUSD — Sentora-curated, PYUSD, $110M: the PYUSD lane's pick.
+      // Hidden with Ethena PYUSD Prime on 2026-09-14, restored 2026-09-24;
+      // Ethena stays in `HIDDEN_VAULTS`.
+      // biome-ignore lint/security/noSecrets: vault address constant, not a secret
+      "A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK",
     ],
   },
   // Devnet equivalents for the sandbox shelf, read on-chain from the devnet

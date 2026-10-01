@@ -26,11 +26,10 @@ import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flo
 import {
   formatDurationSeconds,
   formatEpochSecondsOr,
-  formatTokenQuantity,
-  formatUsd,
+  formatTokenValue,
   positionDisplayName,
 } from "./earn-format";
-import { earnMintAsset, TransactionLink } from "./earn-market-presentation";
+import { TransactionLink } from "./earn-market-presentation";
 import {
   cancelEarnVaultWithdrawalRequest,
   createEarnVaultWithdrawalRequest,
@@ -357,11 +356,7 @@ function QueuedWithdrawalResult({
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.quotedAmount")}</dt>
           <dd className="text-right tabular-nums text-primary">
-            {formatTokenQuantity(
-              request.quotedAssets,
-              locale,
-              earnMintAsset(request.assetMint).symbol
-            )}
+            {formatTokenValue(request.quotedAssets, request.assetMint, locale)}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-5">
@@ -489,7 +484,6 @@ function QueueReview({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const symbol = earnMintAsset(position.tokenMint).symbol;
   return (
     <>
       <p className="mt-1 text-sm text-secondary">{t("DashboardEarn.queuedWithdraw.reviewBody")}</p>
@@ -503,7 +497,7 @@ function QueueReview({
           <div className="flex items-baseline justify-between gap-5">
             <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.expectedAmount")}</dt>
             <dd className="text-right tabular-nums text-primary">
-              {formatTokenQuantity(preview.assets, locale, symbol)}
+              {formatTokenValue(preview.assets, position.tokenMint, locale)}
             </dd>
           </div>
           <div className="flex items-baseline justify-between gap-5">
@@ -588,6 +582,7 @@ function QueueDetails({
   overAvailableAmount,
   termsValid,
   terms,
+  tokenMint,
 }: {
   amount: string;
   amountError: string | null;
@@ -608,6 +603,7 @@ function QueueDetails({
   overAvailableAmount: boolean;
   termsValid: boolean;
   terms: EarnVaultQueuedWithdrawalTerms;
+  tokenMint: string;
 }) {
   const t = useTranslations();
   return (
@@ -644,7 +640,7 @@ function QueueDetails({
               ? t("DashboardEarn.queuedWithdraw.lockedUntil", { time: lockedUntil })
               : availableAmount
                 ? t("DashboardEarn.vaultWithdraw.amountAvailable", {
-                    amount: formatUsd(availableAmount, locale),
+                    amount: formatTokenValue(availableAmount, tokenMint, locale),
                   })
                 : t("DashboardEarn.vaultWithdraw.amountUnavailable")}
           </p>
@@ -854,6 +850,7 @@ export function EarnVaultQueuedWithdrawModal({
                   overAvailableAmount={overAvailableAmount}
                   termsValid={termsValid}
                   terms={terms}
+                  tokenMint={position.tokenMint}
                 />
               ) : (
                 <QueueReview
