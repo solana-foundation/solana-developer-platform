@@ -291,6 +291,7 @@ describe("WalletDetailPage critical path", () => {
     const balanceResult = { balances: [solBalance], error: null };
     const [summary, populatedBalances, emptyBalances] = await Promise.all([
       WalletBalanceSummary({
+        walletId: "wallet_one",
         balancesPromise: Promise.resolve(balanceResult),
         providerLabel: "Privy",
         publicKey: "11111111111111111111111111111111",
@@ -298,12 +299,14 @@ describe("WalletDetailPage critical path", () => {
         t,
       }),
       WalletBalancesSection({
+        walletId: "wallet_one",
         balancesPromise: Promise.resolve(balanceResult),
         ownedTokensByMintPromise: Promise.resolve(new Map()),
         issuanceEnabled: true,
         t,
       }),
       WalletBalancesSection({
+        walletId: "wallet_one",
         balancesPromise: Promise.resolve({ balances: [], error: null }),
         ownedTokensByMintPromise: Promise.resolve(new Map()),
         issuanceEnabled: true,

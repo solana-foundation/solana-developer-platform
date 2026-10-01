@@ -338,6 +338,49 @@ interface SolanaRpcAirdropResponse {
   };
 }
 
+interface SolanaRpcSignatureStatusesResponse {
+  result?: {
+    value?: Array<{ confirmationStatus?: string | null; err?: unknown } | null>;
+  };
+}
+
+const FAUCET_CONFIRMATION_TIMEOUT_MS = 15_000;
+const FAUCET_CONFIRMATION_POLL_MS = 1_000;
+
+/**
+ * Poll the transaction's status through the RPC relay until it is confirmed or
+ * failed, or the timeout passes. Best effort: on timeout the caller still
+ * revalidates, and the page's balance polling picks up the result later.
+ */
+async function waitForSignatureConfirmation(
+  client: Awaited<ReturnType<typeof createSdpApiClient>>,
+  signature: string
+): Promise<void> {
+  const deadline = Date.now() + FAUCET_CONFIRMATION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const relay = await client
+      .fetch<RpcRelayResponse<SolanaRpcSignatureStatusesResponse>>("/v1/rpc/proxy", {
+        method: "POST",
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: `wallet-faucet-status-${signature}`,
+          method: "getSignatureStatuses",
+          params: [[signature]],
+        }),
+      })
+      .catch(() => null);
+    const status = relay?.response?.result?.value?.[0];
+    if (
+      status?.err ||
+      status?.confirmationStatus === "confirmed" ||
+      status?.confirmationStatus === "finalized"
+    ) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, FAUCET_CONFIRMATION_POLL_MS));
+  }
+}
+
 interface RpcRelayResponse<TResponse> {
   provider: {
     id: string;
@@ -468,6 +511,10 @@ export async function requestDevnetSolanaFaucetAction(
     if (!payload.result) {
       return { status: "error", message: t("DashboardCustody.devnetFaucetNoSignature") };
     }
+
+    // requestAirdrop returns once the transaction is submitted. Revalidating now would
+    // re-read the pre-airdrop balance, so wait (bounded) for confirmation first.
+    await waitForSignatureConfirmation(client, payload.result);
 
     revalidatePath("/dashboard/custody");
     revalidatePath("/dashboard/wallets");

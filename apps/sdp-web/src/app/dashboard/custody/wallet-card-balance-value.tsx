@@ -5,7 +5,7 @@ import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatCurrencyAmount, resolveTotalBalance } from "../payments/payments-overview.utils";
 
-const BALANCE_REFRESH_INTERVAL_MS = 30_000;
+export const BALANCE_REFRESH_INTERVAL_MS = 30_000;
 const WALLET_BALANCE_CACHE_TTL_MS = 30_000;
 
 interface ApiErrorEnvelope {
@@ -73,7 +73,7 @@ async function fetchWalletBalances(): Promise<Record<string, CustodyWalletTokenB
   );
 }
 
-async function fetchWalletBalance(walletId: string): Promise<CustodyWalletTokenBalance[]> {
+export async function fetchWalletBalance(walletId: string): Promise<CustodyWalletTokenBalance[]> {
   const response = await fetch(
     `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
     {

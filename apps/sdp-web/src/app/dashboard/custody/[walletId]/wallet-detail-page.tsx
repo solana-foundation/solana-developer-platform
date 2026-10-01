@@ -41,13 +41,13 @@ import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
 import { collectDestinationAllowlist, resolveTransferCaps } from "@/lib/wallet-policy-rules";
+import { resolveTransferTokenLabel } from "../../payments/payments-overview.utils";
 import {
-  formatCurrencyAmount,
-  formatDisplayAmount,
-  resolveTotalBalance,
-  resolveTransferTokenLabel,
-  shortenAddress,
-} from "../../payments/payments-overview.utils";
+  WalletBalanceRows,
+  type WalletBalanceTokenRoutes,
+  WalletBalanceTotal,
+  type WalletTrackedBalancesResult,
+} from "./wallet-detail-balances";
 
 interface WalletBalancesResponse {
   walletBalances?: {
@@ -55,11 +55,6 @@ interface WalletBalancesResponse {
     address: string;
     balances: CustodyWalletTokenBalance[];
   };
-}
-
-interface WalletTrackedBalancesResult {
-  balances: CustodyWalletTokenBalance[];
-  error: string | null;
 }
 
 interface WalletPolicyResult {
@@ -366,6 +361,7 @@ export default async function WalletDetailPage({
 
         <Suspense fallback={<WalletBalanceSummarySkeleton />}>
           <WalletBalanceSummary
+            walletId={resolvedWalletId}
             balancesPromise={trackedBalancesPromise}
             providerLabel={providerLabel}
             publicKey={wallet.publicKey}
@@ -388,6 +384,7 @@ export default async function WalletDetailPage({
 
       <Suspense fallback={<WalletBalancesSkeleton />}>
         <WalletBalancesSection
+          walletId={resolvedWalletId}
           balancesPromise={trackedBalancesPromise}
           ownedTokensByMintPromise={ownedTokensByMintPromise}
           issuanceEnabled={issuanceEnabled}
@@ -448,12 +445,14 @@ async function WalletActivityWithBalanceSymbols({
 }
 
 export async function WalletBalanceSummary({
+  walletId,
   balancesPromise,
   providerLabel,
   publicKey,
   purposeLabel,
   t,
 }: {
+  walletId: string;
   balancesPromise: Promise<WalletTrackedBalancesResult>;
   providerLabel: string;
   publicKey: string;
@@ -461,7 +460,6 @@ export async function WalletBalanceSummary({
   t: Awaited<ReturnType<typeof getTranslations>>;
 }) {
   const balancesResult = await balancesPromise;
-  const totalBalance = balancesResult.error ? null : resolveTotalBalance(balancesResult.balances);
 
   return (
     <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
@@ -470,18 +468,7 @@ export async function WalletBalanceSummary({
           <p className="text-xs font-medium tracking-[0.14em] text-muted uppercase">
             {t("DashboardCustody.totalBalance")}
           </p>
-          {balancesResult.error ? (
-            <div className="mt-3 space-y-2">
-              <p className="text-[38px] leading-none font-medium tracking-[-0.05em] text-primary">
-                —
-              </p>
-              <p className="text-sm text-tertiary">{balancesResult.error}</p>
-            </div>
-          ) : (
-            <p className="mt-3 text-[38px] leading-none font-medium tracking-[-0.05em] text-primary">
-              {formatCurrencyAmount(totalBalance)}
-            </p>
-          )}
+          <WalletBalanceTotal walletId={walletId} initial={balancesResult} />
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
@@ -501,11 +488,13 @@ export async function WalletBalanceSummary({
 }
 
 export async function WalletBalancesSection({
+  walletId,
   balancesPromise,
   ownedTokensByMintPromise,
   issuanceEnabled,
   t,
 }: {
+  walletId: string;
   balancesPromise: Promise<WalletTrackedBalancesResult>;
   ownedTokensByMintPromise: Promise<OwnedTokensByMint>;
   issuanceEnabled: boolean;
@@ -515,39 +504,23 @@ export async function WalletBalancesSection({
     balancesPromise,
     ownedTokensByMintPromise,
   ]);
-  const balances = trackedBalancesResult.balances;
+  const tokenRoutes: WalletBalanceTokenRoutes = {};
+  for (const [mint, token] of ownedTokensByMint) {
+    tokenRoutes[mint] = { id: token.id, name: token.name };
+  }
 
   return (
     <section className="space-y-3">
       <h3 className="text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
         {t("DashboardCustody.balances")}
       </h3>
-      {trackedBalancesResult.error ? (
-        <p className="text-sm text-tertiary">{trackedBalancesResult.error}</p>
-      ) : null}
-
-      {balances.length > 0 ? (
-        <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
-          {balances.map((balance) => {
-            const ownedToken =
-              balance.token === "SOL" ? null : (ownedTokensByMint.get(balance.mint) ?? null);
-
-            return (
-              <WalletBalanceRow
-                key={`${balance.mint}-${balance.token}`}
-                label={ownedToken?.name ?? balance.token}
-                value={formatDisplayAmount(balance.uiAmount, balance.token)}
-                mint={balance.mint}
-                href={issuanceEnabled && ownedToken ? `/dashboard/issuance/${ownedToken.id}` : null}
-              />
-            );
-          })}
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-4 text-sm text-secondary">
-          {t("DashboardCustody.noTrackedBalances")}
-        </div>
-      )}
+      <WalletBalanceRows
+        walletId={walletId}
+        initial={trackedBalancesResult}
+        tokenRoutes={tokenRoutes}
+        issuanceEnabled={issuanceEnabled}
+        emptyLabel={t("DashboardCustody.noTrackedBalances")}
+      />
     </section>
   );
 }
@@ -741,49 +714,5 @@ function WalletInfoRow({
         {trailing}
       </div>
     </div>
-  );
-}
-
-function WalletBalanceRow({
-  label,
-  value,
-  mint,
-  href = null,
-}: {
-  label: string;
-  value: string;
-  mint: string;
-  href?: string | null;
-}) {
-  const content = (
-    <div
-      className={[
-        "flex flex-wrap items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0",
-        href ? "transition-colors hover:bg-fill-subtle" : "",
-      ].join(" ")}
-    >
-      <div className="flex min-w-0 items-center gap-3">
-        <TokenMark mint={mint} symbol={label} size="md" />
-        <div className="min-w-0">
-          <p className="text-[17px] font-medium text-primary">{label}</p>
-          {/* The full mint is 44 characters; keep it reachable on hover rather
-              than letting it dominate the row. */}
-          <p className="font-mono text-xs text-tertiary" title={mint}>
-            {shortenAddress(mint)}
-          </p>
-        </div>
-      </div>
-      <p className="text-[15px] text-primary tabular-nums">{value}</p>
-    </div>
-  );
-
-  if (!href) {
-    return content;
-  }
-
-  return (
-    <Link href={href} className="block focus-visible:outline-none">
-      {content}
-    </Link>
   );
 }
