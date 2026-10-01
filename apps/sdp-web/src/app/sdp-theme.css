@@ -27,9 +27,11 @@
 
 /* Point design-system runtime tokens at SDP's product palette. Re-declared on the refresh
    scope so var() re-resolves there: a custom property computed at :root would otherwise
-   carry the base palette into a refresh subtree. */
+   carry the base palette into a refresh subtree. The :root form keeps a refresh <html> ahead of
+   the design system's .dark whatever the order of the stylesheets. */
 :root,
-[data-sdp-theme="refresh"] {
+[data-sdp-theme="refresh"],
+:root[data-sdp-theme="refresh"] {
   --sdp-shell-bg: var(--surface);
 
   --gray-1400: var(--emph-xh);
@@ -64,12 +66,19 @@
 
 /* Refresh scope: the design-system component tokens the 2026 Payments design changes. The
    package derives its text and component tokens from its gray ramp at :root, so each one the
-   design touches is re-stated here to resolve against the scope's palette. */
-[data-sdp-theme="refresh"] {
+   design touches is re-stated here to resolve against the scope's palette. The :root form
+   outranks the design system's .dark when the scope sits on a dark <html>, whatever the order of
+   the stylesheets. */
+[data-sdp-theme="refresh"],
+:root[data-sdp-theme="refresh"] {
   /* Season Sans ships Regular and Medium faces only. The design system's regular weight is 450,
      which the browser matches to the Medium face, so every plain run came out heavy. The design's
-     body text is the Regular face, drawn antialiased. */
+     body text is the Regular face, drawn antialiased. The derived weights are re-stated with the
+     design system's own formula (its dark multiplier included): computed at :root, they would
+     carry 450 into a nested scope. */
   --font-weight-regular-base: 400;
+  --font-weight-regular: calc(var(--font-weight-regular-base) * var(--fw-mult));
+  --tab-weight-idle: var(--font-weight-regular);
   font-weight: var(--font-weight-regular);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
