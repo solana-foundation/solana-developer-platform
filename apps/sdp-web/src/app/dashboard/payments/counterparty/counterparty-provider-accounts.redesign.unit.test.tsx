@@ -37,8 +37,9 @@ vi.mock("@/i18n/provider", () => ({
 
 vi.mock("next/image", () => ({ default: () => null }));
 
+const routerRefresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), refresh: routerRefresh }),
   usePathname: () => "/dashboard/payments/counterparty/cpty_test",
 }));
 
@@ -131,50 +132,49 @@ describe("counterparty provider accounts table", () => {
     vi.unstubAllGlobals();
     await environment.teardown(globalThis);
   });
-  async function renderAccounts(
-    accounts: CounterpartyProviderAccount[],
-    history: {
-      transfers?: PaymentTransferSummary[];
-      transfersFailed?: boolean;
-      payouts?: PaymentTransferSummary[];
-      payoutsTotal?: number;
-      payoutsFailed?: boolean;
-      addresses?: CounterpartyAccount[];
-      addressesTotal?: number;
-      addressesFailed?: boolean;
-    } = {}
-  ) {
+  interface History {
+    transfers?: PaymentTransferSummary[];
+    transfersFailed?: boolean;
+    payouts?: PaymentTransferSummary[];
+    payoutsTotal?: number;
+    payoutsFailed?: boolean;
+    addresses?: CounterpartyAccount[];
+    addressesTotal?: number;
+    addressesFailed?: boolean;
+  }
+  function workspace(history: History) {
+    return (
+      <CounterpartyDetailWorkspace
+        counterparty={{
+          id: "cpty_test",
+          organizationId: "org_test",
+          projectId: "prj_test",
+          externalId: null,
+          entityType: "individual",
+          displayName: "Test Customer",
+          status: "active",
+          createdBy: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        }}
+        initialAccounts={history.addresses ?? []}
+        accountsTotal={history.addressesTotal}
+        accountsFailed={history.addressesFailed}
+        initialTransfers={history.transfers ?? []}
+        transfersFailed={history.transfersFailed}
+        payouts={history.payouts ?? []}
+        payoutsTotal={history.payoutsTotal}
+        payoutsFailed={history.payoutsFailed}
+      />
+    );
+  }
+  async function renderAccounts(accounts: CounterpartyProviderAccount[], history: History = {}) {
     accountState.accounts = accounts;
     container = document.createElement("div");
     document.body.append(container);
     const { createRoot } = await import("react-dom/client");
     root = createRoot(container);
-    await act(async () =>
-      root.render(
-        <CounterpartyDetailWorkspace
-          counterparty={{
-            id: "cpty_test",
-            organizationId: "org_test",
-            projectId: "prj_test",
-            externalId: null,
-            entityType: "individual",
-            displayName: "Test Customer",
-            status: "active",
-            createdBy: null,
-            createdAt: "2026-01-01T00:00:00.000Z",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-          }}
-          initialAccounts={history.addresses ?? []}
-          accountsTotal={history.addressesTotal}
-          accountsFailed={history.addressesFailed}
-          initialTransfers={history.transfers ?? []}
-          transfersFailed={history.transfersFailed}
-          payouts={history.payouts ?? []}
-          payoutsTotal={history.payoutsTotal}
-          payoutsFailed={history.payoutsFailed}
-        />
-      )
-    );
+    await act(async () => root.render(workspace(history)));
   }
   async function renderWallet(account: CounterpartyProviderAccount) {
     await renderAccounts([account]);
@@ -356,6 +356,22 @@ describe("counterparty provider accounts table", () => {
     const text = container.textContent ?? "";
     expect(text).not.toContain("DashboardPayments.counterparty.detail.noAddresses");
     expect(text).toContain("DashboardPayments.counterparty.detail.addressesLoadFailed");
+  });
+
+  it("shows the addresses a successful Retry loads after a failed read", async () => {
+    await renderAccounts([], { addressesFailed: true });
+    const retry = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Shared.SharedComponents.retry"
+    );
+    if (retry === undefined) throw new Error("Expected a retry button");
+    await act(async () => retry.click());
+    expect(routerRefresh).toHaveBeenCalled();
+    // The refresh hands the page the read it retried.
+    await act(async () => root.render(workspace({ addresses: [savedAddress("cpa_1")] })));
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.addressesLoadFailed");
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.noAddresses");
+    expect(text).toContain("DashboardPayments.counterparty.detail.unnamedAddress");
   });
 
   it("says how many saved addresses it left out when the read was capped", async () => {
