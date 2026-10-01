@@ -567,12 +567,13 @@ describe("OpenAPI spec", () => {
       ["/v1/dvp/trades/{tradeId}/settle", "post"],
     ] as const;
     for (const [path, method] of sponsored) {
-      expect(doc.paths?.[path]?.[method]?.responses, path).toHaveProperty("422");
+      const label = `${method.toUpperCase()} ${path}`;
+      const response = doc.paths?.[path]?.[method]?.responses?.["422"];
+      expect(response, label).toBeDefined();
+      const codeEnum = getJsonSchema(response).properties?.error?.properties?.code?.enum;
+      expect(codeEnum, label).toBeDefined();
+      expect(codeEnum, label).toContain("SIGNING_REJECTED");
     }
-    const codes = (doc.components?.schemas?.ApiErrorCode ?? doc.components?.schemas?.ErrorCode) as
-      | { enum?: string[] }
-      | undefined;
-    if (codes?.enum) expect(codes.enum).toContain("SIGNING_REJECTED");
   });
 
   it("documents exact-one wallet ownership and request-time runtime admission", () => {
