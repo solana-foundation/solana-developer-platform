@@ -157,3 +157,42 @@ describe("quick start preferences", () => {
     expect(onStale).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("recordQuickStartStep", () => {
+  const scope = { orgId: "org_test", userId: "user_test" };
+
+  it("re-reads the server status when the Overview module's guide is on", async () => {
+    const guide = await import("./dashboard-quick-start.redesign");
+    const legacy = await import("./dashboard-quick-start");
+    const onStale = vi.fn();
+    const unsubscribe = guide.subscribeQuickStartStatusStale(onStale);
+    guide.recordQuickStartStep(
+      { newDesign: true, newDesignModules: { overview: true } },
+      scope,
+      "wallet"
+    );
+    expect(onStale).toHaveBeenCalledTimes(1);
+    expect(legacy.readQuickStart(legacy.quickStartKey(scope))).toBe("api-key");
+    unsubscribe();
+  });
+
+  it("advances the previous design's guide when the Overview module is off", async () => {
+    const guide = await import("./dashboard-quick-start.redesign");
+    const legacy = await import("./dashboard-quick-start");
+    const onStale = vi.fn();
+    const unsubscribe = guide.subscribeQuickStartStatusStale(onStale);
+    // The Wallets redesign can run beside the previous Home and its guide.
+    guide.recordQuickStartStep(
+      { newDesign: true, newDesignModules: { overview: false, wallets: true } },
+      scope,
+      "wallet"
+    );
+    expect(onStale).not.toHaveBeenCalled();
+    expect(legacy.readQuickStart(legacy.quickStartKey(scope))).toBe("done");
+    guide.recordQuickStartStep({ newDesign: false }, { ...scope, orgId: "org_other" }, "api-key");
+    expect(legacy.readQuickStart(legacy.quickStartKey({ ...scope, orgId: "org_other" }))).toBe(
+      "wallet"
+    );
+    unsubscribe();
+  });
+});

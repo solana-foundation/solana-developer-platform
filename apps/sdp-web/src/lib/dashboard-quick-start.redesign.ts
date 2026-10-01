@@ -1,5 +1,10 @@
 import type { CustodyProvider, OrganizationRpcProvider } from "@sdp/types";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "./dashboard-cache-scope";
+import {
+  completeQuickStartStep as completeLegacyQuickStartStep,
+  quickStartKey as legacyQuickStartKey,
+} from "./dashboard-quick-start";
+import { type DesignFlags, isDesignModuleOn } from "./design-modules";
 
 /**
  * What the server knows about an organization's setup: the RPC provider it saved, the custody
@@ -208,6 +213,27 @@ const STATUS_STALE_EVENT = "sdp:quick-start-status-stale";
  */
 export function invalidateQuickStartStatus(): void {
   window.dispatchEvent(new Event(STATUS_STALE_EVENT));
+}
+
+/**
+ * Records that a flow in this tab finished a quick start step, for whichever guide is on: the
+ * Overview module's guide re-reads the server status, the previous design's guide advances its
+ * stored step. Wallets and API keys run under either guide, so they never pick one themselves.
+ *
+ * @param flags - The dashboard's flags.
+ * @param scope - The dashboard scope the previous design's guide is stored under.
+ * @param step - The step the flow finished.
+ */
+export function recordQuickStartStep(
+  flags: DesignFlags | null | undefined,
+  scope: DashboardCacheScope,
+  step: "api-key" | "wallet"
+): void {
+  if (isDesignModuleOn(flags, "overview")) {
+    invalidateQuickStartStatus();
+    return;
+  }
+  completeLegacyQuickStartStep(legacyQuickStartKey(scope), step);
 }
 
 export function subscribeQuickStartStatusStale(onStale: () => void): () => void {

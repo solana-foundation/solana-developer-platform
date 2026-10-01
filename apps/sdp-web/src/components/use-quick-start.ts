@@ -54,12 +54,8 @@ async function probeRpc(): Promise<RpcProbeResult> {
 
 const subscribeNothing = () => () => {};
 
-/**
- * The quick start's state, shared by the Overview card, the sidebar card and Settings: who may
- * see it, the three resolved steps, and the person's choices. SWR dedupes the status read and
- * the probe across the surfaces mounted at once.
- */
-export function useQuickStart() {
+/** Who may see the guide: a sandbox key manager inside an organization and project. */
+function useQuickStartEligibility(): boolean {
   const {
     initialQuickStartStatus,
     sdpEnvironment,
@@ -67,28 +63,18 @@ export function useQuickStart() {
     dashboardCacheScope,
     selectedProjectId,
   } = useDashboardWorkspace();
-  const storageKey = quickStartKey(dashboardCacheScope);
-  const prefs = useSyncExternalStore(
-    subscribeQuickStart,
-    () => readQuickStartPrefs(storageKey),
-    () => EMPTY_QUICK_START_PREFS
-  );
-  // The probe answer lives in browser storage, so the server and the first client render both
-  // read "checking"; the stored answer arrives on the next render instead of mismatching.
-  const hydrated = useSyncExternalStore(
-    subscribeNothing,
-    () => true,
-    () => false
-  );
-  const eligible = Boolean(
+  return Boolean(
     initialQuickStartStatus &&
       sdpEnvironment === "sandbox" &&
       dashboardAccess.capabilities.canManageApiKeys &&
       dashboardCacheScope.orgId &&
       selectedProjectId
   );
-  const live = eligible && !prefs.dismissed;
+}
 
+/** The server's setup status, re-read on focus, on an interval and when a flow marks it stale. */
+function useQuickStartStatus(live: boolean): QuickStartStatus | null {
+  const { initialQuickStartStatus } = useDashboardWorkspace();
   const { data: status, mutate: refreshStatus } = usePersistedDashboardSWR(
     live ? STATUS_KEY : null,
     fetchQuickStartStatus,
@@ -99,18 +85,6 @@ export function useQuickStart() {
       refreshInterval: STATUS_REFRESH_MS,
     }
   );
-  const { data: probe } = usePersistedDashboardSWR(
-    live ? PROBE_KEY : null,
-    probeRpc,
-    {
-      revalidateIfStale: false,
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      dedupingInterval: PROBE_TTL_MS,
-      refreshInterval: PROBE_TTL_MS,
-    },
-    { key: "quick-start-rpc-probe", ttlMs: PROBE_TTL_MS }
-  );
 
   useEffect(() => {
     if (!live) return;
@@ -119,8 +93,56 @@ export function useQuickStart() {
     });
   }, [live, refreshStatus]);
 
-  const knownStatus = status ?? initialQuickStartStatus;
-  const settledProbe = hydrated ? (probe ?? null) : null;
+  return status ?? initialQuickStartStatus;
+}
+
+/**
+ * The latest RPC probe, or null until one answers. A probe answers for the provider it tested, so
+ * its cache entry is keyed by the saved provider: switching providers starts a fresh probe instead
+ * of reusing the previous provider's answer for the rest of its five minutes.
+ */
+function useQuickStartProbe(live: boolean, status: QuickStartStatus | null): RpcProbeResult | null {
+  // The probe answer lives in browser storage, so the server and the first client render both
+  // read "checking"; the stored answer arrives on the next render instead of mismatching.
+  const hydrated = useSyncExternalStore(
+    subscribeNothing,
+    () => true,
+    () => false
+  );
+  const provider = status?.rpcProvider ?? "default";
+  const { data: probe } = usePersistedDashboardSWR(
+    live && status ? `${PROBE_KEY}:${provider}` : null,
+    probeRpc,
+    {
+      revalidateIfStale: false,
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      dedupingInterval: PROBE_TTL_MS,
+      refreshInterval: PROBE_TTL_MS,
+    },
+    { key: `quick-start-rpc-probe:${provider}`, ttlMs: PROBE_TTL_MS }
+  );
+  return hydrated ? (probe ?? null) : null;
+}
+
+/**
+ * The quick start's state, shared by the Overview card, the sidebar card and Settings: who may
+ * see it, the three resolved steps, and the person's choices. SWR dedupes the status read and
+ * the probe across the surfaces mounted at once.
+ */
+export function useQuickStart() {
+  const { dashboardCacheScope } = useDashboardWorkspace();
+  const storageKey = quickStartKey(dashboardCacheScope);
+  const prefs = useSyncExternalStore(
+    subscribeQuickStart,
+    () => readQuickStartPrefs(storageKey),
+    () => EMPTY_QUICK_START_PREFS
+  );
+  const eligible = useQuickStartEligibility();
+  const live = eligible && !prefs.dismissed;
+  const knownStatus = useQuickStartStatus(live);
+  const settledProbe = useQuickStartProbe(live, knownStatus);
+
   const steps = knownStatus
     ? resolveQuickStartSteps({ status: knownStatus, probe: settledProbe, skipped: prefs.skipped })
     : [];
