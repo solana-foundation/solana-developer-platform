@@ -121,6 +121,11 @@ type DashboardTopBarProps = {
    * title's row. "base" keeps the bottom bar's layout.
    */
   layout?: "base" | "refresh";
+  /**
+   * Whether the phone's bottom bar is on screen (the previous design). Without it a base layout
+   * still needs the menu button, in its title row's leading slot.
+   */
+  hasBottomNav?: boolean;
   /** Page-level controls at the title row's end (Payments puts its demo switch here). */
   utilities?: ReactNode;
 };
@@ -350,6 +355,7 @@ export function DashboardTopBar({
   action,
   above,
   layout = "base",
+  hasBottomNav = true,
   utilities,
 }: DashboardTopBarProps) {
   const utilityContent = utilities ?? null;
@@ -380,9 +386,11 @@ export function DashboardTopBar({
     );
   }
 
-  // The refresh phone has no bottom bar, so a centred or back-linked title still needs the
-  // menu button; the base shell's toggle stays hidden behind the bar.
-  const sidebarToggle = isRefresh ? (
+  // A phone with no bottom bar (any refresh route, and every route on NEW DESIGN) needs the menu
+  // button beside a centred, back-linked or base title; the previous design's toggle stays
+  // hidden behind the bar.
+  const showsMenuButton = isRefresh || !hasBottomNav;
+  const sidebarToggle = showsMenuButton ? (
     <MobileNavButton onClick={openNavigation} />
   ) : (
     <SidebarToggle
