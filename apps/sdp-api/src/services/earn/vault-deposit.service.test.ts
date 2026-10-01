@@ -909,26 +909,46 @@ describe("depositIntoVault — signed persistence boundary", () => {
     ).rejects.toThrow("Illegal earn movement transition");
   });
 
+  // Each failure surfaces as the error the service actually produces from it:
+  // plain build/sign/signer faults propagate raw, while simulation refusals and
+  // a mismatched signer are mapped onto badRequest. Asserting the specific
+  // rejection (not merely "something threw") keeps a mock-wiring accident from
+  // satisfying this test.
   it.each([
-    ["build throws", () => buildVaultDeposit.mockRejectedValue(new Error("build failed"))],
-    ["simulation throws", () => simulateVaultPlan.mockRejectedValue(new Error("RPC failed"))],
+    [
+      "build throws",
+      () => buildVaultDeposit.mockRejectedValue(new Error("build failed")),
+      "build failed",
+    ],
+    [
+      "simulation throws",
+      () => simulateVaultPlan.mockRejectedValue(new Error("RPC failed")),
+      "RPC failed",
+    ],
     [
       "simulation rejects",
       () => simulateVaultPlan.mockResolvedValue({ ok: false, error: "program error", logs: [] }),
+      "Vault deposit simulation failed: program error",
     ],
     [
       "signer lookup throws",
       () => createOrgSignerForCustodyWallet.mockRejectedValue(new Error("custody failed")),
+      "custody failed",
     ],
     [
       "signer address mismatches",
       () => createOrgSignerForCustodyWallet.mockResolvedValue({ address: VAULT_A }),
+      "Resolved signing wallet does not match the deposit wallet",
     ],
-    ["signing throws", () => signVaultPlan.mockRejectedValue(new Error("sign failed"))],
-  ])("does not invent a movement or holding when %s", async (_name, arrange) => {
+    [
+      "signing throws",
+      () => signVaultPlan.mockRejectedValue(new Error("sign failed")),
+      "sign failed",
+    ],
+  ])("does not invent a movement or holding when %s", async (_name, arrange, expectedRejection) => {
     arrange();
 
-    await expect(depositIntoVault(env, depositInput())).rejects.toBeTruthy();
+    await expect(depositIntoVault(env, depositInput())).rejects.toThrow(expectedRejection);
 
     expect(await tableCount("earn_positions")).toBe(0);
     expect(await tableCount("earn_movements")).toBe(0);

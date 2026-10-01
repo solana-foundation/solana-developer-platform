@@ -519,7 +519,8 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Prepare mint transaction",
     operationId: "prepareMint",
-    description: "Builds an unsigned mint transaction for client-side signing.",
+    description:
+      "Builds an unsigned mint transaction for client-side signing. The authority wallet is the fee payer: it signs the transaction and pays the network fee and the rent for a new destination token account; SDP does not sponsor prepared transactions.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -573,7 +574,8 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Prepare burn transaction",
     operationId: "prepareBurn",
-    description: "Builds an unsigned burn transaction for client-side signing.",
+    description:
+      "Builds an unsigned burn transaction for client-side signing. The authority wallet is the fee payer: it signs the transaction and pays the network fee; SDP does not sponsor prepared transactions.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

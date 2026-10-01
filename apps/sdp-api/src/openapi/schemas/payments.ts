@@ -9,6 +9,38 @@ import {
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   WALLET_OPERATION_FAMILIES,
 } from "@sdp/types";
+import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
+import {
+  createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
+  listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
+} from "@/routes/payments/ramps/onramp/schemas";
+import { simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase } from "@/routes/payments/ramps/schemas";
+import {
+  createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
+  listRecurringPaymentsQuerySchema as listRecurringPaymentsQuerySchemaBase,
+  paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
+  recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
+  updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
+} from "@/routes/payments/recurring-payments/schemas";
+import {
+  createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
+  listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
+  paymentSubscriptionPlanStatusSchema as paymentSubscriptionPlanStatusSchemaBase,
+  prepareSubscriptionPlanCreateSchema as prepareSubscriptionPlanCreateSchemaBase,
+  subscriptionPlanIdParamsSchema as subscriptionPlanIdParamsSchemaBase,
+  updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
+} from "@/routes/payments/subscription-plans/schemas";
+import {
+  createSubscriptionSchema as createSubscriptionSchemaBase,
+  listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
+  listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
+  paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
+  paymentSubscriptionStatusSchema as paymentSubscriptionStatusSchemaBase,
+  prepareSubscriptionAuthorizationSchema as prepareSubscriptionAuthorizationSchemaBase,
+  prepareSubscriptionCollectionSchema as prepareSubscriptionCollectionSchemaBase,
+  prepareSubscriptionLifecycleSchema as prepareSubscriptionLifecycleSchemaBase,
+  subscriptionIdParamsSchema as subscriptionIdParamsSchemaBase,
+} from "@/routes/payments/subscriptions/schemas";
 import {
   createTransferBatchSchema as createTransferBatchSchemaBase,
   estimateTransferBatchSchema as estimateTransferBatchSchemaBase,
@@ -26,34 +58,10 @@ import {
   transferTypeSchema as transferTypeSchemaBase,
 } from "@/routes/payments/transfers/schemas";
 import {
-  createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
-  createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
-  createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
-  createSubscriptionSchema as createSubscriptionSchemaBase,
-  listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
-  listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
-  listRecurringPaymentsQuerySchema as listRecurringPaymentsQuerySchemaBase,
-  listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
-  listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
-  listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
-  paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
-  paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
-  paymentSubscriptionPlanStatusSchema as paymentSubscriptionPlanStatusSchemaBase,
-  paymentSubscriptionStatusSchema as paymentSubscriptionStatusSchemaBase,
-  prepareSubscriptionAuthorizationSchema as prepareSubscriptionAuthorizationSchemaBase,
-  prepareSubscriptionCollectionSchema as prepareSubscriptionCollectionSchemaBase,
-  prepareSubscriptionLifecycleSchema as prepareSubscriptionLifecycleSchemaBase,
-  prepareSubscriptionPlanCreateSchema as prepareSubscriptionPlanCreateSchemaBase,
-  recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
-  simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase,
-  subscriptionIdParamsSchema as subscriptionIdParamsSchemaBase,
-  subscriptionPlanIdParamsSchema as subscriptionPlanIdParamsSchemaBase,
-  transferIdParamsSchema as transferIdParamsSchemaBase,
-  updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
-  updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
   updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
-} from "../../routes/payments/schemas";
+} from "@/routes/payments/wallet-policies/schemas";
+import { transferIdParamsSchema as transferIdParamsSchemaBase } from "../../routes/payments/schemas";
 import {
   base64Schema,
   cryptoAssetSymbolSchema,
@@ -1790,10 +1798,18 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
     },
   });
 
-export const simulateSandboxTransferRequestSchema = withOpenApi(simulateSandboxTransferSchemaBase, {
-  description:
-    "Sandbox-only helper to simulate provider-specific transfer completion flows. The payload is discriminated by provider.",
-});
+export const simulateSandboxTransferRequestSchema = simulateSandboxTransferSchemaBase
+  .extend({
+    transferId: withOpenApi(simulateSandboxTransferSchemaBase.shape.transferId, {
+      description:
+        "ID of an on-ramp transfer that is awaiting payment. The provider, quote reference, counterparty, and fiat amount are read from the transfer; each transfer can be simulated once.",
+      example: "xfr_example",
+    }),
+  })
+  .openapi({
+    description:
+      "Sandbox-only helper that simulates the fiat pay-in for a persisted on-ramp quote. Only the transfer ID is accepted; every provider-specific value is derived from the transfer.",
+  });
 
 export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
   .extend({
@@ -2339,11 +2355,3 @@ export const onrampQuoteResponseSchema = z
     }),
   })
   .openapi({ description: "On-ramp quote response payload." });
-
-export const sandboxTransferSimulationResponseSchema = z
-  .object({
-    transaction: z
-      .record(z.string(), z.unknown())
-      .openapi({ description: "Provider sandbox transaction response." }),
-  })
-  .openapi({ description: "Sandbox transfer simulation response payload." });

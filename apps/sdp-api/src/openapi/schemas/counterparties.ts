@@ -1,4 +1,5 @@
 import { COUNTERPARTY_ENTITY_TYPES, COUNTRY_CODES, RAMP_PROVIDERS } from "@sdp/types";
+import { rampDirectionSchema as rampDirectionSchemaBase } from "@/routes/payments/ramps/schemas";
 import {
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
   counterpartyIdParamsSchema as counterpartyIdParamsSchemaBase,
@@ -16,7 +17,6 @@ import {
   updateCounterpartyAccountObjectSchema as updateCounterpartyAccountSchemaBase,
 } from "../../routes/counterparty-accounts/schemas";
 import { listCounterpartyProviderAccountsQuerySchema as listCounterpartyProviderAccountsQuerySchemaBase } from "../../routes/counterparty-provider-accounts/schemas";
-import { rampDirectionSchema as rampDirectionSchemaBase } from "../../routes/payments/schemas";
 import {
   isoDateTimeSchema,
   orgIdParamSchema,

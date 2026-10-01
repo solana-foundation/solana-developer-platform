@@ -11,7 +11,6 @@ import type {
   ListProjectCounterpartyAccountsEnvelope,
   ListProjectCounterpartyAccountsResponse,
   MoneygramRampEvent,
-  MuralSandboxPayinCurrency,
   PaymentRampEstimateEnvelope,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferBatch,
@@ -256,19 +255,6 @@ interface WalletBalancesEnvelope {
         address?: string;
         balances?: PaymentWalletBalance[];
       };
-  error?: {
-    message?: string;
-  };
-}
-
-interface SandboxTransferSimulationEnvelope {
-  data?: {
-    transaction?: {
-      id?: string;
-      status?: string;
-      quoteId?: string;
-    };
-  };
   error?: {
     message?: string;
   };
@@ -827,31 +813,12 @@ export async function fetchCounterpartyAccounts(
   return body.data?.accounts ?? [];
 }
 
-type SandboxTransferSimulationInput =
-  | {
-      provider: "lightspark";
-      payload: {
-        quoteId: string;
-        currencyCode?: "USD" | "USDC";
-        currencyAmount?: number;
-      };
-    }
-  | {
-      provider: "bvnk";
-      payload: {
-        transferId: string;
-      };
-    }
-  | {
-      provider: "mural";
-      payload: {
-        counterpartyId: string;
-        amount: number;
-        fiatCurrency: MuralSandboxPayinCurrency;
-      };
-    };
+type SandboxTransferSimulationInput = { transferId: string };
 
-export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput, t: Translate) {
+export async function simulateSandboxTransfer(
+  input: SandboxTransferSimulationInput,
+  t: Translate
+): Promise<void> {
   const response = await fetch("/api/dashboard/payments/ramps/sandbox/simulate", {
     method: "POST",
     headers: {
@@ -859,20 +826,17 @@ export async function simulateSandboxTransfer(input: SandboxTransferSimulationIn
     },
     body: JSON.stringify(input),
   });
-  const body = (await response.json().catch(() => ({}))) as SandboxTransferSimulationEnvelope;
 
   if (!response.ok) {
     throw new Error(
       getApiError(
-        body,
+        await response.json().catch(() => null),
         t("DashboardPayments.workspace.sandboxSimulationRequestFailed", {
           status: response.status,
         })
       )
     );
   }
-
-  return body.data?.transaction ?? null;
 }
 
 export async function runComplianceCheck(

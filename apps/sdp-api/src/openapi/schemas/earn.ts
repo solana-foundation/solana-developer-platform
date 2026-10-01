@@ -431,12 +431,51 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
           vaultAddress: z.string().nullable(),
           shareMint: z.string().nullable(),
           label: z.string(),
+          ambiguousBacking: z.boolean().openapi({
+            description:
+              "True when the wallet holds intermediate tokens this position's cancelled operator " +
+              "redemption may have left, but an unresolved request or another position's " +
+              "redemption could own them, so the report cannot tell whether they back it.",
+          }),
         })
       )
       .openapi({
         description:
           "Recorded open positions whose wallet holds none of their shares. Positions with an " +
-          "unsettled movement are excluded: the ledger already explains that disagreement.",
+          "unsettled movement are excluded: the ledger already explains that disagreement. " +
+          "So is a position provably backed by the intermediate token its cancelled operator " +
+          "redemption left in place of its shares; one whose backing the report cannot decide " +
+          "carries `ambiguousBacking`. Positions with an open queued withdrawal request are " +
+          "listed in `queuedWithdrawalPositions` instead.",
+      }),
+    queuedWithdrawalPositions: z
+      .array(
+        z.object({
+          positionId: z.string().openapi({ example: "earn_position_example" }),
+          custodyWalletId: z.string().openapi({ example: "cwlt_example" }),
+          walletAddress: z.string(),
+          provider: z.string().openapi({ example: "veda" }),
+          vaultAddress: z.string().nullable(),
+          shareMint: z.string().nullable(),
+          label: z.string(),
+          ambiguousBacking: z.boolean().openapi({
+            description:
+              "True when the wallet holds intermediate tokens this position's cancelled operator " +
+              "redemption may have left, but an unresolved request or another position's " +
+              "redemption could own them, so the report cannot tell whether they back it.",
+          }),
+          withdrawalRequestIds: z.array(z.string()).openapi({
+            example: ["earn_vault_withdrawal_request_example"],
+          }),
+        })
+      )
+      .openapi({
+        description:
+          "Recorded open positions whose wallet holds none of their shares while queued " +
+          "withdrawal requests are open. The requests escrowed or burned shares ahead of the " +
+          "payout, but only the shares they cover, so these positions are listed with their " +
+          "requests rather than judged. A position provably backed by its cancelled operator " +
+          "redemption's intermediate token is omitted from both lists.",
       }),
     unreadableWallets: z
       .array(
@@ -1096,8 +1135,32 @@ const earnExternalWalletPositionSchema = z
         example: "1789722000",
       }),
     tokenValue: earnLiveDecimalAmountSchema.optional().openapi({
-      description: "Live deposit-token value. Absent when hydration is unavailable.",
+      description:
+        "Live value of the position in the deposit token (`tokenMint`), as the provider reports " +
+        "it: shares × rate for rate-based vaults, an exit quote for the whole position for " +
+        "quote-based providers (Veda, Ondo), so spread and price impact are already inside it and " +
+        "it does not scale to other share amounts. A deposit-token amount, not a share count and " +
+        "not a USD conversion; every Earn deposit token is a USD stablecoin, so at par this is a " +
+        "dollar figure. Absent when hydration is unavailable.",
     }),
+    parIntermediate: z
+      .object({
+        mint: z.string().openapi({ example: "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih" }),
+        amount: earnLiveDecimalAmountSchema,
+        withdrawableAmount: earnLiveDecimalAmountSchema.openapi({
+          description: "Zero while the provider has frozen the token account.",
+        }),
+        tokenValue: earnLiveDecimalAmountSchema.openapi({
+          description: "Value in the position's deposit token (`tokenMint`).",
+        }),
+      })
+      .optional()
+      .openapi({
+        description:
+          "The par-redemption route's intermediate token the owner holds outside any open " +
+          "request, such as Hastra wYLDS after a cancelled par redemption. It belongs to this " +
+          "position and is not included in `tokenValue`. Present only while non-zero.",
+      }),
   })
   .openapi({ description: "One live vault position owned by a partner end-user wallet." });
 
@@ -1108,7 +1171,9 @@ const earnExternalWalletTokenTotalSchema = z.object({
   unavailablePositionCount: z.number().int().nonnegative(),
   tokenValue: earnLiveDecimalAmountSchema.optional().openapi({
     description:
-      "Exact live total. Absent when any contributing position is unavailable, so partial money is never presented as complete.",
+      "Exact live total in the deposit token (`tokenMint`): the sum of the positions' `tokenValue` " +
+      "plus any `parIntermediate.tokenValue`, a dollar figure at par. Absent when any " +
+      "contributing position is unavailable, so partial money is never presented as complete.",
   }),
 });
 
@@ -1196,8 +1261,9 @@ const earnExternalWalletTokenEarningsSchema = z
     }),
     currentValue: earnLiveDecimalAmountSchema.optional().openapi({
       description:
-        "Live value across the token's positions. Absent when any contributing position is " +
-        "unavailable, so partial money is never presented as complete.",
+        "Live value across the token's positions, including any par intermediate they hold. " +
+        "Absent when any contributing position is unavailable, so partial money is never " +
+        "presented as complete.",
     }),
     totalDeposited: earnLiveDecimalAmountSchema.openapi({
       description: "Sum of finalized SDP deposits — a ledger fact, always present.",
@@ -1215,13 +1281,20 @@ const earnExternalWalletTokenEarningsSchema = z
         "acquired outside SDP inflate this figure (a documented property of non-custodial reads).",
     }),
     earnedUnavailableReason: z
-      .enum(["live_value_unavailable", "movements_pending", "withdrawals_not_valued"])
+      .enum([
+        "live_value_unavailable",
+        "movements_pending",
+        "withdrawals_pending",
+        "withdrawals_not_valued",
+      ])
       .optional()
       .openapi({
         description:
           "Why `earned` is absent: live value failed to hydrate; a movement is still settling; " +
-          "or a currently held position has a finalized withdrawal whose token payout was not " +
-          "observed at settlement, so `totalWithdrawn` is incomplete.",
+          "a currently held position has an open queued withdrawal request, whose shares leave " +
+          "the wallet before its payout (this can last days); or a currently held position has " +
+          "a finalized withdrawal whose token payout was not observed at settlement, so " +
+          "`totalWithdrawn` is incomplete.",
       }),
   })
   .openapi({ description: "Earnings for one deposit token across the wallet's positions." });

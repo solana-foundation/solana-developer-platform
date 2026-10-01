@@ -179,8 +179,7 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
 
     const needsHeight = rows.some(
       (row, index) =>
-        statuses[index] === null &&
-        (row.status === "requested" || (row.status === "submitted" && row.action === "cancel"))
+        statuses[index] === null && (row.status === "requested" || row.status === "submitted")
     );
     let currentHeight: bigint | null = null;
     if (needsHeight) {
@@ -298,6 +297,8 @@ export async function reconcileAction(
   chain: { rpc: RawHistoryRpc; rpcUrl: string; currentHeight: bigint | null }
 ): Promise<"advanced" | "failed" | "rebroadcast" | "unchanged"> {
   if (status?.err) {
+    // A rejection on an unrooted fork cannot release the durable PDA claim.
+    if (status.confirmationStatus !== "finalized") return "unchanged";
     await failAction(ledger, actionRow, describeError(status.err));
     return "failed";
   }
@@ -334,17 +335,18 @@ export async function reconcileAction(
   // its live request is reconciled through the PDA sweep. A submitted CANCEL
   // needs one extra recovery rule: once its blockhash expired, a still-live
   // expired PDA proves the cancel did not finalize and must reopen retry.
-  if (actionRow.status !== "requested") {
-    if (
-      actionRow.status === "submitted" &&
-      actionRow.action === "cancel" &&
-      chain.currentHeight !== null &&
-      chain.currentHeight > BigInt(actionRow.last_valid_block_height)
-    ) {
+  if (actionRow.status === "confirmed") return "unchanged";
+  if (
+    actionRow.status === "submitted" &&
+    chain.currentHeight !== null &&
+    chain.currentHeight > BigInt(actionRow.last_valid_block_height)
+  ) {
+    if (actionRow.action === "cancel") {
       return recoverExpiredUnknownAction(env, ledger, actionRow, chain.rpc);
     }
     return "unchanged";
   }
+  if (actionRow.status !== "requested" && actionRow.status !== "submitted") return "unchanged";
   if (
     chain.currentHeight !== null &&
     chain.currentHeight > BigInt(actionRow.last_valid_block_height)

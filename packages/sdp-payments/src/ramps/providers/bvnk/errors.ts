@@ -30,28 +30,32 @@ function mapBvnkErrorStatus(
   message: string,
   options?: { edgeBlocked?: boolean; details?: Record<string, unknown> }
 ): SdpPaymentsError {
+  const details = { provider: "bvnk", providerStatus: status, ...options?.details };
   if (options?.edgeBlocked) {
     return providerUnavailable(
-      `BVNK request was blocked at the edge (CloudFront/WAF, status ${status}) before reaching the API. This is typically IP rate-limiting, not a credential issue; retry shortly or from a different egress.`
+      `BVNK request was blocked at the edge (CloudFront/WAF, status ${status}) before reaching the API. This is typically IP rate-limiting, not a credential issue; retry shortly or from a different egress.`,
+      details
     );
   }
   if (status === 401) {
     return providerNotConfigured(
-      "BVNK rejected the request credentials (status 401). Check the BVNK Hawk auth configuration."
+      "BVNK rejected the request credentials (status 401). Check the BVNK Hawk auth configuration.",
+      details
     );
   }
   if (status === 403) {
     return providerNotConfigured(
-      "BVNK request was forbidden (status 403). Check the BVNK Hawk auth/account permissions and that the API egress IP is allowlisted on the merchant account."
+      "BVNK request was forbidden (status 403). Check the BVNK Hawk auth/account permissions and that the API egress IP is allowlisted on the merchant account.",
+      details
     );
   }
   if (status === 429) {
-    return rateLimited(message);
+    return rateLimited(message, details);
   }
   if (status >= 500) {
-    return internalError(`BVNK request failed with status ${status}.`);
+    return internalError(`BVNK request failed with status ${status}.`, details);
   }
-  return badRequest(message, options?.details);
+  return badRequest(message, details);
 }
 
 /**
