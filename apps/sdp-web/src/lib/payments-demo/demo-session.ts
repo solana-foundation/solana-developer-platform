@@ -32,17 +32,19 @@ function chunkName(index: number): string {
 
 /** The log as the cookies carry it: deflated JSON, base64url, split into chunks. */
 export function encodeDemoOps(ops: readonly DemoOp[]): string[] {
+  // Past either budget the oldest actions go first; the replay tolerates what they referred to.
   let kept = [...ops];
   let json = JSON.stringify(kept);
-  let encoded = deflateRawSync(json).toString("base64url");
-  // Past either budget the oldest actions go first; the replay tolerates what they referred to.
-  while (
-    (encoded.length > MAX_ENCODED_LENGTH || json.length > MAX_DECODED_LENGTH) &&
-    kept.length > 0
-  ) {
-    kept = kept.slice(1);
+  // The JSON budget is cut in proportion, so a long log isn't deflated once per action dropped.
+  while (json.length > MAX_DECODED_LENGTH && kept.length > 0) {
+    const keep = Math.floor((kept.length * MAX_DECODED_LENGTH) / json.length);
+    kept = kept.slice(kept.length - Math.min(keep, kept.length - 1));
     json = JSON.stringify(kept);
-    encoded = deflateRawSync(json).toString("base64url");
+  }
+  let encoded = deflateRawSync(json).toString("base64url");
+  while (encoded.length > MAX_ENCODED_LENGTH && kept.length > 0) {
+    kept = kept.slice(1);
+    encoded = deflateRawSync(JSON.stringify(kept)).toString("base64url");
   }
   if (kept.length === 0) return [];
   const chunks: string[] = [];
