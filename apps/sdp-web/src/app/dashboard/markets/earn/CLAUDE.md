@@ -518,7 +518,9 @@ successful pair clears that gate, including retries and overlapping completions.
 Keep the custody wallet ID from the intent while a deposit is provisional and
 resolve recovered movements from the returned position read. An unknown wallet
 scope remains pending; it must never become a global freshness bound. Overlapping
-confirmations each trigger refresh, including recovery.
+confirmations each trigger refresh, including recovery. Retry IDs follow the
+bounded activity window (50 deposits plus 50 withdrawals); retired history must
+not accumulate into requests beyond the API's 100-ID limit.
 
 Post-confirmation position reads send `afterMovementIds`. The API authorizes the
 movements and bounds only the affected positions by each position's maximum

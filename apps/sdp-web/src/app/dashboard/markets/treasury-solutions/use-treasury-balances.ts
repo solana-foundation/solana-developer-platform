@@ -23,7 +23,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
   const funding = useEarnFundingWallets();
   const vaults = useEarnVaultPositions();
   const [submissions, setSubmissions] = useState<readonly SubmissionTarget[]>([]);
-  const [refreshes, setRefreshes] = useState<readonly { movementIds: readonly string[] }[]>([]);
+  const [refreshes, setRefreshes] = useState<readonly { movementIds: ReadonlySet<string> }[]>([]);
   const [refreshError, setRefreshError] = useState<Error>();
   const [pairedMovementIds, setPairedMovementIds] = useState<ReadonlySet<string>>(() => new Set());
   const movementWalletIds = useRef(new Map<string, string>());
@@ -41,29 +41,43 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
   const refresh = useCallback(
     async (movementIds?: readonly string[]) => {
       const current = ++generation.current;
-      const request = { movementIds: movementIds ?? [...requested.current] };
+      // Treasury keeps a bounded activity window. Retired history must not leak
+      // back into retries and exceed the API's 100-movement request limit.
+      const movements = new Map(activities.map(({ movement }) => [movement.movementId, movement]));
+      const request = {
+        movementIds: new Set(
+          movementIds ??
+            activities
+              .filter(
+                ({ movement }) =>
+                  isCommittedVaultMovement(movement) && movement.committedObservedAt !== undefined
+              )
+              .map(({ movement }) => movement.movementId)
+        ),
+      };
+      const positionsById = new Map(vaults.positions?.map((position) => [position.id, position]));
       setRefreshes((current) => [...current, request]);
       setPairedMovementIds(
-        (previous) => new Set([...previous].filter((id) => !request.movementIds.includes(id)))
+        (previous) =>
+          new Set([...previous].filter((id) => movements.has(id) && !request.movementIds.has(id)))
       );
       const requestedActivities = activities.filter(({ movement }) =>
-        request.movementIds.includes(movement.movementId)
+        request.movementIds.has(movement.movementId)
       );
       // Capture submission metadata before a full withdrawal removes its position.
       for (const { movement } of requestedActivities) {
         const walletId =
-          movement.custodyWalletId ??
-          vaults.positions?.find(({ id }) => id === movement.positionId)?.custodyWalletId;
+          movement.custodyWalletId ?? positionsById.get(movement.positionId)?.custodyWalletId;
         if (walletId) movementWalletIds.current.set(movement.movementId, walletId);
       }
       try {
         const positionRead = Promise.resolve(
-          vaults.refresh(request.movementIds.length > 0 ? request.movementIds : undefined)
+          vaults.refresh(request.movementIds.size > 0 ? [...request.movementIds] : undefined)
         );
         const results = await Promise.allSettled([
           positionRead,
           positionRead.then((read) => {
-            if (request.movementIds.length === 0) return funding.refreshBalances();
+            if (request.movementIds.size === 0) return funding.refreshBalances();
             if (
               !read ||
               read.minimumSlot === undefined ||
@@ -72,13 +86,15 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
               throw new Error("Vault balance read did not verify the requested movements");
             }
             // A new deposit may first appear in this response, after the request began.
-            const walletIds = request.movementIds.map((movementId) => {
-              const movement = requestedActivities.find(
-                ({ movement }) => movement.movementId === movementId
-              )?.movement;
+            const returnedPositions = new Map(
+              read.positions.map((position) => [position.id, position])
+            );
+            const walletIds = [...request.movementIds].map((movementId) => {
+              const movement = movements.get(movementId);
               const walletId =
-                read.positions.find(({ id }) => id === movement?.positionId)?.custodyWalletId ??
-                movementWalletIds.current.get(movementId);
+                (movement
+                  ? returnedPositions.get(movement.positionId)?.custodyWalletId
+                  : undefined) ?? movementWalletIds.current.get(movementId);
               if (!walletId) throw new Error("Confirmed movement wallet is not yet available");
               movementWalletIds.current.set(movementId, walletId);
               return walletId;
@@ -102,6 +118,11 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
   );
 
   useEffect(() => {
+    const currentIds = new Set(activities.map(({ movement }) => movement.movementId));
+    requested.current = new Set([...requested.current].filter((id) => currentIds.has(id)));
+    for (const id of movementWalletIds.current.keys()) {
+      if (!currentIds.has(id)) movementWalletIds.current.delete(id);
+    }
     const confirmed = activities.filter(
       ({ movement }) =>
         isCommittedVaultMovement(movement) && movement.committedObservedAt !== undefined
@@ -111,7 +132,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
     );
     if (unrequested.length === 0) return;
     for (const { movement } of unrequested) requested.current.add(movement.movementId);
-    void refresh([...requested.current]);
+    void refresh(confirmed.map(({ movement }) => movement.movementId));
   }, [activities, refresh]);
 
   useEffect(() => {
@@ -133,7 +154,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
         refreshes.some((read) =>
           activities.some(
             ({ movement }) =>
-              movement.positionId === position.id && read.movementIds.includes(movement.movementId)
+              movement.positionId === position.id && read.movementIds.has(movement.movementId)
           )
         );
       if (

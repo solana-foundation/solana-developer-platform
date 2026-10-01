@@ -251,3 +251,50 @@ describe("confirmation refresh recovery", () => {
     expect(result.current.walletsError).toBeInstanceOf(Error);
   });
 });
+
+it("keeps retries within the API limit after more than 100 confirmations in one session", async () => {
+  vi.useFakeTimers();
+  const observed: VaultActivity[] = [];
+  let activities: VaultActivity[] = [];
+  mocks.refreshPositions.mockImplementation(async (ids: readonly string[]) => {
+    if (ids.length > 100) throw new Error("API movement limit exceeded");
+    const read = {
+      positions: [position],
+      afterMovementIds: ids,
+      minimumSlot: 101,
+      startedAt: 11,
+      landedAt: 12,
+    };
+    mocks.reads = [read];
+    return read;
+  });
+  const { result, rerender } = renderHook(() => useTreasuryBalances(activities));
+  for (let index = 0; index < 120; index += 1) {
+    observed.push({
+      kind: "deposit",
+      movement: {
+        ...movement("confirmed").movement,
+        movementId: `movement-${index}`,
+        observedOrder: index,
+      },
+    });
+    // Same bounded history maintained by Treasury's deposit watch list.
+    activities = observed.slice(-50);
+    await act(async () => rerender());
+  }
+  mocks.refreshWallets.mockRejectedValueOnce(new Error("temporary wallet failure"));
+  await act(async () => {
+    await result.current.refresh();
+  });
+  expect(result.current.walletsError).toBeInstanceOf(Error);
+  expect(result.current.balanceOf(position).syncing).toBe(true);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+  const expected = activities.map(({ movement }) => movement.movementId);
+  expect(mocks.refreshPositions).toHaveBeenLastCalledWith(expected);
+  expect(mocks.refreshPositions.mock.calls.every(([ids]) => ids.length <= 100)).toBe(true);
+  expect(result.current.walletsError).toBeUndefined();
+  expect(result.current.balanceOf(position)).toEqual({ value: "10", syncing: false });
+  expect(result.current.balancesRefreshing).toBe(false);
+});
