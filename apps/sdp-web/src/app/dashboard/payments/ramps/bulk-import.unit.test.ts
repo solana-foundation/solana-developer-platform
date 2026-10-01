@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
+import { getMessages, type MessageKey, type TranslationValues, translate } from "@/i18n/messages";
 import {
+  type BulkRowError,
   bulkCsvTemplate,
+  bulkRowErrorMessage,
   parseBulkCsv,
   splitPastedRows,
   validateBulkRows,
 } from "./bulk-import.redesign";
+
+const t = (key: MessageKey, values?: TranslationValues) =>
+  translate(getMessages("en"), key, values);
+
+function messages(errors: BulkRowError[]) {
+  return errors.map((error) => ({ row: error.row, message: bulkRowErrorMessage(error, t) }));
+}
 
 describe("parseBulkCsv", () => {
   it("skips the template header, a byte-order mark and blank lines", () => {
@@ -29,7 +39,7 @@ describe("parseBulkCsv", () => {
     expect(rows).toHaveLength(4);
     const { valid, errors } = validateBulkRows(rows);
     expect(valid.map((row) => row.accountId)).toEqual(["cpa_1"]);
-    expect(errors).toEqual([
+    expect(messages(errors)).toEqual([
       { row: 2, message: "Amount must be a positive number" },
       { row: 3, message: "Missing counterparty_wallet_id" },
       { row: 4, message: "Amount must be a positive number" },
@@ -71,6 +81,12 @@ describe("validateBulkRows", () => {
       { accountId: "cpa_1", currency: "USDC", amount: "7" },
     ]);
     expect(valid.map((row) => row.accountId)).toEqual(["cpa_1", "cpa_2"]);
-    expect(errors).toEqual([{ row: 3, message: "cpa_1 is already on row 1" }]);
+    expect(errors).toEqual([{ row: 3, reason: "duplicateWallet", walletId: "cpa_1", firstRow: 1 }]);
+    expect(messages(errors)).toEqual([{ row: 3, message: "cpa_1 is already on row 1" }]);
+  });
+
+  it("words a row without a token from the catalog", () => {
+    const { errors } = validateBulkRows([{ accountId: "cpa_1", currency: "", amount: "1" }]);
+    expect(messages(errors)).toEqual([{ row: 1, message: "Missing currency or mint address" }]);
   });
 });

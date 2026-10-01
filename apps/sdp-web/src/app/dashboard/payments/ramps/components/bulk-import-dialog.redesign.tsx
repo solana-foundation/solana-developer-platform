@@ -7,6 +7,7 @@ import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import {
   type BulkImportRow,
+  bulkRowErrorMessage,
   emptyBulkRow,
   isEmptyBulkRow,
   splitPastedRows,
@@ -76,7 +77,10 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
   const handleImport = async () => {
     const { valid, errors: rowErrors } = validateBulkRows(rows.map(toBulkRow));
     const messages = rowErrors.map((error) =>
-      t("DashboardPayments.batchSend.rowError", { row: error.row, message: error.message })
+      t("DashboardPayments.batchSend.rowError", {
+        row: error.row,
+        message: bulkRowErrorMessage(error, t),
+      })
     );
     if (valid.length === 0 && messages.length === 0) {
       setErrors([t("DashboardPayments.batchSend.addAtLeastOneRecipient")]);

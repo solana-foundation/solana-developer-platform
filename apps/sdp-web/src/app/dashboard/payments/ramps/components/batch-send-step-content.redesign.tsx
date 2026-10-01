@@ -21,7 +21,12 @@ import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
-import { bulkCsvTemplate, parseBulkCsv, validateBulkRows } from "../bulk-import.redesign";
+import {
+  bulkCsvTemplate,
+  bulkRowErrorMessage,
+  parseBulkCsv,
+  validateBulkRows,
+} from "../bulk-import.redesign";
 import type {
   BatchEligibleRecipient,
   BatchSendWizard,
@@ -139,7 +144,7 @@ function CsvDropzone({
         toast.error(
           t("DashboardPayments.batchSend.csvRowError", {
             row: errors[0].row,
-            message: errors[0].message,
+            message: bulkRowErrorMessage(errors[0], t),
           })
         );
         return;
