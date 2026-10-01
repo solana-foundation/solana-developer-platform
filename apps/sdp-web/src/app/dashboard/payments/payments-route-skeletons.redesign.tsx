@@ -213,22 +213,6 @@ function FlowPageSkeleton({
   );
 }
 
-function WizardProgressSkeleton({ steps }: { steps: number }) {
-  return (
-    <div className="flex items-center gap-4">
-      <div className="flex items-center gap-1.5">
-        {Array.from({ length: steps }, (_, index) => index).map((index) => (
-          <SkeletonBlock
-            key={index}
-            className={index === 0 ? "h-1.5 w-5 rounded-full" : "h-1.5 w-2.5 rounded-full"}
-          />
-        ))}
-      </div>
-      <SkeletonBlock className="h-3 w-16" />
-    </div>
-  );
-}
-
 function DetailRowsSkeleton({ count = 8 }: { count?: number }) {
   return (
     <div className="divide-y divide-border-default" data-loading-detail-rows>
@@ -318,42 +302,6 @@ export function PaymentRequestCreateSkeleton() {
         <SkeletonBlock className="h-4 w-80 max-w-full" />
       </div>
     </FlowPageSkeleton>
-  );
-}
-
-export function CounterpartyCreateSkeleton() {
-  return (
-    <div
-      className="flex h-full min-h-0 w-full flex-col"
-      data-loading-layout="counterparty-create"
-      data-loading-wizard
-      aria-busy="true"
-    >
-      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
-        <div className="mx-auto w-full max-w-xl">
-          <WizardProgressSkeleton steps={4} />
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden px-4 md:px-6">
-        <div className="mx-auto w-full max-w-xl space-y-6 pb-8">
-          <div className="space-y-2">
-            <SkeletonBlock className="h-8 w-52 max-w-full" />
-            <SkeletonBlock className="h-4 w-full max-w-md" />
-          </div>
-          <div className="space-y-5">
-            <SkeletonBlock className="h-14 w-full rounded-xl" />
-            <SkeletonBlock className="h-14 w-full rounded-xl" />
-            <SkeletonBlock className="h-24 w-full rounded-xl" />
-          </div>
-        </div>
-      </div>
-      <div className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6">
-        <div className="mx-auto flex w-full max-w-xl items-center justify-between gap-3">
-          <SkeletonBlock className="h-10 w-24 rounded-lg" />
-          <SkeletonBlock className="h-10 w-24 rounded-lg" />
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -506,3 +454,6 @@ export function PaymentsTransactionsPageSkeleton() {
     </ListPageSkeleton>
   );
 }
+
+// A new contact's wizard loads as it did before: its layout is unchanged.
+export { CounterpartyCreateSkeleton } from "./payments-route-skeletons";

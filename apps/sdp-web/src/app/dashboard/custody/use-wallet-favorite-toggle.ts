@@ -7,14 +7,14 @@ import { useTranslations } from "@/i18n/provider";
 import {
   addWalletFavorite,
   readWalletFavorites,
+  reinsertWalletFavorite,
   removeWalletFavorite,
-  restoreWalletFavorites,
   type WalletFavorite,
 } from "@/lib/wallet-favorites";
 
 /**
- * Pins or unpins a wallet and says so in a toast with Undo. Undo puts the earlier list back
- * exactly, so an unpinned wallet returns to its old place in the sidebar.
+ * Pins or unpins a wallet and says so in a toast with Undo. Undo reverses only that toggle, so
+ * an unpinned wallet returns to its old place in the sidebar and a later pin or unpin survives.
  */
 export function useWalletFavoriteToggle() {
   const t = useTranslations();
@@ -26,23 +26,27 @@ export function useWalletFavoriteToggle() {
 
   const toggle = (favorite: WalletFavorite) => {
     if (!storageKey) return;
-    const previous = readWalletFavorites(storageKey);
-    const undo = {
-      label: t("DashboardCustody.undo"),
-      onClick: () => restoreWalletFavorites(storageKey, previous),
-    };
-    if (previous.some((entry) => entry.walletId === favorite.walletId)) {
+    const current = readWalletFavorites(storageKey);
+    const index = current.findIndex((entry) => entry.walletId === favorite.walletId);
+    if (index >= 0) {
+      const removed = current[index] ?? favorite;
       removeWalletFavorite(storageKey, favorite.walletId);
       toast(t("DashboardCustody.favoriteRemoved"), {
         description: t("DashboardCustody.favoriteRemovedDescription", { wallet: favorite.name }),
-        action: undo,
+        action: {
+          label: t("DashboardCustody.undo"),
+          onClick: () => reinsertWalletFavorite(storageKey, removed, index),
+        },
       });
       return;
     }
     addWalletFavorite(storageKey, favorite);
     toast(t("DashboardCustody.favoriteAdded"), {
       description: t("DashboardCustody.favoriteAddedDescription", { wallet: favorite.name }),
-      action: undo,
+      action: {
+        label: t("DashboardCustody.undo"),
+        onClick: () => removeWalletFavorite(storageKey, favorite.walletId),
+      },
     });
   };
 

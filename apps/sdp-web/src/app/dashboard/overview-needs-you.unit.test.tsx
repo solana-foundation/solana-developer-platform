@@ -21,7 +21,7 @@ const MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 function request(
   id: string,
-  overrides: Partial<WalletApprovalRequestSummary> & {
+  overrides: Omit<Partial<WalletApprovalRequestSummary>, "operation"> & {
     operation?: Partial<WalletApprovalRequestSummary["operation"]>;
   } = {}
 ): WalletApprovalRequestSummary {
@@ -111,13 +111,13 @@ describe("OverviewNeedsYou", () => {
         operation: { walletId: "wallet_without_a_label_0001", asset: MINT, amount: "15000" },
         policyEvaluation: {
           id: "pe_1",
-          decision: "require_approval",
+          decision: "approval_required",
           reasonCode: "amount_over_limit",
           reason: null,
           matchedRules: [],
           requiresApproval: true,
           evaluatedAt: "2026-09-25T08:00:00.000Z",
-        } as WalletApprovalRequestSummary["policyEvaluation"],
+        },
       }),
     ]);
     renderNeedsYou();

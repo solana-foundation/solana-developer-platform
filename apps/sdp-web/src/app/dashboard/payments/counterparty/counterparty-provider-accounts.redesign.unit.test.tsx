@@ -1,4 +1,8 @@
-import { BVNK_FUNDING_WALLET_STATUS, type CounterpartyProviderAccount } from "@sdp/types";
+import {
+  BVNK_FUNDING_WALLET_STATUS,
+  type CounterpartyProviderAccount,
+  type PaymentTransferSummary,
+} from "@sdp/types";
 import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -14,13 +18,19 @@ vi.mock("@/i18n/provider", () => ({
       values?: {
         label?: string;
         currency?: string;
+        amounts?: string;
+        count?: number;
       }
     ) =>
       values?.label
         ? `${key} ${values.label}`
         : values?.currency
           ? `${key} ${values.currency}`
-          : key,
+          : values?.amounts
+            ? `${key} ${values.amounts}`
+            : values?.count !== undefined
+              ? `${key} ${values.count}`
+              : key,
   useLocale: () => "en",
 }));
 
@@ -120,8 +130,15 @@ describe("counterparty provider accounts table", () => {
     vi.unstubAllGlobals();
     await environment.teardown(globalThis);
   });
-  async function renderWallet(account: CounterpartyProviderAccount) {
-    accountState.accounts = [account];
+  async function renderAccounts(
+    accounts: CounterpartyProviderAccount[],
+    history: {
+      transfers?: PaymentTransferSummary[];
+      transfersTotal?: number;
+      transfersFailed?: boolean;
+    } = {}
+  ) {
+    accountState.accounts = accounts;
     container = document.createElement("div");
     document.body.append(container);
     const { createRoot } = await import("react-dom/client");
@@ -142,10 +159,15 @@ describe("counterparty provider accounts table", () => {
             updatedAt: "2026-01-01T00:00:00.000Z",
           }}
           initialAccounts={[]}
-          initialTransfers={[]}
+          initialTransfers={history.transfers ?? []}
+          transfersTotal={history.transfersTotal}
+          transfersFailed={history.transfersFailed}
         />
       )
     );
+  }
+  async function renderWallet(account: CounterpartyProviderAccount) {
+    await renderAccounts([account]);
     const row = container.querySelector<HTMLTableRowElement>(
       'tr[data-provider-account-kind="funding_wallet"]'
     );
@@ -222,5 +244,74 @@ describe("counterparty provider accounts table", () => {
     // The agreement the provider wants accepted is listed once, under the table.
     expect(row.textContent).not.toContain("Test Wallet Agreement");
     expect(container.textContent?.split("Test Wallet Agreement")).toHaveLength(2);
+  });
+
+  it("gives a customer link carried on the provider's accounts its own row, once", async () => {
+    // With accounts present the API sends no separate customer-link row; each account carries it.
+    const link = walletAccount({}).customerLink;
+    await renderAccounts([
+      walletAccount({ id: "cpa_wallet" }),
+      providerAccount({ id: "cpa_payout", customerLink: link }),
+    ]);
+
+    const customerRows = container.querySelectorAll(
+      'tr[data-provider-account-kind="customer_link"]'
+    );
+    expect(customerRows).toHaveLength(1);
+    expect(customerRows[0]?.textContent).toContain("US");
+    expect(
+      customerRows[0]?.querySelector(
+        'button[aria-label="DashboardCustody.copy dashboardpayments.counterparty.customeridlabel"]'
+      )
+    ).not.toBeNull();
+    expect(
+      container.querySelectorAll('tr[data-provider-account-kind="funding_wallet"]')
+    ).toHaveLength(1);
+    expect(
+      container.querySelectorAll('tr[data-provider-account-kind="payout_account"]')
+    ).toHaveLength(1);
+  });
+
+  function payout(id: string, amount: string): PaymentTransferSummary {
+    return {
+      id,
+      custodyWalletId: null,
+      providerWalletId: "pw_1",
+      status: "completed",
+      signature: null,
+      direction: "outbound",
+      token: "USDC",
+      amount,
+      rampsMemo: {},
+      createdAt: "2026-01-02T00:00:00.000Z",
+    };
+  }
+
+  it("adds payouts as decimals, so the total does not pick up float rounding", async () => {
+    await renderAccounts([], {
+      transfers: [payout("tx_1", "0.1"), payout("tx_2", "0.2"), payout("tx_3", "9007199254740993")],
+    });
+    expect(container.textContent).toContain("9,007,199,254,740,993.30 USDC");
+  });
+
+  it("does not say a contact was never paid when older transfers were not loaded", async () => {
+    await renderAccounts([], {
+      transfers: [{ ...payout("tx_1", "5"), status: "failed" }],
+      transfersTotal: 80,
+    });
+    expect(container.textContent).not.toContain("DashboardPayments.counterparty.detail.notPaidYet");
+    expect(container.textContent).toContain(
+      "DashboardPayments.counterparty.detail.notPaidInLatest 1"
+    );
+  });
+
+  it("says the payment history was not loaded when the transfers read failed", async () => {
+    await renderAccounts([], { transfers: [], transfersTotal: 0, transfersFailed: true });
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.notPaidYet");
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.noPayments");
+    expect(text.split("DashboardPayments.counterparty.detail.paymentsNotLoaded")).toHaveLength(3);
+    expect(text).toContain("DashboardPayments.counterparty.detail.paymentsLoadFailed");
+    expect(text).toContain("Shared.SharedComponents.retry");
   });
 });

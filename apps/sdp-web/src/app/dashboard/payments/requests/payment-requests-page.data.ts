@@ -6,6 +6,7 @@ import {
   WELL_KNOWN_TOKENS,
   type WellKnownToken,
 } from "@sdp/types";
+import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const PAYMENT_REQUESTS_PAGE_SIZE = 100;
@@ -72,38 +73,240 @@ export async function fetchPaymentRequests(
   }
 }
 
-/** The most requests the Requests list loads for local search, filtering and paging. */
-export const PAYMENT_REQUESTS_CAP = 500;
+/** Rows a page of the Requests list shows until the user picks another size. */
+export const PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE = 25;
+
+const PAYMENT_REQUEST_STATUSES = [
+  "awaiting_payment",
+  "paid",
+  "canceled",
+  "expired",
+] as const satisfies readonly PaymentRequest["status"][];
+
+/** Longest search the Requests list carries in its URL. */
+const PAYMENT_REQUESTS_SEARCH_MAX_LENGTH = 200;
+
+/** The Requests list's page, its size, its status filter and its search, as the URL carries them. */
+export interface PaymentRequestsListState {
+  page: number;
+  pageSize: number;
+  status: PaymentRequest["status"] | null;
+  /** Trimmed, never empty; `null` when the list is not searched. */
+  search: string | null;
+}
+
+function firstParamValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function parseListInteger(value: string | undefined, fallback: number): number {
+  if (value === undefined || !/^\d+$/.test(value)) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return parsed > 0 ? parsed : fallback;
+}
 
 /**
- * The newest payment requests up to `cap`, read in pages of {@link PAYMENT_REQUESTS_PAGE_SIZE}.
- * The list API has no search, so the Requests list loads this once and searches it locally;
- * `total` is the project's full count, so the list can say when the cap cut it short.
+ * The Requests list's state from its URL. Anything missing or malformed falls back to the
+ * first page, the default size, every status and no search; the size never exceeds what the
+ * API serves.
  *
- * @param request - Authenticated SDP API fetcher.
- * @param cap - Most rows to read.
- * @returns The loaded requests and the full total; never throws.
+ * @param params - The route's search params.
+ * @returns The page, its size, the status filter and the search.
  */
-export async function fetchPaymentRequestDirectory(
+export function parsePaymentRequestsListParams(
+  params: Record<string, string | string[] | undefined>
+): PaymentRequestsListState {
+  const status = firstParamValue(params.status);
+  const search = firstParamValue(params.search)
+    ?.trim()
+    .slice(0, PAYMENT_REQUESTS_SEARCH_MAX_LENGTH);
+  return {
+    page: parseListInteger(firstParamValue(params.page), 1),
+    pageSize: Math.min(
+      parseListInteger(firstParamValue(params.pageSize), PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE),
+      PAYMENT_REQUESTS_PAGE_SIZE
+    ),
+    status: PAYMENT_REQUEST_STATUSES.find((candidate) => candidate === status) ?? null,
+    search: search ? search : null,
+  };
+}
+
+/**
+ * The Requests list's URL for a state, leaving out whatever is at its default.
+ *
+ * @param state - The page, its size, the status filter and the search.
+ * @returns A path under {@link PAYMENT_REQUESTS_HREF}.
+ */
+export function paymentRequestsListHref(state: PaymentRequestsListState): string {
+  const query = new URLSearchParams();
+  if (state.page > 1) query.set("page", String(state.page));
+  if (state.pageSize !== PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE) {
+    query.set("pageSize", String(state.pageSize));
+  }
+  if (state.status) query.set("status", state.status);
+  if (state.search) query.set("search", state.search);
+  const search = query.toString();
+  return `${PAYMENT_REQUESTS_HREF}${search ? `?${search}` : ""}`;
+}
+
+/**
+ * The most requests the list reads to search, or to settle open requests, before it pages
+ * them itself; the API has no search, so a searched list reads this far and no further.
+ */
+export const PAYMENT_REQUESTS_SCAN_CAP = 500;
+
+type PaymentRequestsScan = PaymentRequestsResult & {
+  /** More requests matched the read than {@link PAYMENT_REQUESTS_SCAN_CAP}. */
+  capped: boolean;
+};
+
+/**
+ * The newest payment requests up to {@link PAYMENT_REQUESTS_SCAN_CAP}, with an optional status,
+ * read in pages of {@link PAYMENT_REQUESTS_PAGE_SIZE}. Listing reconciles each open request it
+ * reads, and saves any that has been paid, so the rows carry the status the list shows.
+ */
+async function scanPaymentRequests(
   request: SdpApiClient["request"],
-  cap = PAYMENT_REQUESTS_CAP
-): Promise<PaymentRequestsResult> {
-  const first = await fetchPaymentRequests(request, { page: 1 });
-  if (!first.ok) return first;
-  const target = Math.min(first.total, cap);
-  const pages = Math.ceil(target / PAYMENT_REQUESTS_PAGE_SIZE);
+  status: PaymentRequest["status"] | undefined
+): Promise<PaymentRequestsScan> {
+  const statusOption = status ? { status } : {};
+  const first = await fetchPaymentRequests(request, { page: 1, ...statusOption });
+  if (!first.ok) return { ...first, capped: false };
+  const pages = Math.ceil(
+    Math.min(first.total, PAYMENT_REQUESTS_SCAN_CAP) / PAYMENT_REQUESTS_PAGE_SIZE
+  );
   const rest = await Promise.all(
     Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
-      fetchPaymentRequests(request, { page: index + 2 })
+      fetchPaymentRequests(request, { page: index + 2, ...statusOption })
     )
   );
   const failed = rest.find((result) => !result.ok);
-  if (failed) return failed;
+  if (failed) return { ...failed, capped: false };
   return {
     ok: true,
-    data: [first, ...rest].flatMap((result) => result.data).slice(0, cap),
+    data: [first, ...rest].flatMap((result) => result.data).slice(0, PAYMENT_REQUESTS_SCAN_CAP),
     total: first.total,
+    capped: first.total > PAYMENT_REQUESTS_SCAN_CAP,
   };
+}
+
+/** Every well-known token's symbol by mint, on any cluster, for searching by symbol. */
+const TOKEN_SYMBOL_BY_MINT: ReadonlyMap<string, string> = new Map(
+  Object.values(WELL_KNOWN_TOKENS).flatMap((token: WellKnownToken) =>
+    Object.values(token.mints).flatMap((mint) =>
+      mint ? [[mint.address, token.symbol] as const] : []
+    )
+  )
+);
+
+/**
+ * Whether a request matches a search: its amount, token, payer's name, destination or
+ * reference contains the needle, ignoring case.
+ *
+ * @param request - The request.
+ * @param needle - The search, already trimmed.
+ * @param counterpartyNames - Contact display names by id.
+ * @returns `true` when any of those fields contains the needle.
+ */
+export function paymentRequestMatchesSearch(
+  request: PaymentRequest,
+  needle: string,
+  counterpartyNames: ReadonlyMap<string, string>
+): boolean {
+  return [
+    request.amount,
+    TOKEN_SYMBOL_BY_MINT.get(request.token) ?? request.token,
+    request.counterpartyId ? (counterpartyNames.get(request.counterpartyId) ?? "") : "",
+    request.destinationAddress,
+    request.reference,
+  ]
+    .join(" ")
+    .toLowerCase()
+    .includes(needle.toLowerCase());
+}
+
+export type PaymentRequestsListResult = PaymentRequestsResult & {
+  /** The search read only the newest {@link PAYMENT_REQUESTS_SCAN_CAP} requests. */
+  searchCapped: boolean;
+};
+
+function listFailure({ error, localErrorCode }: PaymentRequestsResult): PaymentRequestsListResult {
+  return {
+    ok: false,
+    data: [],
+    total: 0,
+    error,
+    ...(localErrorCode ? { localErrorCode } : {}),
+    searchCapped: false,
+  };
+}
+
+function pageOf(
+  rows: readonly PaymentRequest[],
+  state: PaymentRequestsListState,
+  searchCapped: boolean
+): PaymentRequestsListResult {
+  const start = (state.page - 1) * state.pageSize;
+  return {
+    ok: true,
+    data: rows.slice(start, start + state.pageSize),
+    total: rows.length,
+    searchCapped,
+  };
+}
+
+/**
+ * One page of the Requests list as its URL names it. With no search and no status, or a status
+ * no payment can change (canceled, expired), the API pages it. Awaiting payment and paid are
+ * read after the open requests, since listing settles any that has been paid, and the API's
+ * filter reads the stored status: a request paid since the last read would otherwise be missed
+ * by Paid and shown as paid under Awaiting payment. The API has no search, so a search reads up
+ * to {@link PAYMENT_REQUESTS_SCAN_CAP} requests and matches and pages them here.
+ *
+ * @param request - Authenticated SDP API fetcher.
+ * @param state - The list's page, size, status and search.
+ * @param options.counterpartyNames - Contact names by id, read only when the list is searched.
+ * @returns The page's rows, how many requests match in all, and whether a search stopped at the
+ *   cap; on any failure `{ ok: false, data: [], total: 0, error }`. Never throws.
+ */
+export async function loadPaymentRequestsList(
+  request: SdpApiClient["request"],
+  state: PaymentRequestsListState,
+  options: { counterpartyNames?: () => Promise<ReadonlyMap<string, string>> } = {}
+): Promise<PaymentRequestsListResult> {
+  const { status, search } = state;
+  let open: PaymentRequestsScan | undefined;
+  if (status === "awaiting_payment" || status === "paid") {
+    open = await scanPaymentRequests(request, "awaiting_payment");
+    if (!open.ok) return listFailure(open);
+  }
+  // Awaiting payment is the open requests that were not just settled: when they were all read,
+  // or the list is searched (which reads no further), the open read already holds the list.
+  const directory =
+    status === "awaiting_payment" && open && (search !== null || !open.capped)
+      ? open
+      : search !== null
+        ? await scanPaymentRequests(request, status ?? undefined)
+        : undefined;
+  if (directory === undefined) {
+    const result = await fetchPaymentRequests(request, {
+      page: state.page,
+      pageSize: state.pageSize,
+      ...(status ? { status } : {}),
+    });
+    return { ...result, searchCapped: false };
+  }
+  if (!directory.ok) return listFailure(directory);
+  const counterpartyNames =
+    search !== null && options.counterpartyNames ? await options.counterpartyNames() : new Map();
+  const rows = directory.data.filter(
+    (row) =>
+      (status === null || row.status === status) &&
+      (search === null || paymentRequestMatchesSearch(row, search, counterpartyNames))
+  );
+  return pageOf(rows, state, search !== null && directory.capped);
 }
 
 export type PaymentRequestDetailResult =
@@ -113,8 +316,8 @@ export type PaymentRequestDetailResult =
 
 /**
  * One payment request by id. The API reads requests only as a list, so this pages through it
- * newest first, as far as the Requests list itself reads ({@link PAYMENT_REQUESTS_CAP}), and
- * stops at the match; a request just created is on the first page.
+ * newest first and stops at the match, or once the pages run out; a request just created is on
+ * the first page.
  *
  * @param request - Authenticated SDP API fetcher.
  * @param requestId - The request's id.
@@ -124,13 +327,13 @@ export async function fetchPaymentRequestDetail(
   request: SdpApiClient["request"],
   requestId: string
 ): Promise<PaymentRequestDetailResult> {
-  const pages = Math.ceil(PAYMENT_REQUESTS_CAP / PAYMENT_REQUESTS_PAGE_SIZE);
-  for (let page = 1; page <= pages; page += 1) {
+  for (let page = 1; ; page += 1) {
     const result = await fetchPaymentRequests(request, { page });
     if (!result.ok) return { status: "error", error: result.error };
     const match = result.data.find((candidate) => candidate.id === requestId);
     if (match) return { status: "found", request: match };
-    if (page * PAYMENT_REQUESTS_PAGE_SIZE >= result.total) break;
+    if (result.data.length === 0 || page * PAYMENT_REQUESTS_PAGE_SIZE >= result.total) {
+      return { status: "not_found" };
+    }
   }
-  return { status: "not_found" };
 }

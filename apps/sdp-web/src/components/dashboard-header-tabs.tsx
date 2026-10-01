@@ -1,8 +1,9 @@
 "use client";
 
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useContext, useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
 import {
   selectActiveDashboardTab,
   useDashboardTab,
@@ -143,18 +144,12 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
   );
 }
 
-/** The shell's slot at the right end of the header tab row. */
-export const DASHBOARD_HEADER_TABS_TRAILING_ID = "dashboard-header-tabs-trailing";
-
 /**
  * Controls a page sets at the right end of its header tab row, such as a list's refresh and
  * view toggle. Portaled into the shell's slot so the page keeps their state; renders nothing
- * until the slot is found after hydration, and nothing on a route without header tabs.
+ * until the slot has mounted, and nothing on a route without header tabs.
  */
 export function DashboardHeaderTabsTrailing({ children }: { children: ReactNode }) {
-  const [slot, setSlot] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    setSlot(document.getElementById(DASHBOARD_HEADER_TABS_TRAILING_ID));
-  }, []);
+  const slot = useContext(DashboardHeaderTabsTrailingContext);
   return slot ? createPortal(children, slot) : null;
 }

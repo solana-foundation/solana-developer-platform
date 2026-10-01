@@ -20,7 +20,7 @@ import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { OnrampReview } from "./onramp-review";
 import { hasOnboardingLifecycle, isOnboardingPanelStatus } from "./providers";
-import { RampCompleteScreen } from "./ramp-complete-screen.redesign";
+import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector.redesign";
 import { RampQuoteError } from "./ramp-quote-error";

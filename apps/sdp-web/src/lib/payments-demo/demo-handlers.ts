@@ -21,6 +21,7 @@ import { z } from "zod";
 import { getRampProviderLabel } from "../ramps";
 import {
   DEMO_TOKENS,
+  type DemoTokenKey,
   type DemoWorld,
   findWallet,
   fromBaseUnits,
@@ -34,10 +35,10 @@ import {
   consentKey,
   contactById,
   DEMO_BATCH_RECIPIENTS_PER_TRANSACTION,
-  mintForRail,
   rampDepositAddress,
   rampReference,
   tokenKeyForMint,
+  tokenKeyForRail,
   transferById,
   walletHolding,
 } from "./demo-replay";
@@ -549,14 +550,13 @@ function rampAmounts(
   provider: RampProviderId,
   direction: RampDirection,
   fiatCurrency: string,
-  assetRail: string,
+  tokenKey: DemoTokenKey,
   amount: number
 ): RampAmounts {
-  const mint = mintForRail(assetRail);
-  const token = DEMO_TOKENS[tokenKeyForMint(mint) ?? "USDC"];
+  const token = DEMO_TOKENS[tokenKey];
   const rate = usdPerUnit(fiatCurrency) / token.usdPrice;
   const feeRate = PROVIDER_FEE_RATE[provider];
-  const common = { rate, mint, symbol: token.symbol, decimals: token.decimals };
+  const common = { rate, mint: token.mint, symbol: token.symbol, decimals: token.decimals };
   if (direction === "onramp") {
     const fee = amount * feeRate;
     return { ...common, fiat: amount, crypto: (amount - fee) * rate, fee };
@@ -586,12 +586,12 @@ function estimate({ segments, body, now }: WriteContext): DemoWriteResult {
   const raw = direction === "onramp" ? input.data.fiatAmount : input.data.cryptoAmount;
   const amount = raw !== undefined && DECIMAL.test(raw) ? Number(raw) : 0;
   const expiresAt = new Date(now.getTime() + QUOTE_TTL_MS).toISOString();
-  const estimates: RampProviderEstimateResult[] = pairProviders(
-    direction,
-    fiatCurrency,
-    assetRail
-  ).map((provider) => {
-    const amounts = rampAmounts(provider, direction, fiatCurrency, assetRail, amount);
+  // No provider runs a pair whose asset the demo wallets don't hold.
+  const tokenKey = tokenKeyForRail(assetRail);
+  if (!tokenKey) return record([], () => ok({ data: { estimates: [] } }));
+  const providers = pairProviders(direction, fiatCurrency, assetRail);
+  const estimates: RampProviderEstimateResult[] = providers.map((provider) => {
+    const amounts = rampAmounts(provider, direction, fiatCurrency, tokenKey, amount);
     return {
       provider,
       status: "ok",
@@ -894,6 +894,13 @@ function pairRefusal(provider: RampProviderId, from: string, to: string): DemoWr
   return error(400, `${getRampProviderLabel(provider)} doesn't run ${from} to ${to}.`);
 }
 
+function assetRefusal(assetRail: string): DemoWriteResult {
+  return error(
+    400,
+    `The demo wallets don't hold ${getCryptoRailAssetLabel(assetRail as CryptoRailId)}. Choose USDC, SOL or EURC.`
+  );
+}
+
 /** Whether a contact finished a provider's onboarding; only BVNK runs one in the demo. */
 function onboardedWith(
   provider: RampProviderId,
@@ -934,6 +941,8 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
     const input = parse(onrampQuoteSchema, body);
     if ("failure" in input) return input.failure;
     const { counterpartyId, destinationCustodyWalletId, assetRail, fiatCurrency } = input.data;
+    const tokenKey = tokenKeyForRail(assetRail);
+    if (!tokenKey) return assetRefusal(assetRail);
     if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
     if (!onboardedWith(provider, world, counterpartyId, now)) return notOnboarded(provider);
     const wallet = findWallet(world, destinationCustodyWalletId);
@@ -949,7 +958,7 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
       provider,
       direction,
       fiatCurrency,
-      assetRail,
+      tokenKey,
       Number(input.data.fiatAmount)
     );
     const crypto = cryptoText(amounts);
@@ -985,6 +994,8 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   if ("failure" in input) return input.failure;
   const { counterpartyId, sourceCustodyWalletId, assetRail, fiatCurrency, cryptoAmount } =
     input.data;
+  const tokenKey = tokenKeyForRail(assetRail);
+  if (!tokenKey) return assetRefusal(assetRail);
   if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
   if (!onboardedWith(provider, world, counterpartyId, now)) return notOnboarded(provider);
   const wallet = findWallet(world, sourceCustodyWalletId);
@@ -992,7 +1003,7 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
     return pairRefusal(provider, getCryptoRailAssetLabel(assetRail as CryptoRailId), fiatCurrency);
   }
-  const amounts = rampAmounts(provider, direction, fiatCurrency, assetRail, Number(cryptoAmount));
+  const amounts = rampAmounts(provider, direction, fiatCurrency, tokenKey, Number(cryptoAmount));
   const notEnough = shortfall(world, sourceCustodyWalletId, amounts.mint, cryptoAmount);
   if (notEnough) return error(400, notEnough, "insufficient_funds");
   const offrampQuote = offrampQuoteFor(provider, {
@@ -1025,15 +1036,14 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
 
 const simulateSchema = z.object({
   provider: z.string(),
-  payload: z
-    .object({
-      quoteId: z.string().optional(),
-      transferId: z.string().optional(),
-      counterpartyId: z.string().optional(),
-      /** Demo mode's Simulate verification: the provider approves the contact's identity check. */
-      verification: z.literal("approved").optional(),
-    })
-    .passthrough(),
+  // Loose: each provider's sandbox payload carries fields of its own the demo doesn't read.
+  payload: z.looseObject({
+    quoteId: z.string().optional(),
+    transferId: z.string().optional(),
+    counterpartyId: z.string().optional(),
+    /** Demo mode's Simulate verification: the provider approves the contact's identity check. */
+    verification: z.literal("approved").optional(),
+  }),
 });
 
 /** Simulate verification: BVNK approves the identity check of a contact that accepted its terms. */

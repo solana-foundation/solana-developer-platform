@@ -28,14 +28,9 @@ import {
   privateChannelsInstancePath,
 } from "../../../private-channels-routes";
 import { deletePrivateChannelAction, disconnectPrivateChannelAction } from "../../../setup/actions";
-import {
-  DeleteConfirmationDialog as LegacyDeleteConfirmationDialog,
-  PrivateChannelsConnectForm as LegacyPrivateChannelsConnectForm,
-} from "../../../setup/private-channels-connect-form";
-import {
-  DeleteConfirmationDialog as CurrentDeleteConfirmationDialog,
-  PrivateChannelsConnectForm as CurrentPrivateChannelsConnectForm,
-} from "../../../setup/private-channels-connect-form.redesign";
+import { DeleteConfirmationDialog } from "../../../setup/private-channels-confirmation-dialogs";
+import { PrivateChannelsConnectForm as LegacyPrivateChannelsConnectForm } from "../../../setup/private-channels-connect-form";
+import { PrivateChannelsConnectForm as CurrentPrivateChannelsConnectForm } from "../../../setup/private-channels-connect-form.redesign";
 
 export function ChannelActionsMenu({
   instance,
@@ -54,9 +49,6 @@ export function ChannelActionsMenu({
   const PrivateChannelsConnectForm = newDesign
     ? CurrentPrivateChannelsConnectForm
     : LegacyPrivateChannelsConnectForm;
-  const DeleteConfirmationDialog = newDesign
-    ? CurrentDeleteConfirmationDialog
-    : LegacyDeleteConfirmationDialog;
   const router = useRouter();
   const [manageOpen, setManageOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);

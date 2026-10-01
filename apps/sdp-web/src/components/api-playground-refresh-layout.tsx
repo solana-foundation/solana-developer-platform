@@ -533,6 +533,74 @@ function EndpointLine({
   );
 }
 
+/** The key picker and the host the call goes to, on one quiet line under the endpoint. */
+function KeyAndHostLine({
+  apiKeySelector,
+  apiHost,
+}: {
+  apiKeySelector?: ReactNode;
+  apiHost: string | null;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-meta text-secondary">
+      {apiKeySelector ? (
+        <>
+          <span>{t("Shared.SharedComponents.apiKeyLabel")}</span>
+          {apiKeySelector}
+        </>
+      ) : null}
+      {apiHost ? (
+        <>
+          {apiKeySelector ? (
+            <span aria-hidden="true" className="text-tertiary">
+              ·
+            </span>
+          ) : null}
+          <span className="font-mono">{apiHost}</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function PlaygroundMessages({ messages }: { messages: ApiPlaygroundMessage[] }) {
+  if (messages.length === 0) return null;
+  return (
+    <div className="mt-6 space-y-3">
+      {messages.map((message) => (
+        <Callout
+          key={`${message.tone ?? "neutral"}-${message.text}`}
+          variant={message.tone === "critical" ? "danger" : "info"}
+        >
+          {message.text}
+        </Callout>
+      ))}
+    </div>
+  );
+}
+
+/** The run's body, or before a run the example, which reads as a placeholder in one quiet tone. */
+function ResponseBody({
+  hasRun,
+  responseBody,
+  exampleBody,
+}: {
+  hasRun: boolean;
+  responseBody: string;
+  exampleBody: string;
+}) {
+  return (
+    <div data-testid="api-playground-code">
+      {hasRun ? (
+        <PlainCode content={responseBody} />
+      ) : (
+        <PlainCode content={exampleBody} className="text-tertiary" />
+      )}
+    </div>
+  );
+}
+
 export interface ApiPlaygroundRefreshLayoutProps {
   endpoints: ApiPlaygroundEndpointConfig[];
   activeEndpoint: ApiPlaygroundEndpointConfig;
@@ -613,24 +681,7 @@ export function ApiPlaygroundRefreshLayout({
         createApiKeyHref={createKeyHref}
       />
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-meta text-secondary">
-        {apiKeySelector ? (
-          <>
-            <span>{t("Shared.SharedComponents.apiKeyLabel")}</span>
-            {apiKeySelector}
-          </>
-        ) : null}
-        {apiHost ? (
-          <>
-            {apiKeySelector ? (
-              <span aria-hidden="true" className="text-tertiary">
-                ·
-              </span>
-            ) : null}
-            <span className="font-mono">{apiHost}</span>
-          </>
-        ) : null}
-      </div>
+      <KeyAndHostLine apiKeySelector={apiKeySelector} apiHost={apiHost} />
       {/* Someone who cannot make a key is told why Run waits; the others get the button. */}
       {requiresApiKey && !createKeyHref ? (
         <p className="mt-2 text-meta text-tertiary">
@@ -638,18 +689,7 @@ export function ApiPlaygroundRefreshLayout({
         </p>
       ) : null}
 
-      {messages.length > 0 ? (
-        <div className="mt-6 space-y-3">
-          {messages.map((message) => (
-            <Callout
-              key={`${message.tone ?? "neutral"}-${message.text}`}
-              variant={message.tone === "critical" ? "danger" : "info"}
-            >
-              {message.text}
-            </Callout>
-          ))}
-        </div>
-      ) : null}
+      <PlaygroundMessages messages={messages} />
 
       {/* The design's rhythm: 28px to the rule, 40px under it to the two 36px section rows (the
           divider between the halves starts there, not at the rule), 24px to the view tabs. */}
@@ -760,16 +800,7 @@ export function ApiPlaygroundRefreshLayout({
           </Tabs>
           <div className="mt-4">
             {responseView === "body" ? (
-              hasRun ? (
-                <div data-testid="api-playground-code">
-                  <PlainCode content={responseBody} />
-                </div>
-              ) : (
-                // The example reads as a placeholder: one quiet tone, no highlighting.
-                <div data-testid="api-playground-code">
-                  <PlainCode content={exampleBody} className="text-tertiary" />
-                </div>
-              )
+              <ResponseBody hasRun={hasRun} responseBody={responseBody} exampleBody={exampleBody} />
             ) : (
               <ResponseHeaders headers={responseHeaders} hasRun={hasRun} />
             )}

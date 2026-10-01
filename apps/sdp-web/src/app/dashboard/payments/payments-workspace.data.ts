@@ -843,8 +843,11 @@ type SandboxTransferSimulationInput =
       };
     }
   | {
-      /** BVNK's sandbox, and demo mode's stand-in checkouts for the widget providers. */
-      provider: Exclude<RampProviderId, "lightspark" | "mural">;
+      /**
+       * BVNK's sandbox, and demo mode's stand-in for every provider's pay-in (Mural's in any
+       * currency, since the demo needs no sandbox to pay in).
+       */
+      provider: Exclude<RampProviderId, "lightspark">;
       payload: {
         transferId: string;
       };

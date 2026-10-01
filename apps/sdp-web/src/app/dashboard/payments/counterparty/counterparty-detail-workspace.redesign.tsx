@@ -1,5 +1,6 @@
 "use client";
 
+import { addDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type {
   Counterparty,
   CounterpartyAccount,
@@ -39,7 +40,7 @@ import {
 } from "../payments-presentation";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { CounterpartyProviderAccounts } from "./counterparty-provider-accounts.redesign";
-import { TransferDetailModal } from "./counterparty-transfer-detail-modal";
+import { TransferDetailModal } from "./counterparty-transactions";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 import { useCounterpartyProviderAccounts } from "./use-counterparty-provider-accounts";
 
@@ -51,6 +52,8 @@ interface CounterpartyDetailWorkspaceProps {
   initialTransfers: PaymentTransferSummary[];
   /** How many transfers the contact has in all; more than `initialTransfers` when cut short. */
   transfersTotal?: number;
+  /** True when the transfers could not be read: the history is unknown, not empty. */
+  transfersFailed?: boolean;
 }
 
 /** The design shows the latest three payments; Transactions has the rest. */
@@ -68,18 +71,20 @@ function isInbound(transfer: PaymentTransferSummary): boolean {
 
 /**
  * What has been paid to the contact, read from the transfers the page loaded: the settled
- * outbound ones, their totals per token, and when the latest went out.
+ * outbound ones, their totals per token (added as decimal strings, so no float rounding), and
+ * when the latest went out.
  */
 function summarizePayouts(transfers: PaymentTransferSummary[]) {
   const payouts = transfers.filter(
     (transfer) => SETTLED_STATUSES.has(transfer.status) && !isInbound(transfer)
   );
-  const totals = new Map<string, number>();
+  const totals = new Map<string, string>();
   for (const transfer of payouts) {
     const token = resolveTransferTokenLabel(transfer.token);
-    const amount = Number(transfer.amount);
-    if (token === undefined || !Number.isFinite(amount)) continue;
-    totals.set(token, (totals.get(token) ?? 0) + amount);
+    const amount = transfer.amount?.trim();
+    if (token === undefined || amount === undefined || !isDecimalString(amount)) continue;
+    const total = totals.get(token);
+    totals.set(token, total === undefined ? amount : addDecimalAmounts(total, amount));
   }
   const lastPaidAt = payouts
     .flatMap((transfer) => (transfer.createdAt ? [transfer.createdAt] : []))
@@ -111,13 +116,18 @@ function paidSoFarLabel(
       ? t("DashboardPayments.counterparty.detail.paymentCountOne")
       : t("DashboardPayments.counterparty.detail.paymentCountOther", { count: summary.count });
   if (summary.totals.size > 2 || summary.totals.size === 0) {
-    return t("DashboardPayments.counterparty.detail.paidInTokens", {
-      payments,
-      count: summary.totals.size,
-    });
+    return partial
+      ? t("DashboardPayments.counterparty.detail.paidInTokensPartial", {
+          payments,
+          count: summary.totals.size,
+        })
+      : t("DashboardPayments.counterparty.detail.paidInTokens", {
+          payments,
+          count: summary.totals.size,
+        });
   }
   const amounts = [...summary.totals]
-    .map(([token, total]) => `${formatDecimalAmount(String(total), locale)} ${token}`)
+    .map(([token, total]) => `${formatDecimalAmount(total, locale)} ${token}`)
     .join(", ");
   return partial
     ? t("DashboardPayments.counterparty.detail.paidSummaryPartial", { amounts, payments })
@@ -159,20 +169,41 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
+/**
+ * What the record says when nothing settled was paid out in the loaded transfers: "Not yet" only
+ * when the whole history was read; otherwise how much was read, or that none of it was.
+ */
+function noPayoutLabel(
+  t: Translate,
+  history: { failed: boolean; partial: boolean; loaded: number }
+): string {
+  if (history.failed) return t("DashboardPayments.counterparty.detail.paymentsNotLoaded");
+  if (history.partial) {
+    return t("DashboardPayments.counterparty.detail.notPaidInLatest", { count: history.loaded });
+  }
+  return t("DashboardPayments.counterparty.detail.notPaidYet");
+}
+
 function ContactRecord({
   counterparty,
   transfers,
   transfersTotal,
+  transfersFailed,
 }: {
   counterparty: Counterparty;
   transfers: PaymentTransferSummary[];
   transfersTotal: number;
+  transfersFailed: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const summary = summarizePayouts(transfers);
+  // Only the latest transfers were loaded: older ones may hold payouts these do not.
+  const partial = transfersTotal > transfers.length;
   const notYet = (
-    <span className="text-tertiary">{t("DashboardPayments.counterparty.detail.notPaidYet")}</span>
+    <span className="text-tertiary">
+      {noPayoutLabel(t, { failed: transfersFailed, partial, loaded: transfers.length })}
+    </span>
   );
   return (
     <section className="grid gap-x-6 md:grid-cols-2">
@@ -217,9 +248,7 @@ function ContactRecord({
           )}
         </DetailRow>
         <DetailRow label={t("DashboardPayments.counterparty.detail.paidSoFar")}>
-          {summary.count === 0
-            ? notYet
-            : paidSoFarLabel(summary, transfersTotal > transfers.length, locale, t)}
+          {summary.count === 0 ? notYet : paidSoFarLabel(summary, partial, locale, t)}
         </DetailRow>
       </dl>
     </section>
@@ -383,6 +412,43 @@ function PaymentsTable({
 }
 
 /**
+ * The latest payments, or why there are none: a failed read offers a retry rather than claim
+ * the contact was never paid.
+ */
+function RecentPayments({
+  transfers,
+  failed,
+  onSelect,
+}: {
+  transfers: PaymentTransferSummary[];
+  failed: boolean;
+  onSelect: (transfer: PaymentTransferSummary) => void;
+}) {
+  const t = useTranslations();
+  const router = useRouter();
+  if (transfers.length > 0) return <PaymentsTable transfers={transfers} onSelect={onSelect} />;
+  if (failed) {
+    return (
+      <ListEmptyState
+        message={t("DashboardPayments.counterparty.detail.paymentsLoadFailed")}
+        description={t("DashboardPayments.counterparty.detail.paymentsLoadFailedDescription")}
+        action={
+          <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
+            {t("Shared.SharedComponents.retry")}
+          </Button>
+        }
+      />
+    );
+  }
+  return (
+    <ListEmptyState
+      message={t("DashboardPayments.counterparty.detail.noPayments")}
+      description={t("DashboardPayments.counterparty.detail.noPaymentsDescription")}
+    />
+  );
+}
+
+/**
  * A contact's page, as the design lays it out: the record (type, external ID, created; status,
  * last paid, paid so far), the saved Solana addresses, the accounts payment providers hold for
  * the contact, the latest payments, what the page does not keep, and Delete. The header titles
@@ -393,6 +459,7 @@ export function CounterpartyDetailWorkspace({
   initialAccounts,
   initialTransfers,
   transfersTotal = initialTransfers.length,
+  transfersFailed = false,
 }: CounterpartyDetailWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -432,6 +499,7 @@ export function CounterpartyDetailWorkspace({
           counterparty={counterparty}
           transfers={initialTransfers}
           transfersTotal={transfersTotal}
+          transfersFailed={transfersFailed}
         />
 
         <DetailBlock
@@ -470,14 +538,11 @@ export function CounterpartyDetailWorkspace({
             )
           }
         >
-          {recentTransfers.length === 0 ? (
-            <ListEmptyState
-              message={t("DashboardPayments.counterparty.detail.noPayments")}
-              description={t("DashboardPayments.counterparty.detail.noPaymentsDescription")}
-            />
-          ) : (
-            <PaymentsTable transfers={recentTransfers} onSelect={setSelectedTransfer} />
-          )}
+          <RecentPayments
+            transfers={recentTransfers}
+            failed={transfersFailed}
+            onSelect={setSelectedTransfer}
+          />
         </DetailBlock>
 
         <DetailBlock title={t("DashboardPayments.counterparty.detail.notKeptHere")}>

@@ -11,12 +11,38 @@ import { resolveTransferTokenLabel } from "../../payments/payments-overview.util
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-/** "Aug 12, 2026". */
-export const POLICY_DATE: Intl.DateTimeFormatOptions = { dateStyle: "medium" };
+/**
+ * "Aug 12, 2026". In UTC, so the server's render and the browser's agree on the day; the
+ * formatter is built once per locale.
+ */
+const POLICY_DATE: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeZone: "UTC" };
+const policyDateFormats = new Map<string, Intl.DateTimeFormat>();
+
+export function formatPolicyDate(iso: string, locale: string): string {
+  let format = policyDateFormats.get(locale);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, POLICY_DATE);
+    policyDateFormats.set(locale, format);
+  }
+  return format.format(new Date(iso));
+}
+
+/** The Transactions ledger narrowed to one wallet, where its whole history pages. */
+export function walletTransactionsHref(custodyWalletId: string): string {
+  return `/dashboard/payments/transactions?${new URLSearchParams({ custodyWalletId })}`;
+}
+
+/** The transfer or transaction id the row carries, without the feed's source prefix. */
+export function activityDisplayId(id: string): string {
+  const bare = id.replace(/^(payment|issuance)-/, "");
+  return bare.length > 14 ? `${bare.slice(0, 8)}…${bare.slice(-4)}` : bare;
+}
 
 /** What the wallet's page shows about the wallet itself, resolved on the server. */
 export interface WalletPageView {
   walletId: string;
+  /** The custody record's own id, which the Transactions ledger filters by. */
+  custodyWalletId: string;
   /** The label, or "Untitled wallet". */
   name: string;
   publicKey: string;
@@ -172,7 +198,7 @@ export function policySummaryLine(
     profile?.revisionNumber && profile.activatedAt
       ? t("DashboardCustody.walletPolicyRevisionSince", {
           number: profile.revisionNumber,
-          date: new Intl.DateTimeFormat(locale, POLICY_DATE).format(new Date(profile.activatedAt)),
+          date: formatPolicyDate(profile.activatedAt, locale),
         })
       : null;
   return [`${parts.join(", ")}.`, since].filter(Boolean).join(" ");

@@ -17,7 +17,9 @@ const mocks = vi.hoisted(() => ({
     activityRows: [] as unknown[],
     activityError: null as string | null,
     activityNotice: null as string | null,
+    hasMore: false as boolean,
   },
+  activityLimits: [] as (number | undefined)[],
 }));
 
 vi.mock("next/navigation", () => ({
@@ -55,7 +57,10 @@ vi.mock("@/app/dashboard/custody/wallet-provider-mark", () => ({
   WalletProviderMark: () => <span data-testid="mark" />,
 }));
 vi.mock("./use-wallet-activity", () => ({
-  useWalletActivity: () => ({ data: mocks.activity, error: undefined }),
+  useWalletActivity: (_walletId: string, limit?: number) => {
+    mocks.activityLimits.push(limit);
+    return { data: mocks.activity, error: undefined, isLoading: false };
+  },
 }));
 
 const { WalletDetailView } = await import("./wallet-detail-view");
@@ -108,6 +113,7 @@ const policy: PaymentWalletPolicy = {
 
 const wallet: ComponentProps<typeof WalletDetailView>["wallet"] = {
   walletId: "wallet_one",
+  custodyWalletId: "cwlt_one",
   name: "Settlement Fireblocks",
   label: "Settlement Fireblocks",
   publicKey: "gZeTc7Hq9mXw2JDUBSDgZeTc7Hq9mXw2JDUBSD",
@@ -198,7 +204,9 @@ beforeEach(() => {
     ],
     activityError: null,
     activityNotice: null,
+    hasMore: false,
   };
+  mocks.activityLimits = [];
 });
 afterEach(() => {
   cleanup();
@@ -267,6 +275,59 @@ describe("Activity", () => {
       target: { value: "a046" },
     });
     expect(screen.getAllByText(/xfr_/)).toHaveLength(1);
+    expect(document.querySelector("[data-wallet-activity-capped]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Load older activity" })).toBeNull();
+  });
+
+  it("loads older activity and points the full history at this wallet's ledger", async () => {
+    mocks.tab = "activity";
+    const [first] = mocks.activity.activityRows as { id: string }[];
+    mocks.activity = {
+      ...mocks.activity,
+      activityRows: Array.from({ length: 20 }, (_, index) => ({
+        ...first,
+        id: `payment-xfr_row_${index}`,
+      })),
+      hasMore: true,
+    };
+    await act(async () => {
+      renderView();
+    });
+    expect(
+      await screen.findByText(
+        /Search and filters cover the latest 20 transactions loaded here\. The full history is in Transactions\./
+      )
+    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open Transactions" }).getAttribute("href")).toBe(
+      "/dashboard/payments/transactions?custodyWalletId=cwlt_one"
+    );
+    expect(mocks.activityLimits.at(-1)).toBe(20);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Load older activity" }));
+    });
+    expect(mocks.activityLimits.at(-1)).toBe(120);
+  });
+
+  it("offers older activity only from the last page of what is loaded", async () => {
+    mocks.tab = "activity";
+    const [first] = mocks.activity.activityRows as { id: string }[];
+    mocks.activity = {
+      ...mocks.activity,
+      activityRows: Array.from({ length: 30 }, (_, index) => ({
+        ...first,
+        id: `payment-xfr_row_${index}`,
+      })),
+      hasMore: true,
+    };
+    await act(async () => {
+      renderView();
+    });
+    expect(await screen.findByText("Page 1 of 2")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load older activity" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(screen.getByRole("button", { name: "Load older activity" })).toBeTruthy();
   });
 });
 

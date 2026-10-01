@@ -18,13 +18,15 @@ import {
   type ProviderAvailabilityEntry,
   RAMP_PROVIDER_SURFACING,
 } from "@sdp/types/provider-access";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, domMax, LazyMotion, m } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
 import { useThemeScope } from "@/components/theme-scope";
 import { Modal } from "@/components/ui/modal";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   findRampPair,
@@ -465,31 +467,33 @@ function ProviderCardList({
       </div>
 
       <div className="-mx-1.5 h-96 overflow-y-auto px-1.5 py-1">
-        <motion.div layout className="space-y-2">
-          <AnimatePresence mode="popLayout" initial={false}>
-            {availableProviders.map((option) => (
-              <ProviderCard
-                key={option.id}
-                option={option}
-                active={selectedProvider === option.id}
-                estimate={estimatesByProvider.get(option.id)}
-                estimateLoading={estimatesLoading}
-                onSelect={() => onProviderSelect(option.id)}
-              />
-            ))}
-          </AnimatePresence>
+        <LazyMotion features={domMax}>
+          <m.div layout className="space-y-2">
+            <AnimatePresence mode="popLayout" initial={false}>
+              {availableProviders.map((option) => (
+                <ProviderCard
+                  key={option.id}
+                  option={option}
+                  active={selectedProvider === option.id}
+                  estimate={estimatesByProvider.get(option.id)}
+                  estimateLoading={estimatesLoading}
+                  onSelect={() => onProviderSelect(option.id)}
+                />
+              ))}
+            </AnimatePresence>
 
-          {availableProviders.length === 0 ? (
-            <motion.p
-              layout
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="py-2 text-sm text-tertiary"
-            >
-              {t("DashboardPayments.ramps.noProvidersAvailable")}
-            </motion.p>
-          ) : null}
-        </motion.div>
+            {availableProviders.length === 0 ? (
+              <m.p
+                layout
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="py-2 text-sm text-tertiary"
+              >
+                {t("DashboardPayments.ramps.noProvidersAvailable")}
+              </m.p>
+            ) : null}
+          </m.div>
+        </LazyMotion>
       </div>
     </div>
   );
@@ -567,9 +571,13 @@ export function RampPairProviderSelector({
   onProviderSelect,
 }: RampPairProviderSelectorProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
+  const demo = usePaymentsDemo();
   const refresh = useThemeScope() === "refresh";
   const [unavailableDialogOpen, setUnavailableDialogOpen] = useState(false);
-  const pairs = pairsForDirection(direction, sdpEnvironment, enabledRampProviders);
+  const pairs = demoRampPairs(
+    pairsForDirection(direction, sdpEnvironment, enabledRampProviders),
+    demo
+  );
   const selectedPairSupport = useMemo(
     () => findRampPair(pairs, selectedPair),
     [pairs, selectedPair]

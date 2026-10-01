@@ -91,7 +91,9 @@ export function WalletDetailView({
         ) : null}
         {tab === "activity" ? (
           <WalletActivityTab
+            key={wallet.walletId}
             walletId={wallet.walletId}
+            custodyWalletId={wallet.custodyWalletId}
             balancesPromise={balancesPromise}
             issuedTokensPromise={issuedTokensPromise}
           />

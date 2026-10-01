@@ -19,6 +19,7 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { onrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
@@ -78,7 +79,7 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
  * Whether the provider's sandbox can simulate this quote's pay-in: Lightspark's always, BVNK's
  * once its funding account is ready, Mural's in the currencies its sandbox pays in.
  */
-function canSimulateQuote(quote: PaymentRampQuote, muralCurrency: boolean): boolean {
+function canSimulateQuote(quote: PaymentRampQuote, fiatCurrency: string): boolean {
   switch (quote.provider) {
     case "lightspark":
       return true;
@@ -91,10 +92,72 @@ function canSimulateQuote(quote: PaymentRampQuote, muralCurrency: boolean): bool
         )
       );
     case "mural":
-      return muralCurrency;
+      return isMuralSandboxPayinCurrency(fiatCurrency);
     default:
       return false;
   }
+}
+
+interface SimulationContext {
+  quote: PaymentRampQuote | null;
+  transferId: string | null;
+  transferStatus: PaymentTransferSummary | undefined;
+  succeeded: boolean;
+  demo: boolean;
+  sandbox: boolean;
+  fiatCurrency: string;
+}
+
+/**
+ * Whether a deposit can be marked paid: while it waits for its money (and as done until it
+ * finishes), through a sandbox provider's own simulation, or in demo mode for any provider, the
+ * demo standing in for checkouts that would open elsewhere. A production deposit never offers
+ * it: the sandbox can't fund a live deposit.
+ */
+function simulationOffered(context: SimulationContext): context is SimulationContext & {
+  quote: PaymentRampQuote;
+  transferId: string;
+} {
+  const { quote, transferId, transferStatus } = context;
+  if (quote === null || transferId === null || transferStatus === undefined) return false;
+  if (getRampTransferState(transferStatus.status).terminal) return false;
+  if (transferStatus.status !== "awaiting_payment" && !context.succeeded) return false;
+  return context.demo || (context.sandbox && canSimulateQuote(quote, context.fiatCurrency));
+}
+
+type SimulationRequest = Parameters<typeof simulateSandboxTransfer>[0];
+
+/**
+ * What marks the deposit paid. Demo mode answers by the transfer for any provider; the real
+ * sandboxes each take their own payload, Mural's only in the currencies it pays in.
+ */
+function simulationRequest(
+  quote: PaymentRampQuote,
+  transferId: string,
+  demo: boolean,
+  mural: { counterpartyId: string; amount: string; fiatCurrency: string },
+  t: Translate
+): SimulationRequest {
+  if (quote.provider === "lightspark") {
+    return { provider: "lightspark", payload: { quoteId: quote.id, currencyCode: "USD" } };
+  }
+  if (demo || quote.provider !== "mural") {
+    return { provider: quote.provider, payload: { transferId } };
+  }
+  const { fiatCurrency } = mural;
+  if (!isMuralSandboxPayinCurrency(fiatCurrency)) {
+    throw new Error(
+      t("DashboardPayments.ramps.muralSandboxCurrencyUnsupported", { currency: fiatCurrency })
+    );
+  }
+  return {
+    provider: "mural",
+    payload: {
+      counterpartyId: mural.counterpartyId,
+      amount: Number(mural.amount.trim()),
+      fiatCurrency,
+    },
+  };
 }
 
 export function useOnrampWizard(props: UseRampWizardProps) {
@@ -106,7 +169,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
   const wizard = useRampWizard<OnrampStepId>(props, {
-    pairs: onrampPairs(sdpEnvironment, props.enabledRampProviders),
+    pairs: demoRampPairs(onrampPairs(sdpEnvironment, props.enabledRampProviders), demo),
     steps: getOnrampSteps(t),
     stepSchemas: { DEPOSIT: depositDetailsSchema },
     quoteStepId: "MEMO",
@@ -187,28 +250,22 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     bvnkSettlementReached ||
     (transferStatus !== undefined && transferStatus.status === "completed");
 
-  // A sandbox deposit can be marked paid: through the provider's own simulation for the
-  // providers that have one, and in demo mode for any provider, the demo standing in for
-  // checkouts that would open elsewhere. It is offered while the deposit waits for its money,
-  // and shows as done until the deposit finishes.
-  const transferOpen =
-    transferStatus !== undefined && !getRampTransferState(transferStatus.status).terminal;
-  const simulateAvailable =
-    wizard.quote !== null &&
-    wizard.quoteTransferId !== null &&
-    transferOpen &&
-    (transferStatus.status === "awaiting_payment" || quoteSimulationSucceeded) &&
-    (demo ||
-      canSimulateQuote(
-        wizard.quote,
-        isMuralSandboxPayinCurrency(wizard.selectedRampPair.fiatCurrency)
-      ));
+  const simulation = {
+    quote: wizard.quote,
+    transferId: wizard.quoteTransferId,
+    transferStatus,
+    succeeded: quoteSimulationSucceeded,
+    demo,
+    sandbox: sdpEnvironment === "sandbox",
+    fiatCurrency: wizard.selectedRampPair.fiatCurrency,
+  };
+  const simulateAvailable = simulationOffered(simulation);
 
   const simulateCurrentQuote = async () => {
-    const quote = wizard.quote;
-    if (!simulateAvailable || !quote || !wizard.selectedWallet || wizard.quoteTransferId === null) {
+    if (!simulationOffered(simulation) || !wizard.selectedWallet) {
       return;
     }
+    const { quote, transferId } = simulation;
 
     setQuoteSimulationLoading(true);
     const toastId = toast.loading(t("DashboardPayments.ramps.simulatingQuoteFunding"), {
@@ -216,43 +273,20 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     });
 
     try {
-      if (quote.provider === "lightspark") {
-        await simulateSandboxTransfer(
+      await simulateSandboxTransfer(
+        simulationRequest(
+          quote,
+          transferId,
+          demo,
           {
-            provider: "lightspark",
-            payload: { quoteId: quote.id, currencyCode: "USD" },
+            counterpartyId: wizard.fields.counterpartyId,
+            amount: wizard.fields.amount,
+            fiatCurrency: simulation.fiatCurrency,
           },
           t
-        );
-      } else if (quote.provider === "mural") {
-        const fiatCurrency = wizard.selectedRampPair.fiatCurrency;
-        if (!isMuralSandboxPayinCurrency(fiatCurrency)) {
-          throw new Error(
-            t("DashboardPayments.ramps.muralSandboxCurrencyUnsupported", {
-              currency: fiatCurrency,
-            })
-          );
-        }
-        await simulateSandboxTransfer(
-          {
-            provider: "mural",
-            payload: {
-              counterpartyId: wizard.fields.counterpartyId,
-              amount: Number(wizard.fields.amount.trim()),
-              fiatCurrency,
-            },
-          },
-          t
-        );
-      } else {
-        await simulateSandboxTransfer(
-          {
-            provider: quote.provider,
-            payload: { transferId: wizard.quoteTransferId },
-          },
-          t
-        );
-      }
+        ),
+        t
+      );
       setQuoteSimulationSucceeded(true);
       toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
         id: toastId,

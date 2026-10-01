@@ -9,11 +9,21 @@ export async function PrivateChannelsSetupScreen({
   instance: PrivateChannelInstance | null;
 }) {
   // NEW DESIGN picks the connect form; the previous design keeps the original file.
-  const ConnectForm = (await newDesign())
+  const newDesignEnabled = await newDesign();
+  const ConnectForm = newDesignEnabled
     ? PrivateChannelsConnectForm
     : LegacyPrivateChannelsConnectForm;
   return (
-    <div className="-mx-3 -mt-6 -mb-20 flex min-h-0 flex-1 md:-mx-6 xl:-mb-6">
+    <div
+      className={
+        // The new design cancels the layout's padding (`pb-20`, then `md:pb-6`) exactly, so the
+        // wizard fills the clipped viewport: its form scrolls and its footer stays on screen.
+        // `xl:-mb-6` would leave the wizard 56px taller than that box between md and xl.
+        newDesignEnabled
+          ? "-mx-3 -mt-6 -mb-20 flex min-h-0 flex-1 md:-mx-6 md:-mb-6"
+          : "-mx-3 -mt-6 -mb-20 flex min-h-0 flex-1 md:-mx-6 xl:-mb-6"
+      }
+    >
       <ConnectForm initialInstance={instance} pageLayout />
     </div>
   );
