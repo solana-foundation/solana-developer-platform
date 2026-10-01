@@ -132,11 +132,14 @@ export function TokenPermissionsTab({
             const holder = draft
               ? walletName(draftHolderId(row.id))
               : holderName(row.value, ops.authorityWallets, t);
+            // A deployed token's key moves on chain, so it needs a signer that can move it; a
+            // draft's is only a wallet choice saved with the draft, with no authority on chain
+            // yet for the shared rows to find.
             const editDisabled =
               !canManageTokenAdmin ||
               ops.isPending ||
               form.saving ||
-              Boolean(row.editDisabledReason) ||
+              (!draft && Boolean(row.editDisabledReason)) ||
               state === "revoked";
             return (
               <div

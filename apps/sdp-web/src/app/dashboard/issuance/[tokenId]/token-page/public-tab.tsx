@@ -12,6 +12,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
 import { IssuanceCheckRow, LockHint } from "../../issuance-checkbox.redesign";
 import { IssuedTokenMark } from "../../issued-token-mark.redesign";
+import { MetadataSigner } from "./metadata-signer";
 import { shortAddress, type TokenTabProps } from "./token-page.shared";
 import { TokenSaveFooter } from "./token-save-footer";
 
@@ -183,10 +184,13 @@ export function TokenPublicTab({ token, ops, form }: TokenTabProps) {
         <TokenSaveFooter
           note={t("DashboardIssuance.newDesign.publicInfo.nothingPublished")}
           saving={saving}
-          saveDisabled={false}
+          saveDisabled={Boolean(
+            form.requiresMetadataSigner && ops.metadataSignerSelection.unavailableReason
+          )}
           errorCount={form.showErrors ? form.errorCount : 0}
           onDiscard={form.discard}
           onSave={() => void form.save()}
+          signer={form.requiresMetadataSigner ? <MetadataSigner ops={ops} form={form} /> : null}
         />
       ) : null}
     </div>

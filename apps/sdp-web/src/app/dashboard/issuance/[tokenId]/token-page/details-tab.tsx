@@ -1,7 +1,7 @@
 "use client";
 
 import { LockIcon, PencilIcon } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { formatDecimalAmount } from "@/app/dashboard/payments/payments-presentation";
 import { RecordBlock, RecordRow } from "@/components/refresh-record";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { getTokenTypeLabel } from "../../issuance-token-fields";
-import { TokenSignerSelect } from "../token-signer-select";
+import { MetadataSigner } from "./metadata-signer";
 import { accessControlLabel, shortAddress, type TokenTabProps } from "./token-page.shared";
 import { TokenSaveFooter } from "./token-save-footer";
 
@@ -385,25 +385,6 @@ function DetailsSaveFooter({
         if (await form.save()) onDone();
       }}
       signer={form.requiresMetadataSigner ? <MetadataSigner ops={ops} form={form} /> : null}
-    />
-  );
-}
-
-function MetadataSigner({ ops, form }: Pick<TokenTabProps, "ops" | "form">): ReactNode {
-  const selection = ops.metadataSignerSelection;
-  if (
-    selection.wallets.length === 1 &&
-    selection.wallets[0]?.id === form.metadataSignerWalletId &&
-    !selection.unavailableReason
-  ) {
-    return null;
-  }
-  return (
-    <TokenSignerSelect
-      signerWallets={selection.wallets}
-      signerWalletId={form.metadataSignerWalletId}
-      signerUnavailableReason={selection.unavailableReason}
-      onSignerWalletIdChange={form.setMetadataSignerWalletId}
     />
   );
 }

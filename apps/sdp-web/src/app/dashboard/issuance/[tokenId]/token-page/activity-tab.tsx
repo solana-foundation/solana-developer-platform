@@ -19,14 +19,13 @@ import {
   activityEventLabel,
   activitySignature,
   activityStatus,
-  useTokenActivity,
+  useTokenActivityWindows,
 } from "./token-activity";
 import { transactionExplorerHref } from "./token-page.shared";
 import { TokenTable } from "./token-table";
 
-// The history is read in one window and searched and paged here: the audit API filters by
-// event, actor type and status but has no text search.
-const WINDOW = 100;
+// The history is read 100 events at a time and searched and paged here: the audit API filters
+// by event, actor type and status but has no text search. Older windows load on request.
 const PAGE_SIZE = 25;
 const ACTOR_TYPES = ["user", "api_key", "system"] as const;
 const STATUSES = ["success", "failure"] as const;
@@ -44,7 +43,7 @@ export function TokenActivityTab({ token }: { token: Token }) {
   const [filters, setFilters] = useState<ActivityFilters>({});
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const { data, error } = useTokenActivity(token.id, { page: 1, pageSize: WINDOW, ...filters });
+  const history = useTokenActivityWindows(token.id, filters);
   const formatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -58,7 +57,7 @@ export function TokenActivityTab({ token }: { token: Token }) {
   );
 
   const needle = search.trim().toLowerCase();
-  const events = (data?.events ?? []).filter((event) =>
+  const events = history.events.filter((event) =>
     needle
       ? [activityEventLabel(event.action, t), event.actorLabel, activityStatus(event, t).label]
           .join(" ")
@@ -168,9 +167,9 @@ export function TokenActivityTab({ token }: { token: Token }) {
           ))}
         </div>
       ) : null}
-      {error ? (
+      {history.error ? (
         <ListEmptyState message={t("DashboardIssuance.newDesign.activity.loadFailed")} />
-      ) : data && events.length === 0 ? (
+      ) : history.loaded && events.length === 0 ? (
         chips.length > 0 || needle ? (
           <ListEmptyState
             message={t("DashboardIssuance.newDesign.activity.noMatchTitle")}
@@ -243,10 +242,22 @@ export function TokenActivityTab({ token }: { token: Token }) {
       {pageCount > 1 ? (
         <ArrowPagination page={page} pageCount={pageCount} onPageChange={setPage} />
       ) : null}
-      {data?.hasMore ? (
-        <p className="text-meta text-tertiary">
-          {t("DashboardIssuance.newDesign.activity.windowNote", { count: WINDOW })}
-        </p>
+      {history.hasMore ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-meta text-tertiary">
+            {t("DashboardIssuance.newDesign.activity.windowNote", {
+              count: history.events.length,
+            })}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={history.loadingOlder}
+            onClick={() => void history.loadOlder()}
+          >
+            {t("DashboardIssuance.newDesign.activity.loadOlder")}
+          </Button>
+        </div>
       ) : null}
     </div>
   );

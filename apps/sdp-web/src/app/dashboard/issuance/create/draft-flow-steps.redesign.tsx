@@ -109,6 +109,17 @@ function Field({
   );
 }
 
+/** The controls a draft of this class starts with, what the previous design's form resets to. */
+function classControls(stablecoin: boolean): Partial<DraftState> {
+  return {
+    pauseTransfers: stablecoin,
+    freezeAccounts: stablecoin,
+    permanentDelegate: false,
+    interestBearing: false,
+    transferFee: false,
+  };
+}
+
 /** Step 1: the token's name and what it is. */
 export function ClassifyStep({ draft, update }: { draft: DraftState; update: UpdateDraft }) {
   const t = useTranslations();
@@ -184,6 +195,9 @@ export function ClassifyStep({ draft, update }: { draft: DraftState; update: Upd
                       assetClass: entry.key,
                       // A stablecoin is six decimals; any other token starts at nine.
                       decimals: entry.key === "stablecoin" ? "6" : "9",
+                      // Controls start from the class: a stablecoin's are fixed on, and any
+                      // other token starts with none, so none carry over from a switch.
+                      ...classControls(entry.key === "stablecoin"),
                     })
                   }
                 />

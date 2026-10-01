@@ -1823,7 +1823,7 @@
         "noMatchTitle": "No events match",
         "noMatchBody": "Drop a filter or clear the search to see every event on this token.",
         "searchPlaceholder": "Search this token’s activity",
-        "windowNote": "Searching the latest {count} events.",
+        "windowNote": "Showing and searching the latest {count} events.",
         "events": {
           "deploy": "Deploy",
           "mint": "Mint",
@@ -1838,7 +1838,8 @@
           "create": "Token created",
           "update": "Settings updated",
           "revoke": "Authority given up"
-        }
+        },
+        "loadOlder": "Load older events"
       },
       "localDrafts": {
         "title": "Unfinished drafts",

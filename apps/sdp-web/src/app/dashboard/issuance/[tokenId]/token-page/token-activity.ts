@@ -2,6 +2,7 @@
 
 import type { AssetAuditEvent } from "@sdp/types";
 import useSWR from "swr";
+import useSWRInfinite from "swr/infinite";
 import type { StatusTone } from "@/components/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
@@ -41,6 +42,54 @@ export function useTokenActivity(tokenId: string, query: TokenActivityQuery) {
       }),
     { keepPreviousData: true, revalidateOnFocus: true }
   );
+}
+
+/** How many events the activity tab reads at a time. */
+export const TOKEN_ACTIVITY_WINDOW = 100;
+
+/**
+ * The token's audit history read 100 events at a time, newest first: the tab searches and
+ * pages what is loaded, and `loadOlder` reads the next window while `hasMore` says the API
+ * holds older events.
+ */
+export function useTokenActivityWindows(
+  tokenId: string,
+  filters: Omit<TokenActivityQuery, "page" | "pageSize">
+) {
+  const { data, error, size, setSize, isValidating } = useSWRInfinite<AssetAuditHistory, Error>(
+    (index, previous) =>
+      previous && !previous.hasMore
+        ? null
+        : [
+            TOKEN_ACTIVITY_KEY,
+            tokenId,
+            index + 1,
+            TOKEN_ACTIVITY_WINDOW,
+            filters.action,
+            filters.status,
+            filters.actorType,
+          ],
+    ([, , page]) =>
+      fetchAssetAuditHistory(tokenId, {
+        page: page as number,
+        pageSize: TOKEN_ACTIVITY_WINDOW,
+        action: filters.action ?? null,
+        status: filters.status ?? null,
+        actorType: filters.actorType ?? null,
+      }),
+    { revalidateOnFocus: true, revalidateFirstPage: true }
+  );
+  const events = data?.flatMap((window) => window.events) ?? [];
+  const hasMore = data?.at(-1)?.hasMore === true;
+  const loadingOlder = isValidating && size > (data?.length ?? 0);
+  return {
+    events,
+    loaded: data !== undefined,
+    error,
+    hasMore,
+    loadingOlder,
+    loadOlder: () => setSize(size + 1),
+  };
 }
 
 const ACTION_LABEL: Record<string, MessageKey> = {
