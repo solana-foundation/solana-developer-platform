@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   },
   activityLimits: [] as (number | undefined)[],
   widerActivityFails: false,
+  /** The loaded window's latest refresh fails, so SWR holds its rows and an error. */
+  activityRefreshFails: false,
   retryActivity: vi.fn(),
 }));
 
@@ -81,7 +83,12 @@ vi.mock("./use-wallet-activity", async () => {
           mutate: mocks.retryActivity,
         };
       }
-      return { data: mocks.activity, error: undefined, isValidating: false, mutate: vi.fn() };
+      return {
+        data: mocks.activity,
+        error: mocks.activityRefreshFails ? new Error("Activity refresh failed") : undefined,
+        isValidating: false,
+        mutate: vi.fn(),
+      };
     },
   };
 });
@@ -231,6 +238,7 @@ beforeEach(() => {
   };
   mocks.activityLimits = [];
   mocks.widerActivityFails = false;
+  mocks.activityRefreshFails = false;
 });
 afterEach(() => {
   cleanup();
@@ -270,6 +278,17 @@ describe("Overview", () => {
     expect(mocks.replaceSearchParams).toHaveBeenCalledWith({ tab: "activity" });
   });
 
+  it("keeps the recent rows when a refresh fails, and says the activity is unavailable", async () => {
+    mocks.activityRefreshFails = true;
+    await act(async () => {
+      renderView();
+    });
+    expect(await screen.findByText("Wallet activity is unavailable right now.")).toBeTruthy();
+    const activity = document.querySelector("[data-wallet-activity-table]") as HTMLElement;
+    expect(within(activity).getByText("−500.00 USDC")).toBeTruthy();
+    expect(within(activity).getByText("+1250.00 USDC")).toBeTruthy();
+  });
+
   it("says a restricted wallet cannot sign, and offers no faucet", async () => {
     await act(async () => {
       renderView({ wallet: { ...wallet, isRuntimeExecutionAllowed: false } });
@@ -301,6 +320,16 @@ describe("Activity", () => {
     expect(screen.getAllByText(/xfr_/)).toHaveLength(1);
     expect(document.querySelector("[data-wallet-activity-capped]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Load older activity" })).toBeNull();
+  });
+
+  it("keeps the loaded rows when a refresh fails, and says the activity is unavailable", async () => {
+    mocks.tab = "activity";
+    mocks.activityRefreshFails = true;
+    await act(async () => {
+      renderView();
+    });
+    expect(await screen.findByText("Wallet activity is unavailable right now.")).toBeTruthy();
+    expect(screen.getAllByText(/xfr_/)).toHaveLength(2);
   });
 
   it("loads older activity and points the full history at this wallet's ledger", async () => {
