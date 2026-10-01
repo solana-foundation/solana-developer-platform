@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { assetProfiles } from "@/flags";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { readApiErrorMessage } from "@/lib/api-error";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -14,6 +15,7 @@ import {
   fetchIssuanceTokensPage,
 } from "../issuance-tokens.data";
 import { IssuanceWorkspace } from "../issuance-workspace";
+import RedesignIssuancePage from "./page.redesign";
 
 interface IssuanceTemplateView {
   id: string;
@@ -111,7 +113,7 @@ interface IssuancePageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default async function IssuancePage({ searchParams }: IssuancePageProps) {
+async function IssuancePage({ searchParams }: IssuancePageProps) {
   const [t, { userId, orgId }, resolvedSearchParams, assetProfilesEnabled] = await Promise.all([
     getTranslations(),
     auth(),
@@ -190,3 +192,5 @@ export default async function IssuancePage({ searchParams }: IssuancePageProps) 
     throw error;
   }
 }
+
+export default withLegacyDesign(RedesignIssuancePage, IssuancePage, "issuance");

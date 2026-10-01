@@ -1,4 +1,4 @@
-import { IssuancePageSkeleton } from "../issuance-page-skeleton";
+import { IssuancePageSkeleton } from "../issuance-route-skeletons.redesign";
 
 /**
  * Issuance overview Suspense fallback. It can't await the async
@@ -9,5 +9,5 @@ import { IssuancePageSkeleton } from "../issuance-page-skeleton";
  * @returns The issuance page skeleton matching the flag default.
  */
 export default function IssuanceLoading() {
-  return <IssuancePageSkeleton assetProfilesEnabled />;
+  return <IssuancePageSkeleton />;
 }

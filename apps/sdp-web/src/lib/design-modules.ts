@@ -14,6 +14,8 @@ const DESIGN_MODULE_ROUTES = {
   // legacy custody prefix. A wallet's policy editor and audit pages keep the base design.
   // `connections` and `switch` are pages of their own, not wallets.
   wallets: /^\/dashboard\/(?:wallets|custody)(?:\/(?!connections\/?$|switch\/?$)[^/]+)?\/?$/,
+  // Issuance: the token list and its API playground, the draft flow and one token's page.
+  issuance: /^\/dashboard\/issuance(?:\/|$)/,
   // Payments' Contacts: the list, a new contact, one contact's page.
   contacts: /^\/dashboard\/payments\/counterparty(?:\/[^/]+)?\/?$/,
   // Payments' two flows, Pay and Deposit.
