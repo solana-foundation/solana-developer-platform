@@ -28,7 +28,10 @@ read the same files without Tailwind.
    base palette so the two can be documented side by side.
 3. **Refresh scope.** `[data-sdp-theme="refresh"]` points the base names at the refresh values
    and sets the face. Everything inside that element renders in the new design, shared
-   components included, with no per-component overrides.
+   components included, with no per-component overrides. An element marked
+   `data-sdp-palette="refresh"` does the same for the whole document (`:root:has(...)`), so every
+   page, and what portals out to `<body>`, shares the palette and face; an app layers its
+   component shapes on the `data-sdp-theme` scope alone.
 
 The type, radius, control-height, layout, elevation and motion tokens are the same in both
 themes. Dark mode is the `.dark` class on `<html>`, for both palettes.
