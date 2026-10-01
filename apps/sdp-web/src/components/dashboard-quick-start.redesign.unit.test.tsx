@@ -129,7 +129,7 @@ describe("Overview quick start", () => {
     renderQuickStart("overview");
     fireEvent.click(screen.getByRole("button", { name: "Hide" }));
     expect(readQuickStartPrefs(KEY).collapsed).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss quick start" }));
     expect(readQuickStartPrefs(KEY).dismissed).toBe(true);
   });
 

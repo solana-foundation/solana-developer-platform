@@ -370,6 +370,8 @@ function OverviewQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQ
           <button
             type="button"
             onClick={() => dismissQuickStart(storageKey)}
+            // Names the guide: a page's own "Dismiss" (a new key's secret) sits beside it.
+            aria-label={t("Shared.quickStart.dismissConfirm")}
             className="inline-flex h-control-sm items-center rounded-control px-2 text-body text-secondary transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
           >
             {t("Shared.quickStart.dismiss")}
@@ -529,6 +531,7 @@ function SidebarQuickStart({
             <button
               type="button"
               onClick={() => dismissQuickStart(storageKey)}
+              aria-label={t("Shared.quickStart.dismissConfirm")}
               className="inline-flex h-7 items-center rounded-control px-2 text-meta text-secondary transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2"
             >
               {t("Shared.quickStart.dismiss")}
