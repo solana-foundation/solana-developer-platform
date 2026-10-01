@@ -1,7 +1,7 @@
 "use client";
 
 import { Popover } from "@base-ui/react/popover";
-import { format, isValid, type Locale, parse } from "date-fns";
+import { differenceInCalendarDays, format, isValid, type Locale, parse } from "date-fns";
 import { CalendarIcon } from "lucide-react";
 import { useState } from "react";
 import { getDefaultClassNames } from "react-day-picker";
@@ -79,8 +79,8 @@ interface DateFieldProps {
 /**
  * A date as its own field: the day typed or read as text ("Oct 1, 2026"), with a calendar
  * button at the field's end that opens a month under it. Typing is read when the field is left
- * or Enter is pressed; text that is not a date goes back to the last one, and an empty field
- * clears it.
+ * or Enter is pressed; text that is not a date, or a day before `minDate`, goes back to the last
+ * one, and an empty field clears it.
  */
 export function DateField({
   id,
@@ -108,7 +108,10 @@ export function DateField({
       return;
     }
     const typed = parseTypedDate(draft, locale);
-    if (typed) onChange(formatDateValue(typed));
+    if (!typed) return;
+    // The calendar disables days before `minDate`; a typed one is held to the same rule.
+    if (minDate && differenceInCalendarDays(typed, minDate) < 0) return;
+    onChange(formatDateValue(typed));
   }
 
   return (

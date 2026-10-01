@@ -1,7 +1,7 @@
 "use client";
 
 import { PlusIcon, XIcon } from "lucide-react";
-import { type ClipboardEvent, useState } from "react";
+import { type ClipboardEvent, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
@@ -19,17 +19,30 @@ interface BulkImportDialogProps {
   onImport: (rows: BulkImportRow[]) => Promise<{ unresolved: string[] }>;
 }
 
+/** A row in the editor, with a key that survives removing or pasting rows above it. */
+type DraftRow = BulkImportRow & { key: number };
+
+function toBulkRow({ accountId, currency, amount }: DraftRow): BulkImportRow {
+  return { accountId, currency, amount };
+}
+
 const INPUT_CLASS =
   "h-10 w-full rounded-lg border border-border-default bg-[var(--input-bg-idle)] px-3 text-sm text-primary placeholder:text-tertiary focus:border-[var(--input-border-focus)] focus:outline-none";
 
 export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogProps) {
   const t = useTranslations();
-  const [rows, setRows] = useState<BulkImportRow[]>([emptyBulkRow()]);
+  const nextKey = useRef(1);
+  const draft = (row: BulkImportRow): DraftRow => {
+    const key = nextKey.current;
+    nextKey.current += 1;
+    return { ...row, key };
+  };
+  const [rows, setRows] = useState<DraftRow[]>(() => [{ ...emptyBulkRow(), key: 0 }]);
   const [errors, setErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const handleClose = () => {
-    setRows([emptyBulkRow()]);
+    setRows([draft(emptyBulkRow())]);
     setErrors([]);
     onClose();
   };
@@ -39,9 +52,11 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
   };
 
   const removeRow = (index: number) => {
+    // Keys are drawn outside the updater, which React may run twice.
+    const fallback = draft(emptyBulkRow());
     setRows((prev) => {
       const next = prev.filter((_, i) => i !== index);
-      return next.length > 0 ? next : [emptyBulkRow()];
+      return next.length > 0 ? next : [fallback];
     });
   };
 
@@ -51,14 +66,15 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
       return;
     }
     event.preventDefault();
+    const pasted = parsed.map(draft);
     setRows((prev) => {
       const kept = prev.filter((row) => !isEmptyBulkRow(row));
-      return [...kept, ...parsed];
+      return [...kept, ...pasted];
     });
   };
 
   const handleImport = async () => {
-    const { valid, errors: rowErrors } = validateBulkRows(rows);
+    const { valid, errors: rowErrors } = validateBulkRows(rows.map(toBulkRow));
     const messages = rowErrors.map((error) =>
       t("DashboardPayments.batchSend.rowError", { row: error.row, message: error.message })
     );
@@ -111,8 +127,7 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
 
         <div className="max-h-80 space-y-2 overflow-y-auto">
           {rows.map((row, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional, identity is the index
-            <div key={index} className="grid grid-cols-[1fr_120px_120px_36px] items-center gap-2">
+            <div key={row.key} className="grid grid-cols-[1fr_120px_120px_36px] items-center gap-2">
               <input
                 value={row.accountId}
                 onChange={(event) => updateRow(index, "accountId", event.currentTarget.value)}
@@ -149,7 +164,10 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
 
         <button
           type="button"
-          onClick={() => setRows((prev) => [...prev, emptyBulkRow()])}
+          onClick={() => {
+            const added = draft(emptyBulkRow());
+            setRows((prev) => [...prev, added]);
+          }}
           className="flex items-center gap-1.5 text-sm font-medium text-tertiary transition-colors hover:text-primary"
         >
           <PlusIcon className="size-4" />
@@ -158,9 +176,9 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
 
         {errors.length > 0 ? (
           <div className="space-y-1 rounded-xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
-            {errors.map((message, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: error list is positional; messages may repeat
-              <p key={index}>{message}</p>
+            {/* Each message names its row or wallet, so it is unique in the list. */}
+            {errors.map((message) => (
+              <p key={message}>{message}</p>
             ))}
           </div>
         ) : null}
