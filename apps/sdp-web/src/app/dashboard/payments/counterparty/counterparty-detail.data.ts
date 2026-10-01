@@ -18,6 +18,8 @@ export async function fetchCounterpartyDetail(
   transfers: PaymentTransferSummary[];
   /** How many transfers the contact has in all; more than `transfers` when the page cut it. */
   transfersTotal: number;
+  /** True when the transfers could not be read, so no transfers is not no payment history. */
+  transfersFailed: boolean;
 }> {
   const encoded = encodeURIComponent(counterpartyId);
   const [counterpartyRes, accountsRes, transfersRes] = await Promise.all([
@@ -51,5 +53,11 @@ export async function fetchCounterpartyDetail(
     transfersTotal = Math.max(json.meta?.total ?? 0, transfers.length);
   }
 
-  return { counterparty, accounts, transfers, transfersTotal };
+  return {
+    counterparty,
+    accounts,
+    transfers,
+    transfersTotal,
+    transfersFailed: !transfersRes.ok,
+  };
 }

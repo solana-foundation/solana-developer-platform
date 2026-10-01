@@ -132,7 +132,11 @@ describe("counterparty provider accounts table", () => {
   });
   async function renderAccounts(
     accounts: CounterpartyProviderAccount[],
-    history: { transfers?: PaymentTransferSummary[]; transfersTotal?: number } = {}
+    history: {
+      transfers?: PaymentTransferSummary[];
+      transfersTotal?: number;
+      transfersFailed?: boolean;
+    } = {}
   ) {
     accountState.accounts = accounts;
     container = document.createElement("div");
@@ -157,6 +161,7 @@ describe("counterparty provider accounts table", () => {
           initialAccounts={[]}
           initialTransfers={history.transfers ?? []}
           transfersTotal={history.transfersTotal}
+          transfersFailed={history.transfersFailed}
         />
       )
     );
@@ -298,5 +303,15 @@ describe("counterparty provider accounts table", () => {
     expect(container.textContent).toContain(
       "DashboardPayments.counterparty.detail.notPaidInLatest 1"
     );
+  });
+
+  it("says the payment history was not loaded when the transfers read failed", async () => {
+    await renderAccounts([], { transfers: [], transfersTotal: 0, transfersFailed: true });
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.notPaidYet");
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.noPayments");
+    expect(text.split("DashboardPayments.counterparty.detail.paymentsNotLoaded")).toHaveLength(3);
+    expect(text).toContain("DashboardPayments.counterparty.detail.paymentsLoadFailed");
+    expect(text).toContain("Shared.SharedComponents.retry");
   });
 });
