@@ -52,6 +52,8 @@ interface CounterpartyDetailWorkspaceProps {
   initialTransfers: PaymentTransferSummary[];
   /** How many transfers the contact has in all; more than `initialTransfers` when cut short. */
   transfersTotal?: number;
+  /** True when the transfers could not be read: the history is unknown, not empty. */
+  transfersFailed?: boolean;
 }
 
 /** The design shows the latest three payments; Transactions has the rest. */
@@ -167,14 +169,31 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
+/**
+ * What the record says when nothing settled was paid out in the loaded transfers: "Not yet" only
+ * when the whole history was read; otherwise how much was read, or that none of it was.
+ */
+function noPayoutLabel(
+  t: Translate,
+  history: { failed: boolean; partial: boolean; loaded: number }
+): string {
+  if (history.failed) return t("DashboardPayments.counterparty.detail.paymentsNotLoaded");
+  if (history.partial) {
+    return t("DashboardPayments.counterparty.detail.notPaidInLatest", { count: history.loaded });
+  }
+  return t("DashboardPayments.counterparty.detail.notPaidYet");
+}
+
 function ContactRecord({
   counterparty,
   transfers,
   transfersTotal,
+  transfersFailed,
 }: {
   counterparty: Counterparty;
   transfers: PaymentTransferSummary[];
   transfersTotal: number;
+  transfersFailed: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -183,9 +202,7 @@ function ContactRecord({
   const partial = transfersTotal > transfers.length;
   const notYet = (
     <span className="text-tertiary">
-      {partial
-        ? t("DashboardPayments.counterparty.detail.notPaidInLatest", { count: transfers.length })
-        : t("DashboardPayments.counterparty.detail.notPaidYet")}
+      {noPayoutLabel(t, { failed: transfersFailed, partial, loaded: transfers.length })}
     </span>
   );
   return (
@@ -395,6 +412,43 @@ function PaymentsTable({
 }
 
 /**
+ * The latest payments, or why there are none: a failed read offers a retry rather than claim
+ * the contact was never paid.
+ */
+function RecentPayments({
+  transfers,
+  failed,
+  onSelect,
+}: {
+  transfers: PaymentTransferSummary[];
+  failed: boolean;
+  onSelect: (transfer: PaymentTransferSummary) => void;
+}) {
+  const t = useTranslations();
+  const router = useRouter();
+  if (transfers.length > 0) return <PaymentsTable transfers={transfers} onSelect={onSelect} />;
+  if (failed) {
+    return (
+      <ListEmptyState
+        message={t("DashboardPayments.counterparty.detail.paymentsLoadFailed")}
+        description={t("DashboardPayments.counterparty.detail.paymentsLoadFailedDescription")}
+        action={
+          <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
+            {t("Shared.SharedComponents.retry")}
+          </Button>
+        }
+      />
+    );
+  }
+  return (
+    <ListEmptyState
+      message={t("DashboardPayments.counterparty.detail.noPayments")}
+      description={t("DashboardPayments.counterparty.detail.noPaymentsDescription")}
+    />
+  );
+}
+
+/**
  * A contact's page, as the design lays it out: the record (type, external ID, created; status,
  * last paid, paid so far), the saved Solana addresses, the accounts payment providers hold for
  * the contact, the latest payments, what the page does not keep, and Delete. The header titles
@@ -405,6 +459,7 @@ export function CounterpartyDetailWorkspace({
   initialAccounts,
   initialTransfers,
   transfersTotal = initialTransfers.length,
+  transfersFailed = false,
 }: CounterpartyDetailWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -444,6 +499,7 @@ export function CounterpartyDetailWorkspace({
           counterparty={counterparty}
           transfers={initialTransfers}
           transfersTotal={transfersTotal}
+          transfersFailed={transfersFailed}
         />
 
         <DetailBlock
@@ -482,14 +538,11 @@ export function CounterpartyDetailWorkspace({
             )
           }
         >
-          {recentTransfers.length === 0 ? (
-            <ListEmptyState
-              message={t("DashboardPayments.counterparty.detail.noPayments")}
-              description={t("DashboardPayments.counterparty.detail.noPaymentsDescription")}
-            />
-          ) : (
-            <PaymentsTable transfers={recentTransfers} onSelect={setSelectedTransfer} />
-          )}
+          <RecentPayments
+            transfers={recentTransfers}
+            failed={transfersFailed}
+            onSelect={setSelectedTransfer}
+          />
         </DetailBlock>
 
         <DetailBlock title={t("DashboardPayments.counterparty.detail.notKeptHere")}>
