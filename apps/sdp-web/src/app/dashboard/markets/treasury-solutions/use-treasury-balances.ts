@@ -27,6 +27,11 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
   const [refreshError, setRefreshError] = useState<Error>();
   const [pairedMovementIds, setPairedMovementIds] = useState<ReadonlySet<string>>(() => new Set());
   const movementWalletIds = useRef(new Map<string, string>());
+  // Outstanding verification is independent of the bounded activity display.
+  const pendingPairs = useRef(new Map<string, VaultActivity>());
+  const [unpairedPositionIds, setUnpairedPositionIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const generation = useRef(0);
   const requested = useRef(new Set<string>());
   const latestRead = vaults.reads.at(-1);
@@ -41,19 +46,24 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
   const refresh = useCallback(
     async (movementIds?: readonly string[]) => {
       const current = ++generation.current;
-      // Treasury keeps a bounded activity window. Retired history must not leak
-      // back into retries and exceed the API's 100-movement request limit.
-      const movements = new Map(activities.map(({ movement }) => [movement.movementId, movement]));
+      const currentActivities = new Map([
+        ...pendingPairs.current,
+        ...activities.map((activity) => [activity.movement.movementId, activity] as const),
+      ]);
+      const movements = new Map(
+        [...currentActivities.values()].map(({ movement }) => [movement.movementId, movement])
+      );
       const request = {
-        movementIds: new Set(
-          movementIds ??
+        movementIds: new Set([
+          ...pendingPairs.current.keys(),
+          ...(movementIds ??
             activities
               .filter(
                 ({ movement }) =>
                   isCommittedVaultMovement(movement) && movement.committedObservedAt !== undefined
               )
-              .map(({ movement }) => movement.movementId)
-        ),
+              .map(({ movement }) => movement.movementId)),
+        ]),
       };
       const positionsById = new Map(vaults.positions?.map((position) => [position.id, position]));
       setRefreshes((current) => [...current, request]);
@@ -61,8 +71,13 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
         (previous) =>
           new Set([...previous].filter((id) => movements.has(id) && !request.movementIds.has(id)))
       );
-      const requestedActivities = activities.filter(({ movement }) =>
+      const requestedActivities = [...currentActivities.values()].filter(({ movement }) =>
         request.movementIds.has(movement.movementId)
+      );
+      for (const activity of requestedActivities)
+        pendingPairs.current.set(activity.movement.movementId, activity);
+      setUnpairedPositionIds(
+        new Set([...pendingPairs.current.values()].map(({ movement }) => movement.positionId))
       );
       // Capture submission metadata before a full withdrawal removes its position.
       for (const { movement } of requestedActivities) {
@@ -71,8 +86,19 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
         if (walletId) movementWalletIds.current.set(movement.movementId, walletId);
       }
       try {
+        const ids = [...request.movementIds];
         const positionRead = Promise.resolve(
-          vaults.refresh(request.movementIds.size > 0 ? [...request.movementIds] : undefined)
+          ids.length > 100
+            ? vaults.refresh(
+                ids,
+                new Map(
+                  requestedActivities.map(({ movement }) => [
+                    movement.movementId,
+                    movement.positionId,
+                  ])
+                )
+              )
+            : vaults.refresh(ids.length > 0 ? ids : undefined)
         );
         const results = await Promise.allSettled([
           positionRead,
@@ -107,8 +133,13 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
           setRefreshError(
             failed ? new Error("Treasury balances could not be refreshed") : undefined
           );
-          if (!failed)
+          if (!failed) {
+            for (const id of request.movementIds) pendingPairs.current.delete(id);
+            setUnpairedPositionIds(
+              new Set([...pendingPairs.current.values()].map(({ movement }) => movement.positionId))
+            );
             setPairedMovementIds((previous) => new Set([...previous, ...request.movementIds]));
+          }
         }
       } finally {
         setRefreshes((current) => current.filter((item) => item !== request));
@@ -121,7 +152,8 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
     const currentIds = new Set(activities.map(({ movement }) => movement.movementId));
     requested.current = new Set([...requested.current].filter((id) => currentIds.has(id)));
     for (const id of movementWalletIds.current.keys()) {
-      if (!currentIds.has(id)) movementWalletIds.current.delete(id);
+      if (!currentIds.has(id) && !pendingPairs.current.has(id))
+        movementWalletIds.current.delete(id);
     }
     const confirmed = activities.filter(
       ({ movement }) =>
@@ -144,6 +176,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
   const balanceOf = useCallback(
     (position: EarnVaultPosition): TreasuryPositionBalance => {
       const awaitingPair =
+        unpairedPositionIds.has(position.id) ||
         activities.some(
           ({ movement }) =>
             movement.positionId === position.id &&
@@ -170,7 +203,15 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
       }
       return displayedVaultBalance(vaults.reads, position.id, activities, vaults.error);
     },
-    [activities, pairedMovementIds, submissions, refreshes, vaults.error, vaults.reads]
+    [
+      activities,
+      pairedMovementIds,
+      unpairedPositionIds,
+      submissions,
+      refreshes,
+      vaults.error,
+      vaults.reads,
+    ]
   );
 
   return {
@@ -182,6 +223,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
     walletsLoading: funding.isLoading,
     balancesRefreshing:
       submissions.length > 0 ||
+      unpairedPositionIds.size > 0 ||
       hasUnconfirmedVaultMovement(activities) ||
       refreshes.length > 0 ||
       activities.some(

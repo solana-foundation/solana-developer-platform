@@ -435,14 +435,76 @@ export interface EarnVaultPositionsRead {
   minimumSlot?: number;
 }
 
-async function readEarnVaultPositions(
-  afterMovementIds: readonly string[] = []
+/**
+ * Keep each position's evidence together. A position with more than 100
+ * movements gets its own batches, so their minimum slots can be compared
+ * without borrowing the slot of an unrelated position.
+ */
+function vaultBalanceReadBatches(
+  movementIds: readonly string[],
+  positionIds?: ReadonlyMap<string, string>
+): string[][] {
+  if (movementIds.length <= 100) return [[...movementIds]];
+  const byPosition = new Map<string, string[]>();
+  for (const id of movementIds) {
+    const positionId = positionIds?.get(id);
+    if (!positionId) throw new Error("Missing position for batched balance verification");
+    const group = byPosition.get(positionId) ?? [];
+    group.push(id);
+    byPosition.set(positionId, group);
+  }
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  for (const group of byPosition.values()) {
+    if (batch.length + group.length > 100) {
+      if (batch.length > 0) batches.push(batch);
+      batch = [];
+    }
+    if (group.length > 100) {
+      for (let index = 0; index < group.length; index += 100)
+        batches.push(group.slice(index, index + 100));
+    } else batch.push(...group);
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+export async function readEarnVaultPositions(
+  afterMovementIds: readonly string[] = [],
+  positionIds?: ReadonlyMap<string, string>
 ): Promise<EarnVaultPositionsRead> {
   const startedAt = Date.now();
+  const batches = vaultBalanceReadBatches(afterMovementIds, positionIds);
+  const verified = new Map<string, { position: EarnVaultPosition | undefined; slot: number }>();
+  let positions: EarnVaultPosition[] = [];
   let minimumSlot: number | undefined;
-  const positions = await fetchEarnVaultPositions(afterMovementIds, (slot) => {
-    minimumSlot = Math.max(minimumSlot ?? 0, slot);
-  });
+  for (const batch of batches) {
+    let batchSlot: number | undefined;
+    positions = await fetchEarnVaultPositions(batch, (slot) => {
+      batchSlot = Math.max(batchSlot ?? 0, slot);
+    });
+    if (batchSlot !== undefined) minimumSlot = Math.max(minimumSlot ?? 0, batchSlot);
+    if (batches.length > 1) {
+      const byId = new Map(positions.map((position) => [position.id, position]));
+      for (const id of batch) {
+        const positionId = positionIds?.get(id);
+        if (!positionId || batchSlot === undefined)
+          throw new Error("Missing position balance verification");
+        // Multiple batches for one position must use the greatest proven slot,
+        // even when confirmation arrival order differs from chain slot order.
+        if ((verified.get(positionId)?.slot ?? -1) <= batchSlot)
+          verified.set(positionId, { position: byId.get(positionId), slot: batchSlot });
+      }
+    }
+  }
+  if (batches.length > 1) {
+    const combined = new Map(positions.map((position) => [position.id, position]));
+    for (const [id, { position }] of verified) {
+      if (position) combined.set(id, position);
+      else combined.delete(id);
+    }
+    positions = [...combined.values()];
+  }
   return { positions, startedAt, landedAt: Date.now(), afterMovementIds, minimumSlot };
 }
 
@@ -474,9 +536,10 @@ export function appendVaultPositionsRead(
 /** Live position values refresh while the surface is mounted; `reads` keeps the recent history, newest last. */
 export function useEarnVaultPositions() {
   const afterMovementIds = useRef<readonly string[]>([]);
+  const movementPositionIds = useRef<ReadonlyMap<string, string> | undefined>(undefined);
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultPositions(),
-    () => readEarnVaultPositions(afterMovementIds.current),
+    () => readEarnVaultPositions(afterMovementIds.current, movementPositionIds.current),
     { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
   const [history, setHistory] = useState<readonly EarnVaultPositionsRead[]>([]);
@@ -489,11 +552,14 @@ export function useEarnVaultPositions() {
     [data, history]
   );
   const refresh = useCallback(
-    (movementIds?: readonly string[]) => {
-      if (movementIds) afterMovementIds.current = [...movementIds];
+    (movementIds?: readonly string[], positionIds?: ReadonlyMap<string, string>) => {
+      if (movementIds) {
+        afterMovementIds.current = [...movementIds];
+        movementPositionIds.current = positionIds;
+      }
       // Explicit mutation propagates failures; a bare SWR revalidation can
       // resolve with cached data after its fetcher failed.
-      return mutate(readEarnVaultPositions(afterMovementIds.current), {
+      return mutate(readEarnVaultPositions(afterMovementIds.current, movementPositionIds.current), {
         revalidate: false,
         throwOnError: true,
       });

@@ -518,9 +518,13 @@ successful pair clears that gate, including retries and overlapping completions.
 Keep the custody wallet ID from the intent while a deposit is provisional and
 resolve recovered movements from the returned position read. An unknown wallet
 scope remains pending; it must never become a global freshness bound. Overlapping
-confirmations each trigger refresh, including recovery. Retry IDs follow the
-bounded activity window (50 deposits plus 50 withdrawals); retired history must
-not accumulate into requests beyond the API's 100-ID limit.
+confirmations each trigger refresh, including recovery. Unpaired movements remain
+tracked independently of the bounded activity list until both reads succeed.
+Retired, verified history is pruned. More than 100 outstanding movements are read
+in bounded batches, keeping each position's evidence together. A position that
+spans batches uses the snapshot with its greatest proven slot; unrelated reads
+must never replace that snapshot. Publish the combined read only after every
+batch verifies its evidence, then finish the paired wallet refresh.
 
 Post-confirmation position reads send `afterMovementIds`. The API authorizes the
 movements and bounds only the affected positions by each position's maximum

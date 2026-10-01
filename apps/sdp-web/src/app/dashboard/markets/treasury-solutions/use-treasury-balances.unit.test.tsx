@@ -70,6 +70,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("Treasury balance coordinator", () => {
@@ -294,6 +295,108 @@ it("keeps retries within the API limit after more than 100 confirmations in one 
   const expected = activities.map(({ movement }) => movement.movementId);
   expect(mocks.refreshPositions).toHaveBeenLastCalledWith(expected);
   expect(mocks.refreshPositions.mock.calls.every(([ids]) => ids.length <= 100)).toBe(true);
+  expect(result.current.walletsError).toBeUndefined();
+  expect(result.current.balanceOf(position)).toEqual({ value: "10", syncing: false });
+  expect(result.current.balancesRefreshing).toBe(false);
+});
+
+it("retains an unpaired holding after its movement leaves visible activity", async () => {
+  vi.useFakeTimers();
+  const other = { ...position, id: "other", custodyWalletId: "other-wallet" };
+  mocks.positions = [position, other];
+  mocks.refreshPositions.mockImplementation(async (ids: readonly string[]) => {
+    const read = {
+      positions: mocks.positions,
+      startedAt: 11,
+      landedAt: 12,
+      afterMovementIds: ids,
+      minimumSlot: 101,
+    };
+    mocks.reads = [read];
+    return read;
+  });
+  mocks.refreshWallets.mockRejectedValue(new Error("wallet read unavailable"));
+  let activities = [movement("confirmed")];
+  const { result, rerender } = renderHook(() => useTreasuryBalances(activities));
+  await act(async () => {});
+  activities = Array.from({ length: 50 }, (_, index) => ({
+    kind: "deposit" as const,
+    movement: {
+      ...movement("confirmed").movement,
+      movementId: `new-${index}`,
+      positionId: other.id,
+      observedOrder: index + 2,
+    },
+  }));
+  await act(async () => rerender());
+  expect(result.current.balanceOf(position)).toEqual({ value: undefined, syncing: true });
+  expect(mocks.refreshPositions.mock.lastCall?.[0]).toContain("movement");
+  mocks.refreshWallets.mockResolvedValue([]);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+  expect(mocks.refreshWallets).toHaveBeenLastCalledWith(101, ["wallet", "other-wallet"]);
+  expect(result.current.balanceOf(position)).toEqual({ value: "10", syncing: false });
+  expect(result.current.balanceOf(other)).toEqual({ value: "10", syncing: false });
+  expect(result.current.walletsError).toBeUndefined();
+});
+
+it("recovers more than 100 outstanding pairs through bounded HTTP reads", async () => {
+  vi.useFakeTimers();
+  const { readEarnVaultPositions } = await vi.importActual<
+    typeof import("../earn/earn-program-data")
+  >("../earn/earn-program-data");
+  const batchSizes: number[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      const ids =
+        new URL(input, "https://example.test").searchParams.get("afterMovementIds")?.split(",") ??
+        [];
+      batchSizes.push(ids.length);
+      if (ids.length > 100) return Response.json({}, { status: 400 });
+      return Response.json({
+        data: {
+          positions: [position],
+          hasMore: false,
+          nextCursor: null,
+          balanceReadContext: { afterMovementIds: ids, minimumSlot: 101 },
+        },
+      });
+    })
+  );
+  mocks.refreshPositions.mockImplementation(
+    async (ids: readonly string[], positionIds?: ReadonlyMap<string, string>) => {
+      const read = await readEarnVaultPositions(ids, positionIds);
+      mocks.reads = [read];
+      return read;
+    }
+  );
+  mocks.refreshWallets.mockRejectedValue(new Error("sustained wallet read failure"));
+  const all: VaultActivity[] = [];
+  let activities: VaultActivity[] = [];
+  const { result, rerender } = renderHook(() => useTreasuryBalances(activities));
+  for (let index = 0; index < 120; index += 1) {
+    all.push({
+      kind: "deposit",
+      movement: {
+        ...movement("confirmed").movement,
+        movementId: `movement-${index}`,
+        observedOrder: index,
+      },
+    });
+    activities = all.slice(-50);
+    await act(async () => rerender());
+  }
+  expect(result.current.balanceOf(position).syncing).toBe(true);
+  expect(mocks.refreshPositions.mock.lastCall?.[0]).toHaveLength(120);
+  mocks.refreshWallets.mockResolvedValue([]);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+  expect(batchSizes.every((count) => count <= 100)).toBe(true);
+  expect(batchSizes.slice(-2)).toEqual([100, 20]);
+  expect(mocks.reads.at(-1)?.afterMovementIds).toHaveLength(120);
   expect(result.current.walletsError).toBeUndefined();
   expect(result.current.balanceOf(position)).toEqual({ value: "10", syncing: false });
   expect(result.current.balancesRefreshing).toBe(false);

@@ -28,6 +28,7 @@ import {
   fetchEarnVaultWithdrawalRequests,
   isEarnVaultDepositInFlight,
   isEarnVaultWithdrawalInFlight,
+  readEarnVaultPositions,
 } from "./earn-program-data";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
@@ -1232,5 +1233,89 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
       status: 201,
       error: "Invalid queued withdrawal response",
     });
+  });
+});
+
+describe("batched confirmation reads", () => {
+  it("keeps each position's verified snapshot and uses its greatest slot across batches", async () => {
+    const ids = Array.from({ length: 120 }, (_, i) => `a-${i}`).concat("b-0");
+    const positions = new Map(ids.map((id) => [id, id.startsWith("a-") ? "a" : "b"]));
+    const slots = [200, 100, 300];
+    const amounts = ["2", "1", "999"];
+    const fetchMock = vi.fn(async (input: string) => {
+      const batch =
+        new URL(input, "https://example.test").searchParams.get("afterMovementIds")?.split(",") ??
+        [];
+      expect(batch.length).toBeLessThanOrEqual(100);
+      return Response.json({
+        data: {
+          positions: [
+            { ...vaultPosition("a"), tokenValue: amounts.shift() },
+            { ...vaultPosition("b"), tokenValue: "3" },
+          ],
+          hasMore: false,
+          nextCursor: null,
+          balanceReadContext: { afterMovementIds: batch, minimumSlot: slots.shift() },
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const read = await readEarnVaultPositions(ids, positions);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(read.afterMovementIds).toEqual(ids);
+    expect(read.minimumSlot).toBe(300);
+    expect(read.positions.map(({ id, tokenValue }) => [id, tokenValue])).toEqual([
+      ["a", "2"],
+      ["b", "3"],
+    ]);
+  });
+
+  it("rejects the entire refresh if a later batch lacks confirmation evidence", async () => {
+    const ids = Array.from({ length: 101 }, (_, i) => `movement-${i}`);
+    const positions = new Map(ids.map((id) => [id, "a"]));
+    const fetchMock = vi.fn(async (input: string) => {
+      const batch =
+        new URL(input, "https://example.test").searchParams.get("afterMovementIds")?.split(",") ??
+        [];
+      return Response.json({
+        data: {
+          positions: [vaultPosition("a")],
+          hasMore: false,
+          nextCursor: null,
+          ...(batch.length === 100
+            ? { balanceReadContext: { afterMovementIds: batch, minimumSlot: 200 } }
+            : {}),
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(readEarnVaultPositions(ids, positions)).rejects.toThrow(/confirmation freshness/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not resurrect a closed holding from another position's unbounded read", async () => {
+    const ids = Array.from({ length: 100 }, (_, i) => `closed-${i}`).concat("open-0");
+    const positions = new Map(ids.map((id) => [id, id.startsWith("closed") ? "closed" : "open"]));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        const batch =
+          new URL(input, "https://example.test").searchParams.get("afterMovementIds")?.split(",") ??
+          [];
+        return Response.json({
+          data: {
+            positions:
+              batch.length === 100
+                ? [vaultPosition("open")]
+                : [vaultPosition("closed"), vaultPosition("open")],
+            hasMore: false,
+            nextCursor: null,
+            balanceReadContext: { afterMovementIds: batch, minimumSlot: 200 },
+          },
+        });
+      })
+    );
+    const read = await readEarnVaultPositions(ids, positions);
+    expect(read.positions.map(({ id }) => id)).toEqual(["open"]);
   });
 });
