@@ -415,25 +415,36 @@ function PaymentRequestCreateForm({
       return;
     }
     setSubmitting(true);
-    const expiresAtOnSubmit = resolveExpiryDate(expiry);
-    const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
-      method: "POST",
-      body: {
-        walletId: wallet.walletId,
-        token: token.mintAddress,
-        amount: amount.trim(),
-        counterpartyId: contact ? contact.id : null,
-        expiresAt: expiresAtOnSubmit ? expiresAtOnSubmit.toISOString() : null,
-      },
-    });
-    if (!res.ok) {
-      setSubmitting(false);
-      toast.error(res.error);
-      return;
+    // Once the link exists the page stays busy: it is on its way to the request, and a second
+    // press must not make a second link. Anything short of that frees the form again.
+    let linkCreated = false;
+    let created: PaymentRequest | undefined;
+    try {
+      const expiresAtOnSubmit = resolveExpiryDate(expiry);
+      const res = await dashboardFetch<{ data: PaymentRequest }>(
+        "/api/dashboard/payments/requests",
+        {
+          method: "POST",
+          body: {
+            walletId: wallet.walletId,
+            token: token.mintAddress,
+            amount: amount.trim(),
+            counterpartyId: contact ? contact.id : null,
+            expiresAt: expiresAtOnSubmit ? expiresAtOnSubmit.toISOString() : null,
+          },
+        }
+      );
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      linkCreated = true;
+      created = res.data?.data;
+    } finally {
+      if (!linkCreated) {
+        setSubmitting(false);
+      }
     }
-    // The page stays busy from here: it is on its way to the list, and a second press must not
-    // make a second link.
-    const created = res.data?.data;
     const copied = created?.publicToken
       ? await copyToClipboard(`${window.location.origin}/pay/${created.publicToken}`)
       : false;
