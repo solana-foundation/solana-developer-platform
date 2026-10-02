@@ -267,16 +267,14 @@ describe("sponsorship identity boundary", () => {
       status: "active",
     });
     const env = { FEE_PAYMENT_PROVIDER: "kora" } as Env;
-    await createProjectSponsorshipFeePayment(
-      { ...testEnv, ...env },
-      {
-        organizationId: "org_stored",
-        projectId: "project_stored",
-        actor: { type: "wallet", id: "wallet_stored" },
-      }
-    );
+    const requestEnv = { ...testEnv, ...env };
+    await createProjectSponsorshipFeePayment(requestEnv, {
+      organizationId: "org_stored",
+      projectId: "project_stored",
+      actor: { type: "wallet", id: "wallet_stored" },
+    });
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
-      env,
+      requestEnv,
       "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored",
       undefined
     );

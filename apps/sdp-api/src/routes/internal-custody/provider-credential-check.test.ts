@@ -368,14 +368,14 @@ async function installationRequest(
 
 async function getInstallation(
   app: Hono<{ Bindings: Env }>,
-  token: string,
+  token: string | null,
   options: { connectionId: string; projectId: string }
 ): Promise<Response> {
   return app.request(
     `/internal/dashboard/custody/connections/${options.connectionId}`,
     {
       headers: {
-        Authorization: `Bearer ${token}`,
+        ...(token === null ? {} : { Authorization: `Bearer ${token}` }),
         "X-Project-ID": options.projectId,
       },
     },
@@ -2057,17 +2057,14 @@ describe("exact Custody Connection installation routes", () => {
     expect(await hidden.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
     expect(await missing.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
 
-    const unauthenticated = buildApp();
-    const unauthenticatedExisting = await getInstallation(
-      unauthenticated.app,
-      unauthenticated.token,
-      { connectionId: CONNECTION_ID, projectId: PROJECT_ID, ...{} }
-    );
-    const unauthenticatedMissing = await getInstallation(
-      unauthenticated.app,
-      unauthenticated.token,
-      { projectId: PROJECT_ID, connectionId: "cconn_missing" }
-    );
+    const unauthenticatedExisting = await getInstallation(app, null, {
+      connectionId: CONNECTION_ID,
+      projectId: PROJECT_ID,
+    });
+    const unauthenticatedMissing = await getInstallation(app, null, {
+      projectId: PROJECT_ID,
+      connectionId: "cconn_missing",
+    });
     expect(unauthenticatedExisting.status).toBe(401);
     expect(unauthenticatedMissing.status).toBe(401);
   });
