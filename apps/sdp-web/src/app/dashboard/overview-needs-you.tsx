@@ -39,6 +39,11 @@ const NEEDS_YOU_ROWS = 4;
  * read the sidebar badge and the approvals inbox make, narrowed to requests the viewer may
  * approve or reject. Like them it sees the newest 100 pending requests: the list route has no
  * cursor or viewer filter, so a project past 100 can leave an older request out of this card.
+ *
+ * TODO(api): ask for only the requests this viewer can decide, with a cursor, once
+ * GET /v1/wallets/approval-requests supports both; then the card no longer depends on the newest
+ * 100. Known limitation of the API, shared with the approvals inbox and sidebar badge, not a bug
+ * of this card.
  */
 async function fetchApprovalsNeedingViewer(): Promise<WalletApprovalRequestSummary[]> {
   const response = await fetch("/api/dashboard/approval-requests?status=pending&limit=100", {
