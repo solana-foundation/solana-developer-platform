@@ -457,7 +457,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/approval-requests",
-            "description": "Lists wallet operation approval requests for the authenticated organization or project scope."
+            "description": "Lists wallet operation approval requests for the authenticated organization or project scope, newest first. Paginate with the opaque `cursor` from `nextCursor`. When `viewerCanDecide` is set, the server bounds how many rows one call scans, so a page may hold fewer than `limit` requests while `nextCursor` is still set; keep following `nextCursor` until it is null."
           }
         },
         {

@@ -595,6 +595,10 @@ const walletApprovalRequestSchema = z
 export const walletApprovalRequestsResponseSchema = z
   .object({
     approvalRequests: z.array(walletApprovalRequestSchema),
+    nextCursor: z.string().nullable().openapi({
+      description:
+        "Opaque cursor for the next, older page; null when no older request remains. A page filtered by `viewerCanDecide` may hold fewer than `limit` requests while this is set.",
+    }),
   })
   .openapi({ description: "Wallet approval request list response payload." });
 

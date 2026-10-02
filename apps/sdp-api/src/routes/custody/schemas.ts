@@ -205,6 +205,12 @@ export const approvalRequestStatusSchema = z.enum([
 export const approvalRequestListQuerySchema = z.object({
   status: approvalRequestStatusSchema.optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
+  // Opaque; the handler decodes it and rejects a malformed value.
+  cursor: z.string().min(1).optional(),
+  viewerCanDecide: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
 });
 
 export const approvalRequestParamsSchema = z.object({

@@ -323,7 +323,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "List wallet approval requests",
     operationId: "listWalletApprovalRequests",
     description:
-      "Lists wallet operation approval requests for the authenticated organization or project scope.",
+      "Lists wallet operation approval requests for the authenticated organization or project scope, newest first. Paginate with the opaque `cursor` from `nextCursor`. When `viewerCanDecide` is set, the server bounds how many rows one call scans, so a page may hold fewer than `limit` requests while `nextCursor` is still set; keep following `nextCursor` until it is null.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -335,6 +335,17 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         limit: z.number().int().min(1).max(100).optional().openapi({
           description: "Maximum approval requests to return.",
           example: 50,
+        }),
+        // No example: the playground would send it by default and page past
+        // every live request.
+        cursor: z.string().optional().openapi({
+          description:
+            "Opaque pagination cursor from a previous response's `nextCursor`. Returns the requests older than that page.",
+        }),
+        viewerCanDecide: z.enum(["true", "false"]).optional().openapi({
+          description:
+            "Return only requests the caller may approve or reject right now (`true`), or only those they may not (`false`). Omit to return both.",
+          example: "true",
         }),
       }),
     },

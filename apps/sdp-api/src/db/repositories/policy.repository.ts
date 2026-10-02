@@ -500,6 +500,17 @@ export interface ListApprovalRequestDetailsInput {
   projectId: string | null;
   status?: ApprovalRequestStatus;
   limit?: number;
+  /**
+   * Keyset bound: only requests older than this `(created_at, id)` pair are
+   * returned. It matches the list's `created_at DESC, id DESC` order.
+   */
+  cursor?: { createdAt: string; id: string };
+}
+
+export interface ApprovalRequestDetailPage {
+  rows: ApprovalRequestDetailRow[];
+  /** Whether a request older than the last row exists. */
+  hasMore: boolean;
 }
 
 export interface GetApprovalRequestDetailInput {
@@ -668,6 +679,9 @@ export interface PolicyRepository {
   listApprovalRequestDetails(
     input: ListApprovalRequestDetailsInput
   ): Promise<ApprovalRequestDetailRow[]>;
+  listApprovalRequestDetailsPage(
+    input: ListApprovalRequestDetailsInput
+  ): Promise<ApprovalRequestDetailPage>;
   getApprovalRequestDetail(
     input: GetApprovalRequestDetailInput
   ): Promise<ApprovalRequestDetailRow | null>;

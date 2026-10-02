@@ -305,6 +305,18 @@ export interface WalletApprovalRequestSummary {
   viewerCanDecide: boolean;
 }
 
+/** Response payload of `GET /v1/wallets/approval-requests`. */
+export interface ListWalletApprovalRequestsResponse {
+  approvalRequests: WalletApprovalRequestSummary[];
+  /**
+   * Opaque cursor for the next, older page, or null when no older request
+   * remains. A page filtered by `viewerCanDecide` may hold fewer than `limit`
+   * requests while this is set, because the server bounds how many rows one
+   * call scans; keep following it until it is null.
+   */
+  nextCursor: string | null;
+}
+
 export interface WalletControlProfile {
   id: string;
   organizationId: string;

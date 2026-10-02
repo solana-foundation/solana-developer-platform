@@ -734,6 +734,75 @@ describe("PolicyRepository (postgres)", () => {
     expect(orgRows.map((row) => row.approval_request_id)).toEqual([request?.id]);
   });
 
+  it("pages approval request details by a (created_at, id) keyset, newest first", async () => {
+    const createdAts = [
+      "2026-03-01T10:00:00.000Z",
+      "2026-03-01T11:00:00.000Z",
+      "2026-03-01T12:00:00.000Z",
+    ];
+    const requestIds: string[] = [];
+    for (const createdAt of createdAts) {
+      const operation = await repo.createWalletOperation({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET.id,
+        walletId: TEST_CUSTODY_WALLET.walletId,
+        apiKeyId: TEST_API_KEY.id,
+        operationFamily: "payment",
+        operationType: "payment_transfer_execute",
+        asset: "USDC",
+        amount: "25.00",
+        destination: "recipient_1",
+        status: "pending_approval",
+      });
+      const request = await repo.createApprovalRequest({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        walletOperationId: operation?.id ?? "",
+        requestedBy: TEST_USER.id,
+      });
+      expect(request).not.toBeNull();
+      // Pin distinct timestamps so the expected order does not depend on how
+      // fast the inserts ran.
+      await getDb(env)
+        .prepare("UPDATE approval_requests SET created_at = ? WHERE id = ?")
+        .bind(createdAt, request?.id ?? "")
+        .run();
+      requestIds.push(request?.id ?? "");
+    }
+    const [oldest, middle, newest] = requestIds;
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
+
+    const firstPage = await repo.listApprovalRequestDetailsPage({
+      ...scope,
+      status: "pending",
+      limit: 2,
+    });
+    expect(firstPage.rows.map((row) => row.approval_request_id)).toEqual([newest, middle]);
+    expect(firstPage.hasMore).toBe(true);
+
+    const last = firstPage.rows[1];
+    const secondPage = await repo.listApprovalRequestDetailsPage({
+      ...scope,
+      status: "pending",
+      limit: 2,
+      cursor: { createdAt: last?.approval_created_at ?? "", id: last?.approval_request_id ?? "" },
+    });
+    expect(secondPage.rows.map((row) => row.approval_request_id)).toEqual([oldest]);
+    expect(secondPage.hasMore).toBe(false);
+
+    const pastTheEnd = await repo.listApprovalRequestDetailsPage({
+      ...scope,
+      limit: 2,
+      cursor: { createdAt: createdAts[0] ?? "", id: oldest ?? "" },
+    });
+    expect(pastTheEnd).toEqual({ rows: [], hasMore: false });
+
+    // The unpaged read is unchanged for its other callers.
+    const unpaged = await repo.listApprovalRequestDetails({ ...scope, limit: 10 });
+    expect(unpaged.map((row) => row.approval_request_id)).toEqual([newest, middle, oldest]);
+  });
+
   it("sums velocity windows from wallet_operations, skipping failed, canceled and undecided rows and the operation under evaluation", async () => {
     const service = policyStores(repo);
     const enforcement = new PostgresPolicyEnforcementStore(repo, TEST_SCOPE);

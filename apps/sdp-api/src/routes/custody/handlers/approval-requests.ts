@@ -1,4 +1,8 @@
-import type { WalletApprovalRequestSummary } from "@sdp/types";
+import type {
+  ApprovalRequestStatus,
+  ListWalletApprovalRequestsResponse,
+  WalletApprovalRequestSummary,
+} from "@sdp/types";
 import { z } from "zod";
 import { type ApprovalRequestDetailRow, createPolicyRepository } from "@/db/repositories";
 import { type ApiKeyContext, getAuth } from "@/lib/auth";
@@ -10,6 +14,7 @@ import {
   forbidden,
   notFound,
 } from "@/lib/errors";
+import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -240,11 +245,159 @@ async function assertCanResolveApprovalRequest(
   return row;
 }
 
+/** Page size when the caller omits `limit`; unchanged from the unpaged list. */
+const APPROVAL_REQUESTS_DEFAULT_LIMIT = 50;
+
+/** DB rows read per round trip while a filtered page is being filled. */
+const APPROVAL_REQUESTS_SCAN_BATCH = 100;
+
+/**
+ * DB rows one call may scan before it hands the remainder to the next page.
+ * Caps the work a single request can cause when the viewer filter matches
+ * nothing for a long stretch of history.
+ */
+export const APPROVAL_REQUESTS_SCAN_LIMIT = 1000;
+
+interface ApprovalRequestCursor {
+  createdAt: string;
+  id: string;
+}
+
+/**
+ * The cursor is a pagination BOUND, not an access grant: it lands in
+ * `(created_at, id) < (?, ?)` while the organization and project scope are
+ * separate conditions, so a forged cursor only repositions the caller within
+ * rows they could already read. The shape check keeps garbage out of the SQL.
+ */
+const approvalRequestCursorSchema = z.object({
+  createdAt: z.iso.datetime(),
+  id: z.string().min(1).max(128),
+});
+
+function decodeApprovalRequestCursor(cursor: string): ApprovalRequestCursor {
+  const decoded = decodeKeysetCursor(cursor);
+  const parsed = decoded
+    ? approvalRequestCursorSchema.safeParse({ createdAt: decoded.value, id: decoded.id })
+    : null;
+  if (!parsed?.success) {
+    throw badRequestQuery({ errors: { cursor: ["Invalid cursor"] } });
+  }
+  return parsed.data;
+}
+
+function encodeApprovalRequestCursor(row: ApprovalRequestDetailRow): string {
+  return encodeKeysetCursor(row.approval_created_at, row.approval_request_id);
+}
+
+interface ApprovalRequestsPageInput {
+  status: ApprovalRequestStatus | undefined;
+  limit: number;
+  cursor: ApprovalRequestCursor | undefined;
+  /** When set, only rows whose computed `viewerCanDecide` equals it are returned. */
+  viewerCanDecide: boolean | undefined;
+}
+
+/**
+ * Fills one page of approval requests, newest first.
+ *
+ * `viewerCanDecide` is not a column: it is computed per row from the caller,
+ * the requester and approval-group membership (`viewerDecisionCheck`), so the
+ * filter runs after the read. Rows are scanned in batches, each batch resolving
+ * the viewer's standing in one round of reads as the unfiltered list does, and
+ * collected until `limit` rows match, the repository reports no older row, or
+ * `APPROVAL_REQUESTS_SCAN_LIMIT` rows have been scanned in this call. The bound
+ * keeps one request from reading a tenant's whole history for a caller who may
+ * decide nothing in it. A scan-bounded page can therefore hold fewer than
+ * `limit` rows while `nextCursor` is set; the client keeps following
+ * `nextCursor` until it is null.
+ *
+ * Without `viewerCanDecide` every row matches, so this is a single batch of
+ * `limit` rows: the previous behaviour plus `nextCursor`.
+ *
+ * `nextCursor` names the last row CONSUMED. When the page fills inside a batch
+ * that is the last collected row, and the rest of that batch is re-read by the
+ * next call; otherwise it is the last row of the last batch scanned. It is null
+ * when nothing older can remain.
+ *
+ * @param repository - Policy repository.
+ * @param auth - The caller.
+ * @param input - Parsed query.
+ * @returns The page and its continuation cursor.
+ */
+async function collectApprovalRequestsPage(
+  repository: ReturnType<typeof createPolicyRepository>,
+  auth: ApiKeyContext,
+  input: ApprovalRequestsPageInput
+): Promise<ListWalletApprovalRequestsResponse> {
+  const approvalRequests: WalletApprovalRequestSummary[] = [];
+  let cursor = input.cursor;
+  let scanned = 0;
+  let lastConsumed: ApprovalRequestDetailRow | null = null;
+  let mayRemain = false;
+
+  while (true) {
+    const needed = input.limit - approvalRequests.length;
+    const batchSize = Math.min(
+      input.viewerCanDecide === undefined ? needed : APPROVAL_REQUESTS_SCAN_BATCH,
+      APPROVAL_REQUESTS_SCAN_LIMIT - scanned
+    );
+    const { rows, hasMore } = await repository.listApprovalRequestDetailsPage({
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+      status: input.status,
+      limit: batchSize,
+      cursor,
+    });
+    const viewer = await viewerDecisionCheck(repository, auth, rows);
+
+    let consumed = 0;
+    for (const row of rows) {
+      consumed += 1;
+      const summary = mapApprovalRequest(row, viewer(row));
+      if (
+        input.viewerCanDecide !== undefined &&
+        summary.viewerCanDecide !== input.viewerCanDecide
+      ) {
+        continue;
+      }
+      approvalRequests.push(summary);
+      if (approvalRequests.length === input.limit) {
+        break;
+      }
+    }
+
+    scanned += consumed;
+    if (consumed > 0) {
+      lastConsumed = rows[consumed - 1] ?? lastConsumed;
+    }
+    // Rows left unread in this batch are "more" even when the table is not.
+    mayRemain = hasMore || consumed < rows.length;
+    // An empty batch already means !hasMore; the null check only narrows the
+    // type for the cursor below.
+    if (
+      approvalRequests.length === input.limit ||
+      !hasMore ||
+      scanned >= APPROVAL_REQUESTS_SCAN_LIMIT ||
+      lastConsumed === null
+    ) {
+      break;
+    }
+    cursor = { createdAt: lastConsumed.approval_created_at, id: lastConsumed.approval_request_id };
+  }
+
+  return {
+    approvalRequests,
+    nextCursor: mayRemain && lastConsumed ? encodeApprovalRequestCursor(lastConsumed) : null,
+  };
+}
+
 export const listApprovalRequests = async (c: AppContext) => {
   const auth = getAuth(c);
   const parsed = approvalRequestListQuerySchema.safeParse({
     status: c.req.query("status"),
     limit: c.req.query("limit"),
+    cursor: c.req.query("cursor"),
+    viewerCanDecide: c.req.query("viewerCanDecide"),
   });
 
   if (!parsed.success) {
@@ -252,17 +405,13 @@ export const listApprovalRequests = async (c: AppContext) => {
   }
 
   const repository = createPolicyRepository(c.env, getRequestTenantScope(c));
-  const rows = await repository.listApprovalRequestDetails({
-    organizationId: auth.organizationId,
-    projectId: auth.projectId,
+  const page = await collectApprovalRequestsPage(repository, auth, {
     status: parsed.data.status,
-    limit: parsed.data.limit,
+    limit: parsed.data.limit ?? APPROVAL_REQUESTS_DEFAULT_LIMIT,
+    cursor: parsed.data.cursor ? decodeApprovalRequestCursor(parsed.data.cursor) : undefined,
+    viewerCanDecide: parsed.data.viewerCanDecide,
   });
-
-  const viewer = await viewerDecisionCheck(repository, auth, rows);
-  return success(c, {
-    approvalRequests: rows.map((row) => mapApprovalRequest(row, viewer(row))),
-  });
+  return success(c, page);
 };
 
 export const getApprovalRequest = async (c: AppContext) => {
