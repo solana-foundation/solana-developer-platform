@@ -387,10 +387,8 @@ export async function depositIntoVault(
           idempotencyFingerprint: fingerprint,
           createdBy: input.userId ?? null,
           initiatedByKeyId: input.apiKeyId ?? null,
-          // Only the builder, which read the chain, knows whether this deposit
-          // creates the share account and therefore pays its rent. Recording the
-          // funder now is what lets the exit give it back to the right party,
-          // possibly months later and under a different fee mode.
+          // Preserve the planned creation and payer. The pre-build read cannot
+          // prove that an idempotent create eventually paid rent.
           createsShareAccount: plan.createsShareAccount === true,
           shareAtaRentFunder: rentPayer ?? null,
         }),

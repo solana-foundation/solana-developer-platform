@@ -1375,10 +1375,11 @@ function stakeBlockingIssues(state: HastraState): { code: string; message: strin
   return issues;
 }
 
-function parBlockingIssues(state: HastraState): { code: string; message: string }[] {
-  const issues = stakeBlockingIssues(state);
+/** What blocks `request_redeem` itself, whichever source feeds it. */
+function parRequestBlockingIssues(state: HastraState): { code: string; message: string }[] {
+  const issues: { code: string; message: string }[] = [];
   if (state.mintConfig.paused) {
-    issues.unshift({
+    issues.push({
       code: "HASTRA_MINT_PAUSED",
       message: "Hastra's wYLDS redemption request program is paused.",
     });
@@ -1390,6 +1391,79 @@ function parBlockingIssues(state: HastraState): { code: string; message: string 
     });
   }
   return issues;
+}
+
+/** The PRIME source also redeems through the stake program first. */
+function parBlockingIssues(state: HastraState): { code: string; message: string }[] {
+  const request = parRequestBlockingIssues(state);
+  const paused = request.filter((issue) => issue.code === "HASTRA_MINT_PAUSED");
+  const rest = request.filter((issue) => issue.code !== "HASTRA_MINT_PAUSED");
+  return [...paused, ...stakeBlockingIssues(state), ...rest];
+}
+
+type ParRedemptionSource =
+  | { kind: "shares"; shares: { text: string; atoms: bigint } }
+  | { kind: "intermediate"; amount: { text: string; atoms: bigint } };
+
+function parRedemptionSource(input: EarnVaultParRedemptionQuoteInput): ParRedemptionSource {
+  if (input.shares !== undefined && input.intermediateAmount === undefined) {
+    return { kind: "shares", shares: canonicalAmount(input.shares, "Share amount") };
+  }
+  if (input.intermediateAmount !== undefined && input.shares === undefined) {
+    return {
+      kind: "intermediate",
+      amount: canonicalAmount(input.intermediateAmount, "wYLDS amount"),
+    };
+  }
+  throw new SdpHastraError(
+    "INVALID_AMOUNT",
+    "A Hastra par request redeems either PRIME shares or held wYLDS, exactly one of the two."
+  );
+}
+
+/**
+ * The request half both par sources share, so neither can skip it: one open
+ * request per owner, the reuse cooldown for its nonce-less PDA, and the
+ * sponsor's prefund of the rent `request_redeem` charges the owner.
+ */
+async function admitParRequest(args: {
+  runtime: HastraRuntime;
+  config: HastraClusterConfig;
+  owner: PublicKey;
+  sponsor: PublicKey | undefined;
+}): Promise<{ request: PublicKey; prefund: EarnVaultInstruction | undefined }> {
+  const request = redemptionRequestAddress(args.config.deployment, args.owner);
+  if ((await getAccount(args.runtime, request.toBase58(), "REQUEST_UNREADABLE")) !== null) {
+    throw new SdpHastraError(
+      "REDEMPTION_REFUSED",
+      "This wallet already has an open Hastra redemption request; complete or cancel it first."
+    );
+  }
+  await assertRedemptionRequestReuseSafe(args.runtime, args.config, request.toBase58());
+  // The reuse check above proves the request PDA absent at build time, so a
+  // sponsor's prefund is exactly one account's rent and the program's create
+  // consumes it at execution. A PDA created in between leaves the owner the
+  // prefund as dust, the same bounded residual the Veda allowed-user prefund
+  // accepts.
+  if (!args.sponsor) return { request, prefund: undefined };
+  const requestRentLamports = await rpcRequest<number>(
+    args.runtime,
+    // biome-ignore lint/security/noSecrets: public Solana JSON-RPC method name, not a credential.
+    "getMinimumBalanceForRentExemption",
+    [REDEMPTION_REQUEST_ACCOUNT_BYTES, { commitment: "confirmed" }],
+    "PROGRAM_MISMATCH",
+    "reading redemption-request rent"
+  );
+  if (!nonNegativeSafeInteger(requestRentLamports)) {
+    throw new SdpHastraError(
+      "PROGRAM_MISMATCH",
+      "The Solana RPC returned an invalid redemption-request rent."
+    );
+  }
+  return {
+    request,
+    prefund: prefundOwnerRentInstruction(args.sponsor, args.owner, BigInt(requestRentLamports)),
+  };
 }
 
 function sharesForAssets(assets: bigint, price: StakePriceState): bigint {
@@ -2125,16 +2199,14 @@ export class HastraVaultDirectClient
       async (runtime, config) => {
         this.assertKnownReference(config, input.providerReference);
         const state = await loadHastraState(runtime, config);
-        if (state.stakePrice.price <= 0n) {
-          throw new SdpHastraError(
-            "REDEMPTION_REFUSED",
-            "Hastra's rate is unavailable, so its live PRIME minimum cannot be calculated."
-          );
-        }
         return {
           intermediateMint: config.deployment.wYldsMint,
           assetMint: config.depositMint,
-          minimumShares: formatAtoms(minimumSharesForPar(state.stakePrice)),
+          // An unavailable rate blocks only the PRIME source; redeeming held
+          // wYLDS needs no rate, so the options stay readable for it.
+          minimumShares:
+            state.stakePrice.price > 0n ? formatAtoms(minimumSharesForPar(state.stakePrice)) : null,
+          minimumIntermediateAmount: HASTRA_PAR_MINIMUM_ASSETS,
           shareDecimals: TOKEN_DECIMALS,
           assetDecimals: TOKEN_DECIMALS,
           cancelable: true,
@@ -2148,20 +2220,24 @@ export class HastraVaultDirectClient
     ctx: EarnRuntimeContext,
     input: EarnVaultParRedemptionQuoteInput
   ): Promise<EarnVaultParRedemptionQuote> {
-    const shares = canonicalAmount(input.shares, "Share amount");
+    const source = parRedemptionSource(input);
     return this.withRuntime(ctx, "Quoting the Hastra par redemption", async (runtime, config) => {
       this.assertKnownReference(config, input.providerReference);
       const state = await loadHastraState(runtime, config);
-      const intermediate = assetsForShares(shares.atoms, state.stakePrice);
-      const blockingIssues = parBlockingIssues(state);
-      if (intermediate === 0n) {
+      const intermediate =
+        source.kind === "shares"
+          ? assetsForShares(source.shares.atoms, state.stakePrice)
+          : source.amount.atoms;
+      const blockingIssues =
+        source.kind === "shares" ? parBlockingIssues(state) : parRequestBlockingIssues(state);
+      if (intermediate < HASTRA_PAR_MINIMUM_ASSET_ATOMS) {
         blockingIssues.push({
           code: "HASTRA_REDEMPTION_DUST",
           message: "The request is too small to redeem one wYLDS atom at Hastra's live rate.",
         });
       }
       return {
-        shares: shares.text,
+        shares: source.kind === "shares" ? source.shares.text : "0",
         shareDecimals: TOKEN_DECIMALS,
         intermediateMint: config.deployment.wYldsMint,
         intermediateAmount: formatAtoms(intermediate),
@@ -2189,63 +2265,45 @@ export class HastraVaultDirectClient
     // transaction, the owner nets zero, and the completion/cancellation refund
     // still lands with the owner. Wallet-pays plans change nothing.
     const sponsor = rentPayer.equals(owner) ? undefined : rentPayer;
-    const shares = canonicalAmount(input.shares, "Share amount");
+    const source = parRedemptionSource(input);
     return this.withRuntime(
       ctx,
       "Building the Hastra par-redemption request",
       async (runtime, config) => {
         this.assertKnownReference(config, input.providerReference);
         const state = await loadHastraState(runtime, config);
-        assertNoBlockingIssues(
-          parBlockingIssues(state),
-          "REDEMPTION_REFUSED",
-          "The par-redemption request"
-        );
-        const intermediateAtoms = assetsForShares(shares.atoms, state.stakePrice);
+        let intermediateAtoms: bigint;
+        if (source.kind === "shares") {
+          assertNoBlockingIssues(
+            parBlockingIssues(state),
+            "REDEMPTION_REFUSED",
+            "The par-redemption request"
+          );
+          intermediateAtoms = assetsForShares(source.shares.atoms, state.stakePrice);
+        } else {
+          // Held wYLDS never touches the stake program, so neither its pause
+          // nor its price can block this source.
+          assertNoBlockingIssues(
+            parRequestBlockingIssues(state),
+            "REDEMPTION_REFUSED",
+            "The par-redemption request"
+          );
+          intermediateAtoms = source.amount.atoms;
+        }
         if (intermediateAtoms < HASTRA_PAR_MINIMUM_ASSET_ATOMS) {
           throw new SdpHastraError(
             "REDEMPTION_REFUSED",
             "The request is too small to redeem one wYLDS atom at Hastra's live rate."
           );
         }
-        if (state.stakeVaultLiquidity < intermediateAtoms) {
+        if (source.kind === "shares" && state.stakeVaultLiquidity < intermediateAtoms) {
           throw new SdpHastraError(
             "REDEMPTION_REFUSED",
             "Hastra's PRIME vault does not currently hold enough wYLDS for this request."
           );
         }
 
-        const request = redemptionRequestAddress(config.deployment, owner);
-        if ((await getAccount(runtime, request.toBase58(), "REQUEST_UNREADABLE")) !== null) {
-          throw new SdpHastraError(
-            "REDEMPTION_REFUSED",
-            "This wallet already has an open Hastra redemption request; complete or cancel it first."
-          );
-        }
-        await assertRedemptionRequestReuseSafe(runtime, config, request.toBase58());
-        // The reuse check above proves the request PDA absent at build time,
-        // so a sponsor's prefund is exactly one account's rent and the
-        // program's create consumes it at execution. A PDA created in between
-        // leaves the owner the prefund as dust — the same bounded residual the
-        // Veda allowed-user prefund accepts.
-        let prefund: EarnVaultInstruction | undefined;
-        if (sponsor) {
-          const requestRentLamports = await rpcRequest<number>(
-            runtime,
-            // biome-ignore lint/security/noSecrets: public Solana JSON-RPC method name, not a credential.
-            "getMinimumBalanceForRentExemption",
-            [REDEMPTION_REQUEST_ACCOUNT_BYTES, { commitment: "confirmed" }],
-            "PROGRAM_MISMATCH",
-            "reading redemption-request rent"
-          );
-          if (!nonNegativeSafeInteger(requestRentLamports)) {
-            throw new SdpHastraError(
-              "PROGRAM_MISMATCH",
-              "The Solana RPC returned an invalid redemption-request rent."
-            );
-          }
-          prefund = prefundOwnerRentInstruction(sponsor, owner, BigInt(requestRentLamports));
-        }
+        const { request, prefund } = await admitParRequest({ runtime, config, owner, sponsor });
         const wylds = new PublicKey(config.deployment.wYldsMint);
         const prime = new PublicKey(config.deployment.primeMint);
         const usdc = new PublicKey(config.depositMint);
@@ -2256,21 +2314,32 @@ export class HastraVaultDirectClient
           runtime,
           [userWylds.toBase58(), userPrime.toBase58(), userUsdc.toBase58()]
         );
-        assertOwnerTokenUsable(
-          userPrimeAccount ?? null,
-          "Owner PRIME token account",
-          config.deployment.primeMint,
-          owner.toBase58(),
-          "REDEMPTION_REFUSED",
-          shares.atoms
-        );
-        assertExistingOwnerTokenUsable(
-          userWyldsAccount ?? null,
-          "Owner wYLDS token account",
-          config.deployment.wYldsMint,
-          owner.toBase58(),
-          "REDEMPTION_REFUSED"
-        );
+        if (source.kind === "shares") {
+          assertOwnerTokenUsable(
+            userPrimeAccount ?? null,
+            "Owner PRIME token account",
+            config.deployment.primeMint,
+            owner.toBase58(),
+            "REDEMPTION_REFUSED",
+            source.shares.atoms
+          );
+          assertExistingOwnerTokenUsable(
+            userWyldsAccount ?? null,
+            "Owner wYLDS token account",
+            config.deployment.wYldsMint,
+            owner.toBase58(),
+            "REDEMPTION_REFUSED"
+          );
+        } else {
+          assertOwnerTokenUsable(
+            userWyldsAccount ?? null,
+            "Owner wYLDS token account",
+            config.deployment.wYldsMint,
+            owner.toBase58(),
+            "REDEMPTION_REFUSED",
+            intermediateAtoms
+          );
+        }
         assertExistingOwnerTokenUsable(
           userUsdcAccount ?? null,
           "Owner USDC token account",
@@ -2278,17 +2347,35 @@ export class HastraVaultDirectClient
           owner.toBase58(),
           "REDEMPTION_REFUSED"
         );
-        const legacyTicket = await readLegacyTicket(runtime, config, owner);
+
+        let conversion: EarnVaultInstruction[] = [];
+        if (source.kind === "shares") {
+          const legacyTicket = await readLegacyTicket(runtime, config, owner);
+          const transientWylds = await transientTokenAccountPlan({
+            runtime,
+            payer: rentPayer,
+            owner,
+            mint: wylds,
+            destination: userWylds,
+            refundTo: rentPayer,
+            amount: intermediateAtoms,
+          });
+          conversion = [
+            ...transientWylds.setupInstructions,
+            stakeRedeemInstruction({
+              config,
+              state,
+              owner,
+              userWylds: transientWylds.address,
+              userPrime,
+              legacyTicket,
+              amount: source.shares.atoms,
+            }),
+            ...transientWylds.settleInstructions,
+          ];
+        }
         const intermediate = formatAtoms(intermediateAtoms);
-        const transientWylds = await transientTokenAccountPlan({
-          runtime,
-          payer: rentPayer,
-          owner,
-          mint: wylds,
-          destination: userWylds,
-          refundTo: rentPayer,
-          amount: intermediateAtoms,
-        });
+        const shares = source.kind === "shares" ? source.shares.text : "0";
 
         return {
           cluster: runtime.cluster,
@@ -2298,17 +2385,7 @@ export class HastraVaultDirectClient
             createAssociatedTokenInstruction(rentPayer, owner, wylds),
             // Completion is operator-signed, so prepare the user's canonical USDC destination now.
             createAssociatedTokenInstruction(rentPayer, owner, usdc),
-            ...transientWylds.setupInstructions,
-            stakeRedeemInstruction({
-              config,
-              state,
-              owner,
-              userWylds: transientWylds.address,
-              userPrime,
-              legacyTicket,
-              amount: shares.atoms,
-            }),
-            ...transientWylds.settleInstructions,
+            ...conversion,
             parRequestInstruction({
               config,
               state,
@@ -2323,10 +2400,10 @@ export class HastraVaultDirectClient
             depositTokenMint: config.depositMint,
             shareMint: config.deployment.primeMint,
           },
-          accepted: { shares: shares.text },
+          ...(source.kind === "shares" ? { accepted: { shares: source.shares.text } } : {}),
           requestAddress: request.toBase58(),
           expectedRequest: {
-            shares: shares.text,
+            shares,
             intermediateMint: config.deployment.wYldsMint,
             intermediateAmount: intermediate,
             assetMint: config.depositMint,

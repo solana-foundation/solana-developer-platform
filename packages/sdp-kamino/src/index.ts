@@ -27,6 +27,7 @@ export {
   KaminoVaultDirectClient,
   type KaminoVaultOperationRunner,
 } from "./client";
+export { type KaminoDepositReceipt, readKaminoDepositReceipt } from "./deposit-receipt";
 export { SdpKaminoError, type SdpKaminoErrorCode } from "./errors";
 export {
   assertPlanInstructionsSupported,
@@ -53,4 +54,3 @@ export type {
   KaminoVaultAssetIdentity,
   KaminoWithdrawInput,
 } from "./types";
-export { buildShareAccountCloseInstruction } from "./withdraw-instructions";

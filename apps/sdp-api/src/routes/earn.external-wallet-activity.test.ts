@@ -186,17 +186,30 @@ async function seedMovement(input: {
   provider?: string;
   /** A finalized withdrawal's observed deposit-token payout; omitted = not observed. */
   tokenAmountSettled?: string;
+  depositObserved?: boolean;
+  depositAmountSettled?: string;
 }): Promise<string> {
   const movementId = generateEarnMovementId();
   const confirmedAt =
     input.status === "confirmed" || input.status === "finalized" ? input.createdAt : null;
   const settledAt = input.status === "finalized" ? input.createdAt : null;
-  const amountSettled = input.status === "finalized" ? input.amount : null;
+  const isDepositReceipt =
+    (input.provider ?? "kamino") === "kamino" && input.direction === "deposit";
+  const observedDeposit =
+    isDepositReceipt && input.status === "finalized" && input.depositObserved !== false;
+  const amountSettled =
+    input.status !== "finalized"
+      ? null
+      : isDepositReceipt
+        ? observedDeposit
+          ? (input.depositAmountSettled ?? input.amount)
+          : null
+        : input.amount;
   const tokenAmountSettled =
     input.status !== "finalized"
       ? null
       : input.direction === "deposit"
-        ? input.amount
+        ? amountSettled
         : (input.tokenAmountSettled ?? null);
   const failureReason = input.status === "failed" ? "expired unlanded" : null;
   const [source, destination] =
@@ -211,9 +224,10 @@ async function seedMovement(input: {
          token_amount_settled,
          owner_address, vault_address, source_address, destination_address,
          signature, signed_transaction, last_valid_block_height, request_id,
-         idempotency_fingerprint, created_at, confirmed_at, settled_at, failure_reason
+         idempotency_fingerprint, created_at, confirmed_at, settled_at, failure_reason,
+         deposit_receipt_observed_at, shares_out
        ) VALUES (?, ?, ?, 'sandbox', ?, 'vault_direct', ?, ?, ?, ?, ?, ?, ?,
-                 ?, ?, ?, ?, ?, 'AQ==', '12345', ?, ?, ?, ?, ?, ?)`
+                 ?, ?, ?, ?, ?, 'AQ==', '12345', ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       movementId,
@@ -237,7 +251,9 @@ async function seedMovement(input: {
       input.createdAt,
       confirmedAt,
       settledAt,
-      failureReason
+      failureReason,
+      observedDeposit ? settledAt : null,
+      observedDeposit ? "1" : null
     )
     .run();
   return movementId;
@@ -766,6 +782,62 @@ describe("external-wallet activity", () => {
 });
 
 describe("external-wallet earnings", () => {
+  it.each([true, false])(
+    "reports a capped Kamino deposit honestly (receipt observed=%s)",
+    async (observed) => {
+      const position = await seedPosition({
+        ownerAddress: OWNER_A,
+        vaultAddress: "vault-capped",
+        tokenMint: USDC,
+        label: "Capped vault",
+      });
+      const movementId = await seedMovement({
+        positionId: position,
+        ownerAddress: OWNER_A,
+        vaultAddress: "vault-capped",
+        direction: "deposit",
+        status: "finalized",
+        amount: "10",
+        denomination: USDC,
+        createdAt: "2026-08-27T00:00:00.000Z",
+        depositObserved: observed,
+        depositAmountSettled: "3",
+      });
+      if (!observed) {
+        // An older revision can still write its requested-amount projection
+        // during rollout. Neither the movement read nor earnings may use it.
+        await getDb(env)
+          .prepare(
+            "UPDATE earn_movements SET amount_settled = amount_requested, token_amount_settled = amount_requested WHERE id = ?"
+          )
+          .bind(movementId)
+          .run();
+      }
+      liveValue({ "vault-capped": "3.1" });
+      const earnings = (await (
+        await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      ).json()) as {
+        data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
+      };
+      const total = earnings.data.earnings.totalsByToken[0];
+      expect(total.totalDeposited).toBe(observed ? "3" : "0");
+      if (observed) expect(total.earned).toBe("0.1");
+      else {
+        expect(total.earnedUnavailableReason).toBe("deposits_not_valued");
+        expect(total).not.toHaveProperty("earned");
+      }
+      const detail = (await (
+        await get(`/v1/earn/external-wallet/movements/${movementId}`)
+      ).json()) as {
+        data: { movement: Record<string, unknown> };
+      };
+      expect(detail.data.movement).toMatchObject({
+        amount: "10",
+        tokenAmount: observed ? "3" : null,
+      });
+    }
+  );
+
   it("states earned per token exactly, including a negative figure", async () => {
     const usdcOne = await seedPosition({
       ownerAddress: OWNER_A,
@@ -1073,6 +1145,66 @@ describe("external-wallet earnings", () => {
     expect(body.data.earnings.totalsByToken[0]).toMatchObject({
       positionCount: 2,
       earnedUnavailableReason: "movements_pending",
+    });
+    expect(body.data.earnings.totalsByToken[0]).not.toHaveProperty("earned");
+  });
+
+  it("prioritizes a queued withdrawal over an unobserved Kamino deposit for the same token", async () => {
+    const deposit = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-kamino-unobserved",
+      tokenMint: USDC,
+      label: "Kamino vault",
+    });
+    await seedMovement({
+      positionId: deposit,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-kamino-unobserved",
+      direction: "deposit",
+      status: "finalized",
+      amount: "10",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      depositObserved: false,
+    });
+    const queued = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-veda-queued",
+      tokenMint: USDC,
+      label: "Veda vault",
+      provider: "veda",
+    });
+    await seedMovement({
+      positionId: queued,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-veda-queued",
+      direction: "deposit",
+      status: "finalized",
+      amount: "60",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      provider: "veda",
+    });
+    await seedWithdrawalRequest({
+      positionId: queued,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-veda-queued",
+      provider: "veda",
+      mechanism: "solver_queue",
+      status: "pending",
+      shares: "40",
+      quotedAssets: "40.4",
+    });
+    liveValue({ "vault-kamino-unobserved": "10", "vault-veda-queued": "20" });
+
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
+      data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
+    };
+    expect(body.data.earnings.totalsByToken[0]).toMatchObject({
+      positionCount: 2,
+      earnedUnavailableReason: "withdrawals_pending",
     });
     expect(body.data.earnings.totalsByToken[0]).not.toHaveProperty("earned");
   });

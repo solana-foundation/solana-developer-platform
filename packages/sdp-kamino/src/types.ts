@@ -50,8 +50,8 @@ export interface KaminoInstructionPlan {
   /** What the instructions above actually encode. See `KaminoAcceptedAmounts`. */
   accepted: KaminoAcceptedAmounts;
   /**
-   * True when these instructions create the owner's share ATA, charging its
-   * rent to `rentPayer`. See `EarnVaultTransactionPlan.createsShareAccount`.
+   * Build-time missing-ATA observation. An idempotent deposit create may still
+   * pay no rent if another transaction creates it first.
    */
   createsShareAccount?: boolean;
 }
@@ -115,14 +115,9 @@ export interface KaminoDepositInput {
    *   rather than the fee alone. On devnet that reserves ~9.9M lamports against
    *   ~2.04M of actual ATA rent, so it over-reserves rather than under-accounts.
    *
-   * The objection's remaining sting is answered by the exit rather than argued
-   * away: klend never closes the share ATA, so its rent used to sit locked in a
-   * zero-share account forever no matter who paid. `buildShareAccountCloseInstruction`
-   * now closes it on a full exit and names the RECORDED funder as the
-   * destination, which makes sponsored rent a float rather than a giveaway. The
-   * caller must persist that funder at deposit time, because the fee mode may
-   * differ by the time the position is exited. See
-   * docs/decisions/0002-earn-provider-pluggability.md.
+   * Share-ATA rent remains owner-controlled after withdrawal, including when
+   * sponsored. A build-time creation claim cannot establish a safe refund
+   * destination, so sponsors must not assume automatic reimbursement.
    */
   rentPayer?: TransactionSigner;
   /** Deposit amount in the vault token's own units, as a decimal string. */
@@ -152,13 +147,9 @@ export interface KaminoWithdrawInput {
   /** Shares to redeem, as a decimal string. */
   shares: string;
   /**
-   * Where the share ATA's reclaimed rent goes when this exit empties it.
-   *
-   * klend's own exit never closes the account, so its rent would otherwise stay
-   * locked in an account holding zero shares forever. Defaults to `owner`, which
-   * is correct whenever the owner funded it. See
-   * `EarnVaultWithdrawInput.rentRefundTo` for why the caller must pass the
-   * RECORDED funder rather than a currently-configured sponsor.
+   * Legacy hint, ignored. Share ATAs retain their rent because creation claims
+   * cannot prove who funded all their lamports. Owners can explicitly close
+   * empty accounts; withdrawals never guess a refund recipient.
    */
   rentRefundTo?: Address;
   /**

@@ -149,7 +149,12 @@ and `advanceRequest` reopens the holding on every cancellation, not only a
 solver queue's, so a stale zero-share snapshot cannot retire it. Values that
 sum a holding (earnings `currentValue`, the summary totals) add the
 intermediate through `hydratedHoldingTokenValue`; `tokenValue` itself stays the
-shares' value. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
+shares' value. A par request redeems either shares or that held intermediate
+(`intermediateAmount`, exactly one of the two in every body schema). The
+intermediate source records `shares = '0'` (migration 0120 admits it for
+operator redemptions only), its policy candidate names the intermediate mint
+as the asset, and its idempotency fingerprint adds `intermediateAmount` without
+changing a shares fingerprint by a byte. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
 signed action rows. Only a provider-authenticated terminal fulfillment is
 projected into movement/activity reads, using the closing transaction's
 signature and payout; request and cancel transactions remain request history
@@ -749,16 +754,12 @@ transaction signed by the organization custody wallet or external owner.
   - Sponsored signing stays sign-only, so record-before-broadcast survives
     unchanged. Turning the flag off returns both routes to `wallet-pays` with no
     code change.
-  - **The exit refunds the share-ATA rent to whoever actually paid it**, which
-    for an account that pre-dates the exit means `share_ata_rent_funder`
-    (migration 0066) and never the current fee mode. klend never closed that
-    account, so its rent used to stay locked in a zero-share account on every
-    exit; the exit now closes it when it provably empties it. Do not re-derive
-    the destination: sponsorship can be toggled between entering and exiting a
-    position, and refunding today's sponsor for rent the customer paid takes the
-    customer's lamports. The single exception is an exit that CREATES the account
-    itself while consolidating, where its own rent payer funded it seconds
-    earlier and the recorded value describes an older instance.
+  - **Kamino exits retain share-ATA rent.** Build-time creation claims cannot
+    prove who paid it, and a close/recreation can invalidate historical claims.
+    Even a same-transaction creation can use lamports pre-funded by another
+    wallet. The adapter ignores refund hints and removes share-account cleanup.
+    Empty accounts stay owner-controlled and their rent remains recoverable
+    through an explicit owner-authorized close.
 - **Swap-funded deposits (both deposit surfaces).** `sourceTokenMint` (+
   optional `swapSlippageBps`, default 2, enforced 1..500) lets a caller pay in one of
   the supported swap-source stablecoins (`EARN_SWAP_SOURCE_TOKEN_SYMBOLS` in
@@ -1068,29 +1069,25 @@ Pinned by the "sweep telemetry" describe in
 `../../services/jobs/reconcile-earn-vault-movements.test.ts`, whose
 `runWithCronRunEvent` test composes the real wrapper.
 
-**Expiring a `submitted` movement takes TWO unknown-signature observations**
-(PRO-1904, migration 0092). The evidence bar differs by status because the
-statuses carry different facts:
+**Expiring an unknown vault movement takes TWO observations.** A broadcast
+response can be lost after landing while the durable row still says `requested`.
+The sweep therefore uses finalized block height, checks finalized transaction
+history after a null signature status, and recovers a historical receipt through
+the normal settlement path only when its execution result is known. Missing
+execution metadata or an unavailable history read leaves the row recoverable and
+fails the tick visibly; neither establishes success, failure, or signature absence.
 
-- `requested` is unbroadcast. Past its blockhash it cannot land, so one null
-  status past the window expires it on that tick (the pre-existing rule).
-- `confirmed` demonstrably landed. A null status is RPC history forgetting, so
-  it is never expired (PRO-1716).
-- `submitted` was broadcast and MAY have landed. RPC history is not complete
-  (the `confirmed` rule exists for exactly that reason), so one null answer is
-  evidence, not proof, and a false `failed` is terminal with the shares still
-  in the vault. The first null observation past the window writes
-  `unknown_signature_observed_at` and returns `unchanged`; only a LATER tick
-  that sees the signature unknown again fails the row. A tick that finds the
-  signature in between advances it normally and the mark becomes inert.
+When neither status nor history observes the transaction past its window, a
+`requested` row moves conservatively to `submitted` through the guarded writer.
+The sweep records `unknown_signature_observed_at` on that submitted row. Only a
+later tick with another absent status and absent finalized receipt can expire it.
+A positive observation in between advances it normally. The migration 0092
+constraint and single-writer rule remain intact; no migration is required.
 
-The mark is written only by the sweep (the interactive read-through passes no
-block height and can neither park nor expire), only on a `submitted` row, and
-only once (COALESCE), so a burst of ticks cannot count as two observations. An
-unavailable block-height read is not an observation either: the row is left for
-the next tick (ADR 0002 exit safety). Cost: a genuinely dead submitted
-movement fails one tick later than before. Pinned by the "expiring a SUBMITTED
-movement" describe in the same test file.
+A `confirmed` row has positive inclusion evidence and is never expired for an
+absent signature. Interactive GET reads pass no block height and cannot expire
+or mark an unknown signature. Tests live in the ambiguous-broadcast recovery and
+expiry describes of `services/jobs/reconcile-earn-vault-movements.test.ts`.
 
 ### Vault withdrawals — the exit half (PRO-1702)
 
@@ -1211,8 +1208,8 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   payer (the funds check moves to the partner wallet — the zero-SOL owners
   this exists for must not fail it; a broke partner 400s naming the fee
   payer), and the provider's `rentPayer`, so a first deposit's share-ATA rent
-  is partner-funded and `share_ata_rent_funder` records the partner (build
-  row → movement → position projection), making the exit refund the PARTNER.
+  can be partner-funded. The movement records the planned payer; Kamino does
+  not treat that claim as proof of payment or use it to authorize a refund.
   For a swap-funded deposit, the same address is Jupiter's `payer`, but it is
   accepted only as the idempotent ATA-create payer; the owner remains the sole
   swap authority.
@@ -1283,13 +1280,12 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
     past the build's `last_valid_block_height` (no movement row, build left
     unconsumed; a consumed build still answers its consumption conflict, and a
     failed height read falls through rather than refusing).
-  - **A preflight `BlockhashNotFound` past the window fails the movement at
-    once**: `broadcastRecordedVaultMovement` (shared with the custody path)
-    moves `requested → failed` with the reconciler's exact reason string when
-    preflight refused the blockhash AND the confirmed height is past the row's
-    window; the response then carries `status: "failed"`. Every other broadcast
-    error, including that refusal while the window is still open (preflight
-    can lag the blockhash's commitment), stays `requested` for the reconciler.
+  - **A preflight `BlockhashNotFound` leaves the movement reconcilable**, even
+    past its window. `broadcastRecordedVaultMovement` shares this behavior
+    with custody: a refusal describes this attempt, while an external wallet
+    or concurrent reconciler may already have sent the same signed bytes.
+    Every broadcast error leaves the durable row for signature reconciliation
+    instead of immediately recording a terminal failure.
 - `POST /external-wallet/withdrawal-previews`: the exit QUOTE
   (`supportsVaultWithdrawQuote`, 501 without it): what redeeming the shares
   would pay from the vault's live accounting, from which the partner derives
@@ -1327,9 +1323,9 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   partners are PRO-1724, not here.
 - Who pays: an anonymous build always uses the owner. A keyed build uses the
   owner by default or the partner's `feePayer` when named. The rent funder is
-  recorded NULL for owner-paid rent (the exit's refund defaults back to the
-  owner) and as the partner's address for partner-funded rent (the exit
-  refunds the partner). Kora sponsorship for this surface, meaning SDP pays,
+  recorded as a creation claim, not execution evidence. Kamino retains share-ATA
+  rent for an explicit owner-authorized close.
+  Kora sponsorship for this surface, meaning SDP pays,
   stays PRO-1744. The response's `sponsored` field is therefore false today.
 
 The keyed per-owner READS (PRO-1772) close the loop the money routes open. All
@@ -1381,13 +1377,14 @@ retired path-addressed shapes (`positions/:ownerAddress`,
 
 - `GET /external-wallet/movements?ownerAddress=…` — **DB ledger list**, one
   owner's activity newest first in ledger vocabulary, keyset-paged, with
-  `direction`/`status` equality filters. Every movement carries two views of
-  the same quantity: `amount`/`denomination` is the on-chain quantity exactly
-  as recorded (token for a deposit, SHARES for a withdrawal), and
-  `tokenMint`/`tokenAmount` is the deposit-token view a feed renders in (the
-  position's token mint via `listPositionTokenMints`; the deposit amount, or a
-  withdrawal's `token_amount_settled` once finalized, null before that or when
-  the payout was never observed). Neither replaces the other.
+  `direction`/`status` equality filters. `amount`/`denomination` preserves the
+  requested quantity (token maximum for a Kamino deposit, SHARES for a
+  withdrawal). `tokenMint`/`tokenAmount` is the deposit-token view a feed
+  renders in, with the position's token mint via `listPositionTokenMints`.
+  For Kamino deposits and all withdrawals, `tokenAmount` is the observed
+  `token_amount_settled`, or null until valued. Other providers' deposits
+  retain their requested-amount fallback. A requested maximum must never be
+  presented as a receipt.
 - `GET /external-wallet/movements/:movementId` — the poll that makes the
   submit's record-before-broadcast answerable on this surface: a scoped,
   fail-soft read-through of the movement's exact Solana signature (the same
@@ -1410,18 +1407,18 @@ retired path-addressed shapes (`positions/:ownerAddress`,
   `movements_pending` (a movement is still settling, so chain and ledger
   describe different moments), `withdrawals_pending` (a held position has an
   open queued withdrawal request: a Veda queue escrowed or a Hastra
-  redemption burned its shares before the payout, which can take days), or
-  `withdrawals_not_valued` (a finalized withdrawal on a held position has NO
-  observed payout, so `totalWithdrawn` is incomplete). The aggregate
-  (`aggregateExternalWalletMovements`) counts open requests separately from
-  unsettled movements on purpose: folded together they answered
-  `movements_pending` for days, breaking that reason's ~90 s window. A
-  settling movement outranks an open request, and a terminal request
-  withholds nothing. Known gap before Hastra is surfaced: a CANCELLED Hastra
-  redemption leaves the owner wYLDS that the PRIME position read never
-  values, so `earned` then understates by it. Exits are still ledgered in
-  SHARES (0070 pins `payout_token` NULL for vault rows); the deposit-token
-  payout is a SETTLE-TIME observation
+  redemption burned its shares before the payout, which can take days),
+  `deposits_not_valued` (a finalized deposit has no observed receipt, leaving
+  `totalDeposited` incomplete), or `withdrawals_not_valued` (a finalized
+  withdrawal on a held position has no observed payout, leaving
+  `totalWithdrawn` incomplete). These reasons are listed in priority order.
+  The aggregate (`aggregateExternalWalletMovements`) counts open requests
+  separately from unsettled movements: folded together they answered
+  `movements_pending` for days, breaking that reason's ~90 s window. A terminal
+  request withholds nothing; a cancelled Hastra request's retained wYLDS is
+  valued through `parIntermediate`. Exits are still ledgered in SHARES
+  (0070 pins `payout_token` NULL for vault rows); the deposit-token payout is
+  a SETTLE-TIME observation
   (`earn_movements.token_amount_settled`, migration 0103): when a withdrawal
   reaches `finalized`, `vault-movement-reconciliation.service.ts` fetches the
   landed transaction (`getTransaction`, jsonParsed) and records the receiving
@@ -1433,7 +1430,12 @@ retired path-addressed shapes (`positions/:ownerAddress`,
   (`repairUnvaluedWithdrawalPayouts`: 25 per tick, 15-minute spacing, rows
   settled within 14 days); older rows and rows finalized before 0103 stay NULL
   and keep reporting it. The
-  same settlement hook reads the holding live for that one vault and owner and
+  deposit side now reads finalized Kamino CPI receipts (0119), because its
+  instruction encodes a maximum rather than an exact debit. Unknown receipts
+  leave `amount_settled` and `token_amount_settled` NULL; the bounded repair
+  sweep includes historical rows, prioritizes rows with no recorded reconciliation
+  attempt, and retries at 15-minute intervals.
+  The same settlement hook reads the holding live for that one vault and owner and
   stamps `closed_at` when shares are "0" (`closeVaultPositionIfEmpty`, fail-soft;
   a later deposit transition re-opens it), for external-wallet AND custody
   rows (the custody wallet's public key is the withdrawal's
