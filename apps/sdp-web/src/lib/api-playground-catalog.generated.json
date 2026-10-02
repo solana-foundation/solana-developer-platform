@@ -5548,7 +5548,7 @@
           {
             "key": "search",
             "label": "search",
-            "description": "Prefix match against transaction id, module id, or signature — not a substring search.",
+            "description": "Prefix match against transaction id, module id, signature, or counterparty address — not a substring search.",
             "required": false
           },
           {
@@ -5589,6 +5589,7 @@
                 "token": "example",
                 "amount": "example",
                 "counterpartyId": "counterparty_example",
+                "counterpartyAddress": "11111111111111111111111111111111",
                 "signature": "example",
                 "createdAt": "example",
                 "module": "payments",

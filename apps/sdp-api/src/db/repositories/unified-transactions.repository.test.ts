@@ -20,6 +20,9 @@ async function seedTransfer(input: {
   status: string;
   custodyWalletId: string | null;
   counterpartyId: string | null;
+  direction?: "inbound" | "outbound";
+  sourceAddress?: string;
+  destinationAddress?: string;
 }): Promise<void> {
   if (input.counterpartyId !== null) {
     await getDb(env).execute(
@@ -35,7 +38,7 @@ async function seedTransfer(input: {
          (id, organization_id, project_id, wallet_id, custody_wallet_id, source_address,
           destination_address, token, amount, type, direction, status, counterparty_id,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'source', 'destination', ?, '10', ?, 'outbound', ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, '10', ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       input.id,
@@ -43,8 +46,11 @@ async function seedTransfer(input: {
       PROJECT,
       WALLET,
       input.custodyWalletId,
+      input.sourceAddress ?? "source",
+      input.destinationAddress ?? "destination",
       wellKnownMint("USDC", "devnet"),
       input.type,
+      input.direction ?? "outbound",
       input.status,
       input.counterpartyId,
       CREATED_AT,
@@ -143,6 +149,92 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
     // offered.
     const bySubstring = await repository.list({ ...base, search: "unified_searchable" });
     expect(bySubstring.rows).toEqual([]);
+  });
+
+  it("projects the counterparty address and issuance amount, and searches the address as a prefix", async () => {
+    const OWN_WALLET = "UnifiedWallet111";
+    const SENDER = "SenderWa11et1111111111111111111111111111111";
+    const RECIPIENT = "Recipient1111111111111111111111111111111111";
+    const MINT_DESTINATION = "MintDest11111111111111111111111111111111111";
+    await seedTransfer({
+      id: "xfr_unified_inbound",
+      type: "transfer",
+      status: "confirmed",
+      custodyWalletId: CUSTODY_WALLET,
+      counterpartyId: null,
+      direction: "inbound",
+      sourceAddress: SENDER,
+      destinationAddress: OWN_WALLET,
+    });
+    await seedTransfer({
+      id: "xfr_unified_outbound",
+      type: "transfer",
+      status: "confirmed",
+      custodyWalletId: CUSTODY_WALLET,
+      counterpartyId: null,
+      direction: "outbound",
+      sourceAddress: OWN_WALLET,
+      destinationAddress: RECIPIENT,
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO issued_tokens
+           (id, project_id, organization_id, mint_address, name, symbol, decimals, created_by)
+         VALUES ('tok_unified_address', ?, ?, 'UnifiedAddressMint', 'Unified', 'UNI', 6, ?)`
+      )
+      .bind(PROJECT, TEST_ORG.id, TEST_USER.id)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO issuance_transactions
+           (id, token_id, organization_id, custody_wallet_id, type, status, operation_params,
+            created_at, updated_at)
+         VALUES ('itx_unified_mint', 'tok_unified_address', ?, ?, 'mint', 'confirmed', ?, ?, ?)`
+      )
+      .bind(
+        TEST_ORG.id,
+        CUSTODY_WALLET,
+        JSON.stringify({ destination: MINT_DESTINATION, amount: "12.5", memo: "unified" }),
+        CREATED_AT,
+        CREATED_AT
+      )
+      .run();
+    const repository = createPostgresUnifiedTransactionsRepository(getDb(env));
+    const base = {
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT,
+      modules: ["payments", "issuance"] as UnifiedTransactionModule[],
+      limit: 25,
+    };
+
+    const all = await repository.list(base);
+    expect(
+      all.rows
+        .map((row) => ({
+          id: row.id,
+          counterpartyAddress: row.counterpartyAddress,
+          amount: row.amount,
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id))
+    ).toEqual([
+      { id: "itx_unified_mint", counterpartyAddress: MINT_DESTINATION, amount: "12.5" },
+      { id: "xfr_unified_inbound", counterpartyAddress: SENDER, amount: "10" },
+      { id: "xfr_unified_outbound", counterpartyAddress: RECIPIENT, amount: "10" },
+    ]);
+
+    const bySender = await repository.list({ ...base, search: SENDER.slice(0, 6) });
+    expect(bySender.rows.map((row) => row.id)).toEqual(["xfr_unified_inbound"]);
+    const byRecipient = await repository.list({ ...base, search: RECIPIENT.slice(0, 6) });
+    expect(byRecipient.rows.map((row) => row.id)).toEqual(["xfr_unified_outbound"]);
+    const byMintDestination = await repository.list({
+      ...base,
+      search: MINT_DESTINATION.slice(0, 6),
+    });
+    expect(byMintDestination.rows.map((row) => row.id)).toEqual(["itx_unified_mint"]);
+    // The SDP wallet's own address sits on the near side of every transfer, so
+    // it is never the counterparty and never a search hit.
+    const byOwnWallet = await repository.list({ ...base, search: OWN_WALLET.slice(0, 6) });
+    expect(byOwnWallet.rows).toEqual([]);
   });
 
   it("filters by counterparty ID", async () => {

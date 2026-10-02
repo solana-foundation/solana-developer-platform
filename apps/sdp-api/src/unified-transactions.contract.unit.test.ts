@@ -48,6 +48,7 @@ describe("unified transaction contract", () => {
           token: null,
           amount: null,
           counterpartyId: null,
+          counterpartyAddress: null,
           signature: null,
           createdAt: "2026-09-15T00:00:00.000Z",
         }).module

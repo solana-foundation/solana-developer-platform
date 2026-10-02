@@ -463,25 +463,35 @@ describe("unified_transactions view (postgres)", () => {
     const dvpRows = await getDb(env).queryMany<{
       amount: string | null;
       custody_wallet_id: string | null;
+      counterparty_address: string | null;
       id: string;
     }>(
-      `SELECT id, custody_wallet_id, amount
+      `SELECT id, custody_wallet_id, counterparty_address, amount
        FROM unified_transactions
        WHERE module = 'dvp' AND kind = 'close' AND module_id = ? ORDER BY id`,
       [tradeId]
     );
+    // SDP funded leg a, so its counterparty is user_b; leg b has no claim and
+    // therefore no custody wallet and no counterparty.
     expect(dvpRows).toEqual([
       {
         id: `${tradeId}:close:a`,
         amount: expect.stringMatching(/^1(?:\.0+)?$/),
         custody_wallet_id: CUSTODY_WALLET,
+        counterparty_address: "user-b",
       },
       {
         id: `${tradeId}:close:b`,
         amount: expect.stringMatching(/^2(?:\.0+)?$/),
         custody_wallet_id: null,
+        counterparty_address: null,
       },
     ]);
+    const fundRow = await getDb(env).queryOne<{ counterparty_address: string | null }>(
+      "SELECT counterparty_address FROM unified_transactions WHERE module = 'dvp' AND id = ?",
+      [`${tradeId}:fund:a`]
+    );
+    expect(fundRow).toEqual({ counterparty_address: "user-b" });
 
     const ringsId = await seedRings("draft");
     const ringsAmount = await getDb(env).queryOne<{ amount_matches: boolean }>(
@@ -490,5 +500,64 @@ describe("unified_transactions view (postgres)", () => {
     );
     if (ringsAmount === null) throw new Error("missing Rings amount fixture");
     expect(ringsAmount.amount_matches).toBe(true);
+  });
+
+  it("reads issuance amounts and addresses from operation_params and tolerates a malformed row", async () => {
+    const emptyParamsId = await seedIssuance("confirmed");
+    await getDb(env).execute(
+      `INSERT INTO issuance_transactions
+         (id, token_id, organization_id, type, status, operation_params, created_at, updated_at)
+       VALUES ('itx_seize_params', 'tok_unified_view', ?, 'seize', 'confirmed', ?, ?, ?),
+              ('itx_malformed_params', 'tok_unified_view', ?, 'mint', 'failed', 'not json', ?, ?)`,
+      [
+        TEST_ORG.id,
+        JSON.stringify({ source: "SeizedFrom111", destination: "SeizedTo111", amount: "3.25" }),
+        CREATED_AT,
+        CREATED_AT,
+        TEST_ORG.id,
+        CREATED_AT,
+        CREATED_AT,
+      ]
+    );
+    const rows = await getDb(env).queryMany<{
+      id: string;
+      amount: string | null;
+      counterparty_address: string | null;
+    }>(
+      `SELECT id, amount, counterparty_address FROM unified_transactions
+       WHERE module = 'issuance' AND id IN (?, 'itx_seize_params', 'itx_malformed_params')
+       ORDER BY id`,
+      [emptyParamsId]
+    );
+    // Without the pg_input_is_valid guard the malformed row would abort the
+    // whole SELECT with "invalid input syntax for type json".
+    expect(rows).toEqual([
+      { id: "itx_malformed_params", amount: null, counterparty_address: null },
+      { id: "itx_seize_params", amount: "3.25", counterparty_address: "SeizedFrom111" },
+      { id: emptyParamsId, amount: null, counterparty_address: null },
+    ]);
+  });
+
+  it("names a private-channel transfer's recipient and no party for a deposit", async () => {
+    const depositId = await seedPrivateChannel("confirmed");
+    await getDb(env).execute(
+      `INSERT INTO private_channel_transfers
+         (id, organization_id, project_id, instance_id, channel_id, sender_private_channel_user_id,
+          recipient_private_channel_user_id, sender_wallet_id, recipient_verified_wallet_id, sender,
+          recipient, mint, amount, status, signature, created_at, updated_at)
+       VALUES ('pct_unified_view', ?, ?, 'instance', 'channel', 'pcu_sender', 'pcu_recipient',
+               'wallet_unified_view', 'pcvw_recipient', 'SenderChannelAddr', 'RecipientChannelAddr',
+               'USDCMint', '1', 'confirmed', 'transfer-signature', ?, ?)`,
+      [TEST_ORG.id, PROJECT, CREATED_AT, CREATED_AT]
+    );
+    const rows = await getDb(env).queryMany<{ id: string; counterparty_address: string | null }>(
+      `SELECT id, counterparty_address FROM unified_transactions
+       WHERE module = 'private_channels' AND id IN (?, 'pct_unified_view') ORDER BY id`,
+      [depositId]
+    );
+    expect(rows).toEqual([
+      { id: depositId, counterparty_address: null },
+      { id: "pct_unified_view", counterparty_address: "RecipientChannelAddr" },
+    ]);
   });
 });

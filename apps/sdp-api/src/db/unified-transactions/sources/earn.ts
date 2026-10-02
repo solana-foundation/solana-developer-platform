@@ -13,6 +13,9 @@ import type { UnifiedTransactionSource } from "./types";
  * mint, so amount and token always describe the same unit. Deposits are
  * valued only after receipt observation for Kamino; legacy projections are
  * hidden until repair establishes the actual debit.
+ *
+ * A movement runs between the position's wallet and a vault or provider
+ * program, so there is no other party to name: `counterparty_address` is NULL.
  */
 export const earnUnifiedTransactionSource = {
   sql: (helpers) => `SELECT
@@ -37,6 +40,7 @@ export const earnUnifiedTransactionSource = {
     ELSE em.amount_requested
   END AS amount,
   NULL::text AS counterparty_id,
+  NULL::text AS counterparty_address,
   em.signature,
   em.created_at
 FROM earn_movements em

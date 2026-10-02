@@ -168,6 +168,8 @@ interface UnifiedTransactionCommon {
   /** Exact decimal string in token units, or null when the source cannot resolve token decimals. */
   amount: string | null;
   counterpartyId: string | null;
+  /** The other party's on-chain address — a payment's source when inbound, else its destination; the account an issuance operation names; the opposite user of a DvP leg SDP funded; a private-channel transfer's recipient — or null when the row records no other party. */
+  counterpartyAddress: string | null;
   signature: string | null;
   createdAt: string;
 }
