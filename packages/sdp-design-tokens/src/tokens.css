@@ -241,6 +241,14 @@
   --red-tx: var(--critical);
   --red-bg: var(--critical-wash);
   --red-brd: var(--critical-rule);
+  /* Destructive fills and borders (bg-destructive, border-destructive-border) read crimson; in
+     the refresh they take the same critical red as error text, so a screen shows one red. The
+     palette has no hover or pressed step, so those darken critical as the base crimson steps do. */
+  --crimson: var(--critical);
+  --crimson-strong: color-mix(in oklab, var(--critical) 85%, black);
+  --crimson-strongest: color-mix(in oklab, var(--critical) 72%, black);
+  --crimson-bg: var(--critical-wash);
+  --crimson-brd: var(--critical-rule);
 
   --font-sans: var(--font-brand-sans);
   --font-mono: var(--font-brand-mono);
@@ -248,10 +256,15 @@
   --page-title-size: var(--font-size-heading);
   --page-title-line-height: var(--line-height-heading);
   --page-title-letter-spacing: var(--letter-spacing-heading);
+}
 
-  /* The one non-token declaration: text inside the scope inherits the design's face without
-     every element asking for it. Utilities (font-sans, font-mono) resolve to the same tokens. */
-  font-family: var(--font-sans);
+/* The one non-token declaration: text inside the scope inherits the design's face without every
+   element asking for it. It sits in the base layer so a utility on the scope element itself
+   (font-mono) still wins; unlayered, it would outrank every utility there. */
+@layer base {
+  [data-sdp-theme="refresh"] {
+    font-family: var(--font-sans);
+  }
 }
 
 /* ── Scale, radius and control tokens (theme-independent) ────────────────── */

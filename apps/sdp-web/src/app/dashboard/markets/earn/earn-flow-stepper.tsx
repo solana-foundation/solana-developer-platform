@@ -29,7 +29,7 @@ function stepMarkerClassName(active: boolean, complete: boolean, terminal: boole
   if (complete) return "border-primary bg-white text-black";
   if (active) {
     return cn(
-      "border-primary shadow-[0_0_0_3px_var(--color-fill-subtle)]",
+      "border-primary shadow-[0_0_0_3px_var(--t4)]",
       terminal ? "bg-white text-black" : "bg-surface-raised text-primary"
     );
   }
