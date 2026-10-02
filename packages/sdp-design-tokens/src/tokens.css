@@ -155,6 +155,10 @@
   --critical: oklch(50.54% 0.1905 27.52);
   --critical-wash: color-mix(in oklab, var(--critical) 8%, transparent);
   --critical-rule: color-mix(in oklab, var(--critical) 35%, transparent);
+  /* Hover and pressed for critical fills, and the stronger critical text: further from the paper,
+     so darker here and lighter in dark mode. */
+  --critical-strong: color-mix(in oklab, var(--critical) 85%, black);
+  --critical-strongest: color-mix(in oklab, var(--critical) 72%, black);
 
   /* The design's faces. An app loads the files in src/assets/fonts and exposes them as
      --font-season-sans and --font-geist-mono; without those, the installed family name is
@@ -201,6 +205,8 @@
   --critical: oklch(62.37% 0.1634 27.66);
   --critical-wash: color-mix(in oklab, var(--critical) 12%, transparent);
   --critical-rule: color-mix(in oklab, var(--critical) 40%, transparent);
+  --critical-strong: color-mix(in oklab, var(--critical) 85%, white);
+  --critical-strongest: color-mix(in oklab, var(--critical) 72%, white);
 }
 
 /* ── 3. Refresh scope ────────────────────────────────────────────────────── */
@@ -242,11 +248,10 @@
   --red-bg: var(--critical-wash);
   --red-brd: var(--critical-rule);
   /* Destructive fills and borders (bg-destructive, border-destructive-border) read crimson; in
-     the refresh they take the same critical red as error text, so a screen shows one red. The
-     palette has no hover or pressed step, so those darken critical as the base crimson steps do. */
+     the refresh they take the same critical red as error text, so a screen shows one red. */
   --crimson: var(--critical);
-  --crimson-strong: color-mix(in oklab, var(--critical) 85%, black);
-  --crimson-strongest: color-mix(in oklab, var(--critical) 72%, black);
+  --crimson-strong: var(--critical-strong);
+  --crimson-strongest: var(--critical-strongest);
   --crimson-bg: var(--critical-wash);
   --crimson-brd: var(--critical-rule);
 
