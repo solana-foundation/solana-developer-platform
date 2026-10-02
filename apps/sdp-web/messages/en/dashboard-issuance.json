@@ -1529,7 +1529,7 @@
         "reversibleValue": "Yes. A draft can be edited until it is deployed.",
         "then": "Then",
         "thenValue": "The draft opens with Deploy token. Minting opens once the mint confirms.",
-        "needClassify": "Name the token and pick what it is before going on. It decides the rest of the form.",
+        "needClassify": "Pick what this token is before going on. It decides the rest of the form.",
         "needDetails": "Symbol, decimals and issuer name are needed before the next step.",
         "fixDetails": "The symbol takes letters and digits, decimals 0 to 18, and the cap a whole number.",
         "needKeys": "Every key needs a wallet before the review.",
