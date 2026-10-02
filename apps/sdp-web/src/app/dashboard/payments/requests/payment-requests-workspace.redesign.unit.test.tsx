@@ -7,7 +7,6 @@ import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { PAYMENT_REQUESTS_SCAN_CAP } from "./payment-requests-page.data";
 import { PaymentRequestsWorkspace } from "./payment-requests-workspace.redesign";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
@@ -49,7 +48,6 @@ function renderWorkspace(props: Partial<ComponentProps<typeof PaymentRequestsWor
       initialPaymentRequests={[paymentRequest]}
       counterparties={[]}
       total={1}
-      searchCapped={false}
       listState={{ page: 1, pageSize: 25, status: null, search: null }}
       {...props}
     />,
@@ -71,17 +69,6 @@ describe("PaymentRequestsWorkspace search", () => {
     expect(searchbox).toHaveProperty("disabled", true);
     await userEvent.type(searchbox, "jane{Enter}");
     expect(router.replace).not.toHaveBeenCalled();
-  });
-
-  it("says when the search stopped at the cap", () => {
-    renderWorkspace({
-      searchCapped: true,
-      listState: { page: 1, pageSize: 25, status: null, search: "jane" },
-    });
-
-    expect(
-      screen.getByText(`Search covers the newest ${PAYMENT_REQUESTS_SCAN_CAP} requests only.`)
-    ).toBeTruthy();
   });
 
   it("shows no matches, not the empty directory, when a search finds nothing", () => {
