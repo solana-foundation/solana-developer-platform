@@ -174,8 +174,12 @@ export async function loadPaymentRequestsList(
   // The API filters by the stored status, and listing then reconciles each open request on chain:
   // one paid since it was last read comes back paid (and is saved so). Awaiting payment leaves
   // those rows out and lowers the total by as many, so the count and the pages don't claim them.
-  // TODO(api): filter by the reconciled status. Until then Paid misses a request paid since its
-  // last read, until something reads it again. Known limitation of the API, not of this list.
+  // Only this page is reconciled, so requests paid on other, unread pages still count: the total
+  // can run high by as many (usually none), and the last page can come up short, until those
+  // pages are read and their paid requests saved. No row shows the wrong status.
+  // TODO(api): filter and count by the reconciled status. Until then the Awaiting total can run
+  // high as above, and Paid misses a request paid since its last read until something reads it
+  // again. Known limitation of the API, not of this list.
   const open = result.data.filter((row) => row.status === "awaiting_payment");
   return {
     ...result,
