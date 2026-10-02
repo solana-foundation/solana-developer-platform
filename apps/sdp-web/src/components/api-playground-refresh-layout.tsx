@@ -344,7 +344,7 @@ function SnippetControls({
 }) {
   const t = useTranslations();
   return (
-    <span className="flex items-center gap-1">
+    <span className="ml-auto flex items-center gap-1">
       <span className="relative inline-flex h-6 items-center gap-1 rounded-control px-2 text-body text-primary transition-colors hover:bg-fill-subtle has-[select:focus-visible]:outline-2 has-[select:focus-visible]:outline-primary">
         {SNIPPET_LANGUAGE_NAMES[language]}
         <ChevronDown aria-hidden="true" className="size-3.5 text-tertiary" />
@@ -719,7 +719,9 @@ export function ApiPlaygroundRefreshLayout({
               {t("Shared.SharedComponents.reset")}
             </button>
           </div>
-          <div className="mt-3 flex items-center justify-between gap-3 md:mt-6">
+          {/* On a phone the Code view's language and Copy controls drop under the chips, right
+              aligned, rather than overflow the row beside them. */}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 md:mt-6 md:flex-nowrap">
             <SegmentedControl
               ariaLabel={t("Shared.SharedComponents.request")}
               options={REQUEST_VIEWS.map((entry) => ({
