@@ -1,3 +1,4 @@
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -286,6 +287,171 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       expect(total).toBe(1);
       expect(rows[0].status).toBe("awaiting_payment");
+    });
+
+    describe("search", () => {
+      function search(needle: string, limit = 50) {
+        return repo.listPaymentRequests({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          search: needle,
+          limit,
+          offset: 0,
+        });
+      }
+
+      it("matches a substring of the reference, case-insensitively", async () => {
+        const target = await repo.createPaymentRequest(createInput());
+        await repo.createPaymentRequest(createInput());
+
+        const { rows, total } = await search(target.reference.slice(2, 22).toLowerCase());
+
+        expect(total).toBe(1);
+        expect(rows.map((row) => row.id)).toEqual([target.id]);
+      });
+
+      it("matches the destination address", async () => {
+        const target = await repo.createPaymentRequest(
+          createInput({ destinationAddress: "PayHere9xQ" })
+        );
+        await repo.createPaymentRequest(createInput());
+
+        const { rows, total } = await search("payhere");
+
+        expect(total).toBe(1);
+        expect(rows.map((row) => row.id)).toEqual([target.id]);
+      });
+
+      it("matches the amount", async () => {
+        const target = await repo.createPaymentRequest(createInput({ amount: "99.50" }));
+        await repo.createPaymentRequest(createInput());
+
+        const { rows, total } = await search("99.5");
+
+        expect(total).toBe(1);
+        expect(rows.map((row) => row.id)).toEqual([target.id]);
+      });
+
+      it("matches the counterparty display name", async () => {
+        const counterparty = await seedCounterparty();
+        const target = await repo.createPaymentRequest(
+          createInput({ counterpartyId: counterparty.id })
+        );
+        await repo.createPaymentRequest(createInput());
+
+        const { rows, total } = await search("acme");
+
+        expect(total).toBe(1);
+        expect(rows.map((row) => row.id)).toEqual([target.id]);
+      });
+
+      it("matches a token symbol against the mint the request is stored under", async () => {
+        const target = await repo.createPaymentRequest(
+          createInput({ token: WELL_KNOWN_TOKENS.USDC.mints.devnet.address })
+        );
+        await repo.createPaymentRequest(createInput({ token: SOL_MINT }));
+
+        const { rows, total } = await search("usdc");
+
+        expect(total).toBe(1);
+        expect(rows.map((row) => row.id)).toEqual([target.id]);
+      });
+
+      it("counts every match while paging", async () => {
+        await repo.createPaymentRequest(createInput({ destinationAddress: "PayHere9xQ" }));
+        await repo.createPaymentRequest(createInput({ destinationAddress: "PayHere9xR" }));
+        await repo.createPaymentRequest(createInput());
+
+        const { rows, total } = await search("PayHere", 1);
+
+        expect(total).toBe(2);
+        expect(rows).toHaveLength(1);
+      });
+
+      it("treats LIKE wildcards in the needle literally", async () => {
+        await repo.createPaymentRequest(createInput());
+
+        const { rows, total } = await search("%");
+
+        expect(total).toBe(0);
+        expect(rows).toEqual([]);
+      });
+    });
+  });
+
+  describe("listOpenPaymentRequests", () => {
+    function listOpen(limit = 50) {
+      return repo.listOpenPaymentRequests({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        limit,
+      });
+    }
+
+    it("returns only pinned, unexpired awaiting requests", async () => {
+      const open = await repo.createPaymentRequest(createInput());
+      await repo.createPaymentRequest(
+        createInput({ expiresAt: new Date(Date.now() - 60_000).toISOString() })
+      );
+      const paid = await repo.createPaymentRequest(createInput());
+      await seedTransfer("xfr_open_paid");
+      await repo.markPaymentRequest({
+        requestId: paid.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        status: "paid",
+        fulfilledByTransferId: "xfr_open_paid",
+        canceledBy: null,
+      });
+      const canceled = await repo.createPaymentRequest(createInput());
+      await repo.markPaymentRequest({
+        requestId: canceled.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        status: "canceled",
+        fulfilledByTransferId: null,
+        canceledBy: TEST_USER.id,
+      });
+      const unpinned = await repo.createPaymentRequest(createInput());
+      await getDb(env)
+        .prepare("UPDATE payment_requests SET custody_wallet_id = NULL WHERE id = ?")
+        .bind(unpinned.id)
+        .run();
+
+      const rows = await listOpen();
+
+      expect(rows.map((row) => row.id)).toEqual([open.id]);
+    });
+
+    it("returns newest first and honours the limit", async () => {
+      const older = await repo.createPaymentRequest(createInput({ expiresAt: null }));
+      const newer = await repo.createPaymentRequest(createInput());
+      const db = getDb(env);
+      await db
+        .prepare("UPDATE payment_requests SET created_at = ? WHERE id = ?")
+        .bind("2026-01-01T00:00:00.000Z", older.id)
+        .run();
+      await db
+        .prepare("UPDATE payment_requests SET created_at = ? WHERE id = ?")
+        .bind("2026-01-01T00:00:01.000Z", newer.id)
+        .run();
+
+      expect((await listOpen()).map((row) => row.id)).toEqual([newer.id, older.id]);
+      expect((await listOpen(1)).map((row) => row.id)).toEqual([newer.id]);
+    });
+
+    it("scopes by project", async () => {
+      await repo.createPaymentRequest(createInput());
+      await expectProjectScoped(
+        (projectId) =>
+          repo.listOpenPaymentRequests({
+            organizationId: TEST_ORG.id,
+            projectId,
+            limit: 50,
+          }),
+        { own: projects.sandbox, other: projects.production },
+        (rows) => rows.length === 0
+      );
     });
   });
 
