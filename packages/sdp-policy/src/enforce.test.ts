@@ -9,7 +9,7 @@ import type {
   WalletOperationStatus,
 } from "@sdp/types";
 import { parseIsoDurationMs } from "./duration";
-import { enforceWalletOperationPolicy } from "./enforce";
+import { enforceWalletOperationPolicy, recordPoliciesExcludedWalletOperation } from "./enforce";
 import { IMPLICIT_DEFAULT_ALLOW_POLICY } from "./evaluate";
 import type {
   CreateWalletOperationInput,
@@ -418,5 +418,68 @@ describe("enforceWalletOperationPolicy velocity", () => {
     await enforceWalletOperationPolicy(store, depositInput("1"));
 
     assert.ok(!calls.some((call) => call.method === "loadVelocityObservations"));
+  });
+});
+
+describe("recordPoliciesExcludedWalletOperation", () => {
+  it("records an allow without loading policy or opening an approval request", async () => {
+    const { store, calls } = fakeStore(walletPolicy([{ kind: "always", action: "deny" }]), {});
+
+    const enforcement = await recordPoliciesExcludedWalletOperation(
+      store,
+      enforcementInput,
+      async () => {}
+    );
+
+    assert.equal(enforcement.operation.status, "evaluated");
+    assert.partialDeepStrictEqual(enforcement.evaluation, {
+      decision: "allow",
+      reasonCode: "policies_module_excluded",
+      matchedRules: [],
+      requiresApproval: false,
+      approvalRequestId: null,
+      walletPolicyRevisionId: null,
+      apiKeyPolicyRevisionId: null,
+    });
+    assert.deepEqual(
+      calls.map((call) => call.method),
+      ["createWalletOperation", "recordPolicyEvaluation", "updateWalletOperationStatus"]
+    );
+  });
+
+  it("marks the operation failed and records no evaluation when a scope check refuses", async () => {
+    const refusal = new Error("API key policy binding is not configured for the requested wallet");
+    const { store, calls } = fakeStore(IMPLICIT_DEFAULT_ALLOW_POLICY, {});
+
+    await assert.rejects(
+      recordPoliciesExcludedWalletOperation(store, enforcementInput, async () => {
+        throw refusal;
+      }),
+      refusal
+    );
+    assert.deepEqual(
+      calls.map((call) => call.method),
+      ["createWalletOperation", "updateWalletOperationStatus"]
+    );
+    assert.partialDeepStrictEqual(calls.at(-1), {
+      method: "updateWalletOperationStatus",
+      args: [operation.id, "failed"],
+    });
+  });
+
+  it("compensates the operation to failed when evaluation persistence fails", async () => {
+    const boom = new Error("evaluation write failed");
+    const { store, calls } = fakeStore(IMPLICIT_DEFAULT_ALLOW_POLICY, {
+      recordPolicyEvaluation: boom,
+    });
+
+    await assert.rejects(
+      recordPoliciesExcludedWalletOperation(store, enforcementInput, async () => {}),
+      boom
+    );
+    assert.partialDeepStrictEqual(calls.at(-1), {
+      method: "updateWalletOperationStatus",
+      args: [operation.id, "failed"],
+    });
   });
 });

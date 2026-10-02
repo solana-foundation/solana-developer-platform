@@ -4,7 +4,7 @@ import type {
   WalletOperationPolicyEvaluation,
 } from "@sdp/types";
 import { walletOperationStatusForDecision } from "./decisions";
-import { evaluateWalletOperationPolicies } from "./evaluate";
+import { evaluateWalletOperationPolicies, policiesExcludedEvaluation } from "./evaluate";
 import type {
   CreateApprovalRequestInput,
   CreateWalletOperationInput,
@@ -35,6 +35,63 @@ export async function enforceWalletOperationPolicy(
   store: PolicyEnforcementStore,
   input: CreateWalletOperationInput
 ): Promise<WalletOperationPolicyEnforcement> {
+  return recordWalletOperationDecision(store, input, async (operation) => {
+    const policies = await store.loadEffectivePolicies(operation);
+    const velocityRules = collectVelocityRules(policies);
+    const observations =
+      velocityRules.length === 0
+        ? []
+        : await store.loadVelocityObservations(operation, velocityRules);
+    return evaluateWalletOperationPolicies({
+      operation,
+      legs: input.legs,
+      walletPolicy: policies.walletPolicy,
+      apiKeyPolicy: policies.apiKeyPolicy,
+      velocity: createVelocityLookup(observations),
+    });
+  });
+}
+
+/**
+ * Record a wallet operation on a deployment whose release channel excludes
+ * the Policies module. No policy is loaded or evaluated, so no rule can deny,
+ * cap or hold the operation and no approval request is created; the operation
+ * and an allow evaluation with reason `policies_module_excluded` are still
+ * written, so the operation ledger and audit trail stay complete.
+ *
+ * @param store - The persistence the flow writes through.
+ * @param input - The operation to record.
+ * @param assertInScope - Scope checks that still apply without Policies (API-key wallet bindings); a throw marks the operation failed.
+ * @returns The recorded operation and its allow evaluation.
+ */
+export async function recordPoliciesExcludedWalletOperation(
+  store: PolicyEnforcementStore,
+  input: CreateWalletOperationInput,
+  assertInScope: () => Promise<void>
+): Promise<WalletOperationPolicyEnforcement> {
+  return recordWalletOperationDecision(store, input, async (operation) => {
+    // Inside the recorded flow, so a refused operation is marked failed like
+    // any other refusal and stays in the operation ledger.
+    await assertInScope();
+    return policiesExcludedEvaluation(operation);
+  });
+}
+
+/**
+ * The shared write path: create the operation row, decide it, then persist
+ * the approval request (when the decision pauses execution), the evaluation
+ * audit row and the status transition, compensating on a mid-flow failure.
+ *
+ * @param store - The persistence the flow writes through.
+ * @param input - The operation to record.
+ * @param decide - Produces the evaluation for the recorded operation.
+ * @returns The recorded operation and its policy evaluation.
+ */
+async function recordWalletOperationDecision(
+  store: PolicyEnforcementStore,
+  input: CreateWalletOperationInput,
+  decide: (operation: WalletOperationEnvelope) => Promise<WalletOperationPolicyEvaluation>
+): Promise<WalletOperationPolicyEnforcement> {
   const operation = await store.createWalletOperation({
     ...input,
     status: input.status === undefined ? "created" : input.status,
@@ -43,19 +100,7 @@ export async function enforceWalletOperationPolicy(
   let approvalRequestId: string | null = null;
 
   try {
-    const policies = await store.loadEffectivePolicies(operation);
-    const velocityRules = collectVelocityRules(policies);
-    const observations =
-      velocityRules.length === 0
-        ? []
-        : await store.loadVelocityObservations(operation, velocityRules);
-    const result = evaluateWalletOperationPolicies({
-      operation,
-      legs: input.legs,
-      walletPolicy: policies.walletPolicy,
-      apiKeyPolicy: policies.apiKeyPolicy,
-      velocity: createVelocityLookup(observations),
-    });
+    const result = await decide(operation);
     const status = walletOperationStatusForDecision(result.decision);
 
     if (status === "pending_approval") {

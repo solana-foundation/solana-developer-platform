@@ -96,6 +96,10 @@ export interface PolicyGateContext<
  * criteria, enforcement is skipped, and the handler receives a null
  * enforcement.
  *
+ * A release channel without Policies changes only the verdict: enforcement and
+ * dry-run answer allow without evaluating (see `enforceWalletOperationPolicy`),
+ * and every other step runs as above.
+ *
  * @param config - The route's extractor and optional idempotent-replay finder.
  * @returns Hono middleware enforcing policy ahead of the handler.
  */

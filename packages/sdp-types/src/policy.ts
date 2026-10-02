@@ -95,16 +95,22 @@ export type PolicyDecision =
   | "review"
   | "not_evaluated";
 
-export type PolicyEvaluationReasonCode =
-  | "implicit_default_allow"
-  | "wallet_policy_match"
-  | "api_key_policy_match"
-  | "wallet_policy_missing"
-  | "api_key_policy_missing"
-  | "manual_review"
-  | "provider_mapping_pending"
-  | "provider_mapping_partial"
-  | "provider_mapping_failed";
+export const POLICY_EVALUATION_REASON_CODES = [
+  "implicit_default_allow",
+  "wallet_policy_match",
+  "api_key_policy_match",
+  "wallet_policy_missing",
+  "api_key_policy_missing",
+  "manual_review",
+  "provider_mapping_pending",
+  "provider_mapping_partial",
+  "provider_mapping_failed",
+  // The deployment's release channel excludes Policies: the operation was
+  // allowed without loading or evaluating any wallet or API key policy.
+  "policies_module_excluded",
+] as const;
+
+export type PolicyEvaluationReasonCode = (typeof POLICY_EVALUATION_REASON_CODES)[number];
 
 export type PolicyRuleAction = Exclude<PolicyDecision, "not_evaluated">;
 export type PolicyRuleScope = "wallet" | "api_key";

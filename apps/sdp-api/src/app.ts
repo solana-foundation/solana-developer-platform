@@ -413,6 +413,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/earn", earn);
   v1.route("/dvp", dvp);
   v1.route("/places", places);
+  v1.use("/policies/*", requireModule("policies"));
   v1.route("/policies", policies);
   v1.route("/private-channels", privateChannels);
   v1.route("/helius-rings", heliusRings);
