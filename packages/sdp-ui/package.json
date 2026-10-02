@@ -1,0 +1,50 @@
+{
+  "name": "@sdp/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./cn": {
+      "types": "./src/cn.ts",
+      "import": "./src/cn.ts",
+      "default": "./src/cn.ts"
+    },
+    "./i18n": {
+      "types": "./src/i18n.tsx",
+      "import": "./src/i18n.tsx",
+      "default": "./src/i18n.tsx"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@base-ui/react": "1.8.0",
+    "@sdp/design-tokens": "workspace:*",
+    "@sdp/solana": "workspace:*",
+    "@solana/design-system": "1.0.1",
+    "clsx": "2.1.1",
+    "date-fns": "4.4.0",
+    "lucide-react": "1.43.0",
+    "motion": "13.2.0",
+    "radix-ui": "1.6.7",
+    "react-day-picker": "10.0.1",
+    "tailwind-merge": "3.6.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.7",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "jsdom": "30.0.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}
