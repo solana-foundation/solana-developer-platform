@@ -551,9 +551,9 @@ accuracy:
 - **One fetch per account per operation.** Never re-read an account the
   operation already holds; batch independent accounts into one
   `getMultipleAccounts`.
-- **Share identical concurrent reads** across owners within one hydration:
-  in-flight only, keyed with any `minContextSlot`, never across clusters or
-  endpoints.
+- **Share identical concurrent reads** in flight only: process-wide, keyed by
+  endpoint and any `minContextSlot`, and joined only after the caller's read
+  floor (`packages/sdp-rpc/CLAUDE.md`, "Read floors").
 - **No unfiltered `getProgramAccounts`.** Derive the PDA, or filter server-side
   with `memcmp`/`dataSize`.
 - **No unused round trips.** No `getBlockTime` or `getSlot` whose answer is
@@ -562,8 +562,9 @@ accuracy:
   count and sequential round trips, and a test pins the count by counting
   requests through a fake transport.
 
-Reference point: Veda position reads went from 22 requests per holding to 6-10
-on `earn-rpc-performance` under these rules, with identical values.
+Reference point: Veda position reads went from 22 requests per holding to 10
+cold and 5-6 warm on `earn-rpc-performance` under these rules, with identical
+values.
 
 ## Conventions
 

@@ -255,6 +255,9 @@ importers:
       react:
         specifier: 19.3.0
         version: 19.3.0
+      undici:
+        specifier: 7.29.1
+        version: 7.29.1
       zod:
         specifier: 4.6.1
         version: 4.6.1
