@@ -1,15 +1,30 @@
+import {
+  isModuleInReleaseChannel,
+  isRampProviderInReleaseChannel,
+  RAMP_PROVIDERS,
+  type RampProviderId,
+  resolveSdpReleaseChannel,
+  SDP_MODULES,
+  SDP_RELEASE_CHANNELS,
+  type SdpReleaseChannel,
+} from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
 import {
+  assertSdpReleaseChannelConfigured,
   isAssetProfilesEnabled,
   isCustodyConnectionRuntimeEnabled,
+  isDvpEnabled,
   isEarnEnabled,
   isEarnHastraDexExitConfigured,
   isEarnHastraDexExitEnabled,
   isEarnVaultSponsorshipEnabled,
+  isHeliusRingsEnabled,
   isMarketsEnabled,
+  isModuleAvailable,
   isPrivateChannelsEnabled,
   isPrivyByokEnabled,
+  isRampProviderAvailable,
   resolveNewCustodySetupMethod,
 } from "./feature-flags";
 
@@ -221,5 +236,124 @@ describe("isEarnVaultSponsorshipEnabled", () => {
     const env = { ...devnetOnly, FEE_PAYMENT_PROVIDER: "native" } as Env;
     expect(isEarnVaultSponsorshipEnabled(env, "devnet")).toBe(true);
     expect(isEarnVaultSponsorshipEnabled(env, "mainnet-beta")).toBe(false);
+  });
+});
+
+describe("release channels", () => {
+  it.each([undefined, "", "  "])(
+    "defaults to the experimental release channel when SDP_RELEASE_CHANNEL is %j",
+    (value) => {
+      expect(resolveSdpReleaseChannel(value)).toBe("experimental");
+    }
+  );
+
+  it("fails loudly on an unknown release channel instead of running every module", () => {
+    expect(() => resolveSdpReleaseChannel("mainnet")).toThrow(/SDP_RELEASE_CHANNEL must be one of/);
+  });
+
+  it("requires an explicit release channel in managed production only", () => {
+    const managedProduction = {
+      ENVIRONMENT: "production",
+      SDP_DEPLOYMENT_MODE: "managed",
+    } as const;
+    expect(() => assertSdpReleaseChannelConfigured(managedProduction)).toThrow(
+      /SDP_RELEASE_CHANNEL is required/
+    );
+    expect(() =>
+      assertSdpReleaseChannelConfigured({ ...managedProduction, SDP_RELEASE_CHANNEL: "stable" })
+    ).not.toThrow();
+    expect(() =>
+      assertSdpReleaseChannelConfigured({
+        ...managedProduction,
+        SDP_DEPLOYMENT_MODE: "self_hosted",
+      })
+    ).not.toThrow();
+    expect(() =>
+      assertSdpReleaseChannelConfigured({
+        ENVIRONMENT: "development",
+        SDP_DEPLOYMENT_MODE: "managed",
+      })
+    ).not.toThrow();
+    expect(() =>
+      assertSdpReleaseChannelConfigured({
+        ENVIRONMENT: "development",
+        SDP_RELEASE_CHANNEL: "mainnet",
+      })
+    ).toThrow(/SDP_RELEASE_CHANNEL must be one of/);
+  });
+
+  it("keeps every module available in the experimental release channel", () => {
+    for (const module of SDP_MODULES) {
+      expect(isModuleAvailable({ SDP_RELEASE_CHANNEL: "experimental" }, module)).toBe(true);
+    }
+  });
+
+  // Pinned on purpose: changing what stable ships must show up in review
+  // as an edit to this list, not only to the manifest.
+  // A module runs in every release channel at or below its own maturity.
+  it.each([
+    ["experimental", "ramps", true],
+    ["beta", "ramps", false],
+    ["stable", "ramps", false],
+    ["experimental", "custody", true],
+    ["beta", "custody", true],
+    ["stable", "custody", true],
+  ] as const)("a %s deployment runs %s: %s", (releaseChannel, module, expected) => {
+    expect(isModuleInReleaseChannel(releaseChannel, module)).toBe(expected);
+  });
+
+  it("runs ramps only where at least one ramp provider is in the release channel", () => {
+    const allExperimental = Object.fromEntries(
+      RAMP_PROVIDERS.map((p) => [p, "experimental"])
+    ) as Record<RampProviderId, SdpReleaseChannel>;
+    expect(isModuleInReleaseChannel("stable", "ramps", allExperimental)).toBe(false);
+    expect(isModuleInReleaseChannel("experimental", "ramps", allExperimental)).toBe(true);
+
+    const bvnkInBeta = { ...allExperimental, bvnk: "beta" } as const;
+    expect(isModuleInReleaseChannel("beta", "ramps", bvnkInBeta)).toBe(true);
+    expect(isModuleInReleaseChannel("stable", "ramps", bvnkInBeta)).toBe(false);
+    expect(isRampProviderInReleaseChannel("beta", "bvnk", bvnkInBeta)).toBe(true);
+    expect(isRampProviderInReleaseChannel("beta", "moonpay", bvnkInBeta)).toBe(false);
+  });
+
+  it("keeps every ramp provider out of stable until it is promoted", () => {
+    for (const provider of RAMP_PROVIDERS) {
+      expect(isRampProviderAvailable({ SDP_RELEASE_CHANNEL: "stable" }, provider)).toBe(false);
+      expect(isRampProviderAvailable({ SDP_RELEASE_CHANNEL: "experimental" }, provider)).toBe(true);
+    }
+  });
+
+  it("pins the stable modules", () => {
+    expect(SDP_RELEASE_CHANNELS.stable).toEqual([
+      "custody",
+      "payments",
+      "recurring_payments",
+      "compliance",
+    ]);
+  });
+
+  it("keeps release-channel-excluded modules off in stable even with every flag on", () => {
+    const env = {
+      SDP_RELEASE_CHANNEL: " stable ",
+      MARKETS_ENABLED: "true",
+      EARN_ENABLED: "true",
+      PRIVATE_CHANNELS_ENABLED: "true",
+      HELIUS_RINGS_ENABLED: "true",
+      SDP_FLAG_ASSET_PROFILES: "true",
+    } as Env;
+
+    expect(isMarketsEnabled(env)).toBe(false);
+    expect(isEarnEnabled(env)).toBe(false);
+    expect(isDvpEnabled(env)).toBe(false);
+    expect(isPrivateChannelsEnabled(env)).toBe(false);
+    expect(isHeliusRingsEnabled(env)).toBe(false);
+    expect(isAssetProfilesEnabled({ ...env, SDP_DEPLOYMENT_MODE: "managed" })).toBe(false);
+    expect(isAssetProfilesEnabled({ ...env, SDP_DEPLOYMENT_MODE: "self_hosted" })).toBe(false);
+  });
+
+  it("leaves release-channel-included features to their flags", () => {
+    const env = { SDP_RELEASE_CHANNEL: "experimental", MARKETS_ENABLED: "true" } as Env;
+    expect(isDvpEnabled(env)).toBe(true);
+    expect(isDvpEnabled({ ...env, MARKETS_ENABLED: undefined })).toBe(false);
   });
 });

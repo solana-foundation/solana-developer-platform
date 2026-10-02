@@ -20,7 +20,11 @@ import { runWithCronRunEvent } from "@/cron/run-event";
 import { SECRET_RETIREMENTS_MONITOR } from "@/cron/secret-retirements";
 import { closeDatabasePools } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
-import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
+import {
+  assertSdpReleaseChannelConfigured,
+  isEarnEnabled,
+  isPrivateChannelsEnabled,
+} from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
@@ -126,6 +130,7 @@ export async function runCronJob(): Promise<void> {
   const cleanupDeadlineMs =
     performance.now() + (timeoutSeconds - process.uptime()) * 1_000 - CLEANUP_SHUTDOWN_RESERVE_MS;
   assertSigningProviderAllowed(env);
+  assertSdpReleaseChannelConfigured(env);
 
   let probeRpc: ReturnType<typeof solanaRpc.createRpc> | null = null;
   try {

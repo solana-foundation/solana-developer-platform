@@ -285,6 +285,16 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow(/Local signing/);
   });
 
+  it("refuses to run with an unknown release channel", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ SDP_RELEASE_CHANNEL: "mainnet" }));
+    await expect(runCronJob()).rejects.toThrow(/SDP_RELEASE_CHANNEL must be one of/);
+  });
+
+  it("refuses to run in managed production without a release channel", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ ENVIRONMENT: "production" }));
+    await expect(runCronJob()).rejects.toThrow(/SDP_RELEASE_CHANNEL is required/);
+  });
+
   it("runs a self-hosted deployment without a custody KMS key", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(
       makeEnv({
