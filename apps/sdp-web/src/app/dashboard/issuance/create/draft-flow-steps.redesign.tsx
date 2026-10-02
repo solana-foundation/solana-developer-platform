@@ -54,7 +54,6 @@ const CLASS_LABEL: Record<DraftState["assetClass"], MessageKey> = {
 };
 
 const CURRENCIES = ["USD", "EUR", "GBP"] as const;
-const NO_CURRENCY = "none";
 const NUMERIC = "numeric";
 const ACCESS_ALLOWLIST: DraftAccess = "allowlist";
 
@@ -323,9 +322,6 @@ export function DetailsStep({ draft, update }: { draft: DraftState; update: Upda
                 {t(`DashboardIssuance.newDesign.draft.currency${currency}`)}
               </SelectItem>
             ))}
-            <SelectItem value={NO_CURRENCY}>
-              {t("DashboardIssuance.newDesign.details.noCurrency")}
-            </SelectItem>
           </Select>
         </Field>
       </div>
