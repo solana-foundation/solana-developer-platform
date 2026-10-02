@@ -243,7 +243,9 @@ per (cluster, endpoint, vault), for `VEDA_READ_CACHE_TTL_MS`. Failures are never
 cached, and a client whose program validation rejects is evicted at once: the
 SDK would otherwise keep that rejection for the client's lifetime. An asset
 removed from a vault is therefore noticed up to one TTL late on reads only,
-with the value unavailable meanwhile.
+with the value unavailable meanwhile. The cached share mint is re-checked on
+every read, at no RPC cost, against the share account the SDK derives from live
+vault state; a mismatch drops the cached facts and re-reads the state.
 
 That client's transport (`createVedaReadRpc`) shares identical in-flight
 requests and reuses a slot's block time. It sits BELOW `withRpcReadContext`, so

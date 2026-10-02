@@ -13,7 +13,7 @@ import { acceptPositiveAtMintScale, mintDecimals } from "./amounts";
 import { SdpVedaError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { readMintDecimals } from "./mint";
-import type { VedaClusterConfig } from "./programs";
+import { type VedaClusterConfig, vedaShareAccountAddress } from "./programs";
 import {
   queuedWithdrawalOwnerFundedAccountSizes,
   queuedWithdrawalRequestAddress,
@@ -223,6 +223,15 @@ async function cachedRead<T>(
     if (cache.get(key) === current) cache.delete(key);
     throw cause;
   }
+}
+
+async function holdsShareAccount(
+  owner: Address,
+  shareMint: Kit7,
+  shareAccount: Kit7
+): Promise<boolean> {
+  const expected = await vedaShareAccountAddress(owner, address(String(shareMint)));
+  return String(expected) === String(shareAccount);
 }
 
 /**
@@ -1251,12 +1260,13 @@ export async function readVedaPosition(
   // failure reported is the one the sequential version reported.
   const [stateRead, positionRead, assetRead] = await Promise.allSettled([
     cachedRead(vaultShareFacts, factsKey, async (): Promise<VaultShareFacts> => {
-      // Both fields are immutable: the share mint is a PDA and a mint's decimals
-      // never change (the SDK re-checks them against the mint on every quote).
+      // No instruction rewrites the share mint after deploy and a mint's
+      // decimals never change. The live share account below re-checks the mint.
       const state: VaultShareFacts = await vaultClient.getState();
       return { shareMint: state.shareMint, shareDecimals: state.shareDecimals };
     }),
     vaultClient.getUserPosition(input.owner as Kit7) as Promise<{
+      shareAccount: Kit7;
       shares: bigint;
       unlockTimestamp: bigint | undefined;
     }>,
@@ -1273,8 +1283,26 @@ export async function readVedaPosition(
     throw vaultUnreadable(String(input.vault), config.cluster, positionRead.reason);
   }
   if (assetRead.status === "rejected") throw assetRead.reason;
-  const state = stateRead.value;
   const position = positionRead.value;
+  let state = stateRead.value;
+  // The SDK derived the share account from LIVE vault state, so a mismatch
+  // means the cached share mint is stale: drop it and read the state again.
+  if (!(await holdsShareAccount(input.owner, state.shareMint, position.shareAccount))) {
+    vaultShareFacts.delete(factsKey);
+    try {
+      const fresh: VaultShareFacts = await vaultClient.getState();
+      state = { shareMint: fresh.shareMint, shareDecimals: fresh.shareDecimals };
+    } catch (cause) {
+      throw vaultUnreadable(String(input.vault), config.cluster, cause);
+    }
+    if (!(await holdsShareAccount(input.owner, state.shareMint, position.shareAccount))) {
+      throw vaultUnreadable(
+        String(input.vault),
+        config.cluster,
+        new Error("The holder's share account does not belong to the vault's share mint")
+      );
+    }
+  }
   const asset = { mint: assetRead.value };
   const shareDecimals = shareMintDecimals(state.shareDecimals, input.vault);
 
