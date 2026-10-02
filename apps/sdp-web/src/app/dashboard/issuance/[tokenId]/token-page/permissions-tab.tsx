@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  FileTextIcon,
-  KeyRoundIcon,
-  type LucideIcon,
-  PencilIcon,
-  SnowflakeIcon,
-  UsersIcon,
-} from "lucide-react";
+import { KeyRoundIcon, type LucideIcon, PencilIcon, SnowflakeIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { Button } from "@/components/ui/button";
@@ -27,7 +20,7 @@ import {
 const ROW_ICON: Record<PermissionRowId, LucideIcon> = {
   "mint-authority": KeyRoundIcon,
   "freeze-authority": SnowflakeIcon,
-  "metadata-authority": FileTextIcon,
+  "metadata-authority": PencilIcon,
   "permanent-delegate": UsersIcon,
 };
 
@@ -124,7 +117,7 @@ export function TokenPermissionsTab({
           {t("DashboardIssuance.newDesign.permissions.externalNote")}
         </p>
       ) : null}
-      <RecordBlock title={t("DashboardIssuance.newDesign.tabs.permissions")}>
+      <RecordBlock title={t("DashboardIssuance.newDesign.tabs.permissions")} className="gap-6">
         <div className="flex flex-col">
           {ops.permissionRows.map((row) => {
             const Icon = ROW_ICON[row.id];
@@ -145,7 +138,7 @@ export function TokenPermissionsTab({
               <div
                 key={row.id}
                 data-token-permission={row.id}
-                className="flex flex-col gap-3 border-b border-border-subtle py-4 first:pt-0 last:border-b-0"
+                className="flex flex-col gap-3 border-b border-border-subtle py-4 first:pt-0 last:border-b-0 last:pb-0"
               >
                 <div className="flex flex-col items-start gap-3 @xl:flex-row @xl:justify-between">
                   <span className="flex min-w-0 items-start gap-3">
@@ -240,12 +233,15 @@ export function TokenPermissionsTab({
         ) : null}
       </RecordBlock>
 
-      <RecordBlock title={t("DashboardIssuance.newDesign.permissions.extensions")}>
+      <RecordBlock
+        title={t("DashboardIssuance.newDesign.permissions.extensions")}
+        className="gap-6"
+      >
         <div className="flex flex-col">
           {extensions.map((extension) => (
             <div
               key={extension.name}
-              className="flex items-start justify-between gap-3 border-b border-border-subtle py-4 first:pt-0 last:border-b-0"
+              className="flex items-start justify-between gap-3 border-b border-border-subtle py-4 first:pt-0 last:border-b-0 last:pb-0"
             >
               <span className="flex min-w-0 flex-col">
                 <span className="text-body font-medium text-primary">{extension.name}</span>

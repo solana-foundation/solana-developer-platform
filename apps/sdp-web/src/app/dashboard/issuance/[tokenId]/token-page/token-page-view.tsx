@@ -1,10 +1,13 @@
 "use client";
 
 import type { AssetProfile, Token } from "@sdp/types";
-import { useCallback } from "react";
+import { ArrowUpRightIcon } from "lucide-react";
+import { useCallback, useMemo } from "react";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useTranslations } from "@/i18n/provider";
 import { useDashboardTab, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useAssetProfileForm } from "../asset-profile/use-asset-profile-form";
 import { useTokenOperations } from "../asset-profile/use-token-operations";
@@ -59,10 +62,11 @@ export function TokenPageView({
   });
   const state = tokenPageLifecycle(token, latestDeploy);
   const page = { token, assetProfile: form.assetProfile, ops, form, state, canManageTokenAdmin };
+  const explorer = useExplorerAction(ops.explorerHref);
 
   return (
     <DashboardWorkspaceOverviewPanel data-token-page={tab}>
-      <DashboardPageTitle title={token.name} />
+      <DashboardPageTitle title={token.name} actions={explorer} />
       {tab === "overview" ? (
         <TokenOverviewTab {...page} latestDeploy={latestDeploy} onOpenTab={openTab} />
       ) : null}
@@ -74,5 +78,29 @@ export function TokenPageView({
       {tab === "activity" ? <TokenActivityTab token={token} /> : null}
       <TokenDialogs ops={ops} token={token} />
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+/** The mint on the explorer, at the header's end on every tab once the token is on chain. */
+function useExplorerAction(href: string | null | undefined) {
+  const t = useTranslations();
+  const label = t("DashboardIssuance.newDesign.overview.explorer");
+  // A stable element, so the shell's header is set once per token rather than every render.
+  return useMemo(
+    () =>
+      href ? (
+        <Button
+          asChild
+          variant="ghost"
+          size="sm"
+          className="text-secondary hover:text-primary"
+          iconRight={<ArrowUpRightIcon aria-hidden="true" />}
+        >
+          <a href={href} target="_blank" rel="noreferrer" data-token-explorer>
+            {label}
+          </a>
+        </Button>
+      ) : undefined,
+    [href, label]
   );
 }

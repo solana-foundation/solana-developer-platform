@@ -122,7 +122,10 @@ export const ACTIVITY_ACTIONS = Object.keys(ACTION_LABEL);
 
 export function activityEventLabel(action: string, t: Translate): string {
   const key = ACTION_LABEL[action];
-  return key ? t(key) : action.replaceAll("_", " ");
+  if (key) return t(key);
+  // An event the catalog has no words for reads in sentence case, as the named ones do.
+  const words = action.replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 export function activityActorType(event: Pick<AssetAuditEvent, "actorType">, t: Translate) {

@@ -1,3 +1,4 @@
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { DesignSwitch } from "@/components/new-design";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { cn } from "@/lib/utils";
@@ -20,7 +21,7 @@ export function IssuanceListRowsSkeleton() {
       {ROWS.map((row) => (
         <div
           key={row}
-          className="grid grid-cols-[36px_minmax(0,1fr)_max-content] items-center gap-x-3 border-b border-border-subtle py-4"
+          className="grid grid-cols-[36px_minmax(0,1fr)_max-content] items-center gap-x-3 border-b border-border-subtle py-4.25"
         >
           <Pulse className="size-9 rounded-full" />
           <div className="flex flex-col gap-1.5">
@@ -37,46 +38,51 @@ export function IssuanceListRowsSkeleton() {
   );
 }
 
+/** Both Issuance pages scroll in the workspace's panel, so their skeletons sit in it too. */
 function CurrentIssuancePageSkeleton() {
   return (
-    <div className="flex flex-col gap-5" data-issuance-loading-layout="list">
-      <div className="flex items-center justify-between gap-3">
-        <Pulse className="h-9 w-24" />
-        <Pulse className="hidden h-9 w-56 sm:block" />
+    <DashboardWorkspaceOverviewPanel>
+      <div className="flex flex-col gap-4" data-issuance-loading-layout="list">
+        <div className="flex items-center justify-between gap-3">
+          <Pulse className="h-9 w-24" />
+          <Pulse className="hidden h-9 w-56 sm:block" />
+        </div>
+        <IssuanceListRowsSkeleton />
       </div>
-      <IssuanceListRowsSkeleton />
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 
 function CurrentIssuanceDetailSkeleton() {
   return (
-    <div
-      aria-busy="true"
-      className="flex flex-col gap-8 md:gap-16"
-      data-issuance-loading-layout="token"
-    >
-      <Pulse className="h-20 w-full rounded-card" />
-      <div className="flex flex-col gap-4">
-        <Pulse className="h-3.5 w-24" />
-        <Pulse className="h-10 w-40" />
-        <div className="grid gap-x-12 md:grid-cols-2">
-          {COLUMNS.map((column) => (
-            <div key={column}>
-              {RECORD_ROWS.map((row) => (
-                <div
-                  key={row}
-                  className="flex min-h-10 items-center justify-between border-b border-border-subtle py-2.5"
-                >
-                  <Pulse className="h-3.5 w-24" />
-                  <Pulse className="h-4 w-28" />
-                </div>
-              ))}
-            </div>
-          ))}
+    <DashboardWorkspaceOverviewPanel>
+      <div
+        aria-busy="true"
+        className="flex flex-col gap-8 md:gap-16"
+        data-issuance-loading-layout="token"
+      >
+        <Pulse className="h-16 w-full rounded-card" />
+        <div className="flex flex-col gap-4">
+          <Pulse className="h-3.5 w-24" />
+          <Pulse className="h-10 w-40" />
+          <div className="grid gap-x-12 md:grid-cols-2">
+            {COLUMNS.map((column) => (
+              <div key={column}>
+                {RECORD_ROWS.map((row) => (
+                  <div
+                    key={row}
+                    className="flex min-h-10 items-center justify-between border-b border-border-subtle py-2.5"
+                  >
+                    <Pulse className="h-3.5 w-24" />
+                    <Pulse className="h-4 w-28" />
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </DashboardWorkspaceOverviewPanel>
   );
 }
 

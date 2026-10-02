@@ -170,7 +170,7 @@ function IssuanceTokenList({
   }
 
   return (
-    <div className="flex flex-col gap-5" aria-busy={list.isRefreshing}>
+    <div className="flex flex-col gap-4" aria-busy={list.isRefreshing}>
       <IssuanceListToolbar list={list} sections={sections} />
       <FilterChips chips={chips} />
       <IssuanceListResults
@@ -506,7 +506,7 @@ function IssuanceTokenRow({
     <Link
       href={`/dashboard/issuance/${token.id}`}
       data-issuance-token-row={token.id}
-      className="-mx-2 grid grid-cols-[36px_minmax(0,1fr)_max-content] items-center gap-x-3 rounded-control border-b border-border-subtle px-2 py-4 outline-none hover:bg-fill-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+      className="-mx-2 grid grid-cols-[36px_minmax(0,1fr)_max-content] items-center gap-x-3 rounded-control border-b border-border-subtle px-2 py-4.25 outline-none hover:bg-fill-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
     >
       <IssuedTokenMark symbol={token.symbol} name={token.name} logoUrl={token.imageUrl} />
       <span className="flex min-w-0 flex-col gap-0.5">

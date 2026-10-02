@@ -1,6 +1,5 @@
 "use client";
 
-import { ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { formatDecimalAmount } from "@/app/dashboard/payments/payments-presentation";
@@ -11,12 +10,13 @@ import {
   RecordLine,
   RecordRow,
   RecordStack,
-  StateBand,
+  type StateBandTone,
 } from "@/components/refresh-record";
 import { Button } from "@/components/ui/button";
 import { StatusText } from "@/components/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import {
   formatTokenDay,
   formatTokenMoment,
@@ -49,6 +49,26 @@ const AUTHORITY_SHORT: Record<PermissionRowId, MessageKey> = {
   "metadata-authority": "DashboardIssuance.newDesign.overview.authority.metadata",
   "permanent-delegate": "DashboardIssuance.newDesign.overview.authority.delegate",
 };
+
+/**
+ * The state band's tint and word colour as the token page draws it: a rounded tint with no
+ * rule at its start (a plain tile when neutral).
+ */
+const BAND_TINT: Record<StateBandTone, { band: string; word: string }> = {
+  ok: { band: "bg-success/7 dark:bg-success/12", word: "text-success" },
+  warn: { band: "bg-warning/7 dark:bg-warning/12", word: "text-warning" },
+  error: { band: "bg-error/7 dark:bg-error/12", word: "text-error" },
+  info: { band: "bg-info/7 dark:bg-info/12", word: "text-info" },
+  neutral: { band: "bg-surface-tile", word: "text-secondary" },
+};
+
+/**
+ * A section's last row with no padding under it, so the 64px to the next section is measured
+ * from its text, as the design spaces them.
+ */
+const LAST_ROW_FLUSH = "[&>div:last-child]:min-h-0 [&>div:last-child]:pb-0";
+/** The same in two columns only: stacked on a phone, a column's last row sits over a rule. */
+const LAST_ROW_FLUSH_COLUMNS = "md:[&>div:last-child]:min-h-0 md:[&>div:last-child]:pb-0";
 
 function minutesSince(iso: string): number {
   return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
@@ -96,9 +116,14 @@ export function TokenOverviewTab({
 
   return (
     <RecordStack>
-      {/* The state band sits 32px over what follows it, closer than the parts below. */}
-      <div className="flex flex-col gap-8">
-        <OverviewStateBand state={state} ops={ops} latestDeploy={latestDeploy} />
+      {/* The state band sits 24px over what follows it, closer than the parts below. */}
+      <div className="flex flex-col gap-6">
+        <OverviewStateBand
+          state={state}
+          ops={ops}
+          latestDeploy={latestDeploy}
+          canManageTokenAdmin={canManageTokenAdmin}
+        />
 
         {state === "draft" ? (
           <DeployDraftBlock signingWalletName={signingWalletName} {...deployProps} />
@@ -126,41 +151,50 @@ export function TokenOverviewTab({
   );
 }
 
-/** The token's state, why it is there, and the explorer link or how long a deploy has run. */
+/** The token's state, why it is there, and its one action: minting, or how long a deploy has run. */
 function OverviewStateBand({
   state,
   ops,
   latestDeploy,
-}: Pick<OverviewTabProps, "state" | "ops" | "latestDeploy">) {
+  canManageTokenAdmin,
+}: Pick<OverviewTabProps, "state" | "ops" | "latestDeploy" | "canManageTokenAdmin">) {
   const t = useTranslations();
-  const action = ops.explorerHref ? (
-    <Button
-      asChild
-      variant="outline"
-      size="sm"
-      className="[--button-height-md:1.875rem]"
-      iconRight={<ExternalLinkIcon aria-hidden="true" />}
-    >
-      <a href={ops.explorerHref} target="_blank" rel="noreferrer">
-        {t("DashboardIssuance.newDesign.overview.explorer")}
-      </a>
-    </Button>
-  ) : state === "deploying" && latestDeploy ? (
-    <span className="text-meta text-secondary">
-      {t("DashboardIssuance.newDesign.overview.submittedAgo", {
-        minutes: minutesSince(latestDeploy.createdAt),
-      })}
-    </span>
-  ) : undefined;
+  const tint = BAND_TINT[TOKEN_LIFECYCLE_BAND[state]];
+  const mintBlocked = ops.operationAvailability.mint ?? null;
+  const action =
+    state === "live" && canManageTokenAdmin ? (
+      <TokenDisabledActionTooltip reason={mintBlocked}>
+        <Button
+          size="sm"
+          className="[--button-height-md:1.875rem]"
+          disabled={ops.isPending || Boolean(mintBlocked)}
+          onClick={() => ops.openFundManagementModal("mint")}
+        >
+          {t("DashboardIssuance.newDesign.overview.mintTokens")}
+        </Button>
+      </TokenDisabledActionTooltip>
+    ) : state === "deploying" && latestDeploy ? (
+      <span className="text-meta text-secondary">
+        {t("DashboardIssuance.newDesign.overview.submittedAgo", {
+          minutes: minutesSince(latestDeploy.createdAt),
+        })}
+      </span>
+    ) : null;
 
   return (
-    <StateBand
-      tone={TOKEN_LIFECYCLE_BAND[state]}
-      state={t(TOKEN_LIFECYCLE_LABEL[state])}
-      action={action}
+    <div
+      data-state-band={TOKEN_LIFECYCLE_BAND[state]}
+      className={cn(
+        "flex flex-col items-start gap-3 rounded-card px-5 py-3 md:flex-row md:items-center md:justify-between md:gap-6",
+        tint.band
+      )}
     >
-      {t(TOKEN_LIFECYCLE_WHY[state])}
-    </StateBand>
+      <div className="flex min-w-0 flex-col gap-0.5 md:flex-1">
+        <p className={cn("text-body font-medium", tint.word)}>{t(TOKEN_LIFECYCLE_LABEL[state])}</p>
+        <p className="max-w-[40em] text-body text-secondary">{t(TOKEN_LIFECYCLE_WHY[state])}</p>
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
   );
 }
 
@@ -284,42 +318,48 @@ function SupplyBlock({
   const locale = useLocale();
   const classification = classificationOf(assetProfile, t);
   return (
-    <RecordBlock>
+    <RecordBlock className="gap-0">
       <RecordAmount label={t("DashboardIssuance.newDesign.overview.issuedSupply")}>
         {formatDecimalAmount(token.totalSupply || "0", locale)}
       </RecordAmount>
-      <RecordColumns>
-        <dl>
-          <RecordRow label={t("DashboardIssuance.newDesign.overview.supplyCap")}>
-            {token.maxSupply
-              ? formatDecimalAmount(token.maxSupply, locale)
-              : t("DashboardIssuance.newDesign.overview.noCap")}
-          </RecordRow>
-          <RecordRow label={t("DashboardIssuance.newDesign.overview.decimals")}>
-            {token.decimals}
-          </RecordRow>
-          <RecordRow label={t("DashboardIssuance.newDesign.overview.symbol")}>
-            {token.symbol}
-          </RecordRow>
-        </dl>
-        <dl>
-          <RecordRow
-            label={t("DashboardIssuance.newDesign.overview.category")}
-            hint={classification.categoryHelp}
-          >
-            {classification.category}
-          </RecordRow>
-          {classification.type ? (
-            <RecordRow label={t("DashboardIssuance.newDesign.overview.type")}>
-              {classification.type}
+      {/* 20px from the amount to its terms, 8px from the terms to the description. */}
+      <div className="mt-5 mb-2">
+        <RecordColumns>
+          <dl>
+            <RecordRow label={t("DashboardIssuance.newDesign.overview.supplyCap")}>
+              {token.maxSupply
+                ? formatDecimalAmount(token.maxSupply, locale)
+                : t("DashboardIssuance.newDesign.overview.noCap")}
             </RecordRow>
-          ) : null}
-          <RecordRow label={t("DashboardIssuance.newDesign.overview.accessControl")}>
-            {accessControlLabel(ops.accessControlMode, t)}
-          </RecordRow>
-        </dl>
-      </RecordColumns>
-      <dl className="border-t border-border-subtle">
+            <RecordRow label={t("DashboardIssuance.newDesign.overview.decimals")}>
+              {token.decimals}
+            </RecordRow>
+            <RecordRow label={t("DashboardIssuance.newDesign.overview.symbol")}>
+              {token.symbol}
+            </RecordRow>
+          </dl>
+          <dl>
+            <RecordRow
+              label={t("DashboardIssuance.newDesign.overview.category")}
+              hint={classification.categoryHelp}
+            >
+              {classification.category}
+            </RecordRow>
+            {classification.type ? (
+              <RecordRow
+                label={t("DashboardIssuance.newDesign.overview.type")}
+                hint={t("DashboardIssuance.newDesign.overview.typeHelp")}
+              >
+                {classification.type}
+              </RecordRow>
+            ) : null}
+            <RecordRow label={t("DashboardIssuance.newDesign.overview.accessControl")}>
+              {accessControlLabel(ops.accessControlMode, t)}
+            </RecordRow>
+          </dl>
+        </RecordColumns>
+      </div>
+      <dl className={cn("border-t border-border-subtle", LAST_ROW_FLUSH)}>
         <RecordRow label={t("DashboardIssuance.newDesign.overview.description")}>
           <span className="max-w-[40em] text-right whitespace-normal">
             {token.description || t("DashboardIssuance.newDesign.overview.noDescription")}
@@ -343,9 +383,9 @@ function IdentityBlock({
   const onChain = isOnChain(state);
   const heldAuthorities = ops.permissionRows.filter((row) => row.value || !onChain);
   return (
-    <RecordBlock title={t("DashboardIssuance.newDesign.overview.identity")}>
+    <RecordBlock title={t("DashboardIssuance.newDesign.overview.identity")} className="gap-3">
       <RecordColumns>
-        <dl>
+        <dl className={LAST_ROW_FLUSH_COLUMNS}>
           {token.mintAddress ? (
             <RecordRow label={t("DashboardIssuance.newDesign.overview.mintAddress")}>
               <span className="tabular-nums">{shortAddress(token.mintAddress)}</span>
@@ -375,7 +415,7 @@ function IdentityBlock({
               : t("DashboardIssuance.newDesign.permissions.nobody")}
           </RecordRow>
         </dl>
-        <dl>
+        <dl className={LAST_ROW_FLUSH_COLUMNS}>
           <RecordRow label={t("DashboardIssuance.newDesign.overview.issuerName")}>
             {form.draft.issuerName.trim() || t("DashboardIssuance.newDesign.notSet")}
           </RecordRow>

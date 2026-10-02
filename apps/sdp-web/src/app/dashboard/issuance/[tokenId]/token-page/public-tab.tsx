@@ -214,7 +214,7 @@ function PublicFieldsBlock({
   const t = useTranslations();
   const publicCount = FIELDS.filter(isPublic).length;
   return (
-    <RecordBlock title={t("DashboardIssuance.newDesign.publicInfo.included")}>
+    <RecordBlock title={t("DashboardIssuance.newDesign.publicInfo.included")} className="gap-6">
       <p className="text-body text-secondary">
         {t("DashboardIssuance.newDesign.publicInfo.count", {
           count: publicCount,
@@ -274,6 +274,7 @@ function PublicPreviewBlock({
   return (
     <RecordBlock
       title={t("DashboardIssuance.newDesign.publicInfo.preview")}
+      className="gap-6"
       aside={
         <SegmentedControl
           ariaLabel={t("DashboardIssuance.newDesign.publicInfo.previewAs")}

@@ -6,8 +6,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils";
 
 /**
- * A row with a checkbox at its start, as the design's control lists draw it: a 20px box,
- * filled when on, a quiet grey fill when it is on and cannot change.
+ * A row with a checkbox at its start, as the design's control lists draw it: a 16px square
+ * box, filled when on, a quiet grey fill when it is on and cannot change.
  */
 export function IssuanceCheckRow({
   checked,
@@ -43,7 +43,7 @@ export function IssuanceCheckRow({
       <span
         aria-hidden="true"
         className={cn(
-          "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors peer-focus-visible:shadow-[0_0_0_2px_var(--input-focus-ring)] motion-reduce:transition-none",
+          "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors peer-focus-visible:shadow-[0_0_0_2px_var(--input-focus-ring)] motion-reduce:transition-none",
           checked && disabled
             ? "border-transparent bg-fill-strong text-secondary"
             : checked
@@ -51,7 +51,7 @@ export function IssuanceCheckRow({
               : "border-[var(--input-border-idle)]"
         )}
       >
-        {checked ? <CheckIcon className="size-3.5" /> : null}
+        {checked ? <CheckIcon className="size-3" strokeWidth={2.5} /> : null}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">{children}</span>
       {aside ? <span className="flex shrink-0 items-center gap-2 self-center">{aside}</span> : null}

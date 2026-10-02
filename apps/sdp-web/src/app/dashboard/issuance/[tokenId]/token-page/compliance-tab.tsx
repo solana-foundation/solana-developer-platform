@@ -100,6 +100,7 @@ function ComplianceListBlock({
           ? "DashboardIssuance.newDesign.compliance.approvedTitle"
           : "DashboardIssuance.newDesign.compliance.blockedTitle"
       )}
+      className="gap-6"
     >
       {allowlist ? (
         <p className="max-w-[40em] text-body text-secondary">
@@ -260,7 +261,7 @@ function AddListEntryBlock({
 }: Pick<TokenTabProps, "ops"> & { canChange: boolean; listDisabledReason: string | null }) {
   const t = useTranslations();
   return (
-    <RecordBlock title={t("DashboardIssuance.newDesign.compliance.addTitle")}>
+    <RecordBlock title={t("DashboardIssuance.newDesign.compliance.addTitle")} className="gap-6">
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {

@@ -1,14 +1,15 @@
 "use client";
 
 import type { TokenTransactionStatus } from "@sdp/types";
-import { ChevronDownIcon, ExternalLinkIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ArrowUpRightIcon, ChevronDownIcon, MinusIcon, PlusIcon } from "lucide-react";
+import { type ReactNode, useMemo, useState } from "react";
 import useSWR from "swr";
 import { formatDecimalAmount } from "@/app/dashboard/payments/payments-presentation";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/payments/payments-table";
-import { RecordBlock, RecordLine, RecordStack } from "@/components/refresh-record";
+import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Modal } from "@/components/ui/modal";
 import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import { TableCell, TableRow } from "@/components/ui/table";
@@ -28,6 +29,7 @@ import {
   type TokenTransactionsPage,
 } from "../asset-profile/transactions.data";
 import { TOKEN_TRANSACTIONS_KEY } from "../asset-profile/transactions-cache";
+import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 import { activityEventLabel } from "./token-activity";
 import {
   accessControlLabel,
@@ -102,6 +104,9 @@ const DATE_TIME_FORMAT: Intl.DateTimeFormatOptions = {
 };
 
 const DANGER_OPERATIONS = new Set(["burn", "seize", "force-burn", "lock-supply"]);
+const LOCK_SUPPLY = "lock-supply";
+/** The design draws minting and burning as a plus and a minus beside the issued supply. */
+const OPERATION_ICON: Record<string, typeof PlusIcon> = { mint: PlusIcon, burn: MinusIcon };
 
 const TRANSACTION_STATUS_LABEL: Record<TokenTransactionStatus, MessageKey> = {
   pending: "DashboardIssuance.newDesign.operations.txStatuses.pending",
@@ -156,11 +161,14 @@ export function TokenOperationsTab({
   });
   const onChain = isOnChain(state);
   const blockedNote = operationsBlockedNote(state, onChain, t);
+  // Locking the supply sits on the cap it fixes; the rest of recovery stays folded away.
+  const lockSupply = recovery.filter((row) => row.id === LOCK_SUPPLY);
+  const recoveryRows = recovery.filter((row) => row.id !== LOCK_SUPPLY);
 
   return (
     <RecordStack>
       {blockedNote ? <p className="max-w-[40em] text-body text-secondary">{blockedNote}</p> : null}
-      <SupplyBlock token={token} ops={ops} rows={onChain ? supply : null} />
+      <SupplyBlock token={token} ops={ops} rows={onChain ? [...supply, ...lockSupply] : null} />
       <TransfersBlock
         token={token}
         ops={ops}
@@ -168,8 +176,8 @@ export function TokenOperationsTab({
         onChain={onChain}
         rows={onChain ? transfers : null}
       />
-      {onChain && recovery.length > 0 ? (
-        <RecoveryFold rows={recovery} pending={ops.isPending} />
+      {onChain && recoveryRows.length > 0 ? (
+        <RecoveryFold rows={recoveryRows} pending={ops.isPending} />
       ) : null}
       <TokenTransactions tokenId={token.id} />
       <OperationModal
@@ -183,7 +191,7 @@ export function TokenOperationsTab({
   );
 }
 
-/** The supply: what is issued, the cap and what it leaves, who mints; its operations when live. */
+/** The supply: what is issued, the cap and what it leaves, who mints; mint, burn and lock beside them. */
 function SupplyBlock({
   token,
   ops,
@@ -203,34 +211,55 @@ function SupplyBlock({
   const issued = Number(token.totalSupply || 0);
   const cap = token.maxSupply ? Number(token.maxSupply) : null;
   const left = cap !== null && Number.isFinite(cap) ? Math.max(0, cap - issued) : null;
+  const actions = (ids: string[]) => (
+    <OperationButtons
+      rows={rows?.filter((row) => ids.includes(row.id)) ?? []}
+      pending={ops.isPending}
+    />
+  );
 
   return (
-    <RecordBlock title={t("DashboardIssuance.newDesign.operations.supply")}>
+    <RecordBlock title={t("DashboardIssuance.newDesign.operations.supply")} className="gap-6">
       <dl>
-        <RecordLine label={t("DashboardIssuance.newDesign.overview.issuedSupply")}>
+        <OperationLine
+          label={t("DashboardIssuance.newDesign.overview.issuedSupply")}
+          actions={actions(["mint", "burn"])}
+        >
           <span>{formatDecimalAmount(token.totalSupply || "0", locale)}</span>
           <span className="rounded-control bg-fill-subtle px-1.5 text-meta text-secondary">
             {token.symbol}
           </span>
-        </RecordLine>
-        <RecordLine label={t("DashboardIssuance.newDesign.overview.supplyCap")}>
+        </OperationLine>
+        <OperationLine
+          label={t("DashboardIssuance.newDesign.overview.supplyCap")}
+          hint={t("DashboardIssuance.newDesign.operations.supplyCapHint")}
+          actions={actions([LOCK_SUPPLY])}
+        >
           {cap === null
             ? t("DashboardIssuance.newDesign.overview.noCap")
             : t("DashboardIssuance.newDesign.operations.capLeft", {
                 cap: formatDecimalAmount(token.maxSupply ?? "0", locale),
                 left: leftFormat.format(left ?? 0),
               })}
-        </RecordLine>
-        <RecordLine label={t("DashboardIssuance.newDesign.operations.mintAuthority")}>
+        </OperationLine>
+        <OperationLine
+          label={t("DashboardIssuance.newDesign.operations.mintAuthority")}
+          hint={t("DashboardIssuance.newDesign.permissions.mintWhy")}
+        >
           {holderName(token.mintAuthority, ops.authorityWallets, t)}
-        </RecordLine>
+        </OperationLine>
       </dl>
-      {rows ? <OperationRows rows={rows} pending={ops.isPending} /> : null}
     </RecordBlock>
   );
 }
 
-/** Transfers: whether they run, who freezes and who may hold; their operations when live. */
+const ACCESS_CONTROL_WHY: Record<"allowlist" | "blocklist" | "disabled", MessageKey> = {
+  allowlist: "DashboardIssuance.newDesign.permissions.allowlistWhy",
+  blocklist: "DashboardIssuance.newDesign.permissions.blocklistWhy",
+  disabled: "DashboardIssuance.newDesign.permissions.noListWhy",
+};
+
+/** Transfers: whether they run, who freezes and who may hold; pause, freeze and the list beside them. */
 function TransfersBlock({
   token,
   ops,
@@ -246,25 +275,126 @@ function TransfersBlock({
   const running = onChain
     ? t("DashboardIssuance.newDesign.operations.transfersRunning")
     : t("DashboardIssuance.newDesign.publicInfo.notDeployed");
+  const actions = (id: string) => (
+    <OperationButtons
+      rows={rows?.filter((row) => row.id === id) ?? []}
+      pending={ops.isPending}
+      paused={paused}
+    />
+  );
 
   return (
-    <RecordBlock title={t("DashboardIssuance.newDesign.operations.transfers")}>
+    <RecordBlock title={t("DashboardIssuance.newDesign.operations.transfers")} className="gap-6">
       <dl>
-        <RecordLine label={t("DashboardIssuance.newDesign.operations.transfers")}>
+        <OperationLine
+          label={t("DashboardIssuance.newDesign.operations.transfers")}
+          actions={actions(PAUSE)}
+        >
           {paused ? t("DashboardIssuance.newDesign.operations.transfersPaused") : running}
-        </RecordLine>
+        </OperationLine>
         {token.isFreezable ? (
-          <RecordLine label={t("DashboardIssuance.newDesign.operations.freezeAuthority")}>
+          <OperationLine
+            label={t("DashboardIssuance.newDesign.operations.freezeAuthority")}
+            hint={t("DashboardIssuance.newDesign.permissions.freezeWhy")}
+            actions={actions("freeze")}
+          >
             {holderName(token.freezeAuthority, ops.authorityWallets, t)}
-          </RecordLine>
+          </OperationLine>
         ) : null}
-        <RecordLine label={t("DashboardIssuance.newDesign.overview.accessControl")}>
+        <OperationLine
+          label={t("DashboardIssuance.newDesign.overview.accessControl")}
+          hint={t(ACCESS_CONTROL_WHY[ops.accessControlMode])}
+          actions={actions("allowlist")}
+        >
           {accessControlLabel(ops.accessControlMode, t)}
-        </RecordLine>
+        </OperationLine>
       </dl>
-      {rows ? <OperationRows rows={rows} pending={ops.isPending} paused={paused} /> : null}
     </RecordBlock>
   );
+}
+
+/**
+ * One fact as Operations lays it out: its label (and why it matters), its value, and the
+ * operations that change it at the row's end. Every row is 51px, with or without a button.
+ */
+function OperationLine({
+  label,
+  hint,
+  actions,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="grid min-h-12.5 grid-cols-1 items-center gap-x-6 gap-y-2 border-b border-border-subtle py-2.5 last:border-b-0 @xl:grid-cols-[10.5rem_minmax(0,1fr)_auto]">
+      <dt className="flex items-center gap-1.5 text-nav text-secondary">
+        {label}
+        {hint ? <InfoHint text={hint} /> : null}
+      </dt>
+      <dd className="flex min-w-0 flex-wrap items-center gap-2 text-nav text-primary tabular-nums">
+        {children}
+      </dd>
+      {actions ? <dd className="flex items-center gap-2 empty:hidden">{actions}</dd> : null}
+    </div>
+  );
+}
+
+/**
+ * The operations a row offers, as 30px outline buttons; one that cannot run says why on hover.
+ * The access list opens Compliance instead, as a link.
+ */
+function OperationButtons({
+  rows,
+  pending,
+  paused = false,
+}: {
+  rows: OperationRow[];
+  pending: boolean;
+  paused?: boolean;
+}) {
+  const t = useTranslations();
+  return rows.map(({ icon, ...row }) => {
+    const copy = OPERATION_COPY[row.id === PAUSE && paused ? RESUME : row.id];
+    const disabled = pending || Boolean(row.disabledReason);
+    if (row.id === "allowlist") {
+      return (
+        <span key={row.id} data-token-operation={row.id} className="inline-flex">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-secondary [--button-height-md:1.875rem] hover:text-primary"
+            onClick={row.onAction}
+            iconRight={<ArrowUpRightIcon aria-hidden="true" />}
+          >
+            {t("DashboardIssuance.newDesign.operations.openCompliance")}
+          </Button>
+        </span>
+      );
+    }
+    const Icon = OPERATION_ICON[row.id] ?? icon;
+    return (
+      <span key={row.id} data-token-operation={row.id} className="inline-flex">
+        <TokenDisabledActionTooltip reason={pending ? null : (row.disabledReason ?? null)}>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              "shrink-0 [--button-height-md:1.875rem]",
+              DANGER_OPERATIONS.has(row.id) && "text-error refresh:border-error/40"
+            )}
+            disabled={disabled}
+            onClick={row.onAction}
+            iconLeft={<Icon aria-hidden="true" />}
+          >
+            {copy ? t(copy.action) : (row.actionLabel ?? row.title)}
+          </Button>
+        </TokenDisabledActionTooltip>
+      </span>
+    );
+  });
 }
 
 /** Recovery operations, folded away until asked for. */
@@ -447,7 +577,7 @@ function TokenTransactions({ tokenId }: { tokenId: string }) {
                     className="inline-flex items-center gap-1 text-primary hover:underline"
                   >
                     {shortAddress(transaction.signature)}
-                    <ExternalLinkIcon className="size-3" aria-hidden="true" />
+                    <ArrowUpRightIcon className="size-3" aria-hidden="true" />
                   </a>
                 ) : (
                   <span className="text-tertiary">
