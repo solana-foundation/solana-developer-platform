@@ -2,14 +2,21 @@
 
 import { auth } from "@clerk/nextjs/server";
 import type { CustodyConfigsResponse, InitializeSigningResponse } from "@sdp/types";
+import {
+  commitmentComparator,
+  decimalFixedPointToNumber,
+  type GetSignatureStatusesApi,
+  isAddress,
+  sol,
+  solToLamports,
+} from "@solana/kit";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { extractPolicyDenialReason, withPolicyDenialReason } from "@/lib/policy-denial-reason";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 
-const DEVNET_FAUCET_LAMPORTS = 1_000_000_000;
-const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const DEVNET_FAUCET_SOL = sol("1");
 
 function getString(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -339,9 +346,7 @@ interface SolanaRpcAirdropResponse {
 }
 
 interface SolanaRpcSignatureStatusesResponse {
-  result?: {
-    value?: Array<{ confirmationStatus?: string | null; err?: unknown } | null>;
-  };
+  result?: ReturnType<GetSignatureStatusesApi["getSignatureStatuses"]>;
 }
 
 const FAUCET_CONFIRMATION_TIMEOUT_MS = 15_000;
@@ -353,28 +358,47 @@ const FAUCET_CONFIRMATION_POLL_MS = 1_000;
  * page's balance polling picks up the result later.
  */
 async function waitForSignatureConfirmation(
-  client: Awaited<ReturnType<typeof createSdpApiClient>>,
+  client: SdpApiClient,
   signature: string
 ): Promise<"confirmed" | "failed" | "timeout"> {
   const deadline = Date.now() + FAUCET_CONFIRMATION_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const relay = await client
-      .fetch<RpcRelayResponse<SolanaRpcSignatureStatusesResponse>>("/v1/rpc/proxy", {
-        method: "POST",
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: `wallet-faucet-status-${signature}`,
-          method: "getSignatureStatuses",
-          params: [[signature]],
-        }),
-        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
-      })
-      .catch(() => null);
-    const status = relay?.response?.result?.value?.[0];
+    let relay: RpcRelayResponse<SolanaRpcSignatureStatusesResponse>;
+    try {
+      relay = await client.fetch<RpcRelayResponse<SolanaRpcSignatureStatusesResponse>>(
+        "/v1/rpc/proxy",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: `wallet-faucet-status-${signature}`,
+            method: "getSignatureStatuses",
+            params: [[signature]],
+          }),
+          signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+        }
+      );
+    } catch (error) {
+      // The deadline abort is expected; log anything else. Either way stop waiting:
+      // the airdrop was submitted, and the caller revalidates while polling catches up.
+      if (!(error instanceof DOMException && error.name === "TimeoutError")) {
+        console.warn(
+          JSON.stringify({
+            event: "wallet_faucet_confirmation_check_failed",
+            name: error instanceof Error ? error.name : "non-error",
+          })
+        );
+      }
+      return "timeout";
+    }
+    const status = relay.response?.result?.value[0];
     if (status?.err) {
       return "failed";
     }
-    if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") {
+    if (
+      status?.confirmationStatus &&
+      commitmentComparator(status.confirmationStatus, "confirmed") >= 0
+    ) {
       return "confirmed";
     }
     await new Promise((resolve) => setTimeout(resolve, FAUCET_CONFIRMATION_POLL_MS));
@@ -458,7 +482,7 @@ export async function requestDevnetSolanaFaucetAction(
   if (!resolvedWalletId) {
     return { status: "error", message: t("DashboardCustody.walletIdRequired") };
   }
-  if (!SOLANA_ADDRESS_PATTERN.test(resolvedWalletAddress)) {
+  if (!isAddress(resolvedWalletAddress)) {
     return { status: "error", message: t("DashboardCustody.validWalletAddressRequired") };
   }
 
@@ -475,7 +499,7 @@ export async function requestDevnetSolanaFaucetAction(
         jsonrpc: "2.0",
         id: `wallet-faucet-${resolvedWalletId}`,
         method: "requestAirdrop",
-        params: [resolvedWalletAddress, DEVNET_FAUCET_LAMPORTS],
+        params: [resolvedWalletAddress, Number(solToLamports(DEVNET_FAUCET_SOL))],
       }),
     });
 
@@ -533,7 +557,7 @@ export async function requestDevnetSolanaFaucetAction(
       status: "success",
       walletId: resolvedWalletId,
       signature: payload.result,
-      amountSol: DEVNET_FAUCET_LAMPORTS / 1_000_000_000,
+      amountSol: decimalFixedPointToNumber(DEVNET_FAUCET_SOL),
     };
   } catch (error) {
     return {

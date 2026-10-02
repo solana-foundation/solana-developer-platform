@@ -4,6 +4,7 @@ import type { CustodyWalletTokenBalance } from "@sdp/types";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatCurrencyAmount, resolveTotalBalance } from "../payments/payments-overview.utils";
+import { custodyQueryKeys } from "./custody-query-key";
 import {
   BALANCE_REFRESH_INTERVAL_MS,
   fetchWalletBalance,
@@ -22,7 +23,7 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
   const { data: batchBalances, error: batchError } = usePersistedDashboardSWR<
     Record<string, CustodyWalletTokenBalance[]>
   >(
-    walletId ? "wallet-card-balances" : null,
+    walletId ? custodyQueryKeys.walletCardBalances() : null,
     fetchWalletBalances,
     {
       revalidateOnFocus: true,
@@ -42,7 +43,7 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
   const { data: fallbackBalances, error: fallbackError } = usePersistedDashboardSWR<
     CustodyWalletTokenBalance[]
   >(
-    batchFailed && walletId ? `wallet-card-balance-fallback:${walletId}` : null,
+    batchFailed && walletId ? custodyQueryKeys.walletCardBalanceFallback({ walletId }) : null,
     () => fetchWalletBalance(walletId),
     {
       revalidateOnFocus: true,

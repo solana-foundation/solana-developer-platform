@@ -117,8 +117,6 @@ describe("requestDevnetSolanaFaucetAction", () => {
     vi.useRealTimers();
   });
 
-  // requestAirdrop returns once the transaction is submitted; revalidating then
-  // re-renders the page with the pre-airdrop balance.
   it("waits for the airdrop to confirm before revalidating the wallet pages", async () => {
     client.fetch
       .mockResolvedValueOnce(relay({ result: "sig_airdrop" }))
@@ -137,6 +135,7 @@ describe("requestDevnetSolanaFaucetAction", () => {
     });
     expect(client.fetch.mock.calls[1]?.[1]?.signal).toBeInstanceOf(AbortSignal);
     const lastStatusCheck = client.fetch.mock.invocationCallOrder[2] ?? 0;
+    expect(mocks.revalidatePath).toHaveBeenCalled();
     for (const order of mocks.revalidatePath.mock.invocationCallOrder) {
       expect(order).toBeGreaterThan(lastStatusCheck);
     }
@@ -158,6 +157,36 @@ describe("requestDevnetSolanaFaucetAction", () => {
       message: "DashboardCustody.devnetFaucetProviderGenericError",
     });
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("stops waiting, logs, and revalidates when a status request fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    client.fetch
+      .mockResolvedValueOnce(relay({ result: "sig_airdrop" }))
+      .mockRejectedValueOnce(new Error("relay unavailable"));
+
+    const result = await requestDevnetSolanaFaucetAction("wallet_one", WALLET_ADDRESS);
+
+    expect(result).toMatchObject({ status: "success", signature: "sig_airdrop" });
+    expect(client.fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.revalidatePath).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("wallet_faucet_confirmation_check_failed")
+    );
+    warn.mockRestore();
+  });
+
+  it("does not log when the status request hits the confirmation deadline", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    client.fetch
+      .mockResolvedValueOnce(relay({ result: "sig_airdrop" }))
+      .mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"));
+
+    const result = await requestDevnetSolanaFaucetAction("wallet_one", WALLET_ADDRESS);
+
+    expect(result).toMatchObject({ status: "success", signature: "sig_airdrop" });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("still succeeds and revalidates when confirmation does not arrive in time", async () => {

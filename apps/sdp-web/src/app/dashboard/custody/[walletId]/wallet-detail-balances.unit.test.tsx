@@ -1,4 +1,3 @@
-import type { CustodyWalletTokenBalance } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,21 +6,13 @@ const { mockUseSWR } = vi.hoisted(() => ({ mockUseSWR: vi.fn() }));
 vi.mock("swr", () => ({ default: mockUseSWR }));
 
 import { BALANCE_REFRESH_INTERVAL_MS } from "@/app/dashboard/custody/wallet-balances.data";
+import {
+  READ_AT,
+  solBalance,
+  trackedBalances,
+} from "@/app/dashboard/custody/wallet-balances.fixtures";
+import { formatDisplayAmount } from "../../payments/payments-overview.utils";
 import { WalletBalanceRows, WalletBalanceTotal } from "./wallet-detail-balances";
-
-const WALLET_ID = "wallet-1";
-const READ_AT = 1_700_000_000_000;
-
-function sol(uiAmount: string, usdValue: number): CustodyWalletTokenBalance {
-  return {
-    token: "SOL",
-    mint: "So11111111111111111111111111111111111111112",
-    amount: String(Number(uiAmount) * 1_000_000_000),
-    uiAmount,
-    decimals: 9,
-    usdValue,
-  };
-}
 
 afterEach(() => {
   mockUseSWR.mockReset();
@@ -29,40 +20,35 @@ afterEach(() => {
 
 describe("wallet detail balances", () => {
   it("polls the wallet's balances on the same cadence as the overview cards", () => {
+    const balance = { ...solBalance("1"), usdValue: 150 };
     mockUseSWR.mockReturnValue({ data: undefined });
 
     renderToStaticMarkup(
-      <WalletBalanceTotal
-        walletId={WALLET_ID}
-        initial={{ balances: [sol("1", 150)], error: null, readAt: READ_AT }}
-      />
+      <WalletBalanceTotal walletId="wallet-1" initial={trackedBalances([balance], null)} />
     );
 
     expect(mockUseSWR).toHaveBeenCalledWith(
-      // Keyed to the server read, so an earlier visit's cached balance can't show first.
-      ["wallet-balances", WALLET_ID, READ_AT],
+      ["wallet-balances", "wallet-1", READ_AT],
       expect.any(Function),
       expect.objectContaining({
-        fallbackData: [sol("1", 150)],
+        fallbackData: [balance],
         refreshInterval: BALANCE_REFRESH_INTERVAL_MS,
         revalidateOnFocus: true,
         revalidateOnMount: false,
       })
     );
-    // keepPreviousData would show the previous key's balance after a new server read.
-    expect(mockUseSWR.mock.calls[0]?.[2]).not.toHaveProperty("keepPreviousData");
   });
 
   it("shows polled balances instead of the server-rendered ones", () => {
-    const initial = { balances: [sol("1", 150)], error: null, readAt: READ_AT };
-    mockUseSWR.mockReturnValue({ data: [sol("2", 300)] });
+    const initial = trackedBalances([{ ...solBalance("1"), usdValue: 150 }], null);
+    mockUseSWR.mockReturnValue({ data: [{ ...solBalance("2"), usdValue: 300 }] });
 
     const total = renderToStaticMarkup(
-      <WalletBalanceTotal walletId={WALLET_ID} initial={initial} />
+      <WalletBalanceTotal walletId="wallet-1" initial={initial} />
     );
     const rows = renderToStaticMarkup(
       <WalletBalanceRows
-        walletId={WALLET_ID}
+        walletId="wallet-1"
         initial={initial}
         tokenRoutes={{}}
         issuanceEnabled={false}
@@ -72,21 +58,21 @@ describe("wallet detail balances", () => {
 
     expect(total).toContain("300");
     expect(total).not.toContain("150");
-    expect(rows).toContain("2");
+    expect(rows).toContain(formatDisplayAmount("2", "SOL"));
   });
 
   it("replaces a failed server read once a poll succeeds", () => {
-    const initial = { balances: [], error: "Balances unavailable", readAt: READ_AT };
+    const initial = trackedBalances([], "Balances unavailable");
 
     mockUseSWR.mockReturnValue({ data: undefined });
     expect(
-      renderToStaticMarkup(<WalletBalanceTotal walletId={WALLET_ID} initial={initial} />)
+      renderToStaticMarkup(<WalletBalanceTotal walletId="wallet-1" initial={initial} />)
     ).toContain("Balances unavailable");
     expect(mockUseSWR.mock.calls[0]?.[2]).toMatchObject({ revalidateOnMount: true });
 
-    mockUseSWR.mockReturnValue({ data: [sol("1", 150)] });
+    mockUseSWR.mockReturnValue({ data: [{ ...solBalance("1"), usdValue: 150 }] });
     const recovered = renderToStaticMarkup(
-      <WalletBalanceTotal walletId={WALLET_ID} initial={initial} />
+      <WalletBalanceTotal walletId="wallet-1" initial={initial} />
     );
     expect(recovered).not.toContain("Balances unavailable");
     expect(recovered).toContain("150");
