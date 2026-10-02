@@ -93,6 +93,16 @@ async function computeApiKeyHash(): Promise<string> {
   return hash;
 }
 
+/** Initialize tenant and API-key fixtures without provisioning a funded custody wallet. */
+export async function initIntegrationApiSuite() {
+  await seedTestDatabase(env);
+
+  const apiKeyHash = await computeApiKeyHash();
+  await resetIntegrationApiState(apiKeyHash);
+
+  return { apiKeyHash };
+}
+
 export async function initIntegrationSuite() {
   await seedTestDatabase(env);
 
@@ -105,6 +115,14 @@ export async function initIntegrationSuite() {
 export async function resetIntegrationState(
   apiKeyHash: string
 ): Promise<{ custodyAddress: string; custodyWallet: IntegrationCustodyWallet }> {
+  await resetIntegrationApiState(apiKeyHash);
+  const custodyAddress = await ensureIntegrationCustodyAddress();
+  cachedCustodyWallet = await findIntegrationCustodyWallet(custodyAddress);
+  return { custodyAddress, custodyWallet: cachedCustodyWallet };
+}
+
+async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
+  cachedCustodyWallet = null;
   const db = getDb(env);
   const { apiKeys: apiKeysKV, rateLimits: rateLimitKV } = createKVStoreSet(env);
 
@@ -205,9 +223,6 @@ export async function resetIntegrationState(
     .run();
 
   await apiKeysKV.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
-  const custodyAddress = await ensureIntegrationCustodyAddress();
-  cachedCustodyWallet = await findIntegrationCustodyWallet(custodyAddress);
-  return { custodyAddress, custodyWallet: cachedCustodyWallet };
 }
 
 async function findIntegrationCustodyWallet(address: string): Promise<IntegrationCustodyWallet> {

@@ -444,6 +444,16 @@ const earnVaultParRedemptionTermsShape = {
   mechanism: z.literal("operatorRedemption"),
 } as const;
 
+/** A par request over intermediate the owner already holds (a cancelled request's wYLDS). */
+const earnVaultParRedemptionIntermediateTermsShape = {
+  intermediateAmount: z
+    .string()
+    .max(128)
+    .regex(/^\d+(\.\d+)?$/, "intermediateAmount must be a positive decimal string")
+    .refine((value) => /[1-9]/.test(value), "intermediateAmount must be greater than zero"),
+  mechanism: z.literal("operatorRedemption"),
+} as const;
+
 export const earnVaultWithdrawalOptionsSchema = z
   .object({ positionId: earnWithdrawalPositionIdSchema })
   .strict();
@@ -459,6 +469,12 @@ export const earnVaultQueuedWithdrawalPreviewSchema = z.union([
     .object({
       positionId: earnWithdrawalPositionIdSchema,
       ...earnVaultParRedemptionTermsShape,
+    })
+    .strict(),
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnVaultParRedemptionIntermediateTermsShape,
     })
     .strict(),
 ]);
@@ -481,6 +497,13 @@ export const earnVaultWithdrawalRequestSchema = z.union([
     .object({
       positionId: earnWithdrawalPositionIdSchema,
       ...earnVaultParRedemptionTermsShape,
+      ...earnVaultWithdrawalRequestIdShape,
+    })
+    .strict(),
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnVaultParRedemptionIntermediateTermsShape,
       ...earnVaultWithdrawalRequestIdShape,
     })
     .strict(),
@@ -668,6 +691,19 @@ export const earnExternalWalletQueuedWithdrawalPreviewSchema = z.union([
       ...earnVaultParRedemptionTermsShape,
     })
     .strict(),
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnVaultParRedemptionIntermediateTermsShape,
+    })
+    .strict(),
+  z
+    .object({
+      strategyId: z.string().min(1),
+      ownerAddress: solanaOwnerAddressSchema,
+      ...earnVaultParRedemptionIntermediateTermsShape,
+    })
+    .strict(),
 ]);
 
 export const earnExternalWalletWithdrawalRequestTransactionSchema = z.union([
@@ -683,6 +719,13 @@ export const earnExternalWalletWithdrawalRequestTransactionSchema = z.union([
       positionId: earnWithdrawalPositionIdSchema,
       ...earnExternalWalletFeePayerShape,
       ...earnVaultParRedemptionTermsShape,
+    })
+    .strict(),
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnExternalWalletFeePayerShape,
+      ...earnVaultParRedemptionIntermediateTermsShape,
     })
     .strict(),
 ]);

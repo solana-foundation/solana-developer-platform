@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   asyncModal: undefined as
     | {
         onSettled?: (event: { kind: "queue"; request: { withdrawalRequestId: string } }) => void;
+        parSource?: "shares" | "intermediate";
         route?: { kind: "queue" | "provider_order" | "operator_redemption" };
       }
     | undefined,
@@ -24,6 +25,7 @@ vi.mock("./earn-vault-withdraw-modal", () => ({
 vi.mock("./earn-vault-async-withdraw-modal", () => ({
   EarnVaultAsyncWithdrawModal: (props: {
     onSettled?: (event: { kind: "queue"; request: { withdrawalRequestId: string } }) => void;
+    parSource?: "shares" | "intermediate";
     route: { kind: "queue" | "provider_order" | "operator_redemption" };
   }) => {
     mocks.asyncModal = props;
@@ -243,6 +245,47 @@ describe("EarnVaultExitModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /Redeem at par/ }));
     expect(await screen.findByText("async flow")).toBeTruthy();
     expect(mocks.asyncModal?.route?.kind).toBe("operator_redemption");
+  });
+
+  it("opens held wYLDS straight into the par route, never the share exits", async () => {
+    const parRedemption = {
+      intermediateMint: "wylds",
+      assetMint: position.tokenMint,
+      minimumShares: null,
+      minimumIntermediateAmount: "0.000001",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      cancelable: true,
+      operatorSettled: true as const,
+    };
+    const options = {
+      positionId: position.id,
+      instant: true,
+      providerOrder: false,
+      queued: false,
+      withdrawAuthority: null,
+      queueState: null,
+      queueAsset: null,
+    };
+    mocks.fetchOptions.mockResolvedValue({ kind: "ready", value: { ...options, parRedemption } });
+    const hastra = { ...position, provider: "hastra", label: "Hastra PRIME" };
+
+    renderModal({ parSource: "intermediate", position: hastra });
+    expect(await screen.findByText("async flow")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Withdraw now/ })).toBeNull();
+    expect(mocks.asyncModal?.route?.kind).toBe("operator_redemption");
+    expect(mocks.asyncModal?.parSource).toBe("intermediate");
+
+    cleanup();
+    mocks.fetchOptions.mockResolvedValue({
+      kind: "ready",
+      value: { ...options, parRedemption: null },
+    });
+    renderModal({ parSource: "intermediate", position: hastra });
+    expect(
+      await screen.findByText("This position can't be withdrawn here right now.")
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Withdraw now/ })).toBeNull();
   });
 
   it("fails closed when route discovery is unavailable", async () => {

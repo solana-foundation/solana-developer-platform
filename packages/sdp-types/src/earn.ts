@@ -636,7 +636,10 @@ export interface EarnVaultQueuedWithdrawalTerms {
 export interface EarnVaultParRedemptionTerms {
   intermediateMint: string;
   assetMint: string;
-  minimumShares: string;
+  /** Null while the provider's rate is unavailable, which blocks share-sourced requests. */
+  minimumShares: string | null;
+  /** Smallest request over intermediate the owner already holds. */
+  minimumIntermediateAmount: string;
   shareDecimals: number;
   assetDecimals: number;
   cancelable: boolean;
@@ -673,13 +676,24 @@ export interface EarnVaultQueuedWithdrawalTermsRequest {
   deadlineSeconds: number;
 }
 
-/** Request inputs for an operator-completed par redemption. */
-export interface EarnVaultParRedemptionTermsRequest {
-  positionId: string;
-  /** Decimal string in vault-share units. */
-  shares: string;
-  mechanism: "operatorRedemption";
-}
+/**
+ * Request inputs for an operator-completed par redemption: position shares
+ * (vault-share units), or intermediate the position already holds outside any
+ * request (`parIntermediate`, in that token's units). Never both.
+ */
+export type EarnVaultParRedemptionTermsRequest =
+  | {
+      positionId: string;
+      shares: string;
+      intermediateAmount?: undefined;
+      mechanism: "operatorRedemption";
+    }
+  | {
+      positionId: string;
+      intermediateAmount: string;
+      shares?: undefined;
+      mechanism: "operatorRedemption";
+    };
 
 /** Backwards-compatible queue input or the explicit par-redemption variant. */
 export type EarnVaultAsyncWithdrawalTermsRequest =
@@ -956,8 +970,8 @@ export interface EarnExternalWalletMovement {
   /** The position's deposit-token mint: the unit an activity feed renders in. */
   tokenMint: string;
   /**
-   * Quantity in `tokenMint` units. A deposit's amount; a withdrawal's observed
-   * payout once finalized, null before that or when it could not be observed.
+   * Quantity in `tokenMint` units. Kamino deposits and withdrawals require a
+   * finalized observation; null before that or when it could not be observed.
    * `amount`/`denomination` stay the on-chain quantity (shares on a withdrawal).
    */
   tokenAmount: string | null;
@@ -1000,6 +1014,8 @@ export interface EarnExternalWalletMovementResponse {
  * - `withdrawals_pending`: a currently held position has an open queued
  *   withdrawal request. Its shares leave the wallet (escrowed or burned)
  *   before the payout becomes a ledger fact, which can take days.
+ * - `deposits_not_valued`: a finalized deposit has no observed receipt, so
+ *   totalDeposited excludes it and earned cannot be stated accurately.
  * - `withdrawals_not_valued`: a currently held position has a finalized
  *   withdrawal whose token payout was not observed at settlement (rows that
  *   predate the observation, or a settlement whose transaction read failed),
@@ -1014,6 +1030,7 @@ export type EarnExternalWalletEarnedUnavailableReason =
   | "live_value_unavailable"
   | "movements_pending"
   | "withdrawals_pending"
+  | "deposits_not_valued"
   | "withdrawals_not_valued";
 
 /** Earnings for one deposit token across an external wallet's positions. */
@@ -1027,7 +1044,7 @@ export interface EarnExternalWalletTokenEarnings {
    * absent when any position is unavailable.
    */
   currentValue?: string;
-  /** Sum of finalized SDP deposits, a pure ledger fact — always present. */
+  /** Sum of observed finalized SDP deposits; excludes unvalued deposits. */
   totalDeposited: string;
   /**
    * Sum of the observed token payouts of finalized withdrawals, a ledger fact,
