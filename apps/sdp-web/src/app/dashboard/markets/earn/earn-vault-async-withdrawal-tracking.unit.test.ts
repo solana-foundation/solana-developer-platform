@@ -46,6 +46,27 @@ describe("vaultAsyncWithdrawalRequestFingerprint", () => {
     );
   });
 
+  it("keys a held-intermediate par request apart from a shares request of the same number", () => {
+    const route = { kind: "operator_redemption" as const };
+    const held = vaultAsyncWithdrawalRequestFingerprint({
+      projectId: intent.projectId,
+      positionId: intent.positionId,
+      intermediateAmount: "5",
+      route,
+    });
+    expect(held).toBe(
+      JSON.stringify(["project_1", "position_1", "5", "operator_redemption", "intermediate"])
+    );
+    expect(held).not.toBe(
+      vaultAsyncWithdrawalRequestFingerprint({
+        projectId: intent.projectId,
+        positionId: intent.positionId,
+        shares: "5",
+        route,
+      })
+    );
+  });
+
   it("separates operator redemption from a solver queue without queue-only fields", () => {
     const operatorIntent = {
       projectId: intent.projectId,

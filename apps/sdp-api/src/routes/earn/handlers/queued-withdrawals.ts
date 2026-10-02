@@ -256,16 +256,26 @@ export function builtTransactionWire(built: ExternalQueuedWithdrawalBuiltTransac
 }
 
 function queuedTerms(body: {
-  shares: string;
+  shares?: string;
+  intermediateAmount?: string;
   mechanism?: "solverQueue" | "operatorRedemption";
   discountBps?: number;
   deadlineSeconds?: number;
 }): AsyncWithdrawalTermsInput {
   if (body.mechanism === "operatorRedemption") {
-    return { shares: body.shares, mechanism: "operator_redemption" };
+    // The body schemas admit exactly one of the two sources.
+    if (body.intermediateAmount !== undefined) {
+      return { intermediateAmount: body.intermediateAmount, mechanism: "operator_redemption" };
+    }
+    if (body.shares !== undefined) return { shares: body.shares, mechanism: "operator_redemption" };
+    throw badRequest("shares or intermediateAmount is required for an operator redemption");
   }
-  if (body.discountBps === undefined || body.deadlineSeconds === undefined) {
-    throw badRequest("discountBps and deadlineSeconds are required for a solver queue");
+  if (
+    body.shares === undefined ||
+    body.discountBps === undefined ||
+    body.deadlineSeconds === undefined
+  ) {
+    throw badRequest("shares, discountBps and deadlineSeconds are required for a solver queue");
   }
   return {
     shares: body.shares,
@@ -398,7 +408,12 @@ async function readPreview(
     try {
       const quote = await client.quoteParRedemption(
         { env: c.env, environment },
-        { providerReference: position.vaultAddress, shares: terms.shares }
+        terms.intermediateAmount === undefined
+          ? { providerReference: position.vaultAddress, shares: terms.shares }
+          : {
+              providerReference: position.vaultAddress,
+              intermediateAmount: terms.intermediateAmount,
+            }
       );
       return { ...quote, mechanism: "operatorRedemption" };
     } catch (error) {
@@ -412,6 +427,24 @@ async function readPreview(
       { env: c.env, environment },
       { providerReference: position.vaultAddress, ...terms }
     );
+  } catch (error) {
+    rethrowVaultProviderFailure(error);
+  }
+}
+
+async function readParIntermediateMint(
+  c: AppContext,
+  environment: SdpEnvironment,
+  position: QueuedWithdrawalPosition
+): Promise<string> {
+  const client = resolveVaultParRedemptionClient(c.env, position.provider, createVaultDeadline());
+  if (!client) throw notImplemented(position.provider, "par redemptions");
+  try {
+    const options = await client.getParRedemptionOptions(
+      { env: c.env, environment },
+      { providerReference: position.vaultAddress }
+    );
+    return options.intermediateMint;
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }
@@ -452,7 +485,9 @@ export async function extractEarnVaultWithdrawalRequestPolicyCandidate(
           environment: target.environment,
           provider: target.position.provider,
           positionId: target.position.id,
-          shares: terms.shares,
+          ...(terms.intermediateAmount === undefined
+            ? { shares: terms.shares }
+            : { intermediateAmount: terms.intermediateAmount }),
         })
       : buildEarnVaultQueuedWithdrawalFingerprint({
           environment: target.environment,
@@ -467,6 +502,15 @@ export async function extractEarnVaultWithdrawalRequestPolicyCandidate(
     requestId,
     idempotencyFingerprint,
   };
+  // Policy judges the token that actually leaves: position shares, or the
+  // held intermediate a par request delegates to the provider's operator.
+  const leaving =
+    terms.mechanism === "operator_redemption" && terms.intermediateAmount !== undefined
+      ? {
+          asset: await readParIntermediateMint(c, target.environment, target.position),
+          amount: terms.intermediateAmount,
+        }
+      : { asset: target.position.shareMint, amount: terms.shares };
   return {
     candidate: {
       organizationId: target.auth.organizationId,
@@ -478,8 +522,8 @@ export async function extractEarnVaultWithdrawalRequestPolicyCandidate(
       source: "earn_vault_withdrawal",
       operationFamily: "program",
       operationType: "earn_vault_withdrawal",
-      asset: target.position.shareMint,
-      amount: body.shares,
+      asset: leaving.asset,
+      amount: leaving.amount,
       destination: target.position.vaultAddress,
       context: {
         provider: target.position.provider,
@@ -490,7 +534,7 @@ export async function extractEarnVaultWithdrawalRequestPolicyCandidate(
         withdrawalRoute:
           terms.mechanism === "operator_redemption" ? "operator_redemption" : "queued",
         ...(terms.mechanism === "operator_redemption"
-          ? {}
+          ? { parSource: terms.intermediateAmount === undefined ? "shares" : "intermediate" }
           : { discountBps: terms.discountBps, deadlineSeconds: terms.deadlineSeconds }),
       },
       providerExtensions: {},

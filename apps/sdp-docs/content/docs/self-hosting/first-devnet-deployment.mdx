@@ -88,9 +88,11 @@ docker compose up -d
 ```
 
 <Callout type="info">
-In self-hosted mode, SDP entitles every provider that is configured in the
-environment. Providers that are not configured remain unavailable, so the default
-devnet path exposes only the local signer.
+Providers that are not configured remain unavailable, so the default devnet path
+exposes only the local signer. The local signer is a manual provider: after you
+create your organization, enable it by adding
+`{"sdp": {"providerOverrides": {"custody": {"local": true}}}}` to the
+organization's private metadata in the Clerk dashboard.
 </Callout>
 
 </Step>

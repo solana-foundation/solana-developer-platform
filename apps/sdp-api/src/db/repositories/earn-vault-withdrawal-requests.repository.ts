@@ -1,6 +1,9 @@
 import type { SdpEnvironment } from "@sdp/types";
 import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
-import { queuedFulfillmentMovementId } from "@/db/repositories/earn-movements.repository";
+import {
+  fulfilledQueueQuantity,
+  queuedFulfillmentMovementId,
+} from "@/db/repositories/earn-movements.repository";
 import { conflict } from "@/lib/errors";
 
 export type EarnVaultWithdrawalRequestStatus =
@@ -590,6 +593,23 @@ async function promoteRequestAddressLease(
 }
 
 /**
+ * Hastra's owner-derived request address sits out a reuse embargo after every
+ * close, so its conflicts tell the owner to wait instead of naming the lease.
+ */
+function requestAddressConflict(
+  mechanism: EarnVaultWithdrawalMechanism | undefined,
+  state: "recorded" | "leased",
+  queueMessage: string
+): ReturnType<typeof conflict> {
+  if (mechanism !== "operator_redemption") return conflict(queueMessage);
+  return conflict(
+    state === "recorded"
+      ? "This wallet's previous redemption request is still closing. Try again in a few minutes."
+      : "This wallet's previous redemption request closed moments ago. Try again in a few minutes."
+  );
+}
+
+/**
  * Persist a fulfilled queued withdrawal's payout as one idempotent
  * earn_movements row, in the same transaction that moved the request to
  * `fulfilled`. Mirrors the read-side projection field for field — including
@@ -607,6 +627,7 @@ async function promoteRequestAddressLease(
  * against a custody position row that has no owner address. Either way the
  * payout's destination is recorded in destination_address.
  */
+
 async function recordFulfilledQueueMovement(
   tx: DatabaseExecutor,
   request: EarnVaultWithdrawalRequestRow
@@ -614,6 +635,7 @@ async function recordFulfilledQueueMovement(
   if (!request.closing_signature) return;
   const settledAt = request.fulfilled_at ?? request.updated_at;
   const ownerAddress = request.custody_wallet_id ? null : request.owner_address;
+  const quantity = fulfilledQueueQuantity(request);
   await tx
     .prepare(
       `INSERT INTO earn_movements (
@@ -650,9 +672,9 @@ async function recordFulfilledQueueMovement(
       request.position_id,
       settledAt,
       settledAt,
-      request.share_mint,
-      request.shares,
-      request.shares,
+      quantity.denomination,
+      quantity.amount,
+      quantity.amount,
       request.assets_paid,
       request.assets_paid,
       request.custody_wallet_id,
@@ -711,7 +733,11 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           .bind(input.environment, input.requestAddress, mechanism)
           .first<{ id: string }>();
         if (recorded) {
-          throw conflict("A queued withdrawal already uses this provider request address");
+          throw requestAddressConflict(
+            mechanism,
+            "recorded",
+            "A queued withdrawal already uses this provider request address"
+          );
         }
         const lease = await tx
           .prepare(
@@ -737,7 +763,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           )
           .first<{ lease_token: string }>();
         if (!lease || lease.lease_token !== input.id) {
-          throw conflict(
+          throw requestAddressConflict(
+            mechanism,
+            "leased",
             "Another queued withdrawal build is already reserving this provider nonce; retry shortly"
           );
         }
@@ -925,7 +953,11 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           .bind(input.environment, input.requestAddress, input.mechanism)
           .first<{ id: string }>();
         if (recordedAddress) {
-          throw conflict("A queued withdrawal already uses this provider request address");
+          throw requestAddressConflict(
+            input.mechanism,
+            "recorded",
+            "A queued withdrawal already uses this provider request address"
+          );
         }
 
         const requestRow = await tx
@@ -1623,7 +1655,11 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             .bind(input.environment, input.requestAddress, input.mechanism ?? "solver_queue")
             .first<{ id: string }>();
           if (recorded) {
-            throw conflict("A queued withdrawal already uses this provider request address");
+            throw requestAddressConflict(
+              input.mechanism,
+              "recorded",
+              "A queued withdrawal already uses this provider request address"
+            );
           }
           const leaseExpiresAt =
             input.reservationExpiresAt ?? new Date(Date.now() + 86_400_000).toISOString();
@@ -1655,7 +1691,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             )
             .first<{ lease_token: string }>();
           if (!lease || lease.lease_token !== input.id) {
-            throw conflict(
+            throw requestAddressConflict(
+              input.mechanism,
+              "leased",
               "Another queued withdrawal build already reserves this provider nonce; retry after it lands or expires"
             );
           }

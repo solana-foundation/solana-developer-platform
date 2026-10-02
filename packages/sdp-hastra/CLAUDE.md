@@ -34,6 +34,11 @@ sufficient execution boundary.
   cancellation deadline and cancellation remains allowed while paused, but an
   SPL freeze can block the delegate revocation it needs. Only one request PDA
   exists per owner.
+- A par request can instead redeem wYLDS the owner already holds
+  (`intermediateAmount` instead of `shares`): `request_redeem` alone, gated only
+  by vault-mint's pause and the redemption vault's freeze. Both sources run
+  through `admitParRequest`, so the open-request refusal, the reuse cooldown,
+  and the sponsor prefund cannot differ between them.
 
 The often-cited $2,000 figure is an off-chain operator/CCTP batching threshold,
 not a v0.0.6 per-request program constraint. Execution therefore exposes the

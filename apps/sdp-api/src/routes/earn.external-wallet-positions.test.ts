@@ -203,8 +203,7 @@ describe("external-wallet position reads", () => {
     await getDb(env)
       .prepare(
         `UPDATE earn_movements
-            SET status = 'finalized', confirmed_at = sdp_iso_now(), settled_at = sdp_iso_now(),
-                amount_settled = amount_requested
+            SET status = 'finalized', confirmed_at = sdp_iso_now(), settled_at = sdp_iso_now()
           WHERE position_id = ?`
       )
       .bind(positionId)

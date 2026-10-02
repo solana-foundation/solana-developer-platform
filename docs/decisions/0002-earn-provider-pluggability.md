@@ -1344,3 +1344,29 @@ poll until a terminal state, and expose recovery only when server state is
 Custody queue routes remain internal. Any future operation-list or OpenAPI
 security change is another EARN-027 scope change and requires a new named
 security approval.
+
+
+## Addendum: 2026-09-29 Kamino observed deposits and rent provenance
+
+Kamino encodes a maximum deposit, so a successful transaction can debit less
+than its requested amount. Finalization now observes the deposit's token CPI
+transfers and minted shares, bound to the recorded signature, owner, vault,
+mints and cluster. A preceding swap's credit is excluded. Missing or unfamiliar
+receipts stay unknown and are retried, including historical deposits.
+Migration 0121 adds provenance without rewriting existing rows, and 0122
+builds the repair index concurrently. Legacy amount
+projections are ignored by movement reads, earnings and transaction history
+until receipt repair replaces them. `earned` is withheld with
+`deposits_not_valued` while a held position has an unvalued deposit.
+
+The earlier rent projection was a build-time claim, not evidence of who paid:
+two idempotent builds can both claim creation although only one pays rent.
+An account can also be closed and recreated outside SDP. Kamino withdrawals
+therefore retain share ATAs, ignoring stored refund hints. The owner can
+explicitly recover the rent. Even creating an account in the same transaction
+can use lamports pre-funded by another wallet, so withdrawals never append an
+automatic share-account close. Other providers' behavior is unchanged.
+
+This supersedes the Kamino requested-amount and rent-refund assumptions above.
+See [the audit](../earn/kamino-audit-2026-09-29.md) for validation, threat analysis
+and rollout requirements for previously issued transactions.

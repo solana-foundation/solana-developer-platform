@@ -16,7 +16,8 @@ price accrues Treasury yield. So:
 
 - **Deposit** = Jupiter-routed ExactIn swap USDC→USDY, signed by the owner.
 - **Position** = the owner's USDY token balance. Share mint == the instrument.
-- **Exit** = the reverse swap. Always open, no lock (`liquidityTerm: instant`).
+- **Exit** = the reverse swap (`liquidityTerm: instant`), subject to liquidity
+  and an unfrozen owner ATA. Auxiliary accounts need consolidation first.
 - **Exchange rate** = the live market price, which is why BOTH builders require
   an explicit slippage floor and both quote capabilities exist to derive one.
 
@@ -67,6 +68,9 @@ What this package adds on top of an admitted leg is exactly one instruction it
 builds itself: the `SetComputeUnitLimit` (`ONDO_SWAP_COMPUTE_UNIT_LIMIT`)
 prepended to every plan, because a Jupiter route routinely exceeds the default
 budget and this builder has no simulation seam to derive a tighter one.
+When the API composes a swap-funded deposit, `withComputeUnitLimit` replaces
+provider limits with one limit for the complete plan. Appending a second
+`SetComputeUnitLimit` makes the transaction invalid.
 
 ## The floor is proven, not encoded
 
@@ -86,10 +90,25 @@ rounded, at the pair's 6-decimal scale (`canonicalAmount`).
 ## Positions are read in base units, and the valuation may be absent
 
 Balances sum the exact raw `amount` integer strings from
-`getTokenAccountsByOwner` — never `uiAmount` (lossy above 2^53). The valuation
+validated, distinct USDY accounts returned by `getTokenAccountsByOwner`, never
+`uiAmount` (lossy above 2^53). The valuation
 comes from the EXIT quote (what the market would actually pay), and may fail
 independently of the balance read: a quote outage makes the VALUE unknown, not
-the HOLDING. Rent: deposits fund the USDY ATA from the owner (Jupiter's setup
+the HOLDING. `withdrawableShares` includes only the unfrozen owner ATA that
+Jupiter can actually spend; frozen and non-associated accounts remain in
+`shares`. Reads verify the SPL program, token owner, mint, initialized/frozen
+state, six-decimal scale and u64 bounds. A malformed account fails the whole
+read, never reports a partial balance. Rent detection checks the exact ATA.
+Quotes use Metis only, matching the API's `/build` execution path.
+
+These checks protect owner USDC/USDY amounts and movement accounting without
+changing signer authority: custody stays tenant-scoped and external owners sign
+the exact built message. Malformed responses fail closed, but plausible false
+RPC data can still misstate holdings or settlement. Jupiter/program compromise
+or issuer action can lose or freeze funds; an output floor limits slippage, not
+those risks. Missing transaction history is not independent proof of absence.
+
+Rent: deposits fund the USDY ATA from the owner (Jupiter's setup
 creates charge the taker), so a foreign `rentPayer` is refused; exits close
 nothing, so `rentRefundTo` is accepted and unused.
 

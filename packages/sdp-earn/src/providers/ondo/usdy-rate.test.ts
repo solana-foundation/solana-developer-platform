@@ -55,6 +55,9 @@ describe("ondoPercentToDecimalString", () => {
     assert.equal(ondoPercentToDecimalString(0.00001), "0");
     assert.equal(ondoPercentToDecimalString(100), "1");
     assert.equal(ondoPercentToDecimalString(0), "0");
+    assert.equal(ondoPercentToDecimalString(3.5999999999999), "0.035999");
+    assert.equal(ondoPercentToDecimalString(1e21), "10000000000000000000");
+    assert.equal(ondoPercentToDecimalString(1e-7), "0");
   });
 
   it("refuses anything that is not a finite non-negative number", () => {
