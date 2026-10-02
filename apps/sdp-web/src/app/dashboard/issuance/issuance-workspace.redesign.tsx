@@ -38,6 +38,7 @@ import {
   tokenLifecycle,
 } from "./issuance-token-state.redesign";
 import type { IssuanceTokenFacets } from "./issuance-tokens.data";
+import { ISSUANCE_TOOLBAR_CONTROLS } from "./issuance-toolbar.redesign";
 import { IssuedTokenMark } from "./issued-token-mark.redesign";
 import { LocalDraftsBlock } from "./local-drafts-block.redesign";
 import {
@@ -217,6 +218,7 @@ function IssuanceListToolbar({
   const { query, updateQuery, search, setSearch } = list;
   return (
     <ListToolbar
+      className={ISSUANCE_TOOLBAR_CONTROLS}
       filters={
         <FilterMenu
           label={t("Shared.SharedComponents.filter")}
