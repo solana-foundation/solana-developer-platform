@@ -440,11 +440,10 @@ export interface WalletOperationActor {
 }
 
 /**
- * Actor types a human principal persists on a wallet operation. A replay
- * re-emits the stored type so the operation fingerprint matches; `session`
- * survives only on rows written before cookie sessions were removed.
+ * Actor types a human principal persists on a wallet operation. An approved
+ * operation replay re-emits the stored type so the operation fingerprint matches.
  */
-export const WALLET_OPERATION_HUMAN_ACTOR_TYPES = ["clerk", "session"] as const;
+export const WALLET_OPERATION_HUMAN_ACTOR_TYPES = ["clerk"] as const;
 export type WalletOperationHumanActorType = (typeof WALLET_OPERATION_HUMAN_ACTOR_TYPES)[number];
 
 export type WalletOperationContext = Record<string, unknown>;
