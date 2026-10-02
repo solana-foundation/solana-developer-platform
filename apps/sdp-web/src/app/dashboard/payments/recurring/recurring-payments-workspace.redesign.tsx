@@ -278,28 +278,29 @@ export function RecurringPaymentsWorkspace({
           {t("DashboardPayments.newDesign.recurring.noMatches")}
         </p>
       ) : (
-        <div className="overflow-x-auto refresh:-mx-3">
-          {/* The design's columns, measured on its 852px list with the table's 12px overhang:
-              fixed, so a long schedule truncates instead of squeezing the dates. */}
+        <div className="mt-1.5 overflow-x-auto">
+          {/* The design's list: 26px under the toolbar, flush with the column (no overhang, the
+              edge cells unpadded), a header over a stronger rule, and the columns as measured on
+              its 852px list; fixed, so a long schedule truncates instead of squeezing the dates. */}
           <Table
-            className="min-w-[760px] table-fixed rounded-none border-0"
+            className="min-w-[760px] table-fixed rounded-none border-0 [&_td:first-child]:ps-0 [&_td:last-child]:pe-0 [&_th:first-child]:ps-0 [&_th:last-child]:pe-0"
             data-recurring-payments-table
           >
             <TableHeader>
-              <TableRow>
-                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[16.5%]")}>
+              <TableRow className="[&>th]:border-border-default">
+                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[15.2%]")}>
                   {t("DashboardPayments.status")}
                 </TableHead>
-                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[34%]")}>
+                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[35%]")}>
                   {t("DashboardPayments.recurring.schedule")}
                 </TableHead>
-                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[17.5%]")}>
+                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[18%]")}>
                   {t("DashboardPayments.recurring.repeats")}
                 </TableHead>
-                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[14.5%]")}>
+                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[15%]")}>
                   {t("DashboardPayments.recurring.nextRun")}
                 </TableHead>
-                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[17.5%]")}>
+                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[16.8%]")}>
                   {t("DashboardPayments.recurring.ends")}
                 </TableHead>
               </TableRow>

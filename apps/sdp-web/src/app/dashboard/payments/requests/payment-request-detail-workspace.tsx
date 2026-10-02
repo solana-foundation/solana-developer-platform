@@ -1,9 +1,11 @@
 "use client";
 
 import { CLUSTER_BY_SDP_ENVIRONMENT, type PaymentRequest } from "@sdp/types";
-import { CopyIcon } from "lucide-react";
+import { CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -46,7 +48,29 @@ function requestWhy(
     : t("DashboardPayments.requestDetail.why.expired");
 }
 
-/** The request's pay link on this origin, and the copy that puts it on the clipboard. */
+const QR_COLORS = { dark: "#0f0f12", light: "#ffffff" };
+
+/** The link drawn as a QR code, as a data URL once it is drawn; null before and without a link. */
+function useQrDataUrl(text: string, width: number): string | null {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!text) return;
+    let current = true;
+    void QRCode.toDataURL(text, { margin: 0, width, color: QR_COLORS }).then((drawn) => {
+      if (current) setDataUrl(drawn);
+    });
+    return () => {
+      current = false;
+    };
+  }, [text, width]);
+  return text ? dataUrl : null;
+}
+
+/**
+ * The request's pay link on this origin, as the design lays it out: its QR code on a 128px tile,
+ * the link beside it, and the copy, share and QR download under the link. A demo request lives
+ * in this browser only, so its actions say so instead of handing out a link nobody can open.
+ */
 function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symbol: string }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -54,21 +78,14 @@ function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symb
   // The link is on this origin; read after mount so the server render does not guess it.
   const [origin, setOrigin] = useState("");
   useEffect(() => setOrigin(window.location.origin), []);
-  const payLink = `${origin}/pay/${request.publicToken}`;
+  const payLink = origin ? `${origin}/pay/${request.publicToken}` : "";
+  const qrDataUrl = useQrDataUrl(payLink, 256);
+  const amount = `${formatDecimalAmount(request.amount, locale)} ${symbol}`;
 
-  // A demo request lives in this browser only, so the public pay page can't open its link.
-  if (demo) {
-    return (
-      <div className="flex flex-col gap-2 border-t border-border-default pt-4">
-        <span className="text-meta text-secondary">
-          {t("DashboardPayments.requestDetail.paymentLink")}
-        </span>
-        <p className="text-body text-secondary">{t("DashboardPayments.demo.noPayLink")}</p>
-      </div>
-    );
-  }
+  const demoOnly = () => toast.info(t("DashboardPayments.demo.noPayLink"));
 
   async function copyLink() {
+    if (demo) return demoOnly();
     try {
       await navigator.clipboard.writeText(payLink);
     } catch {
@@ -77,31 +94,92 @@ function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symb
     }
     toast.success(t("DashboardPayments.requestDetail.linkCopied"), {
       id: `request-link-${request.id}`,
-      description: t("DashboardPayments.requestDetail.linkCopiedDescription", {
-        amount: `${formatDecimalAmount(request.amount, locale)} ${symbol}`,
-      }),
+      description: t("DashboardPayments.requestDetail.linkCopiedDescription", { amount }),
     });
   }
 
+  // The browser's share sheet where there is one; copying stands in elsewhere.
+  async function shareLink() {
+    if (demo) return demoOnly();
+    if (typeof navigator.share !== "function") return copyLink();
+    try {
+      await navigator.share({
+        title: t("DashboardPayments.requestDetail.shareTitle", { amount }),
+        url: payLink,
+      });
+    } catch (error) {
+      // Closing the sheet rejects with AbortError; that is not a failure.
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        toast.error(t("DashboardPayments.record.copyFailed"));
+      }
+    }
+  }
+
+  async function downloadQrCode() {
+    if (demo) return demoOnly();
+    const file = await QRCode.toDataURL(payLink, { margin: 2, width: 512, color: QR_COLORS });
+    const anchor = document.createElement("a");
+    anchor.href = file;
+    anchor.download = `payment-request-${request.id}.png`;
+    anchor.click();
+  }
+
   return (
-    <div className="flex flex-col gap-2 border-t border-border-default pt-4">
-      <span className="text-meta text-secondary">
-        {t("DashboardPayments.requestDetail.paymentLink")}
-      </span>
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="min-w-0 flex-1 truncate font-mono text-body text-primary">
-          {origin ? payLink : null}
+    <div className="flex items-start gap-6 border-t border-border-default pt-4">
+      {/* The design's 128px tile: a 96px code on white with a 16px quiet zone. */}
+      <div className="size-32 shrink-0 rounded-xs bg-white p-4">
+        {qrDataUrl ? (
+          <Image
+            src={qrDataUrl}
+            alt={t("DashboardPayments.requestDetail.qrCodeAlt")}
+            width={96}
+            height={96}
+            unoptimized
+            className="size-full"
+          />
+        ) : (
+          <div className="size-full animate-pulse rounded-xs bg-fill" />
+        )}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <span className="text-meta text-secondary">
+          {t("DashboardPayments.requestDetail.paymentLink")}
         </span>
-        <Button
-          type="button"
-          variant={request.status === "awaiting_payment" ? "default" : "outline"}
-          size="sm"
-          iconLeft={<CopyIcon />}
-          disabled={!origin}
-          onClick={() => void copyLink()}
-        >
-          {t("Shared.SharedComponents.copyLink")}
-        </Button>
+        <span className="min-w-0 truncate font-mono text-body text-primary">{payLink || null}</span>
+        {/* 16px to the design's 30px buttons, 8px apart; the copy is filled while the request
+            can still be paid. */}
+        <div className="mt-2.5 flex flex-wrap items-center gap-2 [&_button]:[--button-height-md:1.875rem]">
+          <Button
+            type="button"
+            variant={request.status === "awaiting_payment" ? "default" : "outline"}
+            size="sm"
+            iconLeft={<CopyIcon />}
+            disabled={!origin}
+            onClick={() => void copyLink()}
+          >
+            {t("Shared.SharedComponents.copyLink")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            iconLeft={<Share2Icon />}
+            disabled={!origin}
+            onClick={() => void shareLink()}
+          >
+            {t("DashboardPayments.requestDetail.share")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            iconLeft={<DownloadIcon />}
+            disabled={!origin}
+            onClick={() => void downloadQrCode()}
+          >
+            {t("DashboardPayments.requestDetail.downloadQrCode")}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -175,9 +253,9 @@ function PaymentRequestRecord({
 
   return (
     <DashboardWorkspaceOverviewPanel>
-      {/* 24px between blocks, the band 4px nearer the title than a first block, the rows 8px
+      {/* 24px between blocks, the band 12px nearer the title than a first block, the rows 8px
           further from the link. */}
-      <div className="-mt-1 flex flex-col gap-6" data-payment-request-detail>
+      <div className="-mt-3 flex flex-col gap-6" data-payment-request-detail>
         <RecordStateBand
           state={t(REQUEST_STATUS_TRANSLATION_KEYS[request.status])}
           tone={REQUEST_STATUS_TONE[request.status]}

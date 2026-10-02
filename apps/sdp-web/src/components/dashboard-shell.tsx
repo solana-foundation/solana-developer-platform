@@ -941,14 +941,19 @@ export function DashboardShell({
                   ].join(" ")}
                 >
                   {/* Refresh: the gutter sits outside the centred column, so the title's left edge is
-                  the content's at every width; 44px above the title row (a 34px button sits on it)
-                  and 24px from the title to the tabs are the design's. */}
+                  the content's at every width; 44px above the title row (a 34px button sits on it),
+                  40px above a back link's row, and 24px from the title to the tabs are the
+                  design's. */}
                   <div
                     className={cn(
                       "shrink-0",
                       isRefresh && [
                         refreshGutterClass,
-                        pageConfig.flushTopOnDesktop ? "pt-6 md:pt-0" : "pt-6 md:pt-11",
+                        pageConfig.flushTopOnDesktop
+                          ? "pt-6 md:pt-0"
+                          : stacksBackAboveTitle
+                            ? "pt-6 md:pt-10"
+                            : "pt-6 md:pt-11",
                       ]
                     )}
                   >
