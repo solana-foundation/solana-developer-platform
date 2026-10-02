@@ -322,8 +322,8 @@ function SupplyBlock({
       <RecordAmount label={t("DashboardIssuance.newDesign.overview.issuedSupply")}>
         {formatDecimalAmount(token.totalSupply || "0", locale)}
       </RecordAmount>
-      {/* 20px from the amount to its terms, 8px from the terms to the description. */}
-      <div className="mt-5 mb-2">
+      {/* 26px from the amount to its terms, 8px from the terms to the description. */}
+      <div className="mt-6.5 mb-2">
         <RecordColumns>
           <dl>
             <RecordRow label={t("DashboardIssuance.newDesign.overview.supplyCap")}>

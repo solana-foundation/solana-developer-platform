@@ -273,9 +273,11 @@ export function StackedDashboardTopBar({
         </div>
       )}
       {/* An empty state whose action repeats this one (New, Add) hides it: the shell's
-          section is the `page` group and the state carries the attribute. */}
+          section is the `page` group and the state carries the attribute. An action marked
+          `data-align-title` (a token's Explorer) sits on the title's row rather than centred
+          beside the back link and the title together. */}
       {action ? (
-        <div className="col-span-3 row-start-3 mt-1 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-3 md:row-start-1 md:mt-0 md:ml-3">
+        <div className="col-span-3 row-start-3 mt-1 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-3 md:row-start-1 md:mt-0 md:ml-3 md:has-[[data-align-title]]:self-end">
           {action}
         </div>
       ) : null}
