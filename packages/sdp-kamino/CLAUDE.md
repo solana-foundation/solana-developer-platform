@@ -44,8 +44,11 @@ trip: instructions come back as plain objects with a numeric `AccountRole` and
 `Uint8Array` data, so kit 6.8 compiles and signs them unchanged — the boundary is
 real at the TYPE level and inert at RUNTIME.
 
-`src/sdk.ts` is the only module that may import `@kamino-finance/klend-sdk` or
-`decimal.js`. Everything crossing this package's surface is `@solana/kit` 6.8,
+`src/sdk.ts` is the only module that may import `@kamino-finance/klend-sdk` (its
+`dist/` subpaths included: the farm reader comes from `dist/classes/farm_utils.js`,
+which the SDK index does not re-export; keep the `.js`, the SDK has no exports
+map and plain Node ESM needs it) or `decimal.js`. Everything crossing this
+package's surface is `@solana/kit` 6.8,
 `@sdp/types`, or a **decimal string**. A `Decimal` escaping would also drag in the
 instance-identity hazard: klend-sdk compares with `instanceof Decimal`, so two
 physical copies degrade to NaN rather than to a type error — which is why the root
@@ -224,14 +227,16 @@ amount than it was asked for.
 
 ## Share balances are read in base units, never `uiAmount`
 
-`readKaminoPosition` computes UNSTAKED shares itself, from
+`readKaminoPositions` computes UNSTAKED shares itself, from
 `tokenAmount.amount` (the exact integer string), and takes only the STAKED half
-from `vault.getUserShares`. The SDK's own path sums
-`parsed.info.tokenAmount.uiAmount` — a JSON **number** — via
+from klend-sdk's own farm reader (`getUserSharesInTokensStakedInFarm`, the one
+`vault.getUserShares` calls), for the same farms. The SDK's own unstaked path
+sums `parsed.info.tokenAmount.uiAmount`, a JSON **number**, via
 `getTokenAccountAmount` (`utils/ata.ts`), so above 2^53 base units the value has
 already lost precision and no amount of `Decimal`-wrapping downstream recovers
-it. The staked half comes from farm state as an exact `Decimal`, so it is safe
-to reuse. Every matching token account is summed; if any returned account lacks
+it. The staked half is farm state scaled through a JS number (farms-sdk
+`scaleDownWads`), so it is exact only below 2^53 lamports; SDP itself never
+stakes. Every matching token account is summed; if any returned account lacks
 an exact raw amount, the entire position is unreadable rather than silently
 under-reported.
 
@@ -241,15 +246,19 @@ helper enumerates the configured kvault program plus the owner's farm and token
 accounts, so catalogue admission gates cannot hide an existing holding. Never
 return its balance values: they use the same lossy `uiAmount` path and overwrite
 rather than sum multiple token accounts. Every candidate is re-hydrated through
-`readKaminoPosition`, and exact zeroes are removed only after that read.
+`readKaminoPositions`, and exact zeroes are removed only after that read.
 
 ## RPC reads are bounded
 
 `rpc.ts` applies a 30-second deadline at the transport boundary shared with
 klend-sdk, so vault, reserve, farm, token-account, exchange-rate and slot reads
 cannot hold an API worker forever. Caller cancellation is composed with that
-deadline and remains distinguishable from a timeout. A portfolio page reads one
-shared slot, then hydrates at most four candidate holdings concurrently. An
+deadline and remains distinguishable from a timeout. Both clients send a read
+once more, immediately, when its pooled keep-alive socket died before any response
+(`withReadSocketRetry` from `@sdp/rpc`); sends, simulations and every other
+failure surface unchanged. A portfolio page reads one
+shared slot, then reads at most four share-account balances at a time (see
+"Position reads batch and share requests"). An
 empty request pays one on-chain program/owner census up front, then fans out only
 over vaults for which the SDK found a share-token account or farm position — not
 the whole raw registry and not the curated catalogue. Census failures propagate
@@ -260,6 +269,41 @@ against genesis-verified alternatives within one shared workflow deadline.
 Explicit cluster pins stay pinned. This runner never signs or broadcasts, and
 a stalled primary can exhaust the deadline before fallback. `VAULT_UNREADABLE`
 preserves its cause; an unreadable account alone does not prove a wrong cluster.
+
+## Position reads batch and share requests
+
+Every value is read live on every call; nothing is cached. A page is the slot,
+then ONE `getMultipleAccounts` for all its vault states, then ONE for the union
+of their reserves and the owner's farm user states, alongside one
+`getTokenAccountsByOwner` per vault. klend-sdk decodes those batched bytes
+through a read-only RPC over the batch (`readAccountBatch`), so its owner,
+discriminator and staked-share code runs unchanged; a read outside the batch
+fails closed. A vault with no configured farm reads no farm state. If the union
+read fails, the farm user states are re-read alone and each vault's reserves on
+their own (four at a time), so the share count survives and only a vault whose
+own reserve read failed goes without a value.
+
+`createKaminoReadRpc` keeps one transport per endpoint that shares identical
+in-flight requests, so owners hydrated together read the slot, a vault and
+(farm-less) its reserves once. Only `getSlot`, `getAccountInfo`,
+`getMultipleAccounts` and `getTokenAccountsByOwner` are shared; every other
+method (sends, simulations, blockhashes) passes straight through. It sits BELOW
+`withRpcReadContext`: a minimum-slot read never joins an unscoped one, and every
+consumer validates the context itself. The socket retry sits below the sharing,
+so a re-send serves every joiner with the scoped payload. Builds and quotes stay
+on `createKaminoRpc`.
+
+Builds and quotes carry what they need in their reserve read: the share ATA
+(deposit build, `createsShareAccount` from its decoded owner and mint), the
+global config (withdraw quote and build) and the lookup table (withdraw build,
+`jsonParsed` so the table comes back parsed while accounts without an RPC
+parser fall back to base64). A withdraw that needs no consolidation hands
+klend-sdk the ATA balance the share-account read returned instead of letting
+it read the ATA again. Devnet, 2026-10-02: two owners in one farm vault went
+from 12 requests to 6 and a withdraw build from 7 to 4, values identical.
+
+The page `getSlot` stays: pricing at the reserves read's context slot would
+move values (about 564 base units per slot on a 1M-share holding with borrows).
 
 ## Tests
 
