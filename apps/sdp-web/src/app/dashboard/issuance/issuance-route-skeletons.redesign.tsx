@@ -21,7 +21,7 @@ export function IssuanceListRowsSkeleton() {
       {ROWS.map((row) => (
         <div
           key={row}
-          className="grid grid-cols-[36px_minmax(0,1fr)_max-content] items-center gap-x-3 border-b border-border-subtle py-4.25"
+          className="grid grid-cols-[36px_minmax(0,1fr)_max-content] items-center gap-x-3 border-b border-border-subtle py-4.5"
         >
           <Pulse className="size-9 rounded-full" />
           <div className="flex flex-col gap-1.5">

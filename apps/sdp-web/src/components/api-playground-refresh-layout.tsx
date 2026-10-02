@@ -44,8 +44,8 @@ const SNIPPET_LANGUAGE_NAMES: Record<SnippetLanguage, string> = {
 const TAB_LIST_CLASS =
   "gap-6.5 [&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)]";
 
-// On a phone the design swaps each view's underline tabs for a 30px chip group with 14px labels.
-const PHONE_CHIP_CLASS = "refresh:px-2 refresh:py-[3px] refresh:text-body";
+// On a phone the design swaps each view's underline tabs for a 32px chip group with 14px labels.
+const PHONE_CHIP_CLASS = "refresh:px-2 refresh:py-1 refresh:text-body";
 
 // The design's playground fields: 36px underline controls with 14px values, tracked -0.01em
 // like the deck's other controls.
