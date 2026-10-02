@@ -46,6 +46,7 @@ function renderColdLoad(pathname: string): string {
     <DashboardShell
       flags={{
         assetProfiles: false,
+        compliance: false,
         custody: false,
         dvp: false,
         earn: false,
@@ -57,6 +58,7 @@ function renderColdLoad(pathname: string): string {
         privateChannels: false,
         // The preparation screen has no flags and draws the previous design; the shell matches it.
         newDesign: false,
+        ramps: true,
       }}
     >
       <div>settled route content</div>
@@ -70,7 +72,7 @@ const identityTranslate = ((key: string) => key) as Parameters<typeof getDashboa
 
 /** What the settled shell puts on its centred content column, per dashboard-shell.tsx. */
 function settledContentWidthClassFor(pathname: string): string {
-  const config = getDashboardPageConfig(pathname, identityTranslate, false, false);
+  const config = getDashboardPageConfig(pathname, identityTranslate, false, false, []);
   return config.contentWidthClass ?? "max-w-5xl";
 }
 
@@ -134,10 +136,10 @@ describe("dashboard cold load", () => {
   it("titles Helius Rings and the Members redirect instead of falling through to Home", () => {
     const t = identityTranslate;
 
-    expect(getDashboardPageConfig("/dashboard/helius-rings", t, false, false).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/helius-rings", t, false, false, []).title).toBe(
       "Shared.dashboardShell.heliusRings"
     );
-    expect(getDashboardPageConfig("/dashboard/members", t, false, false).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/members", t, false, false, []).title).toBe(
       "Shared.dashboardShell.settings"
     );
   });

@@ -98,6 +98,7 @@ function WorkspaceFixture() {
         dashboardAccess={resolveDashboardAccess("org:admin")}
         flags={{
           assetProfiles: false,
+          compliance: false,
           custody: false,
           dvp: false,
           earn: false,
@@ -108,6 +109,7 @@ function WorkspaceFixture() {
           policies: false,
           privateChannels: false,
           newDesign: true,
+          ramps: false,
         }}
         serverDashboardCacheScope={{ orgId: "org-a", userId: "user-a" }}
         projects={projects}

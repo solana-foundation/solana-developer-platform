@@ -28,12 +28,15 @@ function policyBinding(
   };
 }
 
+const WITH_POLICIES = { policiesInReleaseChannel: true };
+const WITHOUT_POLICIES = { policiesInReleaseChannel: false };
+
 describe("API-key authoring", () => {
   it("leaves the no-policy create flow unchanged", () => {
     const draft = createApiKeyAuthoringDraft();
 
     expect(buildApiKeyPolicyRules(draft)).toEqual([]);
-    expect(getPolicyBindingIntent("create", null, draft)).toEqual({ mode: "none" });
+    expect(getPolicyBindingIntent("create", null, draft, WITH_POLICIES)).toEqual({ mode: "none" });
   });
 
   it("builds selected-wallet and all-wallet endpoint scope", () => {
@@ -137,12 +140,13 @@ describe("API-key authoring", () => {
       restrictionsEnabled: true,
       restrictionsEdited: true,
     };
-    const replaceIntent = getPolicyBindingIntent("edit", initial, replacement);
-    const clearIntent = getPolicyBindingIntent("edit", initial, {
-      ...replacement,
-      restrictionsEnabled: false,
-      restrictionsEdited: false,
-    });
+    const replaceIntent = getPolicyBindingIntent("edit", initial, replacement, WITH_POLICIES);
+    const clearIntent = getPolicyBindingIntent(
+      "edit",
+      initial,
+      { ...replacement, restrictionsEnabled: false, restrictionsEdited: false },
+      WITH_POLICIES
+    );
 
     expect(requiredBindingConfirmation(replaceIntent)).toBe("replace");
     expect(replaceIntent).toMatchObject({
@@ -168,6 +172,83 @@ describe("API-key authoring", () => {
       restrictionsEdited: false,
     };
 
-    expect(getPolicyBindingIntent("edit", initial, draft)).toEqual({ mode: "none" });
+    expect(getPolicyBindingIntent("edit", initial, draft, WITH_POLICIES)).toEqual({ mode: "none" });
+  });
+});
+
+describe("API-key policy bindings without the Policies module", () => {
+  const restrictedKey = {
+    walletScope: "selected" as const,
+    selectedWalletIds: ["wallet_a"],
+    policyBindings: [policyBinding()],
+  };
+  const unchangedDraft = {
+    ...createApiKeyAuthoringDraft(),
+    walletScope: "selected" as const,
+    selectedWalletIds: ["wallet_a"],
+    defaultWalletId: "wallet_a",
+    restrictionsEnabled: true,
+    restrictionsEdited: false,
+  };
+  const blocked = { mode: "blocked", reason: "policies_unavailable" };
+
+  it("leaves an unchanged wallet scope alone, so only the key itself is saved", () => {
+    expect(getPolicyBindingIntent("edit", restrictedKey, unchangedDraft, WITHOUT_POLICIES)).toEqual(
+      { mode: "none" }
+    );
+    expect(
+      getPolicyBindingIntent(
+        "edit",
+        { ...restrictedKey, policyBindings: [] },
+        { ...unchangedDraft, walletScope: "all", restrictionsEnabled: false },
+        WITHOUT_POLICIES
+      )
+    ).toEqual({ mode: "none" });
+  });
+
+  it("blocks a wallet-scope change on a key with bindings, where the API would refuse the rebind", () => {
+    // With Policies the same edit rebinds the existing restrictions.
+    const rescoped = { ...unchangedDraft, selectedWalletIds: ["wallet_a", "wallet_b"] };
+    expect(getPolicyBindingIntent("edit", restrictedKey, rescoped, WITH_POLICIES)).toMatchObject({
+      mode: "replace",
+    });
+    expect(getPolicyBindingIntent("edit", restrictedKey, rescoped, WITHOUT_POLICIES)).toEqual(
+      blocked
+    );
+    expect(
+      getPolicyBindingIntent(
+        "edit",
+        restrictedKey,
+        { ...unchangedDraft, walletScope: "all" },
+        WITHOUT_POLICIES
+      )
+    ).toEqual(blocked);
+  });
+
+  it("blocks adding, editing or clearing restrictions instead of calling the policy endpoints", () => {
+    expect(
+      getPolicyBindingIntent(
+        "create",
+        null,
+        { ...createApiKeyAuthoringDraft(), restrictionsEnabled: true, restrictionsEdited: true },
+        WITHOUT_POLICIES
+      )
+    ).toEqual(blocked);
+    expect(
+      getPolicyBindingIntent(
+        "edit",
+        restrictedKey,
+        { ...unchangedDraft, restrictionsEdited: true },
+        WITHOUT_POLICIES
+      )
+    ).toEqual(blocked);
+    expect(
+      getPolicyBindingIntent(
+        "edit",
+        restrictedKey,
+        { ...unchangedDraft, restrictionsEnabled: false },
+        WITHOUT_POLICIES
+      )
+    ).toEqual(blocked);
   });
 });

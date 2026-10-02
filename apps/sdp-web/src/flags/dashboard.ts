@@ -13,9 +13,13 @@ import {
 } from "@/flags";
 import { getDesignModuleFlags } from "@/flags/new-design";
 import type { DesignModuleFlags } from "@/lib/design-modules";
+import { isComplianceEnabled } from "./compliance";
+import { isRampsEnabled } from "./ramps";
 
 export type DashboardFlags = {
   assetProfiles: boolean;
+  /** Compliance integrations: module in the release channel and the `policies` flag on. */
+  compliance: boolean;
   custody: boolean;
   dvp: boolean;
   earn: boolean;
@@ -29,6 +33,7 @@ export type DashboardFlags = {
   payments: boolean;
   policies: boolean;
   privateChannels: boolean;
+  ramps: boolean;
 };
 
 /**
@@ -44,6 +49,7 @@ export type DashboardFlags = {
 export async function getDashboardFlags(): Promise<DashboardFlags> {
   const [
     assetProfilesEnabled,
+    complianceEnabled,
     custodyEnabled,
     dvpEnabled,
     earnEnabled,
@@ -55,8 +61,10 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     paymentsEnabled,
     policiesEnabled,
     privateChannelsEnabled,
+    rampsEnabled,
   ] = await Promise.all([
     assetProfiles(),
+    isComplianceEnabled(),
     custody(),
     dvp(),
     earn(),
@@ -68,10 +76,12 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     payments(),
     policies(),
     privateChannels(),
+    isRampsEnabled(),
   ]);
 
   return {
     assetProfiles: assetProfilesEnabled,
+    compliance: complianceEnabled,
     custody: custodyEnabled,
     dvp: dvpEnabled,
     earn: earnEnabled,
@@ -83,5 +93,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     payments: paymentsEnabled,
     policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
+    ramps: rampsEnabled,
   };
 }

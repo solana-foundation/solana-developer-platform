@@ -11,6 +11,7 @@ import type {
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import {
@@ -370,11 +371,19 @@ export async function saveApiKeyAuthoringAction(
   }
 
   const walletPayload = buildEndpointWalletPayload(input.draft);
+  // The API refuses policy configuration outside the release channel; decide that here, not in the browser.
+  const policiesInReleaseChannel = isModuleInDeploymentReleaseChannel("policies");
 
   try {
     const client = await createSdpApiClient();
 
     if (input.mode === "create") {
+      const createIntent = getPolicyBindingIntent("create", null, input.draft, {
+        policiesInReleaseChannel,
+      });
+      if (createIntent.mode === "blocked") {
+        return { ok: false, message: t("DashboardCustody.apiKeyRestrictionsNeedPolicies") };
+      }
       const created = await client.fetch<{
         apiKey: { id: string; name: string; key: string; keyPrefix: string };
       }>("/v1/api-keys", {
@@ -433,13 +442,17 @@ export async function saveApiKeyAuthoringAction(
         selectedWalletIds: apiKey.signingWalletIds,
         policyBindings: apiKey.policyBindings,
       },
-      input.draft
+      input.draft,
+      { policiesInReleaseChannel }
     );
 
     if (bindingIntent.mode === "blocked") {
       return {
         ok: false,
-        message: t("DashboardCustody.apiKeyRestrictionReplacementRequired"),
+        message:
+          bindingIntent.reason === "policies_unavailable"
+            ? t("DashboardCustody.apiKeyScopeLockedWithoutPolicies")
+            : t("DashboardCustody.apiKeyRestrictionReplacementRequired"),
       };
     }
 

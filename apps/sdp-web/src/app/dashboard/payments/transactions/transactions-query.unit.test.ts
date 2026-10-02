@@ -1,3 +1,4 @@
+import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   parseTransactionFilters,
@@ -6,10 +7,13 @@ import {
   toTransactionsApiQuery,
 } from "./transactions-query";
 
+const parseAll = (searchParams: Parameters<typeof parseTransactionFilters>[0]) =>
+  parseTransactionFilters(searchParams, UNIFIED_TRANSACTION_MODULES);
+
 describe("transaction filter query", () => {
   it("parses valid fields independently", () => {
     expect(
-      parseTransactionFilters({
+      parseAll({
         tab: "payments",
         status: "succeeded",
         counterpartyId: "  cpty_42  ",
@@ -31,7 +35,7 @@ describe("transaction filter query", () => {
 
   it("treats every malformed URL field as absent without dropping valid fields", () => {
     expect(() =>
-      parseTransactionFilters({
+      parseAll({
         tab: "unknown",
         status: "complete",
         search: "xy",
@@ -41,7 +45,7 @@ describe("transaction filter query", () => {
       })
     ).not.toThrow();
     expect(
-      parseTransactionFilters({
+      parseAll({
         tab: "unknown",
         status: "complete",
         search: "xy",
@@ -53,15 +57,21 @@ describe("transaction filter query", () => {
   });
 
   it("maps the shared tab param: a module id selects it, all and unknown mean the default", () => {
-    expect(parseTransactionModule("earn")).toBe("earn");
-    expect(parseTransactionModule("all")).toBeUndefined();
-    expect(parseTransactionModule(null)).toBeUndefined();
-    expect(parseTransactionModule("unknown")).toBeUndefined();
-    expect(parseTransactionFilters({ tab: "all" }).module).toBeUndefined();
+    expect(parseTransactionModule("earn", UNIFIED_TRANSACTION_MODULES)).toBe("earn");
+    expect(parseTransactionModule("all", UNIFIED_TRANSACTION_MODULES)).toBeUndefined();
+    expect(parseTransactionModule(null, UNIFIED_TRANSACTION_MODULES)).toBeUndefined();
+    expect(parseTransactionModule("unknown", UNIFIED_TRANSACTION_MODULES)).toBeUndefined();
+    expect(parseAll({ tab: "all" }).module).toBeUndefined();
+  });
+
+  it("treats a module the dashboard does not show as the default tab", () => {
+    expect(parseTransactionModule("issuance", ["payments"])).toBeUndefined();
+    expect(parseTransactionFilters({ tab: "issuance" }, ["payments"]).module).toBeUndefined();
+    expect(parseTransactionFilters({ tab: "payments" }, ["payments"]).module).toBe("payments");
   });
 
   it("serializes filters to tab and translates date boundaries for the API", () => {
-    const filters = parseTransactionFilters({
+    const filters = parseAll({
       tab: "earn",
       counterpartyId: "cpty_42",
       from: "2026-07-01",

@@ -125,6 +125,7 @@ async function renderControlList(
         dashboardAccess={resolveDashboardAccess("org:admin")}
         flags={{
           assetProfiles: true,
+          compliance: false,
           custody: true,
           dvp: false,
           earn: false,
@@ -135,6 +136,7 @@ async function renderControlList(
           policies: false,
           privateChannels: false,
           newDesign: true,
+          ramps: false,
         }}
         serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
         projects={[]}

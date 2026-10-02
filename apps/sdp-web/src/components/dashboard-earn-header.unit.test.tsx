@@ -6,7 +6,7 @@ const t = ((key: string) => key) as Translate;
 
 describe("Markets dashboard headers", () => {
   it("centers the Markets landing title without header tabs", () => {
-    const config = getDashboardPageConfig("/dashboard/markets", t, false, false);
+    const config = getDashboardPageConfig("/dashboard/markets", t, false, false, []);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
@@ -21,7 +21,7 @@ describe("Markets dashboard headers", () => {
     "/dashboard/markets/embedded-yield",
     "/dashboard/markets/dvp",
   ])("centers the shared Markets title without redundant route tabs for %s", (pathname) => {
-    const config = getDashboardPageConfig(pathname, t, false, false);
+    const config = getDashboardPageConfig(pathname, t, false, false, []);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
@@ -37,7 +37,8 @@ describe("Markets dashboard headers", () => {
       "/dashboard/markets/embedded-yield/integrate",
       t,
       false,
-      false
+      false,
+      []
     );
 
     expect(config).toMatchObject({
@@ -53,7 +54,8 @@ describe("Markets dashboard headers", () => {
       "/dashboard/markets/embedded-yield/configure",
       t,
       false,
-      false
+      false,
+      []
     );
 
     expect(config).toMatchObject({
@@ -71,6 +73,7 @@ describe("Integrations dashboard headers", () => {
       t,
       false,
       true,
+      [],
       true,
       true,
       true
@@ -85,6 +88,7 @@ describe("Integrations dashboard headers", () => {
       t,
       false,
       false,
+      [],
       false,
       false,
       false
@@ -96,7 +100,7 @@ describe("Integrations dashboard headers", () => {
 
 describe("Policies dashboard headers", () => {
   it("keeps only API key policies when Custody is disabled", () => {
-    const config = getDashboardPageConfig("/dashboard/policies", t, false, false, false);
+    const config = getDashboardPageConfig("/dashboard/policies", t, false, false, [], false);
 
     expect(config.headerTabs?.tabs.map((tab) => tab.id)).toEqual(["api_keys"]);
   });
@@ -169,14 +173,16 @@ describe("dashboard route headers", () => {
     ["/dashboard/allowlist", "Shared.dashboardShell.allowlist"],
     ["/dashboard/unknown", "Shared.dashboardShell.home"],
   ])("maps %s to its route-specific title", (pathname, title) => {
-    expect(getDashboardPageConfig(pathname, t, false, true, true, true, true).title).toBe(title);
+    expect(getDashboardPageConfig(pathname, t, false, true, [], true, true, true).title).toBe(
+      title
+    );
   });
 
   it("uses the asset-management header only for enabled Asset Profiles", () => {
-    expect(getDashboardPageConfig("/dashboard/issuance/token_1", t, true, false).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/issuance/token_1", t, true, false, []).title).toBe(
       "Shared.dashboardShell.assetManagement"
     );
-    expect(getDashboardPageConfig("/dashboard/issuance/token_1", t, false, false).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/issuance/token_1", t, false, false, []).title).toBe(
       "Shared.dashboardShell.issuance"
     );
   });

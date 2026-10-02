@@ -117,6 +117,7 @@ services:
     ports:
       - "${SDP_WEB_PORT:-3000}:3000"
     environment:
+      SDP_RELEASE_CHANNEL: ${SDP_RELEASE_CHANNEL:-experimental}
       PRIVATE_CHANNELS_ENABLED: ${PRIVATE_CHANNELS_ENABLED:-false}
       CUSTODY_ENABLED: ${CUSTODY_ENABLED:-false}
       ISSUANCE_ENABLED: ${ISSUANCE_ENABLED:-false}

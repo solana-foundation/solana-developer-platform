@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import type { ComponentProps } from "react";
+import { enabledTransactionModules } from "@/app/dashboard/payments/transactions/transaction-modules";
 import { getDashboardPageConfig } from "@/components/dashboard-header";
 import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
@@ -33,6 +34,7 @@ export function DashboardLoadingScreen({
     t,
     flags?.assetProfiles ?? false,
     flags?.privateChannels ?? false,
+    flags === undefined ? [] : enabledTransactionModules(flags),
     flags?.custody,
     flags?.payments,
     flags?.policies,
