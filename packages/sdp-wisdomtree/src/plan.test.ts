@@ -181,6 +181,10 @@ describe("buildWisdomTreeDepositPlan", () => {
       onReceiptUsdcAta,
       OWNER,
     ]);
+    // The mint and both measured ATAs, in one request.
+    expect(reader.requests).toEqual([
+      [WTGXX.mint, await ata(OWNER, WTGXX.mint, TOKEN_2022), onReceiptUsdcAta],
+    ]);
   });
 
   it("creates the on-receipt USDC ATA only when it is measured absent", async () => {

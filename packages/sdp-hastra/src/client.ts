@@ -197,13 +197,13 @@ function legacyTicketAddress(deployment: HastraDeployment, owner: PublicKey): Pu
   return pda(new PublicKey(deployment.vaultStakeProgramAddress), "ticket", owner.toBytes())[0];
 }
 
-async function readLegacyTicket(
-  runtime: HastraRuntime,
+/** `account` is the live read of `legacyTicketAddress(owner)`. */
+function decodeLegacyTicket(
+  account: RpcAccount | null,
   config: HastraClusterConfig,
   owner: PublicKey
-): Promise<PublicKey | null> {
+): PublicKey | null {
   const ticket = legacyTicketAddress(config.deployment, owner);
-  const account = await getAccount(runtime, ticket.toBase58());
   if (!account) return null;
   assertOwned(account, config.deployment.vaultStakeProgramAddress, "Hastra legacy ticket");
   assertDiscriminator(account.data, "account", "UnbondingTicket");
@@ -359,11 +359,19 @@ function decodeRpcAccount(value: RpcAccountWire | null, address: string): RpcAcc
   return { data: Buffer.from(encoded, "base64"), executable: value.executable, owner: value.owner };
 }
 
-async function getMultipleAccounts(
+function decodeRpcAccounts(
+  values: readonly (RpcAccountWire | null)[],
+  addresses: readonly string[]
+): (RpcAccount | null)[] {
+  return addresses.map((address, index) => decodeRpcAccount(values[index] ?? null, address));
+}
+
+/** `getMultipleAccounts` left undecoded, so each account is decoded where it is checked. */
+async function getMultipleAccountWires(
   runtime: HastraRuntime,
   addresses: readonly string[],
-  code: SdpHastraErrorCode = "PROGRAM_MISMATCH"
-): Promise<(RpcAccount | null)[]> {
+  code: SdpHastraErrorCode
+): Promise<(RpcAccountWire | null)[]> {
   const result = await rpcRequest<{ value?: (RpcAccountWire | null)[] }>(
     runtime,
     "getMultipleAccounts",
@@ -374,7 +382,15 @@ async function getMultipleAccounts(
   if (!Array.isArray(result.value) || result.value.length !== addresses.length) {
     throw new SdpHastraError(code, "The Solana RPC returned an incomplete Hastra account set.");
   }
-  return result.value.map((value, index) => decodeRpcAccount(value, addresses[index] ?? "unknown"));
+  return result.value;
+}
+
+async function getMultipleAccounts(
+  runtime: HastraRuntime,
+  addresses: readonly string[],
+  code: SdpHastraErrorCode = "PROGRAM_MISMATCH"
+): Promise<(RpcAccount | null)[]> {
+  return decodeRpcAccounts(await getMultipleAccountWires(runtime, addresses, code), addresses);
 }
 
 async function getAccount(
@@ -412,6 +428,77 @@ interface RpcTransactionLifecycle {
 
 function nonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * The vault token accounts the live configs named at the last validated state
+ * read, per cluster. They ride in the identity request and stand in for a
+ * vault read only where a live config still names the same address, so they
+ * are never trusted and need no TTL.
+ */
+const namedVaults = new Map<SolanaCluster, readonly string[]>();
+
+/** Rent-exempt minimums are static per (cluster, endpoint, size). */
+const RENT_MINIMUM_TTL_MS = 600_000;
+const rentMinimums = new Map<string, { lamports: Promise<number>; expiresAt: number | null }>();
+
+/** Test seam: forget remembered vault addresses and rent minimums. */
+export function resetHastraReadCaches(): void {
+  namedVaults.clear();
+  rentMinimums.clear();
+}
+
+/** Shared while in flight, kept for the TTL on success, never kept on failure. */
+async function rentExemptMinimum(
+  runtime: HastraRuntime,
+  bytes: number,
+  label: string
+): Promise<number> {
+  // A digest, so no key holds the RPC URL or its API key.
+  const endpoint = createHash("sha256").update(runtime.rpcUrl).digest("hex").slice(0, 16);
+  const key = `${runtime.cluster}\n${endpoint}\n${bytes}`;
+  let entry = rentMinimums.get(key);
+  if (entry && entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
+    rentMinimums.delete(key);
+    entry = undefined;
+  }
+  if (!entry) {
+    entry = { lamports: readRentExemptMinimum(runtime, bytes, label), expiresAt: null };
+    rentMinimums.set(key, entry);
+  }
+  const current = entry;
+  try {
+    const lamports = await current.lamports;
+    if (rentMinimums.get(key) === current && current.expiresAt === null) {
+      current.expiresAt = Date.now() + RENT_MINIMUM_TTL_MS;
+    }
+    return lamports;
+  } catch (cause) {
+    if (rentMinimums.get(key) === current) rentMinimums.delete(key);
+    throw cause;
+  }
+}
+
+async function readRentExemptMinimum(
+  runtime: HastraRuntime,
+  bytes: number,
+  label: string
+): Promise<number> {
+  const lamports = await rpcRequest<number>(
+    runtime,
+    // biome-ignore lint/security/noSecrets: public Solana JSON-RPC method name, not a credential.
+    "getMinimumBalanceForRentExemption",
+    [bytes, { commitment: "confirmed" }],
+    "PROGRAM_MISMATCH",
+    `reading ${label} rent`
+  );
+  if (!nonNegativeSafeInteger(lamports)) {
+    throw new SdpHastraError(
+      "PROGRAM_MISMATCH",
+      `The Solana RPC returned an invalid ${label} rent.`
+    );
+  }
+  return lamports;
 }
 
 /**
@@ -858,6 +945,20 @@ async function loadHastraState(
   runtime: HastraRuntime,
   config: HastraClusterConfig
 ): Promise<HastraState> {
+  return (await readHastraState(runtime, config)).state;
+}
+
+/**
+ * The validated live state in one request when the configs still name the
+ * remembered vaults, else two. `extra`, the operation's own accounts, rides
+ * the first request (so they fail as `PROGRAM_MISMATCH`, as their own reads
+ * did) and comes back undecoded, for the operation to decode where it reads it.
+ */
+async function readHastraState(
+  runtime: HastraRuntime,
+  config: HastraClusterConfig,
+  extra: readonly string[] = []
+): Promise<{ state: HastraState; extra: (RpcAccountWire | null)[] }> {
   const { deployment } = config;
   const addresses = deriveHastraAddresses(deployment);
   const firstAddresses = [
@@ -872,7 +973,13 @@ async function loadHastraState(
     deployment.wYldsMint,
     deployment.primeMint,
   ] as const;
-  const first = await getMultipleAccounts(runtime, firstAddresses);
+  const remembered = namedVaults.get(config.cluster) ?? [];
+  const values = await getMultipleAccountWires(
+    runtime,
+    [...firstAddresses, ...remembered, ...extra],
+    "PROGRAM_MISMATCH"
+  );
+  const first = decodeRpcAccounts(values, firstAddresses);
   const [mintProgram, stakeProgram] = first;
   if (
     !mintProgram?.executable ||
@@ -979,7 +1086,18 @@ async function loadHastraState(
     mintConfig.redeemVault,
     stakeVaultConfig.vaultTokenAccount,
   ] as const;
-  const vaultAccounts = await getMultipleAccounts(runtime, vaultAddresses);
+  const held = new Map<string, RpcAccountWire | null>(
+    remembered.map((address, index) => [address, values[firstAddresses.length + index] ?? null])
+  );
+  const unread = vaultAddresses.filter((address) => !held.has(address));
+  if (unread.length > 0) {
+    const reread = await getMultipleAccountWires(runtime, unread, "PROGRAM_MISMATCH");
+    for (const [index, address] of unread.entries()) held.set(address, reread[index] ?? null);
+  }
+  const vaultAccounts = decodeRpcAccounts(
+    vaultAddresses.map((address) => held.get(address) ?? null),
+    vaultAddresses
+  );
   const depositVault = decodeTokenAccount(
     requiredAccount(vaultAccounts[0] ?? null, mintVaultConfig.address),
     "Hastra USDC deposit vault",
@@ -1001,18 +1119,22 @@ async function loadHastraState(
     deployment.wYldsMint,
     addresses.stakeVaultAuthority
   );
+  namedVaults.set(config.cluster, vaultAddresses);
 
   return {
-    addresses,
-    mintConfig,
-    stakeConfig,
-    stakePrice,
-    mintVaultTokenAccount: mintVaultConfig.address,
-    stakeVaultTokenAccount: stakeVaultConfig.vaultTokenAccount,
-    stakeVaultLiquidity: stakeVault.amount,
-    depositVaultFrozen: depositVault.frozen,
-    redeemVaultFrozen: redeemVault.frozen,
-    stakeVaultFrozen: stakeVault.frozen,
+    state: {
+      addresses,
+      mintConfig,
+      stakeConfig,
+      stakePrice,
+      mintVaultTokenAccount: mintVaultConfig.address,
+      stakeVaultTokenAccount: stakeVaultConfig.vaultTokenAccount,
+      stakeVaultLiquidity: stakeVault.amount,
+      depositVaultFrozen: depositVault.frozen,
+      redeemVaultFrozen: redeemVault.frozen,
+      stakeVaultFrozen: stakeVault.frozen,
+    },
+    extra: values.slice(firstAddresses.length + remembered.length),
   };
 }
 
@@ -1150,20 +1272,11 @@ async function transientTokenAccountPlan(args: {
   refundTo: PublicKey;
   amount: bigint;
 }): Promise<TransientTokenAccountPlan> {
-  const rentLamports = await rpcRequest<number>(
+  const rentLamports = await rentExemptMinimum(
     args.runtime,
-    // biome-ignore lint/security/noSecrets: public Solana JSON-RPC method name, not a credential.
-    "getMinimumBalanceForRentExemption",
-    [CLASSIC_TOKEN_ACCOUNT_BYTES, { commitment: "confirmed" }],
-    "PROGRAM_MISMATCH",
-    "reading classic token-account rent"
+    CLASSIC_TOKEN_ACCOUNT_BYTES,
+    "classic token-account"
   );
-  if (!nonNegativeSafeInteger(rentLamports)) {
-    throw new SdpHastraError(
-      "PROGRAM_MISMATCH",
-      "The Solana RPC returned an invalid classic token-account rent."
-    );
-  }
   const seed = `sdp-hastra-${randomBytes(10).toString("hex")}`;
   const tokenProgram = new PublicKey(TOKEN_PROGRAM_ID);
   const address = await PublicKey.createWithSeed(args.owner, seed, tokenProgram);
@@ -1447,20 +1560,11 @@ async function admitParRequest(args: {
   // prefund as dust, the same bounded residual the Veda allowed-user prefund
   // accepts.
   if (!args.sponsor) return { request, prefund: undefined };
-  const requestRentLamports = await rpcRequest<number>(
+  const requestRentLamports = await rentExemptMinimum(
     args.runtime,
-    // biome-ignore lint/security/noSecrets: public Solana JSON-RPC method name, not a credential.
-    "getMinimumBalanceForRentExemption",
-    [REDEMPTION_REQUEST_ACCOUNT_BYTES, { commitment: "confirmed" }],
-    "PROGRAM_MISMATCH",
-    "reading redemption-request rent"
+    REDEMPTION_REQUEST_ACCOUNT_BYTES,
+    "redemption-request"
   );
-  if (!nonNegativeSafeInteger(requestRentLamports)) {
-    throw new SdpHastraError(
-      "PROGRAM_MISMATCH",
-      "The Solana RPC returned an invalid redemption-request rent."
-    );
-  }
   return {
     request,
     prefund: prefundOwnerRentInstruction(args.sponsor, args.owner, BigInt(requestRentLamports)),
@@ -1794,7 +1898,14 @@ export class HastraVaultDirectClient
       "Building the Hastra USDC to PRIME deposit",
       async (runtime, config) => {
         this.assertKnownReference(config, input.providerReference);
-        const state = await loadHastraState(runtime, config);
+        const usdc = new PublicKey(config.depositMint);
+        const wylds = new PublicKey(config.deployment.wYldsMint);
+        const prime = new PublicKey(config.deployment.primeMint);
+        const userUsdc = associatedTokenAddress(owner, usdc);
+        const userWylds = associatedTokenAddress(owner, wylds);
+        const userPrime = associatedTokenAddress(owner, prime);
+        const ownerAccounts = [userUsdc.toBase58(), userWylds.toBase58(), userPrime.toBase58()];
+        const { state, extra } = await readHastraState(runtime, config, ownerAccounts);
         assertNoBlockingIssues(depositBlockingIssues(state), "DEPOSIT_REFUSED", "The deposit");
         const shares = sharesForAssets(amount.atoms, state.stakePrice);
         if (shares === 0n) {
@@ -1804,15 +1915,9 @@ export class HastraVaultDirectClient
           );
         }
 
-        const usdc = new PublicKey(config.depositMint);
-        const wylds = new PublicKey(config.deployment.wYldsMint);
-        const prime = new PublicKey(config.deployment.primeMint);
-        const userUsdc = associatedTokenAddress(owner, usdc);
-        const userWylds = associatedTokenAddress(owner, wylds);
-        const userPrime = associatedTokenAddress(owner, prime);
-        const [userUsdcAccount, userWyldsAccount, userPrimeAccount] = await getMultipleAccounts(
-          runtime,
-          [userUsdc.toBase58(), userWylds.toBase58(), userPrime.toBase58()]
+        const [userUsdcAccount, userWyldsAccount, userPrimeAccount] = decodeRpcAccounts(
+          extra,
+          ownerAccounts
         );
         assertOwnerTokenUsable(
           userUsdcAccount ?? null,
@@ -1933,7 +2038,15 @@ export class HastraVaultDirectClient
       "Building the Hastra PRIME DEX exit",
       async (runtime, config, assertActive) => {
         this.assertKnownReference(config, input.providerReference);
-        const state = await loadHastraState(runtime, config);
+        const wylds = new PublicKey(config.deployment.wYldsMint);
+        const prime = new PublicKey(config.deployment.primeMint);
+        const usdc = new PublicKey(config.depositMint);
+        const userWylds = associatedTokenAddress(owner, wylds);
+        const userPrime = associatedTokenAddress(owner, prime);
+        const userUsdc = associatedTokenAddress(owner, usdc);
+        const ownerAccounts = [userWylds.toBase58(), userPrime.toBase58(), userUsdc.toBase58()];
+        const ticket = legacyTicketAddress(config.deployment, owner).toBase58();
+        const { state, extra } = await readHastraState(runtime, config, [...ownerAccounts, ticket]);
         assertNoBlockingIssues(stakeBlockingIssues(state), "WITHDRAW_REFUSED", "The DEX exit");
         const wyldsAtoms = assetsForShares(shares.atoms, state.stakePrice);
         if (wyldsAtoms === 0n) {
@@ -1949,15 +2062,9 @@ export class HastraVaultDirectClient
           );
         }
 
-        const wylds = new PublicKey(config.deployment.wYldsMint);
-        const prime = new PublicKey(config.deployment.primeMint);
-        const usdc = new PublicKey(config.depositMint);
-        const userWylds = associatedTokenAddress(owner, wylds);
-        const userPrime = associatedTokenAddress(owner, prime);
-        const userUsdc = associatedTokenAddress(owner, usdc);
-        const [userWyldsAccount, userPrimeAccount, userUsdcAccount] = await getMultipleAccounts(
-          runtime,
-          [userWylds.toBase58(), userPrime.toBase58(), userUsdc.toBase58()]
+        const [userWyldsAccount, userPrimeAccount, userUsdcAccount] = decodeRpcAccounts(
+          extra,
+          ownerAccounts
         );
         assertOwnerTokenUsable(
           userPrimeAccount ?? null,
@@ -1981,7 +2088,11 @@ export class HastraVaultDirectClient
           owner.toBase58(),
           "WITHDRAW_REFUSED"
         );
-        const legacyTicket = await readLegacyTicket(runtime, config, owner);
+        const legacyTicket = decodeLegacyTicket(
+          decodeRpcAccount(extra[ownerAccounts.length] ?? null, ticket),
+          config,
+          owner
+        );
         if (
           legacyTicket &&
           input.rentRefundTo !== undefined &&
@@ -2272,7 +2383,19 @@ export class HastraVaultDirectClient
       "Building the Hastra par-redemption request",
       async (runtime, config) => {
         this.assertKnownReference(config, input.providerReference);
-        const state = await loadHastraState(runtime, config);
+        const wylds = new PublicKey(config.deployment.wYldsMint);
+        const prime = new PublicKey(config.deployment.primeMint);
+        const usdc = new PublicKey(config.depositMint);
+        const userWylds = associatedTokenAddress(owner, wylds);
+        const userPrime = associatedTokenAddress(owner, prime);
+        const userUsdc = associatedTokenAddress(owner, usdc);
+        const ownerAccounts = [userWylds.toBase58(), userPrime.toBase58(), userUsdc.toBase58()];
+        const ticket = legacyTicketAddress(config.deployment, owner).toBase58();
+        const { state, extra } = await readHastraState(
+          runtime,
+          config,
+          source.kind === "shares" ? [...ownerAccounts, ticket] : ownerAccounts
+        );
         let intermediateAtoms: bigint;
         if (source.kind === "shares") {
           assertNoBlockingIssues(
@@ -2305,15 +2428,9 @@ export class HastraVaultDirectClient
         }
 
         const { request, prefund } = await admitParRequest({ runtime, config, owner, sponsor });
-        const wylds = new PublicKey(config.deployment.wYldsMint);
-        const prime = new PublicKey(config.deployment.primeMint);
-        const usdc = new PublicKey(config.depositMint);
-        const userWylds = associatedTokenAddress(owner, wylds);
-        const userPrime = associatedTokenAddress(owner, prime);
-        const userUsdc = associatedTokenAddress(owner, usdc);
-        const [userWyldsAccount, userPrimeAccount, userUsdcAccount] = await getMultipleAccounts(
-          runtime,
-          [userWylds.toBase58(), userPrime.toBase58(), userUsdc.toBase58()]
+        const [userWyldsAccount, userPrimeAccount, userUsdcAccount] = decodeRpcAccounts(
+          extra,
+          ownerAccounts
         );
         if (source.kind === "shares") {
           assertOwnerTokenUsable(
@@ -2351,7 +2468,11 @@ export class HastraVaultDirectClient
 
         let conversion: EarnVaultInstruction[] = [];
         if (source.kind === "shares") {
-          const legacyTicket = await readLegacyTicket(runtime, config, owner);
+          const legacyTicket = decodeLegacyTicket(
+            decodeRpcAccount(extra[ownerAccounts.length] ?? null, ticket),
+            config,
+            owner
+          );
           const transientWylds = await transientTokenAccountPlan({
             runtime,
             payer: rentPayer,
@@ -2433,10 +2554,23 @@ export class HastraVaultDirectClient
             "The Hastra request address is not the deterministic request for this owner."
           );
         }
-        const [state, account] = await Promise.all([
+        const wylds = new PublicKey(config.deployment.wYldsMint);
+        const userWylds = associatedTokenAddress(owner, wylds);
+        // The owner's wYLDS rides the request read; both were REQUEST_UNREADABLE reads.
+        const [stateRead, requestRead] = await Promise.allSettled([
           loadHastraState(runtime, config),
-          getAccount(runtime, request.toBase58(), "REQUEST_UNREADABLE"),
+          getMultipleAccountWires(
+            runtime,
+            [request.toBase58(), userWylds.toBase58()],
+            "REQUEST_UNREADABLE"
+          ),
         ]);
+        // The identity request went first, so a full outage stays PROGRAM_MISMATCH.
+        if (stateRead.status === "rejected") throw stateRead.reason;
+        if (requestRead.status === "rejected") throw requestRead.reason;
+        const state = stateRead.value;
+        const [requestWire, userWyldsWire] = requestRead.value;
+        const account = decodeRpcAccount(requestWire ?? null, request.toBase58());
         if (!account) {
           throw new SdpHastraError("REDEMPTION_REFUSED", "The Hastra request is already closed.");
         }
@@ -2447,10 +2581,8 @@ export class HastraVaultDirectClient
             "The Hastra request belongs to another owner."
           );
         }
-        const wylds = new PublicKey(config.deployment.wYldsMint);
-        const userWylds = associatedTokenAddress(owner, wylds);
         assertExistingOwnerTokenUsable(
-          await getAccount(runtime, userWylds.toBase58(), "REQUEST_UNREADABLE"),
+          decodeRpcAccount(userWyldsWire ?? null, userWylds.toBase58()),
           "Owner wYLDS token account",
           config.deployment.wYldsMint,
           owner.toBase58(),

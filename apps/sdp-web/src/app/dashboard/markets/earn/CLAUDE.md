@@ -532,16 +532,22 @@ confirmed slot. Unrelated owners, vaults and providers keep independent reads.
 `balanceReadContext` acknowledges that bound on every page. Request timestamps
 and changed share counts are not freshness evidence. Funding-wallet reads carry
 the minimum slot only for affected wallets (including aliases of the same chain
-address), and subsequent revalidation keeps those bounds.
+address), and subsequent revalidation keeps those bounds. The poll, retries and
+explicit refreshes join an in-flight read only when the request is identical
+(same movement ids and position grouping; for wallets, the same floors and read
+mode). A floored read never joins an unfloored one, and nothing is reused once it
+settles.
 
 A transient failure retains an unaffected holding's last verified value, explicitly
 labelled with its observation time. It never becomes a current API value or enters
 fresh portfolio totals. A new movement still waits for evidence covering its own
 confirmation; requested amounts are never added to balances. Missing values with
 no verified history stay unknown, never zero. Wallet errors do not erase position
-rows; failed paired refreshes retry automatically. The history retains at most one
-verified value per current holding plus the latest raw read, including across a
-prolonged outage. Fresh data clears the label; removed holdings drop their history.
+rows; failed paired refreshes retry after 5, 10, 20 and 40 s, then every 60 s,
+restart at 5 s after a success, and hold while the tab is hidden (a due retry runs
+when it returns). The history retains at most one verified value per current
+holding plus the latest raw read, including across a prolonged outage. Fresh data
+clears the label; removed holdings drop their history.
 
 These are observed values, not an atomic portfolio snapshot: provider/RPC
 freshness remains an external dependency.
