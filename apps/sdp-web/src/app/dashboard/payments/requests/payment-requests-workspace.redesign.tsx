@@ -16,7 +16,7 @@ import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
 import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
+import { ListToolbar } from "@/components/ui/list-toolbar";
 import { SearchInput } from "@/components/ui/search-input";
 import { StatusText } from "@/components/ui/status-text";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
@@ -30,7 +30,7 @@ import {
 } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
 import { shortenAddress } from "../payments-overview.utils";
-import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
+import { formatDate, formatDecimalAmount } from "../payments-presentation";
 import { PAYMENTS_TABLE_CELL } from "../payments-table";
 import { PaymentsTableHeader } from "../payments-table-header";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
@@ -154,7 +154,7 @@ function PaymentRequestsTable({
               <TableCell
                 className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
               >
-                {formatDateTime(request.createdAt, locale)}
+                {formatDate(request.createdAt, locale)}
               </TableCell>
               <TableCell className="text-right whitespace-nowrap">
                 <Button
@@ -330,7 +330,9 @@ function PaymentRequestsPagination({
 }) {
   const t = useTranslations();
   const { page, pageSize, search } = listState;
+  // One page needs no pager, as the design's lists show none.
   if (!totalIsExact || search !== null) {
+    if (page === 1 && !hasNextPage) return null;
     return (
       <ArrowPagination
         page={page}
@@ -342,6 +344,7 @@ function PaymentRequestsPagination({
     );
   }
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  if (pageCount === 1) return null;
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, total);
   return (
@@ -467,7 +470,10 @@ export function PaymentRequestsWorkspace({
         />
       ) : (
         <>
+          {/* The design draws the search at the Filter button's 30px, its rule level with the
+              button's bottom edge; the shared field defaults to the taller input. */}
           <ListToolbar
+            className="[--input-height-lg:1.875rem]"
             filters={
               <PaymentRequestsStatusFilter
                 value={listState.status}
@@ -475,10 +481,6 @@ export function PaymentRequestsWorkspace({
               />
             }
           >
-            <RowsPerPageSelect
-              value={listState.pageSize}
-              onChange={(pageSize) => applyListParams({ pageSize })}
-            />
             <PaymentRequestsSearch
               key={listState.search ?? ""}
               initialValue={listState.search ?? ""}
