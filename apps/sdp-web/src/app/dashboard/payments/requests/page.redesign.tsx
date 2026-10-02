@@ -54,18 +54,9 @@ async function PaymentRequestsPage({
     );
     const [result, counterpartiesResult] = await Promise.all([
       // One page, as the URL names it: listing reconciles each open request on chain, so the
-      // list reads no more than it shows, unless it is searched or the status is one a payment
-      // can change (see loadPaymentRequestsList).
+      // list reads no more than it shows (see loadPaymentRequestsList).
       trace.step("fetch_payment_requests", () =>
-        loadPaymentRequestsList(apiClient.request, listState, {
-          counterpartyNames: async () =>
-            new Map(
-              (await counterpartiesLoad).data.map((counterparty) => [
-                counterparty.id,
-                counterparty.displayName,
-              ])
-            ),
-        })
+        loadPaymentRequestsList(apiClient.request, listState)
       ),
       counterpartiesLoad,
     ]);
@@ -74,7 +65,6 @@ async function PaymentRequestsPage({
       ok: result.ok,
       count: result.data.length,
       total: result.total,
-      searchCapped: result.searchCapped,
     });
 
     const lastPage = Math.max(1, Math.ceil(result.total / listState.pageSize));
@@ -87,7 +77,6 @@ async function PaymentRequestsPage({
       <PaymentRequestsWorkspace
         initialPaymentRequests={result.data}
         total={result.total}
-        searchCapped={result.searchCapped}
         listState={listState}
         initialError={result.error}
         initialLocalErrorCode={result.localErrorCode}
