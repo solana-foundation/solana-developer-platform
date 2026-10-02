@@ -93,7 +93,7 @@ describe("PaymentRequestsWorkspace search", () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
-  it("shows the page's rows that match the search, by payer, and names the page alone", () => {
+  it("shows the page's rows that match the search, by payer, with no pager on one page", () => {
     renderWorkspace({
       initialPaymentRequests: [paymentRequest, otherRequest],
       counterparties: [{ id: "cp_jane", displayName: "Jane Doe" } as never],
@@ -103,7 +103,7 @@ describe("PaymentRequestsWorkspace search", () => {
 
     expect(screen.getByText("Jane Doe")).toBeTruthy();
     expect(screen.queryByText("anyone")).toBeNull();
-    expect(screen.getByText("Page 1")).toBeTruthy();
+    expect(screen.queryByText("Page 1")).toBeNull();
     expect(screen.queryByText(/of 2 requests/)).toBeNull();
   });
 
