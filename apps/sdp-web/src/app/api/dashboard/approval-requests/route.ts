@@ -14,9 +14,16 @@ export async function GET(request: Request) {
   const query = new URLSearchParams();
   const status = incoming.searchParams.get("status");
   const limit = incoming.searchParams.get("limit");
+  const cursor = incoming.searchParams.get("cursor");
+  const viewerCanDecide = incoming.searchParams.get("viewerCanDecide");
 
   if (status && APPROVAL_STATUSES.has(status)) query.set("status", status);
   if (limit && /^\d{1,3}$/.test(limit)) query.set("limit", limit);
+  // An opaque cursor from a previous page's `nextCursor`; the API rejects a malformed one.
+  if (cursor && /^[A-Za-z0-9_-]{1,512}$/.test(cursor)) query.set("cursor", cursor);
+  if (viewerCanDecide === "true" || viewerCanDecide === "false") {
+    query.set("viewerCanDecide", viewerCanDecide);
+  }
 
   return proxyToSdpApi({
     request,

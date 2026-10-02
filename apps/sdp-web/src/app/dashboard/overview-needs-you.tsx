@@ -33,29 +33,33 @@ function formatApprovalAmount(
   return asset ? `${figure} ${asset.length > 12 ? shortenAddress(asset) : asset}` : figure;
 }
 const NEEDS_YOU_ROWS = 4;
+/** Pages of 100 the card reads before it stops counting; the inbox lists the rest. */
+const NEEDS_YOU_MAX_PAGES = 10;
 
 /**
- * Pending approvals this viewer can decide, oldest first: the longest wait leads. The same
- * read the sidebar badge and the approvals inbox make, narrowed to requests the viewer may
- * approve or reject. Like them it sees the newest 100 pending requests: the list route has no
- * cursor or viewer filter, so a project past 100 can leave an older request out of this card.
- *
- * TODO(api): ask for only the requests this viewer can decide, with a cursor, once
- * GET /v1/wallets/approval-requests supports both; then the card no longer depends on the newest
- * 100. Known limitation of the API, shared with the approvals inbox and sidebar badge, not a bug
- * of this card.
+ * Pending approvals this viewer can decide, oldest first: the longest wait leads. The API keeps
+ * only the requests the viewer may approve or reject (`viewerCanDecide=true`) and pages them
+ * with a cursor, so the card follows the pages until none remain, or until it has read
+ * `NEEDS_YOU_MAX_PAGES` of them.
  */
 async function fetchApprovalsNeedingViewer(): Promise<WalletApprovalRequestSummary[]> {
-  const response = await fetch("/api/dashboard/approval-requests?status=pending&limit=100", {
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error(`Approval requests failed (${response.status})`);
-  const body = (await response.json()) as {
-    data?: { approvalRequests?: WalletApprovalRequestSummary[] };
-  };
-  return (body.data?.approvalRequests ?? [])
-    .filter((request) => request.viewerCanDecide)
-    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const requests: WalletApprovalRequestSummary[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < NEEDS_YOU_MAX_PAGES; page += 1) {
+    const query = new URLSearchParams({ status: "pending", viewerCanDecide: "true", limit: "100" });
+    if (cursor !== null) query.set("cursor", cursor);
+    const response = await fetch(`/api/dashboard/approval-requests?${query}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Approval requests failed (${response.status})`);
+    const body = (await response.json()) as {
+      data?: { approvalRequests?: WalletApprovalRequestSummary[]; nextCursor?: string | null };
+    };
+    requests.push(...(body.data?.approvalRequests ?? []));
+    cursor = body.data?.nextCursor ?? null;
+    if (cursor === null) break;
+  }
+  return requests.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 }
 
 /**

@@ -74,9 +74,34 @@ function respond(requests: WalletApprovalRequestSummary[] | null, ok = true) {
     vi.fn(async () => ({
       ok,
       status: ok ? 200 : 503,
-      json: async () => ({ data: { approvalRequests: requests ?? undefined } }),
+      json: async () => ({
+        data: { approvalRequests: requests ?? undefined, nextCursor: null },
+      }),
     }))
   );
+}
+
+/** An API that serves `pages` in order, each with the cursor of the next, and records each URL. */
+function respondPaged(pages: WalletApprovalRequestSummary[][]) {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      urls.push(url);
+      const index = urls.length - 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            approvalRequests: pages[index] ?? [],
+            nextCursor: index + 1 < pages.length ? `cursor_${index + 1}` : null,
+          },
+        }),
+      };
+    })
+  );
+  return urls;
 }
 
 function renderNeedsYou() {
@@ -101,10 +126,30 @@ afterEach(() => {
 });
 
 describe("OverviewNeedsYou", () => {
-  it("lists the requests this viewer can decide, the longest wait first", async () => {
+  it("asks the API for the requests this viewer can decide and follows its pages", async () => {
+    const urls = respondPaged([
+      [request("appr_page1", { createdAt: "2026-09-25T11:00:00.000Z" })],
+      [request("appr_page2", { createdAt: "2026-09-25T09:00:00.000Z" })],
+    ]);
+    renderNeedsYou();
+
+    expect(await screen.findByText("2 waiting on you")).toBeTruthy();
+    expect(urls).toEqual([
+      "/api/dashboard/approval-requests?status=pending&viewerCanDecide=true&limit=100",
+      "/api/dashboard/approval-requests?status=pending&viewerCanDecide=true&limit=100&cursor=cursor_1",
+    ]);
+    const links = screen
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("href")?.includes("appr_"));
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/dashboard/approvals/appr_page2",
+      "/dashboard/approvals/appr_page1",
+    ]);
+  });
+
+  it("lists the requests, the longest wait first", async () => {
     respond([
       request("appr_newest", { createdAt: "2026-09-25T11:00:00.000Z" }),
-      request("appr_own", { viewerCanDecide: false, viewerIsRequester: true }),
       request("appr_oldest", {
         createdAt: "2026-09-25T08:00:00.000Z",
         wallet: null,
@@ -157,7 +202,7 @@ describe("OverviewNeedsYou", () => {
   });
 
   it("renders nothing when nothing waits on the viewer", async () => {
-    respond([request("appr_own", { viewerCanDecide: false })]);
+    respond([]);
     const { container } = renderNeedsYou();
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     expect(container.innerHTML).toBe("");
