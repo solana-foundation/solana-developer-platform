@@ -1423,6 +1423,7 @@
       "clearSearch": "Clear request search",
       "noMatches": "No requests match these filters.",
       "range": "{from}-{to} of {total} requests",
+      "pageNumber": "Page {page}",
       "emptyTitle": "You haven't created a request yet",
       "emptyDescription": "A request is a link or QR that asks for a fixed amount. Anyone with the link can pay it.",
       "newRequest": "New request",

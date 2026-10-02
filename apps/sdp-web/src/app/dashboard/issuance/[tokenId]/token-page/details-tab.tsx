@@ -142,7 +142,7 @@ function DetailsView({ token, form }: Pick<TokenTabProps, "token" | "form">) {
           {draft.maxSupply ? formatDecimalAmount(draft.maxSupply, locale) : <NotSet />}
         </RecordRow>
         <RecordRow label={t("DashboardIssuance.newDesign.details.description")}>
-          <span className="max-w-[40em] text-right whitespace-normal">
+          <span className="max-w-[40em] whitespace-normal md:text-right">
             {draft.description || <NotSet />}
           </span>
         </RecordRow>

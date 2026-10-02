@@ -232,7 +232,8 @@ function DeployDraftBlock({
 }: DeployProps & { signingWalletName: string }) {
   const t = useTranslations();
   // 12px from the heading to the rows and 10px from the rows to the 34px buttons; 32px under
-  // the buttons to the supply, 8px more than the band's 24 over this block.
+  // the buttons to the supply, 8px more than the band's 24 over this block. A phone's buttons
+  // are the full 36px, 16px under the rows.
   return (
     <section className="mb-2 flex min-w-0 flex-col gap-3">
       <h2 className="flex items-center gap-1.5 text-subheading font-medium text-primary">
@@ -254,7 +255,7 @@ function DeployDraftBlock({
           </span>
         </RecordRow>
       </dl>
-      <div className="-mt-0.5 flex items-center justify-end gap-2 [&_a]:[--button-height-md:2.125rem] [&_button]:[--button-height-md:2.125rem]">
+      <div className="mt-1 flex items-center justify-end gap-2 md:-mt-0.5 md:[&_a]:[--button-height-md:2.125rem] md:[&_button]:[--button-height-md:2.125rem]">
         <Button asChild variant="ghost" size="sm">
           <Link href="/dashboard/issuance">{t("DashboardIssuance.newDesign.overview.notNow")}</Link>
         </Button>
@@ -329,8 +330,9 @@ function SupplyBlock({
       <RecordAmount label={t("DashboardIssuance.newDesign.overview.issuedSupply")}>
         {formatDecimalAmount(token.totalSupply || "0", locale)}
       </RecordAmount>
-      {/* 26px from the amount to its terms, 8px from the terms to the description. */}
-      <div className="mt-6.5 mb-2">
+      {/* 26px from the amount to its terms (22 on a phone, whose rows start 2px lower), 8px from
+          the terms to the description. */}
+      <div className="mt-5.5 mb-2 md:mt-6.5">
         <RecordColumns>
           <dl>
             <RecordRow label={t("DashboardIssuance.newDesign.overview.supplyCap")}>
@@ -368,7 +370,7 @@ function SupplyBlock({
       </div>
       <dl className={cn("border-t border-border-subtle", LAST_ROW_FLUSH)}>
         <RecordRow label={t("DashboardIssuance.newDesign.overview.description")}>
-          <span className="max-w-[40em] text-right whitespace-normal">
+          <span className="max-w-[40em] whitespace-normal md:text-right">
             {token.description || t("DashboardIssuance.newDesign.overview.noDescription")}
           </span>
         </RecordRow>
