@@ -1365,18 +1365,17 @@ describe("POST /v1/earn/vault-withdrawal-requests: a par request over held inter
   it("puts the delegated intermediate, not the share mint, in front of policy", async () => {
     await seedAuth();
     const positionId = await seedPosition({ provider: "hastra" });
-    parRedemptionClientOverride.current = {
-      getParRedemptionOptions: vi.fn(async () => ({
-        intermediateMint: WYLDS_MINT,
-        assetMint: USDC_MINT,
-        minimumShares: null,
-        minimumIntermediateAmount: "0.000001",
-        shareDecimals: 6,
-        assetDecimals: 6,
-        cancelable: true,
-        operatorSettled: true,
-      })),
-    };
+    const readOptions = vi.fn(async () => ({
+      intermediateMint: WYLDS_MINT,
+      assetMint: USDC_MINT,
+      minimumShares: null,
+      minimumIntermediateAmount: "0.000001",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      cancelable: true,
+      operatorSettled: true,
+    }));
+    parRedemptionClientOverride.current = { getParRedemptionOptions: readOptions };
     const repo = createPostgresPolicyRepository(
       getDb(env),
       createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
@@ -1424,6 +1423,12 @@ describe("POST /v1/earn/vault-withdrawal-requests: a par request over held inter
         intermediateAmount: "2000",
       });
       expect(both.status).toBe(400);
+
+      // Only the held-intermediate request asks the provider, through its live options read.
+      expect(readOptions).toHaveBeenCalledTimes(1);
+      expect(readOptions).toHaveBeenCalledWith(expect.objectContaining({ env }), {
+        providerReference: VAULT,
+      });
     } finally {
       parRedemptionClientOverride.current = null;
     }

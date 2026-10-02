@@ -949,6 +949,20 @@ transaction signed by the organization custody wallet or external owner.
   bounded waves of eight. Giving each queued owner a new deadline makes the
   route's latency ceiling grow with portfolio size. Empty-position close-out
   writes use the same concurrency bound and remain fail-soft.
+  Jobs in flight together with the same environment, RPC endpoint list (as a
+  hash, never the URL), provider, owner, reference set and minimum slot share
+  one provider read, across custody and external-wallet routes. Each route
+  passes `rowsReadAt: markVaultPositionRowsRead()` taken right after its rows
+  query, and every provider read of that hydration runs under
+  `withReadFloor(rowsReadAt)`. A caller joins only a read whose creator read
+  its rows no earlier than it did, and provider-level request sharing must join
+  only requests stamped after the caller's floor (`packages/sdp-rpc/CLAUDE.md`,
+  "Read floors"), so no read reuses a provider request sent before its rows
+  were read. Close-out trusts the rows' `updated_at`, and an earlier request
+  could return a stale zero for a holding a deposit refilled since. It is not
+  a cache: entries are removed on
+  settlement. The read runs on the first caller's deadline; each caller
+  validates the snapshots itself and stops waiting at its own deadline.
 
 - `GET /vault-share-reconciliation` — chain-versus-ledger REPORT for the custody
   claims above (PRO-1741). The positions read can only serve what SDP recorded,
@@ -1707,8 +1721,11 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 
 Authenticated `GET /vault-positions?afterMovementIds=id1,id2` accepts at most 100
 movement ids. Resolve organization, project, environment and readable custody
-wallet scope before looking up their confirmed/finalized signature slots. The
-response's `balanceReadContext` acknowledges the ids and maximum slot.
+wallet scope before looking up their confirmed/finalized signature slots. A
+finalized status that passed those checks is memoised per (cluster, signature),
+bounded and for 10 minutes, so later polls skip `getSignatureStatuses` for it;
+a confirmed-only one is read on every poll, and the endpoint proof always runs.
+The response's `balanceReadContext` acknowledges the ids and maximum slot.
 Only affected positions receive their own maximum confirmation slot. Hydration
 batches separate differing bounds even within the same provider and owner.
 `@sdp/rpc/read-context` scopes provider RPC reads to confirmed state, requests

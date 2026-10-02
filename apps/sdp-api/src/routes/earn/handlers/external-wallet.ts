@@ -94,6 +94,7 @@ import {
   type HydratedVaultPositionValue,
   hydratedHoldingTokenValue,
   hydrateVaultPositions,
+  markVaultPositionRowsRead,
 } from "./vault-position-hydration";
 
 /**
@@ -239,9 +240,11 @@ async function loadExternalWalletPortfolio(
       before,
     })
   );
+  const rowsReadAt = markVaultPositionRowsRead();
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
+    rowsReadAt,
   });
   await closeEmptyHydratedPositions(
     (positionId, observedUpdatedAt) =>
@@ -288,9 +291,11 @@ export async function listEarnExternalWalletPositions(c: AppContext) {
     limit: query.limit,
     before,
   });
+  const rowsReadAt = markVaultPositionRowsRead();
   const holdings = page.rows.map((row) => requireExternalWalletHolding(row, projectId));
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
+    rowsReadAt,
   });
   await closeEmptyHydratedPositions(
     (positionId, observedUpdatedAt) =>
@@ -536,9 +541,11 @@ export async function getEarnExternalWalletEarnings(c: AppContext) {
     ),
     repo.aggregateExternalWalletMovements({ ...scope, ownerAddress }),
   ]);
+  const rowsReadAt = markVaultPositionRowsRead();
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
   const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
+    rowsReadAt,
   });
   await closeEmptyHydratedPositions(
     (positionId, observedUpdatedAt) =>
