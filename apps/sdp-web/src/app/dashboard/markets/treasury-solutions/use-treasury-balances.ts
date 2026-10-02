@@ -1,7 +1,7 @@
 "use client";
 
 import type { EarnVaultPosition } from "@sdp/types";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useEarnFundingWallets } from "../earn/deposit/earn-funding-wallets";
 import { useEarnVaultPositions } from "../earn/earn-program-data";
 import {
@@ -18,6 +18,11 @@ type SubmissionTarget = Pick<
 >;
 export type TreasuryPositionBalance = ReturnType<typeof displayedVaultBalance>;
 
+/** Delay before retrying after the given number of consecutive failed refreshes. */
+export function treasuryRefreshRetryDelay(failures: number): number {
+  return Math.min(5_000 * 2 ** Math.max(failures - 1, 0), 60_000);
+}
+
 /** One coordinator for submission, confirmation, and both sides of a balance refresh. */
 export function useTreasuryBalances(activities: readonly VaultActivity[]) {
   const funding = useEarnFundingWallets();
@@ -33,6 +38,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
     () => new Set()
   );
   const generation = useRef(0);
+  const failures = useRef(0);
   const requested = useRef(new Set<string>());
   const latestRead = vaults.reads.at(-1);
 
@@ -130,6 +136,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
         ]);
         if (current === generation.current) {
           const failed = results.some((result) => result.status === "rejected");
+          failures.current = failed ? failures.current + 1 : 0;
           setRefreshError(
             failed ? new Error("Treasury balances could not be refreshed") : undefined
           );
@@ -167,11 +174,25 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
     void refresh(confirmed.map(({ movement }) => movement.movementId));
   }, [activities, refresh]);
 
+  const retry = useEffectEvent(() => void refresh());
   useEffect(() => {
     if (!refreshError) return;
-    const retry = setTimeout(() => void refresh(), 5_000);
-    return () => clearTimeout(retry);
-  }, [refresh, refreshError]);
+    let due = false;
+    const run = () => {
+      if (!due || document.hidden) return;
+      due = false;
+      retry();
+    };
+    const timer = setTimeout(() => {
+      due = true;
+      run();
+    }, treasuryRefreshRetryDelay(failures.current));
+    document.addEventListener("visibilitychange", run);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", run);
+    };
+  }, [refreshError]);
 
   const balanceOf = useCallback(
     (position: EarnVaultPosition): TreasuryPositionBalance => {

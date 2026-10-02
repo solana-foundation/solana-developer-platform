@@ -4,7 +4,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnVaultPositionsRead } from "../earn/earn-program-data";
 import type { VaultActivity } from "./treasury-vault-balance";
-import { useTreasuryBalances } from "./use-treasury-balances";
+import { treasuryRefreshRetryDelay, useTreasuryBalances } from "./use-treasury-balances";
 
 const mocks = vi.hoisted(() => ({
   reads: [] as EarnVaultPositionsRead[],
@@ -333,7 +333,7 @@ it("retains an unpaired holding after its movement leaves visible activity", asy
   expect(mocks.refreshPositions.mock.lastCall?.[0]).toContain("movement");
   mocks.refreshWallets.mockResolvedValue([]);
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(treasuryRefreshRetryDelay(2));
   });
   expect(mocks.refreshWallets).toHaveBeenLastCalledWith(101, ["wallet", "other-wallet"]);
   expect(result.current.balanceOf(position)).toEqual({ value: "10", syncing: false });
@@ -392,7 +392,7 @@ it("recovers more than 100 outstanding pairs through bounded HTTP reads", async 
   expect(mocks.refreshPositions.mock.lastCall?.[0]).toHaveLength(120);
   mocks.refreshWallets.mockResolvedValue([]);
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(treasuryRefreshRetryDelay(120));
   });
   expect(batchSizes.every((count) => count <= 100)).toBe(true);
   expect(batchSizes.slice(-2)).toEqual([100, 20]);
@@ -400,4 +400,96 @@ it("recovers more than 100 outstanding pairs through bounded HTTP reads", async 
   expect(result.current.walletsError).toBeUndefined();
   expect(result.current.balanceOf(position)).toEqual({ value: "10", syncing: false });
   expect(result.current.balancesRefreshing).toBe(false);
+});
+
+describe("failed refresh retries", () => {
+  async function failRefresh(result: { current: ReturnType<typeof useTreasuryBalances> }) {
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.walletsError).toBeInstanceOf(Error);
+  }
+
+  async function expectRetryAfter(delay: number) {
+    const calls = mocks.refreshPositions.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(delay - 1);
+    });
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(calls);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(calls + 1);
+  }
+
+  it("backs off 5, 10, 20, 40 s, caps at 60 s and restarts at 5 s after a success", async () => {
+    vi.useFakeTimers();
+    mocks.refreshWallets.mockRejectedValue(new Error("wallet RPC unavailable"));
+    const { result } = renderHook(() => useTreasuryBalances([]));
+    await failRefresh(result);
+    for (const delay of [5_000, 10_000, 20_000, 40_000, 60_000, 60_000]) {
+      await expectRetryAfter(delay);
+    }
+    mocks.refreshWallets.mockResolvedValue([]);
+    await expectRetryAfter(60_000);
+    expect(result.current.walletsError).toBeUndefined();
+    mocks.refreshWallets.mockRejectedValueOnce(new Error("wallet RPC unavailable"));
+    await failRefresh(result);
+    await expectRetryAfter(5_000);
+    expect(result.current.walletsError).toBeUndefined();
+  });
+
+  it("keeps the retry schedule while the activity list re-renders", async () => {
+    vi.useFakeTimers();
+    mocks.refreshWallets.mockRejectedValueOnce(new Error("wallet RPC unavailable"));
+    let activities: VaultActivity[] = [];
+    const { result, rerender } = renderHook(() => useTreasuryBalances(activities));
+    await failRefresh(result);
+    const calls = mocks.refreshPositions.mock.calls.length;
+    for (let second = 1; second < 5; second += 1) {
+      activities = [];
+      await act(async () => {
+        rerender();
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(calls);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(calls + 1);
+    expect(result.current.walletsError).toBeUndefined();
+  });
+
+  it("holds a due retry while the tab is hidden and runs it when the tab returns", async () => {
+    vi.useFakeTimers();
+    let hidden = false;
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    const setHidden = async (value: boolean) => {
+      hidden = value;
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+    };
+    try {
+      mocks.refreshWallets.mockRejectedValueOnce(new Error("wallet RPC unavailable"));
+      const { result } = renderHook(() => useTreasuryBalances([]));
+      await failRefresh(result);
+      const calls = mocks.refreshPositions.mock.calls.length;
+      await setHidden(true);
+      await setHidden(false);
+      expect(mocks.refreshPositions).toHaveBeenCalledTimes(calls);
+      await setHidden(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000);
+      });
+      expect(mocks.refreshPositions).toHaveBeenCalledTimes(calls);
+      expect(result.current.walletsError).toBeInstanceOf(Error);
+      await setHidden(false);
+      expect(mocks.refreshPositions).toHaveBeenCalledTimes(calls + 1);
+      expect(result.current.walletsError).toBeUndefined();
+    } finally {
+      Reflect.deleteProperty(document, "hidden");
+    }
+  });
 });
