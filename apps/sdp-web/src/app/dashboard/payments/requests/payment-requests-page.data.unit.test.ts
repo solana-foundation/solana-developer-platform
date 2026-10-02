@@ -7,6 +7,7 @@ import {
   PAYMENT_REQUESTS_PAGE_SIZE,
   type PaymentRequestsListState,
   parsePaymentRequestsListParams,
+  paymentRequestMatchesSearch,
   paymentRequestsListHref,
 } from "./payment-requests-page.data";
 
@@ -35,10 +36,10 @@ function listApi(total: number) {
 }
 
 describe("parsePaymentRequestsListParams", () => {
-  it("reads the page, its size and the status from the URL, and ignores a search", () => {
+  it("reads the page, its size, the status and the search from the URL", () => {
     expect(
       parsePaymentRequestsListParams({ page: "3", pageSize: "50", status: "paid", search: " ab " })
-    ).toEqual({ page: 3, pageSize: 50, status: "paid", search: null });
+    ).toEqual({ page: 3, pageSize: 50, status: "paid", search: "ab" });
   });
 
   it("falls back on anything missing or malformed, and caps the size at the API's", () => {
@@ -52,6 +53,31 @@ describe("parsePaymentRequestsListParams", () => {
     });
     expect(parsePaymentRequestsListParams({ pageSize: "1000" }).pageSize).toBe(
       PAYMENT_REQUESTS_PAGE_SIZE
+    );
+  });
+});
+
+describe("paymentRequestMatchesSearch", () => {
+  const request = {
+    id: "preq_1",
+    amount: "12.5",
+    token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    counterpartyId: "cp_1",
+    destinationAddress: "Dest1111111111111111111111111111111111111111",
+    reference: "INV-42",
+  } as PaymentRequest;
+  const names = new Map([["cp_1", "Jane Doe"]]);
+
+  it("matches the amount, token symbol, payer, destination or reference, ignoring case", () => {
+    for (const needle of ["12.5", "usdc", "jane", "dest111", "inv-42"]) {
+      expect(paymentRequestMatchesSearch(request, needle, names)).toBe(true);
+    }
+  });
+
+  it("matches nothing else", () => {
+    expect(paymentRequestMatchesSearch(request, "john", names)).toBe(false);
+    expect(paymentRequestMatchesSearch({ ...request, counterpartyId: null }, "jane", names)).toBe(
+      false
     );
   });
 });
@@ -135,7 +161,13 @@ describe("loadPaymentRequestsList", () => {
       api.request,
       listState({ page: 2, pageSize: 50, status: "canceled" })
     );
-    expect(result).toEqual({ ok: true, data: rows, total: 60 });
+    expect(result).toEqual({
+      ok: true,
+      data: rows,
+      total: 60,
+      totalIsExact: true,
+      hasNextPage: false,
+    });
     expect(api.calls).toEqual([{ page: "2", pageSize: "50", status: "canceled" }]);
 
     const unfiltered = pageApi(rows, 2);
@@ -143,7 +175,7 @@ describe("loadPaymentRequestsList", () => {
     expect(unfiltered.calls).toEqual([{ page: "1", pageSize: "25", status: null }]);
   });
 
-  it("leaves out of Awaiting payment a row the API returns as paid, and its count", async () => {
+  it("leaves out of Awaiting payment a row the API returns as paid, and marks its total inexact", async () => {
     const api = pageApi(
       [rowWithStatus("preq_open", "awaiting_payment"), rowWithStatus("preq_landed", "paid")],
       40
@@ -153,7 +185,23 @@ describe("loadPaymentRequestsList", () => {
       listState({ status: "awaiting_payment" })
     );
     expect(result.data).toEqual([rowWithStatus("preq_open", "awaiting_payment")]);
-    expect(result.total).toBe(39);
+    expect(result.total).toBe(40);
+    expect(result.totalIsExact).toBe(false);
+    expect(result.hasNextPage).toBe(true);
+  });
+
+  it("offers a next page while the API's total reaches past this one", async () => {
+    const rows = [rowWithStatus("preq_1", "paid")];
+    const last = await loadPaymentRequestsList(
+      pageApi(rows, 51).request,
+      listState({ page: 3, pageSize: 25, status: "paid" })
+    );
+    expect(last.hasNextPage).toBe(false);
+    const middle = await loadPaymentRequestsList(
+      pageApi(rows, 51).request,
+      listState({ page: 2, pageSize: 25, status: "paid" })
+    );
+    expect(middle.hasNextPage).toBe(true);
   });
 
   it("passes Paid's rows through as the API returns them", async () => {
@@ -162,7 +210,13 @@ describe("loadPaymentRequestsList", () => {
       pageApi(rows, 2).request,
       listState({ status: "paid" })
     );
-    expect(result).toEqual({ ok: true, data: rows, total: 2 });
+    expect(result).toEqual({
+      ok: true,
+      data: rows,
+      total: 2,
+      totalIsExact: true,
+      hasNextPage: false,
+    });
   });
 
   it("reports a failed read", async () => {
@@ -173,6 +227,13 @@ describe("loadPaymentRequestsList", () => {
       request,
       listState({ status: "awaiting_payment" })
     );
-    expect(result).toEqual({ ok: false, data: [], total: 0, error: "boom" });
+    expect(result).toEqual({
+      ok: false,
+      data: [],
+      total: 0,
+      error: "boom",
+      totalIsExact: true,
+      hasNextPage: false,
+    });
   });
 });
