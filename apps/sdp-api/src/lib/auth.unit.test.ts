@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { TEST_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { type ApiKeyContext, canManageOrganizationCredentials } from "./auth";
 
 const base = {
-  id: "usr_test",
-  organizationId: "org_test",
-  projectId: "prj_test",
+  id: TEST_USER.id,
+  organizationId: TEST_ORG.id,
+  projectId: TEST_PROJECT.id,
   environment: "dashboard",
   walletScope: null,
   signingWalletId: null,
@@ -18,7 +21,7 @@ describe("canManageOrganizationCredentials", () => {
       ...base,
       authType: "clerk",
       apiKeyId: null,
-      userId: "usr_test",
+      userId: TEST_USER.id,
       role: "admin",
       permissions: ["payments:read"],
     };
@@ -26,17 +29,17 @@ describe("canManageOrganizationCredentials", () => {
     expect(canManageOrganizationCredentials(auth)).toBe(true);
   });
 
-  it("recognizes an administrator resolved through a dashboard session", () => {
+  it("rejects an approved-operation actor with organization admin permissions", () => {
     const auth: ApiKeyContext = {
       ...base,
-      authType: "session",
+      authType: "approved_operation",
       apiKeyId: null,
-      userId: "usr_test",
-      role: "session",
+      userId: TEST_USER.id,
+      role: "approved_operation",
       permissions: ["org:admin"],
     };
 
-    expect(canManageOrganizationCredentials(auth)).toBe(true);
+    expect(canManageOrganizationCredentials(auth)).toBe(false);
   });
 
   it("rejects members and API keys, including wildcard API keys", () => {
@@ -44,14 +47,14 @@ describe("canManageOrganizationCredentials", () => {
       ...base,
       authType: "clerk",
       apiKeyId: null,
-      userId: "usr_test",
+      userId: TEST_USER.id,
       role: "member",
       permissions: ["payments:read"],
     };
     const apiKey: ApiKeyContext = {
       ...base,
       authType: "api_key",
-      apiKeyId: "key_test",
+      apiKeyId: TEST_API_KEY.id,
       userId: null,
       role: "api_admin",
       permissions: ["*"],

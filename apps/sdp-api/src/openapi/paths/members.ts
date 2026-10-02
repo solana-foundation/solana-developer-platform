@@ -21,7 +21,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     operationId: "listMembers",
     description:
       "Lists members of the authenticated organization, followed by any pending invitations the caller is permitted to see. The two page as one sequence. Invitations require `org:write`, because each carries a shareable acceptance link.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       query: listMembersQuerySchema,
@@ -42,7 +42,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     summary: "Invite member",
     operationId: "inviteMember",
     description: "Creates an invitation for a new organization member.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       body: {
@@ -92,7 +92,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     operationId: "revokeInvitation",
     description:
       "Withdraws a pending invitation, in Clerk as well as locally. Only a pending invitation can be revoked.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
@@ -115,7 +115,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     operationId: "removeMember",
     description:
       "Removes a member from the organization and revokes their pending invitations, so an unspent invitation token cannot reinstate them. Re-inviting the removed member issues a fresh invitation that works normally.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({

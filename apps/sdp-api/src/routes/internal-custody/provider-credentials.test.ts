@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { type DatabaseClient, getDb } from "@/db";
-import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError, internalError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { rootLogger } from "@/runtime/logger";
@@ -11,6 +11,7 @@ import { AuditService } from "@/services/audit.service";
 import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -18,9 +19,11 @@ import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
 
-const ORGANIZATION_ID = "org_provider_credential_submit";
+let clerkToken: string;
+
+const ORGANIZATION_ID = "org_test_provider_credential_submit";
 const PROJECT_ID = "prj_provider_credential_submit";
-const USER_ID = "usr_provider_credential_submit";
+const USER_ID = "usr_test_provider_credential_submit";
 const VALID_BODY = {
   provider: "privy",
   fields: {
@@ -31,40 +34,16 @@ const VALID_BODY = {
   },
 } as const;
 
-function encodeJwtPart(value: Record<string, unknown>): string {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
-}
-
-function createJwt(payload: ClerkJwtPayload): string {
-  return `${encodeJwtPart({ alg: "RS256", typ: "JWT" })}.${encodeJwtPart(payload)}.signature`;
-}
-
 function testEncryptionKey(): string {
   return Buffer.alloc(32, 7).toString("base64");
 }
 
-function buildApp(options: { injectJwt?: boolean } = {}) {
-  const token = createJwt({
-    sub: "clerk_provider_credential_submit",
-    org_id: "clerk_org_provider_credential_submit",
-    org_role: "org:admin",
-    email: "provider-credential-submit@example.com",
-  });
+function buildApp() {
+  const token = clerkToken;
   const app = new Hono<{ Bindings: Env }>();
 
   app.use("*", kvStoreMiddleware());
   app.use("*", async (c, next) => {
-    if (options.injectJwt !== false) {
-      c.set("verifiedClerkJwt", {
-        token,
-        payload: {
-          sub: "clerk_provider_credential_submit",
-          org_id: "clerk_org_provider_credential_submit",
-          org_role: "org:admin",
-          email: "provider-credential-submit@example.com",
-        },
-      });
-    }
     c.set("requestId", "req_provider_credential_submit");
     await next();
   });
@@ -108,7 +87,7 @@ async function seedActor(): Promise<void> {
       )
       .bind(
         "aui_provider_credential_submit",
-        "clerk_provider_credential_submit",
+        "clerk_user_provider_credential_submit",
         USER_ID,
         "provider-credential-submit@example.com"
       ),
@@ -145,14 +124,14 @@ async function submit(
   token: string,
   options: {
     key?: string;
-    projectId?: string;
+    projectId: string;
     body?: unknown;
-  } = {}
+  }
 ): Promise<Response> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
-    "X-Project-ID": options.projectId ?? PROJECT_ID,
+    "X-Project-ID": options.projectId,
   };
   if (options.key !== undefined) {
     headers["Idempotency-Key"] = options.key;
@@ -163,7 +142,7 @@ async function submit(
     {
       method: "POST",
       headers,
-      body: JSON.stringify(options.body ?? VALID_BODY),
+      body: JSON.stringify(options.body),
     },
     env
   );
@@ -175,14 +154,14 @@ async function replace(
   connectionId: string,
   options: {
     key?: string;
-    projectId?: string;
+    projectId: string;
     body?: unknown;
-  } = {}
+  }
 ): Promise<Response> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
-    "X-Project-ID": options.projectId ?? PROJECT_ID,
+    "X-Project-ID": options.projectId,
   };
   if (options.key !== undefined) {
     headers["Idempotency-Key"] = options.key;
@@ -193,7 +172,7 @@ async function replace(
     {
       method: "POST",
       headers,
-      body: JSON.stringify(options.body ?? VALID_BODY),
+      body: JSON.stringify(options.body),
     },
     env
   );
@@ -351,6 +330,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedActor();
+    clerkToken = await signSeededClerkMember(env, getDb(env), USER_ID, ORGANIZATION_ID);
+    await verifyClerkJwt(clerkToken, env);
     env.SDP_DEPLOYMENT_MODE = "managed";
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = testEncryptionKey();
@@ -377,6 +358,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it("stores one pending credential and one pending project connection", async () => {
     const { app, token } = buildApp();
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "submit-privy-credentials-1",
       body: { ...VALID_BODY, requestDelayMs: 175, walletLabel: "  Treasury Wallet  " },
     });
@@ -439,8 +421,16 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       .mockResolvedValue(false);
     const { app, token } = buildApp();
 
-    const first = await submit(app, token, { key: "submission-audit-outcome-failure" });
-    const replay = await submit(app, token, { key: "submission-audit-outcome-failure" });
+    const first = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "submission-audit-outcome-failure",
+    });
+    const replay = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "submission-audit-outcome-failure",
+    });
 
     expect(first.status).toBe(201);
     expect(replay.status).toBe(201);
@@ -465,7 +455,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
     const { app, token } = buildApp();
 
-    const response = await submit(app, token, { key: "submission-audit-intent-failure" });
+    const response = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "submission-audit-intent-failure",
+    });
 
     expect(response.status).toBe(500);
     expect(factory).not.toHaveBeenCalled();
@@ -474,7 +468,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
   it("requires an idempotency key after auth, project, and body validation", async () => {
     const { app, token } = buildApp();
-    const response = await submit(app, token);
+    const response = await submit(app, token, { projectId: PROJECT_ID, body: VALID_BODY, ...{} });
 
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({
@@ -491,7 +485,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   });
 
   it("requires dashboard authentication", async () => {
-    const { app } = buildApp({ injectJwt: false });
+    const { app } = buildApp();
     const response = await app.request(
       "/internal/dashboard/custody/provider-credentials",
       {
@@ -512,23 +506,15 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it("accepts an organization admin dashboard session", async () => {
-    const sessionId = "ses_provider_credential_submit";
-    await getDb(env)
-      .prepare(
-        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-         VALUES (?, ?, ?, 'session', ?)`
-      )
-      .bind(sessionId, USER_ID, ORGANIZATION_ID, "2999-01-01T00:00:00.000Z")
-      .run();
-    const { app } = buildApp({ injectJwt: false });
+  it("accepts an organization admin Clerk JWT", async () => {
+    const { app } = buildApp();
 
     const response = await app.request(
       "/internal/dashboard/custody/provider-credentials",
       {
         method: "POST",
         headers: {
-          Cookie: `sdp_session=${sessionId}`,
+          Authorization: `Bearer ${clerkToken}`,
           "Content-Type": "application/json",
           "Idempotency-Key": "session-submit",
           "X-Project-ID": PROJECT_ID,
@@ -560,9 +546,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       status: "active",
       expiresAt: null,
     });
-    const { app } = buildApp({ injectJwt: false });
+    const { app } = buildApp();
 
     const response = await submit(app, rawKey, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "api-key-auth-rejected",
     });
 
@@ -632,6 +620,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   ])("rejects %s without persistence", async (_name, body) => {
     const { app, token } = buildApp();
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "strict-contract-key",
       body,
     });
@@ -650,6 +639,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it("accepts credential fields at the 4096-character input limit", async () => {
     const { app, token } = buildApp();
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "submit-max-length-fields",
       body: {
         ...VALID_BODY,
@@ -670,6 +660,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "submit-oversized-field",
       body: { ...VALID_BODY, fields: { ...VALID_BODY.fields, [field]: "x".repeat(4097) } },
     });
@@ -681,6 +672,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it("replays the committed result before current gates and keeps the secret exact", async () => {
     const { app, token } = buildApp();
     const first = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "replay-before-gates",
     });
     expect(first.status).toBe(201);
@@ -744,6 +737,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       .run();
 
     const replay = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "replay-before-gates",
     });
     expect(replay.status).toBe(201);
@@ -751,6 +746,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(replayBody.data).toEqual(firstBody.data);
 
     const deniedNewIntent = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "new-intent-after-gates",
     });
     expect(deniedNewIntent.status).toBe(403);
@@ -800,12 +797,15 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(
       (
         await submit(app, token, {
+          projectId: PROJECT_ID,
+          body: VALID_BODY,
           key: "same-key-different-payload",
         })
       ).status
     ).toBe(201);
 
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "same-key-different-payload",
       body: changedBody,
     });
@@ -840,6 +840,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "disabled-new-intent",
     });
 
@@ -869,6 +871,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "self-hosted-runtime-submission",
       body: {
         provider: "privy",
@@ -951,6 +954,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
       key,
       body,
     });
@@ -973,6 +977,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const runtimeBody = { provider: "privy", walletLabel: "Runtime replay" } as const;
 
     const first = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "runtime-replay-before-policy",
       body: runtimeBody,
     });
@@ -981,6 +986,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
     env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "true";
     const replay = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "runtime-replay-before-policy",
       body: runtimeBody,
     });
@@ -988,6 +994,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(((await replay.json()) as { data: unknown }).data).toEqual(firstBody.data);
 
     const freshStoredIntent = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "stored-after-runtime-policy",
       body: runtimeBody,
     });
@@ -1010,6 +1017,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
     const { app, token } = buildApp();
     const created = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "runtime-replacement-v1",
       body: { provider: "privy" },
     });
@@ -1022,6 +1030,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
 
     const response = await replace(app, token, createdBody.data.connectionId, {
+      projectId: PROJECT_ID,
       key: "runtime-replacement-v2",
       body: VALID_BODY,
     });
@@ -1034,6 +1043,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it("replaces credentials only on the exact eligible failed connection", async () => {
     const { app, token } = buildApp();
     const first = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "replacement-v1",
       body: { ...VALID_BODY, walletLabel: "First wallet" },
     });
@@ -1050,6 +1060,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
 
     const replacement = await replace(app, token, connectionId, {
+      projectId: PROJECT_ID,
       key: "replacement-v2",
       body: {
         provider: "privy",
@@ -1124,6 +1135,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
 
     const oldReplay = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "replacement-v1",
       body: { ...VALID_BODY, walletLabel: "First wallet" },
     });
@@ -1146,7 +1158,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it("reuses the GCP container on replacement and keeps one scan owner", async () => {
     const { app, token } = buildApp();
     const gcp = mockSubmissionGcp();
-    const first = await submit(app, token, { key: "shared-submission-root" });
+    const first = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "shared-submission-root",
+    });
     expect(first.status).toBe(201);
     const original = await first.json();
     await markInitialValidationFailed(getDb(env), {
@@ -1154,6 +1170,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       connectionId: original.data.connectionId,
     });
     const replaced = await replace(app, token, original.data.connectionId, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "shared-submission-child",
     });
     expect(replaced.status).toBe(201);
@@ -1168,7 +1186,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
   it("finalizes its own GCP replacement reservation on the same failed Connection", async () => {
     const { app, token } = buildApp();
-    const first = await submit(app, token, { key: "gcp-replacement-original" });
+    const first = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "gcp-replacement-original",
+    });
     expect(first.status).toBe(201);
     const original = await first.json();
     await markInitialValidationFailed(getDb(env), {
@@ -1187,7 +1209,10 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         },
       },
     };
-    const replacement = await replace(app, token, original.data.connectionId, request);
+    const replacement = await replace(app, token, original.data.connectionId, {
+      projectId: PROJECT_ID,
+      ...request,
+    });
     expect(replacement.status).toBe(201);
     const created = await replacement.json();
     expect(created.data.connectionId).toBe(original.data.connectionId);
@@ -1198,10 +1223,17 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(created.data.providerCredential.id).not.toBe(original.data.providerCredential.id);
     expect(gcp.writes).toHaveLength(1);
     expect(gcp.destroys).toEqual([]);
-    const replay = await replace(app, token, original.data.connectionId, request);
+    const replay = await replace(app, token, original.data.connectionId, {
+      projectId: PROJECT_ID,
+      ...request,
+    });
     expect(replay.status).toBe(201);
     expect((await replay.json()).data).toEqual(created.data);
-    const oldReplay = await submit(app, token, { key: "gcp-replacement-original" });
+    const oldReplay = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "gcp-replacement-original",
+    });
     expect(oldReplay.status).toBe(201);
     expect((await oldReplay.json()).data).toEqual({
       connectionId: original.data.connectionId,
@@ -1219,7 +1251,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       }),
     });
     const { app, token } = buildApp();
-    const first = await submit(app, token, { key: "version-allocation-original" });
+    const first = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "version-allocation-original",
+    });
     expect(first.status).toBe(201);
     const original = submissionSchema.parse(await first.json()).data;
     await markInitialValidationFailed(getDb(env), {
@@ -1232,10 +1268,16 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       return Response.json({ name: versionRef });
     });
     expect(
-      await replace(app, token, original.connectionId, { key: "version-allocation-abandoned" })
+      await replace(app, token, original.connectionId, {
+        projectId: PROJECT_ID,
+        body: VALID_BODY,
+        key: "version-allocation-abandoned",
+      })
     ).toMatchObject({ status: 503 });
     failWrite = false;
     const replacement = await replace(app, token, original.connectionId, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "version-allocation-next",
     });
     expect(replacement.status).toBe(201);
@@ -1254,6 +1296,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it("clears optional Connection settings when replacement omits them", async () => {
     const { app, token } = buildApp();
     const first = await submit(app, token, {
+      projectId: PROJECT_ID,
       key: "replacement-clear-label-v1",
       body: { ...VALID_BODY, requestDelayMs: 225, walletLabel: "First wallet" },
     });
@@ -1268,6 +1311,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
 
     const replacement = await replace(app, token, connectionId, {
+      projectId: PROJECT_ID,
       key: "replacement-clear-label-v2",
       body: {
         ...VALID_BODY,
@@ -1291,7 +1335,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
   it("binds replacement idempotency to the exact Connection", async () => {
     const { app, token } = buildApp();
-    const first = await submit(app, token, { key: "exact-idempotency-first" });
+    const first = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "exact-idempotency-first",
+    });
     const firstBody = (await first.json()) as {
       data: { providerCredential: { id: string }; connectionId: string };
     };
@@ -1300,7 +1348,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       connectionId: firstBody.data.connectionId,
     });
 
-    const second = await submit(app, token, { key: "exact-idempotency-second" });
+    const second = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "exact-idempotency-second",
+    });
     const secondBody = (await second.json()) as {
       data: { providerCredential: { id: string }; connectionId: string };
     };
@@ -1310,11 +1362,15 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
 
     const replaced = await replace(app, token, firstBody.data.connectionId, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "exact-idempotency-replacement",
     });
     expect(replaced.status).toBe(201);
 
     const wrongTargetReplay = await replace(app, token, secondBody.data.connectionId, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "exact-idempotency-replacement",
     });
     expect(wrongTargetReplay.status).toBe(409);
@@ -1328,10 +1384,16 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
 
   it("fails closed when exact replacement targets a non-replaceable Connection", async () => {
     const { app, token } = buildApp();
-    const initial = await submit(app, token, { key: "exact-non-replaceable-initial" });
+    const initial = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "exact-non-replaceable-initial",
+    });
     const initialBody = (await initial.json()) as { data: { connectionId: string } };
 
     const response = await replace(app, token, initialBody.data.connectionId, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "exact-non-replaceable-attempt",
     });
     expect(response.status).toBe(409);
@@ -1371,6 +1433,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     async ({ key, arrange }) => {
       const { app, token } = buildApp();
       const initial = await submit(app, token, {
+        projectId: PROJECT_ID,
+        body: VALID_BODY,
         key: `blocked-${key}-initial`,
       });
       expect(initial.status).toBe(201);
@@ -1420,7 +1484,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
       const newKey = `blocked-${key}-new`;
 
-      const response = await submit(app, token, { key: newKey });
+      const response = await submit(app, token, {
+        projectId: PROJECT_ID,
+        body: VALID_BODY,
+        key: newKey,
+      });
 
       expect(response.status).toBe(409);
       expect(await response.json()).toEqual({
@@ -1450,7 +1518,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     "creates a fresh Connection beside %s history instead of implicitly replacing it",
     async (historyStatus) => {
       const { app, token } = buildApp();
-      const initial = await submit(app, token, { key: `history-${historyStatus}-initial` });
+      const initial = await submit(app, token, {
+        projectId: PROJECT_ID,
+        body: VALID_BODY,
+        key: `history-${historyStatus}-initial`,
+      });
       const initialBody = (await initial.json()) as {
         data: { providerCredential: { id: string }; connectionId: string };
       };
@@ -1490,7 +1562,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         ]);
       }
 
-      const fresh = await submit(app, token, { key: `history-${historyStatus}-fresh` });
+      const fresh = await submit(app, token, {
+        projectId: PROJECT_ID,
+        body: VALID_BODY,
+        key: `history-${historyStatus}-fresh`,
+      });
       expect(fresh.status).toBe(201);
       const freshBody = (await fresh.json()) as {
         data: { providerCredential: { id: string }; connectionId: string };
@@ -1507,6 +1583,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it("reinstalls as a new root and preserves deactivated lineage replay", async () => {
     const { app, token } = buildApp();
     const first = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "deactivated-lineage-v1",
     });
     const firstBody = (await first.json()) as {
@@ -1527,6 +1605,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       .run();
 
     const reinstall = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "deactivated-lineage-reinstall",
     });
     expect(reinstall.status).toBe(201);
@@ -1566,6 +1646,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     ]);
 
     const oldReplay = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "deactivated-lineage-v1",
     });
     expect(oldReplay.status).toBe(201);
@@ -1649,6 +1731,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       const { app, token } = buildApp();
 
       const response = await submit(app, token, {
+        projectId: PROJECT_ID,
         key: `legacy-active-${source}-coexistence`,
         body,
       });
@@ -1706,6 +1789,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "legacy-nonblocking",
     });
     expect(response.status).toBe(201);
@@ -1738,6 +1823,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       const { app, token } = buildApp();
 
       const response = await submit(app, token, {
+        projectId: PROJECT_ID,
+        body: VALID_BODY,
         key: "missing-pepper",
       });
       expect(response.status).toBe(500);
@@ -1770,13 +1857,25 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       return Response.json({ name: versionRef });
     });
     const { app, token } = buildApp();
-    const first = submit(app, token, { key: "gcp-in-flight" });
+    const first = submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "gcp-in-flight",
+    });
     try {
       await writing;
-      const replay = await submit(app, token, { key: "gcp-in-flight" });
+      const replay = await submit(app, token, {
+        projectId: PROJECT_ID,
+        body: VALID_BODY,
+        key: "gcp-in-flight",
+      });
       expect(replay.status).toBe(503);
       expect(gcp.writes).toHaveLength(1);
-      const competing = await submit(app, token, { key: "gcp-in-flight-other" });
+      const competing = await submit(app, token, {
+        projectId: PROJECT_ID,
+        body: VALID_BODY,
+        key: "gcp-in-flight-other",
+      });
       expect(competing.status).toBe(409);
       expect(gcp.writes).toHaveLength(1);
     } finally {
@@ -1786,7 +1885,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const committed = await first;
     expect(committed.status).toBe(201);
     const committedBody = await committed.json();
-    const replay = await submit(app, token, { key: "gcp-in-flight" });
+    const replay = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "gcp-in-flight",
+    });
     expect(replay.status).toBe(201);
     expect((await replay.json()).data).toEqual(committedBody.data);
     expect(gcp.writes).toHaveLength(1);
@@ -1795,7 +1898,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
   it("replays a successfully created GCP credential after installation cancellation", async () => {
     const gcp = mockSubmissionGcp();
     const { app, token } = buildApp();
-    const response = await submit(app, token, { key: "gcp-success-then-cancel" });
+    const response = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "gcp-success-then-cancel",
+    });
     expect(response.status).toBe(201);
     const created = await response.json();
     const cancelled = await app.request(
@@ -1804,7 +1911,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       env
     );
     expect(cancelled.status).toBe(200);
-    const replay = await submit(app, token, { key: "gcp-success-then-cancel" });
+    const replay = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "gcp-success-then-cancel",
+    });
     expect(replay.status).toBe(201);
     expect((await replay.json()).data).toEqual({
       connectionId: created.data.connectionId,
@@ -1824,6 +1935,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "upstream-secret-failure",
     });
 
@@ -1882,10 +1995,26 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       { status: "failure", event: "provider_credential_submission_failed" },
     ]);
 
-    expect((await submit(app, token, { key: "upstream-secret-failure" })).status).toBe(409);
+    expect(
+      (
+        await submit(app, token, {
+          projectId: PROJECT_ID,
+          body: VALID_BODY,
+          key: "upstream-secret-failure",
+        })
+      ).status
+    ).toBe(409);
     expect(gcp.writes).toHaveLength(1);
     loseResponse = false;
-    expect((await submit(app, token, { key: "upstream-secret-failure-new" })).status).toBe(201);
+    expect(
+      (
+        await submit(app, token, {
+          projectId: PROJECT_ID,
+          body: VALID_BODY,
+          key: "upstream-secret-failure-new",
+        })
+      ).status
+    ).toBe(201);
     expect(gcp.writes).toHaveLength(2);
     expect(new Set(gcp.writes).size).toBe(2);
   });
@@ -1897,7 +2026,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       CHECK (status <> 'creating')`);
     const { app, token } = buildApp();
     try {
-      const response = await submit(app, token, { key: "gcp-reservation-rollback" });
+      const response = await submit(app, token, {
+        projectId: PROJECT_ID,
+        body: VALID_BODY,
+        key: "gcp-reservation-rollback",
+      });
       expect(response.status).toBe(500);
       expect(gcp.requests).toEqual([]);
     } finally {
@@ -1919,7 +2052,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       const { app, token } = buildApp();
       let original: { connectionId: string; providerCredential: { id: string } } | undefined;
       if (operation === "replacement") {
-        const response = await submit(app, token, { key: "gcp-finalization-original" });
+        const response = await submit(app, token, {
+          projectId: PROJECT_ID,
+          body: VALID_BODY,
+          key: "gcp-finalization-original",
+        });
         expect(response.status).toBe(201);
         original = z
           .object({
@@ -1937,8 +2074,16 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       const gcp = mockSubmissionGcp();
       const request = () =>
         original
-          ? replace(app, token, original.connectionId, { key: "gcp-finalization-rollback" })
-          : submit(app, token, { key: "gcp-finalization-rollback" });
+          ? replace(app, token, original.connectionId, {
+              projectId: PROJECT_ID,
+              body: VALID_BODY,
+              key: "gcp-finalization-rollback",
+            })
+          : submit(app, token, {
+              projectId: PROJECT_ID,
+              body: VALID_BODY,
+              key: "gcp-finalization-rollback",
+            });
       await db.execute(`ALTER TABLE custody_connections ADD CONSTRAINT sdp_test_reject_gcp_connection
       CHECK (status <> 'pending') NOT VALID`);
       try {
@@ -2008,6 +2153,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "gcp-commit-ambiguity",
     });
 
@@ -2015,7 +2162,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(gcp.writes).toHaveLength(1);
     expect(gcp.destroys).toEqual([]);
     const committedBody = await response.json();
-    const replay = await submit(app, token, { key: "gcp-commit-ambiguity" });
+    const replay = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "gcp-commit-ambiguity",
+    });
     expect(replay.status).toBe(201);
     expect((await replay.json()).data).toEqual(committedBody.data);
     expect(gcp.writes).toHaveLength(1);
@@ -2051,6 +2202,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "encrypted-db-rollback",
     });
 
@@ -2074,6 +2227,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
       key: "gcp-reservation-unknown",
     });
     expect(response.status).toBe(503);
@@ -2088,7 +2243,11 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         .bind("gcp-reservation-unknown")
         .first()
     ).toEqual({ status: "creating", secret_version_ref: null });
-    const replay = await submit(app, token, { key: "gcp-reservation-unknown" });
+    const replay = await submit(app, token, {
+      projectId: PROJECT_ID,
+      body: VALID_BODY,
+      key: "gcp-reservation-unknown",
+    });
     expect(replay.status).toBe(503);
     expect(gcp.requests).toEqual([]);
     const outcome = await db
@@ -2113,8 +2272,8 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
     const key = `concurrent-same-key-${source}`;
     const [left, right] = await Promise.all([
-      submit(app, token, { key, body }),
-      submit(app, token, { key, body }),
+      submit(app, token, { projectId: PROJECT_ID, key, body }),
+      submit(app, token, { projectId: PROJECT_ID, key, body }),
     ]);
 
     expect(left.status).toBe(201);
@@ -2155,8 +2314,16 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const body = { provider: "privy" } as const;
 
     const responses = await Promise.all([
-      submit(app, token, { key: "runtime-concurrent-left", body }),
-      submit(app, token, { key: "runtime-concurrent-right", body }),
+      submit(app, token, {
+        projectId: PROJECT_ID,
+        key: "runtime-concurrent-left",
+        body,
+      }),
+      submit(app, token, {
+        projectId: PROJECT_ID,
+        key: "runtime-concurrent-right",
+        body,
+      }),
     ]);
 
     expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
@@ -2169,8 +2336,12 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const { app, token } = buildApp();
 
     const responses = await Promise.all([
-      submit(app, token, { key: "concurrent-fresh-left" }),
-      submit(app, token, { key: "concurrent-fresh-right" }),
+      submit(app, token, { projectId: PROJECT_ID, body: VALID_BODY, key: "concurrent-fresh-left" }),
+      submit(app, token, {
+        projectId: PROJECT_ID,
+        body: VALID_BODY,
+        key: "concurrent-fresh-right",
+      }),
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
     const conflictResponse = responses.find((response) => response.status === 409);

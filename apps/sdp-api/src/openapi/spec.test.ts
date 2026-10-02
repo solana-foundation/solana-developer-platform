@@ -44,6 +44,26 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
 }
 
 describe("OpenAPI spec", () => {
+  it("documents API key and Clerk access for shared private-channel and member operations", () => {
+    const doc = createOpenApiDocument();
+    for (const [path, method] of [
+      ["/v1/private-channels/balance", "get"],
+      ["/v1/private-channels/wallets", "get"],
+      ["/v1/private-channels/wallets/{walletId}/verify", "post"],
+      ["/v1/private-channels/wallets/{pubkey}", "delete"],
+      ["/v1/members", "get"],
+      ["/v1/members/invite", "post"],
+      ["/v1/members/invitations/{invitationId}", "delete"],
+      ["/v1/members/{memberId}", "delete"],
+    ] as const) {
+      expect(doc.paths?.[path]?.[method]?.security).toEqual([
+        { apiKeyAuth: [] },
+        { clerkBearerAuth: [] },
+      ]);
+    }
+    expect(doc.paths?.["/v1/members/accept"]?.post?.security).toEqual([{ clerkBearerAuth: [] }]);
+  });
+
   it("documents exact signer-check runtime failures without changing its Provider-ID request", () => {
     const operation = createPublicOpenApiDocument().paths?.["/v1/wallets/signer-check"]?.post;
     expect(operation?.responses).toHaveProperty("403");
@@ -236,7 +256,6 @@ describe("OpenAPI spec", () => {
       expect(internalOperation?.security).toEqual([
         { apiKeyAuth: [] },
         { clerkBearerAuth: [] },
-        { sessionCookie: [] },
         {},
       ]);
     }
@@ -246,7 +265,6 @@ describe("OpenAPI spec", () => {
       expect(internal.paths?.[path]?.[method]?.security).toEqual([
         { apiKeyAuth: [] },
         { clerkBearerAuth: [] },
-        { sessionCookie: [] },
       ]);
     }
 
@@ -726,13 +744,11 @@ describe("OpenAPI spec", () => {
       createPublicOpenApiDocument({ publishEarn: true }).tags?.map((tag) => tag.name)
     ).toContain("Earn");
 
-    expect(doc.paths?.["/v1/auth/me"]).toBeUndefined();
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();
     expect(doc.paths?.["/v1/members"]).toBeUndefined();
     expect(doc.paths?.["/v1/rpc/providers"]).toBeUndefined();
     expect(doc.paths?.["/admin/allowlist"]).toBeUndefined();
     expect(doc.paths?.["/v1/onboarding/status"]).toBeUndefined();
-    expect(doc.components?.securitySchemes?.sessionCookie).toBeUndefined();
     expect(doc.components?.securitySchemes?.adminKey).toBeUndefined();
     expect(updateProject).toContain('"rpcProvider"');
     expect(updateProject).toContain('"nodit"');
