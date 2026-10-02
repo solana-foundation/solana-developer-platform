@@ -59,6 +59,8 @@ already names the Private Channels module.
 
 - Each module needs an API gate. A route inventory test requires every API route
   to belong to a module or to core.
+- Lists that span modules leave out excluded ones: `GET /v1/transactions` drops
+  their rows and refuses a filter that names one.
 - Code for excluded modules still ships in the image.
 - Excluding a module also stops its exits: routes, webhooks and reconcilers for
   money already in flight (for example Earn withdrawals, DvP settlement, a ramp

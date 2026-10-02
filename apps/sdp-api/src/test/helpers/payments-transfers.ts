@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { Permission, PolicyDefaultAction, PolicyRule } from "@sdp/types";
+import type { Permission, PolicyDefaultAction, PolicyRule, SdpReleaseChannel } from "@sdp/types";
 import type { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
@@ -36,6 +36,8 @@ export interface PostTransferOptions {
         token: string;
       };
   dryRun?: boolean;
+  /** Overrides `SDP_RELEASE_CHANNEL` for this request. */
+  releaseChannel?: SdpReleaseChannel;
 }
 
 export async function postTransfer(
@@ -70,7 +72,9 @@ export async function postRawTransfer(
   return app.request(
     "/v1/payments/transfers",
     { method: "POST", headers, body: JSON.stringify(body) },
-    env
+    options.releaseChannel === undefined
+      ? env
+      : { ...env, SDP_RELEASE_CHANNEL: options.releaseChannel }
   );
 }
 

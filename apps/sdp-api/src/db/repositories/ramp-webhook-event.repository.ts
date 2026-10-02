@@ -35,6 +35,8 @@ export interface ClaimReplayableRampWebhookEventsInput {
   createdBefore: string;
   maxAttempts: number;
   limit: number;
+  /** Rows from these providers are never claimed (their release channel leaves them out). */
+  excludedProviders: readonly RampProviderId[];
 }
 
 export interface RecordRampWebhookEventFailureInput {
@@ -57,6 +59,14 @@ export interface ParkExhaustedRampWebhookEventsInput {
   updatedBefore: string;
   maxAttempts: number;
   appRevision: string;
+  /** Rows from these providers are never parked. */
+  excludedProviders: readonly RampProviderId[];
+}
+
+export interface RearmRampWebhookEventsInput {
+  appRevision: string;
+  /** Rows from these providers are never re-armed. */
+  excludedProviders: readonly RampProviderId[];
 }
 
 export interface RampWebhookEventsRepository {
@@ -90,7 +100,7 @@ export interface RampWebhookEventsRepository {
    * revision stays parked — retrying the same code against the same payload
    * only burns attempts.
    */
-  rearmParkedByOtherRevisions(appRevision: string): Promise<RampWebhookEventRow[]>;
+  rearmParkedByOtherRevisions(input: RearmRampWebhookEventsInput): Promise<RampWebhookEventRow[]>;
 }
 
 function mapRow(row: Record<string, unknown>): RampWebhookEventRow {
@@ -172,13 +182,20 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
            WHERE id IN (
              SELECT id FROM ramp_webhook_events
               WHERE status = 'pending' AND created_at <= ? AND updated_at <= ? AND attempts < ?
+                AND provider <> ALL(?::text[])
               ORDER BY created_at ASC
               LIMIT ?
               FOR UPDATE SKIP LOCKED
            )
            RETURNING *`
         )
-        .bind(input.createdBefore, input.createdBefore, input.maxAttempts, input.limit)
+        .bind(
+          input.createdBefore,
+          input.createdBefore,
+          input.maxAttempts,
+          [...input.excludedProviders],
+          input.limit
+        )
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
@@ -189,14 +206,17 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
           `UPDATE ramp_webhook_events
              SET status = 'failed', parked_app_revision = ?, updated_at = sdp_iso_now()
            WHERE status = 'pending' AND attempts >= ? AND updated_at <= ?
+             AND provider <> ALL(?::text[])
            RETURNING *`
         )
-        .bind(input.appRevision, input.maxAttempts, input.updatedBefore)
+        .bind(input.appRevision, input.maxAttempts, input.updatedBefore, [
+          ...input.excludedProviders,
+        ])
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
 
-    async rearmParkedByOtherRevisions(appRevision) {
+    async rearmParkedByOtherRevisions(input) {
       // Same batch and lock discipline as the claim path: bounded per pass —
       // the parked set is small by nature, and the next minutely pass takes
       // the rest — and SKIP LOCKED so overlapping passes never fight over a
@@ -209,13 +229,14 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
            WHERE id IN (
              SELECT id FROM ramp_webhook_events
               WHERE status = 'failed' AND NOT terminal AND parked_app_revision IS DISTINCT FROM ?
+                AND provider <> ALL(?::text[])
               ORDER BY created_at ASC
               LIMIT 100
               FOR UPDATE SKIP LOCKED
            )
            RETURNING *`
         )
-        .bind(appRevision)
+        .bind(input.appRevision, [...input.excludedProviders])
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },

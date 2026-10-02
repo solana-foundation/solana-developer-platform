@@ -1,4 +1,9 @@
-import { resolveOrganizationProviderEntitlements } from "@sdp/types";
+import {
+  EARN_PROVIDERS,
+  RAMP_PROVIDERS,
+  resolveOrganizationProviderEntitlements,
+  SDP_RAMP_PROVIDER_STAGES,
+} from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { getLogger } from "@/runtime/logger";
@@ -252,6 +257,47 @@ describe("provider-availability.service", () => {
       code: "FORBIDDEN",
       message: "Range is not configured in this environment.",
     });
+  });
+
+  it("reports providers the release channel leaves out as not enabled", async () => {
+    await setOrganizationTier("enterprise");
+
+    const onExperimental = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const onStable = await getProviderAvailability(
+      { ...env, SDP_RELEASE_CHANNEL: "stable" },
+      getDb(env),
+      TEST_ORG_ID
+    );
+
+    const enabledRamps = RAMP_PROVIDERS.filter((p) => onExperimental.providers.ramps[p]?.enabled);
+    expect(enabledRamps.length).toBeGreaterThan(0);
+    for (const provider of enabledRamps) {
+      expect(onStable.providers.ramps[provider]).toEqual({
+        ...onExperimental.providers.ramps[provider],
+        enabled: false,
+      });
+    }
+    for (const provider of EARN_PROVIDERS) {
+      if (!onExperimental.providers.earn[provider]?.enabled) continue;
+      expect(onStable.providers.earn[provider]?.enabled).toBe(false);
+    }
+    // Stable modules are unchanged.
+    expect(onStable.providers.custody).toEqual(onExperimental.providers.custody);
+    expect(onStable.providers.compliance).toEqual(onExperimental.providers.compliance);
+  });
+
+  it("follows injected ramp provider stages", async () => {
+    await setOrganizationTier("enterprise");
+    const onBeta = { ...env, SDP_RELEASE_CHANNEL: "beta" };
+    const onExperimental = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    expect(onExperimental.providers.ramps.moonpay?.enabled).toBe(true);
+
+    const availability = await getProviderAvailability(onBeta, getDb(env), TEST_ORG_ID, {
+      rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
+    });
+
+    expect(availability.providers.ramps.moonpay?.enabled).toBe(true);
+    expect(availability.providers.ramps.bvnk?.enabled).toBe(false);
   });
 
   it("treats partially configured multi-secret providers as not configured", async () => {

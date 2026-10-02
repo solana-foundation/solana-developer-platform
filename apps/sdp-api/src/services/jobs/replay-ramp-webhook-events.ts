@@ -1,8 +1,10 @@
+import { RAMP_PROVIDERS } from "@sdp/types";
 import { getDb } from "@/db";
 import {
   createPostgresRampWebhookEventsRepository,
   type RampWebhookEventRow,
 } from "@/db/repositories/ramp-webhook-event.repository";
+import { isRampProviderAvailable, type RampProviderStages } from "@/lib/feature-flags";
 import { TerminalRampWebhookError, type WebhookProcessor } from "@/routes/webhooks/ramps/processor";
 import {
   isWebhookRampProvider,
@@ -127,8 +129,22 @@ export async function applyStoredRampWebhookEvent(
  * Replays pending events the background pass failed to apply (or never got to
  * run for — a deploy or crash between the ack and the apply). Returns the
  * number of events applied.
+ *
+ * Rows from a ramp provider the release channel leaves out are never re-armed,
+ * parked or replayed: they stay exactly as they are until the provider returns.
+ *
+ * @param rampProviderStages - Ramp provider stages; tests only, see `RampProviderStages`.
  */
-export async function replayRampWebhookEvents(env: Env): Promise<number> {
+export async function replayRampWebhookEvents(
+  env: Env,
+  rampProviderStages?: RampProviderStages
+): Promise<number> {
+  const excludedProviders = RAMP_PROVIDERS.filter(
+    (provider) => !isRampProviderAvailable(env, provider, rampProviderStages)
+  );
+  if (excludedProviders.length === RAMP_PROVIDERS.length) {
+    return 0;
+  }
   const events = createPostgresRampWebhookEventsRepository(getDb(env));
   const cutoff = new Date(Date.now() - RAMP_WEBHOOK_EVENT_REPLAY_MIN_AGE_MS).toISOString();
   const appRevision = currentAppRevision(env);
@@ -138,7 +154,7 @@ export async function replayRampWebhookEvents(env: Env): Promise<number> {
   // path after an incident is "ship the fix" with no manual re-arm. Rows the
   // CURRENT revision parked stay parked — same code, same payload, same
   // outcome.
-  for (const row of await events.rearmParkedByOtherRevisions(appRevision)) {
+  for (const row of await events.rearmParkedByOtherRevisions({ appRevision, excludedProviders })) {
     logEvent("info", {
       event: "sdp_api_ramp_webhook_event_rearmed",
       flow: "ramp-settlement",
@@ -155,6 +171,7 @@ export async function replayRampWebhookEvents(env: Env): Promise<number> {
     updatedBefore: cutoff,
     maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
     appRevision,
+    excludedProviders,
   })) {
     logEvent("error", {
       event: RAMP_WEBHOOK_EVENT_EXHAUSTED_EVENT,
@@ -176,6 +193,7 @@ export async function replayRampWebhookEvents(env: Env): Promise<number> {
       createdBefore: cutoff,
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
       limit: 1,
+      excludedProviders,
     });
     if (!row) {
       break;

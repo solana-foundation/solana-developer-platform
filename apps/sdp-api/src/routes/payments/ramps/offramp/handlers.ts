@@ -24,16 +24,12 @@ import {
 } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
-import {
-  type AppContext,
-  getPaymentsRepository,
-  rampRuntime,
-  resolveSdpEnvironment,
-} from "../../context";
+import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
 import {
   completePendingBvnkOfframpTransfer,
   createPendingBvnkOfframpTransfer,
@@ -123,7 +119,7 @@ export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOff
   const row = OFFRAMP_SUPPORT.find(
     (pair) => pair.source === input.assetRail && pair.dest === input.fiatCurrency
   );
-  const providers = row ? filterProviders(row.providers, resolveSdpEnvironment(c)) : [];
+  const providers = row ? filterProviders(c, row.providers) : [];
 
   const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
     RAMP_PROVIDER_CLIENTS[provider].estimateOfframp(ctx, {
@@ -441,10 +437,13 @@ export async function listOfframpCurrencies(c: AppContext) {
   }
 
   const { source, dest, provider } = parsed.data;
+  if (provider) {
+    assertRampProviderInChannel(c, provider);
+  }
   const pairs: OfframpCurrencyPair[] = OFFRAMP_SUPPORT.flatMap((row) => {
     if (source && row.source !== source) return [];
     if (dest && row.dest !== dest) return [];
-    const providers = filterProviders(row.providers, resolveSdpEnvironment(c), provider);
+    const providers = filterProviders(c, row.providers, provider);
     if (providers.length === 0) return [];
     return [{ source: row.source, dest: row.dest, providers }];
   });

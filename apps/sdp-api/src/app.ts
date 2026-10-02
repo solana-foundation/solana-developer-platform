@@ -25,6 +25,7 @@ import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError, badRequest, payloadTooLarge } from "@/lib/errors";
+import type { RampProviderStages } from "@/lib/feature-flags";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { dryRunMiddleware } from "@/middleware/dry-run";
@@ -33,6 +34,7 @@ import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
+import { requireModule } from "@/middleware/require-module";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import assetProfiles from "@/routes/asset-profiles";
@@ -76,6 +78,12 @@ export interface SdpPlugin {
 export interface AppDeps {
   observability: Observability;
   plugins?: SdpPlugin[];
+  /**
+   * Ramp provider stages to run the release channel against, in place of
+   * `SDP_RAMP_PROVIDER_STAGES`. Tests only: lets one provider be in a release
+   * channel while another is out, which today's all-`experimental` stages cannot show.
+   */
+  rampProviderStages?: RampProviderStages;
 }
 
 // Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
@@ -306,6 +314,9 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   app.use("*", async (c, next) => {
     c.set("observability", deps.observability);
+    if (deps.rampProviderStages) {
+      c.set("rampProviderStages", deps.rampProviderStages);
+    }
     await next();
   });
 
@@ -394,6 +405,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Asset profiles live under the issuance namespace, as a sibling of
   // /issuance/tokens. The router is self-contained (own auth + feature-flag + project
   // middleware).
+  v1.use("/issuance/*", requireModule("issuance"));
   v1.route("/issuance/asset-profiles", assetProfiles);
   v1.route("/issuance", issuance);
   v1.route("/wallets", wallets);

@@ -7,6 +7,7 @@ import {
   resolveSdpReleaseChannel,
   SDP_RAMP_PROVIDER_STAGES,
   type SdpModule,
+  type SdpReleaseChannel,
   type SolanaCluster,
 } from "@sdp/types";
 import type { Env } from "@/types/env";
@@ -18,30 +19,38 @@ function isTruthyFlag(value: string | undefined): boolean {
 }
 
 /**
+ * Each ramp provider's stage. Production always runs `SDP_RAMP_PROVIDER_STAGES`;
+ * tests pass other stages to put one provider in a release channel and leave another out.
+ */
+export type RampProviderStages = Record<RampProviderId, SdpReleaseChannel>;
+
+/**
  * Whether the deployment's release channel (`SDP_RELEASE_CHANNEL`, see `@sdp/types` release channels)
  * includes `module`. A release channel only caps: every flag below still has to be on,
  * and none of them can bring back a module the release channel leaves out.
  */
 export function isModuleAvailable(
   env: Pick<Env, "SDP_RELEASE_CHANNEL">,
-  module: SdpModule
+  module: SdpModule,
+  rampProviderStages: RampProviderStages = SDP_RAMP_PROVIDER_STAGES
 ): boolean {
   return isModuleInReleaseChannel(
     resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
     module,
-    SDP_RAMP_PROVIDER_STAGES
+    rampProviderStages
   );
 }
 
 /** Whether the deployment's release channel includes ramp `provider` (see `SDP_RAMP_PROVIDER_STAGES`). */
 export function isRampProviderAvailable(
   env: Pick<Env, "SDP_RELEASE_CHANNEL">,
-  provider: RampProviderId
+  provider: RampProviderId,
+  stages: RampProviderStages = SDP_RAMP_PROVIDER_STAGES
 ): boolean {
   return isRampProviderInReleaseChannel(
     resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
     provider,
-    SDP_RAMP_PROVIDER_STAGES
+    stages
   );
 }
 

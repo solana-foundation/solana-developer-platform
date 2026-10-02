@@ -1,9 +1,11 @@
+import { UNIFIED_TRANSACTION_SDP_MODULES } from "@sdp/types";
 import { getDb } from "@/db";
 import { createPostgresUnifiedTransactionsRepository } from "@/db/repositories/unified-transactions.repository.postgres";
 import { getAuth } from "@/lib/auth";
 import { forbidden, insufficientPermissions } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { grantedPermissions } from "@/middleware/auth";
+import { assertModuleInChannel, isModuleInChannel } from "@/middleware/require-module";
 import type { ValidatedContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import {
@@ -17,13 +19,23 @@ export async function listUnifiedTransactions(
 ) {
   const auth = getAuth(c);
   const query: UnifiedTransactionsQuery = c.req.valid("query");
+  if (query.module !== undefined) {
+    assertModuleInChannel(c, UNIFIED_TRANSACTION_SDP_MODULES[query.module]);
+  }
   const granted = grantedPermissions(c);
-  const permittedModules = permittedUnifiedTransactionModules(granted);
+  const grantedModules = permittedUnifiedTransactionModules(granted);
   if (
-    permittedModules.length === 0 ||
-    (query.module !== undefined && !permittedModules.includes(query.module))
+    grantedModules.length === 0 ||
+    (query.module !== undefined && !grantedModules.includes(query.module))
   ) {
     throw insufficientPermissions();
+  }
+  // Rows of a module the release channel leaves out are not listed (ADR 0005).
+  const permittedModules = grantedModules.filter((module) =>
+    isModuleInChannel(c, UNIFIED_TRANSACTION_SDP_MODULES[module])
+  );
+  if (permittedModules.length === 0) {
+    return success(c, { transactions: [], nextCursor: null });
   }
   const moduleWalletScopes = permittedModules.flatMap((module) => {
     const authorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [

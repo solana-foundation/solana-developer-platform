@@ -13,6 +13,7 @@ import {
   buildCompleteSettlement,
   bvnkPayoutObservationFromSource,
 } from "@sdp/payments/ramps/providers/bvnk/settlement";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AppDb, getDb } from "@/db";
 import type {
@@ -22,6 +23,7 @@ import type {
   SettleBvnkOnrampPayoutInput,
 } from "@/db/repositories/bvnk-onramp-transfers.repository";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
+import type { RampProviderStages } from "@/lib/feature-flags";
 import { rootLogger } from "@/runtime/logger";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -339,6 +341,49 @@ beforeEach(async () => {
 });
 
 describe("reconcileBvnkOnrampPayouts", () => {
+  describe("release channel", () => {
+    // Today every provider is `experimental`; these stages put one provider in `beta`.
+    const betaEnv = () => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
+    const onlyInBeta = (provider: "bvnk" | "moonpay"): RampProviderStages => ({
+      ...SDP_RAMP_PROVIDER_STAGES,
+      [provider]: "beta",
+    });
+
+    it("leaves BVNK payouts alone while BVNK is outside the release channel", async () => {
+      await seedUnclaimedCandidate({ id: "xfr_bvnk_excluded" });
+      const before = await readTransferRow("xfr_bvnk_excluded");
+
+      // Ramps is in the release channel through MoonPay; BVNK is not.
+      const touched = await reconcileBvnkOnrampPayouts(betaEnv(), onlyInBeta("moonpay"));
+
+      expect(touched).toBe(0);
+      expect(dryRunSpy).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(await readTransferRow("xfr_bvnk_excluded")).toEqual(before);
+    });
+
+    it("leaves BVNK payouts alone when no ramp provider is in the release channel", async () => {
+      await seedUnclaimedCandidate({ id: "xfr_bvnk_stable" });
+      const before = await readTransferRow("xfr_bvnk_stable");
+
+      const touched = await reconcileBvnkOnrampPayouts({ ...env, SDP_RELEASE_CHANNEL: "stable" });
+
+      expect(touched).toBe(0);
+      expect(dryRunSpy).not.toHaveBeenCalled();
+      expect(await readTransferRow("xfr_bvnk_stable")).toEqual(before);
+    });
+
+    it("reconciles BVNK payouts once BVNK is in the release channel", async () => {
+      await seedUnclaimedCandidate({ id: "xfr_bvnk_included" });
+      createSpy.mockResolvedValue(processingSummary("xfr_bvnk_included"));
+
+      const touched = await reconcileBvnkOnrampPayouts(betaEnv(), onlyInBeta("bvnk"));
+
+      expect(touched).toBe(1);
+      expect(createSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("unclaimed branch", () => {
     it("claims with the dry-run-derived intent, creates, and records the payout id", async () => {
       await seedUnclaimedCandidate({ id: "xfr_happy" });

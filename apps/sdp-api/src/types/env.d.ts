@@ -2,6 +2,7 @@
 
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import type { RampProviderStages } from "@/lib/feature-flags";
 import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
@@ -358,6 +359,8 @@ declare module "hono" {
   interface ContextVariableMap {
     // Injected by createApp so handlers use the same implementation as tests
     observability?: Observability;
+    // Injected by createApp in tests only; see AppDeps.rampProviderStages
+    rampProviderStages?: RampProviderStages;
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;

@@ -1,11 +1,15 @@
 import { createHmac } from "node:crypto";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createApp } from "@/app";
 import { getDb } from "@/db";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import app from "@/index";
+import type { RampProviderStages } from "@/lib/feature-flags";
 import { TerminalRampWebhookError } from "@/routes/webhooks/ramps/processor";
 import { RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "@/routes/webhooks/ramps/registry";
+import { noopObservability } from "@/runtime/observability";
 import * as replayJobs from "@/services/jobs/replay-ramp-webhook-events";
 import {
   applyStoredRampWebhookEvent,
@@ -15,6 +19,7 @@ import {
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import type { Env } from "@/types/env";
 
 /**
  * The durable ramp webhook inbox: a verified event is persisted before the
@@ -37,7 +42,10 @@ describe("Ramp webhook event inbox", () => {
     return `t=${timestampSeconds},s=${s}`;
   }
 
-  async function sendMoonpayWebhook(payload: unknown, options?: { settleBackground?: boolean }) {
+  async function sendMoonpayWebhook(
+    payload: unknown,
+    options?: { settleBackground?: boolean; target?: { app: typeof app; env: Env } }
+  ) {
     const body = JSON.stringify(payload);
     const header = moonpaySignatureHeader(body, Math.floor(Date.now() / 1000));
     const background: Promise<unknown>[] = [];
@@ -48,14 +56,15 @@ describe("Ramp webhook event inbox", () => {
       passThroughOnException() {},
       props: {},
     };
-    const res = await app.request(
+    const target = options?.target ?? { app, env };
+    const res = await target.app.request(
       "/webhooks/payments/ramps/sandbox/moonpay",
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "Moonpay-Signature-V2": header },
         body,
       },
-      env,
+      target.env,
       executionCtx
     );
     if (options?.settleBackground !== false) {
@@ -383,5 +392,123 @@ describe("Ramp webhook event inbox", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.status).toBe("failed");
     expect(rows[0]?.attempts).toBe(RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS);
+  });
+  describe("with one ramp provider in the release channel and another out", () => {
+    // Today every provider is `experimental`, so `beta` would leave them all out:
+    // these stages put MoonPay in `beta` and keep Lightspark out of it.
+    const MOONPAY_ONLY: RampProviderStages = { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" };
+    const betaEnv = (): Env => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
+    const betaApp = createApp({
+      observability: noopObservability,
+      rampProviderStages: MOONPAY_ONLY,
+    });
+
+    it("accepts the included provider's webhook and refuses the excluded one's", async () => {
+      const { res } = await sendMoonpayWebhook(completedPayload, {
+        target: { app: betaApp, env: betaEnv() },
+      });
+      expect(res.status).toBe(200);
+      expect(await readTransferStatus()).toBe("completed");
+
+      const refused = await betaApp.request(
+        "/webhooks/payments/ramps/sandbox/lightspark",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+        betaEnv()
+      );
+      expect(refused.status).toBe(403);
+      expect(await readInboxRows()).toHaveLength(0);
+    });
+
+    it("answers an unknown provider name as before", async () => {
+      const res = await betaApp.request(
+        "/webhooks/payments/ramps/sandbox/not-a-provider",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+        betaEnv()
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("replays, parks and re-arms only the included provider's rows", async () => {
+      const events = createPostgresRampWebhookEventsRepository(getDb(env));
+      const included = await events.insertEvent({
+        provider: "moonpay",
+        environment: "sandbox",
+        payload: completedPayload,
+      });
+      const excludedPending = await events.insertEvent({
+        provider: "lightspark",
+        environment: "sandbox",
+        payload: { excluded: "pending" },
+      });
+      const excludedExhausted = await events.insertEvent({
+        provider: "lightspark",
+        environment: "sandbox",
+        payload: { excluded: "exhausted" },
+      });
+      const excludedParked = await events.insertEvent({
+        provider: "lightspark",
+        environment: "sandbox",
+        payload: { excluded: "parked" },
+      });
+      const longAgo = "2026-06-18T00:00:00.000Z";
+      await getDb(env)
+        .prepare("UPDATE ramp_webhook_events SET created_at = ?, updated_at = ?")
+        .bind(longAgo, longAgo)
+        .run();
+      await getDb(env)
+        .prepare("UPDATE ramp_webhook_events SET attempts = ? WHERE id = ?")
+        .bind(RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS, excludedExhausted.id)
+        .run();
+      await getDb(env)
+        .prepare(
+          `UPDATE ramp_webhook_events
+             SET status = 'failed', attempts = ?, parked_app_revision = 'rev-previous'
+           WHERE id = ?`
+        )
+        .bind(RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS, excludedParked.id)
+        .run();
+
+      const applied = await replayRampWebhookEvents(betaEnv(), MOONPAY_ONLY);
+
+      expect(applied).toBe(1);
+      expect(await readTransferStatus()).toBe("completed");
+      const rows = await getDb(env)
+        .prepare("SELECT id, status, attempts, last_error FROM ramp_webhook_events")
+        .all<{ id: string; status: string; attempts: number; last_error: string | null }>();
+      const byId = new Map(rows.results.map((row) => [row.id, row]));
+      expect(byId.has(included.id)).toBe(false);
+      expect(byId.get(excludedPending.id)).toMatchObject({
+        status: "pending",
+        attempts: 0,
+        last_error: null,
+      });
+      expect(byId.get(excludedExhausted.id)).toMatchObject({
+        status: "pending",
+        attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      });
+      expect(byId.get(excludedParked.id)).toMatchObject({
+        status: "failed",
+        attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      });
+    });
+
+    it("touches no row when no ramp provider is in the release channel", async () => {
+      const stored = await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
+        provider: "moonpay",
+        environment: "sandbox",
+        payload: completedPayload,
+      });
+      await getDb(env)
+        .prepare("UPDATE ramp_webhook_events SET created_at = ?, updated_at = ? WHERE id = ?")
+        .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
+        .run();
+
+      expect(await replayRampWebhookEvents({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(0);
+
+      expect(await readInboxRows()).toMatchObject([
+        { id: stored.id, status: "pending", attempts: 0 },
+      ]);
+      expect(await readTransferStatus()).toBe("awaiting_payment");
+    });
   });
 });

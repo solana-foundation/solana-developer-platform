@@ -17,8 +17,9 @@ import {
   bvnkVerifiedIndividualCustomer,
   bvnkWalletProfilesResponse,
 } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
-import { BVNK_FUNDING_WALLET_STATUS } from "@sdp/types";
+import { BVNK_FUNDING_WALLET_STATUS, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createApp } from "@/app";
 import { getDb } from "@/db";
 import {
   createPostgresCounterpartiesRepository,
@@ -30,6 +31,7 @@ import {
 } from "@/db/repositories/counterparty-provider-account.repository";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
+import { noopObservability } from "@/runtime/observability";
 import {
   TEST_API_KEY,
   TEST_CACHED_API_KEY,
@@ -2731,6 +2733,54 @@ describe("Counterparties Routes", () => {
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = undefined;
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = undefined;
       vi.restoreAllMocks();
+    });
+
+    it("neither lists nor enriches accounts at a provider outside the release channel", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_channel" });
+      const owner = (await created.json()).data.counterparty;
+      await seedProviderAccount({
+        id: "provider_account_excluded_lightspark",
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:owner",
+        externalAccountReference: "ExternalAccount:excluded",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await seedProviderAccount({
+        id: "provider_account_included_mural",
+        counterpartyId: owner.id,
+        provider: "mural",
+        providerCustomerReference: "mural_customer",
+        externalAccountReference: "mural_external",
+        fiatCurrency: "GBP",
+        destinationCountry: "GB",
+        paymentRail: "FPS",
+        providerStatus: "ACTIVE",
+        status: "archived",
+        createdAt: "2026-01-02T00:00:00.000Z",
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      // Today every provider is `experimental`; these stages put only Mural in `beta`.
+      const betaApp = createApp({
+        observability: noopObservability,
+        rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, mural: "beta" },
+      });
+
+      const response = await betaApp.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        { ...env, SDP_RELEASE_CHANNEL: "beta" }
+      );
+
+      expect(response.status).toBe(200);
+      const { accounts } = (await response.json()).data as { accounts: { id: string }[] };
+      expect(accounts.map((account) => account.id)).toEqual(["provider_account_included_mural"]);
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it("lists scoped rows with grouped JIT enrichment, filters, and pending rows", async () => {
