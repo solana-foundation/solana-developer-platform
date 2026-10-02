@@ -64,23 +64,12 @@ afterEach(() => {
 });
 
 describe("PaymentRequestsWorkspace search", () => {
-  it("sends a search to the server on Enter, from the first page", async () => {
-    window.history.replaceState(null, "", "/dashboard/payments/requests?page=3&status=paid");
-    renderWorkspace({ listState: { page: 3, pageSize: 25, status: "paid", search: null } });
+  it("keeps the search box disabled until the API can search", async () => {
+    renderWorkspace();
 
-    await userEvent.type(screen.getByRole("searchbox"), " jane {Enter}");
-
-    expect(router.replace).toHaveBeenCalledWith(
-      "/dashboard/payments/requests?status=paid&search=jane",
-      { scroll: false }
-    );
-  });
-
-  it("does not reload for a search the list already shows", async () => {
-    renderWorkspace({ listState: { page: 1, pageSize: 25, status: null, search: "jane" } });
-
-    await userEvent.type(screen.getByRole("searchbox"), "{Enter}");
-
+    const searchbox = screen.getByRole("searchbox");
+    expect(searchbox).toHaveProperty("disabled", true);
+    await userEvent.type(searchbox, "jane{Enter}");
     expect(router.replace).not.toHaveBeenCalled();
   });
 

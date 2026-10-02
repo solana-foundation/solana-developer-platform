@@ -208,6 +208,10 @@ function PaymentRequestsSearch({
         },
       }}
       placeholder={t("DashboardPayments.requests.searchPlaceholder")}
+      // TODO(api): enable once GET /v1/payments/requests can search every request. Until then the
+      // box stays disabled rather than search only the requests already read (see
+      // parsePaymentRequestsListParams).
+      disabled
       className="min-w-0 flex-1 sm:w-56 sm:flex-none"
     />
   );
