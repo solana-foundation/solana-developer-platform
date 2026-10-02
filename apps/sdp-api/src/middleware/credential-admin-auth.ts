@@ -5,13 +5,13 @@ import type { Env } from "@/types/env";
 import { requirePermissions, unifiedAuthMiddleware } from "./auth";
 
 export function credentialAdminAuthMiddleware() {
-  const authenticate = unifiedAuthMiddleware({ allowClerk: true, allowSession: true });
+  const authenticate = unifiedAuthMiddleware();
   const authorize = requirePermissions("custody:admin");
 
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     await authenticate(c, async () => {
-      if (c.get("apiKey")) {
-        throw forbidden("Credential administration does not accept API keys");
+      if (!c.get("clerk")) {
+        throw forbidden("Credential administration requires a signed-in user");
       }
       await authorize(c, next);
     });
@@ -25,7 +25,7 @@ export function credentialAdminAuthMiddleware() {
  * credential administration surface must be tied to a person.
  */
 export function rpcAdminAuthMiddleware() {
-  const authenticate = unifiedAuthMiddleware({ allowClerk: true, allowSession: true });
+  const authenticate = unifiedAuthMiddleware();
 
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     await authenticate(c, async () => {

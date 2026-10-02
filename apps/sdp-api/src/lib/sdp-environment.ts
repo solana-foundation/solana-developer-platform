@@ -8,8 +8,8 @@ import type { Env } from "@/types/env";
  * scope) for the current request.
  *
  * Environment is a project boundary (migration 0005): API keys inherit it from
- * their project via the auth JOIN, and dashboard callers (Clerk or session
- * cookie) select a project with the x-project-id header, which
+ * their project via the auth JOIN, and dashboard callers (Clerk) select a
+ * project with the x-project-id header, which
  * projectContextMiddleware verifies against project membership before setting
  * `projectEnvironment`. A production-project dashboard session therefore
  * resolves to production — the same rails as a production API key.

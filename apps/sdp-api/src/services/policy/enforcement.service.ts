@@ -10,6 +10,7 @@ import type {
   WalletOperationEnvelope,
   WalletOperationProviderExtensions,
 } from "@sdp/types";
+import { z } from "zod";
 import { getDb } from "@/db";
 import {
   type ApprovalRequestRow,
@@ -273,6 +274,22 @@ function stableJson(value: unknown): string | undefined {
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+/**
+ * Shape of the actor persisted in `wallet_operations.raw_payload` by
+ * {@link walletOperationActorFromAuth}; readers parse with this instead of
+ * narrowing by hand. `session` survives only as a legacy stored value.
+ */
+export const storedWalletOperationActorSchema = z.discriminatedUnion("type", [
+  z.looseObject({ type: z.literal("api_key"), id: z.string(), apiKeyId: z.string() }),
+  z.looseObject({
+    type: z.enum(["clerk", "approved_operation", "session"]),
+    id: z.string(),
+    userId: z.string(),
+  }),
+]);
+
+export type StoredWalletOperationActor = z.infer<typeof storedWalletOperationActorSchema>;
 
 /**
  * Derive the wallet-operation actor from the authenticated context.

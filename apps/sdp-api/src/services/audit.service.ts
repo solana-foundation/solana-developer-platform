@@ -87,7 +87,6 @@ export type ResourceType =
   | "member"
   | "project"
   | "project_member"
-  | "session"
   | "token"
   | "token_transaction"
   | "token_allowlist"
@@ -383,16 +382,16 @@ export class AuditService {
     // invisible to org-scoped queries.
     const auth = c.get("apiKey");
     const clerk = c.get("clerk");
-    const session = c.get("session");
+    const replayActor = c.get("approvedOperationActor");
     const requestId = c.get("requestId");
 
     const organizationId =
       entry.organizationId ||
       auth?.organizationId ||
       clerk?.organizationId ||
-      session?.organizationId ||
+      replayActor?.organizationId ||
       null;
-    const userId = entry.userId || clerk?.userId || session?.userId || null;
+    const userId = entry.userId || clerk?.userId || replayActor?.userId || null;
     const apiKeyId = entry.apiKeyId || auth?.id || null;
 
     const ipAddress = getClientIp(c);

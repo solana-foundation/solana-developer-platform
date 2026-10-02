@@ -67,7 +67,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     operationId: "acceptInvitation",
     description:
       "Accepts an invitation token and activates membership. The caller must be signed in as the invited user: the token identifies the invitation, and the authenticated account's email address is what binds it to a person. An API key cannot accept an invitation, and the membership is always granted in the organization that issued it rather than the one the caller is currently scoped to.",
-    security: [{ sessionCookie: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       body: {

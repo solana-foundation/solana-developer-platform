@@ -89,7 +89,6 @@ export const memberIdParamSchema = idSchema("Member identifier.", "mem_example")
 export const projectIdParamSchema = idSchema("Project identifier.", "prj_example");
 export const tokenIdParamSchema = idSchema("Token identifier.", "tok_example");
 export const allowlistEntryIdParamSchema = idSchema("Allowlist entry identifier.", "al_example");
-export const sessionIdParamSchema = idSchema("Session identifier.", "ses_example");
 export const signingRequestIdParamSchema = idSchema(
   "Wallet signing request identifier.",
   "sigreq_example"

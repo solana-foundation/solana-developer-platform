@@ -92,7 +92,6 @@ const POSTGRES_TEST_TABLES = [
   // reference data seeded by migration 0057, not per-test state. Truncating it
   // would empty it for the rest of the run, and nothing re-seeds it.
   "magic_links",
-  "sessions",
   "project_members",
   "api_keys",
   "projects",
