@@ -420,8 +420,9 @@ function TransactionRecord({
   return (
     <DashboardWorkspaceOverviewPanel>
       <DashboardPageTitle title={summary.title} />
-      {/* The design's 32px between blocks; a titled section adds its own 32 above. The band
-          sits 4px nearer the title than a page's first block does. */}
+      {/* The design's 32px between blocks; a titled section adds its own 22 above, 54 from the
+          last row to its heading. The band sits 4px nearer the title than a page's first block
+          does. */}
       <div className="-mt-1 flex flex-col gap-8" data-transaction-detail>
         <RecordStateBand
           state={summary.status.label}
