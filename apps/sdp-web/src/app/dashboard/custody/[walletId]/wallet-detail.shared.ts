@@ -27,15 +27,9 @@ export function formatPolicyDate(iso: string, locale: string): string {
   return format.format(new Date(iso));
 }
 
-/** The Transactions ledger narrowed to one wallet, where its whole history pages. */
-export function walletTransactionsHref(custodyWalletId: string): string {
-  return `/dashboard/payments/transactions?${new URLSearchParams({ custodyWalletId })}`;
-}
-
-/** The transfer or transaction id the row carries, without the feed's source prefix. */
+/** A transaction's id as a row shows it: whole when short, else its start and end. */
 export function activityDisplayId(id: string): string {
-  const bare = id.replace(/^(payment|issuance)-/, "");
-  return bare.length > 14 ? `${bare.slice(0, 8)}…${bare.slice(-4)}` : bare;
+  return id.length > 14 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
 }
 
 /** What the wallet's page shows about the wallet itself, resolved on the server. */

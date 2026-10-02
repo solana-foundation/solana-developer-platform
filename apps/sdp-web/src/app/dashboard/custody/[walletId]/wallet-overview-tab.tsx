@@ -32,7 +32,7 @@ import {
 import { formatDate } from "../../payments/payments-presentation";
 import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../../payments/payments-table";
 import { useWalletActions } from "../use-wallet-actions";
-import { useWalletActivity } from "./use-wallet-activity";
+import { useWalletTransactions, WalletTransactionsError } from "./use-wallet-transactions";
 import { WalletActivityTable } from "./wallet-activity-table";
 import {
   type IssuedTokensByMint,
@@ -304,33 +304,30 @@ function TokensBlock({
   );
 }
 
+/** The wallet's newest transactions across every module, from the same feed the Activity tab pages. */
 function RecentActivityRows({
-  walletId,
+  custodyWalletId,
   balancesPromise,
   issuedTokensPromise,
 }: {
-  walletId: string;
+  custodyWalletId: string;
   balancesPromise: Promise<WalletBalancesResult>;
   issuedTokensPromise: Promise<IssuedTokensByMint>;
 }) {
   const t = useTranslations();
   const { balances } = use(balancesPromise);
   const issued = use(issuedTokensPromise);
-  const { data, error } = useWalletActivity(walletId);
+  const { data, error } = useWalletTransactions({ custodyWalletId, limit: RECENT_ACTIVITY });
+  const unavailable =
+    error instanceof WalletTransactionsError && error.status === 403
+      ? t("DashboardCustody.noActivitySources")
+      : t("DashboardCustody.walletActivityUnavailable");
   if (!data && !error) return <PartSkeleton />;
-  if (!data || data.activityError) {
-    return (
-      <p className="text-body text-tertiary">
-        {data?.activityError ?? t("DashboardCustody.walletActivityUnavailable")}
-      </p>
-    );
-  }
+  if (!data) return <p className="text-body text-tertiary">{unavailable}</p>;
   // A refresh that fails after the rows loaded keeps them, with a note, as the Activity tab does
   // (the block lays its children out in a column).
-  const refreshFailed = error ? (
-    <p className="text-meta text-tertiary">{t("DashboardCustody.walletActivityUnavailable")}</p>
-  ) : null;
-  const rows = data.activityRows;
+  const refreshFailed = error ? <p className="text-meta text-tertiary">{unavailable}</p> : null;
+  const rows = data.transactions;
   if (rows.length === 0) {
     return (
       <>
@@ -344,10 +341,7 @@ function RecentActivityRows({
   return (
     <>
       {refreshFailed}
-      <WalletActivityTable
-        rows={rows.slice(0, RECENT_ACTIVITY)}
-        symbols={symbolsByMint(balances, issued)}
-      />
+      <WalletActivityTable rows={rows} symbols={symbolsByMint(balances, issued)} />
     </>
   );
 }
@@ -437,7 +431,7 @@ export function WalletOverviewTab({
       >
         <Suspense fallback={<PartSkeleton />}>
           <RecentActivityRows
-            walletId={wallet.walletId}
+            custodyWalletId={wallet.custodyWalletId}
             balancesPromise={balancesPromise}
             issuedTokensPromise={issuedTokensPromise}
           />

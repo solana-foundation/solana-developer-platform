@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 
-import type { PaymentWalletPolicy } from "@sdp/types";
+import type {
+  PaymentWalletPolicy,
+  UnifiedTransaction,
+  UnifiedTransactionsListResponse,
+} from "@sdp/types";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import type { WalletTransactionsQuery } from "./use-wallet-transactions";
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
@@ -13,17 +18,16 @@ const mocks = vi.hoisted(() => ({
   tab: null as string | null,
   replaceSearchParams: vi.fn(),
   refresh: vi.fn(),
-  activity: {
-    activityRows: [] as unknown[],
-    activityError: null as string | null,
-    activityNotice: null as string | null,
-    hasMore: false as boolean,
+  transactions: {
+    transactions: [] as unknown[],
+    nextCursor: null as string | null,
   },
-  activityLimits: [] as (number | undefined)[],
-  widerActivityFails: false,
-  /** The loaded window's latest refresh fails, so SWR holds its rows and an error. */
+  /** Every page the view asked the feed for, in order. */
+  queries: [] as unknown[],
+  /** The page's latest refresh fails, so SWR holds its rows and an error. */
   activityRefreshFails: false,
-  retryActivity: vi.fn(),
+  /** The feed refuses the caller: no module permission at all. */
+  activityForbidden: false,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -60,31 +64,22 @@ vi.mock("@/app/dashboard/payments/payments-workspace.data", () => ({
 vi.mock("@/app/dashboard/custody/wallet-provider-mark", () => ({
   WalletProviderMark: () => <span data-testid="mark" />,
 }));
-vi.mock("./use-wallet-activity", async () => {
-  const { useEffect } = await import("react");
+vi.mock("./use-wallet-transactions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./use-wallet-transactions")>();
   return {
-    useWalletActivity: (
-      _walletId: string,
-      limit?: number,
-      callbacks: { onSuccess?: (data: unknown) => void; onError?: (error: Error) => void } = {}
-    ) => {
-      mocks.activityLimits.push(limit);
-      const fails = mocks.widerActivityFails && limit !== 20;
-      // Like SWR, report how the read this hook started settled.
-      useEffect(() => {
-        if (fails) callbacks.onError?.(new Error("unavailable"));
-        else callbacks.onSuccess?.(mocks.activity);
-      }, [limit]);
-      if (fails) {
+    ...actual,
+    useWalletTransactions: (query: WalletTransactionsQuery) => {
+      mocks.queries.push(query);
+      if (mocks.activityForbidden) {
         return {
           data: undefined,
-          error: new Error("unavailable"),
+          error: new actual.WalletTransactionsError("Forbidden", 403),
           isValidating: false,
-          mutate: mocks.retryActivity,
+          mutate: vi.fn(),
         };
       }
       return {
-        data: mocks.activity,
+        data: mocks.transactions as UnifiedTransactionsListResponse,
         error: mocks.activityRefreshFails ? new Error("Activity refresh failed") : undefined,
         isValidating: false,
         mutate: vi.fn(),
@@ -92,6 +87,36 @@ vi.mock("./use-wallet-activity", async () => {
     },
   };
 });
+
+function lastQuery(): WalletTransactionsQuery {
+  return mocks.queries.at(-1) as WalletTransactionsQuery;
+}
+
+function paymentRow(
+  id: string,
+  kind: "pay" | "deposit",
+  changes: Partial<UnifiedTransaction> = {}
+): UnifiedTransaction {
+  return {
+    id,
+    moduleId: id,
+    module: "payments",
+    kind,
+    moduleStatus: "finalized",
+    status: "succeeded",
+    organizationId: "org",
+    projectId: "project",
+    custodyWalletId: "cwlt_one",
+    custodyWalletLabel: "Treasury",
+    token: USDC,
+    amount: "500.00",
+    counterpartyId: null,
+    counterpartyAddress: "Dq73aaaaaaaaaaaaaaaaaaaa2KCh",
+    signature: null,
+    createdAt: "2026-09-11T00:00:00.000Z",
+    ...changes,
+  } as UnifiedTransaction;
+}
 
 const { WalletDetailView } = await import("./wallet-detail-view");
 
@@ -207,38 +232,22 @@ function renderView(overrides: Partial<ComponentProps<typeof WalletDetailView>> 
 
 beforeEach(() => {
   mocks.tab = null;
-  mocks.activity = {
-    activityRows: [
-      {
-        id: "payment-xfr_7c1c0000c1c7",
-        sourceKind: "payments",
-        operationLabel: "Outgoing",
-        status: "finalized",
-        signature: null,
-        token: USDC,
-        amount: "500.00",
-        address: "Dq73aaaaaaaaaaaaaaaaaaaa2KCh",
-        createdAt: "2026-09-11T00:00:00.000Z",
-      },
-      {
-        id: "payment-xfr_a0460000a2a63",
-        sourceKind: "payments",
-        operationLabel: "Incoming",
+  mocks.transactions = {
+    transactions: [
+      paymentRow("xfr_7c1c0000c1c7", "pay"),
+      paymentRow("xfr_a0460000a2a63", "deposit", {
+        moduleStatus: "pending",
         status: "pending",
-        signature: null,
-        token: USDC,
         amount: "1250.00",
-        address: "FSegbbbbbbbbbbbbbbbbbb2WSY",
+        counterpartyAddress: "FSegbbbbbbbbbbbbbbbbbb2WSY",
         createdAt: "2026-09-10T00:00:00.000Z",
-      },
+      }),
     ],
-    activityError: null,
-    activityNotice: null,
-    hasMore: false,
+    nextCursor: null,
   };
-  mocks.activityLimits = [];
-  mocks.widerActivityFails = false;
+  mocks.queries = [];
   mocks.activityRefreshFails = false;
+  mocks.activityForbidden = false;
 });
 afterEach(() => {
   cleanup();
@@ -262,8 +271,12 @@ describe("Overview", () => {
 
     const activity = document.querySelector("[data-wallet-activity-table]") as HTMLElement;
     expect(within(activity).getByText("−500.00 USDC")).toBeTruthy();
-    expect(within(activity).getByText("+1250.00 USDC")).toBeTruthy();
+    expect(within(activity).getByText("+1,250.00 USDC")).toBeTruthy();
     expect(within(activity).getByText("xfr_7c1c…c1c7")).toBeTruthy();
+    expect(within(activity).getByText("Pay")).toBeTruthy();
+    expect(within(activity).getByText("Deposit")).toBeTruthy();
+    // The Overview reads the wallet's five newest rows from the same feed the Activity tab pages.
+    expect(lastQuery()).toEqual({ custodyWalletId: "cwlt_one", limit: 5 });
 
     expect(
       screen.getByText(
@@ -286,7 +299,17 @@ describe("Overview", () => {
     expect(await screen.findByText("Wallet activity is unavailable right now.")).toBeTruthy();
     const activity = document.querySelector("[data-wallet-activity-table]") as HTMLElement;
     expect(within(activity).getByText("−500.00 USDC")).toBeTruthy();
-    expect(within(activity).getByText("+1250.00 USDC")).toBeTruthy();
+    expect(within(activity).getByText("+1,250.00 USDC")).toBeTruthy();
+  });
+
+  it("says when the caller may read no activity at all", async () => {
+    mocks.activityForbidden = true;
+    await act(async () => {
+      renderView();
+    });
+    expect(
+      await screen.findByText("No activity sources are available for this wallet.")
+    ).toBeTruthy();
   });
 
   it("says a restricted wallet cannot sign, and offers no faucet", async () => {
@@ -308,18 +331,61 @@ describe("Overview", () => {
 });
 
 describe("Activity", () => {
-  it("searches the wallet's activity", async () => {
+  it("sends a search of three or more characters to the API, from the newest page", async () => {
+    mocks.tab = "activity";
+    mocks.transactions = { ...mocks.transactions, nextCursor: "cursor_2" };
+    await act(async () => {
+      renderView();
+    });
+    expect(await screen.findAllByText(/xfr_/)).toHaveLength(2);
+    expect(lastQuery()).toEqual({ custodyWalletId: "cwlt_one", limit: 25 });
+    const search = screen.getByPlaceholderText("Search ID, signature or address (3+ characters)");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(lastQuery().cursor).toBe("cursor_2");
+
+    fireEvent.change(search, { target: { value: "a0" } });
+    expect(lastQuery().search).toBeUndefined();
+
+    fireEvent.change(search, { target: { value: "a046" } });
+    expect(lastQuery()).toMatchObject({ search: "a046", cursor: undefined });
+
+    fireEvent.change(search, { target: { value: "" } });
+    expect(lastQuery().search).toBeUndefined();
+  });
+
+  it("pages the wallet's whole history with the feed's cursor", async () => {
+    mocks.tab = "activity";
+    mocks.transactions = { ...mocks.transactions, nextCursor: "cursor_2" };
+    await act(async () => {
+      renderView();
+    });
+    expect(await screen.findByText("Page 1 of 2")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(lastQuery().cursor).toBe("cursor_2");
+    expect(screen.getByText("Page 2 of 3")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
+    expect(lastQuery().cursor).toBeUndefined();
+    expect(screen.getByText("Page 1 of 2")).toBeTruthy();
+  });
+
+  it("shows no pager while the feed has one page, and the empty note when it has none", async () => {
     mocks.tab = "activity";
     await act(async () => {
       renderView();
     });
     expect(await screen.findAllByText(/xfr_/)).toHaveLength(2);
-    fireEvent.change(screen.getByPlaceholderText("Search this wallet's activity"), {
-      target: { value: "a046" },
+    expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
+    cleanup();
+
+    mocks.transactions = { transactions: [], nextCursor: null };
+    await act(async () => {
+      renderView();
     });
-    expect(screen.getAllByText(/xfr_/)).toHaveLength(1);
-    expect(document.querySelector("[data-wallet-activity-capped]")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Load older activity" })).toBeNull();
+    expect(await screen.findByText("No activity yet")).toBeTruthy();
+    expect(screen.queryByRole("searchbox")).toBeNull();
   });
 
   it("keeps the loaded rows when a refresh fails, and says the activity is unavailable", async () => {
@@ -330,87 +396,6 @@ describe("Activity", () => {
     });
     expect(await screen.findByText("Wallet activity is unavailable right now.")).toBeTruthy();
     expect(screen.getAllByText(/xfr_/)).toHaveLength(2);
-  });
-
-  it("loads older activity and points the full history at this wallet's ledger", async () => {
-    mocks.tab = "activity";
-    const [first] = mocks.activity.activityRows as { id: string }[];
-    mocks.activity = {
-      ...mocks.activity,
-      activityRows: Array.from({ length: 20 }, (_, index) => ({
-        ...first,
-        id: `payment-xfr_row_${index}`,
-      })),
-      hasMore: true,
-    };
-    await act(async () => {
-      renderView();
-    });
-    expect(
-      await screen.findByText(
-        /Search and filters cover the latest 20 transactions loaded here\. The full history is in Transactions\./
-      )
-    ).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open Transactions" }).getAttribute("href")).toBe(
-      "/dashboard/payments/transactions?custodyWalletId=cwlt_one"
-    );
-    expect(mocks.activityLimits.at(-1)).toBe(20);
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Load older activity" }));
-    });
-    expect(mocks.activityLimits.at(-1)).toBe(120);
-  });
-
-  it("keeps the loaded rows when older activity fails, and retries the same window", async () => {
-    mocks.tab = "activity";
-    mocks.widerActivityFails = true;
-    const [first] = mocks.activity.activityRows as { id: string }[];
-    mocks.activity = {
-      ...mocks.activity,
-      activityRows: Array.from({ length: 20 }, (_, index) => ({
-        ...first,
-        id: `payment-xfr_row_${index}`,
-      })),
-      hasMore: true,
-    };
-    await act(async () => {
-      renderView();
-    });
-    await act(async () => {
-      fireEvent.click(await screen.findByRole("button", { name: "Load older activity" }));
-    });
-    expect(
-      screen.getByText("Older activity didn't load. The latest 20 transactions are still shown.")
-    ).toBeTruthy();
-    expect(screen.getAllByText(/xfr_row_/)).toHaveLength(20);
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Try loading older activity again" }));
-    });
-    expect(mocks.retryActivity).toHaveBeenCalledTimes(1);
-    expect(Math.max(...mocks.activityLimits.map((limit) => limit ?? 20))).toBe(120);
-  });
-
-  it("offers older activity only from the last page of what is loaded", async () => {
-    mocks.tab = "activity";
-    const [first] = mocks.activity.activityRows as { id: string }[];
-    mocks.activity = {
-      ...mocks.activity,
-      activityRows: Array.from({ length: 30 }, (_, index) => ({
-        ...first,
-        id: `payment-xfr_row_${index}`,
-      })),
-      hasMore: true,
-    };
-    await act(async () => {
-      renderView();
-    });
-    expect(await screen.findByText("Page 1 of 2")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Load older activity" })).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-    expect(screen.getByRole("button", { name: "Load older activity" })).toBeTruthy();
   });
 });
 

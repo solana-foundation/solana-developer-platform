@@ -1,7 +1,7 @@
 "use client";
 
-import type { WalletActivityRow } from "@/app/dashboard/custody/wallet-activity.data";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
+import type { UnifiedTransaction, UnifiedTransactionKind } from "@sdp/types";
+import { StatusText } from "@/components/ui/status-text";
 import {
   Table,
   TableBody,
@@ -12,20 +12,26 @@ import {
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { toTitleCase } from "../../activity-format-utils";
 import { resolveTransferTokenLabel, shortenAddress } from "../../payments/payments-overview.utils";
-import { formatDate } from "../../payments/payments-presentation";
+import { formatDate, formatDecimalAmount } from "../../payments/payments-presentation";
 import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../../payments/payments-table";
+import { kindLabel, useTransactionStatus } from "../../payments/transactions/transaction-status";
 import { activityDisplayId } from "./wallet-detail.shared";
 
-const SETTLED = new Set(["confirmed", "finalized", "completed", "succeeded", "success"]);
-const FAILED = new Set(["failed", "rejected", "canceled", "cancelled", "expired"]);
+/** Which way a payment moved the wallet's balance; every payments kind has a side. */
+const SIGN_BY_PAYMENT_KIND = {
+  pay: "−",
+  confidential_pay: "−",
+  batch_pay: "−",
+  recurring_pay: "−",
+  offramp: "−",
+  deposit: "+",
+  request_deposit: "+",
+  onramp: "+",
+} as const satisfies Record<UnifiedTransactionKind<"payments">, "+" | "−">;
 
-function statusTone(status: string): StatusTone {
-  const normalized = status.toLowerCase();
-  if (SETTLED.has(normalized)) return "positive";
-  if (FAILED.has(normalized)) return "critical";
-  return "progress";
+function amountSign(transaction: UnifiedTransaction): string {
+  return transaction.module === "payments" ? SIGN_BY_PAYMENT_KIND[transaction.kind] : "";
 }
 
 /**
@@ -37,13 +43,12 @@ export function WalletActivityTable({
   rows,
   symbols,
 }: {
-  rows: readonly WalletActivityRow[];
+  rows: readonly UnifiedTransaction[];
   symbols: Record<string, string>;
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const incoming = t("DashboardCustody.incoming");
-  const outgoing = t("DashboardCustody.outgoing");
+  const statusOf = useTransactionStatus();
   return (
     <div className="overflow-x-auto refresh:-mx-3">
       <Table
@@ -70,23 +75,30 @@ export function WalletActivityTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => {
-            const sign =
-              row.operationLabel === incoming ? "+" : row.operationLabel === outgoing ? "−" : "";
-            const token = row.token ? resolveTransferTokenLabel(row.token, symbols) : "";
+          {rows.map((transaction) => {
+            const status = statusOf(transaction);
+            const token = transaction.token
+              ? resolveTransferTokenLabel(transaction.token, symbols)
+              : "";
             return (
-              <TableRow key={row.id} data-wallet-activity-row={row.id}>
+              <TableRow
+                key={`${transaction.module}:${transaction.id}`}
+                data-wallet-activity-row={transaction.id}
+              >
                 <TableCell className={PAYMENTS_TABLE_CELL}>
                   <span className="block truncate font-medium text-primary">
-                    {row.operationLabel}
+                    {kindLabel(t, transaction)}
                   </span>
-                  <span className="block truncate text-tertiary tabular-nums" title={row.id}>
-                    {activityDisplayId(row.id)}
+                  <span
+                    className="block truncate text-tertiary tabular-nums"
+                    title={transaction.id}
+                  >
+                    {activityDisplayId(transaction.id)}
                   </span>
                 </TableCell>
                 <TableCell className={PAYMENTS_TABLE_CELL}>
-                  <StatusText tone={statusTone(row.status)} className={PAYMENTS_TABLE_CELL}>
-                    {toTitleCase(row.status)}
+                  <StatusText tone={status.tone} className={PAYMENTS_TABLE_CELL}>
+                    {status.label}
                   </StatusText>
                 </TableCell>
                 <TableCell
@@ -95,15 +107,17 @@ export function WalletActivityTable({
                     "truncate text-right whitespace-nowrap text-primary tabular-nums"
                   )}
                 >
-                  {row.amount ? (
-                    `${sign}${row.amount}${token ? ` ${token}` : ""}`
+                  {transaction.amount ? (
+                    `${amountSign(transaction)}${formatDecimalAmount(transaction.amount, locale)}${token ? ` ${token}` : ""}`
                   ) : (
                     <span className="text-tertiary">—</span>
                   )}
                 </TableCell>
                 <TableCell className={cn(PAYMENTS_TABLE_CELL, "truncate text-primary")}>
-                  {row.address ? (
-                    <span title={row.address}>{shortenAddress(row.address)}</span>
+                  {transaction.counterpartyAddress ? (
+                    <span title={transaction.counterpartyAddress}>
+                      {shortenAddress(transaction.counterpartyAddress)}
+                    </span>
                   ) : (
                     <span className="text-tertiary">—</span>
                   )}
@@ -114,7 +128,7 @@ export function WalletActivityTable({
                     "whitespace-nowrap text-secondary tabular-nums"
                   )}
                 >
-                  {formatDate(row.createdAt, locale) ?? "—"}
+                  {formatDate(transaction.createdAt, locale) ?? "—"}
                 </TableCell>
               </TableRow>
             );
