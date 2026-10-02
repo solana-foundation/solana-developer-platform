@@ -379,17 +379,18 @@ async function waitForSignatureConfirmation(
         }
       );
     } catch (error) {
-      // The deadline abort is expected; log anything else. Either way stop waiting:
-      // the airdrop was submitted, and the caller revalidates while polling catches up.
-      if (!(error instanceof DOMException && error.name === "TimeoutError")) {
-        console.warn(
-          JSON.stringify({
-            event: "wallet_faucet_confirmation_check_failed",
-            name: error instanceof Error ? error.name : "non-error",
-          })
-        );
+      // The deadline abort ends the wait; any other failure may be transient, so keep checking.
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        return "timeout";
       }
-      return "timeout";
+      console.warn(
+        JSON.stringify({
+          event: "wallet_faucet_confirmation_check_failed",
+          name: error instanceof Error ? error.name : "non-error",
+        })
+      );
+      await new Promise((resolve) => setTimeout(resolve, FAUCET_CONFIRMATION_POLL_MS));
+      continue;
     }
     const status = relay.response?.result?.value[0];
     if (status?.err) {

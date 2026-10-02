@@ -159,16 +159,19 @@ describe("requestDevnetSolanaFaucetAction", () => {
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("stops waiting, logs, and revalidates when a status request fails", async () => {
+  it("logs a failed status request and keeps waiting for confirmation", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     client.fetch
       .mockResolvedValueOnce(relay({ result: "sig_airdrop" }))
-      .mockRejectedValueOnce(new Error("relay unavailable"));
+      .mockRejectedValueOnce(new Error("relay unavailable"))
+      .mockResolvedValueOnce(statuses("confirmed"));
 
-    const result = await requestDevnetSolanaFaucetAction("wallet_one", WALLET_ADDRESS);
+    const pending = requestDevnetSolanaFaucetAction("wallet_one", WALLET_ADDRESS);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await pending;
 
     expect(result).toMatchObject({ status: "success", signature: "sig_airdrop" });
-    expect(client.fetch).toHaveBeenCalledTimes(2);
+    expect(client.fetch).toHaveBeenCalledTimes(3);
     expect(mocks.revalidatePath).toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("wallet_faucet_confirmation_check_failed")
