@@ -7,12 +7,12 @@ import { RecordAmount } from "@/app/dashboard/payments/payments-record";
 import {
   RecordBlock,
   RecordColumns,
-  RecordLine,
   RecordRow,
   RecordStack,
   type StateBandTone,
 } from "@/components/refresh-record";
 import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { StatusText } from "@/components/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -231,21 +231,28 @@ function DeployDraftBlock({
   ...deployProps
 }: DeployProps & { signingWalletName: string }) {
   const t = useTranslations();
+  // 12px from the heading to the rows and from the rows to the buttons; 32px under the
+  // buttons to the supply, 8px more than the band's 24 over this block.
   return (
-    <RecordBlock title={t("DashboardIssuance.newDesign.overview.deployTitle")}>
-      <p className="max-w-[40em] text-body text-secondary">
-        {t("DashboardIssuance.newDesign.overview.deployBody")}
-      </p>
+    <section className="mb-2 flex min-w-0 flex-col gap-3">
+      <h2 className="flex items-center gap-1.5 text-subheading font-medium text-primary">
+        {t("DashboardIssuance.newDesign.overview.deployTitle")}
+        <InfoHint text={t("DashboardIssuance.newDesign.overview.deployBody")} />
+      </h2>
       <dl>
-        <RecordLine label={t("DashboardIssuance.newDesign.overview.signingWallet")}>
+        <RecordRow label={t("DashboardIssuance.newDesign.overview.signingWallet")}>
           {signingWalletName}
-        </RecordLine>
-        <RecordLine label={t("DashboardIssuance.newDesign.overview.authorities")}>
-          {t("DashboardIssuance.newDesign.overview.authoritiesDraft")}
-        </RecordLine>
-        <RecordLine label={t("DashboardIssuance.newDesign.overview.reversible")}>
-          {t("DashboardIssuance.newDesign.overview.reversibleNo")}
-        </RecordLine>
+        </RecordRow>
+        <RecordRow label={t("DashboardIssuance.newDesign.overview.authorities")}>
+          <span className="max-w-[32em] whitespace-normal">
+            {t("DashboardIssuance.newDesign.overview.authoritiesDraft")}
+          </span>
+        </RecordRow>
+        <RecordRow label={t("DashboardIssuance.newDesign.overview.reversible")}>
+          <span className="max-w-[32em] whitespace-normal">
+            {t("DashboardIssuance.newDesign.overview.reversibleNo")}
+          </span>
+        </RecordRow>
       </dl>
       <div className="flex items-center justify-end gap-2">
         <Button asChild variant="ghost" size="sm">
@@ -256,7 +263,7 @@ function DeployDraftBlock({
           {...deployProps}
         />
       </div>
-    </RecordBlock>
+    </section>
   );
 }
 
