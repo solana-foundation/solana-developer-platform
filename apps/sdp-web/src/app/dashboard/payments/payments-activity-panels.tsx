@@ -39,7 +39,7 @@ export function PaymentsActivityPanels({
           ]}
         />
       </div>
-      <div className="mt-4">{view === "transfers" ? transfers : batches}</div>
+      <div className="mt-3">{view === "transfers" ? transfers : batches}</div>
     </>
   );
 }
