@@ -46,7 +46,7 @@ export function RecordStateBand({
         <p className="text-nav font-medium">
           <StatusText tone={tone}>{state}</StatusText>
         </p>
-        {why ? <p className="max-w-md text-nav text-secondary">{why}</p> : null}
+        {why ? <p className="text-nav text-secondary">{why}</p> : null}
       </div>
       {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
     </div>

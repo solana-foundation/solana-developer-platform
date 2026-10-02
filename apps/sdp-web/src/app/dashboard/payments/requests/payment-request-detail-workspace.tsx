@@ -141,14 +141,14 @@ function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symb
           <div className="size-full animate-pulse rounded-xs bg-fill" />
         )}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <span className="text-meta text-secondary">
           {t("DashboardPayments.requestDetail.paymentLink")}
         </span>
         <span className="min-w-0 truncate font-mono text-body text-primary">{payLink || null}</span>
-        {/* 16px to the design's 30px buttons, 10px apart; the copy is filled while the request
+        {/* 16px to the design's 30px buttons, 8px apart; the copy is filled while the request
             can still be paid. */}
-        <div className="mt-3 flex flex-wrap items-center gap-2.5 [&_button]:[--button-height-md:1.875rem]">
+        <div className="mt-2.5 flex flex-wrap items-center gap-2 [&_button]:[--button-height-md:1.875rem]">
           <Button
             type="button"
             variant={request.status === "awaiting_payment" ? "default" : "outline"}
