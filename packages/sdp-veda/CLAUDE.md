@@ -232,6 +232,29 @@ publishes no vault discovery and there is nothing to discover: unlike Kamino's
 permissionless registry, a Veda vault reaches SDP only by being named in
 `VEDA_DEPLOYMENTS`.
 
+## Position reads reuse what does not change
+
+The SDK validates all three programs in its constructor, re-reads vault state
+inside every public method and follows every `getMultipleAccounts` with a
+`getBlockTime`, so a client per read cost 22 requests per holding.
+`readVedaPosition` therefore keeps one SDK client per (cluster, endpoint,
+deployment), and the vault's share mint, share decimals and fronted asset mint
+per (cluster, endpoint, vault), for `VEDA_READ_CACHE_TTL_MS`. Failures are never
+cached, and a client whose program validation rejects is evicted at once: the
+SDK would otherwise keep that rejection for the client's lifetime. An asset
+removed from a vault is therefore noticed up to one TTL late on reads only,
+with the value unavailable meanwhile.
+
+That client's transport (`createVedaReadRpc`) shares identical in-flight
+requests and reuses a slot's block time. It sits BELOW `withRpcReadContext`, so
+a minimum-slot read never shares a request with an unscoped one. The shared
+fills (client construction, static facts) run outside every caller's
+`withMinimumRpcSlot` scope: they are static, and one scoped caller's slot lag
+must not fail an unscoped caller that joined the same fill. The holding and its
+value stay live, in the caller's scope, on every read (devnet: 22 requests
+became 10 cold and 6 warm). Builds, quotes and queue reads keep a fresh
+`client()` per call.
+
 ## Compliance approvals are not implemented
 
 A Veda vault may run in compliance mode, where a deposit needs an Ed25519-signed

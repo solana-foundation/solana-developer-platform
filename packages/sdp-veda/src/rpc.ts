@@ -51,3 +51,154 @@ export function createVedaRpc(rpcUrl: string, timeoutMs = VEDA_RPC_REQUEST_TIMEO
   const transport = createDefaultRpcTransport({ url: rpcUrl });
   return createSolanaRpcFromTransport(withVedaRpcTimeout(transport, timeoutMs));
 }
+
+/** How long a read client reuses one slot's block time. */
+export const VEDA_BLOCK_TIME_TTL_MS = 60_000;
+const VEDA_BLOCK_TIME_CAPACITY = 256;
+
+interface InFlightRead {
+  response: Promise<unknown>;
+  consumers: number;
+  controller: AbortController;
+}
+
+/**
+ * De-duplication for the long-lived position-read client only.
+ *
+ * The SDK re-reads vault state inside every public method and follows every
+ * `getMultipleAccounts` with a `getBlockTime` for the slot that served it. Two
+ * de-duplications remove those repeats without changing what any caller sees:
+ *
+ * - A request identical (method and params) to one already in flight shares
+ *   that request's response. Kit's coalescer covers one microtask only, and the
+ *   SDK is several awaits deep before it sends.
+ * - A slot's block time is a fact of that slot, so a non-null answer is reused
+ *   for a short window. Errors and nulls are never remembered.
+ *
+ * Applied BELOW `withRpcReadContext`: the key already carries any
+ * `minContextSlot` a scoped read adds, and every consumer still validates the
+ * returned context itself. A consumer whose signal aborts rejects with its own
+ * reason; the shared request aborts only once every consumer has left.
+ */
+export function withVedaReadDeduplication(transport: RpcTransport): RpcTransport {
+  const inFlight = new Map<string, InFlightRead>();
+  const blockTimes = new Map<string, { response: unknown; expiresAt: number }>();
+
+  const remember = (key: string, response: unknown) => {
+    blockTimes.delete(key);
+    blockTimes.set(key, { response, expiresAt: Date.now() + VEDA_BLOCK_TIME_TTL_MS });
+    while (blockTimes.size > VEDA_BLOCK_TIME_CAPACITY) {
+      const oldest = blockTimes.keys().next().value;
+      if (oldest === undefined) break;
+      blockTimes.delete(oldest);
+    }
+  };
+
+  return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
+    const request = jsonRpcRequest(config.payload);
+    if (!request) return transport<TResponse>(config);
+    const key = stableKey([request.method, request.params]);
+
+    const remembered = blockTimes.get(key);
+    if (remembered && remembered.expiresAt > Date.now()) return remembered.response as TResponse;
+    if (remembered) blockTimes.delete(key);
+
+    let entry = inFlight.get(key);
+    if (!entry) {
+      const controller = new AbortController();
+      const created: InFlightRead = {
+        response: transport<unknown>({ ...config, signal: controller.signal }),
+        consumers: 0,
+        controller,
+      };
+      created.response.then(
+        (response) => {
+          if (inFlight.get(key) === created) inFlight.delete(key);
+          if (request.method === "getBlockTime" && isBlockTimeAnswer(response)) {
+            remember(key, response);
+          }
+        },
+        () => {
+          if (inFlight.get(key) === created) inFlight.delete(key);
+        }
+      );
+      inFlight.set(key, created);
+      entry = created;
+    }
+    const joined = entry;
+    return consume(joined, config.signal, () => {
+      if (inFlight.get(key) === joined) inFlight.delete(key);
+    }) as Promise<TResponse>;
+  };
+}
+
+function consume(
+  entry: InFlightRead,
+  signal: AbortSignal | undefined,
+  forget: () => void
+): Promise<unknown> {
+  entry.consumers += 1;
+  const leave = (reason: unknown) => {
+    entry.consumers -= 1;
+    if (entry.consumers === 0) {
+      // Forget first, so a later identical request starts afresh instead of
+      // joining a request that is about to reject with somebody else's reason.
+      forget();
+      entry.controller.abort(reason);
+    }
+  };
+  if (!signal) return entry.response;
+  if (signal.aborted) {
+    leave(signal.reason);
+    return Promise.reject(signal.reason);
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      leave(signal.reason);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    entry.response.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
+}
+
+function jsonRpcRequest(payload: unknown): { method: string; params: unknown } | undefined {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const { method, params } = payload as { method?: unknown; params?: unknown };
+  return typeof method === "string" ? { method, params } : undefined;
+}
+
+function isBlockTimeAnswer(response: unknown): boolean {
+  if (response === null || typeof response !== "object") return false;
+  const envelope = response as { error?: unknown; result?: unknown };
+  return (
+    envelope.error === undefined &&
+    (typeof envelope.result === "bigint" || typeof envelope.result === "number")
+  );
+}
+
+/** JSON with sorted object keys, so equal params always produce one key. */
+function stableKey(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => {
+    if (typeof item === "bigint") return { $bigint: item.toString() };
+    if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+      return Object.fromEntries(
+        Object.entries(item as Record<string, unknown>).sort(([left], [right]) =>
+          left < right ? -1 : left > right ? 1 : 0
+        )
+      );
+    }
+    return item;
+  });
+}
+
+/**
+ * The position-read client: the same deadline and confirmation context as
+ * `createVedaRpc`, over the de-duplicating transport. Never used to build.
+ */
+export function createVedaReadRpc(rpcUrl: string, timeoutMs = VEDA_RPC_REQUEST_TIMEOUT_MS) {
+  const transport = withVedaReadDeduplication(createDefaultRpcTransport({ url: rpcUrl }));
+  return createSolanaRpcFromTransport(withVedaRpcTimeout(transport, timeoutMs));
+}
