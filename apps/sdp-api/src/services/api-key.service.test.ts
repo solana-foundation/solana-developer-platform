@@ -195,7 +195,6 @@ describe("ApiKeyService.createApiKey permission guard", () => {
         organizationId: "org_1",
         projectId: "prj_1",
         actorPermissions: ["api-keys:write"],
-        actorApiKeyRole: null,
         createdByUserId: "usr_1",
         name: "escalated",
         role: "api_admin",

@@ -78,7 +78,7 @@ With the Admin key, call `GET /v1/projects` and pick the project with slug `defa
 
 <Step>
 
-Call `POST /v1/projects/{projectId}/api-keys` twice to mint two project-scoped keys: one with `role: "api_developer"` for routine create, mint, and burn calls, and one with `role: "api_admin"` for compliance operations (screening, freeze, seize, force-burn). Each response includes the full key value exactly once:
+In the dashboard, open **API keys** and create two keys for this project (API keys cannot mint API keys, so this step is dashboard-only; see [Manage API keys](/docs/developing-with-sdp/manage-api-keys)): one with the **Developer** role for routine create, mint, and burn calls, and one with the **Admin** role for compliance operations (screening, freeze, seize, force-burn). Each key is shown exactly once; the underlying `POST /v1/api-keys` response has this shape:
 
 ```json title="response.json"
 {

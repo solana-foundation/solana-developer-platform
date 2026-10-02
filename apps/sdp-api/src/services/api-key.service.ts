@@ -49,10 +49,8 @@ export interface ApiKeyDetails extends ApiKeyListItem {
 export interface CreateApiKeyInput {
   organizationId: string;
   projectId: string;
-  createdByKeyId?: string;
-  createdByUserId?: string;
+  createdByUserId: string;
   actorPermissions: Permission[];
-  actorApiKeyRole: string | null;
   name: string;
   description?: string | null;
   role: ApiKeyRole;
@@ -312,12 +310,7 @@ export class ApiKeyService {
 
   async createApiKey(input: CreateApiKeyInput): Promise<CreateApiKeyResult> {
     assertTenantClaim(this.scope, input, "ApiKeyService.createApiKey");
-    assertGrantableApiKeyPermissions(
-      input.actorPermissions,
-      input.role,
-      input.permissions,
-      input.actorApiKeyRole
-    );
+    assertGrantableApiKeyPermissions(input.actorPermissions, input.role, input.permissions, null);
 
     const project = await this.db
       .prepare(
@@ -335,23 +328,9 @@ export class ApiKeyService {
     const { key, prefix } = createApiKeyMaterial(project.environment);
     const keyHash = await hashString(key, input.pepper);
 
-    let createdBy = input.createdByUserId?.trim() || "";
-
-    if (!createdBy && input.createdByKeyId) {
-      const creatorKey = await this.db
-        .prepare(
-          `SELECT created_by
-           FROM api_keys
-           WHERE id = ? AND organization_id = ? AND project_id = ?`
-        )
-        .bind(input.createdByKeyId, this.scope.organizationId, this.scope.projectId)
-        .first<{ created_by: string }>();
-      createdBy = creatorKey?.created_by || "";
-    }
-
     const actor = await this.db
       .prepare("SELECT id FROM users WHERE id = ?")
-      .bind(createdBy)
+      .bind(input.createdByUserId)
       .first<{ id: string }>();
 
     if (!actor) {
@@ -370,7 +349,7 @@ export class ApiKeyService {
           keyId,
           input.organizationId,
           input.projectId,
-          createdBy,
+          input.createdByUserId,
           input.name,
           input.description ?? null,
           prefix,
@@ -398,15 +377,6 @@ export class ApiKeyService {
       }
 
       throw error;
-    }
-
-    // A key created BY a key inherits its creator's policy foundation, the
-    // same way rotation clones it: otherwise a policy-bound key could mint a
-    // sibling born free of the per-key rules that govern the creator and act
-    // through it. Runs on the caller's transactional client, so the key and
-    // its cloned policy commit together.
-    if (input.createdByKeyId) {
-      await this.cloneApiKeyPolicyFoundation(this.db, input.createdByKeyId, keyId);
     }
 
     return {

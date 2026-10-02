@@ -22,12 +22,11 @@ The full secret is returned exactly once — at creation and at rotation. SDP st
 | `api_developer` | Read/write access, excludes custody actions |
 | `api_readonly` | Read-only access to all resources |
 
-A key can also carry explicit `permissions` that override the role's defaults. A key can only be granted permissions its creator holds.
+`role` is required. A key can also carry explicit `permissions` that narrow the role's preset; an override cannot grant anything outside the role, and a key can only be granted permissions its creator holds.
 
 ## Create a key
 
-<Tabs items={["Dashboard", "API"]}>
-<Tab value="Dashboard">
+Keys are created from the dashboard. The underlying `POST /v1/api-keys` call accepts dashboard sessions only, with the project selected by the `x-project-id` header; an API key cannot mint another API key. The new key belongs to the selected project and inherits its environment. The response includes the full `key` value once.
 
 1. Navigate to **API keys** in the sidebar. You start with an empty list.
 
@@ -52,67 +51,6 @@ A key can also carry explicit `permissions` that override the role's defaults. A
 5. Dismiss the modal. The key now appears in the table with its prefix, role, environment, and status.
 
    ![API keys list with one active key](/images/getting-started/api-keys-list.png)
-
-</Tab>
-<Tab value="API">
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/api-keys \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "CI deploy key",
-    "role": "api_developer",
-    "walletScope": "all",
-    "expiresAt": "2026-12-31T23:59:59Z"
-  }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript title="create-api-key.ts"
-const response = await fetch("https://api.solana.com/v1/api-keys", {
-  method: "POST",
-  headers: {
-    "Authorization": "Bearer sk_test_...",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    name: "CI deploy key",
-    role: "api_developer",
-    walletScope: "all",
-    expiresAt: "2026-12-31T23:59:59Z",
-  }),
-});
-const { data } = await response.json();
-// data.apiKey.key — save this, only shown once
-```
-</Tab>
-<Tab value="Java">
-```java title="CreateApiKey.java"
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/api-keys"))
-    .header("Authorization", "Bearer sk_test_...")
-    .header("Content-Type", "application/json")
-    .POST(HttpRequest.BodyPublishers.ofString("""
-        {
-          "name": "CI deploy key",
-          "role": "api_developer",
-          "walletScope": "all",
-          "expiresAt": "2026-12-31T23:59:59Z"
-        }"""))
-    .build();
-```
-</Tab>
-</Tabs>
-
-The new key belongs to the project of the key that created it and inherits that project's environment — there is no environment field on the request. The response includes the full `key` value — **save it, it is only returned once**.
-
-Optional fields: `description`, `permissions` (fine-grained overrides), `allowedIps` (IPv4/IPv6/CIDR ranges), `signingWalletId` / `signingWalletIds`, `walletBindings` (per-wallet permission lists).
-
-</Tab>
-</Tabs>
 
 ## Rotate a key
 
