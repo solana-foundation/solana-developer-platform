@@ -111,7 +111,7 @@ function ChartGridlines({
         "pointer-events-none absolute inset-x-0 h-px",
         index === 0
           ? "bg-border-default"
-          : "bg-[repeating-linear-gradient(to_right,var(--color-border-default)_0_2px,transparent_2px_6px)]"
+          : "bg-[repeating-linear-gradient(to_right,var(--border-l)_0_2px,transparent_2px_6px)]"
       )}
     />
   ));
