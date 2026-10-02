@@ -12,6 +12,7 @@ SELECT
   unified.token,
   unified.amount,
   unified.counterparty_id,
+  unified.counterparty_address,
   unified.signature,
   unified.created_at,
   unified.module,
@@ -28,6 +29,7 @@ SELECT
   token,
   amount,
   counterparty_id,
+  counterparty_address,
   signature,
   created_at,
   'payments' AS module,
@@ -64,6 +66,7 @@ END AS kind,
   pt.token,
   pt.amount,
   pt.counterparty_id,
+  CASE WHEN pt.direction = 'inbound' THEN pt.source_address ELSE pt.destination_address END AS counterparty_address,
   pt.signature,
   pt.created_at
 FROM payment_transfers pt
@@ -80,6 +83,7 @@ SELECT
   token,
   amount,
   counterparty_id,
+  counterparty_address,
   signature,
   created_at,
   'earn' AS module,
@@ -118,6 +122,7 @@ SELECT
     ELSE em.amount_requested
   END AS amount,
   NULL::text AS counterparty_id,
+  NULL::text AS counterparty_address,
   em.signature,
   em.created_at
 FROM earn_movements em
@@ -135,6 +140,7 @@ SELECT
   token,
   amount,
   counterparty_id,
+  counterparty_address,
   signature,
   created_at,
   'dvp' AS module,
@@ -163,6 +169,7 @@ SELECT
   trim_scale((CASE c.side WHEN 'a' THEN t.escrow_a_peak_amount WHEN 'b' THEN t.escrow_b_peak_amount END)::numeric /
     (10::numeric ^ CASE c.side WHEN 'a' THEN t.decimals_a WHEN 'b' THEN t.decimals_b END))::text AS amount,
   NULL::text AS counterparty_id,
+  CASE c.side WHEN 'a' THEN t.user_b WHEN 'b' THEN t.user_a END AS counterparty_address,
   c.signature,
   c.created_at
 FROM dvp_leg_funding_claims c
@@ -180,6 +187,7 @@ SELECT
   trim_scale((CASE side.value WHEN 'a' THEN t.escrow_a_peak_amount WHEN 'b' THEN t.escrow_b_peak_amount END)::numeric /
     (10::numeric ^ CASE side.value WHEN 'a' THEN t.decimals_a WHEN 'b' THEN t.decimals_b END))::text AS amount,
   NULL::text AS counterparty_id,
+  CASE c.side WHEN 'a' THEN t.user_b WHEN 'b' THEN t.user_a END AS counterparty_address,
   t.close_signature AS signature,
   t.closed_at AS created_at
 FROM dvp_trades t
@@ -199,6 +207,7 @@ SELECT
   token,
   amount,
   counterparty_id,
+  counterparty_address,
   signature,
   created_at,
   'private_channels' AS module,
@@ -210,11 +219,11 @@ SELECT
     WHEN 'failed' THEN 'failed'
   END AS status
 FROM (
-SELECT id, id AS module_id, 'transfer' AS kind, status AS module_status, organization_id, project_id, NULL::text AS custody_wallet_id, mint AS token, amount, NULL::text AS counterparty_id, signature, created_at FROM private_channel_transfers
+SELECT id, id AS module_id, 'transfer' AS kind, status AS module_status, organization_id, project_id, NULL::text AS custody_wallet_id, mint AS token, amount, NULL::text AS counterparty_id, recipient AS counterparty_address, signature, created_at FROM private_channel_transfers
 UNION ALL
-SELECT id, id AS module_id, 'deposit' AS kind, status AS module_status, organization_id, project_id, NULL::text AS custody_wallet_id, mint AS token, amount, NULL::text AS counterparty_id, signature, created_at FROM private_channel_deposits
+SELECT id, id AS module_id, 'deposit' AS kind, status AS module_status, organization_id, project_id, NULL::text AS custody_wallet_id, mint AS token, amount, NULL::text AS counterparty_id, NULL::text AS counterparty_address, signature, created_at FROM private_channel_deposits
 UNION ALL
-SELECT id, id AS module_id, 'withdraw' AS kind, status AS module_status, organization_id, project_id, NULL::text AS custody_wallet_id, mint AS token, amount, NULL::text AS counterparty_id, signature, created_at FROM private_channel_withdrawals
+SELECT id, id AS module_id, 'withdraw' AS kind, status AS module_status, organization_id, project_id, NULL::text AS custody_wallet_id, mint AS token, amount, NULL::text AS counterparty_id, NULL::text AS counterparty_address, signature, created_at FROM private_channel_withdrawals
 ) private_channels
 UNION ALL
 SELECT
@@ -228,6 +237,7 @@ SELECT
   token,
   amount,
   counterparty_id,
+  counterparty_address,
   signature,
   created_at,
   'issuance' AS module,
@@ -248,12 +258,23 @@ SELECT
   tok.project_id,
   it.custody_wallet_id,
   tok.mint_address AS token,
-  NULL::text AS amount,
+  params.value ->> 'amount' AS amount,
   NULL::text AS counterparty_id,
+  COALESCE(
+    params.value ->> 'source',
+    params.value ->> 'destination',
+    params.value ->> 'accountAddress',
+    params.value ->> 'tokenAccount',
+    params.value ->> 'currentAuthority',
+    params.value ->> 'newAuthority'
+  ) AS counterparty_address,
   it.signature,
   it.created_at
 FROM issuance_transactions it
 JOIN issued_tokens tok ON tok.id = it.token_id
+CROSS JOIN LATERAL (
+  SELECT CASE WHEN pg_input_is_valid(it.operation_params, 'jsonb') THEN it.operation_params::jsonb END AS value
+) params
 ) issuance
 UNION ALL
 SELECT
@@ -267,6 +288,7 @@ SELECT
   token,
   amount,
   counterparty_id,
+  counterparty_address,
   signature,
   created_at,
   'rings' AS module,
@@ -294,6 +316,7 @@ SELECT
   o.asset_mint AS token,
   trim_scale(o.amount_raw::numeric / (10::numeric ^ al.decimals))::text AS amount,
   NULL::text AS counterparty_id,
+  NULL::text AS counterparty_address,
   o.outer_tx_signature AS signature,
   o.created_at
 FROM helius_rings_operations o

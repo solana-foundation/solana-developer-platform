@@ -1,5 +1,12 @@
 import type { UnifiedTransactionSource } from "./types";
 
+/**
+ * Helius Rings operations in the unified ledger. `to_addr` is not one
+ * counterparty column: it is the wallet's own shielded address for a shield,
+ * the recipient only for a transfer or withdrawal, and unset for merges,
+ * timelocks and zones. Until a per-operation rule is agreed the row names no
+ * other party and `counterparty_address` is NULL.
+ */
 export const ringsUnifiedTransactionSource = {
   sql: () => `SELECT
   o.id,
@@ -12,6 +19,7 @@ export const ringsUnifiedTransactionSource = {
   o.asset_mint AS token,
   trim_scale(o.amount_raw::numeric / (10::numeric ^ al.decimals))::text AS amount,
   NULL::text AS counterparty_id,
+  NULL::text AS counterparty_address,
   o.outer_tx_signature AS signature,
   o.created_at
 FROM helius_rings_operations o

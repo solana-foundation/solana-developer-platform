@@ -19,6 +19,7 @@ const commonFields = {
   token: z.string().nullable(),
   amount: z.string().nullable(),
   counterpartyId: z.string().nullable(),
+  counterpartyAddress: z.string().nullable(),
   signature: z.string().nullable(),
   createdAt: z.string(),
 };
@@ -97,7 +98,7 @@ export const unifiedTransactionsQuerySchema = z
       .min(3)
       .max(200)
       .describe(
-        "Prefix match against transaction id, module id, or signature — not a substring search."
+        "Prefix match against transaction id, module id, signature, or counterparty address — not a substring search."
       )
       .optional(),
     createdAtFrom: z.string().datetime().optional(),

@@ -15,8 +15,8 @@ import type {
 
 const UNIFIED_TRANSACTION_COLUMNS = `id, module, kind, module_id AS "moduleId", module_status AS "moduleStatus",
   status AS "status", organization_id AS "organizationId", project_id AS "projectId",
-  custody_wallet_id AS "custodyWalletId", custody_wallet_label AS "custodyWalletLabel", token, amount, counterparty_id AS "counterpartyId", signature,
-  created_at AS "createdAt"`;
+  custody_wallet_id AS "custodyWalletId", custody_wallet_label AS "custodyWalletLabel", token, amount, counterparty_id AS "counterpartyId",
+  counterparty_address AS "counterpartyAddress", signature, created_at AS "createdAt"`;
 
 const cursorValueSchema = z.object({
   createdAt: z.string(),
@@ -78,17 +78,17 @@ export function createPostgresUnifiedTransactionsRepository(
       }
       if (input.search !== undefined) {
         // Prefix match, not contains: every searchable column is an
-        // identifier pasted from its start. This is still a scan — the
-        // underlying tables carry no ILIKE-compatible indexes on these
+        // identifier or address pasted from its start. This is still a scan —
+        // the underlying tables carry no ILIKE-compatible indexes on these
         // columns — but a prefix comparison rejects rows on the first bytes
         // instead of substring-searching every value, and it removes the
         // guaranteed worst case a leading wildcard forces. The metered quota
         // on the route is what actually bounds the spend.
         const pattern = `${escapeLikePattern(input.search)}%`;
         clauses.push(
-          "(id ILIKE ? ESCAPE '\\' OR module_id ILIKE ? ESCAPE '\\' OR signature ILIKE ? ESCAPE '\\')"
+          "(id ILIKE ? ESCAPE '\\' OR module_id ILIKE ? ESCAPE '\\' OR signature ILIKE ? ESCAPE '\\' OR counterparty_address ILIKE ? ESCAPE '\\')"
         );
-        values.push(pattern, pattern, pattern);
+        values.push(pattern, pattern, pattern, pattern);
       }
       if (input.createdAtFrom !== undefined) {
         clauses.push("created_at >= ?");
