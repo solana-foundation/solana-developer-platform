@@ -3,6 +3,7 @@ import {
   newDesign,
   newDesignActivity,
   newDesignContacts,
+  newDesignIssuance,
   newDesignOverview,
   newDesignPayDeposit,
   newDesignWallets,
@@ -16,6 +17,7 @@ type ModuleFlag = () => Promise<boolean>;
 const DESIGN_MODULE_FLAGS: Record<DesignModule, ModuleFlag> = {
   overview: newDesignOverview,
   wallets: newDesignWallets,
+  issuance: newDesignIssuance,
   contacts: newDesignContacts,
   payDeposit: newDesignPayDeposit,
   activity: newDesignActivity,

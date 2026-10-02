@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   getBootstrapApiBaseUrl,
@@ -8,6 +8,17 @@ import {
   seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalPaymentFixtures } from "../support/local-issuance-bootstrap";
+
+/**
+ * The page's own "Schedules" link, its way back from a schedule. The shell's <main> wraps the
+ * sidebar too, and the sidebar's Schedules item shares the name, so the sidebar (<aside>) is
+ * excluded rather than scoping to <main>.
+ */
+function pageSchedulesLink(page: Page) {
+  return page
+    .getByRole("link", { name: "Schedules", exact: true })
+    .and(page.locator(":not(aside *)"));
+}
 
 test.describe
   .serial("dashboard recurring payments", () => {
@@ -64,8 +75,8 @@ test.describe
     test("creates and displays a recurring payment", async ({ page }) => {
       await page.goto("/dashboard/payments");
 
-      await expect(page.getByRole("link", { name: "Scheduled", exact: true })).toBeVisible();
-      await page.getByRole("link", { name: "Scheduled", exact: true }).click();
+      await expect(page.getByRole("link", { name: "Schedules", exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "Schedules", exact: true }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
       await expect(
         page.locator("main").getByRole("heading", { name: "Schedules" }).first()
@@ -135,7 +146,7 @@ test.describe
       await expect(page.getByText("Pending activation", { exact: true })).toBeVisible();
       await expect(page.getByText("Every day", { exact: true }).first()).toBeVisible();
 
-      await page.getByRole("link", { name: "Schedules", exact: true }).click();
+      await pageSchedulesLink(page).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
       const recurringRow = page
         .locator("tbody tr")
@@ -159,7 +170,7 @@ test.describe
           name: `7.50 ${recurringTokenSymbol} to ${recurringCounterpartyName}`,
         })
       ).toBeVisible();
-      await expect(page.getByRole("link", { name: "Schedules", exact: true })).toBeVisible();
+      await expect(pageSchedulesLink(page)).toBeVisible();
       // The plan reads as labelled lines; the schedule's identifiers sit under Details.
       const recordLabels = page.locator("main dt");
       for (const label of ["Pays", "To", "From", "Repeats", "Next run", "Schedule ID"]) {

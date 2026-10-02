@@ -53,6 +53,11 @@ type DashboardPageConfig = {
   /** The page's one primary action, set in the title row (Download CSV, Add, New). */
   headerAction?: DashboardHeaderActionConfig;
   hideTitle?: boolean;
+  /**
+   * A refresh flow that hides its title and sets its own top spacing: the header keeps its
+   * padding only on a phone, where it holds the menu button.
+   */
+  flushTopOnDesktop?: boolean;
   hideTitleOnMobile?: boolean;
   backAction?: {
     href: string;
@@ -103,7 +108,14 @@ export function DashboardHeaderAction({
     </>
   );
   return (
-    <Button asChild variant={action.variant === "primary" ? "default" : "outline"} size="sm">
+    <Button
+      asChild
+      variant={action.variant === "primary" ? "default" : "outline"}
+      size="sm"
+      // The refresh header's action is 34px from md, 2px under the shared small button; on a
+      // phone, where it sits alone under the title, the design draws it 38px with 16px sides.
+      className="refresh:[--button-height-md:2.125rem] max-md:refresh:[--button-height-md:2.375rem] max-md:refresh:[--button-padding-x-md:1rem]"
+    >
       {action.download ? (
         <a href={href} download>
           {content}
@@ -155,7 +167,8 @@ export function HeaderBackAction({
   return (
     <Link
       href={href}
-      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:h-5 refresh:gap-1"
+      // Refresh: the chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 8px to its label.
+      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:-ml-1.5 refresh:h-5 refresh:gap-2"
     >
       <ArrowLeftIcon className="h-4 w-4 refresh:hidden" />
       <ChevronLeftIcon className="hidden size-4 refresh:block" />
@@ -219,7 +232,7 @@ function MobileNavButton({ onClick }: { onClick: () => void }) {
 
 /**
  * The refresh title block. On a phone it is the design's three rows: the navigation button, the
- * title 8px under it, then the page's action 12px under that. From md the button goes and the
+ * title 8px under it, then the page's action 16px under that. From md the button goes and the
  * action sits on the title's row. Any utilities (Payments' demo mode switch) sit at the far right
  * of the phone's navigation row, and from md on the title's row, before the action.
  */
@@ -248,11 +261,25 @@ export function StackedDashboardTopBar({
       data-dashboard-stacked-topbar
     >
       <div className="col-start-1 row-start-1 flex items-center md:hidden">{navigation}</div>
+      {/* On a phone the way back shares the navigation button's row, its chevron 4px from the
+          button; from md it sits over the title. */}
+      {above && !hideTitle ? (
+        <div className="col-start-2 row-start-1 -ml-1 flex min-w-0 items-center md:hidden">
+          {above}
+        </div>
+      ) : null}
       {hideTitle ? (
         <h1 className="sr-only">{title}</h1>
       ) : (
         <div className="col-span-3 row-start-2 min-w-0 md:col-span-1 md:col-start-1 md:row-start-1">
-          {above ? <div className={mark ? "mb-4" : "mb-2"}>{above}</div> : null}
+          {/* The back link's row: the design's 32px top row with the link centred, 4px over the
+              title, so the link reads 12px lower than a page's title would and the title 36px
+              below the top. A flex row, so the link's 20px line sets the height, not the strut. */}
+          {above ? (
+            <div className={cn("flex items-center max-md:hidden", mark ? "mb-4" : "h-8 mb-1")}>
+              {above}
+            </div>
+          ) : null}
           {mark ? (
             <div className="flex min-w-0 items-center gap-4">
               <span className="shrink-0">{mark}</span>
@@ -268,9 +295,17 @@ export function StackedDashboardTopBar({
         </div>
       )}
       {/* An empty state whose action repeats this one (New, Add) hides it: the shell's
-          section is the `page` group and the state carries the attribute. */}
+          section is the `page` group and the state carries the attribute. Under a back link
+          the design sets the action on the title's row (a contact's Pay, a token's Explorer),
+          not centred beside the back link and the title together; `data-align-title` asks for
+          the same without one. */}
       {action ? (
-        <div className="col-span-3 row-start-3 mt-1 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-3 md:row-start-1 md:mt-0 md:ml-3">
+        <div
+          className={cn(
+            "col-span-3 row-start-3 mt-2 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-3 md:row-start-1 md:mt-0 md:ml-3 md:has-[[data-align-title]]:self-end",
+            above && "md:self-end"
+          )}
+        >
           {action}
         </div>
       ) : null}
@@ -838,7 +873,63 @@ function getAccessControlPageConfig(
   return null;
 }
 
+/** Issuance on the new design: the list, the draft flow and one token's page. */
 function getIssuanceRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/issuance") {
+    return {
+      title: t("Shared.dashboardShell.issuance"),
+      // The design keeps Overview and API Playground on a phone too.
+      headerTabs: { ...playgroundHeaderTabs(t), hideOnMobile: false },
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardIssuance.newDesign.createDraft"),
+        href: "/dashboard/issuance/create",
+        icon: "plus",
+        variant: "primary",
+        capability: "canManageTokenWrite",
+      },
+    };
+  }
+  // The flow names itself in its step header; the footer's Exit is the way back.
+  if (pathname === "/dashboard/issuance/create") {
+    return {
+      title: t("DashboardIssuance.newDesign.draft.pageTitle"),
+      hideTitle: true,
+      flushTopOnDesktop: true,
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+    };
+  }
+  if (!/^\/dashboard\/issuance\/[^/]+\/?$/.test(pathname)) {
+    return null;
+  }
+  // The token names itself through DashboardPageTitle; "Token" holds the place until it does.
+  return {
+    title: t("DashboardIssuance.newDesign.token.pageTitle"),
+    contentWidthClass: REFRESH_PAGE_WIDTH,
+    backAction: {
+      href: "/dashboard/issuance",
+      label: t("Shared.dashboardShell.issuance"),
+    },
+    headerTabs: {
+      tabs: [
+        { id: "overview", label: t("Shared.tabs.overview") },
+        { id: "details", label: t("DashboardIssuance.newDesign.tabs.details") },
+        { id: "public", label: t("DashboardIssuance.newDesign.tabs.public") },
+        { id: "compliance", label: t("DashboardIssuance.newDesign.tabs.compliance") },
+        { id: "operations", label: t("DashboardIssuance.newDesign.tabs.operations") },
+        { id: "permissions", label: t("DashboardIssuance.newDesign.tabs.permissions") },
+        { id: "activity", label: t("Shared.tabs.activity") },
+      ],
+      hideOnMobile: false,
+    },
+  };
+}
+
+function getLegacyIssuanceRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean
@@ -1415,7 +1506,9 @@ export function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     };
   }
-  const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
+  const issuanceRoutePageConfig = isDesignModuleOn({ newDesign, newDesignModules }, "issuance")
+    ? getIssuanceRoutePageConfig(pathname, t)
+    : getLegacyIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   // A Payments page no design module has redesigned keeps the previous design's header under
   // NEW DESIGN too.

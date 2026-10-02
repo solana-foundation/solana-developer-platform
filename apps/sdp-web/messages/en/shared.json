@@ -355,7 +355,7 @@
     "contact": "Contact",
     "transaction": "Transaction",
     "newDesign": {
-      "recurring": "Scheduled",
+      "recurring": "Schedules",
       "newCounterparty": "New counterparty",
       "recurringPayments": "Schedules",
       "recurringPayment": "Schedule",

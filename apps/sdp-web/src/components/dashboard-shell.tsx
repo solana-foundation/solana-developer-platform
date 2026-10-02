@@ -75,8 +75,9 @@ function sidebarThemeScope(newDesign: boolean, pageScope: ThemeScope | null): Th
 
 // The refresh sidebar is the design's: 40px rows touching, 6px corners, a 20px icon then 16px to
 // the 15px medium label, an ink wash for the active row and a lighter one on hover, no border.
+// A refresh row sets its icon 16px in, so its label lines up with the sub-items' at 60px.
 const navItemBase =
-  "relative flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors refresh:h-control-lg refresh:gap-4 refresh:rounded-control refresh:px-2 refresh:text-nav refresh:font-medium";
+  "relative flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors refresh:h-control-lg refresh:gap-4 refresh:rounded-control refresh:pr-2 refresh:pl-4 refresh:text-nav refresh:font-medium";
 const navItemActive =
   "border border-border-subtle bg-surface-raised text-primary refresh:border-0 refresh:bg-fill-strong";
 const navItemInactive =
@@ -185,7 +186,7 @@ function SidebarGroup({
                   className={cn(
                     navItemBase,
                     active ? navItemActive : navItemInactive,
-                    isCollapsed && "justify-center",
+                    isCollapsed && "justify-center refresh:px-2",
                     subnavKey && !isCollapsed && "pr-11"
                   )}
                 >
@@ -236,7 +237,7 @@ function SidebarGroup({
               {showChildren && childrenExpanded ? (
                 <div
                   id={subnavId}
-                  className="ml-5 mt-2 refresh:mt-1 refresh:ml-0 refresh:space-y-1"
+                  className="ml-5 mt-2 refresh:mt-0.5 refresh:ml-0 refresh:space-y-1"
                 >
                   {(item.children ?? []).map((child, i, siblings) => {
                     const childActive = isDashboardNavItemActive(navigationLocation, child.href);
@@ -317,12 +318,12 @@ function DashboardSidebarContent({
   const showMobileClose = variant === "mobile";
   return (
     <>
-      {/* Refresh: an 8px inset, the workspace row hugging the top, and a scrollbar that only
-          shows under the pointer, so the rows keep the design's full 256px width. */}
+      {/* Refresh: an 8px inset, the workspace row 8px under the top inset, and a scrollbar that
+          only shows under the pointer, so the rows keep the design's full 264px width. */}
       <div className="sdp-quiet-scroll min-h-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto overscroll-contain p-3 refresh:p-2">
-        {/* -4px above pulls the 32px avatar to the 8px inset inside its 40px row; 20px below
+        {/* 8px above sets the 32px avatar 20px from the top, as the design does; 20px below
             keeps the group gap at 24 from the avatar's bottom. */}
-        <div className="py-3 refresh:-mt-1 refresh:mb-5 refresh:py-0">
+        <div className="py-3 refresh:mt-2 refresh:mb-5 refresh:py-0">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
               <WorkspaceSwitcher
@@ -406,7 +407,11 @@ function clipsDashboardHorizontalOverflow(pathname: string): boolean {
   );
 }
 
-function usesWorkspaceViewport(pathname: string): boolean {
+/**
+ * @param issuanceRedesigned - The new design's token page scrolls in its own panel, as a
+ *   wallet's page does; the previous design's token page keeps the page scroll.
+ */
+function usesWorkspaceViewport(pathname: string, issuanceRedesigned: boolean): boolean {
   const isWalletDetailRoute =
     (pathname.startsWith("/dashboard/wallets/") &&
       pathname !== "/dashboard/wallets/setup" &&
@@ -420,6 +425,7 @@ function usesWorkspaceViewport(pathname: string): boolean {
   return (
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/issuance/create" ||
+    (issuanceRedesigned && /^\/dashboard\/issuance\/[^/]+\/?$/.test(pathname)) ||
     pathname === "/dashboard/policies" ||
     pathname === "/dashboard/api-keys" ||
     pathname === "/dashboard/api-keys/new" ||
@@ -505,8 +511,8 @@ export function DashboardShell({
   // NEW DESIGN's phone has no bottom bar on any route: the header's menu button opens the
   // navigation, including on a page no area has redesigned yet.
   const hasBottomNav = !newDesignEnabled;
-  // The design's sidebar is 272px (17rem) including its rule; the previous design's is 296.
-  const sidebarExpandedWidth = newDesignEnabled ? 272 : 296;
+  // The design's sidebar is 280px (17.5rem) including its rule; the previous design's is 296.
+  const sidebarExpandedWidth = newDesignEnabled ? 280 : 296;
   const sidebarScope = sidebarThemeScope(newDesignEnabled, themeScope);
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(
@@ -575,7 +581,10 @@ export function DashboardShell({
   const shouldRenderTopBarBorder =
     (pageConfig.titlePosition === "center" || showBackInTopBar) && !hasHeaderTabs && !isRefresh;
   const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
-  const shouldLockViewportScroll = usesWorkspaceViewport(pathname);
+  const shouldLockViewportScroll = usesWorkspaceViewport(
+    pathname,
+    isDesignModuleOn(flags, "issuance")
+  );
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
   // The dashboard's own URL store rather than useSearchParams: list filters update the query
   // shallowly, and an export has to follow them.
@@ -759,6 +768,8 @@ export function DashboardShell({
     <main
       {...themeScopeAttributes(themeScope)}
       data-sdp-new-design={newDesignEnabled ? "" : undefined}
+      // globals.css drops the root's reserved scrollbar track while the shell is locked.
+      data-sdp-locked-viewport={shouldLockShellViewport ? "" : undefined}
       aria-busy={isWorkspaceSwitching}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
@@ -930,10 +941,21 @@ export function DashboardShell({
                   ].join(" ")}
                 >
                   {/* Refresh: the gutter sits outside the centred column, so the title's left edge is
-                  the content's at every width; 32px above the title and 24px from the title to
-                  the tabs are the design's. */}
+                  the content's at every width; 44px above the title row (a 34px button sits on it),
+                  40px above a back link's row, and 24px from the title to the tabs are the
+                  design's. */}
                   <div
-                    className={cn("shrink-0", isRefresh && [refreshGutterClass, "pt-6 md:pt-8"])}
+                    className={cn(
+                      "shrink-0",
+                      isRefresh && [
+                        refreshGutterClass,
+                        pageConfig.flushTopOnDesktop
+                          ? "pt-6 md:pt-0"
+                          : stacksBackAboveTitle
+                            ? "pt-6 md:pt-10"
+                            : "pt-6 md:pt-11",
+                      ]
+                    )}
                   >
                     <div
                       className={cn(

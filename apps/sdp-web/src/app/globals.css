@@ -202,6 +202,13 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* A shell that locks the viewport scrolls a panel inside it, never the root. Its reserved
+   track (11px here, 15px for classic scrollbars) would only narrow the page and set the centred
+   column off the design's centre. */
+html:has(> body > main[data-sdp-locked-viewport]) {
+  scrollbar-gutter: auto;
+}
+
 /* Radix modal overlays (dropdown menus, dialogs, selects) mount react-remove-scroll,
    which locks <body> and adds `margin-right` sized to the scrollbar it "removed". But
    `scrollbar-gutter: stable` above reserves that track permanently, so nothing is ever
