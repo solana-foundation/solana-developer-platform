@@ -159,7 +159,7 @@ export function paymentRequestMatchesSearch(
   return [
     request.amount,
     TOKEN_SYMBOL_BY_MINT.get(request.token) ?? request.token,
-    request.counterpartyId ? (counterpartyNames.get(request.counterpartyId) ?? "") : "",
+    request.counterpartyId ? (counterpartyNames.get(request.counterpartyId) || request.counterpartyId) : "",
     request.destinationAddress,
     request.reference,
   ]
