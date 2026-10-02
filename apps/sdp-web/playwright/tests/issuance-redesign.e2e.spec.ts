@@ -253,9 +253,14 @@ test.describe
 
       await expect(operationButton(page, "mint")).toBeEnabled({ timeout: 120_000 });
       await operationButton(page, "mint").click();
-      await page.getByLabel("Destination").fill(fixtures.wallets.treasury.publicKey);
-      await page.getByLabel("Amount").fill("10");
-      await page.getByRole("dialog").getByRole("button", { name: "Mint tokens" }).click();
+      // Inside the dialog only: the Operations tab behind it explains the token's access list in
+      // a tooltip whose label also reads "destinations".
+      const mintDialog = page.getByRole("dialog");
+      await mintDialog
+        .getByLabel("Destination", { exact: true })
+        .fill(fixtures.wallets.treasury.publicKey);
+      await mintDialog.getByLabel("Amount", { exact: true }).fill("10");
+      await mintDialog.getByRole("button", { name: "Mint tokens" }).click();
       const successCount = await page.getByText("Mint transaction finalized.").count();
       await confirmAction(page, "Mint now");
       await waitForToast(page, "Mint transaction finalized.", successCount);
