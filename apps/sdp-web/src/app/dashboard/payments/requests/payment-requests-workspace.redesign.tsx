@@ -39,6 +39,7 @@ import {
   PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
   type PaymentRequestsListState,
   type PaymentRequestsLocalErrorCode,
+  paymentRequestMatchesSearch,
 } from "./payment-requests-page.data";
 
 function StatusBadge({
@@ -61,8 +62,12 @@ interface PaymentRequestsWorkspaceProps {
   initialError?: string;
   initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
   counterparties: Counterparty[];
-  /** How many requests match the status filter and the search, across every page. */
+  /** How many requests the API counts for the status filter, across every page. */
   total: number;
+  /** Whether `total` is exact; when it is not, the pager shows the page without a count. */
+  totalIsExact: boolean;
+  /** Whether the API has a page after this one. */
+  hasNextPage: boolean;
   listState: PaymentRequestsListState;
 }
 
@@ -205,10 +210,6 @@ function PaymentRequestsSearch({
         },
       }}
       placeholder={t("DashboardPayments.requests.searchPlaceholder")}
-      // TODO(api): enable once GET /v1/payments/requests can search every request. Until then the
-      // box stays disabled rather than search only the requests already read (see
-      // parsePaymentRequestsListParams).
-      disabled
       className="min-w-0 flex-1 sm:w-56 sm:flex-none"
     />
   );
@@ -307,25 +308,45 @@ function PaymentRequestsStatusFilter({
   );
 }
 
-/** The pager under the list, with which rows of how many it shows. */
+/**
+ * The pager under the list, with which rows of how many it shows. With a count the list cannot
+ * stand behind (an inexact total, or a search, which the API cannot count), it names the page
+ * alone and offers the next while the API has one.
+ */
 function PaymentRequestsPagination({
   total,
+  totalIsExact,
+  hasNextPage,
   listState,
   pending,
   onPageChange,
 }: {
   total: number;
+  totalIsExact: boolean;
+  hasNextPage: boolean;
   listState: PaymentRequestsListState;
   pending: boolean;
   onPageChange: (page: number) => void;
 }) {
   const t = useTranslations();
-  const pageCount = Math.max(1, Math.ceil(total / listState.pageSize));
-  const rangeStart = total === 0 ? 0 : (listState.page - 1) * listState.pageSize + 1;
-  const rangeEnd = Math.min(listState.page * listState.pageSize, total);
+  const { page, pageSize, search } = listState;
+  if (!totalIsExact || search !== null) {
+    return (
+      <ArrowPagination
+        page={page}
+        pageCount={hasNextPage ? page + 1 : page}
+        onPageChange={onPageChange}
+        disabled={pending}
+        summary={t("DashboardPayments.requests.pageNumber", { page })}
+      />
+    );
+  }
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, total);
   return (
     <ArrowPagination
-      page={listState.page}
+      page={page}
       pageCount={pageCount}
       onPageChange={onPageChange}
       disabled={pending}
@@ -369,12 +390,13 @@ function usePaymentRequestLabels(counterparties: readonly Counterparty[]) {
     const symbol = tokenSymbolByMint.get(request.token);
     return `${formatDecimalAmount(request.amount, locale)} ${symbol ? symbol : shortenAddress(request.token)}`;
   };
-  return { fromLabel, amountLabel };
+  return { fromLabel, amountLabel, counterpartyNameById };
 }
 
 /**
- * The Requests list. The page, its size, the status filter and the search live in the URL and
- * load on the server (see loadPaymentRequestsList), so every page is one the server matched.
+ * The Requests list. The page, its size, the status filter and the search live in the URL. The
+ * page, its size and the status load on the server (see loadPaymentRequestsList); the search is
+ * matched here against that page's rows, and stays in the URL as the user pages on.
  */
 export function PaymentRequestsWorkspace({
   initialPaymentRequests,
@@ -382,15 +404,30 @@ export function PaymentRequestsWorkspace({
   initialLocalErrorCode,
   counterparties,
   total,
+  totalIsExact,
+  hasNextPage,
   listState,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
   const demo = usePaymentsDemo();
   const locale = useLocale();
-  const { fromLabel, amountLabel } = usePaymentRequestLabels(counterparties);
+  const { fromLabel, amountLabel, counterpartyNameById } = usePaymentRequestLabels(counterparties);
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const rows = initialPaymentRequests;
+  // TODO(api): send the search to GET /v1/payments/requests once it can search. The API lists
+  // requests only by page and stored status, so until then the search matches the page the list
+  // has read, by amount, token, payer, destination and reference, and the pager carries it to
+  // the other pages. Known limitation of the API, not of this list.
+  const { search } = listState;
+  const rows = useMemo(
+    () =>
+      search === null
+        ? initialPaymentRequests
+        : initialPaymentRequests.filter((request) =>
+            paymentRequestMatchesSearch(request, search, counterpartyNameById)
+          ),
+    [initialPaymentRequests, search, counterpartyNameById]
+  );
 
   const applyListParams = (updates: ListParamsUpdate) => {
     const href = listHrefAfter(window.location.search, updates, listState.search);
@@ -465,6 +502,8 @@ export function PaymentRequestsWorkspace({
           )}
           <PaymentRequestsPagination
             total={total}
+            totalIsExact={totalIsExact}
+            hasNextPage={hasNextPage}
             listState={listState}
             pending={isPending}
             onPageChange={(page) => applyListParams({ page })}

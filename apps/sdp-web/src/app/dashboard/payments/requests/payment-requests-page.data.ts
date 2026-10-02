@@ -83,6 +83,9 @@ const PAYMENT_REQUEST_STATUSES = [
   "expired",
 ] as const satisfies readonly PaymentRequest["status"][];
 
+/** Longest search the Requests list carries in its URL. */
+const PAYMENT_REQUESTS_SEARCH_MAX_LENGTH = 200;
+
 /** The Requests list's page, its size, its status filter and its search, as the URL carries them. */
 export interface PaymentRequestsListState {
   page: number;
@@ -116,6 +119,9 @@ export function parsePaymentRequestsListParams(
   params: Record<string, string | string[] | undefined>
 ): PaymentRequestsListState {
   const status = firstParamValue(params.status);
+  const search = firstParamValue(params.search)
+    ?.trim()
+    .slice(0, PAYMENT_REQUESTS_SEARCH_MAX_LENGTH);
   return {
     page: parseListInteger(firstParamValue(params.page), 1),
     pageSize: Math.min(
@@ -123,12 +129,43 @@ export function parsePaymentRequestsListParams(
       PAYMENT_REQUESTS_PAGE_SIZE
     ),
     status: PAYMENT_REQUEST_STATUSES.find((candidate) => candidate === status) ?? null,
-    // TODO(api): read `search` again once GET /v1/payments/requests can search. The API has no
-    // search parameter, and searching only the requests the dashboard has read would miss older
-    // ones, so search is off for now and a `search` in the URL is ignored. Known limitation of the
-    // API, not of this list.
-    search: null,
+    search: search ? search : null,
   };
+}
+
+/** Every well-known token's symbol by mint, on any cluster, for searching by symbol. */
+const TOKEN_SYMBOL_BY_MINT: ReadonlyMap<string, string> = new Map(
+  Object.values(WELL_KNOWN_TOKENS).flatMap((token: WellKnownToken) =>
+    Object.values(token.mints).flatMap((mint) =>
+      mint ? [[mint.address, token.symbol] as const] : []
+    )
+  )
+);
+
+/**
+ * Whether a request matches a search: its amount, token, payer's name, destination or
+ * reference contains the needle, ignoring case.
+ *
+ * @param request - The request.
+ * @param needle - The search, already trimmed.
+ * @param counterpartyNames - Contact display names by id.
+ * @returns `true` when any of those fields contains the needle.
+ */
+export function paymentRequestMatchesSearch(
+  request: PaymentRequest,
+  needle: string,
+  counterpartyNames: ReadonlyMap<string, string>
+): boolean {
+  return [
+    request.amount,
+    TOKEN_SYMBOL_BY_MINT.get(request.token) ?? request.token,
+    request.counterpartyId ? (counterpartyNames.get(request.counterpartyId) ?? "") : "",
+    request.destinationAddress,
+    request.reference,
+  ]
+    .join(" ")
+    .toLowerCase()
+    .includes(needle.toLowerCase());
 }
 
 /**
@@ -149,42 +186,56 @@ export function paymentRequestsListHref(state: PaymentRequestsListState): string
   return `${PAYMENT_REQUESTS_HREF}${search ? `?${search}` : ""}`;
 }
 
+export type PaymentRequestsListResult = PaymentRequestsResult & {
+  /**
+   * Whether `total` is exactly how many requests the status filter matches. Under Awaiting
+   * payment it is the API's count by stored status, an upper bound the list does not show (see
+   * {@link loadPaymentRequestsList}).
+   */
+  totalIsExact: boolean;
+  /** Whether the API has a page after this one. */
+  hasNextPage: boolean;
+};
+
 /**
  * One page of the Requests list as its URL names it, read straight from the API's page: its
  * page, its size and its status filter. Under Awaiting payment, the rows the API returns as paid
  * are left out (see below).
  *
  * @param request - Authenticated SDP API fetcher.
- * @param state - The list's page, size and status. Its search is not read, since the API has
- *   none (see {@link parsePaymentRequestsListParams}).
- * @returns The page's rows and how many requests match in all; on any failure
- *   `{ ok: false, data: [], total: 0, error }`. Never throws.
+ * @param state - The list's page, size and status. Its search is not sent, since the API has
+ *   none: the list matches it against the page's rows (see PaymentRequestsWorkspace).
+ * @returns The page's rows, how many requests the API counts in all, whether that count is exact
+ *   and whether a page follows; on any failure `{ ok: false, data: [], total: 0, error, … }`.
+ *   Never throws.
  */
 export async function loadPaymentRequestsList(
   request: SdpApiClient["request"],
   state: PaymentRequestsListState
-): Promise<PaymentRequestsResult> {
+): Promise<PaymentRequestsListResult> {
   const { page, pageSize, status } = state;
   const result = await fetchPaymentRequests(request, {
     page,
     pageSize,
     ...(status ? { status } : {}),
   });
-  if (!result.ok || status !== "awaiting_payment") return result;
+  const hasNextPage = result.ok && page * pageSize < result.total;
+  if (!result.ok || status !== "awaiting_payment") {
+    return { ...result, totalIsExact: true, hasNextPage };
+  }
   // The API filters by the stored status, and listing then reconciles each open request on chain:
   // one paid since it was last read comes back paid (and is saved so). Awaiting payment leaves
-  // those rows out and lowers the total by as many, so the count and the pages don't claim them.
-  // Only this page is reconciled, so requests paid on other, unread pages still count: the total
-  // can run high by as many (usually none), and the last page can come up short, until those
-  // pages are read and their paid requests saved. No row shows the wrong status.
-  // TODO(api): filter and count by the reconciled status. Until then the Awaiting total can run
-  // high as above, and Paid misses a request paid since its last read until something reads it
+  // those rows out, so no row shows the wrong status. Only this page is reconciled, so the API's
+  // total still counts requests paid on other, unread pages: it is an upper bound, which the
+  // list uses for its pages but does not show as a count (`totalIsExact: false`).
+  // TODO(api): filter and count by the reconciled status, so Awaiting payment can show its count
+  // again and Paid stops missing a request paid since its last read until something reads it
   // again. Known limitation of the API, not of this list.
-  const open = result.data.filter((row) => row.status === "awaiting_payment");
   return {
     ...result,
-    data: open,
-    total: Math.max(0, result.total - (result.data.length - open.length)),
+    data: result.data.filter((row) => row.status === "awaiting_payment"),
+    totalIsExact: false,
+    hasNextPage,
   };
 }
 

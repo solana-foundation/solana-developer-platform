@@ -67,6 +67,8 @@ async function PaymentRequestsPage({
       total: result.total,
     });
 
+    // Under Awaiting payment the total is the API's upper bound (see loadPaymentRequestsList),
+    // so a page past it is past the end all the more.
     const lastPage = Math.max(1, Math.ceil(result.total / listState.pageSize));
     if (result.ok && listState.page > lastPage) {
       // A page past the end (an old link, or requests gone since) lands on the last one.
@@ -77,6 +79,8 @@ async function PaymentRequestsPage({
       <PaymentRequestsWorkspace
         initialPaymentRequests={result.data}
         total={result.total}
+        totalIsExact={result.totalIsExact}
+        hasNextPage={result.hasNextPage}
         listState={listState}
         initialError={result.error}
         initialLocalErrorCode={result.localErrorCode}
