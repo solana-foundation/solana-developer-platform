@@ -24,6 +24,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/payments/pay", "payments-pay"],
     ["/dashboard/payments/deposit", "payments-deposit"],
     ["/dashboard/payments/requests", "payment-requests"],
+    ["/dashboard/payments/requests/new", "payment-request-create"],
     ["/dashboard/payments/counterparty", "counterparty-directory"],
     ["/dashboard/payments/counterparty/create", "counterparty-create"],
     ["/dashboard/payments/counterparty/counterparty-1", "counterparty-detail"],

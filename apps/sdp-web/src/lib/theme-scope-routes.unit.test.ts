@@ -3,9 +3,8 @@ import { themeScopeForPath } from "./theme-scope-routes";
 
 describe("themeScopeForPath", () => {
   it.each([
+    "/dashboard/payments",
     "/dashboard/payments/pay",
-    "/dashboard/payments/deposit",
-    "/dashboard/payments/counterparty",
     "/dashboard/payments/counterparty/cp_1",
     "/dashboard/integrations/private-channels/setup",
     "/dashboard/integrations/private-channels/inst_1/setup",
@@ -15,8 +14,6 @@ describe("themeScopeForPath", () => {
 
   it.each([
     "/dashboard",
-    "/dashboard/payments",
-    "/dashboard/payments/transactions",
     "/dashboard/payments-archive",
     "/dashboard/issuance",
     "/dashboard/integrations/private-channels/overview",
@@ -26,7 +23,7 @@ describe("themeScopeForPath", () => {
     expect(themeScopeForPath(pathname)).toBeNull();
   });
 
-  it.each(["/dashboard/payments/pay", "/dashboard/integrations/private-channels/setup"])(
+  it.each(["/dashboard/payments", "/dashboard/integrations/private-channels/setup"])(
     "keeps %s in the base design with NEW DESIGN off",
     (pathname) => {
       expect(themeScopeForPath(pathname, false)).toBeNull();
