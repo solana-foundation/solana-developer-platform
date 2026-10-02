@@ -36,10 +36,10 @@ function listApi(total: number) {
 }
 
 describe("parsePaymentRequestsListParams", () => {
-  it("reads the page, its size and the status from the URL", () => {
+  it("reads the page, its size and the status from the URL, and ignores a search", () => {
     expect(
       parsePaymentRequestsListParams({ page: "3", pageSize: "50", status: "paid", search: " ab " })
-    ).toEqual({ page: 3, pageSize: 50, status: "paid", search: "ab" });
+    ).toEqual({ page: 3, pageSize: 50, status: "paid", search: null });
   });
 
   it("falls back on anything missing or malformed, and caps the size at the API's", () => {
