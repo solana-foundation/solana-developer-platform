@@ -703,6 +703,7 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
               {formatLamportsAsSol(BigInt(fees.tokenAccountRentLamports))}
             </ReviewSummaryRow>
             <div className="h-px bg-fill-strong" />
+            {/* react-doctor-disable-next-line duplicate-jsx-subtree -- redesign sibling of main's batch-send-step-content.tsx; goes away when the old design is removed */}
             <div className="flex items-center justify-between">
               <span className="font-medium text-primary">
                 {t("DashboardPayments.batchSend.total")}
