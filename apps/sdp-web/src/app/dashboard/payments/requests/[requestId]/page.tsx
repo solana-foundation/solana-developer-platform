@@ -35,6 +35,8 @@ async function PaymentRequestDetailRoute({ params }: { params: Promise<{ request
       trace.log({ status: detail.status });
 
       if (detail.status === "not_found") {
+        // TODO(api): with a read by id, a missing request can get its own not-found page. For now
+        // it goes back to the list, as the list is the only way the API reads requests.
         redirect(PAYMENT_REQUESTS_HREF);
       }
 

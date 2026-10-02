@@ -83,9 +83,6 @@ const PAYMENT_REQUEST_STATUSES = [
   "expired",
 ] as const satisfies readonly PaymentRequest["status"][];
 
-/** Longest search the Requests list carries in its URL. */
-const PAYMENT_REQUESTS_SEARCH_MAX_LENGTH = 200;
-
 /** The Requests list's page, its size, its status filter and its search, as the URL carries them. */
 export interface PaymentRequestsListState {
   page: number;
@@ -119,9 +116,6 @@ export function parsePaymentRequestsListParams(
   params: Record<string, string | string[] | undefined>
 ): PaymentRequestsListState {
   const status = firstParamValue(params.status);
-  const search = firstParamValue(params.search)
-    ?.trim()
-    .slice(0, PAYMENT_REQUESTS_SEARCH_MAX_LENGTH);
   return {
     page: parseListInteger(firstParamValue(params.page), 1),
     pageSize: Math.min(
@@ -129,7 +123,11 @@ export function parsePaymentRequestsListParams(
       PAYMENT_REQUESTS_PAGE_SIZE
     ),
     status: PAYMENT_REQUEST_STATUSES.find((candidate) => candidate === status) ?? null,
-    search: search ? search : null,
+    // TODO(api): read `search` again once GET /v1/payments/requests can search. The API has no
+    // search parameter, and searching only the requests the dashboard has read would miss older
+    // ones, so search is off for now and a `search` in the URL is ignored. Known limitation of the
+    // API, not of this list.
+    search: null,
   };
 }
 
@@ -427,6 +425,9 @@ export async function fetchPaymentRequestDetail(
   request: SdpApiClient["request"],
   requestId: string
 ): Promise<PaymentRequestDetailResult> {
+  // TODO(api): read the request by id once the API has GET /v1/payments/requests/{id}. Until then
+  // this pages through the list, so an older request costs one read per 100 newer ones. Known
+  // limitation of the API, not of this page.
   for (let page = 1; ; page += 1) {
     const result = await fetchPaymentRequests(request, { page });
     if (!result.ok) return { status: "error", error: result.error };
