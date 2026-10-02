@@ -98,7 +98,7 @@ export function CoinbaseRampFrame({
       <iframe
         title={t("DashboardPayments.ramps.coinbaseOnramp")}
         src={src}
-        className="h-[40rem] w-full border-0"
+        className="h-160 w-full border-0"
         allow="payment"
         sandbox="allow-scripts allow-same-origin"
         referrerPolicy="no-referrer"

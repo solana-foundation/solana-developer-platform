@@ -67,6 +67,20 @@ describe("handleCoinbaseFrameEvent", () => {
     expect(postEvent).not.toHaveBeenCalled();
   });
 
+  it("reports commit_error with the error code when Coinbase's message is empty", () => {
+    handle(
+      frameMessage("onramp_api.commit_error", {
+        errorCode: "ERROR_CODE_PAYMENT_DECLINED",
+        errorMessage: "",
+      })
+    );
+
+    expect(postEvent).toHaveBeenCalledWith(
+      { kind: "errored", orderId: ORDER_ID, reason: "ERROR_CODE_PAYMENT_DECLINED" },
+      t
+    );
+  });
+
   it("still reports commit_success as committed", () => {
     handle(frameMessage("onramp_api.commit_success"));
 

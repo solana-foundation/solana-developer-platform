@@ -36,7 +36,7 @@ describe("CoinbaseRampFrame", () => {
     renderFrame();
 
     const frame = screen.getByTitle("Coinbase onramp");
-    expect(frame.className).toContain("h-[40rem]");
+    expect(frame.className).toContain("h-160");
     expect(frame.className).not.toContain("h-12");
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-same-origin");
     expect(frame.getAttribute("allow")).toBe("payment");
@@ -48,7 +48,7 @@ describe("CoinbaseRampFrame", () => {
     postFrameMessage({ eventName: "onramp_api.verification_success" });
     postFrameMessage({ eventName: "onramp_api.upgrade_approved" });
 
-    expect(screen.getByTitle("Coinbase onramp").className).toContain("h-[40rem]");
+    expect(screen.getByTitle("Coinbase onramp").className).toContain("h-160");
     expect(postEvent).not.toHaveBeenCalled();
   });
 
