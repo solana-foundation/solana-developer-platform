@@ -43,8 +43,9 @@ In a Tailwind v4 stylesheet, import the tokens before anything that reads them:
 ```
 
 `apps/sdp-web/src/app/globals.css` imports them this way, so the dashboard reads the base
-palette from the package. Nothing in sdp-web renders a refresh scope yet: every screen stays on the
-base palette until a surface opts in.
+palette from the package. While the `new-design` flag is on, `apps/sdp-web/src/app/sdp-theme.css`
+also points the base names at the refresh palette and faces for the whole document (every page
+gets the colours and type; only refresh surfaces get the refresh shapes).
 
 Opt a surface into the refresh design with the attribute. On `<html>` it adopts the design
 app-wide, in light and dark:
@@ -57,6 +58,13 @@ import { refreshThemeProps } from "@sdp/design-tokens";
 
 Content portaled out of that element (modals, menus, popovers) leaves the scope, so it has to
 carry the attribute itself.
+
+In the dashboard the shell sets the attribute on `<main>` from the route
+(`themeScopeForPath` in `apps/sdp-web/src/lib/theme-scope-routes.ts`: the routes a redesigned area
+registers in `lib/design-modules.ts`, and the Privacy connect form), and on the sidebar whenever
+`new-design` is on. `ThemeScopeProvider` carries the scope to portaled content, which re-stamps it
+through `useThemeScopeAttributes` (`apps/sdp-web/src/components/theme-scope.ts`); where structure
+differs as well, a client component reads `useThemeScope() === "refresh"`.
 
 When a component needs different styling inside a refresh surface, use the variant rather
 than a second component:
@@ -78,7 +86,7 @@ files in `src/assets/fonts` and exposes them under those names. In Next.js, load
 `next/font/local`, set `variable` to that name, and put the font's `variable` class on
 `<html>`. Elsewhere, declare `@font-face` rules for the same files and set the two variables
 on `:root`. Without either, the stack falls back to the installed family name, then the system
-stack. sdp-web doesn't load them yet.
+stack. sdp-web loads them with `next/font/local` in `apps/sdp-web/src/app/layout.tsx`.
 
 ### Page column
 

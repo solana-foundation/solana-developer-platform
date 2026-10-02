@@ -22,7 +22,8 @@ const variantClassNames: Record<ButtonVariant, string | undefined> = {
   default: undefined,
   destructive:
     "bg-destructive text-on-primary hover:bg-destructive-strong focus-visible:ring-destructive-border",
-  outline: "border border-border-default bg-surface-raised text-primary hover:bg-surface-sunken",
+  outline:
+    "border border-border-default bg-surface-raised text-primary hover:bg-surface-sunken refresh:border-border-strong refresh:bg-transparent refresh:hover:bg-fill-subtle",
   secondary: undefined,
   ghost: "bg-transparent text-secondary hover:bg-fill-subtle hover:text-primary",
   link: "h-auto bg-transparent px-0 text-primary underline-offset-4 hover:bg-transparent hover:underline",
@@ -56,7 +57,8 @@ const slotVariantClassNames: Record<ButtonVariant, string> = {
   default: "bg-primary !text-on-primary hover:opacity-90 visited:!text-on-primary",
   destructive:
     "bg-destructive text-on-primary hover:bg-destructive-strong focus-visible:ring-destructive-border",
-  outline: "border border-border-default bg-surface-raised text-primary hover:bg-surface-sunken",
+  outline:
+    "border border-border-default bg-surface-raised text-primary hover:bg-surface-sunken refresh:border-border-strong refresh:bg-transparent refresh:hover:bg-fill-subtle",
   secondary: "bg-fill text-primary hover:bg-fill-strong",
   ghost: "bg-transparent text-secondary hover:bg-fill-subtle hover:text-primary",
   link: "h-auto bg-transparent px-0 text-primary underline-offset-4 hover:bg-transparent hover:underline",

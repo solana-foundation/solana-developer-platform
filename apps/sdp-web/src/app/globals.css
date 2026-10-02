@@ -9,6 +9,9 @@
 /* Tailwind v4 defaults dark: utilities to the OS media query. SDP has an
    explicit, persisted preference, so utilities must follow the root class. */
 @custom-variant dark (&:where(.dark, .dark *));
+/* Changes outside the refresh scope that belong to the new design (NEW DESIGN flag): the shell
+   marks itself with data-sdp-new-design while the flag is on. */
+@custom-variant new-design (&:where([data-sdp-new-design], [data-sdp-new-design] *));
 
 /* Ensure Tailwind scans app source files */
 @source "../**/*.{ts,tsx}";
@@ -329,4 +332,10 @@ vercel-live-feedback {
 :root.dark vercel-live-feedback {
   color-scheme: dark;
   --geist-foreground: #fcfcfa;
+}
+
+/* A flow's footer holds its Back, Cancel and primary action. Toasts (app-toaster.tsx) sit
+   above it with sonner's usual 24px gap instead of covering them. */
+:root:has([data-sdp-new-design] [data-wizard-actions]) {
+  --app-toast-offset-bottom: calc(6rem + env(safe-area-inset-bottom));
 }
