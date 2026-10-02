@@ -411,6 +411,87 @@ describe("buildWisdomTreeRedemptionPlan", () => {
       HOOK, // 9: hook program
       String(validation), // 10: validation account
     ]);
+    // Mint, destination, validation list and source, in ONE request: both
+    // credential seeds come from accounts that request already returned.
+    expect(reader.requests).toEqual([
+      [
+        WTGXX.mint,
+        await ata(ON_RECEIPT, WTGXX.mint, TOKEN_2022),
+        String(validation),
+        await ata(OWNER, WTGXX.mint, TOKEN_2022),
+      ],
+    ]);
+  });
+
+  it("reads a seed account outside the up-front request once, however often it is used", async () => {
+    const validation = await deriveExtraAccountMetasAddress(address(HOOK), address(WTGXX.mint));
+    const seededFromLiteral = (dataIndex: number) => {
+      const entry = new Uint8Array(35);
+      entry[0] = 1;
+      entry[1] = 4; // account-data seed tag
+      entry[2] = 5; // execute index 5 = the literal account resolved first
+      entry[3] = dataIndex;
+      entry[4] = 8;
+      return entry;
+    };
+    const reader = fakeReader({
+      [WTGXX.mint]: { owner: TOKEN_2022, data: wtgxxMintAccountData() },
+      [await ata(ON_RECEIPT, WTGXX.mint, TOKEN_2022)]: {
+        owner: TOKEN_2022,
+        data: tokenAccountWithOwner(ON_RECEIPT, 0n),
+      },
+      [String(validation)]: {
+        owner: HOOK,
+        data: extraAccountMetaListAccount([
+          literalHookEntry(USDC),
+          seededFromLiteral(0),
+          seededFromLiteral(8),
+        ]),
+      },
+      [USDC]: { owner: TOKEN_2022, data: new Uint8Array(16).fill(3) },
+    });
+
+    await buildWisdomTreeRedemptionPlan(reader, runtime, {
+      fund: WTGXX,
+      owner: createNoopSigner(address(OWNER)),
+      onReceiptWallet: address(ON_RECEIPT),
+      depositMint: address(USDC),
+      shares: "1",
+    });
+
+    expect(reader.requests).toHaveLength(2);
+    expect(reader.requests[1]).toEqual([USDC]);
+  });
+
+  it("still refuses an owner without a fund account as unverified", async () => {
+    const validation = await deriveExtraAccountMetasAddress(address(HOOK), address(WTGXX.mint));
+    const sourceOwnerEntry = new Uint8Array(35);
+    sourceOwnerEntry[0] = 1;
+    sourceOwnerEntry[1] = 4; // account-data seed tag
+    sourceOwnerEntry[2] = 0; // execute index 0 = source token account
+    sourceOwnerEntry[3] = 32;
+    sourceOwnerEntry[4] = 32;
+    const reader = fakeReader({
+      [WTGXX.mint]: { owner: TOKEN_2022, data: wtgxxMintAccountData() },
+      [String(validation)]: {
+        owner: HOOK,
+        data: extraAccountMetaListAccount([sourceOwnerEntry]),
+      },
+    });
+
+    await expect(
+      buildWisdomTreeRedemptionPlan(reader, runtime, {
+        fund: WTGXX,
+        owner: createNoopSigner(address(OWNER)),
+        onReceiptWallet: address(ON_RECEIPT),
+        depositMint: address(USDC),
+        shares: "1",
+      })
+    ).rejects.toMatchObject({
+      code: "WITHDRAW_REFUSED",
+      message: expect.stringContaining("has not been verified by the issuer"),
+    });
+    expect(reader.requests).toHaveLength(1);
   });
 });
 

@@ -302,6 +302,52 @@ describe("checkDepositEligibility", () => {
     }
   });
 
+  it("reads the organization once per bearer token", async () => {
+    const fetchMock = stubConnectFetch(
+      { body: tokenReply },
+      { body: { guid: "org-guid" } },
+      walletsReply([{ public_key: owner, status: "approved" }]),
+      productsReply([{ exchange_code: WTGXX.exchangeCode, can_trade: true }]),
+      walletsReply([{ public_key: owner, status: "approved" }]),
+      productsReply([{ exchange_code: WTGXX.exchangeCode, can_trade: true }])
+    );
+    const input = { providerReference: WTGXX.mint, owner };
+    assert.deepEqual(await client.checkDepositEligibility(productionCtx, input), {
+      eligible: true,
+    });
+    assert.deepEqual(await client.checkDepositEligibility(productionCtx, input), {
+      eligible: true,
+    });
+
+    // Wallet status and products stay live; the GUID rides the cached token.
+    assert.equal(fetchMock.mock.callCount(), 6);
+    assert.match(requestUrl(fetchMock, 4), /\/api\/organizations\/org-guid\/wallets$/);
+    assert.match(requestUrl(fetchMock, 5), /\/api\/orders\/products$/);
+  });
+
+  it("re-reads the organization when its bearer token is replaced", async () => {
+    const fetchMock = stubConnectFetch(
+      { body: tokenReply },
+      { body: { guid: "org-guid" } },
+      walletsReply([{ public_key: owner, status: "approved" }]),
+      productsReply([{ exchange_code: WTGXX.exchangeCode, can_trade: true }]),
+      { body: tokenReply },
+      { body: { guid: "org-guid-2" } },
+      walletsReply([{ public_key: owner, status: "approved" }]),
+      productsReply([{ exchange_code: WTGXX.exchangeCode, can_trade: true }])
+    );
+    const input = { providerReference: WTGXX.mint, owner };
+    await client.checkDepositEligibility(productionCtx, input);
+    const expired = Date.now() + 600_000;
+    mock.method(Date, "now", () => expired);
+    await client.checkDepositEligibility(productionCtx, input);
+
+    assert.equal(fetchMock.mock.callCount(), 8);
+    assert.match(requestUrl(fetchMock, 4), /\/o\/token\/$/);
+    assert.match(requestUrl(fetchMock, 5), /\/api\/organizations\/me$/);
+    assert.match(requestUrl(fetchMock, 6), /\/api\/organizations\/org-guid-2\/wallets$/);
+  });
+
   it("uses the generic reason for an unregistered wallet", async () => {
     stubConnectFetch(
       { body: tokenReply },
