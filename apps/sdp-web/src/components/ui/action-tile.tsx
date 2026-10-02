@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * A tinted, borderless tile that starts a flow: icon at the top, name and a one-line promise
- * at the bottom. Flat by design; hover deepens the tint. 120px tall in a 16px inset, a 16px
- * name over a 14px line, as the design draws it.
+ * at the bottom. Flat by design; hover deepens the tint. 120px tall in a 16px inset, a 20px
+ * icon, then a 15px name over a 13px line, as the design draws it.
  */
 export function ActionTile({
   href,
@@ -28,10 +28,10 @@ export function ActionTile({
         className
       )}
     >
-      <Icon className="size-6 text-secondary" strokeWidth={1.5} aria-hidden="true" />
+      <Icon className="size-5 text-secondary" strokeWidth={1.5} aria-hidden="true" />
       <span className="min-w-0">
-        <span className="block text-field font-medium text-primary">{label}</span>
-        <span className="block text-body text-secondary">{description}</span>
+        <span className="block text-nav font-medium text-primary">{label}</span>
+        <span className="block text-meta text-secondary">{description}</span>
       </span>
     </Link>
   );
