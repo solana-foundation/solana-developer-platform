@@ -88,6 +88,7 @@ function PaymentInstructionField({
   }
 
   return (
+    // react-doctor-disable-next-line duplicate-jsx-subtree -- redesign sibling of main's manual-instructions-quote.tsx; goes away when the old design is removed
     <div className={cn("rounded-xl bg-fill-subtle px-4 py-3", className)}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
@@ -197,6 +198,7 @@ function ManualQuoteSummary({
   }
 
   return (
+    // react-doctor-disable-next-line duplicate-jsx-subtree -- redesign sibling of main's manual-instructions-quote.tsx; goes away when the old design is removed
     <div className="space-y-4 text-left">
       <div>
         <p className="text-sm font-medium text-primary">
@@ -467,6 +469,7 @@ function BvnkInstruction({
           <InstructionIconTile tone="primary">
             <ShieldCheckIcon className="size-5" />
           </InstructionIconTile>
+          {/* react-doctor-disable-next-line duplicate-jsx-subtree -- redesign sibling of main's manual-instructions-quote.tsx; goes away when the old design is removed */}
           <div className="min-w-0 flex-1">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
@@ -683,6 +686,7 @@ export function ManualInstructionsQuote({
       </div>
 
       {quote.provider === "lightspark" ? (
+        // react-doctor-disable-next-line duplicate-jsx-subtree -- redesign sibling of main's manual-instructions-quote.tsx; goes away when the old design is removed
         <>
           <Tabs
             className="mt-6"
