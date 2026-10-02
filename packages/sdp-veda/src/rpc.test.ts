@@ -1,11 +1,18 @@
-import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
-import type { RpcTransport } from "@solana/kit";
+import { readStamp, withMinimumRpcSlot, withReadFloor } from "@sdp/rpc/read-context";
+import { address, type Base64EncodedWireTransaction, type RpcTransport } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { VEDA_BLOCK_TIME_TTL_MS, withVedaReadDeduplication, withVedaRpcTimeout } from "./rpc";
+import {
+  createVedaReadRpc,
+  createVedaRpc,
+  VEDA_BLOCK_TIME_TTL_MS,
+  withVedaReadDeduplication,
+  withVedaRpcTimeout,
+} from "./rpc";
 
 /**
  * The position-read transport's de-duplication, against a fake transport that
- * records every request it is asked to send and settles only when told to.
+ * records every request it is asked to send and settles only when told to, and
+ * both clients' dead-socket re-send, against a stubbed `fetch`.
  */
 
 interface SentRequest {
@@ -42,9 +49,48 @@ const laterTask = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("withVedaReadDeduplication", () => {
+  it("shares each read a position read sends", async () => {
+    for (const [method, params] of [
+      ["getAccountInfo", [ACCOUNTS[0], { encoding: "base64" }]],
+      ["getBlockTime", [5]],
+      ["getMultipleAccounts", [ACCOUNTS, { encoding: "base64" }]],
+      ["getProgramAccounts", [ACCOUNTS[0], { encoding: "base64" }]],
+    ] as const) {
+      const { sent, transport } = fakeTransport();
+      const read = withVedaReadDeduplication(transport);
+      void read(request(method, [...params]));
+      await laterTask();
+      void read(request(method, [...params]));
+      expect(sent, method).toHaveLength(1);
+    }
+  });
+
+  it("never shares or remembers a send, a simulation or a blockhash", async () => {
+    for (const [method, params] of [
+      ["sendTransaction", ["AQ==", { encoding: "base64" }]],
+      ["simulateTransaction", ["AQ==", { encoding: "base64", sigVerify: false }]],
+      ["getLatestBlockhash", [{ commitment: "confirmed" }]],
+    ] as const) {
+      const { sent, transport } = fakeTransport();
+      const read = withVedaReadDeduplication(transport);
+      const first = read(request(method, [...params]));
+      await laterTask();
+      const second = read(request(method, [...params]));
+      expect(sent, method).toHaveLength(2);
+
+      sent[0]?.resolve({ jsonrpc: "2.0", result: "first" });
+      sent[1]?.resolve({ jsonrpc: "2.0", result: "second" });
+      await expect(first).resolves.toEqual({ jsonrpc: "2.0", result: "first" });
+      await expect(second).resolves.toEqual({ jsonrpc: "2.0", result: "second" });
+      void read(request(method, [...params]));
+      expect(sent, method).toHaveLength(3);
+    }
+  });
+
   it("shares one in-flight response among identical requests", async () => {
     const { sent, transport } = fakeTransport();
     const read = withVedaReadDeduplication(transport);
@@ -63,6 +109,39 @@ describe("withVedaReadDeduplication", () => {
     sent[0]?.resolve(response);
     await expect(first).resolves.toBe(response);
     await expect(second).resolves.toBe(response);
+  });
+
+  it("never lets a caller join a request sent before its read floor", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+    const params = [ACCOUNTS, { encoding: "base64" }];
+
+    const before = read(request("getMultipleAccounts", params));
+    const rowsReadAt = readStamp();
+    const floored = withReadFloor(rowsReadAt, () => read(request("getMultipleAccounts", params)));
+    // The fresh request replaces the stale entry: later callers share it.
+    const unfloored = read(request("getMultipleAccounts", params));
+    expect(sent).toHaveLength(2);
+
+    const stale = { jsonrpc: "2.0", result: { context: { slot: 1n }, value: [null] } };
+    const fresh = { jsonrpc: "2.0", result: { context: { slot: 2n }, value: [null] } };
+    sent[0]?.resolve(stale);
+    sent[1]?.resolve(fresh);
+    await expect(before).resolves.toBe(stale);
+    await expect(floored).resolves.toBe(fresh);
+    await expect(unfloored).resolves.toBe(fresh);
+  });
+
+  it("lets a caller join a request sent after its read floor", () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+    const params = [ACCOUNTS, { encoding: "base64" }];
+
+    const rowsReadAt = readStamp();
+    void read(request("getMultipleAccounts", params));
+    void withReadFloor(rowsReadAt, () => read(request("getMultipleAccounts", params)));
+
+    expect(sent).toHaveLength(1);
   });
 
   it("keeps requests apart when any param differs", async () => {
@@ -185,5 +264,125 @@ describe("withVedaReadDeduplication", () => {
     }
     await expect(scoped).resolves.toBeDefined();
     await expect(unscoped).resolves.toBeDefined();
+  });
+});
+
+const socketDeath = () =>
+  new TypeError("fetch failed", {
+    cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+  });
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * A `fetch` that plays `script` in order: "die" rejects at once, as a pooled
+ * socket the server already closed does, "die-later" rejects the same way once
+ * released, and "answer" answers once released. A send past the script fails.
+ */
+function scriptedWire(script: readonly ("die" | "die-later" | "answer")[]) {
+  const bodies: unknown[] = [];
+  const held: (() => void)[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      const payload = record(JSON.parse(String(init?.body)));
+      bodies.push(payload);
+      const step = script[bodies.length - 1];
+      if (step === undefined) throw new Error("unscripted send");
+      if (step === "die") throw socketDeath();
+      await new Promise<void>((resolve) => held.push(resolve));
+      if (step === "die-later") throw socketDeath();
+      const value = payload?.method === "getMultipleAccounts" ? [null] : null;
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: payload?.id,
+          result: { context: { slot: 150 }, value },
+        }),
+        { headers: { "content-type": "application/json" } }
+      );
+    })
+  );
+  return {
+    bodies,
+    release() {
+      for (const settle of held.splice(0)) settle();
+    },
+  };
+}
+
+const ACCOUNT = address("11111111111111111111111111111111");
+
+describe("a pooled socket that dies before the response", () => {
+  it("re-sends a shared read once and answers every consumer from it", async () => {
+    const wire = scriptedWire(["die", "answer"]);
+    const rpc = createVedaReadRpc("https://veda-socket-shared.invalid");
+
+    const first = rpc.getMultipleAccounts([ACCOUNT], { encoding: "base64" }).send();
+    await laterTask();
+    const second = rpc.getMultipleAccounts([ACCOUNT], { encoding: "base64" }).send();
+    await laterTask();
+    wire.release();
+
+    const answer = { context: { slot: 150n }, value: [null] };
+    await expect(Promise.all([first, second])).resolves.toEqual([answer, answer]);
+    expect(wire.bodies).toHaveLength(2);
+    expect(wire.bodies[1]).toEqual(wire.bodies[0]);
+  });
+
+  it("re-sends once in all, not once per consumer, when the re-send dies too", async () => {
+    const wire = scriptedWire(["die", "die-later"]);
+    const rpc = createVedaReadRpc("https://veda-socket-twice.invalid");
+
+    const first = rpc.getMultipleAccounts([ACCOUNT], { encoding: "base64" }).send();
+    await laterTask();
+    const second = rpc.getMultipleAccounts([ACCOUNT], { encoding: "base64" }).send();
+    await laterTask();
+    wire.release();
+
+    await expect(first).rejects.toThrow("fetch failed");
+    await expect(second).rejects.toThrow("fetch failed");
+    expect(wire.bodies).toHaveLength(2);
+  });
+
+  it("re-sends a minimum-slot read with its scope intact", async () => {
+    const wire = scriptedWire(["die", "answer"]);
+    const rpc = createVedaReadRpc("https://veda-socket-scoped.invalid");
+
+    const read = withMinimumRpcSlot(100, () =>
+      rpc.getMultipleAccounts([ACCOUNT], { encoding: "base64" }).send()
+    );
+    await laterTask();
+    wire.release();
+
+    await expect(read).resolves.toEqual({ context: { slot: 150n }, value: [null] });
+    const scoped = { commitment: "confirmed", encoding: "base64", minContextSlot: 100 };
+    expect(wire.bodies.map((body) => record(body)?.params)).toEqual([
+      [[ACCOUNT], scoped],
+      [[ACCOUNT], scoped],
+    ]);
+  });
+
+  it("re-sends a read on the build client, never a transaction", async () => {
+    const wire = scriptedWire(["die", "answer", "die"]);
+    const rpc = createVedaRpc("https://veda-socket-build.invalid");
+
+    const read = rpc.getAccountInfo(ACCOUNT, { encoding: "base64" }).send();
+    await laterTask();
+    wire.release();
+    await expect(read).resolves.toEqual({ context: { slot: 150n }, value: null });
+
+    await expect(
+      rpc.sendTransaction("AQ==" as Base64EncodedWireTransaction, { encoding: "base64" }).send()
+    ).rejects.toThrow("fetch failed");
+    expect(wire.bodies.map((body) => record(body)?.method)).toEqual([
+      "getAccountInfo",
+      "getAccountInfo",
+      "sendTransaction",
+    ]);
   });
 });
