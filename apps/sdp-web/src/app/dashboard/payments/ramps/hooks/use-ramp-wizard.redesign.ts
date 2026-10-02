@@ -364,10 +364,12 @@ export function useRampWizard<TId extends string>(
   // arrival — not derived state — hence the effect.
   const onboardingStatus = requirements.onboarding === null ? null : requirements.onboarding.status;
   const resolvedProviderAccountId = requirements.resolvedProviderAccountId;
+  // react-doctor-disable-next-line no-fetch-in-effect, no-set-state-after-await-in-effect -- copied unchanged from main's use-ramp-wizard.ts; goes away when the old design is removed
   useEffect(() => {
     if (!isLastStep || onboardingStatus !== "ready") {
       return;
     }
+    // react-doctor-disable-next-line no-pass-live-state-to-parent -- copied unchanged from main's use-ramp-wizard.ts; goes away when the old design is removed
     maybeCreateQuote(resolvedProviderAccountId);
   });
 

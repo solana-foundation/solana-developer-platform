@@ -382,6 +382,7 @@ function UnavailableProvidersModal({
       ariaLabel={t("DashboardPayments.ramps.unavailableProviders")}
       size="md"
     >
+      {/* react-doctor-disable-next-line duplicate-jsx-subtree -- redesign sibling of main's ramp-pair-provider-selector.tsx; goes away when the old design is removed */}
       <div className="px-5 py-5">
         <h2 className="pr-10 text-lg font-medium text-primary">
           {t("DashboardPayments.ramps.unavailableProviders")}
