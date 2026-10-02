@@ -533,6 +533,38 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
 - Missing required provider configuration ⇒ throw `PROVIDER_NOT_CONFIGURED`
   **before** any network call.
 
+## RPC budget (hard rule)
+
+Every Treasury refresh re-reads every position live, so each call a provider
+makes is paid per holding per refresh, against provider rate limits and the
+Cloud NAT's 64 ports per instance per destination. Every provider path (reads,
+quotes, builds, reconciliation) stays as lean as it can without losing
+accuracy:
+
+- **Live stays live.** Balances, shares, exchange rates, reserves, vesting and
+  clock inputs, prices and quotes are read on every call. Never cache one.
+- **Static is read once.** Program validation, PDAs, mint decimals and
+  admin-set config are cached per (cluster, endpoint, account) with a TTL.
+  Never cache a failure, and evict a cached client whose validation rejects.
+- **No per-call construction cost.** Reuse a validated client instead of
+  building one, and paying its validation, on every read.
+- **One fetch per account per operation.** Never re-read an account the
+  operation already holds; batch independent accounts into one
+  `getMultipleAccounts`.
+- **Share identical concurrent reads** across owners within one hydration:
+  in-flight only, keyed with any `minContextSlot`, never across clusters or
+  endpoints.
+- **No unfiltered `getProgramAccounts`.** Derive the PDA, or filter server-side
+  with `memcmp`/`dataSize`.
+- **No unused round trips.** No `getBlockTime` or `getSlot` whose answer is
+  discarded or already in a returned context slot.
+- **Prove it.** A change to any of these paths states its before/after request
+  count and sequential round trips, and a test pins the count by counting
+  requests through a fake transport.
+
+Reference point: Veda position reads went from 22 requests per holding to 6-10
+on `earn-rpc-performance` under these rules, with identical values.
+
 ## Conventions
 
 - New provider = subclass `providers/stub.ts` (`StubEarnClient`), register in
