@@ -1,18 +1,88 @@
+import { createHash } from "node:crypto";
+import type { EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { addDecimalAmounts } from "@sdp/payments/decimal";
-import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
+import { resolveClusterRpcUrls } from "@sdp/rpc";
+import { readStamp, withMinimumRpcSlot, withReadFloor } from "@sdp/rpc/read-context";
 import { isDecimalString } from "@sdp/solana/amount";
 import {
   type EarnVaultPositionIntermediate,
   isEarnVaultHoldingEmpty,
   type SdpEnvironment,
+  type SolanaCluster,
 } from "@sdp/types";
 import { isAddress } from "@solana/kit";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
-import { createVaultDeadline } from "@/services/earn/vault-deadline";
+import { createVaultDeadline, type VaultDeadline } from "@/services/earn/vault-deadline";
 import type { AppContext } from "../context";
 import { earnRuntime } from "../context";
+
+const MAX_IN_FLIGHT_VAULT_POSITION_READS = 256;
+
+/**
+ * Stamp a caller takes as soon as its position rows are read, and passes as
+ * `rowsReadAt`: no provider request its hydration uses was sent before it (see
+ * `sharedVaultPositionRead`). Close-out trusts the rows' `updatedAt`. Same
+ * clock as the providers' in-flight request sharing (`readStamp`).
+ */
+export function markVaultPositionRowsRead(): number {
+  return readStamp();
+}
+
+/**
+ * Provider reads in flight, keyed by everything a read depends on: environment,
+ * RPC endpoints, provider, owner, the sorted references and the minimum slot.
+ * Removed on settlement, so this is never a cache: it only stops overlapping
+ * requests from repeating the same chain read.
+ */
+const inFlightVaultPositionReads = new Map<
+  string,
+  { read: Promise<EarnVaultPositionSnapshot[]>; startedAt: number }
+>();
+
+/**
+ * Join an identical read whose creator read its rows no earlier than the
+ * caller did, or start one. A read is stamped with its creator's `rowsReadAt`
+ * and runs under that read floor, so every provider request it uses was sent
+ * after the creator's rows were read, and so after every joiner's. Every job
+ * of one hydration runs under the same floor, so owners on one page still
+ * share provider requests. A joiner stops waiting at its own deadline; the
+ * read itself runs on the deadline of the caller that started it.
+ */
+function sharedVaultPositionRead(
+  key: string,
+  rowsReadAt: number,
+  deadline: VaultDeadline,
+  read: () => Promise<EarnVaultPositionSnapshot[]>
+): Promise<EarnVaultPositionSnapshot[]> {
+  const existing = inFlightVaultPositionReads.get(key);
+  if (existing && existing.startedAt >= rowsReadAt) {
+    return deadline.run("vault position read", () => existing.read);
+  }
+  const entry = { startedAt: rowsReadAt, read: withReadFloor(rowsReadAt, read) };
+  if (!existing && inFlightVaultPositionReads.size >= MAX_IN_FLIGHT_VAULT_POSITION_READS) {
+    return entry.read;
+  }
+  inFlightVaultPositionReads.set(key, entry);
+  const clear = () => {
+    if (inFlightVaultPositionReads.get(key) === entry) inFlightVaultPositionReads.delete(key);
+  };
+  void entry.read.then(clear, clear);
+  return entry.read;
+}
+
+/**
+ * The RPC endpoints a read for `cluster` would use, in failover order, as a
+ * hash: reads through different endpoints never share, and the key never
+ * holds a URL (providers carry API keys in them).
+ */
+function rpcEndpointIdentity(env: AppContext["env"], cluster: SolanaCluster): string {
+  return createHash("sha256")
+    .update(JSON.stringify(resolveClusterRpcUrls(env, cluster)))
+    .digest("hex")
+    .slice(0, 16);
+}
 
 /** A persisted vault claim with the live-read owner resolved. */
 export interface HydratableVaultPosition {
@@ -49,6 +119,8 @@ export function hydratedHoldingTokenValue(
 export interface VaultPositionHydrationOptions {
   ownerKind: "custody" | "external-wallet";
   minimumSlotByPositionId?: ReadonlyMap<string, number>;
+  /** `markVaultPositionRowsRead()`, taken once the positions' rows were read. */
+  rowsReadAt: number;
 }
 
 /**
@@ -116,14 +188,24 @@ export async function hydrateVaultPositions(
         hydrate: async () => {
           const client = resolveVaultDirectClient(c.env, provider, hydrationDeadline);
           if (!client) return;
-          const read = () =>
-            client.readVaultPositions(earnRuntime(c), {
+          const runtime = earnRuntime(c);
+          const providerReferences = [...trustedByReference.keys()];
+          const read = () => client.readVaultPositions(runtime, { owner, providerReferences });
+          // The whole scoped read is shared, never the inner one: a joiner's
+          // own minimum-slot scope would observe no RPC context and fail.
+          const snapshots = await sharedVaultPositionRead(
+            JSON.stringify([
+              runtime.environment,
+              rpcEndpointIdentity(c.env, earnClusterFor(runtime.environment)),
+              provider,
               owner,
-              providerReferences: [...trustedByReference.keys()],
-            });
-          const snapshots = await (minimumSlot === undefined
-            ? read()
-            : withMinimumRpcSlot(minimumSlot, read));
+              [...providerReferences].sort(),
+              minimumSlot ?? null,
+            ]),
+            options.rowsReadAt,
+            hydrationDeadline,
+            () => (minimumSlot === undefined ? read() : withMinimumRpcSlot(minimumSlot, read))
+          );
           for (const snapshot of snapshots) {
             const trustedPositions = trustedByReference.get(snapshot.providerReference);
             if (

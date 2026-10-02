@@ -1,5 +1,6 @@
 import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
 import { type KaminoDepositReceipt, readKaminoDepositReceipt } from "@sdp/kamino";
+import { readStamp, withReadFloor } from "@sdp/rpc/read-context";
 import {
   createRpc,
   getSignatureStatuses,
@@ -761,9 +762,12 @@ async function closePositionIfEmpty(
   try {
     const client = resolveVaultDirectClient(env, movement.provider, createVaultDeadline());
     if (!client) return;
-    const snapshots = await client.readVaultPositions(
-      { env, environment: movement.environment },
-      { owner, providerReferences: [vault] }
+    // A close decision never reuses a provider request sent before this one.
+    const snapshots = await withReadFloor(readStamp(), () =>
+      client.readVaultPositions(
+        { env, environment: movement.environment },
+        { owner, providerReferences: [vault] }
+      )
     );
     const snapshot = snapshots.find(
       (candidate) =>
