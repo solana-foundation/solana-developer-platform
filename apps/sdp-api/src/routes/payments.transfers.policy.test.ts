@@ -24,7 +24,7 @@ import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
   seedCachedKey,
-  sendAndConfirmTransactionMock,
+  sendTransactionMock,
   TEST_API_KEY,
   TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
@@ -809,7 +809,7 @@ describe("Payments routes — transfer policy", () => {
     expect(response.status).toBe(403);
     expect(await countTransferRows()).toBe(0);
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-    expect(sendAndConfirmTransactionMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
   });
   it("executes the exact Config-owned wallet when a Connection duplicates its Provider ID", async () => {
     await seedConnectionOwnedDuplicateProviderWallet();
@@ -933,7 +933,7 @@ describe("Payments routes — transfer policy", () => {
     });
     expect(await countTransferRows()).toBe(0);
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-    expect(sendAndConfirmTransactionMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
   });
   it("replays a Clerk-requested transfer once as its requester after another Clerk admin approves", async () => {
     const approverUserId = "usr_test_human_replay_approver";
@@ -998,7 +998,7 @@ describe("Payments routes — transfer policy", () => {
       raw_payload: { actor: { userId: TEST_USER.id } },
     });
     expect(await countTransferRows()).toBe(0);
-    expect(sendAndConfirmTransactionMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
     const approvalPath = `/v1/wallets/approval-requests/${approvalRequestId}/approve`;
     const approve = () =>
       app.request(
@@ -1024,7 +1024,7 @@ describe("Payments routes — transfer policy", () => {
       execution_attempts: 1,
       raw_payload: { actor: { userId: TEST_USER.id } },
     });
-    expect(sendAndConfirmTransactionMock).toHaveBeenCalledOnce();
+    expect(sendTransactionMock).toHaveBeenCalledOnce();
     const transfers = await listTransferRows();
     expect(transfers).toHaveLength(1);
     const audit = await getDb(env)
