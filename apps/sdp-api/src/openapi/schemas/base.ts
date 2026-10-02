@@ -46,7 +46,7 @@ export const projectScopeHeaderSchema = z
   .openapi({
     param: { name: "x-project-id", in: "header" },
     description:
-      "Selects the active project for this request. Required for session/dashboard callers. " +
+      "Selects the active project for this request. Required for Clerk (dashboard) callers. " +
       "Ignored when authenticating with an API key, whose scope is fixed to the key's project.",
     example: "prj_example",
   });
@@ -185,7 +185,6 @@ export const errorCodeSchema = z
     "INVALID_INVITATION",
     "EXPIRED_INVITATION",
     "INVALID_TOKEN",
-    "EXPIRED_SESSION",
     "TOKEN_NOT_FOUND",
     "TOKEN_NOT_ACTIVE",
     "TOKEN_NOT_MINTABLE",

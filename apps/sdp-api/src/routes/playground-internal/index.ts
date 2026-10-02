@@ -26,7 +26,7 @@ const playgroundInternal = new Hono<{ Bindings: Env }>();
 playgroundInternal.use("*", unifiedAuthMiddleware());
 playgroundInternal.use("*", async (c, next) => {
   if (!c.get("clerk")) {
-    throw unauthorized("Dashboard session required");
+    throw unauthorized("Clerk JWT required");
   }
   await next();
 });

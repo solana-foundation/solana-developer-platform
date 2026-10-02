@@ -11,7 +11,7 @@ import type { Env } from "@/types/env";
  * their project via the auth JOIN, and dashboard callers (Clerk) select a
  * project with the x-project-id header, which
  * projectContextMiddleware verifies against project membership before setting
- * `projectEnvironment`. A production-project dashboard session therefore
+ * `projectEnvironment`. A Clerk caller on a production project therefore
  * resolves to production — the same rails as a production API key.
  *
  * Fails closed: a request whose environment cannot be resolved must never
