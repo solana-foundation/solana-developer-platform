@@ -295,11 +295,17 @@ export function StackedDashboardTopBar({
         </div>
       )}
       {/* An empty state whose action repeats this one (New, Add) hides it: the shell's
-          section is the `page` group and the state carries the attribute. An action marked
-          `data-align-title` (a token's Explorer) sits on the title's row rather than centred
-          beside the back link and the title together. */}
+          section is the `page` group and the state carries the attribute. Under a back link
+          the design sets the action on the title's row (a contact's Pay, a token's Explorer),
+          not centred beside the back link and the title together; `data-align-title` asks for
+          the same without one. */}
       {action ? (
-        <div className="col-span-3 row-start-3 mt-2 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-3 md:row-start-1 md:mt-0 md:ml-3 md:has-[[data-align-title]]:self-end">
+        <div
+          className={cn(
+            "col-span-3 row-start-3 mt-2 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-3 md:row-start-1 md:mt-0 md:ml-3 md:has-[[data-align-title]]:self-end",
+            above && "md:self-end"
+          )}
+        >
           {action}
         </div>
       ) : null}
