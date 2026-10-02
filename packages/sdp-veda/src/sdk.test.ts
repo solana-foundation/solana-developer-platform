@@ -1,12 +1,13 @@
+import { prepareRpcRead, withMinimumRpcSlot } from "@sdp/rpc/read-context";
 import { wellKnownMint } from "@sdp/types";
 import type { VedaDeployment } from "@sdp/types/veda-programs";
-import { address } from "@solana/kit";
+import { type Address, address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   VEDA_DEPOSIT_ALLOWED_USER_ACCOUNT_INDEX,
   VEDA_DEPOSIT_DISCRIMINATOR,
 } from "./allowed-user";
-import { toClusterConfig } from "./programs";
+import { toClusterConfig, vedaShareAccountAddress } from "./programs";
 import {
   VEDA_REQUEST_WITHDRAW_DISCRIMINATOR,
   VEDA_SETUP_USER_WITHDRAW_STATE_DISCRIMINATOR,
@@ -75,8 +76,12 @@ vi.mock("./accounts", () => ({
   accountExists: mocks.accountExists,
   minimumBalanceForRentExemption: mocks.minimumBalanceForRentExemption,
 }));
-// The RPC client is only handed to the (mocked) SDK; keep it inert.
-vi.mock("./rpc", () => ({ createVedaRpc: vi.fn(() => ({})) }));
+// The RPC client is only handed to the (mocked) SDK; keep it inert. The read
+// client is tagged so a test can tell which one a construction received.
+vi.mock("./rpc", () => ({
+  createVedaRpc: vi.fn(() => ({})),
+  createVedaReadRpc: vi.fn(() => ({ positionReads: true })),
+}));
 
 import {
   buildVedaDepositPlan,
@@ -92,6 +97,8 @@ import {
   readVedaQueuedWithdrawalRequests,
   readVedaWithdrawalOptions,
   resetVedaCompatibilityCache,
+  resetVedaReadCaches,
+  VEDA_READ_CACHE_TTL_MS,
 } from "./sdk";
 
 const USDC_DEVNET = wellKnownMint("USDC", "devnet") as string;
@@ -112,6 +119,16 @@ const DEPLOYMENT: VedaDeployment = {
 };
 const config = toClusterConfig("devnet", DEPLOYMENT);
 const runtime: VedaRuntime = { cluster: "devnet", rpcUrl: "https://rpc.test.invalid" };
+const OTHER_SHARE_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+
+/** `getUserPosition` as the SDK answers it: the share account comes from the live share mint. */
+function holding(shares: bigint, extra: { unlockTimestamp?: bigint } = {}, shareMint = SHARE_MINT) {
+  return async (user: Address) => ({
+    shareAccount: await vedaShareAccountAddress(user, address(shareMint)),
+    shares,
+    ...extra,
+  });
+}
 
 function primeVault(assets: { mint: string; allowDeposits: boolean }[]): void {
   mocks.validateDeployment.mockResolvedValue({});
@@ -120,7 +137,7 @@ function primeVault(assets: { mint: string; allowDeposits: boolean }[]): void {
   mocks.vault.listAssets.mockResolvedValue(
     assets.map((asset) => ({ mint: asset.mint, allowDeposits: asset.allowDeposits }))
   );
-  mocks.vault.getUserPosition.mockResolvedValue({ shares: 2_500_000n });
+  mocks.vault.getUserPosition.mockImplementation(holding(2_500_000n));
   mocks.vault.previewWithdraw.mockResolvedValue({ assetsOut: 2_600_000n, assetDecimals: 6 });
   mocks.vault.getWithdrawalOptions.mockResolvedValue({
     instant: true,
@@ -167,6 +184,8 @@ function primeVault(assets: { mint: string; allowDeposits: boolean }[]): void {
 beforeEach(() => {
   vi.clearAllMocks();
   resetVedaCompatibilityCache();
+  // Module-level caches outlive vi.clearAllMocks.
+  resetVedaReadCaches();
 });
 
 describe("readVedaPosition never consults a deposit gate", () => {
@@ -197,10 +216,7 @@ describe("readVedaPosition never consults a deposit gate", () => {
   it("reports locked shares as held but not withdrawable", async () => {
     primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
     const unlockTimestamp = BigInt(Math.floor(Date.now() / 1000) + 3_600);
-    mocks.vault.getUserPosition.mockResolvedValue({
-      shares: 2_500_000n,
-      unlockTimestamp,
-    });
+    mocks.vault.getUserPosition.mockImplementation(holding(2_500_000n, { unlockTimestamp }));
 
     const position = await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
 
@@ -211,7 +227,7 @@ describe("readVedaPosition never consults a deposit gate", () => {
 
   it("still reads a zero balance without quoting a withdrawal", async () => {
     primeVault([{ mint: USDC_DEVNET, allowDeposits: false }]);
-    mocks.vault.getUserPosition.mockResolvedValue({ shares: 0n });
+    mocks.vault.getUserPosition.mockImplementation(holding(0n));
 
     const position = await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
 
@@ -228,6 +244,172 @@ describe("readVedaPosition never consults a deposit gate", () => {
 
     expect(position.shares).toBe("2.5");
     expect(position.tokenValue).toBeUndefined();
+  });
+});
+
+describe("position reads reuse the client and the vault's static facts", () => {
+  const OTHER_OWNER = address("11111111111111111111111111111113");
+
+  it("reads two holdings with one SDK client and one static-facts read", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+
+    const [first, second] = await Promise.all([
+      readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER }),
+      readVedaPosition(runtime, config, { vault: VAULT, owner: OTHER_OWNER }),
+    ]);
+    const third = await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
+
+    expect(mocks.clientOptions).toHaveBeenCalledTimes(1);
+    expect(mocks.clientOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ rpc: { positionReads: true }, commitment: "confirmed" })
+    );
+    expect(mocks.vault.getState).toHaveBeenCalledTimes(1);
+    expect(mocks.vault.listAssets).toHaveBeenCalledTimes(1);
+    expect(mocks.readMintDecimals).not.toHaveBeenCalled();
+    // The holding and its value stay live on every read.
+    expect(mocks.vault.getUserPosition).toHaveBeenCalledTimes(3);
+    expect(mocks.vault.previewWithdraw).toHaveBeenCalledTimes(3);
+    for (const position of [first, second, third]) {
+      expect(position).toMatchObject({ shares: "2.5", tokenValue: "2.6" });
+      expect(String(position.shareMint)).toBe(SHARE_MINT);
+      expect(String(position.tokenMint)).toBe(USDC_DEVNET);
+    }
+  });
+
+  it("re-reads everything once the cache window has passed", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    try {
+      await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
+      clock.mockReturnValue(now + VEDA_READ_CACHE_TTL_MS + 1);
+      await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
+    } finally {
+      clock.mockRestore();
+    }
+
+    expect(mocks.clientOptions).toHaveBeenCalledTimes(2);
+    expect(mocks.vault.getState).toHaveBeenCalledTimes(2);
+    expect(mocks.vault.listAssets).toHaveBeenCalledTimes(2);
+  });
+
+  it("never reuses a client whose program validation rejected", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.validateDeployment.mockRejectedValueOnce(new Error("validation unavailable"));
+
+    await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
+    await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
+
+    expect(mocks.clientOptions).toHaveBeenCalledTimes(2);
+  });
+
+  it("never remembers a failed asset resolution", async () => {
+    primeVault([{ mint: USDC_MAINNET, allowDeposits: true }]);
+    await expect(
+      readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER })
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_VAULT" });
+
+    mocks.vault.listAssets.mockResolvedValue([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    const position = await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
+
+    expect(String(position.tokenMint)).toBe(USDC_DEVNET);
+    expect(mocks.vault.listAssets).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-reads the vault state when the live share account belongs to another mint", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
+    mocks.vault.getState.mockResolvedValue({ shareMint: OTHER_SHARE_MINT, shareDecimals: 6 });
+    mocks.vault.getUserPosition.mockImplementation(holding(2_500_000n, {}, OTHER_SHARE_MINT));
+
+    const position = await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
+
+    expect(String(position.shareMint)).toBe(OTHER_SHARE_MINT);
+    expect(mocks.vault.getState).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses a share account that belongs to neither the cached nor the live mint", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.vault.getUserPosition.mockImplementation(holding(2_500_000n, {}, OTHER_SHARE_MINT));
+
+    await expect(
+      readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER })
+    ).rejects.toMatchObject({ code: "VAULT_UNREADABLE" });
+    expect(mocks.vault.getState).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports the vault-state failure first, as the sequential read did", async () => {
+    primeVault([{ mint: USDC_MAINNET, allowDeposits: true }]);
+    const stateFailure = new Error("vault state unavailable");
+    mocks.vault.getState.mockRejectedValue(stateFailure);
+    mocks.vault.getUserPosition.mockRejectedValue(new Error("share account unavailable"));
+
+    await expect(
+      readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER })
+    ).rejects.toMatchObject({ code: "VAULT_UNREADABLE", cause: stateFailure });
+  });
+
+  it("fills the shared facts outside a caller's minimum-slot scope", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    // The minContextSlot the confirmation-context middleware would add to an
+    // account read issued at this point: present only inside a scoped read.
+    const scopedSlot = () =>
+      (
+        prepareRpcRead({ method: "getMultipleAccounts", params: [[], {}] }) as {
+          params: [unknown, { minContextSlot?: number }];
+        }
+      ).params[1].minContextSlot;
+    const seen: Record<string, number | undefined> = {};
+    mocks.clientOptions.mockImplementation(() => {
+      seen.construction = scopedSlot();
+    });
+    mocks.vault.getState.mockImplementation(async () => {
+      seen.getState = scopedSlot();
+      return { shareMint: SHARE_MINT, shareDecimals: 6 };
+    });
+    mocks.vault.listAssets.mockImplementation(async () => {
+      seen.listAssets = scopedSlot();
+      return [{ mint: USDC_DEVNET, allowDeposits: true }];
+    });
+    const held = holding(2_500_000n);
+    mocks.vault.getUserPosition.mockImplementation(async (user: Address) => {
+      seen.getUserPosition = scopedSlot();
+      return held(user);
+    });
+
+    // The mocked SDK sends nothing, so the scope itself rejects for lack of an
+    // observed slot; what matters here is where each read was issued.
+    await expect(
+      withMinimumRpcSlot(100, () =>
+        readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER })
+      )
+    ).rejects.toThrow("did not establish");
+
+    expect(seen).toEqual({
+      construction: undefined,
+      getState: undefined,
+      listAssets: undefined,
+      getUserPosition: 100,
+    });
+  });
+
+  it("keeps builds and quotes on a fresh client of their own", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.vault.previewWithdraw.mockResolvedValue({
+      assetsOut: 2_600_000n,
+      assetDecimals: 6,
+      issues: [],
+    });
+
+    await readVedaPosition(runtime, config, { vault: VAULT, owner: OWNER });
+    await previewVedaWithdraw(runtime, config, { vault: VAULT, shares: "2.5" });
+    await previewVedaWithdraw(runtime, config, { vault: VAULT, shares: "2.5" });
+
+    expect(mocks.clientOptions).toHaveBeenCalledTimes(3);
+    expect(mocks.clientOptions).toHaveBeenLastCalledWith(expect.objectContaining({ rpc: {} }));
+    expect(mocks.vault.getState).toHaveBeenCalledTimes(3);
+    expect(mocks.vault.listAssets).toHaveBeenCalledTimes(3);
+    expect(mocks.readMintDecimals).toHaveBeenCalledTimes(2);
   });
 });
 
