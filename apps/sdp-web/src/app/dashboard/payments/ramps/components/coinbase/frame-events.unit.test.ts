@@ -10,13 +10,13 @@ function frameMessage(eventName: string, data?: Record<string, string>): string 
 }
 
 function handle(raw: unknown) {
-  return handleCoinbaseFrameEvent(ORDER_ID, raw, t, { postEvent });
+  return handleCoinbaseFrameEvent(ORDER_ID, raw, t, postEvent);
 }
 
 describe("handleCoinbaseFrameEvent", () => {
   beforeEach(() => {
     postEvent.mockReset();
-    postEvent.mockResolvedValue(undefined as never);
+    postEvent.mockResolvedValue(undefined);
   });
 
   it.each([
@@ -59,17 +59,11 @@ describe("handleCoinbaseFrameEvent", () => {
     );
   });
 
-  it("falls back to the event name when Coinbase sends neither a message nor a code", () => {
-    handle(frameMessage("onramp_api.session_error", { errorCode: "", errorMessage: "" }));
-
-    expect(postEvent).toHaveBeenCalledWith(
-      { kind: "errored", orderId: ORDER_ID, reason: "onramp_api.session_error" },
-      t
-    );
-  });
-
-  it("rejects a session_error without the error payload", () => {
+  it("rejects a session_error without an error code", () => {
     expect(handle(frameMessage("onramp_api.session_error"))).toBeNull();
+    expect(
+      handle(frameMessage("onramp_api.session_error", { errorCode: "", errorMessage: "" }))
+    ).toBeNull();
     expect(postEvent).not.toHaveBeenCalled();
   });
 

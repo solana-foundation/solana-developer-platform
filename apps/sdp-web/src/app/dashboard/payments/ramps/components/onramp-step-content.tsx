@@ -3,6 +3,7 @@
 import { isMuralSandboxPayinCurrency, isTerminalRampTransferStatus } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
+import { postCoinbaseRampEvent } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
@@ -199,7 +200,11 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         {quote.provider === "coinbase" ? (
           <>
             <CoinbaseQuoteSummary quote={quote} />
-            <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
+            <CoinbaseRampFrame
+              orderId={quote.id}
+              src={quote.hostedUrl}
+              postEvent={postCoinbaseRampEvent}
+            />
           </>
         ) : (
           <MoonpayRampFrame

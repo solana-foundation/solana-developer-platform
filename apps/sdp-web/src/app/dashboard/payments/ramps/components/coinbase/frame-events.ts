@@ -1,7 +1,7 @@
 import type { CoinbaseRampEvent } from "@sdp/types";
 import { toast } from "sonner";
 import { z } from "zod";
-import { postCoinbaseRampEvent } from "@/app/dashboard/payments/payments-workspace.data";
+import type { postCoinbaseRampEvent } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 
 const coinbaseFrameEventSchema = z.discriminatedUnion("eventName", [
@@ -16,8 +16,6 @@ const coinbaseFrameEventSchema = z.discriminatedUnion("eventName", [
       "onramp_api.cancel",
       "onramp_api.polling_start",
       "onramp_api.polling_success",
-      // Embedded-mode progress events: Coinbase verifies the buyer's phone and email and
-      // runs its limits-upgrade form inside the frame before the payment step.
       "onramp_api.verification_success",
       "onramp_api.upgrade_submit_success",
       "onramp_api.upgrade_approved",
@@ -28,12 +26,10 @@ const coinbaseFrameEventSchema = z.discriminatedUnion("eventName", [
       "onramp_api.load_error",
       "onramp_api.commit_error",
       "onramp_api.polling_error",
-      // Embedded-mode terminal error: verification, limits, or order preparation failed
-      // and the hosted flow cannot continue.
       "onramp_api.session_error",
     ]),
     data: z.object({
-      errorCode: z.string(),
+      errorCode: z.string().min(1),
       errorMessage: z.string(),
     }),
   }),
@@ -44,26 +40,16 @@ type CoinbaseFrameErrorEvent = Extract<CoinbaseFrameEvent, { data: unknown }>;
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 /**
- * The reason recorded and shown for a Coinbase error event. Coinbase's localized message
- * when it has one, the error code otherwise, and the event name when both are blank, so
- * the ramp-events endpoint (which requires a non-empty reason) never rejects the report
- * and the operator never sees a blank notice.
+ * The reason recorded and shown for a Coinbase error event: Coinbase's localized message
+ * when it has one, otherwise the always-present error code, so the ramp-events endpoint
+ * (which requires a non-empty reason) never rejects the report.
  */
 export function coinbaseErrorReason(event: CoinbaseFrameErrorEvent): string {
   const message = event.data.errorMessage.trim();
-  if (message.length > 0) {
-    return message;
-  }
-  const code = event.data.errorCode.trim();
-  return code.length > 0 ? code : event.eventName;
+  return message.length > 0 ? message : event.data.errorCode;
 }
-/** Posts a Coinbase ramp event to the SDP ramp-events endpoint. */
-export type PostCoinbaseRampEvent = typeof postCoinbaseRampEvent;
 
-export interface CoinbaseFrameEventOptions {
-  /** Event poster; defaults to the workspace's ramp-events client. Tests inject a spy here. */
-  postEvent?: PostCoinbaseRampEvent;
-}
+export type PostCoinbaseRampEvent = typeof postCoinbaseRampEvent;
 
 /**
  * Parses a raw postMessage payload from the Coinbase payment-link iframe.
@@ -130,7 +116,7 @@ export function handleCoinbaseFrameEvent(
   orderId: string,
   raw: unknown,
   t: Translate,
-  { postEvent = postCoinbaseRampEvent }: CoinbaseFrameEventOptions = {}
+  postEvent: PostCoinbaseRampEvent
 ): CoinbaseFrameEvent | null {
   const event = parseCoinbaseFrameEvent(raw);
   if (!event) {

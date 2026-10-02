@@ -7,9 +7,9 @@ import {
   isTrustedRampDestination,
 } from "@/lib/trusted-ramp-destinations";
 import {
-  type CoinbaseFrameEventOptions,
   coinbaseErrorReason,
   handleCoinbaseFrameEvent,
+  type PostCoinbaseRampEvent,
 } from "./frame-events";
 
 /**
@@ -42,7 +42,11 @@ export function CoinbaseRampFrame({
   orderId,
   src,
   postEvent,
-}: { orderId: string; src: string } & CoinbaseFrameEventOptions) {
+}: {
+  orderId: string;
+  src: string;
+  postEvent: PostCoinbaseRampEvent;
+}) {
   const t = useTranslations();
   const [phase, setPhase] = useState<CoinbaseFramePhase>({ kind: "panel" });
   // The frame's origin is also what the postMessage listener trusts, so only
@@ -57,7 +61,7 @@ export function CoinbaseRampFrame({
       if (event.origin !== expectedOrigin) {
         return;
       }
-      const frameEvent = handleCoinbaseFrameEvent(orderId, event.data, t, { postEvent });
+      const frameEvent = handleCoinbaseFrameEvent(orderId, event.data, t, postEvent);
       if (frameEvent?.eventName === "onramp_api.commit_success") {
         setPhase({ kind: "processing" });
       }
@@ -94,7 +98,7 @@ export function CoinbaseRampFrame({
       <iframe
         title={t("DashboardPayments.ramps.coinbaseOnramp")}
         src={src}
-        className="h-[640px] w-full border-0"
+        className="h-[40rem] w-full border-0"
         allow="payment"
         sandbox="allow-scripts allow-same-origin"
         referrerPolicy="no-referrer"
