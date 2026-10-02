@@ -60,6 +60,10 @@ export const PERMISSIONS = [
   "project-members:read",
   "project-members:write",
 
+  // Session management
+  "sessions:read",
+  "sessions:write",
+
   // Custody/signing key management
   "custody:read",
   "custody:write",
