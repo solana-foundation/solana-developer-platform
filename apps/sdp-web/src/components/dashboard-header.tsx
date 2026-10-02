@@ -438,6 +438,24 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
   };
 }
 
+/**
+ * A refresh-design payments flow (Pay, Deposit): the title sits left above the flow's own tabs,
+ * both in the flow's column, and the content box stays full width so the flow's footer band
+ * can span the card. No back action: the footer's Cancel returns to Payments.
+ */
+function refreshFlowPageConfig(config: {
+  title: string;
+  tabs: readonly { id: string; label: string }[];
+}): DashboardPageConfig {
+  return {
+    title: config.title,
+    titlePosition: "left",
+    headerTabs: { tabs: config.tabs, hideOnMobile: false },
+    contentWidthClass: "max-w-none",
+    headerWidthClass: "max-w-flow",
+  };
+}
+
 /** Width of the refresh Payments overview and list pages: the design's 900px column. */
 const REFRESH_PAGE_WIDTH = "max-w-page";
 
@@ -912,8 +930,8 @@ function getWalletSectionPageConfig(
 }
 
 /**
- * Header config for the Payments pages built on the refresh design so far: Contacts. Returns
- * null for every other route.
+ * Header config for the Payments pages built on the refresh design so far: Contacts and the two
+ * flows. Returns null for every other route.
  */
 function getRefreshPaymentsPageConfig(
   pathname: string,
@@ -931,6 +949,24 @@ function getRefreshPaymentsPageConfig(
         variant: "primary",
       },
     };
+  }
+  if (pathname === "/dashboard/payments/pay") {
+    return refreshFlowPageConfig({
+      title: t("Shared.dashboardShell.pay"),
+      tabs: [
+        { id: "single", label: t("DashboardPayments.sendMode.single") },
+        { id: "batch", label: t("DashboardPayments.sendMode.batch") },
+      ],
+    });
+  }
+  if (pathname === "/dashboard/payments/deposit") {
+    return refreshFlowPageConfig({
+      title: t("Shared.dashboardShell.deposit"),
+      tabs: [
+        { id: "address", label: t("DashboardPayments.depositMethod.address") },
+        { id: "provider", label: t("DashboardPayments.depositMethod.provider") },
+      ],
+    });
   }
   return null;
 }
