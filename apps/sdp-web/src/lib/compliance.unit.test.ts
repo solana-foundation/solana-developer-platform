@@ -41,19 +41,27 @@ describe("screenAddressCompliance", () => {
     // The dangerous case: a 200 whose payload never arrived used to surface as
     // "checked just now, nothing flagged".
     mockResponse("<html>gateway</html>", 200);
-    await expect(screenAddressCompliance(INPUT)).rejects.toThrow();
+    // Pin the unreadable-payload failure, not just any rejection: a network or
+    // wiring error must not be mistaken for this data contract.
+    await expect(screenAddressCompliance(INPUT)).rejects.toThrow(
+      "Compliance response could not be read."
+    );
   });
 
   it("throws when the screening is missing from an otherwise valid envelope", async () => {
     mockResponse({ data: {} });
-    await expect(screenAddressCompliance(INPUT)).rejects.toThrow();
+    await expect(screenAddressCompliance(INPUT)).rejects.toThrow(
+      "Compliance response could not be read."
+    );
   });
 
   it("throws when a provider entry is malformed", async () => {
     mockResponse({
       data: { screening: { ...SCREENING, providers: [{ provider: "elliptic" }] } },
     });
-    await expect(screenAddressCompliance(INPUT)).rejects.toThrow();
+    await expect(screenAddressCompliance(INPUT)).rejects.toThrow(
+      "Compliance response could not be read."
+    );
   });
 
   it("keeps the disabled-compliance signal distinct", async () => {

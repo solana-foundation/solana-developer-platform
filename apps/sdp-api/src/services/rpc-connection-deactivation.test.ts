@@ -218,7 +218,12 @@ describe("deactivateRpcConnection", () => {
       .bind(credentialId)
       .run();
 
-    await expect(deactivateRpcConnection(serviceContext(), connectionId)).rejects.toThrow();
+    // Pin the failure to the credential flip, not just any rejection: the
+    // scenario is "the credential cannot be deactivated", and a rollback
+    // triggered by some other error would make this test lie about it.
+    await expect(deactivateRpcConnection(serviceContext(), connectionId)).rejects.toThrow(
+      "The credential behind this RPC connection did not deactivate"
+    );
 
     const row = await getDb(appEnv)
       .prepare(`SELECT status FROM rpc_connections WHERE id = ?`)
