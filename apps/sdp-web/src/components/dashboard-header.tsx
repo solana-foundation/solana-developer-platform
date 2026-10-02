@@ -108,7 +108,13 @@ export function DashboardHeaderAction({
     </>
   );
   return (
-    <Button asChild variant={action.variant === "primary" ? "default" : "outline"} size="sm">
+    <Button
+      asChild
+      variant={action.variant === "primary" ? "default" : "outline"}
+      size="sm"
+      // The refresh header's action is 34px, 2px under the shared small button.
+      className="refresh:[--button-height-md:2.125rem]"
+    >
       {action.download ? (
         <a href={href} download>
           {content}
@@ -257,7 +263,9 @@ export function StackedDashboardTopBar({
         <h1 className="sr-only">{title}</h1>
       ) : (
         <div className="col-span-3 row-start-2 min-w-0 md:col-span-1 md:col-start-1 md:row-start-1">
-          {above ? <div className={mark ? "mb-4" : "mb-2"}>{above}</div> : null}
+          {/* A flex row, so the back link's 20px line is the row's height: an inline one
+              sat on the text strut and pushed the title 5px further down. */}
+          {above ? <div className={cn("flex", mark ? "mb-4" : "mb-2")}>{above}</div> : null}
           {mark ? (
             <div className="flex min-w-0 items-center gap-4">
               <span className="shrink-0">{mark}</span>
