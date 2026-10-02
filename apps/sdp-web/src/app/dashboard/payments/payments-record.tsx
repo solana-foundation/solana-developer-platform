@@ -125,7 +125,7 @@ export function RecordRow({
 /** A titled part of the record: an 18px heading 32px under what is above, its rows 14px under. */
 export function RecordSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-3.5 pt-8">
+    <section className="flex flex-col gap-3.5 pt-5.5">
       <h2 className="text-subheading font-medium text-primary">{title}</h2>
       {children}
     </section>
