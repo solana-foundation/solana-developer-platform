@@ -1,6 +1,6 @@
 "use client";
 
-import type { WalletApprovalRequestSummary } from "@sdp/types";
+import type { ListWalletApprovalRequestsResponse, WalletApprovalRequestSummary } from "@sdp/types";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -52,9 +52,7 @@ async function fetchApprovalsNeedingViewer(): Promise<WalletApprovalRequestSumma
       cache: "no-store",
     });
     if (!response.ok) throw new Error(`Approval requests failed (${response.status})`);
-    const body = (await response.json()) as {
-      data?: { approvalRequests?: WalletApprovalRequestSummary[]; nextCursor?: string | null };
-    };
+    const body = (await response.json()) as { data?: Partial<ListWalletApprovalRequestsResponse> };
     requests.push(...(body.data?.approvalRequests ?? []));
     cursor = body.data?.nextCursor ?? null;
     if (cursor === null) break;
