@@ -41,7 +41,7 @@ function verifiedOk(): Awaited<ReturnType<typeof verifiedConfirmation.verifyTran
   return {
     ok: true,
     status: { slot: 1n, confirmations: 5n, confirmationStatus: "confirmed", err: null },
-    transaction: { slot: 1n, err: null, instructions: [] },
+    transaction: { slot: 1n, executionResultKnown: true, err: null, instructions: [] },
   };
 }
 

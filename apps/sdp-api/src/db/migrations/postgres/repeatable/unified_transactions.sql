@@ -110,6 +110,9 @@ SELECT
     ELSE em.denomination
   END AS token,
   CASE
+    WHEN em.provider = 'kamino' AND em.execution_model = 'vault_direct'
+      AND em.direction = 'deposit' AND em.status IN ('confirmed', 'finalized')
+      AND em.deposit_receipt_observed_at IS NULL THEN NULL::text
     WHEN em.status IN ('completed', 'partially_completed', 'confirmed', 'finalized')
       THEN COALESCE(em.token_amount_settled, em.amount_settled)
     ELSE em.amount_requested

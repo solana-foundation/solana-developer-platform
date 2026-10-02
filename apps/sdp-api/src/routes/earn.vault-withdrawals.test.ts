@@ -53,6 +53,7 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
  * (Kamino held that role until it learned to quote).
  */
 const vaultWithdrawClientOverride = vi.hoisted(() => ({ current: null as unknown }));
+const parRedemptionClientOverride = vi.hoisted(() => ({ current: null as unknown }));
 
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/earn/execution-registry")>();
@@ -62,6 +63,12 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => {
       (vaultWithdrawClientOverride.current as ReturnType<
         typeof actual.resolveVaultWithdrawClient
       > | null) ?? actual.resolveVaultWithdrawClient(...args),
+    resolveVaultParRedemptionClient: (
+      ...args: Parameters<typeof actual.resolveVaultParRedemptionClient>
+    ) =>
+      (parRedemptionClientOverride.current as ReturnType<
+        typeof actual.resolveVaultParRedemptionClient
+      > | null) ?? actual.resolveVaultParRedemptionClient(...args),
   };
 });
 
@@ -1333,5 +1340,92 @@ describe("POST /v1/earn/vault-withdrawals: audit ledger parity (PRO-1866)", () =
     const second = await postVaultWithdrawal({ positionId, shares: "10" });
     expect(second.status).toBe(200);
     await expect(auditRows()).resolves.toHaveLength(1);
+  });
+});
+
+describe("POST /v1/earn/vault-withdrawal-requests: a par request over held intermediate", () => {
+  const WYLDS_MINT = "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih";
+
+  function dryRunParRequest(body: Record<string, unknown>) {
+    return app.request(
+      "/v1/earn/vault-withdrawal-requests",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+          "Dry-Run": "true",
+        },
+        body: JSON.stringify(body),
+      },
+      env
+    );
+  }
+
+  it("puts the delegated intermediate, not the share mint, in front of policy", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "hastra" });
+    parRedemptionClientOverride.current = {
+      getParRedemptionOptions: vi.fn(async () => ({
+        intermediateMint: WYLDS_MINT,
+        assetMint: USDC_MINT,
+        minimumShares: null,
+        minimumIntermediateAmount: "0.000001",
+        shareDecimals: 6,
+        assetDecimals: 6,
+        cancelable: true,
+        operatorSettled: true,
+      })),
+    };
+    const repo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    const profile = await repo.createApiKeyControlProfile({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      apiKeyId: TEST_API_KEY.id,
+      name: "Hold wYLDS",
+    });
+    if (!profile) throw new Error("Failed to create policy profile");
+    const revision = await repo.createApiKeyControlProfileRevision({
+      profileId: profile.id,
+      rules: [{ id: "deny-wylds", kind: "asset", asset: WYLDS_MINT, action: "deny" }],
+      defaultAction: "allow",
+      createdBy: TEST_USER.id,
+    });
+    if (!revision) throw new Error("Failed to create policy revision");
+    await repo.activateApiKeyControlProfileRevision({
+      profileId: profile.id,
+      revisionId: revision.id,
+    });
+
+    try {
+      const held = await dryRunParRequest({
+        positionId,
+        mechanism: "operatorRedemption",
+        intermediateAmount: "2000",
+      });
+      expect(held.status).toBe(200);
+      expect(await held.json()).toMatchObject({ data: { decision: "deny" } });
+
+      const shares = await dryRunParRequest({
+        positionId,
+        mechanism: "operatorRedemption",
+        shares: "10",
+      });
+      expect(shares.status).toBe(200);
+      expect(await shares.json()).toMatchObject({ data: { decision: "allow" } });
+
+      const both = await dryRunParRequest({
+        positionId,
+        mechanism: "operatorRedemption",
+        shares: "10",
+        intermediateAmount: "2000",
+      });
+      expect(both.status).toBe(400);
+    } finally {
+      parRedemptionClientOverride.current = null;
+    }
   });
 });

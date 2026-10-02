@@ -741,6 +741,8 @@ export interface ParsedTokenBalance {
 
 export interface ParsedTransaction {
   slot: bigint;
+  /** Whether metadata establishes success or failure; absent metadata is unknown. */
+  executionResultKnown: boolean;
   err: unknown | null;
   fee?: bigint;
   preBalances?: readonly bigint[];
@@ -862,6 +864,7 @@ export async function getTransaction(
 
   return {
     slot: response.slot,
+    executionResultKnown: response.meta?.err !== undefined,
     err: response.meta?.err ?? null,
     fee: response.meta?.fee ?? 0n,
     preBalances: response.meta?.preBalances ?? [],

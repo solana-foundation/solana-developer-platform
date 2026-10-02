@@ -111,3 +111,28 @@ test("getTransaction surfaces pre/post token balances from jsonParsed meta", asy
     { accountIndex: 1, mint: USDC, owner: null, amount: "3", decimals: 6 },
   ]);
 });
+
+for (const { name, meta, known } of [
+  { name: "null metadata", meta: null, known: false },
+  { name: "missing metadata", meta: undefined, known: false },
+  { name: "missing execution result", meta: {}, known: false },
+  { name: "successful execution", meta: { err: null }, known: true },
+  { name: "failed execution", meta: { err: "InsufficientFundsForFee" }, known: true },
+]) {
+  test(`getTransaction identifies ${name}`, async () => {
+    const rpc = {
+      getTransaction: () => ({
+        send: async () => ({
+          slot: 42n,
+          meta,
+          transaction: { message: { instructions: [] } },
+        }),
+      }),
+    } as unknown as SolanaRpc;
+
+    const parsed = await getTransaction(rpc, "sig" as Signature, "finalized");
+
+    assert.ok(parsed);
+    assert.equal(parsed.executionResultKnown, known);
+  });
+}
