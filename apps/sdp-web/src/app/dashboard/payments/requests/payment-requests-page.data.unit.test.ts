@@ -7,7 +7,6 @@ import {
   PAYMENT_REQUESTS_PAGE_SIZE,
   type PaymentRequestsListState,
   parsePaymentRequestsListParams,
-  paymentRequestMatchesSearch,
   paymentRequestsListHref,
 } from "./payment-requests-page.data";
 
@@ -15,24 +14,19 @@ function requestRow(id: string): PaymentRequest {
   return { id } as PaymentRequest;
 }
 
-/** A list API over `total` requests, newest first, that records each page it serves. */
-function listApi(total: number) {
-  const pages: number[] = [];
+/** A read-by-id API that knows the given requests and records each path it serves. */
+function detailApi(known: PaymentRequest[], failure?: Response) {
+  const paths: string[] = [];
   const request = async (path: string) => {
-    const query = new URL(path, "https://sdp.test").searchParams;
-    const page = Number(query.get("page"));
-    const pageSize = Number(query.get("pageSize"));
-    pages.push(page);
-    const start = (page - 1) * pageSize;
-    const ids = Array.from(
-      { length: Math.max(0, Math.min(pageSize, total - start)) },
-      (_, index) => `preq_${start + index}`
-    );
-    return Response.json({
-      data: { paymentRequests: ids.map(requestRow), total, page, pageSize },
-    });
+    paths.push(path);
+    if (failure) return failure;
+    const id = decodeURIComponent(path.slice(path.lastIndexOf("/") + 1));
+    const match = known.find((candidate) => candidate.id === id);
+    return match
+      ? Response.json({ data: match })
+      : Response.json({ error: { message: "Payment request not found" } }, { status: 404 });
   };
-  return { request, pages };
+  return { request: request as Parameters<typeof fetchPaymentRequestDetail>[0], paths };
 }
 
 describe("parsePaymentRequestsListParams", () => {
@@ -57,60 +51,43 @@ describe("parsePaymentRequestsListParams", () => {
   });
 });
 
-describe("paymentRequestMatchesSearch", () => {
-  const request = {
-    id: "preq_1",
-    amount: "12.5",
-    token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    counterpartyId: "cp_1",
-    destinationAddress: "Dest1111111111111111111111111111111111111111",
-    reference: "INV-42",
-  } as PaymentRequest;
-  const names = new Map([["cp_1", "Jane Doe"]]);
-
-  it("matches the amount, token symbol, payer, destination or reference, ignoring case", () => {
-    for (const needle of ["12.5", "usdc", "jane", "dest111", "inv-42"]) {
-      expect(paymentRequestMatchesSearch(request, needle, names)).toBe(true);
-    }
-  });
-
-  it("matches nothing else", () => {
-    expect(paymentRequestMatchesSearch(request, "john", names)).toBe(false);
-    expect(paymentRequestMatchesSearch({ ...request, counterpartyId: null }, "jane", names)).toBe(
-      false
-    );
-  });
-});
-
 describe("fetchPaymentRequestDetail", () => {
-  it("stops at the page that holds the request", async () => {
-    const api = listApi(250);
-    const result = await fetchPaymentRequestDetail(
-      api.request as Parameters<typeof fetchPaymentRequestDetail>[0],
-      "preq_120"
-    );
-    expect(result).toEqual({ status: "found", request: requestRow("preq_120") });
-    expect(api.pages).toEqual([1, 2]);
+  it("reads the request by id", async () => {
+    const api = detailApi([requestRow("preq_120"), requestRow("preq/odd")]);
+    expect(await fetchPaymentRequestDetail(api.request, "preq_120")).toEqual({
+      status: "found",
+      request: requestRow("preq_120"),
+    });
+    expect(await fetchPaymentRequestDetail(api.request, "preq/odd")).toEqual({
+      status: "found",
+      request: requestRow("preq/odd"),
+    });
+    expect(api.paths).toEqual([
+      "/v1/payments/requests/preq_120",
+      "/v1/payments/requests/preq%2Fodd",
+    ]);
   });
 
-  it("reaches requests older than any list cap", async () => {
-    const api = listApi(720);
-    const result = await fetchPaymentRequestDetail(
-      api.request as Parameters<typeof fetchPaymentRequestDetail>[0],
-      "preq_710"
-    );
-    expect(result).toEqual({ status: "found", request: requestRow("preq_710") });
-    expect(api.pages).toHaveLength(8);
+  it("is not found when the API has no request by that id", async () => {
+    const api = detailApi([requestRow("preq_120")]);
+    expect(await fetchPaymentRequestDetail(api.request, "preq_missing")).toEqual({
+      status: "not_found",
+    });
   });
 
-  it("is not found once the pages run out", async () => {
-    const api = listApi(150);
-    const result = await fetchPaymentRequestDetail(
-      api.request as Parameters<typeof fetchPaymentRequestDetail>[0],
-      "preq_missing"
-    );
-    expect(result).toEqual({ status: "not_found" });
-    expect(api.pages).toEqual([1, 2]);
+  it("reports any other failure as an error, not as missing", async () => {
+    const api = detailApi([], new Response("boom", { status: 500 }));
+    expect(await fetchPaymentRequestDetail(api.request, "preq_120")).toEqual({
+      status: "error",
+      error: "boom",
+    });
+    const offline = (async () => {
+      throw new Error("offline");
+    }) as unknown as Parameters<typeof fetchPaymentRequestDetail>[0];
+    expect(await fetchPaymentRequestDetail(offline, "preq_120")).toEqual({
+      status: "error",
+      error: "offline",
+    });
   });
 });
 
@@ -127,16 +104,22 @@ describe("paymentRequestsListHref", () => {
 
 /**
  * A list API that serves `rows` as one page with `total`, whatever was asked, and records each
- * call's page, size and status.
+ * call's page, size, status and search.
  */
 function pageApi(rows: PaymentRequest[], total: number) {
-  const calls: { page: string | null; pageSize: string | null; status: string | null }[] = [];
+  const calls: {
+    page: string | null;
+    pageSize: string | null;
+    status: string | null;
+    search: string | null;
+  }[] = [];
   const request = async (path: string) => {
     const query = new URL(path, "https://sdp.test").searchParams;
     calls.push({
       page: query.get("page"),
       pageSize: query.get("pageSize"),
       status: query.get("status"),
+      search: query.get("search"),
     });
     return Response.json({
       data: { paymentRequests: rows, total, page: 1, pageSize: rows.length },
@@ -154,69 +137,31 @@ function listState(changes: Partial<PaymentRequestsListState> = {}): PaymentRequ
 }
 
 describe("loadPaymentRequestsList", () => {
-  it("reads the API's page, size and status, and returns its rows and total", async () => {
+  it("reads the API's page, size, status and search, and returns its rows and total", async () => {
     const rows = [rowWithStatus("preq_1", "canceled"), rowWithStatus("preq_2", "expired")];
     const api = pageApi(rows, 60);
     const result = await loadPaymentRequestsList(
       api.request,
-      listState({ page: 2, pageSize: 50, status: "canceled" })
+      listState({ page: 2, pageSize: 50, status: "canceled", search: "jane" })
     );
-    expect(result).toEqual({
-      ok: true,
-      data: rows,
-      total: 60,
-      totalIsExact: true,
-      hasNextPage: false,
-    });
-    expect(api.calls).toEqual([{ page: "2", pageSize: "50", status: "canceled" }]);
+    expect(result).toEqual({ ok: true, data: rows, total: 60 });
+    expect(api.calls).toEqual([{ page: "2", pageSize: "50", status: "canceled", search: "jane" }]);
 
     const unfiltered = pageApi(rows, 2);
     await loadPaymentRequestsList(unfiltered.request, listState());
-    expect(unfiltered.calls).toEqual([{ page: "1", pageSize: "25", status: null }]);
+    expect(unfiltered.calls).toEqual([{ page: "1", pageSize: "25", status: null, search: null }]);
   });
 
-  it("leaves out of Awaiting payment a row the API returns as paid, and marks its total inexact", async () => {
-    const api = pageApi(
-      [rowWithStatus("preq_open", "awaiting_payment"), rowWithStatus("preq_landed", "paid")],
-      40
-    );
+  it("passes a status filter's rows through as the API returns them", async () => {
+    const rows = [
+      rowWithStatus("preq_open", "awaiting_payment"),
+      rowWithStatus("preq_later", "awaiting_payment"),
+    ];
     const result = await loadPaymentRequestsList(
-      api.request,
+      pageApi(rows, 40).request,
       listState({ status: "awaiting_payment" })
     );
-    expect(result.data).toEqual([rowWithStatus("preq_open", "awaiting_payment")]);
-    expect(result.total).toBe(40);
-    expect(result.totalIsExact).toBe(false);
-    expect(result.hasNextPage).toBe(true);
-  });
-
-  it("offers a next page while the API's total reaches past this one", async () => {
-    const rows = [rowWithStatus("preq_1", "paid")];
-    const last = await loadPaymentRequestsList(
-      pageApi(rows, 51).request,
-      listState({ page: 3, pageSize: 25, status: "paid" })
-    );
-    expect(last.hasNextPage).toBe(false);
-    const middle = await loadPaymentRequestsList(
-      pageApi(rows, 51).request,
-      listState({ page: 2, pageSize: 25, status: "paid" })
-    );
-    expect(middle.hasNextPage).toBe(true);
-  });
-
-  it("passes Paid's rows through as the API returns them", async () => {
-    const rows = [rowWithStatus("preq_1", "paid"), rowWithStatus("preq_2", "paid")];
-    const result = await loadPaymentRequestsList(
-      pageApi(rows, 2).request,
-      listState({ status: "paid" })
-    );
-    expect(result).toEqual({
-      ok: true,
-      data: rows,
-      total: 2,
-      totalIsExact: true,
-      hasNextPage: false,
-    });
+    expect(result).toEqual({ ok: true, data: rows, total: 40 });
   });
 
   it("reports a failed read", async () => {
@@ -227,13 +172,6 @@ describe("loadPaymentRequestsList", () => {
       request,
       listState({ status: "awaiting_payment" })
     );
-    expect(result).toEqual({
-      ok: false,
-      data: [],
-      total: 0,
-      error: "boom",
-      totalIsExact: true,
-      hasNextPage: false,
-    });
+    expect(result).toEqual({ ok: false, data: [], total: 0, error: "boom" });
   });
 });

@@ -1423,7 +1423,6 @@
       "clearSearch": "Clear request search",
       "noMatches": "No requests match these filters.",
       "range": "{from}-{to} of {total} requests",
-      "pageNumber": "Page {page}",
       "emptyTitle": "You haven't created a request yet",
       "emptyDescription": "A request is a link or QR that asks for a fixed amount. Anyone with the link can pay it.",
       "newRequest": "New request",
@@ -1600,6 +1599,9 @@
       "openPayment": "Open the payment",
       "loadFailedTitle": "Couldn't load this request",
       "loadFailedDescription": "The request did not go through. Nothing was changed. The link itself is unaffected.",
+      "notFoundTitle": "There's no request with this ID",
+      "notFoundDescription": "It may belong to another project, or the link may be wrong.",
+      "backToRequests": "Back to requests",
       "why": {
         "paid": "Settled to the destination wallet. Nothing further to do.",
         "awaiting": "The link is live and nobody has paid it yet. It does not expire.",

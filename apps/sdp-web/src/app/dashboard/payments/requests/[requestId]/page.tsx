@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
@@ -35,9 +35,9 @@ async function PaymentRequestDetailRoute({ params }: { params: Promise<{ request
       trace.log({ status: detail.status });
 
       if (detail.status === "not_found") {
-        // TODO(api): with a read by id, a missing request can get its own not-found page. For now
-        // it goes back to the list, as the list is the only way the API reads requests.
-        redirect(PAYMENT_REQUESTS_HREF);
+        // The API has no request by this id in the project: the segment's not-found page says so
+        // (a failed read, by contrast, renders below with a retry).
+        notFound();
       }
 
       const request = detail.status === "found" ? detail.request : null;

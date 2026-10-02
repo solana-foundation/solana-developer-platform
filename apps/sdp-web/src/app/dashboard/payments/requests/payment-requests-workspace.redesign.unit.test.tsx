@@ -48,8 +48,6 @@ function renderWorkspace(props: Partial<ComponentProps<typeof PaymentRequestsWor
       initialPaymentRequests={[paymentRequest]}
       counterparties={[]}
       total={1}
-      totalIsExact
-      hasNextPage={false}
       listState={{ page: 1, pageSize: 25, status: null, search: null }}
       {...props}
     />,
@@ -93,24 +91,24 @@ describe("PaymentRequestsWorkspace search", () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
-  it("shows the page's rows that match the search, by payer, with no pager on one page", () => {
+  it("shows the rows the API matched, naming the payer, with no pager on one page", () => {
     renderWorkspace({
-      initialPaymentRequests: [paymentRequest, otherRequest],
+      initialPaymentRequests: [otherRequest],
       counterparties: [{ id: "cp_jane", displayName: "Jane Doe" } as never],
-      total: 2,
+      total: 1,
       listState: { page: 1, pageSize: 25, status: null, search: "jane" },
     });
 
     expect(screen.getByText("Jane Doe")).toBeTruthy();
     expect(screen.queryByText("anyone")).toBeNull();
-    expect(screen.queryByText("Page 1")).toBeNull();
-    expect(screen.queryByText(/of 2 requests/)).toBeNull();
+    expect(screen.getByRole("searchbox")).toHaveProperty("value", "jane");
+    expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
   });
 
   it("shows no matches, not the empty directory, when a search finds nothing", () => {
     renderWorkspace({
-      initialPaymentRequests: [paymentRequest],
-      total: 1,
+      initialPaymentRequests: [],
+      total: 0,
       listState: { page: 1, pageSize: 25, status: null, search: "nobody" },
     });
 
@@ -120,32 +118,25 @@ describe("PaymentRequestsWorkspace search", () => {
 });
 
 describe("PaymentRequestsWorkspace pager", () => {
-  it("shows which rows of how many when the total is exact", () => {
-    renderWorkspace({ total: 40, hasNextPage: true });
+  it("shows which rows of how many, with the next page while there is one", () => {
+    renderWorkspace({ total: 40 });
 
     expect(screen.getByText("1-25 of 40 requests")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Next page" })).toHaveProperty("disabled", false);
-  });
-
-  it("names the page alone when the total is not exact, and offers the next while there is one", () => {
-    renderWorkspace({
-      total: 40,
-      totalIsExact: false,
-      hasNextPage: true,
-      listState: { page: 2, pageSize: 25, status: "awaiting_payment", search: null },
-    });
-
-    expect(screen.getByText("Page 2")).toBeTruthy();
-    expect(screen.queryByText(/of 40 requests/)).toBeNull();
     expect(screen.getByRole("button", { name: "Next page" })).toHaveProperty("disabled", false);
     cleanup();
 
     renderWorkspace({
       total: 40,
-      totalIsExact: false,
-      hasNextPage: false,
-      listState: { page: 2, pageSize: 25, status: "awaiting_payment", search: null },
+      listState: { page: 2, pageSize: 25, status: "awaiting_payment", search: "5" },
     });
+    expect(screen.getByText("26-40 of 40 requests")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Next page" })).toHaveProperty("disabled", true);
+  });
+
+  it("shows no pager when everything fits on one page", () => {
+    renderWorkspace({ total: 25 });
+
+    expect(screen.queryByText(/of 25 requests/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
   });
 });

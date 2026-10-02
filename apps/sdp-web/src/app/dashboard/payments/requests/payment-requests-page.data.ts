@@ -42,19 +42,26 @@ export function deriveTokenOptions(cluster: SolanaCluster): PaymentRequestTokenO
  * {@link PAYMENT_REQUESTS_PAGE_SIZE} rows.
  *
  * @param request - Authenticated SDP API fetcher.
- * @param options - The page (1-based), its size and an optional status.
+ * @param options - The page (1-based), its size, an optional status and an optional search,
+ *   which the API matches against the amount, token, payer, destination, reference and id.
  * @returns `{ ok: true, data, total }` on success; on any failure (non-2xx or
  *   network error) `{ ok: false, data: [], total: 0, error }` — never throws.
  */
 export async function fetchPaymentRequests(
   request: SdpApiClient["request"],
-  options: { page?: number; pageSize?: number; status?: PaymentRequest["status"] } = {}
+  options: {
+    page?: number;
+    pageSize?: number;
+    status?: PaymentRequest["status"];
+    search?: string;
+  } = {}
 ): Promise<PaymentRequestsResult> {
   try {
     const query = new URLSearchParams({
       page: String(options.page ?? 1),
       pageSize: String(options.pageSize ?? PAYMENT_REQUESTS_PAGE_SIZE),
       ...(options.status ? { status: options.status } : {}),
+      ...(options.search ? { search: options.search } : {}),
     });
     const response = await request(`/v1/payments/requests?${query.toString()}`);
     if (!response.ok) {
@@ -83,7 +90,7 @@ const PAYMENT_REQUEST_STATUSES = [
   "expired",
 ] as const satisfies readonly PaymentRequest["status"][];
 
-/** Longest search the Requests list carries in its URL. */
+/** Longest search the Requests list carries in its URL: what the API accepts. */
 const PAYMENT_REQUESTS_SEARCH_MAX_LENGTH = 200;
 
 /** The Requests list's page, its size, its status filter and its search, as the URL carries them. */
@@ -133,43 +140,6 @@ export function parsePaymentRequestsListParams(
   };
 }
 
-/** Every well-known token's symbol by mint, on any cluster, for searching by symbol. */
-const TOKEN_SYMBOL_BY_MINT: ReadonlyMap<string, string> = new Map(
-  Object.values(WELL_KNOWN_TOKENS).flatMap((token: WellKnownToken) =>
-    Object.values(token.mints).flatMap((mint) =>
-      mint ? [[mint.address, token.symbol] as const] : []
-    )
-  )
-);
-
-/**
- * Whether a request matches a search: its amount, token, payer's name, destination or
- * reference contains the needle, ignoring case.
- *
- * @param request - The request.
- * @param needle - The search, already trimmed.
- * @param counterpartyNames - Contact display names by id.
- * @returns `true` when any of those fields contains the needle.
- */
-export function paymentRequestMatchesSearch(
-  request: PaymentRequest,
-  needle: string,
-  counterpartyNames: ReadonlyMap<string, string>
-): boolean {
-  return [
-    request.amount,
-    TOKEN_SYMBOL_BY_MINT.get(request.token) ?? request.token,
-    request.counterpartyId
-      ? counterpartyNames.get(request.counterpartyId) || request.counterpartyId
-      : "",
-    request.destinationAddress,
-    request.reference,
-  ]
-    .join(" ")
-    .toLowerCase()
-    .includes(needle.toLowerCase());
-}
-
 /**
  * The Requests list's URL for a state, leaving out whatever is at its default.
  *
@@ -188,57 +158,28 @@ export function paymentRequestsListHref(state: PaymentRequestsListState): string
   return `${PAYMENT_REQUESTS_HREF}${search ? `?${search}` : ""}`;
 }
 
-export type PaymentRequestsListResult = PaymentRequestsResult & {
-  /**
-   * Whether `total` is exactly how many requests the status filter matches. Under Awaiting
-   * payment it is the API's count by stored status, an upper bound the list does not show (see
-   * {@link loadPaymentRequestsList}).
-   */
-  totalIsExact: boolean;
-  /** Whether the API has a page after this one. */
-  hasNextPage: boolean;
-};
-
 /**
  * One page of the Requests list as its URL names it, read straight from the API's page: its
- * page, its size and its status filter. Under Awaiting payment, the rows the API returns as paid
- * are left out (see below).
+ * page, its size, its status filter and its search. Before it applies an Awaiting payment or
+ * Paid filter the API checks the newest open requests on chain, so a request paid since its
+ * last read is counted and listed as paid.
  *
  * @param request - Authenticated SDP API fetcher.
- * @param state - The list's page, size and status. Its search is not sent, since the API has
- *   none: the list matches it against the page's rows (see PaymentRequestsWorkspace).
- * @returns The page's rows, how many requests the API counts in all, whether that count is exact
- *   and whether a page follows; on any failure `{ ok: false, data: [], total: 0, error, … }`.
- *   Never throws.
+ * @param state - The list's page, size, status and search.
+ * @returns The page's rows and how many requests match in all; on any failure
+ *   `{ ok: false, data: [], total: 0, error }`. Never throws.
  */
-export async function loadPaymentRequestsList(
+export function loadPaymentRequestsList(
   request: SdpApiClient["request"],
   state: PaymentRequestsListState
-): Promise<PaymentRequestsListResult> {
-  const { page, pageSize, status } = state;
-  const result = await fetchPaymentRequests(request, {
+): Promise<PaymentRequestsResult> {
+  const { page, pageSize, status, search } = state;
+  return fetchPaymentRequests(request, {
     page,
     pageSize,
     ...(status ? { status } : {}),
+    ...(search ? { search } : {}),
   });
-  const hasNextPage = result.ok && page * pageSize < result.total;
-  if (!result.ok || status !== "awaiting_payment") {
-    return { ...result, totalIsExact: true, hasNextPage };
-  }
-  // The API filters by the stored status, and listing then reconciles each open request on chain:
-  // one paid since it was last read comes back paid (and is saved so). Awaiting payment leaves
-  // those rows out, so no row shows the wrong status. Only this page is reconciled, so the API's
-  // total still counts requests paid on other, unread pages: it is an upper bound, which the
-  // list uses for its pages but does not show as a count (`totalIsExact: false`).
-  // TODO(api): filter and count by the reconciled status, so Awaiting payment can show its count
-  // again and Paid stops missing a request paid since its last read until something reads it
-  // again. Known limitation of the API, not of this list.
-  return {
-    ...result,
-    data: result.data.filter((row) => row.status === "awaiting_payment"),
-    totalIsExact: false,
-    hasNextPage,
-  };
 }
 
 export type PaymentRequestDetailResult =
@@ -247,28 +188,24 @@ export type PaymentRequestDetailResult =
   | { status: "error"; error: string | undefined };
 
 /**
- * One payment request by id. The API reads requests only as a list, so this pages through it
- * newest first and stops at the match, or once the pages run out; a request just created is on
- * the first page.
+ * One payment request by id, from `GET /v1/payments/requests/{requestId}`.
  *
  * @param request - Authenticated SDP API fetcher.
  * @param requestId - The request's id.
- * @returns The request, `not_found`, or the load error; never throws.
+ * @returns The request, `not_found` when the API has no request by that id in this project, or
+ *   the load error; never throws.
  */
 export async function fetchPaymentRequestDetail(
   request: SdpApiClient["request"],
   requestId: string
 ): Promise<PaymentRequestDetailResult> {
-  // TODO(api): read the request by id once the API has GET /v1/payments/requests/{id}. Until then
-  // this pages through the list, so an older request costs one read per 100 newer ones. Known
-  // limitation of the API, not of this page.
-  for (let page = 1; ; page += 1) {
-    const result = await fetchPaymentRequests(request, { page });
-    if (!result.ok) return { status: "error", error: result.error };
-    const match = result.data.find((candidate) => candidate.id === requestId);
-    if (match) return { status: "found", request: match };
-    if (result.data.length === 0 || page * PAYMENT_REQUESTS_PAGE_SIZE >= result.total) {
-      return { status: "not_found" };
-    }
+  try {
+    const response = await request(`/v1/payments/requests/${encodeURIComponent(requestId)}`);
+    if (response.status === 404) return { status: "not_found" };
+    if (!response.ok) return { status: "error", error: await response.text() };
+    const json = (await response.json()) as { data: PaymentRequest };
+    return { status: "found", request: json.data };
+  } catch (error) {
+    return { status: "error", error: error instanceof Error ? error.message : undefined };
   }
 }
