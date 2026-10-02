@@ -513,7 +513,7 @@
         "operationId": "listWalletApprovalRequests",
         "title": "List wallet approval requests",
         "method": "GET",
-        "path": "/v1/wallets/approval-requests?status={status}&limit={limit}",
+        "path": "/v1/wallets/approval-requests?status={status}&limit={limit}&cursor={cursor}&viewerCanDecide={viewerCanDecide}",
         "pathFields": [
           {
             "key": "status",
@@ -556,6 +556,30 @@
             "defaultValue": "50",
             "required": false,
             "valueType": "number"
+          },
+          {
+            "key": "cursor",
+            "label": "cursor",
+            "description": "Opaque pagination cursor from a previous response's `nextCursor`. Returns the requests older than that page.",
+            "required": false
+          },
+          {
+            "key": "viewerCanDecide",
+            "label": "viewerCanDecide",
+            "description": "Return only requests the caller may approve or reject right now (`true`), or only those they may not (`false`). Omit to return both.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
           }
         ],
         "bodyFields": [],
@@ -613,7 +637,8 @@
                 "viewerIsRequester": false,
                 "viewerCanDecide": false
               }
-            ]
+            ],
+            "nextCursor": "example"
           },
           "meta": {
             "requestId": "req_example",

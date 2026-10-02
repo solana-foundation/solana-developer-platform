@@ -16,6 +16,7 @@ import type {
   ApiKeyWalletPolicyBindingResolutionRow,
   ApiKeyWalletPolicyBindingRow,
   ApiKeyWalletPolicyTargetRow,
+  ApprovalRequestDetailPage,
   ApprovalRequestDetailRow,
   ApprovalRequestRow,
   CreateApiKeyControlProfileInput,
@@ -685,12 +686,36 @@ async function getWalletControlProfileById(
   return row ? mapWalletControlProfileRow(row) : null;
 }
 
+function clampApprovalRequestLimit(limit: number | undefined): number {
+  return Math.min(Math.max(limit ?? 50, 1), 100);
+}
+
 async function listApprovalRequestDetailsInternal(
   db: AppDb,
   scope: TenantScope,
   input: ListApprovalRequestDetailsInput & { approvalRequestId?: string }
 ): Promise<ApprovalRequestDetailRow[]> {
-  const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
+  return queryApprovalRequestDetails(db, scope, input, clampApprovalRequestLimit(input.limit));
+}
+
+async function listApprovalRequestDetailsPageInternal(
+  db: AppDb,
+  scope: TenantScope,
+  input: ListApprovalRequestDetailsInput
+): Promise<ApprovalRequestDetailPage> {
+  const limit = clampApprovalRequestLimit(input.limit);
+  // One row past the page answers "is there an older request?" without a
+  // second COUNT query over the same joins.
+  const rows = await queryApprovalRequestDetails(db, scope, input, limit + 1);
+  return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+}
+
+async function queryApprovalRequestDetails(
+  db: AppDb,
+  scope: TenantScope,
+  input: ListApprovalRequestDetailsInput & { approvalRequestId?: string },
+  rowLimit: number
+): Promise<ApprovalRequestDetailRow[]> {
   const conditions = ["ar.organization_id = ?"];
   const params: unknown[] = [scope.organizationId];
 
@@ -705,6 +730,12 @@ async function listApprovalRequestDetailsInternal(
   if (input.approvalRequestId) {
     conditions.push("ar.id = ?");
     params.push(input.approvalRequestId);
+  }
+  if (input.cursor) {
+    // Keyset over the ORDER BY below. created_at is ISO text, so text order is
+    // time order, and the id breaks ties the same way the sort does.
+    conditions.push("(ar.created_at, ar.id) < (?, ?)");
+    params.push(input.cursor.createdAt, input.cursor.id);
   }
 
   const rows = await db
@@ -762,7 +793,7 @@ async function listApprovalRequestDetailsInternal(
        ORDER BY ar.created_at DESC, ar.id DESC
        LIMIT ?`
     )
-    .bind(...params, limit)
+    .bind(...params, rowLimit)
     .all<Record<string, unknown>>();
 
   return rows.results.map(mapApprovalRequestDetailRow);
@@ -2619,6 +2650,11 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
     async listApprovalRequestDetails(input: ListApprovalRequestDetailsInput) {
       assertTenantClaim(scope, input, "PolicyRepository.listApprovalRequestDetails");
       return listApprovalRequestDetailsInternal(db, scope, input);
+    },
+
+    async listApprovalRequestDetailsPage(input: ListApprovalRequestDetailsInput) {
+      assertTenantClaim(scope, input, "PolicyRepository.listApprovalRequestDetailsPage");
+      return listApprovalRequestDetailsPageInternal(db, scope, input);
     },
 
     async getApprovalRequestDetail(input: GetApprovalRequestDetailInput) {
