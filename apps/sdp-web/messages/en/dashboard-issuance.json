@@ -1656,6 +1656,7 @@
         "issuerName": "Issuer name",
         "currency": "Currency",
         "noCurrency": "None",
+        "clearCurrency": "Clear",
         "operational": "Operational",
         "template": "Template",
         "locked": "Locked",

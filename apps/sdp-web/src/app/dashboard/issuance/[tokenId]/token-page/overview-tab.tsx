@@ -231,8 +231,8 @@ function DeployDraftBlock({
   ...deployProps
 }: DeployProps & { signingWalletName: string }) {
   const t = useTranslations();
-  // 12px from the heading to the rows and from the rows to the buttons; 32px under the
-  // buttons to the supply, 8px more than the band's 24 over this block.
+  // 12px from the heading to the rows and 10px from the rows to the 34px buttons; 32px under
+  // the buttons to the supply, 8px more than the band's 24 over this block.
   return (
     <section className="mb-2 flex min-w-0 flex-col gap-3">
       <h2 className="flex items-center gap-1.5 text-subheading font-medium text-primary">
@@ -254,7 +254,7 @@ function DeployDraftBlock({
           </span>
         </RecordRow>
       </dl>
-      <div className="flex items-center justify-end gap-2">
+      <div className="-mt-0.5 flex items-center justify-end gap-2 [&_a]:[--button-height-md:2.125rem] [&_button]:[--button-height-md:2.125rem]">
         <Button asChild variant="ghost" size="sm">
           <Link href="/dashboard/issuance">{t("DashboardIssuance.newDesign.overview.notNow")}</Link>
         </Button>
