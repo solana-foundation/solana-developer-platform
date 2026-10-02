@@ -52,7 +52,7 @@ describe("OverviewNetwork", () => {
     expect(plot.getAttribute("aria-valuemax")).toBe("364");
     fireEvent.click(screen.getByRole("radio", { name: "30D" }));
     expect(plot.getAttribute("aria-valuemax")).toBe("29");
-    expect(screen.getByRole("link", { name: /solana\.com\/data/ }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /^solana\.com\/data$/ }).getAttribute("href")).toBe(
       "https://solana.com/data"
     );
   });
