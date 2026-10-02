@@ -37,6 +37,7 @@ const PAYMENT: UnifiedTransaction = {
   token: "Mint111",
   amount: "12.5",
   counterpartyId: "cpty_test",
+  counterpartyAddress: "Dest1111111111111111111111111111111111111111",
   signature: "sig_pay",
   createdAt: "2026-09-15T10:00:00.000Z",
 };
@@ -55,6 +56,7 @@ const DVP_LEG: UnifiedTransaction = {
   token: null,
   amount: null,
   counterpartyId: null,
+  counterpartyAddress: null,
   signature: null,
   createdAt: "2026-09-14T10:00:00.000Z",
 };
