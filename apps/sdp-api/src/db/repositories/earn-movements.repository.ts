@@ -1,3 +1,4 @@
+import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type {
   EarnExecutionModel,
   EarnMovementDirection,
@@ -110,19 +111,9 @@ export interface EarnPositionRow {
   activated_at: string | null;
   closed_at: string | null;
   /**
-   * Address owed this position's share-ATA rent back when the exit closes that
-   * account. Null means the custody wallet funded it and keeps it.
-   *
-   * A PROJECTION of `earn_movements` (migration 0067), not an independent fact:
-   * the funder named by the newest movement that claimed to create this share
-   * account and has not failed. That is what makes it self-repairing. A claim
-   * whose transaction never lands drops out when reconciliation fails the
-   * movement, falling back to the previous surviving claimant rather than
-   * outliving its own transaction, and a movement that lost its idempotency
-   * insert has no row to contribute at all.
-   *
-   * Authoritative WHENEVER THE SHARE ACCOUNT EXISTS, which is the only window
-   * anything reads it: a position with no share account has no shares to exit.
+   * Legacy projection of creation claims. New Kamino writes leave this NULL:
+   * an idempotent build cannot prove who paid for the live account instance.
+   * It must not authorize a Kamino rent refund.
    */
   share_ata_rent_funder: string | null;
 }
@@ -180,13 +171,9 @@ export interface EarnMovementRow {
   initiated_by_key_id: string | null;
   created_at: string;
   updated_at: string;
-  /**
-   * Whether this movement was OBSERVED to create the owner's share token
-   * account, and so charged its rent. The position's funder projects from the
-   * newest non-failed movement carrying this (migration 0067).
-   */
+  /** Build-time share-account creation claim, not proof of a landed rent payment. */
   creates_share_account: boolean;
-  /** Who this movement charged that rent to. Null means the custody wallet. */
+  /** Planned rent payer. Null means the owner; execution can make a create a no-op. */
   share_ata_rent_funder: string | null;
   /**
    * When the sweep first saw this SUBMITTED movement's signature unknown to
@@ -439,6 +426,18 @@ export interface EarnMovementsRepository {
     movementId: string;
     organizationId: string;
     tokenAmountSettled: string;
+  }): Promise<boolean>;
+  /** Bounded, retry-spaced receipt repair, including historical Kamino deposits. */
+  claimUnvaluedKaminoDeposits(params: {
+    limit: number;
+    retryBefore: string;
+  }): Promise<EarnMovementRow[]>;
+  /** Record a finalized Kamino receipt once, without rewriting its requested amount. */
+  recordKaminoDepositReceipt(params: {
+    movementId: string;
+    organizationId: string;
+    amount: string;
+    sharesOut: string;
   }): Promise<boolean>;
   /**
    * One external wallet's recorded movements, exact-project scoped, newest
@@ -755,34 +754,11 @@ async function lockVaultDepositWrites(
     .first();
 }
 
-/**
- * Share-ATA rent attribution, carried by BOTH money directions.
- *
- * Not deposit-only, and that asymmetry was a bug: an EXIT can create the share
- * account too (consolidation emits an idempotent create, and klend interleaves
- * its own ATA prerequisites into the withdraw bundle), so an exit that paid the
- * rent has to say so or the position keeps naming whoever funded a previous
- * instance of the account.
- */
+/** Planning metadata only. The ledger cannot infer a rent payment from a build. */
 export interface ShareAccountRentAttribution {
-  /**
-   * Whether these instructions CREATE the share token account, as OBSERVED by
-   * the builder against chain state rather than inferred from the instruction
-   * list. Creation is idempotent, so the instruction proves nothing on its own.
-   * True is what makes `shareAtaRentFunder` meaningful.
-   *
-   * Optional, and the default is the safe direction: omitted means "no rent was
-   * charged here", so the funder is left untouched and no refund can be
-   * misdirected. A caller that cannot observe creation gets the historical
-   * behaviour rather than a guess.
-   */
+  /** The builder observed the ATA missing before execution. */
   createsShareAccount?: boolean;
-  /**
-   * Who funds that creation: a sponsor address, or null when the custody wallet
-   * pays. Only consulted when `createsShareAccount` is true, and then it is
-   * written even if null, so a later entry under a different fee mode cannot
-   * inherit the previous one's funder.
-   */
+  /** Planned payer for a creation, or null for the owner. */
   shareAtaRentFunder?: string | null;
 }
 
@@ -790,6 +766,8 @@ export interface ShareAccountRentAttribution {
 export interface ExternalWalletMovementTotals {
   /** Σ finalized deposits, deposit-token units. */
   finalizedDeposits: string;
+  /** Finalized deposits whose actual amount has not been observed. */
+  unvaluedDepositCount: number;
   /** Σ observed payouts of finalized withdrawals, deposit-token units. */
   finalizedWithdrawals: string;
   finalizedWithdrawalCount: number;
@@ -811,10 +789,11 @@ export interface AdvanceVaultMovementInput {
   failureReason?: string | null;
   confirmedAt?: string | null;
   settledAt?: string | null;
+  /** Finalized Kamino CPI receipt; a requested maximum is never a receipt. */
+  depositReceipt?: { amount: string; sharesOut: string };
   /**
-   * Finalizing only. A WITHDRAWAL's observed payout in the position's deposit
-   * token; null when it could not be observed. Ignored for deposits, whose
-   * token amount is the settled deposit amount and is stamped by the writer.
+   * Finalizing only. A withdrawal's observed payout in deposit-token units.
+   * Kamino deposits use depositReceipt instead of this generic payout field.
    */
   tokenAmountSettled?: string | null;
 }
@@ -1005,6 +984,13 @@ function vaultSettlementFilter(
 }
 
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
+  // Old revisions populated these columns from the requested maximum. Keep
+  // rolling deployments compatible without exposing that projection as fact.
+  const unobservedKaminoDeposit =
+    row.execution_model === "vault_direct" &&
+    row.provider === "kamino" &&
+    row.direction === "deposit" &&
+    row.deposit_receipt_observed_at == null;
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
@@ -1021,11 +1007,13 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     settled_at: row.settled_at as string | null,
     denomination: row.denomination as string,
     amount_requested: row.amount_requested as string,
-    amount_settled: row.amount_settled as string | null,
+    amount_settled: unobservedKaminoDeposit ? null : (row.amount_settled as string | null),
     fee_amount: row.fee_amount as string | null,
-    token_amount_settled: row.token_amount_settled as string | null,
+    token_amount_settled: unobservedKaminoDeposit
+      ? null
+      : (row.token_amount_settled as string | null),
     min_shares_out: row.min_shares_out as string | null,
-    shares_out: row.shares_out as string | null,
+    shares_out: unobservedKaminoDeposit ? null : (row.shares_out as string | null),
     payout_token: row.payout_token as string | null,
     custody_wallet_id: row.custody_wallet_id as string | null,
     owner_address: row.owner_address as string | null,
@@ -1060,6 +1048,31 @@ export function queuedFulfillmentMovementId(requestId: string): string {
   return `${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}${requestId}`;
 }
 
+/**
+ * What a fulfilled request's payout movement is denominated in, shared by the
+ * writer and the read-side projection: the shares the request consumed, or,
+ * for a par request that burned none because it redeemed intermediate the
+ * owner already held, the intermediate its operator burned. 0062 requires a
+ * non-zero amount either way.
+ */
+export function fulfilledQueueQuantity(request: {
+  mechanism: string;
+  shares: string;
+  share_mint: string;
+  intermediate_mint: string | null;
+  intermediate_amount: string | null;
+}): { denomination: string; amount: string } {
+  if (
+    request.mechanism === "operator_redemption" &&
+    !/[1-9]/.test(request.shares) &&
+    request.intermediate_mint !== null &&
+    request.intermediate_amount !== null
+  ) {
+    return { denomination: request.intermediate_mint, amount: request.intermediate_amount };
+  }
+  return { denomination: request.share_mint, amount: request.shares };
+}
+
 function queuedRequestIdFromMovementId(movementId: string): string | null {
   return movementId.startsWith(QUEUED_FULFILLMENT_MOVEMENT_PREFIX)
     ? movementId.slice(QUEUED_FULFILLMENT_MOVEMENT_PREFIX.length)
@@ -1069,6 +1082,13 @@ function queuedRequestIdFromMovementId(movementId: string): string | null {
 function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRow {
   const requestId = String(row.id);
   const settledAt = String(row.fulfilled_at ?? row.updated_at);
+  const quantity = fulfilledQueueQuantity({
+    mechanism: String(row.mechanism),
+    shares: String(row.shares),
+    share_mint: String(row.share_mint),
+    intermediate_mint: row.intermediate_mint == null ? null : String(row.intermediate_mint),
+    intermediate_amount: row.intermediate_amount == null ? null : String(row.intermediate_amount),
+  });
   return {
     id: queuedFulfillmentMovementId(requestId),
     organization_id: String(row.organization_id),
@@ -1083,9 +1103,9 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     confirmed_at: settledAt,
     chain_finalized_at: null,
     settled_at: settledAt,
-    denomination: String(row.share_mint),
-    amount_requested: String(row.shares),
-    amount_settled: String(row.shares),
+    denomination: quantity.denomination,
+    amount_requested: quantity.amount,
+    amount_settled: quantity.amount,
     fee_amount: null,
     token_amount_settled: row.assets_paid == null ? null : String(row.assets_paid),
     min_shares_out: null,
@@ -1407,7 +1427,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // A cancelled operator redemption never recreates the shares it burned:
       // the owner keeps the intermediate it delegated (Hastra wYLDS), and an
       // open one's delegated intermediate still sits in the wallet. The
-      // amounts come back per status class so the service can tell which
+      // retained balance excludes fulfilled and open held-intermediate requests;
+      // A held-intermediate cancellation proves at least its released amount
+      // remains; repeated cancellations do not accumulate the same tokens.
+      // Clamp debits at zero in lifecycle order so an older redemption cannot
+      // spend backing created by a later cancellation.
+      // Amounts come back per status class so the service can tell which
       // balance is provably whose. Requests are aggregated once per tenant
       // (the tenant/created index) and joined by position, because the
       // request table has no position index and the claim set is unpaged.
@@ -1425,12 +1450,55 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 )
               GROUP BY queued.position_id
            ),
+           redemption_history AS (
+             SELECT redemption.position_id,
+                    redemption.intermediate_mint,
+                    redemption.intermediate_amount,
+                    redemption.status,
+                    redemption.id,
+                    redemption.created_at,
+                    COALESCE(redemption.fulfilled_at, redemption.cancelled_at,
+                      redemption.created_at)::timestamptz AS observed_at,
+                    CASE
+                      WHEN redemption.status = 'cancelled' AND redemption.shares::numeric > 0
+                        THEN redemption.intermediate_amount::numeric
+                      WHEN redemption.status <> 'cancelled' AND redemption.shares::numeric = 0
+                        THEN -redemption.intermediate_amount::numeric
+                      ELSE 0
+                    END AS retained_delta,
+                    CASE
+                      WHEN redemption.status = 'cancelled' AND redemption.shares::numeric = 0
+                        THEN redemption.intermediate_amount::numeric
+                      ELSE 0
+                    END AS retained_floor
+               FROM earn_vault_withdrawal_requests redemption
+              WHERE redemption.organization_id = ?
+                AND redemption.environment = ?
+                AND redemption.mechanism = 'operator_redemption'
+                AND redemption.intermediate_mint IS NOT NULL
+                AND redemption.status IN (
+                  'cancelled', 'fulfilled', 'creating', 'pending', 'fulfillable',
+                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                )
+           ),
+           redemption_balances AS (
+             SELECT redemption_history.*,
+                    SUM(retained_delta) OVER (
+                      PARTITION BY position_id, intermediate_mint
+                      ORDER BY observed_at, created_at, id
+                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    ) AS running_retained
+               FROM redemption_history
+           ),
            redemption_amounts AS (
              SELECT redemption.position_id,
                     redemption.intermediate_mint,
-                    COALESCE(SUM(redemption.intermediate_amount::numeric)
-                      FILTER (WHERE redemption.status = 'cancelled'), 0)::text
-                      AS retained,
+                    -- Track the largest shortfall from the balance floor at each event:
+                    -- zero after a debit, or the amount released by a held-token cancel.
+                    -- This preserves later credits and never sums repeated releases.
+                    (SUM(redemption.retained_delta)
+                      + GREATEST(MAX(redemption.retained_floor
+                        - redemption.running_retained), 0))::text AS retained,
                     COALESCE(SUM(redemption.intermediate_amount::numeric)
                       FILTER (WHERE redemption.status IN (
                         'pending', 'fulfillable', 'expired_cancelable', 'cancelling'
@@ -1444,15 +1512,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                         'creating', 'closed_or_unknown'
                       )), 0)::text
                       AS unresolved
-               FROM earn_vault_withdrawal_requests redemption
-              WHERE redemption.organization_id = ?
-                AND redemption.environment = ?
-                AND redemption.mechanism = 'operator_redemption'
-                AND redemption.intermediate_mint IS NOT NULL
-                AND redemption.status IN (
-                  'cancelled', 'creating', 'pending', 'fulfillable',
-                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                )
+               FROM redemption_balances redemption
               GROUP BY redemption.position_id, redemption.intermediate_mint
            ),
            intermediates_by_position AS (
@@ -1670,6 +1730,54 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return Boolean(row);
     },
 
+    async claimUnvaluedKaminoDeposits(params) {
+      const result = await db
+        .prepare(
+          `WITH candidates AS MATERIALIZED (
+             SELECT id FROM earn_movements
+              WHERE execution_model = 'vault_direct' AND provider = 'kamino'
+                AND direction = 'deposit' AND status = 'finalized'
+                AND deposit_receipt_observed_at IS NULL AND signature IS NOT NULL
+                AND (reconciliation_attempted_at IS NULL OR reconciliation_attempted_at <= ?)
+              ORDER BY (reconciliation_attempted_at IS NOT NULL) ASC,
+                       COALESCE(reconciliation_attempted_at, settled_at) ASC, id ASC
+              LIMIT ? FOR UPDATE SKIP LOCKED
+           ), touched AS (
+             UPDATE earn_movements movement SET reconciliation_attempted_at = sdp_iso_now()
+               FROM candidates WHERE movement.id = candidates.id RETURNING movement.*
+           ) SELECT * FROM touched`
+        )
+        .bind(params.retryBefore, params.limit)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapMovementRow);
+    },
+
+    async recordKaminoDepositReceipt(params) {
+      assertDepositReceipt(params);
+      const row = await db
+        .prepare(
+          `UPDATE earn_movements
+              SET amount_settled = ?, token_amount_settled = ?, shares_out = ?,
+                  deposit_receipt_observed_at = sdp_iso_now(), updated_at = sdp_iso_now()
+            WHERE id = ? AND organization_id = ?
+              AND execution_model = 'vault_direct' AND provider = 'kamino'
+              AND direction = 'deposit' AND status = 'finalized'
+              AND deposit_receipt_observed_at IS NULL
+              AND ?::numeric <= amount_requested::numeric
+            RETURNING id`
+        )
+        .bind(
+          params.amount,
+          params.amount,
+          params.sharesOut,
+          params.movementId,
+          params.organizationId,
+          params.amount
+        )
+        .first<{ id: string }>();
+      return Boolean(row);
+    },
+
     async listExternalWalletDepositsSince(params) {
       // idx_earn_movements_external_wallet_owner drives the range scan; the
       // direction/denomination predicates filter on the heap.
@@ -1802,18 +1910,22 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
 
     async aggregateExternalWalletMovements(params) {
       // Postgres numeric is exact, and every summed row shares its position's
-      // deposit-token denomination, so the casts lose nothing. `COALESCE` on
-      // amount_settled is belt and braces: the writer stamps it on every
-      // finalized row. Withdrawals sum `token_amount_settled` (0103), the
-      // observed payout; a finalized withdrawal with none is counted so the
-      // read can withhold earned instead of understating it.
+      // deposit-token denomination. Unknown receipts contribute no invented
+      // amount and withhold earnings through the unvalued counts.
       const result = await db
         .prepare(
           `WITH facts AS (
              SELECT position_id,
                     CASE WHEN direction = 'deposit' AND status = 'finalized'
-                         THEN COALESCE(amount_settled, amount_requested)::numeric
+                         THEN CASE WHEN provider = 'kamino' AND execution_model = 'vault_direct'
+                                          AND deposit_receipt_observed_at IS NULL
+                                   THEN 0::numeric ELSE COALESCE(amount_settled, '0')::numeric END
                          ELSE 0::numeric END AS finalized_deposits,
+                    CASE WHEN direction = 'deposit' AND status = 'finalized'
+                               AND (amount_settled IS NULL OR (
+                                 provider = 'kamino' AND execution_model = 'vault_direct'
+                                 AND deposit_receipt_observed_at IS NULL))
+                         THEN 1 ELSE 0 END AS unvalued_deposit_count,
                     CASE WHEN direction = 'withdrawal' AND status = 'finalized'
                          THEN COALESCE(token_amount_settled, '0')::numeric
                          ELSE 0::numeric END AS finalized_withdrawals,
@@ -1835,6 +1947,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
               -- stay open for days, and the reason it drives says so.
               SELECT request.position_id,
                      0::numeric,
+                     0,
                      CASE WHEN request.status = 'fulfilled'
                           THEN COALESCE(request.assets_paid, '0')::numeric
                           ELSE 0::numeric END,
@@ -1865,6 +1978,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             )
            SELECT position_id,
                   COALESCE(SUM(finalized_deposits), 0)::text AS finalized_deposits,
+                  COALESCE(SUM(unvalued_deposit_count), 0) AS unvalued_deposit_count,
                   COALESCE(SUM(finalized_withdrawals), 0)::text AS finalized_withdrawals,
                   COALESCE(SUM(finalized_withdrawal_count), 0) AS finalized_withdrawal_count,
                   COALESCE(SUM(unvalued_withdrawal_count), 0) AS unvalued_withdrawal_count,
@@ -1887,6 +2001,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .all<{
           position_id: string;
           finalized_deposits: string;
+          unvalued_deposit_count: number;
           finalized_withdrawals: string;
           finalized_withdrawal_count: number;
           unvalued_withdrawal_count: number;
@@ -1897,6 +2012,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       for (const row of result.results ?? []) {
         totals.set(row.position_id, {
           finalizedDeposits: row.finalized_deposits,
+          unvaluedDepositCount: Number(row.unvalued_deposit_count),
           finalizedWithdrawals: row.finalized_withdrawals,
           finalizedWithdrawalCount: Number(row.finalized_withdrawal_count),
           unvaluedWithdrawalCount: Number(row.unvalued_withdrawal_count),
@@ -2446,27 +2562,26 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         values.push(input.confirmedAt);
       }
       if (input.toStatus === "confirmed" || input.toStatus === "finalized") {
-        // What moved is what the intent encoded: the service asserts the caller's
-        // amount numerically equal to the plan's canonical amount before signing,
-        // so once the chain speaks the requested amount IS the settled amount —
-        // the same fact 0063's projection derived for the backfilled history.
-        // COALESCEd so a backfilled row keeps the projection's spelling.
-        assignments.push("amount_settled = COALESCE(amount_settled, amount_requested)");
+        // Kamino encodes a maximum deposit. Only a finalized receipt establishes
+        // its actual debit; confirmation alone never supplies an amount.
+        assignments.push(`amount_settled = CASE
+          WHEN provider = 'kamino' AND direction = 'deposit' THEN ?
+          ELSE COALESCE(amount_settled, amount_requested) END`);
+        values.push(input.depositReceipt?.amount ?? null);
       }
       if (input.toStatus === "finalized") {
-        // The deposit-token view of the same settlement (0103). A deposit's
-        // token amount IS its settled amount; a withdrawal's is whatever the
-        // caller observed on the landed transaction, or NULL when it could
-        // not. SET expressions read the pre-update row, so the COALESCE over
-        // amount_settled resolves exactly as the assignment above does.
         assignments.push(
-          `token_amount_settled = COALESCE(
-             token_amount_settled,
-             CASE WHEN direction = 'deposit' THEN COALESCE(amount_settled, amount_requested)
-                  ELSE ? END
-           )`
+          `token_amount_settled = CASE
+             WHEN provider = 'kamino' AND direction = 'deposit' THEN ?
+             ELSE COALESCE(token_amount_settled,
+               CASE WHEN direction = 'deposit' THEN COALESCE(amount_settled, amount_requested)
+                    ELSE ? END) END`
         );
-        values.push(input.tokenAmountSettled ?? null);
+        values.push(input.depositReceipt?.amount ?? null, input.tokenAmountSettled ?? null);
+        if (input.depositReceipt) {
+          assignments.push("shares_out = ?", "deposit_receipt_observed_at = sdp_iso_now()");
+          values.push(input.depositReceipt.sharesOut);
+        }
       }
 
       const advance = (target: AppDb) =>
@@ -2478,9 +2593,16 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 AND organization_id = ?
                 AND execution_model = 'vault_direct'
                 AND status IN (${guards})
+                ${input.depositReceipt ? "AND provider = 'kamino' AND direction = 'deposit' AND ?::numeric <= amount_requested::numeric" : ""}
               RETURNING *`
           )
-          .bind(...values, input.movementId, input.organizationId, ...sources)
+          .bind(
+            ...values,
+            input.movementId,
+            input.organizationId,
+            ...sources,
+            ...(input.depositReceipt ? [input.depositReceipt.amount] : [])
+          )
           .first<Record<string, unknown>>();
 
       // Only an outcome that changes what the organization HOLDS needs the
@@ -2719,7 +2841,21 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
  * anyway. Failing here names the actual mistake instead of returning the null that
  * means "someone else got there first".
  */
+function assertDepositReceipt(receipt: { amount: string; sharesOut: string }): void {
+  for (const value of [receipt.amount, receipt.sharesOut]) {
+    if (value.length > 128 || !isDecimalString(value) || compareDecimalAmounts(value, "0") <= 0) {
+      throw new Error("A deposit receipt must contain positive decimal amounts");
+    }
+  }
+}
+
 function assertVaultTransitionMetadata(input: AdvanceVaultMovementInput): void {
+  if (input.depositReceipt) {
+    if (input.toStatus !== "finalized") {
+      throw new Error("A deposit receipt requires finalized chain commitment");
+    }
+    assertDepositReceipt(input.depositReceipt);
+  }
   if (input.failureReason !== undefined && input.toStatus !== "failed") {
     throw new Error("failureReason is only valid when failing an earn vault movement");
   }
@@ -2873,40 +3009,10 @@ function shareAccountClaimBindings(input: ShareAccountRentAttribution): [boolean
 }
 
 /**
- * Recompute `earn_positions.share_ata_rent_funder` from the movements that
- * claimed to create the share account (migration 0067).
- *
- * DERIVED, not remembered, and that is the whole design. The claim is written on
- * the movement inside the pre-broadcast intent transaction, so it is a statement
- * about a transaction that has not landed yet. Three failures fall out of
- * projecting instead of assigning:
- *
- *   * a movement that never lands is FAILED by reconciliation and drops out
- *     here, handing the attribution back to the previous surviving claimant
- *     instead of naming a party that paid nothing for as long as the position
- *     lives;
- *   * a movement that lost its idempotency insert has no row, so it cannot
- *     contribute at all, whatever fee mode it had resolved;
- *   * a rolled-back intent takes its claim with it.
- *
- * Newest claimant wins, matching "the account is created at most once and the
- * last creation is the live one". Callers hold the position row lock already:
- * both intent creators take it through their claim upsert or their own
- * transaction, and `advanceVaultMovement` takes it explicitly.
- *
- * ── The confirmed-fork tail, and why excluding only `failed` is enough ─────
- * A claimant that reached `confirmed` and was then dropped by a fork can never
- * be failed (the transition matrix forbids `confirmed -> failed` on purpose;
- * see @sdp/types EARN_MOVEMENT_TRANSITIONS), so its claim stays selected here.
- * That inherits the ledger's own accepted open question rather than adding a
- * new reachable loss: the dropped create never landed, so the account is still
- * missing, and an exit only reads this projection when the account EXISTS at
- * its build (an exit that creates the account refunds its own rent payer and
- * ignores the projection). Whoever re-created it was either a later SDP
- * movement, whose newer claim supersedes the stale one, or an external actor,
- * which is the already-documented external-create residual, reachable with or
- * without any fork. Confirming the funder from the LANDED transaction at
- * settlement closes both and is deliberately not attempted here.
+ * Preserve legacy provider projections while refusing to promote Kamino's
+ * build-time claims to refund authority. Concurrent idempotent creates can
+ * both claim creation even though only one pays; external recreation can also
+ * replace an account without any ledger movement.
  */
 async function projectShareAccountRentFunder(
   db: AppDb,
@@ -2916,7 +3022,7 @@ async function projectShareAccountRentFunder(
   await db
     .prepare(
       `UPDATE earn_positions position
-          SET share_ata_rent_funder = (
+          SET share_ata_rent_funder = CASE WHEN position.provider = 'kamino' THEN NULL ELSE (
                 SELECT movement.share_ata_rent_funder
                   FROM earn_movements movement
                  WHERE movement.position_id = position.id
@@ -2924,7 +3030,7 @@ async function projectShareAccountRentFunder(
                    AND movement.status <> 'failed'
                  ORDER BY movement.created_at DESC, movement.id DESC
                  LIMIT 1
-              ),
+              ) END,
               updated_at = sdp_iso_now()
         WHERE position.id = ? AND position.organization_id = ?`
     )

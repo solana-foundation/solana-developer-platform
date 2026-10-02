@@ -4,7 +4,7 @@ import type { SignerCheckApiResponse } from "../helpers/api-types";
 import {
   cleanupIntegrationSuite,
   env,
-  initIntegrationSuite,
+  initIntegrationApiSuite,
   requestWithApiKey,
 } from "../helpers/integration";
 
@@ -126,7 +126,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
 
   beforeAll(async () => {
     assertKoraLiveSmokeEnvConfigured();
-    await initIntegrationSuite();
+    await initIntegrationApiSuite();
     const repository = new SponsorshipBudgetRepository(getDb(env));
     for (const policy of [
       {

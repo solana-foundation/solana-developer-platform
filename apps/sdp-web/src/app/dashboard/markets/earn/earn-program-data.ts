@@ -1359,7 +1359,8 @@ const queuedWithdrawalTermsSchema = z.object({
 const parRedemptionTermsSchema = z.object({
   intermediateMint: z.string(),
   assetMint: z.string(),
-  minimumShares: z.string(),
+  minimumShares: z.string().nullable(),
+  minimumIntermediateAmount: z.string(),
   shareDecimals: z.number().int().min(0).max(38),
   assetDecimals: z.number().int().min(0).max(38),
   cancelable: z.boolean(),
@@ -1515,11 +1516,13 @@ export async function createEarnVaultWithdrawalRequest(
 ): Promise<DashboardFetchResult<EarnVaultQueuedWithdrawalOutcome>> {
   const body: EarnVaultAsyncWithdrawalTermsRequest =
     input.mechanism === "operatorRedemption"
-      ? {
-          positionId: input.positionId,
-          shares: input.shares,
-          mechanism: "operatorRedemption",
-        }
+      ? input.intermediateAmount === undefined
+        ? { positionId: input.positionId, shares: input.shares, mechanism: "operatorRedemption" }
+        : {
+            positionId: input.positionId,
+            intermediateAmount: input.intermediateAmount,
+            mechanism: "operatorRedemption",
+          }
       : {
           positionId: input.positionId,
           shares: input.shares,
