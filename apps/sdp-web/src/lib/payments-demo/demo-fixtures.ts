@@ -23,6 +23,7 @@ import {
   type PaymentTransferType,
   type RampProviderId,
   SOL_MINT,
+  tokenFilterAliases,
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   type UnifiedTransaction,
   WELL_KNOWN_TOKENS,
@@ -1438,6 +1439,9 @@ function toUnifiedTransaction(transfer: DemoTransfer, world: DemoWorld): Unified
     token: transfer.token ?? null,
     amount: transfer.amount ?? null,
     counterpartyId: transfer.counterpartyId ?? null,
+    // The other party, as the API resolves it: who paid in, or who was paid.
+    counterpartyAddress:
+      (transfer.direction === "inbound" ? transfer.source : transfer.destination) ?? null,
     signature: transfer.signature,
     createdAt: transfer.createdAt,
   };
@@ -1517,14 +1521,42 @@ function batchBody(world: DemoWorld, batchId: string) {
   };
 }
 
+/**
+ * Whether a demo request matches a search the way the API matches one: a case-insensitive
+ * substring of its id, amount, mint, destination, reference or payer's name, or a well-known
+ * token symbol naming its mint.
+ */
+function requestMatchesSearch(world: DemoWorld, request: PaymentRequest, search: string): boolean {
+  const needle = search.toLowerCase();
+  const payer = request.counterpartyId
+    ? (Object.values(world.contacts).find((contact) => contact.id === request.counterpartyId)
+        ?.displayName ?? "")
+    : "";
+  return (
+    [
+      request.id,
+      request.amount,
+      request.token,
+      request.destinationAddress,
+      request.reference,
+      payer,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(needle) || tokenFilterAliases(search).includes(request.token)
+  );
+}
+
 function requestsBody(world: DemoWorld, params: URLSearchParams) {
   const status = params.get("status");
   const counterpartyId = params.get("counterpartyId");
+  const search = params.get("search")?.trim() || null;
   const page = pageOf(
     world.requests.filter(
       (request) =>
         (status === null || request.status === status) &&
-        (counterpartyId === null || request.counterpartyId === counterpartyId)
+        (counterpartyId === null || request.counterpartyId === counterpartyId) &&
+        (search === null || requestMatchesSearch(world, request, search))
     ),
     params
   );
@@ -1536,6 +1568,11 @@ function requestsBody(world: DemoWorld, params: URLSearchParams) {
       pageSize: page.pageSize,
     },
   };
+}
+
+function requestBody(world: DemoWorld, requestId: string) {
+  const request = world.requests.find((candidate) => candidate.id === requestId);
+  return request ? { data: request } : undefined;
 }
 
 function recurringPaymentsBody(world: DemoWorld, params: URLSearchParams) {
@@ -1605,6 +1642,8 @@ function paymentsRoute(rest: string[], params: URLSearchParams, world: DemoWorld
         return transferBody(world, id);
       case "transfer-batches":
         return batchBody(world, id);
+      case "requests":
+        return requestBody(world, id);
       case "recurring-payments":
         return recurringPaymentBody(world, id);
       default:
