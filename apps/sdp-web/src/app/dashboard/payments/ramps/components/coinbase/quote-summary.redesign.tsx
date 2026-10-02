@@ -18,6 +18,7 @@ export function CoinbaseQuoteSummary({ quote }: { quote: CoinbaseQuote }) {
     .filter((fee) => fee.feeCurrency === quote.paymentCurrency)
     .reduce((total, fee) => total + Number(fee.feeAmount), 0);
   return (
+    // react-doctor-disable-next-line duplicate-jsx-subtree -- redesign sibling of main's quote-summary.tsx; goes away when the old design is removed
     <div className="grid gap-3 lg:grid-cols-2">
       <QuoteSummaryField
         icon={<CoinsIcon className="size-4" />}

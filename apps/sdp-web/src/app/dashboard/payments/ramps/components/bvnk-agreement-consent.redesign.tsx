@@ -100,6 +100,7 @@ export function BvnkAgreementConsent({
   const t = useTranslations();
   const accepted = new Set(acceptedAgreements);
   return (
+    // react-doctor-disable-next-line duplicate-jsx-subtree -- redesign sibling of main's bvnk-agreement-consent.tsx; goes away when the old design is removed
     <div className="flex flex-col items-center gap-4 px-6 py-12 text-center">
       <ShieldCheckIcon className="size-10 text-primary" />
       <p className="text-lg font-medium text-primary">
