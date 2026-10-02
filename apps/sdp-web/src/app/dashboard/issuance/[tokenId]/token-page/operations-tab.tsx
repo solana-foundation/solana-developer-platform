@@ -105,6 +105,9 @@ const DATE_TIME_FORMAT: Intl.DateTimeFormatOptions = {
 
 const DANGER_OPERATIONS = new Set(["burn", "seize", "force-burn", "lock-supply"]);
 const LOCK_SUPPLY = "lock-supply";
+/** The operations each supply row offers: minting and burning on the issued supply, locking on the cap. */
+const ISSUED_SUPPLY_OPERATIONS: ReadonlySet<string> = new Set(["mint", "burn"]);
+const SUPPLY_CAP_OPERATIONS: ReadonlySet<string> = new Set([LOCK_SUPPLY]);
 /** The design draws minting and burning as a plus and a minus beside the issued supply. */
 const OPERATION_ICON: Record<string, typeof PlusIcon> = { mint: PlusIcon, burn: MinusIcon };
 
@@ -211,11 +214,8 @@ function SupplyBlock({
   const issued = Number(token.totalSupply || 0);
   const cap = token.maxSupply ? Number(token.maxSupply) : null;
   const left = cap !== null && Number.isFinite(cap) ? Math.max(0, cap - issued) : null;
-  const actions = (ids: string[]) => (
-    <OperationButtons
-      rows={rows?.filter((row) => ids.includes(row.id)) ?? []}
-      pending={ops.isPending}
-    />
+  const actions = (ids: ReadonlySet<string>) => (
+    <OperationButtons rows={rows?.filter((row) => ids.has(row.id)) ?? []} pending={ops.isPending} />
   );
 
   return (
@@ -223,7 +223,7 @@ function SupplyBlock({
       <dl>
         <OperationLine
           label={t("DashboardIssuance.newDesign.overview.issuedSupply")}
-          actions={actions(["mint", "burn"])}
+          actions={actions(ISSUED_SUPPLY_OPERATIONS)}
         >
           <span>{formatDecimalAmount(token.totalSupply || "0", locale)}</span>
           <span className="rounded-control bg-fill-subtle px-1.5 text-meta text-secondary">
@@ -233,7 +233,7 @@ function SupplyBlock({
         <OperationLine
           label={t("DashboardIssuance.newDesign.overview.supplyCap")}
           hint={t("DashboardIssuance.newDesign.operations.supplyCapHint")}
-          actions={actions([LOCK_SUPPLY])}
+          actions={actions(SUPPLY_CAP_OPERATIONS)}
         >
           {cap === null
             ? t("DashboardIssuance.newDesign.overview.noCap")
