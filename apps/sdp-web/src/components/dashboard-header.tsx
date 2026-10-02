@@ -261,6 +261,13 @@ export function StackedDashboardTopBar({
       data-dashboard-stacked-topbar
     >
       <div className="col-start-1 row-start-1 flex items-center md:hidden">{navigation}</div>
+      {/* On a phone the way back shares the navigation button's row, its chevron 4px from the
+          button; from md it sits over the title. */}
+      {above && !hideTitle ? (
+        <div className="col-start-2 row-start-1 -ml-1 flex min-w-0 items-center md:hidden">
+          {above}
+        </div>
+      ) : null}
       {hideTitle ? (
         <h1 className="sr-only">{title}</h1>
       ) : (
@@ -269,7 +276,9 @@ export function StackedDashboardTopBar({
               title, so the link reads 12px lower than a page's title would and the title 36px
               below the top. A flex row, so the link's 20px line sets the height, not the strut. */}
           {above ? (
-            <div className={cn("flex items-center", mark ? "mb-4" : "h-8 mb-1")}>{above}</div>
+            <div className={cn("flex items-center max-md:hidden", mark ? "mb-4" : "h-8 mb-1")}>
+              {above}
+            </div>
           ) : null}
           {mark ? (
             <div className="flex min-w-0 items-center gap-4">
