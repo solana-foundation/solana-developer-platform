@@ -526,6 +526,17 @@ const earnAsyncWithdrawalSharesSchema = earnDecimalAmountSchema.openapi({
   example: "10",
 });
 
+/** An operator redemption over held intermediate burns no shares. */
+const earnParRedemptionSharesSchema = z
+  .string()
+  .max(128)
+  .regex(/^\d+(\.\d+)?$/)
+  .openapi({
+    description:
+      'Position shares the request burns, in share units; "0" when it redeems intermediate the owner already holds.',
+    example: "10",
+  });
+
 const earnQueuedWithdrawalTermsFields = {
   shares: earnAsyncWithdrawalSharesSchema,
   mechanism: z.literal("solverQueue").optional().openapi({
@@ -588,9 +599,15 @@ const earnParRedemptionOptionsSchema = z.object({
   assetMint: earnSolanaMintSchema.openapi({
     description: "Token the operator pays when the redemption completes.",
   }),
-  minimumShares: earnDecimalAmountSchema.openapi({
-    description: "Smallest operator-redemption request, in position-share units.",
+  minimumShares: earnDecimalAmountSchema.nullable().openapi({
+    description:
+      "Smallest share-sourced operator-redemption request, in position-share units. Null while the provider's rate is unavailable, which also blocks share-sourced requests.",
     example: "1",
+  }),
+  minimumIntermediateAmount: earnDecimalAmountSchema.openapi({
+    description:
+      "Smallest request over intermediate the owner already holds, in intermediate-token units.",
+    example: "0.000001",
   }),
   shareDecimals: z.number().int().min(0).max(38).openapi({ example: 6 }),
   assetDecimals: z.number().int().min(0).max(38).openapi({ example: 6 }),
@@ -637,6 +654,15 @@ const earnParRedemptionTermsFields = {
   }),
 } as const;
 
+const earnParRedemptionIntermediateTermsFields = {
+  intermediateAmount: earnDecimalAmountSchema.openapi({
+    description:
+      "Intermediate token the owner already holds outside any request (such as a cancelled request's wYLDS) to redeem at par, in that token's units. Send instead of `shares`, never with it.",
+    example: "2000",
+  }),
+  mechanism: earnParRedemptionTermsFields.mechanism,
+} as const;
+
 export const earnExternalWalletWithdrawalOptionsRequest = z
   .union([earnExternalWalletPositionLocatorSchema, earnExternalWalletStrategyLocatorSchema])
   .openapi({
@@ -659,6 +685,8 @@ export const earnExternalWalletQueuedWithdrawalPreviewRequest = z
     earnExternalWalletStrategyLocatorSchema.extend(earnQueuedWithdrawalTermsFields),
     earnExternalWalletPositionLocatorSchema.extend(earnParRedemptionTermsFields),
     earnExternalWalletStrategyLocatorSchema.extend(earnParRedemptionTermsFields),
+    earnExternalWalletPositionLocatorSchema.extend(earnParRedemptionIntermediateTermsFields),
+    earnExternalWalletStrategyLocatorSchema.extend(earnParRedemptionIntermediateTermsFields),
   ])
   .openapi({
     description:
@@ -689,7 +717,7 @@ const earnQueuedWithdrawalPreviewFields = {
 
 const earnParRedemptionPreviewFields = {
   mechanism: z.literal("operatorRedemption"),
-  shares: earnDecimalAmountSchema,
+  shares: earnParRedemptionSharesSchema,
   shareDecimals: z.number().int().min(0).max(38),
   intermediateMint: earnSolanaMintSchema.openapi({
     description: "Token the request creates or delegates for later operator settlement.",
@@ -729,10 +757,14 @@ export const earnExternalWalletWithdrawalRequestTransactionRequest = z
       ...earnParRedemptionTermsFields,
       feePayer: earnFeePayerRequestSchema.optional(),
     }),
+    earnExternalWalletPositionLocatorSchema.extend({
+      ...earnParRedemptionIntermediateTermsFields,
+      feePayer: earnFeePayerRequestSchema.optional(),
+    }),
   ])
   .openapi({
     description:
-      "Build a keyed asynchronous withdrawal request. A solver request escrows shares; an operator redemption converts them into the provider's intermediate token. Neither action pays assets.",
+      "Build a keyed asynchronous withdrawal request. A solver request escrows shares; an operator redemption converts them into the provider's intermediate token, or delegates intermediate the owner already holds. Neither action pays assets.",
   });
 
 export const earnExternalWalletWithdrawalRequestCancelTransactionRequest = z
@@ -804,6 +836,7 @@ const earnSolverWithdrawalRequestSchema = z.object({
 
 const earnOperatorRedemptionRequestSchema = z.object({
   ...earnAsyncWithdrawalRequestCommonFields,
+  shares: earnParRedemptionSharesSchema,
   mechanism: z.literal("operatorRedemption"),
   intermediateMint: earnSolanaMintSchema,
   intermediateAmount: earnDecimalAmountSchema,
@@ -912,7 +945,7 @@ const earnOperatorRedemptionRequestBuildSchema = earnExternalWalletTransactionSc
   action: z.literal("request"),
   mechanism: z.literal("operatorRedemption"),
   requestAddress: z.string().openapi({ description: "Provider request account address." }),
-  shares: earnDecimalAmountSchema,
+  shares: earnParRedemptionSharesSchema,
   assets: earnDecimalAmountSchema,
   intermediateMint: earnSolanaMintSchema,
   intermediateAmount: earnDecimalAmountSchema,
@@ -1266,7 +1299,8 @@ const earnExternalWalletTokenEarningsSchema = z
         "presented as complete.",
     }),
     totalDeposited: earnLiveDecimalAmountSchema.openapi({
-      description: "Sum of finalized SDP deposits — a ledger fact, always present.",
+      description:
+        "Sum of observed finalized SDP deposits. Excludes unobserved receipts (see `deposits_not_valued`).",
     }),
     totalWithdrawn: earnLiveDecimalAmountSchema.openapi({
       description:
@@ -1285,16 +1319,16 @@ const earnExternalWalletTokenEarningsSchema = z
         "live_value_unavailable",
         "movements_pending",
         "withdrawals_pending",
+        "deposits_not_valued",
         "withdrawals_not_valued",
       ])
       .optional()
       .openapi({
         description:
           "Why `earned` is absent: live value failed to hydrate; a movement is still settling; " +
-          "a currently held position has an open queued withdrawal request, whose shares leave " +
-          "the wallet before its payout (this can last days); or a currently held position has " +
-          "a finalized withdrawal whose token payout was not observed at settlement, so " +
-          "`totalWithdrawn` is incomplete.",
+          "a held position has an open queued withdrawal request, whose shares leave the wallet " +
+          "before its payout (this can last days); or a held position has an unobserved finalized " +
+          "deposit or withdrawal, leaving `totalDeposited` or `totalWithdrawn` incomplete.",
       }),
   })
   .openapi({ description: "Earnings for one deposit token across the wallet's positions." });

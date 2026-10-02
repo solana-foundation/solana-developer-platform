@@ -9,14 +9,22 @@ import { seedTestDatabase } from "@/test/mocks/db";
 const getSignatureStatuses = vi.hoisted(() => vi.fn());
 const getBlockHeight = vi.hoisted(() => vi.fn());
 const getTransaction = vi.hoisted(() => vi.fn());
+const readKaminoDepositReceipt = vi.hoisted(() => vi.fn());
 const readVaultPositions = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const reconcileEarnVaultQueuedWithdrawals = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
+vi.mock("@sdp/kamino", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/kamino")>()),
+  readKaminoDepositReceipt,
+}));
+
 vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
-  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+  createRpc: () => ({
+    getBlockHeight: (config: unknown) => ({ send: () => getBlockHeight(config) }),
+  }),
   getSignatureStatuses,
   getTransaction,
 }));
@@ -37,9 +45,11 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
 const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("../../cron/run-event");
-const { reconcileEarnVaultMovementReadThrough, repairUnvaluedWithdrawalPayouts } = await import(
-  "../earn/vault-movement-reconciliation.service"
-);
+const {
+  reconcileEarnVaultMovementReadThrough,
+  repairUnvaluedWithdrawalPayouts,
+  repairUnvaluedKaminoDeposits,
+} = await import("../earn/vault-movement-reconciliation.service");
 
 const ORG = "org_vault_reconcile";
 const PROJECT = "prj_vault_reconcile";
@@ -49,6 +59,7 @@ const WALLET = "cwlt_vault_reconcile";
 beforeEach(async () => {
   await seedTestDatabase(env);
   vi.clearAllMocks();
+  readKaminoDepositReceipt.mockResolvedValue({ amount: "1", sharesOut: "1" });
   const db = getDb(env);
   await db.batch([
     db
@@ -307,6 +318,68 @@ async function positionRow(positionId: string) {
     .bind(positionId)
     .first<{ closed_at: string | null; updated_at: string }>();
 }
+
+describe("Kamino deposit receipts", () => {
+  it("settles the actual debit and minted shares, preserving the requested maximum", async () => {
+    const seeded = await seedExternalWalletMovement();
+    readKaminoDepositReceipt.mockResolvedValue({ amount: "0.4", sharesOut: "0.39" });
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    expect(movement).toMatchObject({
+      status: "finalized",
+      amount_requested: "1",
+      amount_settled: "0.4",
+      token_amount_settled: "0.4",
+      shares_out: "0.39",
+    });
+    expect(readKaminoDepositReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({ cluster: "devnet" }),
+      expect.objectContaining({
+        owner: EXTERNAL_OWNER,
+        vault: seeded.position.vault_address,
+        tokenMint: USDC,
+        shareMint: SHARE,
+        signature: seeded.movement.signature,
+        requestedAmount: "1",
+      })
+    );
+  });
+
+  it("finalizes on missing history, then repairs without duplicating the movement", async () => {
+    const seeded = await seedMovement();
+    readKaminoDepositReceipt.mockRejectedValue(new Error("history unavailable"));
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    expect(await reconcileEarnVaultMovementReadThrough(env, seeded.movement)).toMatchObject({
+      status: "finalized",
+      amount_settled: null,
+      token_amount_settled: null,
+    });
+    expect(await repairUnvaluedKaminoDeposits(env)).toEqual({
+      claimed: 1,
+      repaired: 0,
+      unobserved: 1,
+      errors: 0,
+    });
+    expect(await repairUnvaluedKaminoDeposits(env)).toMatchObject({ claimed: 0 });
+    readKaminoDepositReceipt.mockResolvedValue({ amount: "0.999999", sharesOut: "0.9" });
+    expect(
+      await repairUnvaluedKaminoDeposits(env, { now: Date.now() + 16 * 60_000 })
+    ).toMatchObject({ claimed: 1, repaired: 1 });
+    expect(await ledgerRow(seeded.movement.id)).toMatchObject({
+      amount_requested: "1",
+      amount_settled: "0.999999",
+      token_amount_settled: "0.999999",
+      shares_out: "0.9",
+    });
+    expect(
+      await repairUnvaluedKaminoDeposits(env, { now: Date.now() + 32 * 60_000 })
+    ).toMatchObject({ claimed: 0 });
+  });
+});
 
 describe("settlement observations (0103): withdrawal payout and empty-holding close", () => {
   it("records the observed token payout and closes a holding left empty", async () => {
@@ -869,11 +942,119 @@ describe("reconcileEarnVaultMovements", () => {
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
-  it("fails a missing signature after its recorded blockhash expires", async () => {
+  describe.each(["requested", "submitted"] as const)("ambiguous %s broadcast recovery", (state) => {
+    async function ambiguousMovement(direction: "deposit" | "withdrawal" = "deposit") {
+      const seeded =
+        direction === "deposit" ? await seedMovement("100") : await seedWithdrawal("100");
+      if (state === "submitted")
+        await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+          movementId: seeded.movement.id,
+          organizationId: ORG,
+          toStatus: "submitted",
+        });
+      getSignatureStatuses.mockResolvedValue([null]);
+      getBlockHeight.mockResolvedValue(101n);
+      return seeded;
+    }
+
+    it("recovers finalized history before expiring an unknown signature", async () => {
+      const seeded = await ambiguousMovement();
+      getTransaction.mockResolvedValue({ slot: 1n, err: null, executionResultKnown: true });
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "finalized",
+        failure_reason: null,
+        amount_settled: "1",
+      });
+      expect(getTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        seeded.movement.signature,
+        "finalized"
+      );
+      expect(getBlockHeight).toHaveBeenCalledWith({ commitment: "finalized" });
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    });
+
+    it("records an actual finalized transaction error without claiming settlement", async () => {
+      const seeded = await ambiguousMovement();
+      getTransaction.mockResolvedValue({
+        slot: 1n,
+        err: "InsufficientFundsForFee",
+        executionResultKnown: true,
+      });
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "failed",
+        amount_settled: null,
+      });
+    });
+
+    it.each(["deposit", "withdrawal"] as const)(
+      "keeps a %s recoverable until historical execution metadata is available",
+      async (direction) => {
+        const seeded = await ambiguousMovement(direction);
+        getTransaction.mockResolvedValue({ slot: 1n, err: null, executionResultKnown: false });
+
+        await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+        await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+        await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+          status: state,
+          settled_at: null,
+          amount_settled: null,
+          failure_reason: null,
+          unknown_signature_observed_at: null,
+          chain_finalized_at: null,
+        });
+        expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+
+        getTransaction.mockResolvedValue({ slot: 1n, err: null, executionResultKnown: true });
+        await reconcileEarnVaultMovements(env);
+        await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+          status: "finalized",
+          failure_reason: null,
+        });
+      }
+    );
+
+    it("leaves the movement recoverable when historical evidence cannot be read", async () => {
+      const seeded = await ambiguousMovement();
+      getTransaction.mockRejectedValue(new Error("history unavailable"));
+      await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: state,
+        failure_reason: null,
+      });
+    });
+
+    it("waits for another observation and accepts a late finality response", async () => {
+      const seeded = await ambiguousMovement();
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "submitted",
+        failure_reason: null,
+        unknown_signature_observed_at: expect.any(String),
+      });
+      getSignatureStatuses.mockResolvedValue([
+        { slot: 1n, err: null, confirmations: null, confirmationStatus: "finalized" },
+      ]);
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "finalized",
+        failure_reason: null,
+      });
+    });
+  });
+
+  it("expires an unknown intent only after finalized history and a later observation", async () => {
     const seeded = await seedMovement("100");
     getSignatureStatuses.mockResolvedValue([null]);
     getBlockHeight.mockResolvedValue(101n);
 
+    await reconcileEarnVaultMovements(env);
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "submitted",
+      failure_reason: null,
+    });
     await reconcileEarnVaultMovements(env);
 
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({

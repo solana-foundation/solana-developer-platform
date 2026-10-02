@@ -113,6 +113,12 @@ const SHARED_ACCOUNTS_ROUTE_V2_FIXED_BYTES = 8 + 1 + 8 + 8 + 2 + 2 + 2;
 const ROUTE_PLAN_LENGTH_BYTES = 4;
 const SLIPPAGE_BPS_DENOMINATOR = 10_000n;
 
+const MAX_TOKEN_ATOMS = (1n << 64n) - 1n;
+
+function isTokenAtoms(value: unknown): value is string {
+  return typeof value === "string" && /^\d{1,20}$/.test(value) && BigInt(value) <= MAX_TOKEN_ATOMS;
+}
+
 /** Jupiter's ExactIn V2 program rounds the post-slippage floor up. */
 function exactInMinimumOutAtoms(quotedOutAtoms: bigint, slippageBps: number): bigint {
   if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) {
@@ -153,12 +159,17 @@ export function computeUnitLimitInstruction(units: number): EarnVaultInstruction
   return { programAddress: COMPUTE_BUDGET_PROGRAM_ID, accounts: [], data: data.toString("base64") };
 }
 
-/** The plan with a locally-built compute-unit limit as its first instruction. */
+/** Replace provider limits with the one budget for the complete composed transaction. */
 export function withComputeUnitLimit(
   plan: EarnVaultTransactionPlan,
   units: number
 ): EarnVaultTransactionPlan {
-  return { ...plan, instructions: [computeUnitLimitInstruction(units), ...plan.instructions] };
+  const instructions = plan.instructions.filter((instruction) => {
+    if (instruction.programAddress !== COMPUTE_BUDGET_PROGRAM_ID) return true;
+    const data = Buffer.from(instruction.data, "base64");
+    return data.length !== 5 || data[0] !== 2;
+  });
+  return { ...plan, instructions: [computeUnitLimitInstruction(units), ...instructions] };
 }
 
 /** Buffered, capped limit from a probe simulation; the maximum when unreported. */
@@ -718,8 +729,10 @@ export async function fetchJupiterSwapLeg(
   const depositDecimals = destinationToken.decimals;
 
   const amountAtoms = parseDecimalAmount(request.sourceAmount, sourceDecimals);
-  if (amountAtoms <= 0n) {
-    throw badRequest("Swap amount must be greater than zero at the funding token's precision");
+  if (amountAtoms <= 0n || amountAtoms > MAX_TOKEN_ATOMS) {
+    throw badRequest(
+      "Swap amount must fit a positive SPL token amount at the funding token's precision"
+    );
   }
   const sourceTokenProgram = SPL_TOKEN_PROGRAMS[sourceToken.tokenProgram];
   const destinationTokenProgram = SPL_TOKEN_PROGRAMS[destinationToken.tokenProgram];
@@ -785,7 +798,7 @@ export async function fetchJupiterSwapLeg(
   } catch {
     throw earnBadRequest("Jupiter swap routing returned an unreadable response");
   }
-  if (!/^\d+$/.test(body.otherAmountThreshold ?? "") || !/^\d+$/.test(body.outAmount ?? "")) {
+  if (!body || !isTokenAtoms(body.otherAmountThreshold) || !isTokenAtoms(body.outAmount)) {
     throw earnBadRequest("Jupiter swap routing returned malformed amounts");
   }
   if (
@@ -863,8 +876,10 @@ export async function fetchJupiterSwapQuote(
   const outputDecimals = requireEarnSwapMintMetadata(request.outputMint, "deposit token").decimals;
 
   const amountAtoms = parseDecimalAmount(request.sourceAmount, sourceDecimals);
-  if (amountAtoms <= 0n) {
-    throw badRequest("Swap quote amount must be greater than zero at the token's precision");
+  if (amountAtoms <= 0n || amountAtoms > MAX_TOKEN_ATOMS) {
+    throw badRequest(
+      "Swap quote amount must fit a positive SPL token amount at the token's precision"
+    );
   }
 
   const query = new URLSearchParams({
@@ -872,6 +887,8 @@ export async function fetchJupiterSwapQuote(
     outputMint: request.outputMint,
     amount: amountAtoms.toString(),
     swapMode: "ExactIn",
+    // The execution path uses /build, whose only router is Metis.
+    excludeRouters: "jupiterz,dflow,okx",
   });
 
   const response = await deadline.run("Quoting the Jupiter swap", () =>
@@ -901,16 +918,18 @@ export async function fetchJupiterSwapQuote(
     inAmount?: string;
     outAmount?: string;
     priceImpactPct?: string | number;
+    router?: string;
   };
   try {
     body = (await response.json()) as typeof body;
   } catch {
     throw earnBadRequest("Jupiter swap quoting returned an unreadable response");
   }
-  if (!/^\d+$/.test(body.outAmount ?? "")) {
+  if (!body || !isTokenAtoms(body.outAmount) || BigInt(body.outAmount) === 0n) {
     throw earnBadRequest("Jupiter swap quoting returned malformed amounts");
   }
   if (
+    body.router !== "metis" ||
     body.inputMint !== request.inputMint ||
     body.outputMint !== request.outputMint ||
     body.inAmount !== amountAtoms.toString()
@@ -919,7 +938,7 @@ export async function fetchJupiterSwapQuote(
   }
 
   return {
-    outAmount: formatDecimalAmount(BigInt(body.outAmount as string), outputDecimals),
+    outAmount: formatDecimalAmount(BigInt(body.outAmount), outputDecimals),
     priceImpactPct: String(body.priceImpactPct ?? "0"),
   };
 }

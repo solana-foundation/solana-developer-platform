@@ -656,22 +656,22 @@ describe("depositIntoVault — signed persistence boundary", () => {
     expect(result.movement).toMatchObject({ status: "requested", signature: "sig_original" });
   });
 
-  it("fails a signed intent at once when preflight proves its blockhash expired", async () => {
+  it("leaves an expired-blockhash refusal for signature reconciliation", async () => {
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
     getBlockHeight.mockResolvedValue(12_346n);
 
     const result = await depositIntoVault(env, depositInput());
 
     expect(result.movement).toMatchObject({
-      status: "failed",
+      status: "requested",
       signature: "sig_original",
-      failure_reason: "Transaction blockhash expired before confirmation",
+      failure_reason: null,
     });
     const persisted = await getDb(env)
       .prepare("SELECT status FROM earn_movements WHERE id = ?")
       .bind(result.movement.id)
       .first<{ status: string }>();
-    expect(persisted?.status).toBe("failed");
+    expect(persisted?.status).toBe("requested");
   });
 
   it("keeps a preflight blockhash refusal reconcilable while its window is open", async () => {
@@ -962,25 +962,25 @@ describe("depositIntoVault — signed persistence boundary", () => {
    * program's NAMED error — the bare custom-error number is every Anchor
    * program's first error code and would relabel unrelated failures.
    */
-  it("names a slippage-exceeded simulation in the caller's terms", async () => {
-    simulateVaultPlan.mockResolvedValue({
-      ok: false,
-      error: "custom program error: 0x1770",
-      logs: [
-        "Program log: AnchorError occurred. Error Code: SlippageExceeded. " +
-          "Error Number: 6000. Error Message: Slippage tolerance exceeded.",
-      ],
-    });
+  it.each(["SlippageExceeded", "SharesOutBelowMinimum"])(
+    "names %s in the caller's terms",
+    async (marker) => {
+      simulateVaultPlan.mockResolvedValue({
+        ok: false,
+        error: "custom program error: 0x1770",
+        logs: [`Program log: AnchorError occurred. Error Code: ${marker}.`],
+      });
 
-    await expect(depositIntoVault(env, depositInput())).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      details: { reason: "slippage_exceeded" },
-      message: expect.stringContaining("slippage"),
-    });
+      await expect(depositIntoVault(env, depositInput())).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        details: { reason: "slippage_exceeded" },
+        message: expect.stringContaining("slippage"),
+      });
 
-    expect(await tableCount("earn_movements")).toBe(0);
-    expect(broadcastVaultTransaction).not.toHaveBeenCalled();
-  });
+      expect(await tableCount("earn_movements")).toBe(0);
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    }
+  );
 });
 
 describe("depositIntoVault — approved-operation effect fencing", () => {
@@ -1101,13 +1101,14 @@ describe("earn vault project attribution", () => {
       });
     }
 
-    it("records the sponsor when this deposit creates the account", async () => {
+    it("preserves the planned sponsor on the movement without authorizing a refund", async () => {
       sponsored();
       buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
 
       const result = await depositIntoVault(env, depositInput());
 
-      expect(await recordedFunder(result.position.id)).toBe(SPONSOR);
+      expect(await recordedFunder(result.position.id)).toBeNull();
+      expect(result.movement.share_ata_rent_funder).toBe(SPONSOR);
     });
 
     /**
@@ -1162,29 +1163,19 @@ describe("earn vault project attribution", () => {
       });
     }
 
-    /**
-     * The attribution is a PROJECTION, so it repairs itself. A movement that
-     * observed the account missing and then never landed charged no rent, and
-     * leaving its claim standing would send the close's 2,039,280 lamports to a
-     * party that paid nothing, for as long as the position lives.
-     */
-    it("drops the claim when the creating movement fails", async () => {
+    it("keeps the refund destination unknown after a creation claim fails", async () => {
       sponsored();
       buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
       const result = await depositIntoVault(env, depositInput());
-      expect(await recordedFunder(result.position.id)).toBe(SPONSOR);
+      expect(await recordedFunder(result.position.id)).toBeNull();
+      expect(result.movement.share_ata_rent_funder).toBe(SPONSOR);
 
       await failMovement(result.movement.id);
 
       expect(await recordedFunder(result.position.id)).toBeNull();
     });
 
-    /**
-     * And it falls back rather than to a guess: an earlier surviving claim is
-     * the truth once a later one fails, because the account it created is the
-     * one still on chain.
-     */
-    it("falls back to the earlier surviving claim", async () => {
+    it("never promotes either concurrent creation claim to a refund destination", async () => {
       const SPONSOR_LATER = "8pPyFjmDGXnstD9Yg8H1jd1CyJcCPHwRvUBhZ4NRLPMe";
       buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
       resolveVaultSponsorship.mockResolvedValue({
@@ -1209,11 +1200,13 @@ describe("earn vault project attribution", () => {
         depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
       );
       expect(second.position.id).toBe(first.position.id);
-      expect(await recordedFunder(first.position.id)).toBe(SPONSOR_LATER);
+      expect(await recordedFunder(first.position.id)).toBeNull();
+      expect(first.movement.share_ata_rent_funder).toBe(SPONSOR);
+      expect(second.movement.share_ata_rent_funder).toBe(SPONSOR_LATER);
 
       await failMovement(second.movement.id);
 
-      expect(await recordedFunder(first.position.id)).toBe(SPONSOR);
+      expect(await recordedFunder(first.position.id)).toBeNull();
     });
 
     /**
@@ -1269,11 +1262,12 @@ describe("earn vault project attribution", () => {
       expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
       // Two sponsors were resolved, so the assertion below is not vacuous.
       expect(new Set(sponsorBySignature.values()).size).toBe(2);
-      // The refund is owed to whoever signed the bytes that can land.
+      // Preserve the winning plan as a claim; it is not proof that rent was paid.
       const winner = results.find((result) => !result.replayed);
-      expect(await recordedFunder(results[0].position.id)).toBe(
+      expect(winner?.movement.share_ata_rent_funder).toBe(
         sponsorBySignature.get(winner?.movement.signature ?? "")
       );
+      expect(await recordedFunder(results[0].position.id)).toBeNull();
     });
   });
 });

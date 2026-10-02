@@ -590,11 +590,8 @@ export async function buildExternalWalletDepositTransaction(
     minSharesOut,
     createsShareAccount: plan.createsShareAccount === true,
     feePayer: feePayer ?? null,
-    // The rent funder to carry onto the movement at submit: the fee payer when
-    // the plan creates the share account (its address was embedded as the
-    // provider's rentPayer), NULL otherwise — the owner paid, or nothing was
-    // created. Recorded at build because the exit must refund whoever actually
-    // paid, never whoever is configured when the exit happens.
+    // Carry the planned rent payer onto the movement at submit. An idempotent
+    // create can be a no-op; Kamino never uses this claim to authorize a refund.
     shareAtaRentFunder:
       plan.createsShareAccount === true && feePayer !== undefined ? feePayer : null,
     unsignedTransaction: Buffer.from(unsigned.bytes).toString("base64"),
@@ -759,10 +756,8 @@ export async function buildExternalWalletWithdrawalTransaction(
   };
   const runtime: EarnRuntimeContext = { env, environment: input.environment };
 
-  // The recorded rent funder (NULL means the owner paid its own rent) drives
-  // the refund, for the same reason the custody exit reads it from the
-  // position: refund whoever actually paid, never whoever is configured today.
-  // A partner-funded position therefore refunds the PARTNER on exit.
+  // Legacy provider-specific hint. Kamino ignores it for existing accounts;
+  // a pre-build creation claim cannot identify the payer of their live instance.
   const rentRefundTo = input.shareAtaRentFunder ?? undefined;
   // Same one-value rule (and owner normalization) as the deposit build: the
   // fee mode drives the provider's rent payer (an exit consolidation can
@@ -910,8 +905,7 @@ export async function buildExternalWalletWithdrawalTransaction(
     minSharesOut: input.minAmountOut ?? null,
     createsShareAccount: plan.createsShareAccount === true,
     feePayer: feePayer ?? null,
-    // Same recording rule as the deposit build: an exit consolidation that
-    // creates an account was rent-funded by the fee payer when one was named.
+    // Same planning claim as the deposit build; this is not execution evidence.
     shareAtaRentFunder:
       plan.createsShareAccount === true && feePayer !== undefined ? feePayer : null,
     unsignedTransaction: Buffer.from(unsigned.bytes).toString("base64"),
@@ -1011,8 +1005,7 @@ export async function submitExternalWalletDeposit(
     idempotencyFingerprint: fingerprint,
     externalWalletTransactionId: built.id,
     createsShareAccount: built.creates_share_account,
-    // Rent attribution recorded at build time: the partner fee payer when it
-    // funded the share ATA, NULL when the owner did. The exit refunds this.
+    // Build-time payer claim only. Kamino's builder ignores historical hints.
     shareAtaRentFunder: built.share_ata_rent_funder,
     createdBy: input.userId ?? null,
     initiatedByKeyId: input.apiKeyId ?? null,

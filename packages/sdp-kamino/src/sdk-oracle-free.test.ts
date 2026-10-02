@@ -1,7 +1,8 @@
 import { type Address, address, type TransactionSigner } from "@solana/kit";
-import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildKaminoDepositPlan, buildKaminoWithdrawPlan, readKaminoPosition } from "./sdk";
+import { isShareAtaCloseInstruction } from "./withdraw-instructions";
 
 const VAULT = address("7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx");
 const OWNER = address("11111111111111111111111111111112");
@@ -236,6 +237,49 @@ describe("oracle-free Kamino SDK execution", () => {
 
     expect(mocks.stateOnlyOracles).toHaveLength(1);
     expect(mocks.stateOnlyOracles[0]?.valid).toBe(false);
+  });
+
+  it("retains an ATA created during consolidation even with a refund hint", async () => {
+    const rentPayer = { address: LENDING_MARKET } as TransactionSigner;
+    const plan = await buildKaminoWithdrawPlan(runtime, {
+      owner,
+      shares: "1",
+      slot: 123n,
+      vault: VAULT,
+      rentPayer,
+      rentRefundTo: VAULT,
+    });
+    const [shareAta] = await findAssociatedTokenPda({
+      owner: OWNER,
+      mint: SHARE_MINT,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+    expect(plan.createsShareAccount).toBe(true);
+    expect(
+      plan.instructions.some((instruction) => isShareAtaCloseInstruction(instruction, shareAta))
+    ).toBe(false);
+  });
+
+  it("strips SDK cleanup and ignores refund hints for an existing ATA", async () => {
+    const [shareAta] = await findAssociatedTokenPda({
+      owner: OWNER,
+      mint: SHARE_MINT,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+    mocks.sendTokenAccounts.mockResolvedValue({
+      value: [{ ...tokenAccounts.value[0], pubkey: shareAta }],
+    });
+    const plan = await buildKaminoWithdrawPlan(runtime, {
+      owner,
+      shares: "1",
+      slot: 123n,
+      vault: VAULT,
+      rentRefundTo: LENDING_MARKET,
+    });
+    expect(plan.createsShareAccount).toBe(false);
+    expect(
+      plan.instructions.some((instruction) => isShareAtaCloseInstruction(instruction, shareAta))
+    ).toBe(false);
   });
 
   it("keeps the state-only oracle fail-closed if an SDK path tries to price", async () => {

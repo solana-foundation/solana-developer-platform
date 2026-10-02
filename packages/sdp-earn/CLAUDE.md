@@ -217,7 +217,8 @@ reverse swap. Mainnet-only — Ondo has NO devnet deployment (verified on-chain;
 even their staging environment runs on mainnet with different mints), so the
 sandbox shelf carries the row only through the PRO-1742 browse-only mirror.
 The catalogue read (`providers/ondo/client.ts`) genesis-proves the RPC and
-verifies the mint account before reporting the one-row shelf, and the row is
+verifies the mint account, including its initialized flag, before reporting
+the one-row shelf, and the row is
 its `sourceKind: "rwa"`: the classification traces to the
 issuer's own published mint address in `ONDO_DEPLOYMENTS`
 (`@sdp/types/ondo-programs`), the same allowlist bar Veda clears. Its
@@ -226,6 +227,9 @@ keyless GET to `ondo.finance/api/v1/assets` (`providers/ondo/usdy-rate.ts`,
 PRO-1833; NOT the credentialed Stocks API, which has no USDY). Written by this
 hourly pass, not the metrics refresh, because Ondo sets the rate monthly. An
 unreachable API fails the Ondo pass (rows keep their last figures).
+Percent-to-fraction conversion preserves the API number's decimal digits,
+including exponent notation, and truncates to six places using integer
+arithmetic. Do not round with `toFixed` before truncating the rate.
 The row's `riskMetadata` carries the eligibility constraints an
 integrator asks about (Reg S non-US-person restriction, issuer freeze
 authority), with the longer record in `docs/earn/ondo-catalogue-inventory.md`.
