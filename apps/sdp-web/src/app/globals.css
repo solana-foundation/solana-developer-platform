@@ -1,7 +1,9 @@
 @import "tailwindcss";
 @import "@solana/design-system/styles";
-/* SDP color theme (primitives → semantic tokens → package retheme).
-   Imported after the package so its Tier 3 retheme wins. */
+/* SDP tokens (palettes, refresh scope, scale) and their Tailwind utilities, then the app's
+   own wiring (Clerk, design-system retheme). All after the package so SDP names win. */
+@import "@sdp/design-tokens/tokens.css";
+@import "@sdp/design-tokens/theme.css";
 @import "./sdp-theme.css";
 
 /* Tailwind v4 defaults dark: utilities to the OS media query. SDP has an
@@ -40,6 +42,8 @@
   will-change: transform;
 }
 
+/* The amber reads the palette (--amber-*) directly: @theme inline resolves --color-warning*
+   once at :root, so inside a nested refresh scope it would keep the base amber. */
 .earn-processing-modal::before {
   content: "";
   position: absolute;
@@ -52,12 +56,12 @@
     from var(--earn-processing-angle),
     transparent 0deg,
     transparent 248deg,
-    color-mix(in srgb, var(--color-warning-border) 55%, transparent) 282deg,
-    var(--color-warning-border) 316deg,
-    var(--color-warning) 338deg,
+    color-mix(in srgb, var(--amber-brd) 55%, transparent) 282deg,
+    var(--amber-brd) 316deg,
+    var(--amber-tx) 338deg,
     transparent 360deg
   );
-  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--color-warning) 28%, transparent));
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--amber-tx) 28%, transparent));
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
@@ -74,13 +78,14 @@
   }
 
   .earn-processing-modal::before {
-    background: var(--color-warning-border);
+    background: var(--amber-brd);
     filter: none;
   }
 }
 
 :root {
-  --sdp-shell-bg: var(--surface);
+  /* --sdp-shell-bg is declared in sdp-theme.css, on :root and again on the refresh scope so it
+     re-resolves against the scope's --surface. */
   --sdp-field-radius: var(--input-radius-xl, 12px);
   --sdp-surface-radius: var(--radius-xl, 12px);
   --sdp-color-info-bg: rgba(33, 99, 182, 0.12);

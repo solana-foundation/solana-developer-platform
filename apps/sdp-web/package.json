@@ -23,6 +23,7 @@
     "@base-ui/react": "1.8.0",
     "@clerk/nextjs": "7.9.2",
     "@flags-sdk/vercel": "1.4.8",
+    "@sdp/design-tokens": "workspace:*",
     "@sdp/issuance": "workspace:*",
     "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",
