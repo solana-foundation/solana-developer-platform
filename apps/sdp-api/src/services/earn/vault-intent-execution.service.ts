@@ -19,7 +19,7 @@ import {
   signVaultPlan,
   simulateVaultPlan,
 } from "./vault-execution.service";
-import { isBlockhashNotFoundError, rawSimulationDetails } from "./vault-simulation-error";
+import { rawSimulationDetails } from "./vault-simulation-error";
 import type { VaultFeeMode } from "./vault-sponsorship";
 
 /**
@@ -31,6 +31,8 @@ import type { VaultFeeMode } from "./vault-sponsorship";
 const SLIPPAGE_SIMULATION_MARKERS = [
   "SlippageExceeded",
   "Slippage tolerance exceeded",
+  // biome-ignore lint/security/noSecrets: public Kamino Anchor error name.
+  "SharesOutBelowMinimum",
   // biome-ignore lint/security/noSecrets: public Jupiter Lend Anchor error name.
   "FTokenMinAmountOut",
   // biome-ignore lint/security/noSecrets: public Jupiter Lend Anchor error name.
@@ -42,12 +44,6 @@ export function isSlippageSimulationFailure(error: string, logs: readonly string
     (marker) => error.includes(marker) || logs.some((log) => log.includes(marker))
   );
 }
-
-/**
- * The reconciler's wording for a movement that outlived its blockhash window
- * (vault-movement-reconciliation.service.ts); the two paths record one fact.
- */
-export const BLOCKHASH_EXPIRED_FAILURE_REASON = "Transaction blockhash expired before confirmation";
 
 /** Interactive budget for a block-height read that only gates an early answer. */
 const BLOCK_HEIGHT_READ_TIMEOUT_MS = 2_000;
@@ -223,9 +219,9 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
  * The invariant tail past the durable write, shared by every vault money
  * mover: broadcast the recorded bytes, then reconcile the optimistic
  * `submitted` transition. A broadcast error is ambiguous and leaves the
- * durable `requested` row for the shared reconciler; it is never a failure,
- * with one proven exception: a preflight blockhash refusal observed past the
- * blockhash window fails the movement at once (`failExpiredBroadcast`).
+ * durable `requested` row for the shared reconciler. Even an expired-blockhash
+ * refusal describes only this broadcast attempt: an external wallet or a
+ * concurrent reconciler may already have sent the exact signed transaction.
  *
  * Split out of `executeSignedVaultIntent` for the caller-signed external-wallet flow
  * (PRO-1722), which records a movement it never signed and so has no
@@ -253,8 +249,6 @@ export async function broadcastRecordedVaultMovement(
       rpcUrl: input.rpcUrl,
     });
   } catch (error) {
-    const expired = await failExpiredBroadcast(env, input, error);
-    if (expired) return expired;
     getLogger().error(
       { movementId: input.movement.id, signature: input.signature, error },
       `vault ${input.operation}: broadcast outcome unknown; left reconcilable`
@@ -280,68 +274,4 @@ export async function broadcastRecordedVaultMovement(
   throw internalError(
     `Vault ${input.operation} was broadcast but its ledger transition could not be verified`
   );
-}
-
-/**
- * Fail a movement whose broadcast preflight refused an expired blockhash.
- *
- * Two facts make this definitive where a lone broadcast error is not: the
- * preflight `BlockhashNotFound` proves the bytes never reached the network,
- * and a confirmed height past `last_valid_block_height` proves they never
- * can. The height check is not decoration: preflight simulates at a
- * commitment that can lag the one the blockhash was quoted at, so a
- * too-NEW blockhash produces the same refusal, and the reconciler's
- * rebroadcast is what lands it. Any doubt (no window on the row, height
- * unreadable, window still open) answers null and leaves the row
- * reconcilable.
- */
-async function failExpiredBroadcast(
-  env: Env,
-  input: {
-    operation: string;
-    organizationId: string;
-    rpcUrl: string;
-    signature: string;
-    movement: EarnMovementRow;
-  },
-  error: unknown
-): Promise<EarnMovementRow | null> {
-  if (!isBlockhashNotFoundError(error)) return null;
-  const lastValidBlockHeight = input.movement.last_valid_block_height;
-  if (lastValidBlockHeight === null) return null;
-
-  let currentBlockHeight: bigint;
-  try {
-    currentBlockHeight = await readConfirmedBlockHeight(env, input.rpcUrl);
-  } catch (heightError) {
-    getLogger().warn(
-      { movementId: input.movement.id, error: heightError },
-      `vault ${input.operation}: block height unreadable after a preflight blockhash refusal; left reconcilable`
-    );
-    return null;
-  }
-  if (currentBlockHeight <= BigInt(lastValidBlockHeight)) return null;
-
-  getLogger().warn(
-    {
-      movementId: input.movement.id,
-      signature: input.signature,
-      currentBlockHeight: currentBlockHeight.toString(),
-      lastValidBlockHeight,
-    },
-    `vault ${input.operation}: blockhash expired before broadcast; movement failed`
-  );
-  const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const failed = await ledger.advanceVaultMovement({
-    movementId: input.movement.id,
-    organizationId: input.organizationId,
-    toStatus: "failed",
-    failureReason: BLOCKHASH_EXPIRED_FAILURE_REASON,
-  });
-  if (failed) return failed;
-  // The reconciler moved the row first; report whatever it recorded.
-  return ledger.getMovementById({
-    movementId: input.movement.id,
-    organizationId: input.organizationId,
-  });
 }

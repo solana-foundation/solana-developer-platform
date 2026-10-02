@@ -478,6 +478,7 @@ export async function recurringCollectionTransactionForSignature(options: {
     });
   return {
     slot: 100n,
+    executionResultKnown: true,
     err: null,
     instructions: [
       {

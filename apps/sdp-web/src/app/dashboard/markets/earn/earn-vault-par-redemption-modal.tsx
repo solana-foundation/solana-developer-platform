@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
@@ -47,6 +48,9 @@ import {
   vaultWithdrawalSharesForAmount,
 } from "./earn-vault-withdraw-amount";
 
+/** What the request redeems: position shares, or the position's held `parIntermediate`. */
+export type EarnVaultParRedemptionSource = "shares" | "intermediate";
+
 interface EarnVaultParRedemptionModalProps {
   environment: SdpEnvironment;
   onClose: () => void;
@@ -54,10 +58,46 @@ interface EarnVaultParRedemptionModalProps {
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
   position: EarnVaultPosition;
   projectId: string | null;
+  source?: EarnVaultParRedemptionSource;
   terms: EarnVaultParRedemptionTerms;
 }
 
 type FormStep = "details" | "review";
+
+/** Copy that names what the request redeems, chosen once per source. */
+const PAR_SOURCE_COPY: Record<
+  EarnVaultParRedemptionSource,
+  Record<
+    "detailsBody" | "operatorNotice" | "reviewBody" | "reviewNotice" | "title" | "unit",
+    MessageKey
+  >
+> = {
+  shares: {
+    detailsBody: "DashboardEarn.parRedemption.detailsBody",
+    operatorNotice: "DashboardEarn.parRedemption.operatorNotice",
+    reviewBody: "DashboardEarn.parRedemption.reviewBody",
+    reviewNotice: "DashboardEarn.parRedemption.reviewNotice",
+    title: "DashboardEarn.parRedemption.title",
+    unit: "DashboardEarn.parRedemption.shareUnit",
+  },
+  intermediate: {
+    detailsBody: "DashboardEarn.parRedemption.detailsBodyIntermediate",
+    operatorNotice: "DashboardEarn.parRedemption.operatorNoticeIntermediate",
+    reviewBody: "DashboardEarn.parRedemption.reviewBodyIntermediate",
+    reviewNotice: "DashboardEarn.parRedemption.reviewNoticeIntermediate",
+    title: "DashboardEarn.parRedemption.titleIntermediate",
+    unit: "DashboardEarn.parRedemption.intermediateUnit",
+  },
+};
+
+function parMinimum(
+  terms: EarnVaultParRedemptionTerms,
+  source: EarnVaultParRedemptionSource
+): string | undefined {
+  return source === "intermediate"
+    ? terms.minimumIntermediateAmount
+    : (terms.minimumShares ?? undefined);
+}
 
 // Hastra documents this off-chain operator/CCTP batching threshold. It is an
 // advisory, not a program rule: v0.0.6 accepts a one-atom request, so the UI
@@ -66,11 +106,32 @@ const HASTRA_OPERATOR_BATCH_MINIMUM_USDC = "2000";
 
 function parPreviewInput(
   position: EarnVaultPosition,
-  shares: string | undefined,
-  terms: EarnVaultParRedemptionTerms
+  amountState: Pick<
+    ReturnType<typeof parRedemptionAmountState>,
+    "belowMinimum" | "intermediateAmount" | "overAvailableAmount" | "shares"
+  >
 ): EarnVaultParRedemptionTermsRequest | null {
-  if (!shares || compareUnsignedDecimals(shares, terms.minimumShares) === -1) return null;
-  return { positionId: position.id, shares, mechanism: "operatorRedemption" };
+  if (amountState.belowMinimum) return null;
+  if (amountState.intermediateAmount !== undefined) {
+    if (amountState.overAvailableAmount) return null;
+    return {
+      positionId: position.id,
+      intermediateAmount: amountState.intermediateAmount,
+      mechanism: "operatorRedemption",
+    };
+  }
+  if (!amountState.shares) return null;
+  return { positionId: position.id, shares: amountState.shares, mechanism: "operatorRedemption" };
+}
+
+/** The held intermediate is redeemed one-for-one, so its balance is the ceiling. */
+function parAvailableAmount(
+  position: EarnVaultPosition,
+  source: EarnVaultParRedemptionSource
+): string | undefined {
+  if (source === "shares") return vaultWithdrawalAvailableAmount(position);
+  const held = position.parIntermediate?.withdrawableAmount;
+  return held !== undefined && isPositiveDecimal(held) ? held : undefined;
 }
 
 function isClientErrorStatus(status: number | null): boolean {
@@ -81,23 +142,40 @@ function parRedemptionAmountState(
   position: EarnVaultPosition,
   amount: string,
   availableAmount: string | undefined,
-  terms: EarnVaultParRedemptionTerms
+  terms: EarnVaultParRedemptionTerms,
+  source: EarnVaultParRedemptionSource
 ) {
   const validation = validateVaultWithdrawalAmount(amount);
-  const shares =
-    validation.kind === "valid"
-      ? vaultWithdrawalSharesForAmount(validation.canonicalAmount, position)
-      : undefined;
-  return {
+  const canonical = validation.kind === "valid" ? validation.canonicalAmount : undefined;
+  const common = {
     belowBatchMinimum:
-      validation.kind === "valid" &&
-      compareUnsignedDecimals(validation.canonicalAmount, HASTRA_OPERATOR_BATCH_MINIMUM_USDC) ===
-        -1,
-    belowMinimum: !!shares && compareUnsignedDecimals(shares, terms.minimumShares) === -1,
+      canonical !== undefined &&
+      compareUnsignedDecimals(canonical, HASTRA_OPERATOR_BATCH_MINIMUM_USDC) === -1,
     overAvailableAmount:
-      validation.kind === "valid" && availableAmount !== undefined
-        ? compareUnsignedDecimals(validation.canonicalAmount, availableAmount) === 1
+      canonical !== undefined && availableAmount !== undefined
+        ? compareUnsignedDecimals(canonical, availableAmount) === 1
         : false,
+  };
+  if (source === "intermediate") {
+    return {
+      ...common,
+      belowMinimum:
+        canonical !== undefined &&
+        compareUnsignedDecimals(canonical, terms.minimumIntermediateAmount) === -1,
+      intermediateAmount: canonical,
+      shares: undefined,
+    };
+  }
+  const shares =
+    canonical === undefined ? undefined : vaultWithdrawalSharesForAmount(canonical, position);
+  return {
+    ...common,
+    // An unavailable rate has no minimum; the preview names it as a blocking issue.
+    belowMinimum:
+      !!shares &&
+      terms.minimumShares !== null &&
+      compareUnsignedDecimals(shares, terms.minimumShares) === -1,
+    intermediateAmount: undefined,
     shares,
   };
 }
@@ -188,7 +266,9 @@ function useParRedemptionSubmission(options: {
       const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
         projectId: options.projectId,
         positionId: input.positionId,
-        shares: input.shares,
+        ...(input.intermediateAmount === undefined
+          ? { shares: input.shares }
+          : { intermediateAmount: input.intermediateAmount }),
         route: { kind: "operator_redemption" },
       });
       const result = await createEarnVaultWithdrawalRequest(
@@ -298,12 +378,14 @@ function ParRedemptionResult({
   environment,
   onClose,
   onSettled,
+  source,
   submitted,
   terms,
 }: {
   environment: SdpEnvironment;
   onClose: () => void;
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  source: EarnVaultParRedemptionSource;
   submitted: EarnVaultWithdrawalRequestRecord;
   terms: EarnVaultParRedemptionTerms;
 }) {
@@ -338,7 +420,7 @@ function ParRedemptionResult({
       ) : null}
       {!presentation.terminal ? (
         <div className="mt-4 grid gap-2 text-xs leading-5 text-tertiary">
-          <p>{t("DashboardEarn.parRedemption.operatorNotice")}</p>
+          <p>{t(PAR_SOURCE_COPY[source].operatorNotice)}</p>
           <p>{t("DashboardEarn.parRedemption.batchMinimumNotice")}</p>
         </div>
       ) : null}
@@ -381,6 +463,7 @@ function ParRedemptionDetails({
   onContinue,
   onMax,
   overAvailableAmount,
+  source,
   terms,
   tokenMint,
 }: {
@@ -393,6 +476,7 @@ function ParRedemptionDetails({
   onContinue: () => void;
   onMax: () => void;
   overAvailableAmount: boolean;
+  source: EarnVaultParRedemptionSource;
   terms: EarnVaultParRedemptionTerms;
   tokenMint: string;
 }) {
@@ -400,11 +484,11 @@ function ParRedemptionDetails({
   const locale = useLocale();
   const validation = validateVaultWithdrawalAmount(amount);
   const amountInvalid = amount.trim() !== "" && validation.kind !== "valid";
+  const copy = PAR_SOURCE_COPY[source];
+  const minimum = formatProviderAmount(parMinimum(terms, source), locale, t(copy.unit));
   return (
     <>
-      <p className="mt-2 text-sm leading-5 text-secondary">
-        {t("DashboardEarn.parRedemption.detailsBody")}
-      </p>
+      <p className="mt-2 text-sm leading-5 text-secondary">{t(copy.detailsBody)}</p>
       <div className="mt-5 grid gap-2">
         <Label htmlFor="earn-par-redemption-amount">
           {t("DashboardEarn.vaultWithdraw.amountLabel")}
@@ -439,13 +523,7 @@ function ParRedemptionDetails({
           </p>
         ) : belowMinimum ? (
           <p className="text-xs text-error" role="alert">
-            {t("DashboardEarn.parRedemption.minimumShares", {
-              amount: formatProviderAmount(
-                terms.minimumShares,
-                locale,
-                t("DashboardEarn.parRedemption.shareUnit")
-              ),
-            })}
+            {t("DashboardEarn.parRedemption.minimumShares", { amount: minimum })}
           </p>
         ) : overAvailableAmount ? (
           <p className="text-xs text-warning" role="status">
@@ -459,7 +537,7 @@ function ParRedemptionDetails({
         ) : null}
       </div>
       <div className="mt-4 grid gap-2 text-xs leading-5 text-tertiary">
-        <p>{t("DashboardEarn.parRedemption.operatorNotice")}</p>
+        <p>{t(copy.operatorNotice)}</p>
         <p>{t("DashboardEarn.parRedemption.batchMinimumNotice")}</p>
       </div>
       <div className="mt-6">
@@ -477,6 +555,7 @@ function ParRedemptionReview({
   onBack,
   onSubmit,
   preview,
+  source,
   submitting,
 }: {
   error: string | null;
@@ -484,6 +563,7 @@ function ParRedemptionReview({
   onBack: () => void;
   onSubmit: () => void;
   preview: EarnVaultParRedemptionPreview | null;
+  source: EarnVaultParRedemptionSource;
   submitting: boolean;
 }) {
   const t = useTranslations();
@@ -493,7 +573,7 @@ function ParRedemptionReview({
     compareUnsignedDecimals(preview.assets, HASTRA_OPERATOR_BATCH_MINIMUM_USDC) === -1;
   return (
     <>
-      <p className="mt-1 text-sm text-secondary">{t("DashboardEarn.parRedemption.reviewBody")}</p>
+      <p className="mt-1 text-sm text-secondary">{t(PAR_SOURCE_COPY[source].reviewBody)}</p>
       {loading ? (
         <div className="mt-5 flex items-center gap-2 text-sm text-secondary" role="status">
           <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
@@ -537,7 +617,7 @@ function ParRedemptionReview({
         </p>
       ) : null}
       <p className="mt-4 text-xs leading-5 text-tertiary">
-        {t("DashboardEarn.parRedemption.reviewNotice")}
+        {t(PAR_SOURCE_COPY[source].reviewNotice)}
       </p>
       {error ? (
         <p
@@ -598,6 +678,7 @@ function ParRedemptionForm({
   onSubmit,
   overAvailableAmount,
   preview,
+  source,
   step,
   submitting,
   terms,
@@ -618,6 +699,7 @@ function ParRedemptionForm({
   onSubmit: () => void;
   overAvailableAmount: boolean;
   preview: EarnVaultParRedemptionPreview | null;
+  source: EarnVaultParRedemptionSource;
   step: FormStep;
   submitting: boolean;
   terms: EarnVaultParRedemptionTerms;
@@ -643,6 +725,7 @@ function ParRedemptionForm({
           onContinue={onContinue}
           onMax={onMax}
           overAvailableAmount={overAvailableAmount}
+          source={source}
           terms={terms}
           tokenMint={tokenMint}
         />
@@ -653,6 +736,7 @@ function ParRedemptionForm({
           onBack={onBack}
           onSubmit={onSubmit}
           preview={preview}
+          source={source}
           submitting={submitting}
         />
       )}
@@ -667,16 +751,19 @@ export function EarnVaultParRedemptionModal({
   onSettled,
   position,
   projectId,
+  source = "shares",
   terms,
 }: EarnVaultParRedemptionModalProps) {
   const t = useTranslations();
   const [step, setStep] = useState<FormStep>("details");
   const [amount, setAmount] = useState("");
-  const availableAmount = vaultWithdrawalAvailableAmount(position);
-  const amountState = parRedemptionAmountState(position, amount, availableAmount, terms);
+  const availableAmount = parAvailableAmount(position, source);
+  const amountState = parRedemptionAmountState(position, amount, availableAmount, terms, source);
+  const { belowMinimum, intermediateAmount, overAvailableAmount, shares } = amountState;
   const input = useMemo(
-    () => parPreviewInput(position, amountState.shares, terms),
-    [position, amountState.shares, terms]
+    () =>
+      parPreviewInput(position, { belowMinimum, intermediateAmount, overAvailableAmount, shares }),
+    [position, belowMinimum, intermediateAmount, overAvailableAmount, shares]
   );
   const { preview, loading, error, setError } = useParRedemptionPreview(input, step === "review");
   const { submitting, outcome, submit } = useParRedemptionSubmission({
@@ -685,7 +772,7 @@ export function EarnVaultParRedemptionModal({
     setError,
   });
   const positionName = position.label || shortenMarketAddress(position.providerReference);
-  const modalLabel = t("DashboardEarn.parRedemption.title", { position: positionName });
+  const modalLabel = t(PAR_SOURCE_COPY[source].title, { position: positionName });
 
   return (
     <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
@@ -702,6 +789,7 @@ export function EarnVaultParRedemptionModal({
               environment={environment}
               onClose={onClose}
               onSettled={onSettled}
+              source={source}
               submitted={outcome.withdrawalRequest}
               terms={terms}
             />
@@ -724,6 +812,7 @@ export function EarnVaultParRedemptionModal({
               onSubmit={() => void submit(input, preview)}
               overAvailableAmount={amountState.overAvailableAmount}
               preview={preview}
+              source={source}
               step={step}
               submitting={submitting}
               terms={terms}

@@ -29,24 +29,32 @@ Things that will bite:
   `shares_out` to the commitment states, so recording it could only succeed by
   erasing an observation SDP made. Do not add a transition without checking the
   constraint it would have to violate.
-- **`earn_positions.share_ata_rent_funder` is a PROJECTION, never assigned
-  directly** (migrations 0066 + 0067). Each vault movement records on its OWN row
-  whether it was observed to create the share account and who it charged
-  (`creates_share_account`, `share_ata_rent_funder`), and the position column is
-  recomputed by `projectShareAccountRentFunder`: the newest claim that has not
-  failed. Both directions claim (an exit consolidating auxiliary accounts can
-  create the ATA itself), a movement that lost its idempotency insert has no row
-  to contribute, and `advanceVaultMovement` re-projects on failure so a claim
-  cannot outlive a transaction that never landed. Do not write the position
-  column by hand: a direct write is exactly the unrepairable stale attribution
-  the projection exists to prevent. It is authoritative only while the share
-  account exists, which is the only window anything reads it.
+- **Kamino settlement uses receipts, never requested maxima** (0121).
+  `advanceVaultMovement` leaves deposit amounts unknown until a finalized
+  receipt is supplied; `recordKaminoDepositReceipt` repairs missing receipts
+  once, scoped by organization and movement. Earnings must withhold `earned`
+  while a finalized deposit has no observed amount. Exposure may conservatively
+  count the requested maximum until then. Migration 0121 is additive: legacy
+  projections remain in storage for rollback compatibility, but mapped reads
+  and earnings ignore them without `deposit_receipt_observed_at`. Repair claims
+  prioritize rows with no recorded reconciliation attempt, then rotate retries
+  by oldest attempt with 15-minute spacing; missing receipts remain retryable.
+  0122 builds the repair index CONCURRENTLY (non-transactional) because
+  `earn_movements` is live; keep its ORDER BY and the index expression aligned.
+- **Kamino creation claims never authorize rent refunds.** The position's
+  `share_ata_rent_funder` is cleared by new Kamino writes; historical claims are
+  ignored by the builder. Other providers retain the legacy projection. Kamino
+  share ATAs retain rent for an explicit owner-authorized close, including
+  newly created accounts that could have been pre-funded.
 - **Every movement needs a holding, and a missing one must never fail a money
   write.** Resolve or open the holding before writing the movement. The custodial
   holding for a program is minted when its provider wallet is linked.
 - **Amounts carry a `denomination`** (`usd`, the token mint, or the SHARE mint
-  on a vault withdrawal, whose exact intent-time quantity is shares). No read
-  may sum across rows without grouping by denomination.
+  on a vault withdrawal, whose exact intent-time quantity is shares). A par
+  fulfillment whose request burned no shares (it redeemed held intermediate)
+  is denominated in the intermediate mint; `fulfilledQueueQuantity` decides for
+  both the writer and the read projection. No read may sum across rows
+  without grouping by denomination.
 - **A direct vault withdrawal is one signed movement.** The movement owns the requested
   shares, actor, idempotency key, signature, signed bytes and blockhash window.
   It is recorded before broadcast and reconciled through the same outbox path
@@ -61,6 +69,15 @@ Things that will bite:
   advancement to an eligible state excludes active cancel actions. Only atomic
   action-failure recovery may reopen it. A failed create cannot discard a
   request once its nonce or creation timestamp establishes provider existence.
+- **Retained par intermediate excludes redeemed or reserved amounts.**
+  Reconciliation adds intermediate from cancelled share-sourced requests and
+  subtracts fulfilled or open zero-share requests for the same position and mint,
+  in lifecycle order, flooring the balance at zero after each debit. An older
+  redemption cannot consume backing created by a later cancellation. Cancelling
+  held intermediate proves the balance is at least the released amount, even
+  without prior SDP history; repeated cancellations never add the same tokens.
+  Open and unknown requests reserve their amounts separately, never a second time
+  through retained backing.
 - **Ids are heterogeneous by design.** History keeps the ids the projection
   preserved, so nothing may parse an id for its kind — read `execution_model`.
 - **`getUnsettledVaultMovementStats` duplicates `claimUnsettledVaultMovements`'
