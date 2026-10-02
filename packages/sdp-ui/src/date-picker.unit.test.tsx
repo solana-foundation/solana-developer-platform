@@ -3,17 +3,16 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
 import { DateRangePicker } from "./date-picker";
 import { displayRangeValue, formatDateValue, parseDateValue } from "./date-value";
+import { EnglishUiI18nProvider } from "./testing/english-ui-i18n";
 
 afterEach(cleanup);
 
 describe("DateRangePicker", () => {
   it("renders one range trigger while preserving separate form values", () => {
     const markup = renderToStaticMarkup(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishUiI18nProvider>
         <DateRangePicker
           fromName="from"
           toName="to"
@@ -21,7 +20,7 @@ describe("DateRangePicker", () => {
           defaultTo="2026-01-19"
           ariaLabel="Audit dates"
         />
-      </I18nProvider>
+      </EnglishUiI18nProvider>
     );
 
     expect(markup).toContain('aria-label="Audit dates"');
@@ -47,9 +46,9 @@ describe("DateRangePicker", () => {
   it("keeps the popover open until the end date and commits only the complete range", () => {
     const onChange = vi.fn();
     render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishUiI18nProvider>
         <DateRangePicker ariaLabel="Audit dates" onChange={onChange} />
-      </I18nProvider>
+      </EnglishUiI18nProvider>
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Audit dates" }));
