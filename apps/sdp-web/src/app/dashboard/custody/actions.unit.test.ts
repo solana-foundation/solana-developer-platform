@@ -79,6 +79,36 @@ describe("createCustodySetupWalletAction", () => {
     expect(requestBody(client)).toEqual({ provider: "privy", label: "Treasury" });
   });
 
+  it("sends the purpose the wizard chose, with or without a connection", async () => {
+    await createCustodySetupWalletAction(
+      walletForm({ provider: "turnkey", label: "Mint", purpose: "mint_authority" })
+    );
+    expect(requestBody(client)).toEqual({
+      provider: "turnkey",
+      label: "Mint",
+      purpose: "mint_authority",
+    });
+
+    client.fetch.mockClear();
+    await createCustodySetupWalletAction(
+      walletForm({ provider: "privy", label: "Ops", connectionId: "conn_eu", purpose: "transfer" })
+    );
+    expect(requestBody(client)).toEqual({
+      connectionId: "conn_eu",
+      label: "Ops",
+      purpose: "transfer",
+    });
+  });
+
+  // The create endpoint accepts five purposes; anything else is the API's to default, never a
+  // value the dashboard forwards for it to reject.
+  it("leaves out a purpose the create endpoint does not accept", async () => {
+    await createCustodySetupWalletAction(
+      walletForm({ provider: "turnkey", label: "Settle", purpose: "dvp_settlement_authority" })
+    );
+    expect(requestBody(client)).toEqual({ provider: "turnkey", label: "Settle" });
+  });
+
   it("reports a failure instead of throwing", async () => {
     client.fetch.mockRejectedValue(new Error("SDP API request failed (409): {}"));
 

@@ -5,6 +5,7 @@ import {
   type Token,
   type TokenTransaction,
 } from "@sdp/types";
+import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
@@ -215,8 +216,8 @@ test.describe
       await expect(walletCard).toBeVisible({
         timeout: 120_000,
       });
-      await expect(walletCard.getByText("Privy", { exact: true })).toBeVisible();
-      await expect(walletCard.getByRole("link", { name: "Manage" })).toBeVisible();
+      await expect(walletCard.getByText(/· Privy$/)).toBeVisible();
+      await expect(walletCard.getByRole("link", { name: `Open ${walletLabel}` })).toBeVisible();
     });
 
     test("wallet workspace and detail aliases preserve navigation", async ({ browser, page }) => {
@@ -279,7 +280,7 @@ test.describe
         "overview"
       );
       const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
-      await walletCard.getByRole("link", { name: "Manage" }).click();
+      await walletCard.getByRole("link", { name: `Open ${walletLabel}` }).click();
       await expect(page).toHaveURL(new RegExp(`${walletHref.replaceAll("/", "\\/")}$`));
       await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
@@ -293,26 +294,24 @@ test.describe
     });
 
     test("wallet actions menu preserves page geometry", async ({ browser, page }) => {
-      const { wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, page, {
+      const { walletLabel } = await bootstrapWalletRouteFixture(browser, page, {
         labelPrefix: "Wallet Action Geometry",
       });
       await page.setViewportSize({ width: 1280, height: 500 });
-      await page.goto(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`, {
-        waitUntil: "domcontentloaded",
-      });
-      await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
+      // The wallet's actions menu sits on its card in the Wallets list; the wallet's own page
+      // spreads those actions across its tabs.
+      await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+      const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
+      await expect(walletCard).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
 
-      const actions = page.getByRole("button", {
+      const actions = walletCard.getByRole("button", {
         name: `Wallet actions for ${walletLabel}`,
       });
-      const actionTrigger = page.locator(
+      const actionTrigger = walletCard.locator(
         '[data-slot="dropdown-menu-trigger"][aria-label^="Wallet actions for"]'
       );
-      const walletHeading = page.getByRole("heading", { name: walletLabel });
       const pageGeometry = async () => {
-        const [root, trigger, heading] = await Promise.all([
+        const [root, trigger, card] = await Promise.all([
           page.evaluate(() => ({
             viewportWidth: document.documentElement.clientWidth,
             pageWidth: document.documentElement.scrollWidth,
@@ -321,17 +320,17 @@ test.describe
             bodyPaddingRight: getComputedStyle(document.body).paddingRight,
           })),
           actionTrigger.boundingBox(),
-          walletHeading.boundingBox(),
+          walletCard.boundingBox(),
         ]);
-        if (!trigger || !heading) {
+        if (!trigger || !card) {
           throw new Error("Wallet action geometry anchors did not render");
         }
 
         return {
           ...root,
           triggerLeft: trigger.x,
-          headingLeft: heading.x,
-          headingWidth: heading.width,
+          cardLeft: card.x,
+          cardWidth: card.width,
         };
       };
 
@@ -391,11 +390,13 @@ test.describe
       await page.keyboard.press("Escape");
       await expect(drawer).toBeHidden({ timeout: E2E_POLL_TIMEOUT_MS });
 
-      await page.goto(walletHref, { waitUntil: "domcontentloaded" });
-      await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
-      await page.locator(`a[href="${auditHref}"]`).click();
+      // The wallet's policy history opens from its Policy tab, beside the revisions (the
+      // previous design ignores the tab and shows the same link on the wallet's page).
+      const auditLink = page.getByRole("link", { name: "Policy audit", exact: true });
+      await page.goto(`${walletHref}?tab=policy`, { waitUntil: "domcontentloaded" });
+      await expect(auditLink).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(auditLink).toHaveAttribute("href", auditHref);
+      await auditLink.click();
       await expect(page).toHaveURL(new RegExp(`${auditHref.replaceAll("/", "\\/")}$`));
       await expect(page.getByRole("button", { name: "Revision history" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
@@ -419,10 +420,12 @@ test.describe
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
-      const setupActions = page.locator("[data-wallet-setup-actions]");
-      const setupScrollRegion = page.locator("[data-wallet-setup-scroll-region]");
+      const setupActions = page.locator("[data-wallet-setup-flow] [data-wizard-actions]");
+      const setupScrollRegion = page.locator(
+        "[data-wallet-setup-flow] [data-wizard-scroll-region]"
+      );
       const cancelButton = page.getByRole("button", { name: "Cancel" });
-      const nextButton = page.getByRole("button", { name: "Next", exact: true });
+      const nextButton = page.getByRole("button", { name: "Continue", exact: true });
       await expect(setupActions).toBeVisible();
       await expect(cancelButton).toBeVisible();
       await expect(nextButton).toBeDisabled();
@@ -448,10 +451,10 @@ test.describe
       const scrolledActionsBox = await setupActions.boundingBox();
       expect(scrolledActionsBox?.y).toBe(desktopActionsBox?.y);
 
-      const privyProvider = page.getByRole("button", { name: /Privy/ });
+      const privyProvider = page.getByRole("radio", { name: /Privy/ });
       await privyProvider.focus();
       await page.keyboard.press("Space");
-      await expect(privyProvider).toHaveAttribute("aria-pressed", "true");
+      await expect(privyProvider).toBeChecked();
       await expect(nextButton).toBeEnabled();
       await nextButton.click();
       await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
@@ -466,7 +469,7 @@ test.describe
 
       await page.getByRole("button", { name: "Back", exact: true }).click();
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible();
-      await expect(privyProvider).toHaveAttribute("aria-pressed", "true");
+      await expect(privyProvider).toBeChecked();
       await cancelButton.click();
       await expect(page).toHaveURL(/\/dashboard\/wallets$/);
 
@@ -502,7 +505,7 @@ test.describe
       });
       const mobileActionsAfterScroll = await setupActions.boundingBox();
       expect(mobileActionsAfterScroll?.y).toBe(mobileActionsBeforeScroll?.y);
-      const lastProvider = setupScrollRegion.getByRole("button").last();
+      const lastProvider = setupScrollRegion.getByRole("link", { name: /^Set up / }).last();
       await expect(lastProvider).toBeVisible();
       const mobileScrollBox = await setupScrollRegion.boundingBox();
       const lastProviderBox = await lastProvider.boundingBox();
@@ -566,10 +569,10 @@ test.describe
       });
 
       const advanceProviderWithEnter = async () => {
-        const privyProvider = page.getByRole("button", { name: /Privy/ });
+        const privyProvider = page.getByRole("radio", { name: /Privy/ });
         await privyProvider.focus();
         await page.keyboard.press("Space");
-        await expect(privyProvider).toHaveAttribute("aria-pressed", "true");
+        await expect(privyProvider).toBeChecked();
         await page.keyboard.press("Enter");
         await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
         expect(serverActionRequestCount).toBe(0);
@@ -759,55 +762,58 @@ test.describe
         });
       });
 
-      await page.setViewportSize({ width: 1280, height: 500 });
-      await page.goto(`/dashboard/wallets/${wallet.walletId}`, { waitUntil: "domcontentloaded" });
+      // The page runs on Playwright's clock (time still flows) so the test can step past SWR's
+      // dedupe window instead of sleeping through it.
+      await page.clock.install();
+
+      // The wallet's page opens on Overview, whose recent activity reads the feed straight away;
+      // the whole feed is on the Activity tab (`?tab=activity`). Both read the same window.
+      await page.goto(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`, {
+        waitUntil: "domcontentloaded",
+      });
       await expect(page.getByRole("heading", { name: wallet.label ?? "Treasury" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
-      await expect(page.getByRole("button", { name: "Actions" })).toBeEnabled();
-      const activityRegion = page.locator("[data-wallet-activity-state]");
-      await expect(activityRegion).not.toBeInViewport();
-      await page.evaluate(
-        () =>
-          new Promise<void>((resolve) => {
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-          })
-      );
-      await expect(activityRegion).toHaveAttribute("data-wallet-activity-state", "deferred");
-      expect(activityRequestCount).toBe(0);
-
-      await activityRegion.scrollIntoViewIfNeeded();
-      await expect(activityRegion).toHaveAttribute("data-wallet-activity-state", "mounted");
-      await expect.poll(() => activityRequestCount).toBe(1);
-
-      const activityRow = page.locator("tr").filter({ hasText: "5.00 USDC" });
+      const rowSelector = '[data-wallet-activity-row="payment-e2e-refresh"]';
+      const activityRow = page.locator(rowSelector);
       await expect(activityRow).toBeVisible({ timeout: 120_000 });
       await expect(activityRow).toContainText("Incoming");
-      await expect(activityRow.getByRole("link")).toHaveCount(1);
+      await expect(activityRow).toContainText("+5 USDC");
+      expect(activityRequestCount).toBeGreaterThan(0);
 
-      await page
-        .getByRole("heading", { name: wallet.label ?? "Treasury" })
-        .scrollIntoViewIfNeeded();
-      await expect(activityRegion).not.toBeInViewport();
-      await expect(activityRegion).toHaveAttribute("data-wallet-activity-visible", "false");
-      const requestCountBeforeReconnect = activityRequestCount;
-      await page.evaluate(() => {
-        window.dispatchEvent(new Event("offline"));
-        window.dispatchEvent(new Event("online"));
-      });
-      await page.waitForTimeout(1_000);
-      expect(activityRequestCount).toBe(requestCountBeforeReconnect);
+      await page.getByRole("tab", { name: "Activity", exact: true }).click();
+      await expect(page).toHaveURL(/[?&]tab=activity(?:&|$)/);
+      const activityTab = page.locator("[data-wallet-activity-tab]");
+      await expect(activityTab).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(activityTab.locator(rowSelector)).toBeVisible();
 
-      await activityRegion.scrollIntoViewIfNeeded();
-      await expect(activityRegion).toHaveAttribute("data-wallet-activity-visible", "true");
-      await expect.poll(() => activityRequestCount).toBe(requestCountBeforeReconnect + 1);
-
+      // The feed refreshes itself every 20s, and at once on reconnecting; that read now fails.
+      // SWR serves any read within `dedupingInterval` of the last one from that read, so a
+      // reconnect straight after the Activity tab loaded would never reach the route. Each try
+      // jumps the page clock past that window, then reconnects; a 20s poll that comes due on the
+      // way is a failing refresh too. Further tries only add more failing reads.
       failNextActivityRequest = true;
-      const refreshButton = page.getByRole("button", { name: "Refresh" });
-      await expect(refreshButton).toBeEnabled({ timeout: E2E_POLL_TIMEOUT_MS });
-      await refreshButton.click();
+      const requestCountBeforeFailure = activityRequestCount;
+      const dedupeWindowMs = DASHBOARD_SWR_CONFIG.dedupingInterval ?? 2_000;
+      await expect
+        .poll(async () => {
+          await page.clock.fastForward(dedupeWindowMs + 1_000);
+          await page.evaluate(() => {
+            window.dispatchEvent(new Event("offline"));
+            window.dispatchEvent(new Event("online"));
+          });
+          return activityRequestCount;
+        }, E2E_POLL_OPTIONS)
+        .toBeGreaterThan(requestCountBeforeFailure);
 
-      await expect(page.getByText("Activity refresh failed")).toBeVisible();
+      const refreshFailed = page.getByText("Wallet activity is unavailable right now.");
+      await expect(refreshFailed).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(activityTab.locator(rowSelector)).toBeVisible();
+
+      // Overview's recent rows keep the loaded window too.
+      await page.getByRole("tab", { name: "Overview", exact: true }).click();
+      await expect(page).not.toHaveURL(/[?&]tab=/);
+      await expect(refreshFailed).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
       await expect(activityRow).toBeVisible();
     });
   });

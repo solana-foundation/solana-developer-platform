@@ -3,6 +3,8 @@ import { z } from "zod";
 import { parseErrorMessage } from "@/app/dashboard/activity-format-utils";
 import {
   loadWalletActivity,
+  WALLET_ACTIVITY_LIMIT,
+  WALLET_ACTIVITY_MAX_LIMIT,
   type WalletActivityIdentity,
 } from "@/app/dashboard/custody/wallet-activity.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -19,6 +21,14 @@ interface VisibilityResult {
 }
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+/** `?limit=` widens the window to older rows; a missing or out-of-range value reads the default. */
+const walletActivityLimitSchema = z.coerce
+  .number()
+  .int()
+  .min(1)
+  .max(WALLET_ACTIVITY_MAX_LIMIT)
+  .catch(WALLET_ACTIVITY_LIMIT);
 
 const walletActivityMetadataEnvelopeSchema = z.object({
   data: z.object({
@@ -127,8 +137,11 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
     }
 
     const wallet = visibility.wallet;
+    const pageSize = walletActivityLimitSchema.parse(
+      new URL(request.url).searchParams.get("limit") ?? undefined
+    );
     const result = await trace.step("load_wallet_activity", () =>
-      loadWalletActivity(apiClient.request, wallet, t)
+      loadWalletActivity(apiClient.request, wallet, t, { pageSize })
     );
     const status = result.ok ? 200 : (result.status ?? 500);
     const response = NextResponse.json(
