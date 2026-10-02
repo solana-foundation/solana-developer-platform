@@ -79,9 +79,6 @@
   --font-weight-regular-base: 400;
   --font-weight-regular: calc(var(--font-weight-regular-base) * var(--fw-mult));
   --tab-weight-idle: var(--font-weight-regular);
-  font-weight: var(--font-weight-regular);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 
   --text-extra-high: var(--emph-xh);
   --text-high: var(--emph-m);
@@ -153,6 +150,16 @@
   --select-item-radius: var(--corner-control);
   --select-item-highlight-bg: var(--t4);
   --tooltip-radius: var(--corner-control);
+}
+
+/* The scope's own text weight and smoothing, in the base layer so a utility on the scope element
+   itself (font-bold, subpixel-antialiased) still wins; descendants inherit them as before. */
+@layer base {
+  [data-sdp-theme="refresh"] {
+    font-weight: var(--font-weight-regular);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
 /* The design-system field label is medium weight with no class hook; refresh labels are
@@ -297,6 +304,11 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   --red-tx: var(--critical);
   --red-bg: var(--critical-wash);
   --red-brd: var(--critical-rule);
+  --crimson: var(--critical);
+  --crimson-strong: color-mix(in oklab, var(--critical) 85%, black);
+  --crimson-strongest: color-mix(in oklab, var(--critical) 72%, black);
+  --crimson-bg: var(--critical-wash);
+  --crimson-brd: var(--critical-rule);
 
   --font-sans: var(--font-brand-sans);
   --font-mono: var(--font-brand-mono);

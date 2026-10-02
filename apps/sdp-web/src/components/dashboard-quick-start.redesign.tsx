@@ -434,7 +434,7 @@ function OverviewQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQ
                       "absolute top-6 bottom-[-28px] left-[9.5px] w-px",
                       step.state === "done"
                         ? "bg-success/45"
-                        : "bg-[repeating-linear-gradient(to_bottom,var(--color-tertiary)_0_3px,transparent_3px_6px)] opacity-70"
+                        : "bg-[repeating-linear-gradient(to_bottom,var(--emph-l)_0_3px,transparent_3px_6px)] opacity-70"
                     )}
                   />
                 ) : null}

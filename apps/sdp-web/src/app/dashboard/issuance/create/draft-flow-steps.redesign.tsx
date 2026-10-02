@@ -138,13 +138,15 @@ export function ClassifyStep({ draft, update }: { draft: DraftState; update: Upd
         />
       </Field>
       <div className="flex flex-col gap-4 pt-10">
-        <div className="flex flex-wrap items-baseline justify-between gap-4">
+        {/* 32px from the heading row to what follows, as the design spaces the choice. */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
           <h3 className="text-subheading font-medium text-primary">
             {t("DashboardIssuance.newDesign.draft.chooseClassification")}
           </h3>
           <Button
             variant="outline"
             size="sm"
+            className="[--button-height-md:1.875rem]"
             aria-expanded={explain}
             onClick={() => setExplain((open) => !open)}
           >
@@ -222,10 +224,11 @@ export function DetailsStep({ draft, update }: { draft: DraftState; update: Upda
   const locked = t("DashboardIssuance.newDesign.draft.lockedAtDeploy");
   return (
     <div className="flex flex-col gap-6">
-      <h3 className="text-subheading font-medium text-primary">
+      {/* Each heading sits 32px over its fields; the columns are 16px apart. */}
+      <h3 className="mb-2 text-subheading font-medium text-primary">
         {t("DashboardIssuance.newDesign.details.about")}
       </h3>
-      <div className="grid gap-6 @xl:grid-cols-2">
+      <div className="grid gap-x-4 gap-y-6 @xl:grid-cols-2">
         <Field
           id="draft-symbol"
           label={t("DashboardIssuance.newDesign.details.symbol")}
@@ -285,10 +288,10 @@ export function DetailsStep({ draft, update }: { draft: DraftState; update: Upda
           }
         />
       </Field>
-      <h3 className="mt-10 text-subheading font-medium text-primary">
+      <h3 className="mt-10 mb-2 text-subheading font-medium text-primary">
         {t("DashboardIssuance.newDesign.details.financial")}
       </h3>
-      <div className="grid gap-6 @xl:grid-cols-2">
+      <div className="grid gap-x-4 gap-y-6 @xl:grid-cols-2">
         <Field
           id="draft-issuer"
           label={t("DashboardIssuance.newDesign.details.issuerName")}
@@ -483,7 +486,8 @@ export function PermissionsStep({
   }
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-6 @xl:grid-cols-2">
+      {/* The four keys 16px apart both ways, as the design packs them. */}
+      <div className="grid gap-4 @xl:grid-cols-2">
         {AUTHORITIES.filter((authority) => isDraftAuthorityInUse(draft, authority.key)).map(
           (authority) => (
             <Field key={authority.key} label={t(authority.name)} help={t(authority.why)}>
@@ -626,7 +630,8 @@ export function ReviewStep({
     ...WHAT_HAPPENS_NEXT,
   ];
   return (
-    <div className="flex flex-col gap-10">
+    // 12px more under the step's title than the other steps leave, 36px between sections.
+    <div className="mt-3 flex flex-col gap-9">
       <ReviewSection
         title={t("DashboardIssuance.newDesign.draft.thisDraft")}
         rows={draftReviewRows(draft, access, wallets, t).map(([label, value]) => [t(label), value])}

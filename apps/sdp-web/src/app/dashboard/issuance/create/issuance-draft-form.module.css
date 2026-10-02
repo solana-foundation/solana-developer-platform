@@ -314,11 +314,13 @@
 }
 
 /* Two classes so it beats `.controlCopy span` above, which would otherwise mute
-   it back down to the description colour. `--color-warning` is the same token
-   `text-warning` resolves to (@sdp/design-tokens theme.css), so light and dark
-   both follow the design system rather than a hardcoded amber. */
+   it back down to the description colour. `--amber-tx` is the palette token
+   `text-warning` paints with (@sdp/design-tokens theme.css), so light, dark and
+   the refresh scope all follow the design system rather than a hardcoded amber.
+   Read directly: `--color-warning` resolves once at :root, so a nested refresh
+   scope wouldn't reach it. */
 .controlCopy .controlWarning {
-  color: var(--color-warning);
+  color: var(--amber-tx);
   font-weight: 600;
 }
 
