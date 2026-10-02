@@ -1,9 +1,15 @@
-import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types";
+import {
+  type PaymentRequestLifecycleEvent,
+  type PaymentRequestStatus,
+  tokenFilterAliases,
+} from "@sdp/types";
 import type { AppDb } from "@/db";
+import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import type {
   CreatePaymentRequestInput,
+  ListOpenPaymentRequestsInput,
   ListPaymentRequestsInput,
   ListPaymentRequestsResult,
   MarkPaymentRequestInput,
@@ -44,6 +50,8 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
 // so it (and awaiting_payment) filter the awaiting_payment rows partitioned by
 // expiry. Text comparison is exact: expires_at and sdp_iso_now() share the same
 // ISO-8601 UTC format, and the partial index on (expires_at) covers the predicate.
+// Columns are qualified because the list may join counterparties, which has
+// its own id, organization_id, project_id and status columns.
 function paymentRequestStatusFilter(status: PaymentRequestStatus | undefined): {
   sql: string;
   binds: string[];
@@ -53,17 +61,53 @@ function paymentRequestStatusFilter(status: PaymentRequestStatus | undefined): {
       return { sql: "TRUE", binds: [] };
     case "awaiting_payment":
       return {
-        sql: "status = 'awaiting_payment' AND (expires_at IS NULL OR expires_at > sdp_iso_now())",
+        sql: "pr.status = 'awaiting_payment' AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())",
         binds: [],
       };
     case "expired":
       return {
-        sql: "status = 'awaiting_payment' AND expires_at IS NOT NULL AND expires_at <= sdp_iso_now()",
+        sql: "pr.status = 'awaiting_payment' AND pr.expires_at IS NOT NULL AND pr.expires_at <= sdp_iso_now()",
         binds: [],
       };
     default:
-      return { sql: "status = ?", binds: [status] };
+      return { sql: "pr.status = ?", binds: [status] };
   }
+}
+
+// The fields a dashboard user can see and paste back: the id, amount, mint,
+// receiving address, Solana Pay reference and the counterparty's name. The
+// display name comes from the LEFT JOIN, so it is COALESCEd for open links.
+function paymentRequestSearchExpression(): string {
+  return `(
+    pr.id || ' ' ||
+    pr.amount || ' ' ||
+    pr.token || ' ' ||
+    pr.destination_address || ' ' ||
+    pr.reference || ' ' ||
+    COALESCE(cp.display_name, '')
+  )`;
+}
+
+// A symbol search ("USDC") cannot substring-match the mint the request is
+// stored under, so the well-known catalogue expands the needle to every form
+// of that token. tokenFilterAliases always echoes the input, which the ILIKE
+// already covers; only a real expansion earns the IN clause.
+function paymentRequestSearchFilter(search: string | undefined): {
+  sql: string;
+  binds: string[];
+} {
+  if (!search) {
+    return { sql: "TRUE", binds: [] };
+  }
+  const clauses = [`${paymentRequestSearchExpression()} ILIKE ? ESCAPE '\\'`];
+  const binds: string[] = [`%${escapeLikePattern(search)}%`];
+
+  const tokenAliases = tokenFilterAliases(search);
+  if (tokenAliases.length > 1) {
+    clauses.push(`pr.token IN (${buildInClause(tokenAliases.length)})`);
+    binds.push(...tokenAliases);
+  }
+  return { sql: `(${clauses.join(" OR ")})`, binds };
 }
 
 export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentRequestsRepository {
@@ -251,19 +295,32 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
     async listPaymentRequests(
       params: ListPaymentRequestsInput
     ): Promise<ListPaymentRequestsResult> {
-      const filter = paymentRequestStatusFilter(params.status);
-      const where = `WHERE organization_id = ? AND project_id = ? AND ${filter.sql}`;
-      const scopeBinds = [params.organizationId, params.projectId, ...filter.binds];
+      const statusFilter = paymentRequestStatusFilter(params.status);
+      const searchFilter = paymentRequestSearchFilter(params.search);
+      // counterparties.id is the primary key, so the join never multiplies
+      // rows and COUNT(*) stays exact; it is only paid for when searching.
+      const from = params.search
+        ? `FROM payment_requests pr
+           LEFT JOIN counterparties cp
+             ON cp.id = pr.counterparty_id
+            AND cp.organization_id = pr.organization_id
+            AND cp.project_id = pr.project_id`
+        : "FROM payment_requests pr";
+      const where = `WHERE pr.organization_id = ? AND pr.project_id = ? AND ${statusFilter.sql} AND ${searchFilter.sql}`;
+      const scopeBinds = [
+        params.organizationId,
+        params.projectId,
+        ...statusFilter.binds,
+        ...searchFilter.binds,
+      ];
 
       const [rowsResult, countRow] = await Promise.all([
         db
-          .prepare(
-            `SELECT * FROM payment_requests ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
-          )
+          .prepare(`SELECT pr.* ${from} ${where} ORDER BY pr.created_at DESC LIMIT ? OFFSET ?`)
           .bind(...scopeBinds, params.limit, params.offset)
           .all<Record<string, unknown>>(),
         db
-          .prepare(`SELECT COUNT(*)::int AS total FROM payment_requests ${where}`)
+          .prepare(`SELECT COUNT(*)::int AS total ${from} ${where}`)
           .bind(...scopeBinds)
           .first<{ total: number }>(),
       ]);
@@ -275,6 +332,23 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         rows: rowsResult.results.map(mapPaymentRequestRow),
         total: countRow.total,
       };
+    },
+
+    async listOpenPaymentRequests(params: ListOpenPaymentRequestsInput) {
+      const result = await db
+        .prepare(
+          `SELECT * FROM payment_requests
+             WHERE organization_id = ?
+               AND project_id = ?
+               AND status = 'awaiting_payment'
+               AND (expires_at IS NULL OR expires_at > sdp_iso_now())
+               AND custody_wallet_id IS NOT NULL
+             ORDER BY created_at DESC
+             LIMIT ?`
+        )
+        .bind(params.organizationId, params.projectId, params.limit)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapPaymentRequestRow);
     },
   };
 }

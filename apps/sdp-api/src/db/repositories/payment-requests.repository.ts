@@ -67,6 +67,8 @@ export interface ListPaymentRequestsInput {
   organizationId: string;
   projectId: string;
   status?: PaymentRequestStatus;
+  /** Trimmed, non-empty case-insensitive substring; absent means no search. */
+  search?: string;
   limit: number;
   offset: number;
 }
@@ -74,6 +76,12 @@ export interface ListPaymentRequestsInput {
 export interface ListPaymentRequestsResult {
   rows: PaymentRequestRow[];
   total: number;
+}
+
+export interface ListOpenPaymentRequestsInput {
+  organizationId: string;
+  projectId: string;
+  limit: number;
 }
 
 export interface SponsoredTransactionClaim {
@@ -107,4 +115,10 @@ export interface PaymentRequestsRepository {
     signedTransaction: string;
   }): Promise<boolean>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
+  /**
+   * The newest requests that can still settle on chain: stored as
+   * awaiting_payment, not yet expired, and pinned to an exact custody wallet.
+   * Unpinned legacy rows are left out because reconcile cannot act on them.
+   */
+  listOpenPaymentRequests(params: ListOpenPaymentRequestsInput): Promise<PaymentRequestRow[]>;
 }
