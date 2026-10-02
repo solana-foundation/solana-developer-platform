@@ -1,4 +1,5 @@
-import { withRpcReadContext } from "@sdp/rpc/read-context";
+import { readFloor, readStamp, withRpcReadContext } from "@sdp/rpc/read-context";
+import { withReadSocketRetry } from "@sdp/rpc/solana";
 import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
@@ -46,17 +47,39 @@ export function withVedaRpcTimeout(
   };
 }
 
+/**
+ * The raw transport plus one re-send of a read whose pooled socket died before
+ * any response. Every other layer sits above it, so the re-send carries the
+ * payload the read context prepared.
+ */
+function vedaTransport(rpcUrl: string): RpcTransport {
+  return withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }));
+}
+
 /** One deadline-aware RPC client shared by this package and the pinned SDK. */
 export function createVedaRpc(rpcUrl: string, timeoutMs = VEDA_RPC_REQUEST_TIMEOUT_MS) {
-  const transport = createDefaultRpcTransport({ url: rpcUrl });
-  return createSolanaRpcFromTransport(withVedaRpcTimeout(transport, timeoutMs));
+  return createSolanaRpcFromTransport(withVedaRpcTimeout(vedaTransport(rpcUrl), timeoutMs));
 }
 
 /** How long a read client reuses one slot's block time. */
 export const VEDA_BLOCK_TIME_TTL_MS = 60_000;
 const VEDA_BLOCK_TIME_CAPACITY = 256;
 
+/**
+ * The reads a position read sends, and the only methods the read transport
+ * shares. Anything else, above all a send, a simulation or a blockhash, always
+ * goes out as its own request.
+ */
+const VEDA_SHARED_READ_METHODS: ReadonlySet<string> = new Set([
+  "getAccountInfo",
+  "getBlockTime",
+  "getMultipleAccounts",
+  "getProgramAccounts",
+]);
+
 interface InFlightRead {
+  /** `readStamp()` taken before the request was sent. */
+  stamp: number;
   response: Promise<unknown>;
   consumers: number;
   controller: AbortController;
@@ -69,16 +92,20 @@ interface InFlightRead {
  * `getMultipleAccounts` with a `getBlockTime` for the slot that served it. Two
  * de-duplications remove those repeats without changing what any caller sees:
  *
- * - A request identical (method and params) to one already in flight shares
- *   that request's response. Kit's coalescer covers one microtask only, and the
- *   SDK is several awaits deep before it sends.
+ * - A read identical (method and params) to one already in flight shares that
+ *   request's response. Kit's coalescer covers one microtask only, and the SDK
+ *   is several awaits deep before it sends. Only `VEDA_SHARED_READ_METHODS`
+ *   are ever shared.
  * - A slot's block time is a fact of that slot, so a non-null answer is reused
  *   for a short window. Errors and nulls are never remembered.
  *
  * Applied BELOW `withRpcReadContext`: the key already carries any
  * `minContextSlot` a scoped read adds, and every consumer still validates the
  * returned context itself. A consumer whose signal aborts rejects with its own
- * reason; the shared request aborts only once every consumer has left.
+ * reason; the shared request aborts only once every consumer has left. A caller
+ * under a read floor (`withReadFloor`) joins only a request sent after the
+ * floor was stamped; an older entry is replaced, and its joiners keep their
+ * response.
  */
 export function withVedaReadDeduplication(transport: RpcTransport): RpcTransport {
   const inFlight = new Map<string, InFlightRead>();
@@ -96,17 +123,22 @@ export function withVedaReadDeduplication(transport: RpcTransport): RpcTransport
 
   return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
     const request = jsonRpcRequest(config.payload);
-    if (!request) return transport<TResponse>(config);
+    if (!request || !VEDA_SHARED_READ_METHODS.has(request.method)) {
+      return transport<TResponse>(config);
+    }
     const key = stableKey([request.method, request.params]);
 
     const remembered = blockTimes.get(key);
     if (remembered && remembered.expiresAt > Date.now()) return remembered.response as TResponse;
     if (remembered) blockTimes.delete(key);
 
+    const floor = readFloor();
     let entry = inFlight.get(key);
+    if (entry && floor !== undefined && entry.stamp <= floor) entry = undefined;
     if (!entry) {
       const controller = new AbortController();
       const created: InFlightRead = {
+        stamp: readStamp(),
         response: transport<unknown>({ ...config, signal: controller.signal }),
         consumers: 0,
         controller,
@@ -196,9 +228,11 @@ function stableKey(value: unknown): string {
 
 /**
  * The position-read client: the same deadline and confirmation context as
- * `createVedaRpc`, over the de-duplicating transport. Never used to build.
+ * `createVedaRpc`, over the de-duplicating transport. Never used to build. The
+ * socket re-send sits below the de-duplication, so one re-send serves every
+ * consumer of a shared read.
  */
 export function createVedaReadRpc(rpcUrl: string, timeoutMs = VEDA_RPC_REQUEST_TIMEOUT_MS) {
-  const transport = withVedaReadDeduplication(createDefaultRpcTransport({ url: rpcUrl }));
+  const transport = withVedaReadDeduplication(vedaTransport(rpcUrl));
   return createSolanaRpcFromTransport(withVedaRpcTimeout(transport, timeoutMs));
 }
