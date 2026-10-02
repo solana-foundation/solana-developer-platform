@@ -14,7 +14,7 @@ import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
 import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
+import { ListToolbar } from "@/components/ui/list-toolbar";
 import { SearchInput } from "@/components/ui/search-input";
 import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import {
@@ -33,7 +33,7 @@ import {
   shortenAddress,
 } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import { formatDateTime } from "../payments-presentation";
+import { formatDate } from "../payments-presentation";
 import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
@@ -229,7 +229,10 @@ export function RecurringPaymentsWorkspace({
 
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col gap-5">
+      {/* The design draws the search at the Filter button's 30px, its rule level with the
+          button's bottom edge; the shared field defaults to the taller input. */}
       <ListToolbar
+        className="[--input-height-lg:1.875rem]"
         filters={
           <FilterMenu
             label={t("Shared.SharedComponents.filter")}
@@ -258,10 +261,6 @@ export function RecurringPaymentsWorkspace({
           />
         }
       >
-        <RowsPerPageSelect
-          value={listState.pageSize}
-          onChange={(pageSize) => applyListParams({ pageSize })}
-        />
         <SearchInput
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -280,20 +279,28 @@ export function RecurringPaymentsWorkspace({
         </p>
       ) : (
         <div className="overflow-x-auto refresh:-mx-3">
-          <Table className="min-w-[760px] rounded-none border-0" data-recurring-payments-table>
+          {/* The design's columns, measured on its 852px list with the table's 12px overhang:
+              fixed, so a long schedule truncates instead of squeezing the dates. */}
+          <Table
+            className="min-w-[760px] table-fixed rounded-none border-0"
+            data-recurring-payments-table
+          >
             <TableHeader>
               <TableRow>
-                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[16.5%]")}>
                   {t("DashboardPayments.status")}
                 </TableHead>
-                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[34%]")}>
                   {t("DashboardPayments.recurring.schedule")}
                 </TableHead>
-                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[17.5%]")}>
                   {t("DashboardPayments.recurring.repeats")}
                 </TableHead>
-                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[14.5%]")}>
                   {t("DashboardPayments.recurring.nextRun")}
+                </TableHead>
+                <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[17.5%]")}>
+                  {t("DashboardPayments.recurring.ends")}
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -316,7 +323,7 @@ export function RecurringPaymentsWorkspace({
                         {statusLabel(recurringPayment.status)}
                       </StatusText>
                     </TableCell>
-                    <TableCell className={cn(PAYMENTS_TABLE_CELL, "max-w-96")}>
+                    <TableCell className={PAYMENTS_TABLE_CELL}>
                       <Link
                         href={href}
                         className="block truncate text-body leading-5 font-medium text-primary focus-visible:underline focus-visible:outline-none"
@@ -343,8 +350,14 @@ export function RecurringPaymentsWorkspace({
                       )}
                     >
                       {recurringPayment.nextCollectionDueAt
-                        ? formatDateTime(recurringPayment.nextCollectionDueAt, locale)
+                        ? formatDate(recurringPayment.nextCollectionDueAt, locale)
                         : t("DashboardPayments.recurring.notScheduled")}
+                    </TableCell>
+                    {/* A schedule has no stop date yet: it runs until it is paused or canceled. */}
+                    <TableCell
+                      className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-tertiary")}
+                    >
+                      {t("DashboardPayments.recurring.noEndDate")}
                     </TableCell>
                   </TableRow>
                 );
@@ -353,17 +366,19 @@ export function RecurringPaymentsWorkspace({
           </Table>
         </div>
       )}
-      <ArrowPagination
-        page={listState.page}
-        pageCount={pageCount}
-        onPageChange={(page) => applyListParams({ page })}
-        disabled={isPending}
-        summary={t("DashboardPayments.newDesign.recurring.range", {
-          from: rangeStart,
-          to: rangeEnd,
-          total,
-        })}
-      />
+      {pageCount > 1 ? (
+        <ArrowPagination
+          page={listState.page}
+          pageCount={pageCount}
+          onPageChange={(page) => applyListParams({ page })}
+          disabled={isPending}
+          summary={t("DashboardPayments.newDesign.recurring.range", {
+            from: rangeStart,
+            to: rangeEnd,
+            total,
+          })}
+        />
+      ) : null}
     </DashboardWorkspaceOverviewPanel>
   );
 }
