@@ -304,6 +304,11 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   --red-tx: var(--critical);
   --red-bg: var(--critical-wash);
   --red-brd: var(--critical-rule);
+  --crimson: var(--critical);
+  --crimson-strong: color-mix(in oklab, var(--critical) 85%, black);
+  --crimson-strongest: color-mix(in oklab, var(--critical) 72%, black);
+  --crimson-bg: var(--critical-wash);
+  --crimson-brd: var(--critical-rule);
 
   --font-sans: var(--font-brand-sans);
   --font-mono: var(--font-brand-mono);
