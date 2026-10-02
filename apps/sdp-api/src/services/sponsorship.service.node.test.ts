@@ -98,7 +98,7 @@ describe("sponsorship identity boundary", () => {
     ).toThrow("Sponsorship actor id is required");
   });
   it("is the owned boundary that forwards the trusted scope to Kora", () => {
-    const env = { FEE_PAYMENT_PROVIDER: "kora" } as Env;
+    const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     createSponsorshipFeePayment(env, {
       environment: "sandbox",
       organizationId: "org_test_sponsorship",
@@ -112,7 +112,7 @@ describe("sponsorship identity boundary", () => {
     );
   });
   it("selects the paymaster by the scope's cluster when a flow names one", () => {
-    const env = { FEE_PAYMENT_PROVIDER: "kora" } as Env;
+    const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
     createSponsorshipFeePayment(env, {
       environment: "production",
       organizationId: "org_test_sponsorship",
@@ -266,15 +266,14 @@ describe("sponsorship identity boundary", () => {
       environment: "production",
       status: "active",
     });
-    const env = { FEE_PAYMENT_PROVIDER: "kora" } as Env;
-    const requestEnv = { ...testEnv, ...env };
-    await createProjectSponsorshipFeePayment(requestEnv, {
+    const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
+    await createProjectSponsorshipFeePayment(env, {
       organizationId: "org_stored",
       projectId: "project_stored",
       actor: { type: "wallet", id: "wallet_stored" },
     });
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
-      requestEnv,
+      env,
       "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored",
       undefined
     );

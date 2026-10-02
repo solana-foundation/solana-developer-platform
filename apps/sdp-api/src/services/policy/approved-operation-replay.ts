@@ -243,6 +243,7 @@ export async function tryApprovedOperationReplayAuth(
     c.set("approvedOperationActor", {
       operationId: capability.operationId,
       userId,
+      storedActorType: actor.type,
       organizationId,
       permissions: getPermissionsForOrgRole(membership.role),
     });

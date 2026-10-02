@@ -39,7 +39,7 @@ describe("internal RPC connectivity test quota", () => {
       db
         .prepare(
           `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Quota Project', 'quota-project', 'sandbox', 'active', ?)`
+           VALUES (?, ?, 'Default Sandbox Project', 'default-sandbox', 'sandbox', 'active', ?)`
         )
         .bind(PROJECT_ID, ORG_ID, ADMIN_USER_ID),
       db

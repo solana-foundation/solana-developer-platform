@@ -10,6 +10,7 @@ import type {
   WalletOperationEnvelope,
   WalletOperationProviderExtensions,
 } from "@sdp/types";
+import { WALLET_OPERATION_HUMAN_ACTOR_TYPES } from "@sdp/types";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
@@ -278,12 +279,12 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 /**
  * Shape of the actor persisted in `wallet_operations.raw_payload` by
  * {@link walletOperationActorFromAuth}; readers parse with this instead of
- * narrowing by hand. `session` survives only as a legacy stored value.
+ * narrowing by hand.
  */
 export const storedWalletOperationActorSchema = z.discriminatedUnion("type", [
   z.looseObject({ type: z.literal("api_key"), id: z.string(), apiKeyId: z.string() }),
   z.looseObject({
-    type: z.enum(["clerk", "approved_operation", "session"]),
+    type: z.enum(WALLET_OPERATION_HUMAN_ACTOR_TYPES),
     id: z.string(),
     userId: z.string(),
   }),
@@ -292,32 +293,38 @@ export const storedWalletOperationActorSchema = z.discriminatedUnion("type", [
 export type StoredWalletOperationActor = z.infer<typeof storedWalletOperationActorSchema>;
 
 /**
- * Derive the wallet-operation actor from the authenticated context.
+ * Derive the wallet-operation actor from the authenticated context. An
+ * approved-operation replay re-emits the actor type the original request
+ * stored, so `resumeApprovedOperation`'s payload fingerprint matches.
  *
  * @param auth - The authenticated API context.
- * @returns The actor, or null when the context names no principal.
+ * @returns The actor for the authenticated principal.
  */
-export function walletOperationActorFromAuth(auth: ApiKeyContext): WalletOperationActor | null {
-  if (auth.apiKeyId) {
-    return {
-      type: "api_key",
-      id: auth.apiKeyId,
-      apiKeyId: auth.apiKeyId,
-    };
+export function walletOperationActorFromAuth(auth: ApiKeyContext): WalletOperationActor {
+  switch (auth.authType) {
+    case "api_key":
+      return {
+        type: "api_key",
+        id: auth.apiKeyId,
+        apiKeyId: auth.apiKeyId,
+      };
+    case "clerk":
+      return {
+        type: "clerk",
+        id: auth.userId,
+        userId: auth.userId,
+      };
+    case "approved_operation":
+      return {
+        type: auth.storedActorType,
+        id: auth.userId,
+        userId: auth.userId,
+      };
+    default: {
+      const exhaustive: never = auth;
+      throw new Error(`Unhandled auth type: ${JSON.stringify(exhaustive)}`);
+    }
   }
-
-  if (auth.userId) {
-    return {
-      type: auth.authType,
-      id: auth.userId,
-      userId: auth.userId,
-    };
-  }
-
-  return {
-    type: auth.authType,
-    id: auth.id,
-  };
 }
 
 /**

@@ -33,6 +33,7 @@ describe("canManageOrganizationCredentials", () => {
     const auth: ApiKeyContext = {
       ...base,
       authType: "approved_operation",
+      storedActorType: "clerk",
       apiKeyId: null,
       userId: TEST_USER.id,
       role: "approved_operation",

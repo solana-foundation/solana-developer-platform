@@ -5,7 +5,12 @@
  * avoiding non-null assertions while adding defensive runtime checks.
  */
 
-import type { ApiKeyWalletAuthorizationBinding, ApiKeyWalletScope, Permission } from "@sdp/types";
+import type {
+  ApiKeyWalletAuthorizationBinding,
+  ApiKeyWalletScope,
+  Permission,
+  WalletOperationHumanActorType,
+} from "@sdp/types";
 import type { Context } from "hono";
 import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";
@@ -34,7 +39,12 @@ export type ApiKeyContext = AuthContextBase &
   (
     | { authType: "api_key"; apiKeyId: string; userId: null }
     | { authType: "clerk"; apiKeyId: null; userId: string }
-    | { authType: "approved_operation"; apiKeyId: null; userId: string }
+    | {
+        authType: "approved_operation";
+        apiKeyId: null;
+        userId: string;
+        storedActorType: WalletOperationHumanActorType;
+      }
   );
 
 export interface ClerkAuthContext {
@@ -118,6 +128,7 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       walletBindings: [],
       authType: "approved_operation",
       userId: replayActor.userId,
+      storedActorType: replayActor.storedActorType,
       apiKeyId: null,
     };
   }
