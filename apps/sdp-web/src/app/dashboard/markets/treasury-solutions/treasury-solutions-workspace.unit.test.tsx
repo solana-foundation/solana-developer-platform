@@ -116,6 +116,7 @@ const mocks = vi.hoisted(() => ({
     | undefined,
   vaultWithdrawalModal: undefined as
     | {
+        parSource?: "shares" | "intermediate";
         onWithdrawn?: (
           withdrawal: {
             createdAt: string;
@@ -666,6 +667,7 @@ vi.mock("../earn/earn-outcome-trackers", () => ({
 
 vi.mock("../earn/earn-vault-exit-modal", () => ({
   EarnVaultExitModal: (props: {
+    parSource?: "shares" | "intermediate";
     onWithdrawn?: (
       withdrawal: {
         createdAt: string;
@@ -930,7 +932,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(legacyRow.textContent).toContain("$900.50");
   });
 
-  it("keeps a position its par intermediate still funds, without offering a share exit", () => {
+  it("keeps a position its par intermediate still funds and offers only its par redemption", async () => {
     mocks.exitedPositionParIntermediate = {
       mint: "wYLDS111111111111111111111111111111111111111",
       amount: "2000",
@@ -952,6 +954,12 @@ describe("TreasurySolutionsWorkspace", () => {
     );
     expect(within(residualRow).queryByRole("button", { name: "Withdraw" })).toBeNull();
     expect(screen.getByLabelText("$2,130.50 in open vault positions")).toBeTruthy();
+
+    await userEvent
+      .setup()
+      .click(within(residualRow).getByRole("button", { name: "Redeem wYLDS" }));
+    expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Exited provider vault");
+    expect(mocks.vaultWithdrawalModal?.parSource).toBe("intermediate");
   });
 
   it("shows an automatically updating deposit status beside the affected position", async () => {

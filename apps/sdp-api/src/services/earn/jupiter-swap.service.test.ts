@@ -1,6 +1,8 @@
 import { SdpEarnError } from "@sdp/earn/errors";
+import { OndoVaultDirectClient } from "@sdp/ondo";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
+import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,12 +10,15 @@ import { AppError } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import {
+  computeUnitLimitInstruction,
   fetchJupiterSwapLeg,
   fetchJupiterSwapQuote,
   type JupiterSwapRequest,
   prependSwapLegToVaultPlan,
   requireEarnSwapMintMetadata,
+  withComputeUnitLimit,
 } from "./jupiter-swap.service";
+import { createOndoSwapPort } from "./ondo-swap-port";
 import { createVaultDeadline } from "./vault-deadline";
 
 /**
@@ -655,6 +660,7 @@ describe("fetchJupiterSwapQuote", () => {
       inAmount: "25000000",
       outAmount: "24990000",
       priceImpactPct: "0.0001",
+      router: "metis",
       ...overrides,
     };
   }
@@ -672,6 +678,7 @@ describe("fetchJupiterSwapQuote", () => {
     expect(url).toContain("/order?");
     expect(url).toContain("amount=25000000");
     expect(url).not.toContain("taker=");
+    expect(new URL(url).searchParams.get("excludeRouters")).toBe("jupiterz,dflow,okx");
     expect((init.headers as Record<string, string>)["x-api-key"]).toBe("jup_test_key");
     expect(quote).toEqual({ outAmount: "24.99", priceImpactPct: "0.0001" });
   });
@@ -714,6 +721,34 @@ describe("fetchJupiterSwapQuote", () => {
     ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
   });
 
+  it.each(["jupiterz", "dflow", "okx", undefined])(
+    "refuses a %s quote the instruction builder cannot execute",
+    async (router) => {
+      fetchMock.mockResolvedValue(okResponse(quoteResponse({ router })));
+      await expect(
+        fetchJupiterSwapQuote(swapEnv(), createVaultDeadline(), {
+          inputMint: USDC,
+          outputMint: PYUSD,
+          sourceAmount: "25",
+        })
+      ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+    }
+  );
+
+  it.each([null, 24990000, "0", "18446744073709551616"])(
+    "refuses invalid output %s instead of publishing an inaccurate valuation",
+    async (outAmount) => {
+      fetchMock.mockResolvedValue(okResponse(quoteResponse({ outAmount })));
+      await expect(
+        fetchJupiterSwapQuote(swapEnv(), createVaultDeadline(), {
+          inputMint: USDC,
+          outputMint: PYUSD,
+          sourceAmount: "25",
+        })
+      ).rejects.toBeInstanceOf(SdpEarnError);
+    }
+  );
+
   it("refuses malformed amounts from upstream", async () => {
     fetchMock.mockResolvedValue(okResponse(quoteResponse({ outAmount: "not-a-number" })));
     await expect(
@@ -724,4 +759,119 @@ describe("fetchJupiterSwapQuote", () => {
       })
     ).rejects.toBeInstanceOf(SdpEarnError);
   });
+});
+
+describe("composed Ondo compute budget", () => {
+  it("replaces the provider limit for probe and final simulation without changing economic instructions", () => {
+    const limit = computeUnitLimitInstruction(800_000);
+    const swap = { programAddress: JUPITER_PROGRAM, accounts: [], data: "AA==" };
+    const price = { ...limit, data: Buffer.from([3, 0, 0, 0, 0, 0, 0, 0, 0]).toString("base64") };
+    const plan = {
+      cluster: "mainnet-beta" as const,
+      instructions: [swap, limit, price, swap],
+      lookupTables: [],
+      assetIdentity: { depositTokenMint: USDC, shareMint: PYUSD },
+      accepted: { amount: "25", minSharesOut: "24" },
+    };
+    const probe = withComputeUnitLimit(plan, 1_400_000);
+    const final = withComputeUnitLimit(probe, 900_000);
+    expect(probe.instructions).toEqual([computeUnitLimitInstruction(1_400_000), swap, price, swap]);
+    expect(final.instructions).toEqual([computeUnitLimitInstruction(900_000), swap, price, swap]);
+    expect(final.accepted).toEqual(plan.accepted);
+    expect(plan.instructions).toEqual([swap, limit, price, swap]);
+  });
+});
+
+describe("Ondo through the production swap port", () => {
+  async function buildOndo(direction: "deposit" | "withdrawal", substituteDestination = false) {
+    const usdy = ONDO_DEPLOYMENTS["mainnet-beta"]?.usdyMint;
+    if (!usdy) throw new Error("Ondo deployment required");
+    const inputMint = direction === "deposit" ? USDC : usdy;
+    const outputMint = direction === "deposit" ? usdy : USDC;
+    const tokenAccount = (mint: string) =>
+      findAssociatedTokenPda({
+        owner: address(OWNER),
+        mint: address(mint),
+        tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]),
+      });
+    const [[source], [destination]] = await Promise.all([
+      tokenAccount(inputMint),
+      tokenAccount(outputMint),
+    ]);
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "https://rpc.mock.invalid") return okResponse({ result: { value: [] } });
+      const parsed = new URL(url);
+      const quote = {
+        inputMint,
+        outputMint,
+        inAmount: "25000000",
+        outAmount: "25000000",
+        router: "metis",
+      };
+      if (parsed.pathname.endsWith("/order")) return okResponse(quote);
+      expect(parsed.pathname).toBe("/swap/v2/build");
+      expect(parsed.searchParams.get("inputMint")).toBe(inputMint);
+      expect(parsed.searchParams.get("outputMint")).toBe(outputMint);
+      const slippageBps = Number(parsed.searchParams.get("slippageBps"));
+      const accounts = sharedRouteAccounts({
+        2: { pubkey: source, isSigner: false, isWritable: true },
+        5: {
+          pubkey: substituteDestination ? AMM_KEY : destination,
+          isSigner: false,
+          isWritable: true,
+        },
+        6: { pubkey: inputMint, isSigner: false, isWritable: false },
+        7: { pubkey: outputMint, isSigner: false, isWritable: false },
+        9: { pubkey: SPL_TOKEN_PROGRAMS["spl-token"], isSigner: false, isWritable: false },
+      });
+      return okResponse(
+        buildResponse({
+          ...quote,
+          slippageBps,
+          otherAmountThreshold: "24500000",
+          setupInstructions: [],
+          swapInstruction: swapInstruction({
+            accounts,
+            data: routeData({ quotedOutAmount: 25_000_000n, slippageBps }),
+          }),
+        })
+      );
+    });
+    const client = new OndoVaultDirectClient(
+      async () => "https://rpc.mock.invalid",
+      (_label, operation) => operation(() => {}),
+      () => createOndoSwapPort(swapEnv())
+    );
+    const ctx = { env: {}, environment: "production" as const };
+    const common = { owner: OWNER, providerReference: usdy };
+    return direction === "deposit"
+      ? client.buildVaultDeposit(ctx, { ...common, amount: "25", minSharesOut: "24.5" })
+      : client.buildVaultWithdrawal(ctx, { ...common, shares: "25", minAmountOut: "24.5" });
+  }
+
+  it.each(["deposit", "withdrawal"] as const)(
+    "binds a %s to the actual USDY mint, owner and floor",
+    async (direction) => {
+      const plan = await buildOndo(direction);
+      expect(plan.assetIdentity).toEqual({
+        depositTokenMint: USDC,
+        shareMint: ONDO_DEPLOYMENTS["mainnet-beta"]?.usdyMint,
+      });
+      expect(plan.accepted).toEqual(
+        direction === "deposit"
+          ? { amount: "25", minSharesOut: "24.5" }
+          : { shares: "25", minAmountOut: "24.5" }
+      );
+      expect(plan.instructions).toHaveLength(2);
+    }
+  );
+
+  it.each(["deposit", "withdrawal"] as const)(
+    "refuses a %s that redirects the output",
+    async (direction) => {
+      await expect(buildOndo(direction, true)).rejects.toMatchObject({
+        code: "PROVIDER_UNAVAILABLE",
+      });
+    }
+  );
 });

@@ -2,7 +2,6 @@ import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
   findAssociatedTokenPda,
-  getCloseAccountInstruction,
   getCreateAssociatedTokenIdempotentInstruction,
   getTransferCheckedInstruction,
   TOKEN_PROGRAM_ADDRESS,
@@ -300,86 +299,16 @@ export function decodeKvaultWithdrawShares(
   return value;
 }
 
-/**
- * Give the share ATA's rent back, when and only when this exit empties it.
- *
- * ── Why this exists at all ────────────────────────────────────────────────
- * klend's `withdrawIxs` bundle historically carried no cleanup instructions,
- * so nothing ever closed the share ATA. Its 2,039,280 lamports of
- * rent-exemption stayed locked in an account holding zero shares, for every
- * position ever exited, reclaimable by nobody. That was true before
- * sponsorship and is not caused by it; sponsoring rent only changes who is out
- * the lamports.
- *
- * The pinned SDK (klend-sdk 10.0.0) now emits its OWN CloseAccount on a full
- * exit, in `postWithdrawIxs`, refunding the OWNER unconditionally. SDP still
- * owns the close: the refund destination has to be attribution-aware (rent a
- * sponsor funded goes back to the sponsor, never the owner — migrations
- * 0066/0067), so the plan builder strips the SDK's copy with
- * `isShareAtaCloseInstruction` and this builder appends the single close the
- * plan carries. Two closes on one account cannot both land — SPL CloseAccount
- * fails the second with InvalidAccountData and takes the whole exit with it,
- * which is exactly how the duplication was found.
- *
- * ── Why the condition is exact and not optimistic ─────────────────────────
- * SPL `CloseAccount` FAILS on a non-zero balance, and it rides in the same
- * transaction as the redemptions, so a wrong guess here does not leave rent
- * behind: it fails the customer's exit. The caller therefore passes the two
- * quantities that settle it rather than a boolean. Equality means the account
- * ends at zero, because the redemption instructions are separately asserted to
- * encode exactly `redeemedBaseUnits`. A partial exit returns null and correctly
- * leaves the account open, still holding shares and still holding its rent.
- *
- * `refundTo` must be whoever ACTUALLY funded the account, which for an account
- * that pre-dates this exit is the value recorded when it was created and never a
- * currently-configured sponsor: rent was paid then, the fee mode may have changed
- * since, and refunding "whoever sponsors today" would sooner or later pay a
- * sponsor with the customer's lamports. The caller resolves that; when the exit
- * ITSELF creates the account, the caller passes its own rent payer instead (see
- * `./sdk.ts`), because the recorded value then describes an older instance.
- * Omitted means the owner funded it and keeps it, which is also the correct
- * unsponsored default.
- */
-export function buildShareAccountCloseInstruction(input: {
-  shareAta: Address;
-  owner: TransactionSigner;
-  refundTo?: Address;
-  /** What the ATA holds once consolidation has run, before any redemption. */
-  ataBaseUnitsBeforeExit: bigint;
-  /** Shares the redemption instructions are asserted to encode. */
-  redeemedBaseUnits: bigint;
-  /** Everything the owner holds of this share mint, across every account. */
-  ownerTotalBaseUnits: bigint;
-}): Instruction | null {
-  if (input.ataBaseUnitsBeforeExit !== input.redeemedBaseUnits) return null;
-  // A TRUE full exit, not merely an emptied ATA. If auxiliary accounts still
-  // hold shares, closing here would be closing an account the very next
-  // withdrawal has to recreate and pay rent for again, and the funder recorded
-  // against the position would by then describe a previous instance of the
-  // account. Leaving it open costs nothing and keeps the recorded funder true.
-  if (input.ownerTotalBaseUnits !== input.redeemedBaseUnits) return null;
-  return getCloseAccountInstruction(
-    {
-      account: input.shareAta,
-      destination: input.refundTo ?? input.owner.address,
-      owner: input.owner,
-    },
-    { programAddress: TOKEN_PROGRAM_ADDRESS }
-  );
-}
-
 /** SPL Token `CloseAccount` opcode: one byte, 9. */
 const CLOSE_ACCOUNT_OPCODE = 9;
 
 /**
  * Is this the SDK's own close of the share ATA?
  *
- * klend-sdk 10.0.0 closes the emptied share ATA itself on a full exit
- * (`postWithdrawIxs`), refunding the owner unconditionally. SDP owns that
- * close instead (see `buildShareAccountCloseInstruction` above), so the plan
- * builder removes every instruction this predicate matches before appending
- * its own — a plan carrying both would fail on chain, because the second
- * CloseAccount finds an account that no longer exists.
+ * The pinned SDK closes the emptied share ATA on a full exit, refunding the
+ * owner unconditionally. SDP strips that close because account creation claims
+ * cannot prove who paid its rent, including accounts pre-funded before creation.
+ * The retained account stays owner-controlled for an explicit close.
  *
  * Deliberately shape-based and narrow: the token program, the one-byte
  * CloseAccount opcode, and the share ATA as the account being closed. A close

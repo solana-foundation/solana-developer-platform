@@ -55,6 +55,7 @@ import { readOndoUsdyRate } from "./usdy-rate";
 /** SPL mint account layout facts the on-chain check reads positionally. */
 const SPL_MINT_ACCOUNT_SIZE = 82;
 const SPL_MINT_DECIMALS_OFFSET = 44;
+const SPL_MINT_IS_INITIALIZED_OFFSET = 45;
 // biome-ignore lint/security/noSecrets: public on-chain program id, not a secret.
 const SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
@@ -100,6 +101,9 @@ export async function readOndoUsdyMint(
     throw internalError(
       `Ondo USDY mint account is ${data.length} bytes, not the ${SPL_MINT_ACCOUNT_SIZE} of an SPL mint`
     );
+  }
+  if (data[SPL_MINT_IS_INITIALIZED_OFFSET] !== 1) {
+    throw internalError(`Ondo USDY mint ${deployment.usdyMint} is not initialized`);
   }
   const decimals = data[SPL_MINT_DECIMALS_OFFSET];
   if (decimals !== ONDO_USDY_DECIMALS) {
