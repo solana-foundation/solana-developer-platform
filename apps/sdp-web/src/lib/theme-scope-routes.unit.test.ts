@@ -15,6 +15,9 @@ describe("themeScopeForPath", () => {
     "/dashboard/custody/setup",
     "/dashboard/wallets/fb_wallet",
     "/dashboard/custody/fb_wallet",
+    "/dashboard/issuance",
+    "/dashboard/issuance/create",
+    "/dashboard/issuance/tok_1",
   ])("puts %s in the refresh scope", (pathname) => {
     expect(themeScopeForPath(pathname)).toBe("refresh");
   });
@@ -26,7 +29,7 @@ describe("themeScopeForPath", () => {
     "/dashboard/wallets/fb_wallet/policy/audit",
     "/dashboard/wallets/setup/extra",
     "/dashboard/payments-archive",
-    "/dashboard/issuance",
+    "/dashboard/issuance-archive",
     "/dashboard/integrations/private-channels/overview",
     "/dashboard/integrations/private-channels/inst_1/channels",
     "/dashboard/integrations/private-channels/inst_1/setup/extra",

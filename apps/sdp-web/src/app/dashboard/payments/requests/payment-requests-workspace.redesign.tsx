@@ -37,7 +37,6 @@ import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-
 import {
   deriveTokenOptions,
   PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
-  PAYMENT_REQUESTS_SCAN_CAP,
   type PaymentRequestsListState,
   type PaymentRequestsLocalErrorCode,
 } from "./payment-requests-page.data";
@@ -64,8 +63,6 @@ interface PaymentRequestsWorkspaceProps {
   counterparties: Counterparty[];
   /** How many requests match the status filter and the search, across every page. */
   total: number;
-  /** The search read only the newest {@link PAYMENT_REQUESTS_SCAN_CAP} requests. */
-  searchCapped: boolean;
   listState: PaymentRequestsListState;
 }
 
@@ -208,6 +205,10 @@ function PaymentRequestsSearch({
         },
       }}
       placeholder={t("DashboardPayments.requests.searchPlaceholder")}
+      // TODO(api): enable once GET /v1/payments/requests can search every request. Until then the
+      // box stays disabled rather than search only the requests already read (see
+      // parsePaymentRequestsListParams).
+      disabled
       className="min-w-0 flex-1 sm:w-56 sm:flex-none"
     />
   );
@@ -381,7 +382,6 @@ export function PaymentRequestsWorkspace({
   initialLocalErrorCode,
   counterparties,
   total,
-  searchCapped,
   listState,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
@@ -449,11 +449,6 @@ export function PaymentRequestsWorkspace({
               onCommit={(search) => applyListParams({ search })}
             />
           </ListToolbar>
-          {searchCapped ? (
-            <p className="text-body text-tertiary">
-              {t("DashboardPayments.requests.searchCapped", { count: PAYMENT_REQUESTS_SCAN_CAP })}
-            </p>
-          ) : null}
           {rows.length === 0 ? (
             <p className="py-12 text-center text-body text-tertiary">
               {t("DashboardPayments.requests.noMatches")}

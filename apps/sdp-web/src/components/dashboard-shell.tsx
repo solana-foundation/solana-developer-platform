@@ -406,7 +406,11 @@ function clipsDashboardHorizontalOverflow(pathname: string): boolean {
   );
 }
 
-function usesWorkspaceViewport(pathname: string): boolean {
+/**
+ * @param issuanceRedesigned - The new design's token page scrolls in its own panel, as a
+ *   wallet's page does; the previous design's token page keeps the page scroll.
+ */
+function usesWorkspaceViewport(pathname: string, issuanceRedesigned: boolean): boolean {
   const isWalletDetailRoute =
     (pathname.startsWith("/dashboard/wallets/") &&
       pathname !== "/dashboard/wallets/setup" &&
@@ -420,6 +424,7 @@ function usesWorkspaceViewport(pathname: string): boolean {
   return (
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/issuance/create" ||
+    (issuanceRedesigned && /^\/dashboard\/issuance\/[^/]+\/?$/.test(pathname)) ||
     pathname === "/dashboard/policies" ||
     pathname === "/dashboard/api-keys" ||
     pathname === "/dashboard/api-keys/new" ||
@@ -575,7 +580,10 @@ export function DashboardShell({
   const shouldRenderTopBarBorder =
     (pageConfig.titlePosition === "center" || showBackInTopBar) && !hasHeaderTabs && !isRefresh;
   const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
-  const shouldLockViewportScroll = usesWorkspaceViewport(pathname);
+  const shouldLockViewportScroll = usesWorkspaceViewport(
+    pathname,
+    isDesignModuleOn(flags, "issuance")
+  );
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
   // The dashboard's own URL store rather than useSearchParams: list filters update the query
   // shallowly, and an export has to follow them.

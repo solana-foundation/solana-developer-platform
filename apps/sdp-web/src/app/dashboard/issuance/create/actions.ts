@@ -6,7 +6,12 @@ import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../../payments/payments-page.data";
-import { buildDraftPayload, draftSchema } from "./draft-model";
+import {
+  type AuthorityKey,
+  buildDraftPayload,
+  draftSchema,
+  isDraftAuthorityInUse,
+} from "./draft-model";
 
 export async function saveIssuanceDraft(
   input: unknown
@@ -23,7 +28,6 @@ export async function saveIssuanceDraft(
       tokenId: null,
     };
   const draft = parsed.data;
-  const isStablecoin = draft.assetClass === "stablecoin";
   const payload = buildDraftPayload(draft);
   try {
     const client = await createSdpApiClient();
@@ -32,9 +36,9 @@ export async function saveIssuanceDraft(
       includeBalances: false,
     });
     const allowedIds = new Set((wallets.data ?? []).map((wallet) => wallet.id));
-    const required = isStablecoin
-      ? Object.values(draft.authorities)
-      : [draft.authorities["mint-authority"], draft.authorities["metadata-authority"]];
+    const required = (Object.keys(draft.authorities) as AuthorityKey[])
+      .filter((key) => isDraftAuthorityInUse(draft, key))
+      .map((key) => draft.authorities[key]);
     if (!wallets.ok || required.some((id) => !allowedIds.has(id))) {
       return {
         state: "error",

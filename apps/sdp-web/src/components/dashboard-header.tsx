@@ -838,7 +838,61 @@ function getAccessControlPageConfig(
   return null;
 }
 
+/** Issuance on the new design: the list, the draft flow and one token's page. */
 function getIssuanceRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/issuance") {
+    return {
+      title: t("Shared.dashboardShell.issuance"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardIssuance.newDesign.createDraft"),
+        href: "/dashboard/issuance/create",
+        icon: "plus",
+        variant: "primary",
+        capability: "canManageTokenWrite",
+      },
+    };
+  }
+  // The flow names itself in its step header; the footer's Exit is the way back.
+  if (pathname === "/dashboard/issuance/create") {
+    return {
+      title: t("DashboardIssuance.newDesign.draft.pageTitle"),
+      hideTitle: true,
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+    };
+  }
+  if (!/^\/dashboard\/issuance\/[^/]+\/?$/.test(pathname)) {
+    return null;
+  }
+  // The token names itself through DashboardPageTitle; "Token" holds the place until it does.
+  return {
+    title: t("DashboardIssuance.newDesign.token.pageTitle"),
+    contentWidthClass: REFRESH_PAGE_WIDTH,
+    backAction: {
+      href: "/dashboard/issuance",
+      label: t("Shared.dashboardShell.issuance"),
+    },
+    headerTabs: {
+      tabs: [
+        { id: "overview", label: t("Shared.tabs.overview") },
+        { id: "details", label: t("DashboardIssuance.newDesign.tabs.details") },
+        { id: "public", label: t("DashboardIssuance.newDesign.tabs.public") },
+        { id: "compliance", label: t("DashboardIssuance.newDesign.tabs.compliance") },
+        { id: "operations", label: t("DashboardIssuance.newDesign.tabs.operations") },
+        { id: "permissions", label: t("DashboardIssuance.newDesign.tabs.permissions") },
+        { id: "activity", label: t("Shared.tabs.activity") },
+      ],
+      hideOnMobile: false,
+    },
+  };
+}
+
+function getLegacyIssuanceRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean
@@ -1415,7 +1469,9 @@ export function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
     };
   }
-  const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
+  const issuanceRoutePageConfig = isDesignModuleOn({ newDesign, newDesignModules }, "issuance")
+    ? getIssuanceRoutePageConfig(pathname, t)
+    : getLegacyIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   // A Payments page no design module has redesigned keeps the previous design's header under
   // NEW DESIGN too.
