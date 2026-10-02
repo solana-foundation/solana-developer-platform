@@ -558,7 +558,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(await response.json()).toMatchObject({
       error: {
         code: "FORBIDDEN",
-        message: "Credential administration does not accept API keys",
+        message: "Credential administration requires a signed-in user",
       },
     });
   });
