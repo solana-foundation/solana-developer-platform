@@ -5,6 +5,8 @@ import ts from "typescript";
 const scriptDirectory = import.meta.dirname;
 const webDirectory = path.resolve(scriptDirectory, "..");
 const sourceDirectory = path.join(webDirectory, "src");
+// The @sdp/ui primitives render dashboard copy too, so their source is held to the same audit.
+const uiPackageSourceDirectory = path.resolve(webDirectory, "../../packages/sdp-ui/src");
 const baselinePath = path.join(webDirectory, "src/i18n/ui-copy-baseline.json");
 const exemptionsPath = path.join(webDirectory, "src/i18n/ui-copy-exemptions.json");
 const userFacingAttributeNames = new Set([
@@ -241,7 +243,10 @@ function collectCandidates(filePath, source) {
   return candidates;
 }
 
-const files = await collectSourceFiles(sourceDirectory);
+const files = [
+  ...(await collectSourceFiles(sourceDirectory)),
+  ...(await collectSourceFiles(uiPackageSourceDirectory)),
+];
 const candidates = new Set();
 for (const filePath of files) {
   for (const candidate of collectCandidates(filePath, await readFile(filePath, "utf8"))) {
