@@ -25,10 +25,11 @@ These root commands automatically run through the Doppler wrapper and use the ac
 pnpm dev
 pnpm dev:api
 pnpm dev:web
-pnpm dev:docs
 pnpm test
 pnpm test:integration
 ```
+
+`pnpm dev:docs` runs without Doppler. The docs site reads only `NEXT_PUBLIC_SDP_*_URL`, each with an in-code default, so no config is selected or required.
 
 `pnpm secrets:print:docker` projects the allowlisted API environment into the format used by self-hosted Docker tooling. It does not update a hosted environment.
 
