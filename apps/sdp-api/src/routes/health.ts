@@ -13,12 +13,21 @@ health.get("/", async (c) => {
   const timestamp = new Date().toISOString();
 
   // Basic health check
-  const health = {
+  const health: {
+    status: "ok";
+    timestamp: string;
+    version: string;
+    environment: string;
+    build?: string;
+  } = {
     status: "ok",
     timestamp,
     version: c.env.API_VERSION,
     environment: c.env.ENVIRONMENT,
   };
+  if (c.env.ENVIRONMENT === "development") {
+    health.build = c.env.SDP_BUILD_SHA?.trim() || "local";
+  }
 
   return c.json(health);
 });
