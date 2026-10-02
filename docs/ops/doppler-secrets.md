@@ -23,7 +23,7 @@ These root commands automatically run through the Doppler wrapper and use the ac
 
 ```bash
 pnpm dev
-pnpm dev:api:local
+pnpm dev:api
 pnpm dev:web
 pnpm dev:docs
 pnpm test

@@ -93,11 +93,11 @@ authenticated.
    pnpm kora:up
 
    # API with team/Doppler configuration (keep this process running)
-   pnpm dev:api:local
+   pnpm dev:api
    ```
 
    External contributors using only `.env.local` can replace the final command
-   with `pnpm -C apps/sdp-api dev:local` so no Doppler session is required.
+   with `pnpm -C apps/sdp-api dev` so no Doppler session is required.
 
    The API development process waits for Postgres and Redis and applies local
    migrations before starting the server.
