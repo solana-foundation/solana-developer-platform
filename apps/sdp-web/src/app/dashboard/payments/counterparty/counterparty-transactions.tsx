@@ -374,7 +374,7 @@ function TransferDetailRows({
   );
 }
 
-function TransferDetailModal({
+export function TransferDetailModal({
   transfer,
   counterpartyName,
   onClose,

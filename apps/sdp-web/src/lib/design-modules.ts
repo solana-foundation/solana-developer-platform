@@ -7,7 +7,10 @@
  * A redesigned area adds its routes here, its flag in flags/index.ts and the flag's entry in
  * flags/new-design.ts. The first matching route wins, so a catch-all module goes last.
  */
-const DESIGN_MODULE_ROUTES = {} satisfies Record<string, RegExp>;
+const DESIGN_MODULE_ROUTES = {
+  // Payments' Contacts: the list, a new contact, one contact's page.
+  contacts: /^\/dashboard\/payments\/counterparty(?:\/[^/]+)?\/?$/,
+} satisfies Record<string, RegExp>;
 
 export type DesignModule = keyof typeof DESIGN_MODULE_ROUTES;
 
