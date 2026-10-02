@@ -150,8 +150,9 @@ function DetailBlock({
   aside?: ReactNode;
   children: ReactNode;
 }) {
+  // 24px between blocks plus 30 here: the design's 54 from the rows above to the heading.
   return (
-    <section className="flex flex-col gap-4 pt-4 md:pt-10">
+    <section className="flex flex-col gap-4 pt-4 md:pt-7.5">
       <div className="flex flex-wrap items-center justify-between gap-4 [&>a]:-my-1 [&>a]:[--button-height-md:1.875rem] [&>button]:-my-1 [&>button]:[--button-height-md:1.875rem]">
         <h2 className="text-subheading font-medium text-primary">{title}</h2>
         {aside}
