@@ -308,7 +308,7 @@ export function PaymentRequestCreateSkeleton() {
 /** One block of the contact page loading: its heading, then a few table rows under a header. */
 function ContactBlockSkeleton({ rows }: { rows: number }) {
   return (
-    <section className="flex flex-col gap-4 pt-4 md:pt-10">
+    <section className="flex flex-col gap-4 pt-4 md:pt-7.5">
       <SkeletonBlock className="h-6 w-36" />
       <div className="flex flex-col">
         <div className="flex h-[30px] items-center gap-8 border-b border-border-default">
