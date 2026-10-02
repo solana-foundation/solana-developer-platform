@@ -20,12 +20,10 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "lint": "biome check src/"
   },
   "devDependencies": {
     "@types/node": "26.5.1",
-    "tsx": "4.23.13",
     "typescript": "6.0.3"
   }
 }

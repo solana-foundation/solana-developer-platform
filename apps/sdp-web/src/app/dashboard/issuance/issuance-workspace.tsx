@@ -99,8 +99,7 @@ const ISSUANCE_OVERVIEW_PANEL_CLASS = "pt-0 [overflow-anchor:none]";
 // The scrolling panel's own backdrop is the shell's `--surface` seen through the
 // content section's `bg-surface-raised/80`; alpha compositing is a plain sRGB mix,
 // so this color-mix reproduces that composite exactly, in both themes.
-const PINNED_HEADER_BG =
-  "color-mix(in srgb, var(--color-surface-raised) 80%, var(--color-surface))";
+const PINNED_HEADER_BG = "color-mix(in srgb, var(--surface-raised) 80%, var(--surface))";
 
 // That backdrop is painted as a gradient rather than a flat fill: solid down to the
 // asset-count row, then out to transparent over this band. A flat fill guillotines
