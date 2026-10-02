@@ -54,7 +54,6 @@ const CLASS_LABEL: Record<DraftState["assetClass"], MessageKey> = {
 };
 
 const CURRENCIES = ["USD", "EUR", "GBP"] as const;
-const NO_CURRENCY = "none";
 const NUMERIC = "numeric";
 const ACCESS_ALLOWLIST: DraftAccess = "allowlist";
 
@@ -87,12 +86,15 @@ function Field({
   label,
   help,
   hint,
+  action,
   children,
 }: {
   id?: string;
   label: string;
   help?: string;
   hint?: string;
+  /** The field's one small action at the label's end (Clear on an optional choice). */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -102,10 +104,25 @@ function Field({
           {label}
         </Label>
         {help ? <InfoHint text={help} /> : null}
+        {action ? <span className="ml-auto">{action}</span> : null}
       </span>
       {children}
       {hint ? <p className="text-body text-secondary">{hint}</p> : null}
     </div>
+  );
+}
+
+/** Clears an optional choice back to unset: the picker lists only real values. */
+function ClearFieldButton({ onClick }: { onClick: () => void }) {
+  const t = useTranslations();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-meta text-secondary underline-offset-4 transition-colors hover:text-primary hover:underline"
+    >
+      {t("DashboardIssuance.newDesign.details.clearCurrency")}
+    </button>
   );
 }
 
@@ -307,7 +324,14 @@ export function DetailsStep({ draft, update }: { draft: DraftState; update: Upda
             onChange={(event) => update({ issuerName: event.currentTarget.value })}
           />
         </Field>
-        <Field label={t("DashboardIssuance.newDesign.details.currency")}>
+        <Field
+          label={t("DashboardIssuance.newDesign.details.currency")}
+          action={
+            draft.pegCurrency ? (
+              <ClearFieldButton onClick={() => update({ pegCurrency: undefined })} />
+            ) : undefined
+          }
+        >
           <Select
             ariaLabel={t("DashboardIssuance.newDesign.details.currency")}
             placeholder={t("DashboardIssuance.newDesign.draft.selectCurrency")}
@@ -323,9 +347,6 @@ export function DetailsStep({ draft, update }: { draft: DraftState; update: Upda
                 {t(`DashboardIssuance.newDesign.draft.currency${currency}`)}
               </SelectItem>
             ))}
-            <SelectItem value={NO_CURRENCY}>
-              {t("DashboardIssuance.newDesign.details.noCurrency")}
-            </SelectItem>
           </Select>
         </Field>
       </div>

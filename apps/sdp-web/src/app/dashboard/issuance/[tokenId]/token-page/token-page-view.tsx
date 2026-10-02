@@ -96,7 +96,7 @@ function useExplorerAction(href: string | null | undefined) {
           className="text-secondary hover:text-primary"
           iconRight={<ArrowUpRightIcon aria-hidden="true" />}
         >
-          <a href={href} target="_blank" rel="noreferrer" data-token-explorer>
+          <a href={href} target="_blank" rel="noreferrer" data-token-explorer data-align-title>
             {label}
           </a>
         </Button>

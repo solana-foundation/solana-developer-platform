@@ -89,7 +89,7 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
     expect(main?.hasAttribute("data-sdp-new-design")).toBe(true);
     expect(main?.hasAttribute("data-sdp-theme")).toBe(false);
     expect(sidebar?.getAttribute("data-sdp-theme")).toBe("refresh");
-    expect(sidebar?.getAttribute("style")).toContain("width:272px");
+    expect(sidebar?.getAttribute("style")).toContain("width:280px");
     expect(sidebar?.className).toContain("border-r");
     expect(page?.className).not.toContain("rounded-2xl");
   });

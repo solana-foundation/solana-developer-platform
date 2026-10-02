@@ -17,7 +17,6 @@ import { accessControlLabel, shortAddress, type TokenTabProps } from "./token-pa
 import { TokenSaveFooter } from "./token-save-footer";
 
 const CURRENCIES = ["USD", "EUR", "GBP"] as const;
-const NO_CURRENCY = "none";
 const NUMERIC = "numeric";
 const URL_PLACEHOLDER = "https://";
 const LOGO_PLACEHOLDER = "https://…/logo.png";
@@ -314,25 +313,34 @@ function CurrencyField({ form }: DetailsFormProps) {
   const { draft, updateDraft, saving } = form;
   return (
     <div className="flex flex-col gap-2">
-      <Label className="text-meta font-normal text-secondary">
-        {t("DashboardIssuance.newDesign.details.currency")}
-      </Label>
+      <span className="flex items-center gap-1">
+        <Label className="text-meta font-normal text-secondary">
+          {t("DashboardIssuance.newDesign.details.currency")}
+        </Label>
+        {/* The picker lists only real currencies; this is the way back to none. */}
+        {draft.pegCurrency ? (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => updateDraft({ pegCurrency: "" })}
+            className="ml-auto text-meta text-secondary underline-offset-4 transition-colors hover:text-primary hover:underline disabled:opacity-40"
+          >
+            {t("DashboardIssuance.newDesign.details.clearCurrency")}
+          </button>
+        ) : null}
+      </span>
       <Select
         ariaLabel={t("DashboardIssuance.newDesign.details.currency")}
-        value={draft.pegCurrency || NO_CURRENCY}
+        placeholder={t("DashboardIssuance.newDesign.draft.selectCurrency")}
+        value={draft.pegCurrency ?? ""}
         disabled={saving}
-        onValueChange={(value) =>
-          updateDraft({ pegCurrency: !value || value === NO_CURRENCY ? "" : value })
-        }
+        onValueChange={(value) => updateDraft({ pegCurrency: value ?? "" })}
       >
         {CURRENCIES.map((currency) => (
           <SelectItem key={currency} value={currency}>
             {currency}
           </SelectItem>
         ))}
-        <SelectItem value={NO_CURRENCY}>
-          {t("DashboardIssuance.newDesign.details.noCurrency")}
-        </SelectItem>
       </Select>
     </div>
   );

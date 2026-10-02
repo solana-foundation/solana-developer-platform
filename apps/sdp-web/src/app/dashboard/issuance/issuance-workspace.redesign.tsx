@@ -38,6 +38,7 @@ import {
   tokenLifecycle,
 } from "./issuance-token-state.redesign";
 import type { IssuanceTokenFacets } from "./issuance-tokens.data";
+import { ISSUANCE_TOOLBAR_CONTROLS } from "./issuance-toolbar.redesign";
 import { IssuedTokenMark } from "./issued-token-mark.redesign";
 import { LocalDraftsBlock } from "./local-drafts-block.redesign";
 import {
@@ -217,6 +218,13 @@ function IssuanceListToolbar({
   const { query, updateQuery, search, setSearch } = list;
   return (
     <ListToolbar
+      // On a phone the design keeps Filter, sort and page size on one row and gives the search
+      // the next one, full width: the controls' group gives way so all four wrap as one row.
+      // 40px under the tabs, 4 more than the panel's 36, as the design sets the list's toolbar.
+      className={cn(
+        ISSUANCE_TOOLBAR_CONTROLS,
+        "mt-1 max-sm:flex-wrap max-sm:[&>:last-child]:contents"
+      )}
       filters={
         <FilterMenu
           label={t("Shared.SharedComponents.filter")}
@@ -232,7 +240,7 @@ function IssuanceListToolbar({
           const sort = SORT_OPTIONS.find((option) => option.value === value)?.value;
           if (sort) updateQuery({ sort });
         }}
-        className="hidden w-auto shrink-0 sm:flex"
+        className="w-auto shrink-0"
         textSize="body"
       >
         {SORT_OPTIONS.map((option) => (
@@ -255,7 +263,7 @@ function IssuanceListToolbar({
         }}
         placeholder={t("DashboardIssuance.newDesign.list.searchPlaceholder")}
         aria-label={t("DashboardIssuance.newDesign.list.searchLabel")}
-        className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+        className="min-w-0 flex-1 max-sm:basis-full sm:w-56 sm:flex-none"
       />
     </ListToolbar>
   );

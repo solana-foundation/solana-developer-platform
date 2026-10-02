@@ -13,6 +13,7 @@ import { SearchInput } from "@/components/ui/search-input";
 import { StatusText } from "@/components/ui/status-text";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { ISSUANCE_TOOLBAR_CONTROLS } from "../../issuance-toolbar.redesign";
 import {
   ACTIVITY_ACTIONS,
   activityActorType,
@@ -124,6 +125,7 @@ export function TokenActivityTab({ token }: { token: Token }) {
   return (
     <div className="flex flex-col gap-5">
       <ListToolbar
+        className={ISSUANCE_TOOLBAR_CONTROLS}
         filters={
           <FilterMenu
             label={t("Shared.SharedComponents.filter")}
