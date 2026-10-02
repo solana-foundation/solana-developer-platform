@@ -52,8 +52,9 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     tags: ["API Keys"],
     summary: "Create API key",
     operationId: "createApiKey",
-    description: "Creates a new API key. The full key is returned once.",
-    security: [{ apiKeyAuth: [] }],
+    description:
+      "Creates a new API key in the project selected by x-project-id. Signed-in users only: API keys cannot mint API keys. The full key is returned once.",
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       body: {

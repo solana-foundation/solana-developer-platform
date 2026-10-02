@@ -74,10 +74,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/api-keys",
-            "description": "Creates a new API key. The full key is returned once.",
+            "description": "Creates a new API key in the project selected by x-project-id. Signed-in users only: API keys cannot mint API keys. The full key is returned once.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
+              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -640,39 +640,6 @@
             "header": [],
             "url": "{{baseUrl}}/v1/projects/{{projectId}}/members/{{memberId}}",
             "description": "Removes a member from the project."
-          }
-        },
-        {
-          "name": "List project API keys",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}/api-keys",
-            "description": "Lists API keys scoped to the project."
-          }
-        },
-        {
-          "name": "Create project API key",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/projects/{{projectId}}/api-keys",
-            "description": "Creates an API key scoped to the project. The full key is returned once.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"provisionWallet\": {\n    \"connectionId\": \"cconn_123\"\n  },\n  \"walletLabel\": \"Mint authority wallet\",\n  \"walletPurpose\": \"mint_authority\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
           }
         }
       ]

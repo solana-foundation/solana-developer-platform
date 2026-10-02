@@ -5,9 +5,7 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { validateBody } from "@/middleware/validate";
-import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import type { Env } from "@/types/env";
-import { createProjectApiKey, listProjectApiKeys } from "./handlers/api-keys";
 import {
   addProjectMember,
   listProjectMembers,
@@ -61,18 +59,6 @@ projects.delete(
   "/:projectId/members/:memberId",
   requirePermissions("project-members:write"),
   removeProjectMember
-);
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Project API Keys
-// ═══════════════════════════════════════════════════════════════════════════
-
-projects.get("/:projectId/api-keys", requirePermissions("api-keys:read"), listProjectApiKeys);
-projects.post(
-  "/:projectId/api-keys",
-  requirePermissions("api-keys:write"),
-  validateBody(apiKeyCreateSchema),
-  createProjectApiKey
 );
 
 export default projects;

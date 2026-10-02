@@ -36,8 +36,6 @@ export type ParsedWalletBindingPatch = {
 
 type WalletScopeInput = WalletBindingPatchInput & {
   walletScope?: ApiKeyWalletScope;
-  provisionWallet?: boolean;
-  connectionId?: string;
 };
 
 function trimWalletId(walletId: string): string {
@@ -185,19 +183,9 @@ export function resolveCreateWalletScope(input: WalletScopeInput): {
   if (!walletScope) {
     throw badRequest("walletScope is required");
   }
-  if (input.connectionId && !input.provisionWallet) {
-    throw badRequest("connectionId requires provisionWallet");
-  }
-
   const walletBindingPatch = parseWalletBindingPatch(input);
 
   if (walletScope === "all") {
-    if (input.provisionWallet) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "walletScope 'all' cannot be combined with provisionWallet"
-      );
-    }
     if (walletBindingPatch.touched) {
       throw new AppError(
         "BAD_REQUEST",
@@ -212,10 +200,10 @@ export function resolveCreateWalletScope(input: WalletScopeInput): {
     };
   }
 
-  if (!input.provisionWallet && walletBindingPatch.bindings.length === 0) {
+  if (walletBindingPatch.bindings.length === 0) {
     throw new AppError(
       "BAD_REQUEST",
-      "walletScope 'selected' requires wallet bindings or provisionWallet"
+      "walletScope 'selected' requires signingWalletId, signingWalletIds, or walletBindings"
     );
   }
 
@@ -252,12 +240,6 @@ export function resolveUpdateWalletScope(input: WalletScopeInput): {
   }
 
   if (walletScope === "all") {
-    if (input.provisionWallet) {
-      throw new AppError(
-        "BAD_REQUEST",
-        "walletScope 'all' cannot be combined with provisionWallet"
-      );
-    }
     if (walletBindingPatch.touched) {
       throw new AppError(
         "BAD_REQUEST",
@@ -271,10 +253,6 @@ export function resolveUpdateWalletScope(input: WalletScopeInput): {
       bindings: [],
       touched: true,
     };
-  }
-
-  if (input.provisionWallet) {
-    throw badRequest("provisionWallet is only supported during API key creation");
   }
 
   if (!walletBindingPatch.touched || walletBindingPatch.bindings.length === 0) {
@@ -373,12 +351,17 @@ export function assertGrantableApiKeyPermissions(
     );
   }
 
+  const rolePermissions = getPermissionsForApiKeyRole(resolvedRole);
+  if (requestedPermissions != null && !hasAllPermissions(rolePermissions, requestedPermissions)) {
+    throw badRequest(`permissions cannot exceed the ${resolvedRole} role preset`);
+  }
+
   if (hasAnyPermission(actorPermissions, ["org:admin"])) {
     return;
   }
 
   const effectivePermissions =
-    requestedPermissions == null ? getPermissionsForApiKeyRole(resolvedRole) : requestedPermissions;
+    requestedPermissions == null ? rolePermissions : requestedPermissions;
 
   if (!hasAllPermissions(actorPermissions, effectivePermissions)) {
     throw new AppError(

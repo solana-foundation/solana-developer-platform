@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import {
   requireAdminApiKeyRole,
   requirePermissions,
+  requireUserActor,
   unifiedAuthMiddleware,
 } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
@@ -42,6 +43,7 @@ apiKeys.use("*", projectContextMiddleware());
 apiKeys.get("/", requirePermissions("api-keys:read"), listApiKeys);
 apiKeys.post(
   "/",
+  requireUserActor("API key creation"),
   requirePermissions("api-keys:write"),
   validateBody(apiKeyCreateSchema),
   createApiKey
