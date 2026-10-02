@@ -1,7 +1,7 @@
 # @sdp/design-tokens
 
 Every colour, font, type size, radius and control size SDP UI is built from, as plain CSS
-custom properties. Tailwind utilities map onto them, and a typed catalog describes them. The
+custom properties, with Tailwind utilities mapped onto them. The
 dashboard (`apps/sdp-web`) consumes the package today. A future Storybook or docs page can
 read the same files without Tailwind.
 
@@ -11,8 +11,7 @@ read the same files without Tailwind.
 | -- | -- |
 | `src/tokens.css` | The values. Light values on `:root`, dark values on `:root.dark`. |
 | `src/theme.css` | Tailwind v4 `@theme inline` mappings (`bg-surface`, `text-body`, `rounded-control`, `max-w-page`, …) and the `refresh:` variant. |
-| `src/index.ts` | Typed catalog: every token's name, group, description and utility. It also exports the refresh-theme attribute and the scale names for `tailwind-merge`. |
-| `src/catalog.test.ts` | Keeps the CSS and the catalog in step. |
+| `src/index.ts` | The refresh-theme attribute (`refreshThemeProps`) and the scale names for `tailwind-merge` (`tailwindThemeScales`). |
 | `src/assets/fonts/` | The refresh design's faces: Season Sans (Regular, Medium) and Geist Mono (variable, Latin subset), as woff2. |
 
 ## Layers
@@ -74,6 +73,12 @@ than a second component:
 <div className="rounded-lg bg-fill-subtle refresh:rounded-card refresh:bg-transparent" />
 ```
 
+In custom CSS and arbitrary values, read the palette names (`var(--amber-tx)`,
+`var(--surface-raised)`), not Tailwind's `--color-*` names. `@theme inline` declares
+`--color-warning: var(--amber-tx)` on `:root`, where it resolves once, so inside a nested refresh
+scope a `var(--color-warning)` keeps the base value. Utilities aren't affected: they inline the
+palette name.
+
 ### Fonts
 
 The refresh stacks read `--font-season-sans` and `--font-geist-mono`, so the app loads the
@@ -105,24 +110,19 @@ const twMerge = extendTailwindMerge({
 
 ## Adding or changing a token
 
-1. Declare it in `src/tokens.css`. Add a dark value under `:root.dark` when its group is
-   themed (see `THEMED_GROUPS`). If the refresh design changes it, re-point it in the refresh
-   scope block.
-2. Add it to `designTokens` in `src/index.ts`, with a group and a one-line description.
-3. If it needs a utility, map it in `src/theme.css`. A new scale name also goes in
-   `tailwindThemeScales`.
-4. Run `pnpm --filter @sdp/design-tokens test`. The catalog test fails if a token is missing
-   from either side, if a themed token has no dark value, or if a utility points at a token
-   that doesn't exist.
+1. Declare it in `src/tokens.css`. Add a dark value under `:root.dark` when it differs in dark
+   mode. If the refresh design changes it, re-point it in the refresh scope block.
+2. If it needs a utility, map it in `src/theme.css`. A new scale name (a `text-*` size, a
+   `rounded-*` radius, a `shadow-*`, …) also goes in `tailwindThemeScales`.
 
 ## Storybook
 
 The package is laid out so a Storybook can document it without new plumbing:
 
-- Swatch and scale stories can iterate over `designTokens` grouped by `group`, and read live
-  values with `getComputedStyle(element).getPropertyValue(token.name)`. Light, dark and
-  refresh then come from the same stories, by toggling `.dark` and `refreshThemeProps` on the
-  story root.
+- Swatch and scale stories can read live values with
+  `getComputedStyle(element).getPropertyValue(name)`. Light, dark and refresh then come from the
+  same stories, by toggling `.dark` and `refreshThemeProps` on the story root. A typed list of
+  the tokens to iterate over can come back with the Storybook that reads it.
 - Component stories import `tokens.css` and `theme.css` in the Storybook preview, the same
   way `globals.css` does, and declare the two font variables from `src/assets/fonts`, so
   components render exactly as they do in the dashboard.
