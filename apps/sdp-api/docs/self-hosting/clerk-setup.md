@@ -127,12 +127,12 @@ In production self-hosted deployments, point Clerk directly at the deployment's 
 3. Confirm the webhook landed by querying Postgres:
 
    ```bash
-   psql "${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}" -c "SELECT id, clerk_organization_id, name, tier FROM organizations;"
+   psql "${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}" -c "SELECT o.id, a.provider_org_id AS clerk_org_id, o.name, o.tier FROM organizations o JOIN auth_organization_identities a ON a.organization_id = o.id AND a.provider = 'clerk';"
    ```
 
-   You should see one row with `clerk_organization_id` matching the org you just created.
+   You should see one row with `clerk_org_id` matching the org you just created.
 4. From the dashboard, navigate to any authenticated page (wallets, settings). The API call should succeed — the session token is verified and `sub` + `org_id` resolve correctly.
-5. With `SDP_DEPLOYMENT_MODE=self_hosted`, the org's tier does not matter; every configured provider is entitled. If a provider picker is empty, that provider's env vars are not set in `.env.local`.
+5. To use the local signer (or any other manual provider), add `{"sdp": {"providerOverrides": {"custody": {"local": true}}}}` to the organization's private metadata in the Clerk dashboard (Organizations → your org → Metadata → Private). The `organization.updated` webhook syncs it. Without it, choosing the local signer returns `403 Local requires manual activation for this organization.` Generally available providers need no override. If a provider picker is empty, that provider's env vars are not set.
 
 ## Troubleshooting
 
