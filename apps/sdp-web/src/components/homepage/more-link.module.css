@@ -1,0 +1,46 @@
+/* A text link that leads on: underlined by a hairline that lights pink on hover. */
+.more {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 22px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--hp-line);
+  color: var(--hp-ink);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  transition: border-color 200ms var(--hp-micro);
+}
+
+.more:hover {
+  border-color: var(--hp-pink);
+}
+
+.more:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 3px;
+}
+
+.arrow {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 300ms var(--hp-ease);
+}
+
+.more:hover .arrow {
+  transform: translateX(3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .more,
+  .arrow {
+    transition: none;
+  }
+}

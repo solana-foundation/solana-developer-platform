@@ -1,0 +1,42 @@
+/* The example asset's sheet: hairline rows, the first one larger, carrying its name. */
+.sheet {
+  margin: 0;
+}
+
+.item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid var(--hp-line);
+  color: var(--hp-ink-3);
+  font-size: 16px;
+}
+
+.item:first-child {
+  padding-top: 12px;
+  color: var(--hp-ink);
+  font-size: 20px;
+}
+
+.item:last-child {
+  border-bottom: 1px solid var(--hp-line);
+}
+
+.item dt,
+.item dd {
+  margin: 0;
+}
+
+.item dd {
+  color: var(--hp-ink);
+  text-align: right;
+}
+
+.example {
+  margin-left: 10px;
+  color: var(--hp-ink-3);
+  font-size: 14px;
+  font-style: normal;
+}

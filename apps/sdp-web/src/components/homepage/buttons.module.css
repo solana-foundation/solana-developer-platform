@@ -1,0 +1,49 @@
+/* The homepage's buttons: filled ink, and a hairline outline. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 44px;
+  padding: 0 21px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background 160ms var(--hp-micro),
+    border-color 160ms var(--hp-micro),
+    opacity 160ms var(--hp-micro);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 2px;
+}
+
+.fill {
+  background: var(--hp-ink);
+  color: var(--hp-paper);
+}
+
+.fill:hover {
+  opacity: 0.9;
+}
+
+.line {
+  border-color: var(--hp-line);
+  background: none;
+  color: var(--hp-ink);
+}
+
+.line:hover {
+  background: var(--hp-paper-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+}

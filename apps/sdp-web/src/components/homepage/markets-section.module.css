@@ -1,0 +1,162 @@
+/* Two strategies on one balance: the treasuries' floor (silver), curated DeFi's ceiling (signal). */
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  padding-top: 8px;
+}
+
+.axisLine {
+  stroke: var(--hp-line);
+}
+
+.marker {
+  stroke: var(--hp-line);
+  stroke-dasharray: 2 5;
+}
+
+.silverEnd {
+  stop-color: var(--hp-silver-end);
+}
+
+.curve {
+  stroke-dasharray: 720;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 1800ms var(--hp-ease) 200ms;
+}
+
+.ceiling {
+  transition-delay: 600ms;
+}
+
+.band {
+  transition: opacity 900ms var(--hp-ease) 1500ms;
+}
+
+/* Until the row arrives the curves are undrawn; Rise marks it "waiting" only once script runs. */
+[data-rise="waiting"] .curve {
+  stroke-dashoffset: 720;
+}
+
+[data-rise="waiting"] .band {
+  opacity: 0;
+}
+
+.floorDot {
+  fill: var(--hp-silver-end);
+}
+
+.pulse {
+  fill: var(--hp-pink);
+  animation: pulse 2.4s ease-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    r: 5.5;
+  }
+  50% {
+    r: 8;
+  }
+}
+
+.axis {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  color: var(--hp-ink-3);
+  font-size: 12.5px;
+}
+
+.axisMiddle {
+  position: absolute;
+  left: 68%;
+  transform: translateX(-50%);
+}
+
+.legend {
+  min-height: 116px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin: 40px 0 0;
+  padding: 24px 0 0;
+  border-top: 1px solid var(--hp-line);
+  list-style: none;
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--hp-ink-3);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.key {
+  display: inline-block;
+  width: 18px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.keyCeiling {
+  background: linear-gradient(90deg, #c9c6d1, #9945ff, #dc1fff);
+}
+
+.keyFloor {
+  background: linear-gradient(90deg, #c9c6d1, var(--hp-silver-end));
+}
+
+.stats {
+  min-height: 116px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 26px;
+  margin: 40px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--hp-line);
+}
+
+.stat {
+  padding-top: 18px;
+}
+
+.stat dt {
+  color: var(--hp-ink);
+  font-size: clamp(28px, 2.6vw, 40px);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  font-weight: 400;
+}
+
+.stat dd {
+  max-width: 22ch;
+  margin: 10px 0 0;
+  color: var(--hp-ink-3);
+  font-size: 14.5px;
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .curve,
+  .band {
+    transition: none;
+  }
+
+  .pulse {
+    animation: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  .stats,
+  .legend {
+    min-height: 0;
+  }
+}

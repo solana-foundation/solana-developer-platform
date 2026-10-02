@@ -1,37 +1,49 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("public auth entry e2e", () => {
-  test("signed-out homepage offers self-serve signup and a contact path", async ({ page }) => {
+  test("signed-out homepage offers self-serve signup and the docs", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByRole("link", { name: "Try SDP" })).toHaveAttribute("href", "/sign-up");
-    await expect(page.getByRole("link", { name: "Contact us" })).toHaveAttribute(
+    const hero = page.locator("#top");
+    // The drawn letters are hidden from assistive technology; the name is the sentence.
+    await expect(
+      hero.getByRole("heading", { level: 1, name: "The interface to onchain finance" })
+    ).toBeVisible();
+    await expect(hero.getByRole("link", { name: "Create account" })).toHaveAttribute(
       "href",
-      "https://solanafoundation.typeform.com/to/PLfMTDQs"
+      "/sign-up"
     );
-    await expect(page.getByRole("button", { name: "Sign in" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Docs" })).toBeVisible();
+    await expect(hero.getByRole("link", { name: "Read the docs" })).toBeVisible();
+    const header = page.getByRole("banner");
+    await expect(header.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/sign-in");
+    await expect(header.getByRole("link", { name: "Create account" })).toHaveAttribute(
+      "href",
+      "/sign-up"
+    );
+    await expect(header.getByRole("button", { name: "Docs" })).toBeVisible();
   });
 
   test("language picker does not shift the header when it opens or closes", async ({ page }) => {
     await page.goto("/");
 
     const languagePicker = page.getByRole("button", { name: "Language" });
-    const dashboardLink = page.getByRole("link", { name: "Dashboard" });
-    const dashboardLinkX = (await dashboardLink.boundingBox())?.x;
+    const signInLink = page.getByRole("banner").getByRole("link", { name: "Sign in" });
+    const signInLinkX = (await signInLink.boundingBox())?.x;
 
-    expect(dashboardLinkX).toBeDefined();
+    expect(signInLinkX).toBeDefined();
 
     await languagePicker.click();
     await expect(page.getByText("Choose language", { exact: true })).toBeVisible();
-    expect((await dashboardLink.boundingBox())?.x).toBe(dashboardLinkX);
+    expect((await signInLink.boundingBox())?.x).toBe(signInLinkX);
 
     await page.keyboard.press("Escape");
     await expect(page.getByText("Choose language", { exact: true })).toBeHidden();
-    expect((await dashboardLink.boundingBox())?.x).toBe(dashboardLinkX);
+    expect((await signInLink.boundingBox())?.x).toBe(signInLinkX);
   });
 
-  test("system dark mode keeps landing artwork and Clerk sign-in legible", async ({ page }) => {
+  test("system dark mode leaves the homepage light and keeps Clerk sign-in legible", async ({
+    page,
+  }) => {
     const themeScriptErrors: string[] = [];
     page.on("console", (message) => {
       if (message.type() === "error" && /script tag while rendering/i.test(message.text())) {
@@ -43,11 +55,14 @@ test.describe("public auth entry e2e", () => {
     await page.emulateMedia({ colorScheme: "dark" });
     await page.goto("/");
 
-    await expect(page.locator("html")).toHaveClass(/dark/);
-    await expect(page.getByTestId("landing-solana-logo")).toHaveCSS("filter", "invert(1)");
-    await expect(page.getByTestId("landing-hero-figure")).toHaveCSS("filter", "invert(1)");
+    // The homepage is locked to light (FORCED_THEMES in theme-context.tsx).
+    await expect(page.locator("html")).not.toHaveClass(/dark/);
+    await expect(page.getByTestId("homepage-sdp-mark")).toHaveCSS("filter", "none");
 
-    await page.goto("/sign-in");
+    // A client-side navigation away must hand the page back to the visitor's theme.
+    await page.getByRole("banner").getByRole("link", { name: "Sign in" }).click();
+    await expect(page).toHaveURL(/\/sign-in/);
+    await expect(page.locator("html")).toHaveClass(/dark/);
     await expect(
       page.getByRole("heading", { name: "Sign in to Solana Developer Platform" })
     ).toBeVisible({ timeout: 120_000 });

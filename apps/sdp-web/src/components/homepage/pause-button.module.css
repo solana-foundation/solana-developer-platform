@@ -1,0 +1,34 @@
+.button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--hp-line);
+  border-radius: 50%;
+  background: var(--hp-paper);
+  color: var(--hp-ink);
+  cursor: pointer;
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 2px;
+}
+
+.button svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Nothing moves under reduced motion, so there is nothing to pause. */
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    display: none;
+  }
+}

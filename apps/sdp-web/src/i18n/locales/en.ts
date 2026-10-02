@@ -1,4 +1,4 @@
-// No localized dashboard-helius-rings.json yet: product branches ship English
+// No localized dashboard-helius-rings.json or homepage.json yet: product branches ship English
 // source only; localized copy lands via the translation bot on the release PR.
 import dashboardApprovals from "../../../messages/en/dashboard-approvals.json";
 import dashboardCustody from "../../../messages/en/dashboard-custody.json";
@@ -8,6 +8,7 @@ import dashboardIssuance from "../../../messages/en/dashboard-issuance.json";
 import dashboardPayments from "../../../messages/en/dashboard-payments.json";
 import dashboardPolicies from "../../../messages/en/dashboard-policies.json";
 import dashboardPrivateChannels from "../../../messages/en/dashboard-private-channels.json";
+import homepage from "../../../messages/en/homepage.json";
 import shared from "../../../messages/en/shared.json";
 import en from "../../../messages/en.json";
 
@@ -21,5 +22,6 @@ export const englishSourceMessages = {
   ...dashboardPayments,
   ...dashboardPolicies,
   ...dashboardPrivateChannels,
+  ...homepage,
   Shared: shared,
 };

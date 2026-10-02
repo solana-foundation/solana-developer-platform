@@ -1,0 +1,21 @@
+.rise {
+  transition:
+    opacity 620ms var(--hp-ease),
+    transform 620ms var(--hp-ease);
+}
+
+.rise[data-rise="waiting"] {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    transition: none;
+  }
+
+  .rise[data-rise="waiting"] {
+    opacity: 1;
+    transform: none;
+  }
+}

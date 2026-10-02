@@ -1,0 +1,98 @@
+/* Two cells along the bottom of the first screen: who builds with SDP, who builds on Solana. */
+.bar {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: auto 0 0;
+  padding: 0;
+  border-top: 1px solid var(--hp-line);
+  border-bottom: 1px solid var(--hp-line);
+  list-style: none;
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 700ms var(--hp-ease) 400ms,
+    transform 700ms var(--hp-ease) 400ms;
+  animation: arrive-without-script 0s 4s forwards;
+}
+
+/* HeroStage marks the hero once the lede is in; the bar follows it. */
+[data-tail] .bar {
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
+
+.cell {
+  display: flex;
+  align-items: center;
+  gap: 36px;
+  min-width: 0;
+  padding: 22px 40px;
+  border-right: 1px solid var(--hp-line);
+}
+
+.cell:last-child {
+  border-right: 0;
+}
+
+.label {
+  flex: 0 0 auto;
+  color: var(--hp-ink-3);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.14;
+  letter-spacing: 0.015em;
+}
+
+.logos {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.logos img {
+  width: auto;
+  opacity: 0.9;
+}
+
+@keyframes arrive-without-script {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  .bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cell {
+    flex-direction: column;
+    gap: 16px;
+    padding: 20px 16px;
+    border-right: 0;
+  }
+
+  .cell:first-child {
+    border-bottom: 1px solid var(--hp-line);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    opacity: 1;
+    transform: none;
+    transition: none;
+    animation: none;
+  }
+}

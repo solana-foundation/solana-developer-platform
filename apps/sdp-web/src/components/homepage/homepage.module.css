@@ -1,0 +1,81 @@
+/*
+ * Homepage tokens. Paper grounds follow the product theme through the
+ * sdp-theme.css primitives; night bands and brand accents are fixed, so they
+ * read the same in light and dark. Every section module reads these.
+ *
+ * --hp-paper and --hp-silver-end are set on the same element by HomepageRoot (homepage-root.tsx) with
+ * Tailwind's dark: variant, which is how the app reads the theme class on <html>.
+ */
+.home {
+  --hp-paper-2: var(--surface-sunken);
+  --hp-ink: var(--emph-xh);
+  --hp-ink-2: var(--emph-m);
+  /* Muted copy. --emph-l / --emph-xl fall under 4.5:1 on paper, so this is mixed to pass AA. */
+  --hp-ink-3: color-mix(in srgb, var(--emph-xh) 64%, var(--hp-paper));
+  --hp-line: var(--border-l);
+  --hp-line-2: var(--border-xl);
+
+  --hp-purple: #9945ff;
+  --hp-pink: #dc1fff;
+  --hp-green: #14f195;
+
+  --hp-night: #08080a;
+  --hp-night-2: #101014;
+  --hp-night-ink: #fbfaf9;
+  --hp-night-ink-2: #b4b0be;
+  --hp-night-ink-3: #8c8895;
+  --hp-night-line: rgba(255, 255, 255, 0.12);
+
+  --hp-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --hp-micro: cubic-bezier(0.4, 0, 0.2, 1);
+  --hp-band: min(1240px, calc(100vw - 96px));
+  --hp-display: clamp(36px, 5vw, 72px);
+
+  min-height: 100vh;
+  /* The page ground (HomepageRoot): paper, or night while a night section holds the screen. */
+  background-color: var(--hp-paper);
+  transition: background-color 700ms var(--hp-ease);
+  color: var(--hp-ink-2);
+  /* Season Sans, set on this element by HomepageRoot. */
+  font-family: var(--hp-font);
+  font-weight: 450;
+  -webkit-font-smoothing: antialiased;
+}
+
+.home[data-page-ground="night"] {
+  background-color: var(--hp-night);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home {
+    transition: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  .home {
+    --hp-band: calc(100vw - 32px);
+  }
+}
+
+/* The page's content column. */
+.band {
+  width: var(--hp-band);
+  margin-inline: auto;
+}
+
+/*
+ * A night band: the fixed dark ground the design puts under the network, the
+ * interfaces, the builders, the door and the footer, in both themes. The bar
+ * turns dark while one is under it (data-ground, read by HomeNav).
+ */
+.night {
+  background: var(--hp-night);
+  color: var(--hp-night-ink-2);
+  --form-outline: rgba(251, 250, 249, 0.35);
+}
+
+/* Two night bands in a row overlap by a pixel, so no sliver of paper shows between them. */
+.night + .night {
+  margin-top: -1px;
+}

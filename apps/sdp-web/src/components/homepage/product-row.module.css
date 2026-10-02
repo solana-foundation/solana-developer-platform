@@ -1,0 +1,73 @@
+/*
+ * The products, one by one: the words beside the thing itself, one row each,
+ * a hairline between rows. A flipped row puts the words on the right.
+ */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 72px;
+  align-items: stretch;
+  padding: 96px 0;
+  border-top: 1px solid var(--hp-line);
+}
+
+.first {
+  padding-top: 128px;
+  border-top: 0;
+}
+
+.words {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.flip .words {
+  order: 2;
+}
+
+/* A row whose words and picture sit on a shared middle line. */
+.centered {
+  align-items: center;
+}
+
+/* A row whose picture needs the wider column (payments: the rail and the six ways). */
+.wideVisual {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 80px;
+  padding: 120px 0;
+}
+
+.title {
+  margin: 0;
+  color: var(--hp-ink);
+  font-size: clamp(30px, 3.4vw, 48px);
+  font-weight: 400;
+  line-height: 1.06;
+  letter-spacing: -0.028em;
+}
+
+.body {
+  max-width: 42ch;
+  margin: 20px 0 0;
+  color: var(--hp-ink-3);
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.visual {
+  min-width: 0;
+}
+
+@media (max-width: 1000px) {
+  .row,
+  .wideVisual {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
+    padding: 72px 0;
+  }
+
+  .flip .words {
+    order: 0;
+  }
+}

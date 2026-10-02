@@ -1,0 +1,262 @@
+/*
+ * The first screen: the statement beside the globe, and the logo wall held to
+ * the bottom edge. HeroStage sets data-w1 … data-sel2 on .hero as the words
+ * arrive; each piece that waits for one also sets itself after 4s without
+ * script, so a failed hydration never leaves the screen empty.
+ */
+.hero {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 56px);
+  overflow: clip;
+  isolation: isolate;
+  background: var(--hp-paper);
+}
+
+.stage {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 0 0 12px;
+}
+
+.words {
+  position: relative;
+  z-index: 2;
+}
+
+.title {
+  margin: 0;
+  color: var(--hp-ink);
+  font-size: clamp(42px, 4.4vw, 66px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.line {
+  display: block;
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 700ms var(--hp-ease),
+    transform 700ms var(--hp-ease);
+  animation: arrive-without-script 0s 4s forwards;
+}
+
+.hero[data-w1] .lineFirst,
+.hero[data-w2] .lineSecond {
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
+
+/*
+ * The bubbles: a phrase the cursor is over (a dashed marquee), then a phrase it
+ * has settled on (the finished selection, glowing in the brand purple).
+ */
+.phrase {
+  position: relative;
+  display: inline-block;
+  padding: 0 0.12em;
+  border-radius: 0.2em;
+  transition: color 520ms var(--hp-ease);
+}
+
+.phrase::before {
+  content: "";
+  position: absolute;
+  inset: -0.06em -0.02em -0.1em;
+  z-index: -1;
+  border-radius: 0.2em;
+  opacity: 0;
+  transform: scale(0.97);
+  transition:
+    opacity 420ms var(--hp-ease),
+    transform 420ms var(--hp-ease);
+}
+
+.hovered::before {
+  border: 1px dashed color-mix(in srgb, var(--hp-ink) 24%, transparent);
+  background: var(--hp-paper);
+}
+
+.hero[data-sel1] .hovered::before {
+  opacity: 1;
+  transform: none;
+}
+
+.hero[data-sel2] .hovered::before {
+  opacity: 0;
+}
+
+.selected::before {
+  background: var(--hp-paper);
+  box-shadow:
+    inset 0 0 13px rgba(141, 84, 210, 0.4),
+    inset 0 0 34px rgba(141, 84, 210, 0.4),
+    inset 0 0 46px rgba(141, 84, 210, 0.2);
+}
+
+.hero[data-sel2] .selected::before {
+  opacity: 1;
+  transform: none;
+}
+
+.hero[data-sel2] .selected {
+  color: #9a47ff;
+}
+
+/*
+ * The foil: a copy of the phrase over the words, clipped to the glyphs, with an
+ * iridescent band and the tiled mark. The band crosses once every 26 seconds.
+ */
+.foil {
+  position: absolute;
+  inset: 0;
+  padding: 0 0.12em;
+  color: transparent;
+  background-image:
+    linear-gradient(
+      112deg,
+      transparent 30%,
+      #9945ff 41%,
+      #dc1fff 47%,
+      #14f195 53%,
+      #00c2ff 59%,
+      transparent 70%
+    ),
+    url("/homepage/foil-mark.svg");
+  background-size:
+    300% 100%,
+    10px 9px;
+  background-repeat: no-repeat, repeat;
+  background-position:
+    100% 0,
+    0 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  pointer-events: none;
+  opacity: 0;
+  animation: foil-sweep 26s linear 6s infinite;
+}
+
+@keyframes foil-sweep {
+  0% {
+    opacity: 0;
+    background-position:
+      100% 0,
+      0 0;
+  }
+  1% {
+    opacity: 1;
+  }
+  6% {
+    opacity: 1;
+  }
+  7% {
+    opacity: 0;
+    background-position:
+      0% 0,
+      0 0;
+  }
+  100% {
+    opacity: 0;
+    background-position:
+      0% 0,
+      0 0;
+  }
+}
+
+.lede,
+.actions {
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 700ms var(--hp-ease),
+    transform 700ms var(--hp-ease);
+  animation: arrive-without-script 0s 4s forwards;
+}
+
+.lede {
+  max-width: 38ch;
+  margin: 26px 0 0;
+  color: var(--hp-ink-2);
+  font-size: 20px;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 34px;
+  transition-delay: 90ms;
+}
+
+.hero[data-tail] .lede,
+.hero[data-tail] .actions {
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
+
+/* The globe runs a little past the right edge of the band, as drawn. */
+.globe {
+  width: calc(100% + 12vw);
+  aspect-ratio: 1;
+  max-height: min(72vh, 820px);
+  margin-right: -12vw;
+  will-change: transform, opacity;
+}
+
+/* The wrapper sets the size; the globe fills it. */
+.globe > [role="img"] {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+@keyframes arrive-without-script {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  .stage {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+    padding-top: 40px;
+  }
+
+  .globe {
+    width: 100%;
+    max-height: 52vh;
+    margin: 0 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line,
+  .lede,
+  .actions {
+    opacity: 1;
+    transform: none;
+    transition: none;
+    animation: none;
+  }
+
+  .phrase,
+  .phrase::before {
+    transition: none;
+  }
+
+  .foil {
+    display: none;
+  }
+}

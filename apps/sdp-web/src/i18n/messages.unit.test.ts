@@ -35,11 +35,17 @@ describe("i18n messages", () => {
   });
 
   it("resolves typed catalog entries", async () => {
-    expect(translate(getMessages("en"), "Home.trySdp")).toBe("Try SDP");
-    expect(translate(await loadMessages("es"), "Home.contactUs")).toBe("Contáctanos");
-    expect(translate(await loadMessages("fr"), "Home.contactUs")).toBe("Nous contacter");
-    expect(translate(await loadMessages("pt"), "Home.contactUs")).toBe("Fale conosco");
-    expect(translate(await loadMessages("vi"), "Home.contactUs")).toBe("Liên hệ");
+    expect(translate(getMessages("en"), "Home.joinWaitlist")).toBe("Join the waitlist");
+    expect(translate(await loadMessages("es"), "Home.joinWaitlist")).toBe(
+      "Únete a la lista de espera"
+    );
+    expect(translate(await loadMessages("fr"), "Home.joinWaitlist")).toBe(
+      "Rejoindre la liste d’attente"
+    );
+    expect(translate(await loadMessages("pt"), "Home.joinWaitlist")).toBe(
+      "Entre na lista de espera"
+    );
+    expect(translate(await loadMessages("vi"), "Home.joinWaitlist")).toBe("Tham gia danh sách chờ");
   });
 
   it("keeps the English catalog synchronous and localized catalogs behind loadMessages", () => {

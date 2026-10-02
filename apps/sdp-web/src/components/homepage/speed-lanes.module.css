@@ -1,0 +1,149 @@
+/* The rails, on the night ground. Labels sit just above their rail. */
+.speed {
+  position: relative;
+  width: calc(100% - 272px);
+  height: min(46vh, 420px);
+}
+
+.canvas {
+  position: relative;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.lane {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--hp-night-ink-3);
+  font-size: 14px;
+  line-height: 1.2;
+  white-space: nowrap;
+  transform: translateY(calc(-100% - 10px));
+  pointer-events: none;
+}
+
+.lane b {
+  color: var(--hp-night-ink-3);
+  font-weight: 400;
+}
+
+.fast span {
+  color: var(--hp-night-ink);
+}
+
+.fast b {
+  color: var(--hp-green);
+}
+
+/* What has just settled, beside the rails; its rule is the Solana rail, continued. */
+.feed {
+  position: absolute;
+  right: -272px;
+  top: 18%;
+  width: 272px;
+  pointer-events: none;
+}
+
+.feedHead {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--hp-night-line);
+  color: var(--hp-night-ink-3);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--hp-night-ink-2);
+  font-size: 13.5px;
+  animation: row-in 500ms var(--hp-ease);
+}
+
+.row span:first-child {
+  color: var(--hp-night-ink);
+}
+
+.row span:nth-child(2) {
+  text-align: right;
+}
+
+.row span:last-child {
+  grid-column: 1 / -1;
+  color: var(--hp-night-ink-3);
+  font-size: 12px;
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* One payment: a single rail on its own night card. */
+.one {
+  width: 100%;
+  height: 200px;
+  border-radius: 14px;
+  background: var(--hp-night);
+}
+
+.oneLane {
+  left: 28px;
+  right: 28px;
+  justify-content: space-between;
+  transform: translateY(calc(-100% - 14px));
+}
+
+.oneLane b {
+  color: var(--hp-night-ink);
+}
+
+.stamp {
+  position: absolute;
+  left: 28px;
+  bottom: 30px;
+  color: var(--hp-green);
+  font-size: 13px;
+  line-height: 1;
+  animation: stamp-in 600ms var(--hp-ease);
+}
+
+@keyframes stamp-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (max-width: 900px) {
+  .feed {
+    display: none;
+  }
+  .speed {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .stamp {
+    animation: none;
+  }
+}

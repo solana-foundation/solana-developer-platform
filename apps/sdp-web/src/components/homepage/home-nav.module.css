@@ -1,0 +1,295 @@
+/* The bar: brand | groups | actions, full width, sticky; a hairline appears once the page moves. */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: 56px;
+  border-bottom: 1px solid transparent;
+  background: color-mix(in srgb, var(--hp-paper) 84%, transparent);
+  backdrop-filter: blur(14px) saturate(1.1);
+  transition:
+    background 700ms var(--hp-ease),
+    border-color 300ms var(--hp-micro);
+}
+
+.nav[data-scrolled="true"] {
+  border-bottom-color: var(--hp-line-2);
+}
+
+/* How far the page has been read, along the top edge. */
+.progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--hp-pink);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  width: var(--hp-band);
+  height: 56px;
+  margin: 0 auto;
+}
+
+/* The logo: a 78×30 pill with the mark and the wordmark, to the Figma's numbers. */
+.brand {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: 78px;
+  height: 30px;
+  border-radius: 6px;
+  background: var(--t8);
+  color: var(--hp-ink);
+  text-decoration: none;
+  transition:
+    background 700ms var(--hp-ease),
+    color 700ms var(--hp-ease);
+}
+
+.brandMark {
+  position: absolute;
+  left: 5.7px;
+  top: 50%;
+  width: 19.15px;
+  height: 16.91px;
+  transform: translateY(-50%);
+}
+
+.brandWord {
+  position: absolute;
+  left: 29.4px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 22.76px;
+  font-weight: 500;
+  line-height: 0.9;
+  white-space: nowrap;
+}
+
+/* The middle slot takes the free space, whether or not the groups are showing. */
+.groups {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ghost,
+.fill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background 700ms var(--hp-ease),
+    color 700ms var(--hp-ease),
+    opacity 160ms var(--hp-micro);
+}
+
+.ghost {
+  padding: 0 10px;
+  color: var(--hp-ink-3);
+  font-weight: 450;
+  font-size: 15px;
+}
+
+.ghost:hover {
+  color: var(--hp-ink);
+}
+
+.fill {
+  padding: 0 14px;
+  background: var(--hp-ink);
+  color: var(--hp-paper);
+}
+
+.fill:hover {
+  opacity: 0.9;
+}
+
+.ghost:focus-visible,
+.fill:focus-visible,
+.brand:focus-visible,
+.burger:focus-visible,
+.mobileMenu a:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 2px;
+}
+
+.burger {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.burger span {
+  width: 20px;
+  height: 1.5px;
+  background: var(--hp-ink);
+  transition: transform 300ms var(--hp-ease);
+}
+
+.burger[aria-expanded="true"] span:first-child {
+  transform: translateY(3.75px) rotate(45deg);
+}
+
+.burger[aria-expanded="true"] span:last-child {
+  transform: translateY(-3.75px) rotate(-45deg);
+}
+
+/*
+ * The scrim and the mobile menu are siblings of the bar, not children: the bar's
+ * backdrop-filter would make it the containing block of anything fixed inside it.
+ */
+.scrim {
+  position: fixed;
+  inset: 56px 0 0;
+  z-index: 48;
+  background: color-mix(in srgb, var(--hp-paper) 40%, transparent);
+  backdrop-filter: blur(14px) saturate(1.1);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.scrim[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mobileMenu {
+  position: fixed;
+  inset: 56px 0 0;
+  z-index: 49;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 18px 16px;
+  background: var(--hp-paper);
+}
+
+.mobileMenu[hidden] {
+  display: none;
+}
+
+/* The page behind the open mobile menu stays put. */
+html:has(.mobileMenu:not([hidden])) {
+  overflow: hidden;
+}
+
+.mobileMenu a {
+  display: block;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--hp-line-2);
+  color: var(--hp-ink);
+  font-size: 18px;
+  text-decoration: none;
+}
+
+/* The groups leave the bar at 1180px, so the burger takes over there, not at 900px. */
+@media (max-width: 1180px) {
+  .inner {
+    gap: 14px;
+  }
+
+  .burger {
+    display: flex;
+  }
+
+  /* Gone, not just empty, so it is not a second, empty "Primary" landmark beside the menu's. */
+  .groups nav {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .desktopOnly {
+    display: none;
+  }
+}
+
+@media (min-width: 1181px) {
+  .mobileMenu {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav,
+  .brand,
+  .scrim,
+  .burger span,
+  .ghost,
+  .fill {
+    transition: none;
+  }
+}
+
+/* Over a night band the bar takes the night's colours with it. */
+.nav[data-ground="night"] {
+  background: rgba(8, 8, 10, 0.85);
+}
+
+.nav[data-ground="night"][data-scrolled="true"] {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.nav[data-ground="night"] .brand {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--hp-night-ink);
+}
+
+.nav[data-ground="night"] .brandMark {
+  filter: invert(1) brightness(2);
+}
+
+.nav[data-ground="night"] .ghost {
+  color: var(--hp-night-ink-2);
+}
+
+.nav[data-ground="night"] .ghost:hover {
+  color: var(--hp-night-ink);
+}
+
+.nav[data-ground="night"] .fill {
+  background: var(--hp-night-ink);
+  color: #0f0f13;
+}
+
+/* The language picker brings its own theme colours; over night it takes the night's. */
+.nav[data-ground="night"] .actions > button {
+  color: var(--hp-night-ink-2);
+}
+
+.nav[data-ground="night"] .actions > button:hover {
+  color: var(--hp-night-ink);
+}
+
+.nav[data-ground="night"] .burger span {
+  background: var(--hp-night-ink);
+}
