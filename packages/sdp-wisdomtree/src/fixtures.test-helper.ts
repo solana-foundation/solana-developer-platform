@@ -53,19 +53,30 @@ export function literalHookEntry(
 
 /**
  * Fake chain reader keyed by address. Addresses absent from `accounts` read as
- * nonexistent; `reads` records the order for assertions.
+ * nonexistent; `reads` records every account read in order, and `requests`
+ * the RPC requests those reads would have cost.
  */
 export function fakeReader(
   accounts: Record<string, { owner?: string; data: Uint8Array }>
-): WisdomTreeChainReader & { reads: string[] } {
+): WisdomTreeChainReader & { reads: string[]; requests: string[][] } {
   const reads: string[] = [];
+  const requests: string[][] = [];
+  const read = (accountAddress: string) => {
+    reads.push(accountAddress);
+    const entry = accounts[accountAddress];
+    if (!entry) return null;
+    return { owner: entry.owner ?? SPL_TOKEN_PROGRAMS["spl-token"], data: entry.data };
+  };
   return {
     reads,
+    requests,
     async getAccount(accountAddress) {
-      reads.push(String(accountAddress));
-      const entry = accounts[String(accountAddress)];
-      if (!entry) return null;
-      return { owner: entry.owner ?? SPL_TOKEN_PROGRAMS["spl-token"], data: entry.data };
+      requests.push([String(accountAddress)]);
+      return read(String(accountAddress));
+    },
+    async getAccounts(accountAddresses) {
+      requests.push(accountAddresses.map(String));
+      return accountAddresses.map((accountAddress) => read(String(accountAddress)));
     },
   };
 }

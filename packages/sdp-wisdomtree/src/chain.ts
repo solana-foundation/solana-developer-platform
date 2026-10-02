@@ -1,4 +1,5 @@
 import { withRpcReadContext } from "@sdp/rpc/read-context";
+import { withReadSocketRetry } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
 import {
   createDefaultRpcTransport,
@@ -14,7 +15,14 @@ import { SdpWisdomTreeError } from "./errors";
  */
 export interface WisdomTreeChainReader {
   /** The account's owner program and raw data, or null when it does not exist. */
-  getAccount(accountAddress: Address): Promise<{ owner: string; data: Uint8Array } | null>;
+  getAccount(accountAddress: Address): Promise<WisdomTreeChainAccount | null>;
+  /** Several accounts in ONE request, in the order asked; null where one does not exist. */
+  getAccounts(accountAddresses: readonly Address[]): Promise<(WisdomTreeChainAccount | null)[]>;
+}
+
+export interface WisdomTreeChainAccount {
+  owner: string;
+  data: Uint8Array;
 }
 
 export const WISDOMTREE_RPC_REQUEST_TIMEOUT_MS = 30_000;
@@ -46,8 +54,10 @@ export function createWisdomTreeChainReader(
   rpcUrl: string,
   timeoutMs = WISDOMTREE_RPC_REQUEST_TIMEOUT_MS
 ): WisdomTreeChainReader {
+  // A read whose pooled socket died is re-sent below the read context, so a
+  // minimum-slot scope only sees the attempt that answered.
   const rpc = createSolanaRpcFromTransport(
-    withTimeout(createDefaultRpcTransport({ url: rpcUrl }), timeoutMs)
+    withTimeout(withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl })), timeoutMs)
   );
   return {
     async getAccount(accountAddress) {
@@ -64,19 +74,52 @@ export function createWisdomTreeChainReader(
           { cause }
         );
       }
-      if (value === null) {
-        return null;
-      }
-      const encoded = Array.isArray(value.data) ? value.data[0] : undefined;
-      if (typeof encoded !== "string" || typeof value.owner !== "string") {
+      return decodeAccount(accountAddress, value);
+    },
+    async getAccounts(accountAddresses) {
+      let values: readonly ({ owner: unknown; data: unknown } | null)[];
+      try {
+        const response = await rpc
+          .getMultipleAccounts([...accountAddresses], { encoding: "base64" })
+          .send();
+        values = response.value;
+      } catch (cause) {
         throw new SdpWisdomTreeError(
           "VAULT_UNREADABLE",
-          `Account ${accountAddress} came back in an unrecognized RPC shape.`
+          `Failed to read accounts ${accountAddresses.join(", ")}: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+          { cause }
         );
       }
-      return { owner: value.owner, data: Uint8Array.from(Buffer.from(encoded, "base64")) };
+      if (values.length !== accountAddresses.length) {
+        throw new SdpWisdomTreeError(
+          "VAULT_UNREADABLE",
+          `The RPC answered ${values.length} of ${accountAddresses.length} requested accounts.`
+        );
+      }
+      return accountAddresses.map((accountAddress, index) =>
+        decodeAccount(accountAddress, values[index] ?? null)
+      );
     },
   };
+}
+
+function decodeAccount(
+  accountAddress: Address,
+  value: { owner: unknown; data: unknown } | null
+): WisdomTreeChainAccount | null {
+  if (value === null) {
+    return null;
+  }
+  const encoded = Array.isArray(value.data) ? value.data[0] : undefined;
+  if (typeof encoded !== "string" || typeof value.owner !== "string") {
+    throw new SdpWisdomTreeError(
+      "VAULT_UNREADABLE",
+      `Account ${accountAddress} came back in an unrecognized RPC shape.`
+    );
+  }
+  return { owner: value.owner, data: Uint8Array.from(Buffer.from(encoded, "base64")) };
 }
 
 /** Exact token-account balance in base units, from the raw 165-byte layout (amount is u64 LE at offset 64). */
