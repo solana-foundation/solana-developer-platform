@@ -15,25 +15,27 @@ Manager-facing advanced settings, the SDP actions and Token-2022 extensions each
 | interestBearing | economics | interestBearing | update_authority |
 | scaledUiAmount | economics | scaledUiAmount | update_authority |
 | transferHook | controls | transferHook | update_authority |
+| confidentialTransfers | controls | confidentialTransfers | confidential_configure, confidential_approve, confidential_deposit, confidential_apply_pending, confidential_transfer, confidential_withdraw, confidential_empty_account |
+| confidentialMintBurn | controls | confidentialMintBurn | confidential_mint, confidential_burn, confidential_apply_pending_burn, confidential_update_supply |
 | nonTransferable | controls | nonTransferable | — |
 
 ## Availability by asset type
 
 Legend: `req` = locked (forced on) · `rec` = recommended (default on) · `opt` = available (opt-in) · `—` = unsupported.
 
-| Asset type | Template | pauseTransfers | freezeAccounts | permanentDelegate | transferFee | interestBearing | scaledUiAmount | transferHook | nonTransferable |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| generic/generic | custom | opt | opt | opt | opt | opt | opt | opt | opt |
-| generic/commodity | custom | opt | opt | opt | opt | opt | opt | opt | opt |
-| generic/real_estate | custom | opt | opt | opt | opt | opt | opt | opt | opt |
-| generic/collectible | custom | opt | opt | opt | opt | opt | opt | opt | opt |
-| stablecoin/fiat_backed | stablecoin | req | req | req | — | — | — | — | — |
-| stablecoin/crypto_backed | stablecoin | req | req | req | — | — | — | — | — |
-| stablecoin/generic | stablecoin | req | req | req | — | — | — | — | — |
-| tokenized_security/generic | tokenized-security | req | req | req | — | — | opt | — | — |
-| tokenized_security/equity | tokenized-security | req | req | req | — | — | opt | — | — |
-| tokenized_security/debt | tokenized-security | req | req | req | — | — | opt | — | — |
-| tokenized_security/fund | tokenized-security | req | req | req | — | — | opt | — | — |
+| Asset type | Template | pauseTransfers | freezeAccounts | permanentDelegate | transferFee | interestBearing | scaledUiAmount | transferHook | confidentialTransfers | confidentialMintBurn | nonTransferable |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| generic/generic | custom | opt | opt | opt | opt | opt | opt | opt | opt | opt | opt |
+| generic/commodity | custom | opt | opt | opt | opt | opt | opt | opt | opt | opt | opt |
+| generic/real_estate | custom | opt | opt | opt | opt | opt | opt | opt | opt | opt | opt |
+| generic/collectible | custom | opt | opt | opt | opt | opt | opt | opt | opt | opt | opt |
+| stablecoin/fiat_backed | stablecoin | req | req | req | — | — | — | — | opt | — | — |
+| stablecoin/crypto_backed | stablecoin | req | req | req | — | — | — | — | opt | — | — |
+| stablecoin/generic | stablecoin | req | req | req | — | — | — | — | opt | — | — |
+| tokenized_security/generic | tokenized-security | req | req | req | — | — | opt | — | opt | — | — |
+| tokenized_security/equity | tokenized-security | req | req | req | — | — | opt | — | opt | — | — |
+| tokenized_security/debt | tokenized-security | req | req | req | — | — | opt | — | opt | — | — |
+| tokenized_security/fund | tokenized-security | req | req | req | — | — | opt | — | opt | — | — |
 
 ## Unsupported gaps
 
@@ -41,10 +43,10 @@ Legend: `req` = locked (forced on) · `rec` = recommended (default on) · `opt` 
 - `generic/commodity`: none
 - `generic/real_estate`: none
 - `generic/collectible`: none
-- `stablecoin/fiat_backed`: transferFee, interestBearing, scaledUiAmount, transferHook, nonTransferable
-- `stablecoin/crypto_backed`: transferFee, interestBearing, scaledUiAmount, transferHook, nonTransferable
-- `stablecoin/generic`: transferFee, interestBearing, scaledUiAmount, transferHook, nonTransferable
-- `tokenized_security/generic`: transferFee, interestBearing, transferHook, nonTransferable
-- `tokenized_security/equity`: transferFee, interestBearing, transferHook, nonTransferable
-- `tokenized_security/debt`: transferFee, interestBearing, transferHook, nonTransferable
-- `tokenized_security/fund`: transferFee, interestBearing, transferHook, nonTransferable
+- `stablecoin/fiat_backed`: transferFee, interestBearing, scaledUiAmount, transferHook, confidentialMintBurn, nonTransferable
+- `stablecoin/crypto_backed`: transferFee, interestBearing, scaledUiAmount, transferHook, confidentialMintBurn, nonTransferable
+- `stablecoin/generic`: transferFee, interestBearing, scaledUiAmount, transferHook, confidentialMintBurn, nonTransferable
+- `tokenized_security/generic`: transferFee, interestBearing, transferHook, confidentialMintBurn, nonTransferable
+- `tokenized_security/equity`: transferFee, interestBearing, transferHook, confidentialMintBurn, nonTransferable
+- `tokenized_security/debt`: transferFee, interestBearing, transferHook, confidentialMintBurn, nonTransferable
+- `tokenized_security/fund`: transferFee, interestBearing, transferHook, confidentialMintBurn, nonTransferable

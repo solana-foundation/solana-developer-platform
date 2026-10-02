@@ -10,14 +10,23 @@
   "pnpm": {
     "peerDependencyRules": {
       "allowedVersions": {
-        "@solana/pay>@solana/kit": "^7.0.0",
-        "@solana/pay>@solana/keys": "^7.0.0",
-        "@solana/pay>@solana/rpc-subscriptions-api": "^7.0.0",
-        "@solana/pay>@solana/rpc-subscriptions-spec": "^7.0.0"
+        "@solana/pay>@solana/kit": "^8.0.0",
+        "@solana/pay>@solana/keys": "^8.0.0",
+        "@solana/pay>@solana/rpc-subscriptions-api": "^8.0.0",
+        "@solana/pay>@solana/rpc-subscriptions-spec": "^8.0.0",
+        "@solana/kora>@solana/kit": "^8.0.0",
+        "@solana/subscriptions>@solana/kit": "^8.0.0",
+        "@solana/surfpool>@solana/kit": "^8.0.0",
+        "@heliuslabs/zolana>@solana/kit": "^8.0.0",
+        "@solana/kit-plugin-rpc>@solana/kit": "^8.0.0",
+        "@solana/kit-plugin-signer>@solana/kit": "^8.0.0",
+        "@solana/kit-plugin-instruction-plan>@solana/kit": "^8.0.0"
       }
     },
     "overrides": {
       "@token-acl/abl-sdk": "npm:@solana/token-acl-gate-sdk@0.2.0",
+      "@solana/mosaic-sdk": "file:./vendor/solana-mosaic-sdk-0.2.1-003f3aa.tgz",
+      "@solana/zk-sdk": "0.5.2",
       "@babel/core": "7.29.7",
       "axios": "1.18.1",
       "brace-expansion": "5.0.9",

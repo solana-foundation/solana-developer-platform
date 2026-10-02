@@ -16,14 +16,25 @@ const CUSTOM_AVAILABLE_EXTENSIONS: TokenExtensionName[] = [
   "defaultAccountState",
   "scaledUiAmount",
   "transferHook",
+  "confidentialTransfers",
+  // Custom only. The stablecoin and tokenized-security templates are built around
+  // a plaintext supply the issuer mints and burns through the ordinary endpoints,
+  // and ConfidentialMintBurn takes that away outright — a mint-burn stablecoin
+  // could not be minted at all through the surface those templates promise.
+  "confidentialMintBurn",
 ];
 
-const STABLECOIN_OVERRIDE_EXTENSIONS: TokenExtensionName[] = ["permanentDelegate", "pausable"];
+const STABLECOIN_OVERRIDE_EXTENSIONS: TokenExtensionName[] = [
+  "permanentDelegate",
+  "pausable",
+  "confidentialTransfers",
+];
 const ARCADE_OVERRIDE_EXTENSIONS: TokenExtensionName[] = ["permanentDelegate", "pausable"];
 const TOKENIZED_SECURITY_OVERRIDE_EXTENSIONS: TokenExtensionName[] = [
   "permanentDelegate",
   "pausable",
   "scaledUiAmount",
+  "confidentialTransfers",
 ];
 
 type CanonicalTemplate = Exclude<TokenTemplate, "rwa">;

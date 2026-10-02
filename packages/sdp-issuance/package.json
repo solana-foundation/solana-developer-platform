@@ -58,6 +58,7 @@
     "@sdp/types": "workspace:*",
     "@solana-program/system": "catalog:",
     "@solana-program/token-2022": "catalog:",
+    "@solana/instruction-plans": "catalog:",
     "@solana/kit": "catalog:",
     "@solana/mosaic-sdk": "catalog:",
     "@solana/signers": "catalog:",

@@ -21,7 +21,7 @@
     "@solana-program/address-lookup-table": "0.14.1",
     "@solana-program/compute-budget": "0.18.1",
     "@solana-program/token": "catalog:",
-    "@solana/kit": "7.1.1"
+    "@solana/kit": "catalog:"
   },
   "devDependencies": {
     "@types/node": "26.5.1",

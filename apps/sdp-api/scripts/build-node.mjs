@@ -44,6 +44,13 @@ function resolveOrcaWasm() {
  * module scope — so this plugin redirects the `/bundler` import to `/node`
  * for every entry point that reaches it, and the wasm is then copied beside
  * the bundle like Orca's.
+ *
+ * As of `@solana/zk-sdk` 0.5.2 the redirect itself is belt-and-braces: the
+ * package's `./bundler` subpath now carries a `node` condition pointing at the
+ * same `/node` build, which is why the dev server's module-resolution hook could
+ * be deleted. What is still load-bearing here is the second job — recording the
+ * resolved entry so its `index_bg.wasm` is copied beside the bundle. Without
+ * that copy the image starts and then dies on a missing wasm file.
  */
 function zkSdkNodeWasmPlugin(resolvedEntries) {
   return {

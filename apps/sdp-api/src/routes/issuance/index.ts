@@ -26,6 +26,21 @@ import {
 } from "./handlers/authority";
 import { executeBurn, extractBurnPolicyCandidate, prepareBurn } from "./handlers/burn";
 import {
+  applyConfidentialPendingBurn,
+  applyPendingConfidentialBalance,
+  approveConfidentialAccount,
+  confidentialBurn,
+  confidentialMint,
+  confidentialTransfer,
+  configureConfidentialAccount,
+  depositConfidential,
+  emptyConfidentialAccount,
+  getConfidentialBalance,
+  requireConfidentialTransfersDevnet,
+  updateConfidentialSupply,
+  withdrawConfidential,
+} from "./handlers/confidential";
+import {
   confirmDeploy,
   deployToken,
   extractDeployPolicyCandidate,
@@ -75,6 +90,13 @@ import type { AppContext } from "./helpers";
 import {
   addAllowlistSchema,
   burnSchema,
+  confidentialAccountSchema,
+  confidentialAmountSchema,
+  confidentialApplyBurnSchema,
+  confidentialApproveSchema,
+  confidentialBurnSchema,
+  confidentialMintSchema,
+  confidentialTransferSchema,
   confirmDeploySchema,
   createTokenSchema,
   deployTokenSchema,
@@ -299,6 +321,91 @@ issuance.post(
   unfreezeAccount
 );
 issuance.get("/tokens/:tokenId/frozen", requirePermissions("tokens:read"), listFrozenAccounts);
+
+// Confidential balances (Token-2022 encrypted balances) — devnet only, gated for
+// the whole sub-surface so a mainnet deployment cannot reach any of it.
+issuance.use("/tokens/:tokenId/confidential", requireConfidentialTransfersDevnet);
+issuance.use("/tokens/:tokenId/confidential/*", requireConfidentialTransfersDevnet);
+// `balance` is a static segment under /confidential; no :param route collides.
+issuance.get(
+  "/tokens/:tokenId/confidential/balance",
+  requirePermissions("tokens:read"),
+  getConfidentialBalance
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/configure",
+  requirePermissions("tokens:write"),
+  validateBody(confidentialAccountSchema),
+  configureConfidentialAccount
+);
+// Approve is signed by the mint's confidential authority against someone else's
+// account, so it sits at the same tier as the other authority-driven operations.
+issuance.post(
+  "/tokens/:tokenId/confidential/approve",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialApproveSchema),
+  approveConfidentialAccount
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/deposit",
+  requirePermissions("tokens:write"),
+  validateBody(confidentialAmountSchema),
+  depositConfidential
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/apply-pending",
+  requirePermissions("tokens:write"),
+  validateBody(confidentialAccountSchema),
+  applyPendingConfidentialBalance
+);
+// Transfer and withdraw move value out of the confidential balance under an
+// encrypted amount that cannot be reviewed after the fact.
+issuance.post(
+  "/tokens/:tokenId/confidential/transfer",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialTransferSchema),
+  confidentialTransfer
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/withdraw",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialAmountSchema),
+  withdrawConfidential
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/empty",
+  requirePermissions("tokens:write"),
+  validateBody(confidentialAccountSchema),
+  emptyConfidentialAccount
+);
+// Supply operations on a ConfidentialMintBurn mint. Admin everywhere except
+// burn, which is a holder spending their own balance: mint, apply-pending-burn
+// and the supply repair all change the total supply under encryption, so there
+// is nothing for a reviewer to check afterwards.
+issuance.post(
+  "/tokens/:tokenId/confidential/mint",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialMintSchema),
+  confidentialMint
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/burn",
+  requirePermissions("tokens:write"),
+  validateBody(confidentialBurnSchema),
+  confidentialBurn
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/apply-pending-burn",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialApplyBurnSchema),
+  applyConfidentialPendingBurn
+);
+issuance.post(
+  "/tokens/:tokenId/confidential/supply",
+  requirePermissions("tokens:admin"),
+  validateBody(confidentialApplyBurnSchema),
+  updateConfidentialSupply
+);
 
 // Allowlist
 // `/allowlist/labels` (GET) is registered before the `/allowlist/:entryId`

@@ -101,7 +101,10 @@ test("getTransaction surfaces pre/post token balances from jsonParsed meta", asy
   assert.deepEqual(request, {
     commitment: "confirmed",
     encoding: "jsonParsed",
-    maxSupportedTransactionVersion: 0,
+    // 1, matching the request options: confidential-transfer operations are planned as
+    // transaction-v1 messages, and an RPC asked for a version it was not told to
+    // support answers with an error instead of the transaction.
+    maxSupportedTransactionVersion: 1,
   });
   assert.deepEqual(parsed?.preTokenBalances, [
     { accountIndex: 1, mint: USDC, owner: OWNER, amount: "1", decimals: 6 },

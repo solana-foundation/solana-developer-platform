@@ -7,6 +7,7 @@
 
 import type { TokenExtensionsConfig, TokenTemplate } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
+import type { ConfidentialKeys } from "@solana/mosaic-sdk/confidential";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Template Mapping
@@ -78,6 +79,37 @@ export interface MosaicTransactionResult {
 }
 
 /**
+ * Result of an operation executed as a plan — one result per transaction
+ * actually submitted, in submission order.
+ *
+ * Every confidential operation returns this, however few transactions it took.
+ * A proof-bearing operation spans setup → the operation → cleanup at transaction
+ * version 0, and usually folds into one at version 1; the plural shape means a
+ * builder that changes which side of that line it falls on cannot silently lose
+ * the signatures the caller needs to journal.
+ */
+export interface MosaicTransactionPlanResult {
+  transactions: MosaicTransactionResult[];
+}
+
+/**
+ * Thrown when a multi-transaction plan fails partway. The transactions listed in
+ * `submitted` already landed on-chain and cannot be rolled back — callers must
+ * journal them so the proof context-state accounts they created can be
+ * reconciled instead of silently leaking rent.
+ */
+export class MosaicTransactionPlanError extends Error {
+  readonly submitted: MosaicTransactionResult[];
+
+  constructor(cause: unknown, submitted: MosaicTransactionResult[]) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "MosaicTransactionPlanError";
+    this.cause = cause;
+    this.submitted = submitted;
+  }
+}
+
+/**
  * Thrown by createToken's overflow path when the mint was created on-chain (the
  * slim create tx confirmed) but the follow-up metadata-URI update failed.
  *
@@ -134,6 +166,20 @@ export interface CreateTokenOptions {
   aclMode?: AclMode;
   /** Enable sRFC-37 Token ACL */
   enableTokenAcl?: boolean;
+  /**
+   * `ConfidentialMintBurn` init values, when `extensions.confidentialMintBurn`
+   * asked for the extension.
+   *
+   * Passed in rather than derived here because both values come from a signature
+   * by the supply-authority wallet, and this package has no custody access. The
+   * caller resolves that wallet, runs `getConfidentialMintBurnInit`, and frees the
+   * keys; see `withConfidentialKeys` in the API app.
+   */
+  confidentialMintBurnInit?: {
+    supplyElgamalPubkey: Address;
+    /** 36-byte AES ciphertext of a zero supply. */
+    decryptableSupply: Uint8Array;
+  };
 }
 
 /**
@@ -222,6 +268,194 @@ export interface UpdateMetadataOptions {
   imageUrl?: string | null;
   updateAuthority: TransactionSigner;
   feePayer: TransactionSigner;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Confidential Transfer Types
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Field shapes here are the SDP-facing contract (Address-only where the SDK
+// derives extra state itself, decimal string where mosaic converts using mint
+// decimals) — mirrors FreezeThawOptions/TransferOptions. Mapping onto
+// @solana/mosaic-sdk's `createConfidential*InstructionPlan` builder signatures
+// happens in the service layer (Phase 2).
+//
+// Key management gap (flag, don't solve — see the plan's Phase 2 note): ops that
+// need the account owner's ElGamal/AES keys take a `keys: ConfidentialKeys` field
+// directly rather than deriving it internally. MosaicService's `this.signer` is
+// the custody/operating authority, not necessarily `owner`, and HOO-1507 hasn't
+// settled the derivation scheme yet — so key derivation is entirely the caller's
+// responsibility (route handler / Phase 3) until that resolves.
+
+/**
+ * Options for configuring a token account for confidential transfers.
+ * Must run before deposit/apply/withdraw/transfer can touch the account.
+ */
+export interface ConfigureConfidentialAccountOptions {
+  mint: Address;
+  /** The token account owner. */
+  owner: Address;
+  /** Explicit token account; defaults to the owner's ATA. */
+  tokenAccount?: Address;
+  /** ElGamal keypair + AES key the balances will be encrypted under. */
+  keys: ConfidentialKeys;
+  /** Max pending credits before ApplyPendingBalance must be run. */
+  maximumPendingBalanceCreditCounter?: number;
+  feePayer: Address;
+}
+
+/**
+ * Options for approving a configured confidential account. Only needed when
+ * the mint uses the manual-approve (whitelist) policy.
+ */
+export interface ApproveConfidentialAccountOptions {
+  tokenAccount: Address;
+  mint: Address;
+  /** The mint's confidential-transfer authority. */
+  authority: Address;
+  feePayer: Address;
+}
+
+/**
+ * Options for depositing from a token account's public balance into its
+ * confidential pending balance.
+ */
+export interface DepositConfidentialOptions {
+  tokenAccount: Address;
+  mint: Address;
+  /** Decimal amount (e.g. "100" for 100 tokens); resolved against mint decimals. */
+  amount: string;
+  owner: Address;
+  feePayer: Address;
+}
+
+/**
+ * Options for rolling a confidential account's pending balance into its
+ * available balance.
+ */
+export interface ApplyPendingConfidentialBalanceOptions {
+  tokenAccount: Address;
+  owner: Address;
+  keys: ConfidentialKeys;
+  feePayer: Address;
+}
+
+/**
+ * Options for a confidential (encrypted-amount) transfer between two
+ * confidential token accounts.
+ */
+export interface ConfidentialTransferOptions {
+  mint: Address;
+  from: Address;
+  to: Address;
+  amount: string;
+  owner: Address;
+  /** ElGamal keypair + AES key for the source (`from`) account. */
+  keys: ConfidentialKeys;
+  /** Override the auditor pubkey; defaults to the mint's configured auditor. */
+  auditorElgamalPubkey?: Address;
+  feePayer: Address;
+}
+
+/**
+ * Options for withdrawing from a confidential account's available balance
+ * back to the token account's public balance.
+ */
+export interface WithdrawConfidentialOptions {
+  tokenAccount: Address;
+  mint: Address;
+  amount: string;
+  owner: Address;
+  keys: ConfidentialKeys;
+  feePayer: Address;
+}
+
+/**
+ * Options for emptying (closing out) a confidential account's encrypted
+ * balances once they've been withdrawn to zero.
+ */
+export interface EmptyConfidentialAccountOptions {
+  tokenAccount: Address;
+  owner: Address;
+  keys: ConfidentialKeys;
+  feePayer: Address;
+}
+
+/**
+ * Options for confidentially minting new supply straight into a holder's
+ * confidential balance. Only on a mint carrying `ConfidentialMintBurn`.
+ */
+export interface ConfidentialMintOptions {
+  mint: Address;
+  /** Confidential token account the new supply lands in. */
+  destinationToken: Address;
+  amount: string;
+  /**
+   * The mint's supply keys — the dedicated supply-authority wallet's own
+   * confidential keys. Proof material, not a signer: the service's own signer is
+   * the mint authority that signs.
+   */
+  supplyKeys: ConfidentialKeys;
+  /** Override the auditor pubkey; defaults to the mint's configured auditor. */
+  auditorElgamalPubkey?: Address;
+  feePayer: Address;
+}
+
+/**
+ * Options for confidentially burning from a holder's confidential balance,
+ * reducing the mint's encrypted supply. Only on a mint carrying
+ * `ConfidentialMintBurn`.
+ */
+export interface ConfidentialBurnOptions {
+  mint: Address;
+  tokenAccount: Address;
+  amount: string;
+  /** The holder's own ElGamal keypair + AES key. */
+  keys: ConfidentialKeys;
+  /** Override the auditor pubkey; defaults to the mint's configured auditor. */
+  auditorElgamalPubkey?: Address;
+  feePayer: Address;
+}
+
+/**
+ * Options for applying a mint's pending burns to its encrypted supply.
+ *
+ * `resyncSupply` is required rather than optional: `ApplyPendingBurn` leaves the
+ * AES "decryptable supply" describing the old total, and every later confidential
+ * mint proves against that value — so skipping the resync does not degrade
+ * gracefully, it makes the mint unmintable until someone repairs it.
+ */
+export interface ApplyConfidentialPendingBurnOptions {
+  mint: Address;
+  resyncSupply: {
+    supplyKeys: ConfidentialKeys;
+    /** True total supply after this apply, in raw base units. Asserted, not verified. */
+    rawSupply: bigint;
+  };
+  feePayer: Address;
+}
+
+/**
+ * Options for re-asserting a mint's decryptable supply on its own — the repair
+ * path for a resync that was missed or written wrong.
+ */
+export interface UpdateConfidentialSupplyOptions {
+  mint: Address;
+  supplyKeys: ConfidentialKeys;
+  rawSupply: bigint;
+  feePayer: Address;
+}
+
+/**
+ * Options for reading and decrypting a confidential account's balances.
+ * Read-only — no TransactionSigner, no on-chain transaction.
+ */
+export interface GetConfidentialBalanceOptions {
+  tokenAccount: Address;
+  /** ElGamal keypair + AES key for this account; balances are returned encrypted-only when omitted. */
+  keys?: ConfidentialKeys;
+  /** Also decrypt the pending balance (ElGamal discrete log — can be slow). */
+  decryptPendingBalance?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

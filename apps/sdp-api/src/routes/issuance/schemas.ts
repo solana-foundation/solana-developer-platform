@@ -44,6 +44,22 @@ const transferHookConfigSchema = z.object({
   authority: z.string().min(32).max(44).optional(),
 });
 
+/**
+ * The supply authority is required and has no default: derivation is wallet-only,
+ * so a mint's supply keys are that wallet's own account keys for every mint it
+ * holds. Defaulting to the mint authority would hand its confidential balances to
+ * anyone the supply keys are shared with.
+ */
+export const confidentialMintBurnConfigSchema = z.object({
+  supplyAuthority: z.string().min(32).max(44),
+});
+
+export const confidentialTransfersConfigSchema = z.object({
+  policy: z.enum(["opt-in", "whitelist"]).default("whitelist"),
+  authority: z.string().min(32).max(44).optional(),
+  auditorElgamalPubkey: z.string().min(32).max(44).optional(),
+});
+
 // Each extension can be: true/false (enable/disable) or a config object for custom settings
 const extensionOverridesSchema = z
   .object({
@@ -55,6 +71,10 @@ const extensionOverridesSchema = z
     defaultAccountState: z.enum(["initialized", "frozen"]).optional(),
     scaledUiAmount: z.union([z.literal(false), scaledUiAmountConfigSchema]).optional(),
     transferHook: z.union([z.literal(false), transferHookConfigSchema]).optional(),
+    confidentialTransfers: z
+      .union([z.literal(false), confidentialTransfersConfigSchema])
+      .optional(),
+    confidentialMintBurn: z.union([z.literal(false), confidentialMintBurnConfigSchema]).optional(),
   })
   .strict();
 
@@ -331,6 +351,74 @@ export const unfreezeSchema = z
     signingCustodyWalletId: z.string().min(1).optional(),
   })
   .strict();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Confidential Transfer Schemas
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Holder-signed operations are addressed by the owner WALLET, not by a token
+// account: the ElGamal/AES keys are derived from the owner's signature, so the
+// owner must be resolvable to a custody wallet anyway. The associated token
+// account is derived from (wallet, mint).
+
+const solanaAddress = z.string().min(32).max(44);
+const decimalAmount = z.string().refine((value) => isDecimalString(value), {
+  message: "Invalid amount format",
+});
+
+export const confidentialAccountSchema = z.object({
+  walletAddress: solanaAddress,
+  signingCustodyWalletId: z.string().min(1).optional(),
+});
+
+export const confidentialAmountSchema = confidentialAccountSchema.extend({
+  amount: decimalAmount,
+});
+
+/** Signed by the mint's confidential-transfer authority, so it names the target account. */
+export const confidentialApproveSchema = z.object({
+  accountAddress: solanaAddress,
+  signingCustodyWalletId: z.string().min(1).optional(),
+});
+
+export const confidentialTransferSchema = confidentialAmountSchema.extend({
+  destination: solanaAddress,
+});
+
+// ── Confidential mint/burn ──────────────────────────────────────────────────
+//
+// Mint is authority-signed against someone else's account, so it names the
+// destination directly (like approve). Burn is holder-signed, so it is addressed
+// by the owner wallet (like withdraw). Both also need the supply-authority
+// wallet, which is a different wallet from the one that signs.
+
+export const confidentialMintSchema = z.object({
+  destination: solanaAddress,
+  amount: decimalAmount,
+  /** Custody wallet for the mint authority that signs. */
+  signingCustodyWalletId: z.string().min(1).optional(),
+  /** Custody wallet for the supply authority whose keys the proofs are built from. */
+  supplyCustodyWalletId: z.string().min(1).optional(),
+});
+
+export const confidentialBurnSchema = confidentialAmountSchema;
+
+export const confidentialApplyBurnSchema = z.object({
+  signingCustodyWalletId: z.string().min(1).optional(),
+  supplyCustodyWalletId: z.string().min(1).optional(),
+});
+
+export const confidentialBalanceQuerySchema = z.object({
+  walletAddress: solanaAddress,
+  signingCustodyWalletId: z.string().min(1).optional(),
+  // Recovering the pending balance is an ElGamal discrete-log search; opt in.
+  // Spelled as an explicit enum rather than z.coerce.boolean(), which reads the
+  // string "false" as a non-empty string and therefore as true.
+  decryptPendingBalance: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+});
 
 export const addAllowlistSchema = z.object({
   signingCustodyWalletId: z.string().min(1).optional(),

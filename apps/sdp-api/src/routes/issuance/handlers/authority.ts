@@ -28,13 +28,13 @@ import {
 } from "../helpers";
 import type { updateAuthoritySchema } from "../schemas";
 import {
-  type AuthorityRole,
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
   resolveAuthoritySigner,
   resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
   resolveIssuanceWallet,
+  type TransferableAuthorityRole,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
 import { buildIssuancePolicyCandidate } from "./policy";
@@ -52,7 +52,7 @@ interface UpdateAuthorityExecutionPolicyResolved {
   tokenId: string;
   auth: ApiKeyContext;
   tokenService: TokenService;
-  role: AuthorityRole;
+  role: TransferableAuthorityRole;
   currentAuthorityRaw: string;
   custodyWalletId: string;
   mintAddress: ReturnType<typeof assertValidAddress>;
@@ -63,7 +63,7 @@ interface UpdateAuthorityReplayPolicyResolved {
   tokenId: string;
   auth: ApiKeyContext;
   tokenService: TokenService;
-  role: AuthorityRole;
+  role: TransferableAuthorityRole;
   custodyWalletId: string;
   newAuthority: ReturnType<typeof assertValidAddress> | null;
   replay: TokenTransaction;
@@ -109,7 +109,7 @@ function isSettledAuthorityTransaction(transaction: TokenTransaction): boolean {
   );
 }
 
-const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
+const mapAuthorityRole = (role: TransferableAuthorityRole): MosaicAuthorityRole => {
   switch (role) {
     case "mint":
       return AuthorityType.MintTokens as MosaicAuthorityRole;

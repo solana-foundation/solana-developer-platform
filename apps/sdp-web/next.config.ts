@@ -9,8 +9,16 @@ const docsProxyOrigin = (
     : "https://docs.platform.solana.com")
 ).replace(/\/$/, "");
 
+// Hosts permitted to load Next.js dev resources (HMR) cross-origin. Needed only
+// when the dev server is reached through a tunnel or tailnet proxy rather than
+// localhost; Next blocks those by default and the HMR socket 502s without it.
+const allowedDevOrigins = process.env.NEXT_ALLOWED_DEV_ORIGINS?.split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const nextConfig: NextConfig = {
   distDir: process.env.PLAYWRIGHT_NEXT_DIST_DIR?.trim() || ".next",
+  ...(allowedDevOrigins?.length ? { allowedDevOrigins } : {}),
   async redirects() {
     return [
       {
