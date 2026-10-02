@@ -98,7 +98,7 @@ function Field({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       <span className="flex items-center gap-1">
         <Label htmlFor={id} className="text-meta font-normal text-secondary">
           {label}

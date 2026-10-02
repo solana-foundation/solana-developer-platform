@@ -237,7 +237,7 @@ function SidebarGroup({
               {showChildren && childrenExpanded ? (
                 <div
                   id={subnavId}
-                  className="ml-5 mt-2 refresh:mt-0.25 refresh:ml-0 refresh:space-y-1"
+                  className="ml-5 mt-2 refresh:mt-0.5 refresh:ml-0 refresh:space-y-1"
                 >
                   {(item.children ?? []).map((child, i, siblings) => {
                     const childActive = isDashboardNavItemActive(navigationLocation, child.href);
@@ -318,12 +318,12 @@ function DashboardSidebarContent({
   const showMobileClose = variant === "mobile";
   return (
     <>
-      {/* Refresh: an 8px inset, the workspace row 3px under the top inset, and a scrollbar that
+      {/* Refresh: an 8px inset, the workspace row 8px under the top inset, and a scrollbar that
           only shows under the pointer, so the rows keep the design's full 264px width. */}
       <div className="sdp-quiet-scroll min-h-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto overscroll-contain p-3 refresh:p-2">
-        {/* 7px above sets the 32px avatar 19px from the top, as the design does; 20px below
+        {/* 8px above sets the 32px avatar 20px from the top, as the design does; 20px below
             keeps the group gap at 24 from the avatar's bottom. */}
-        <div className="py-3 refresh:mt-1.75 refresh:mb-5 refresh:py-0">
+        <div className="py-3 refresh:mt-2 refresh:mb-5 refresh:py-0">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
               <WorkspaceSwitcher
