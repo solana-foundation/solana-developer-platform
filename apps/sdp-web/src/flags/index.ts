@@ -284,6 +284,11 @@ export const paymentsDemoMode = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
+export const newDesignOverview = newDesignModuleFlag(
+  "overview",
+  "the dashboard's Overview (the page, its name in the sidebar, the new quick start)"
+);
+
 export const newDesignWallets = newDesignModuleFlag(
   "wallets",
   "Wallets (the list, the create flow, one wallet's page, pinned wallets in the sidebar)"

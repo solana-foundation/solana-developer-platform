@@ -271,13 +271,19 @@ export function getNavSections(
 ): NavSection[] {
   const marketsActions = getMarketsActions(t, options.earnEnabled, options.dvpEnabled);
   const integrationActions = getIntegrationActions(t, options);
+  const design: DesignFlags = {
+    newDesign: options.newDesign ?? true,
+    newDesignModules: options.newDesignModules,
+  };
 
   return [
     {
       title: t("Shared.dashboardShell.create"),
       items: [
         {
-          label: t("Shared.dashboardShell.home"),
+          label: isDesignModuleOn(design, "overview")
+            ? t("Shared.dashboardShell.newDesign.home")
+            : t("Shared.dashboardShell.home"),
           href: DASHBOARD_SIDE_NAV_HREFS.home,
           icon: LayoutDashboardIcon,
         },
@@ -313,10 +319,7 @@ export function getNavSections(
                 label: t("Shared.dashboardShell.payments"),
                 href: DASHBOARD_SIDE_NAV_HREFS.payments,
                 icon: ArrowLeftRightIcon,
-                children: getPaymentsActions(t, options.privateChannelsEnabled, {
-                  newDesign: options.newDesign ?? true,
-                  newDesignModules: options.newDesignModules,
-                }),
+                children: getPaymentsActions(t, options.privateChannelsEnabled, design),
                 subnavKey: "payments" as const,
               },
             ]

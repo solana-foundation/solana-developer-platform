@@ -9,6 +9,7 @@ vi.mock("@/flags", () => ({
   newDesignPayDeposit: async () => true,
   newDesignActivity: async () => true,
   newDesignWallets: async () => true,
+  newDesignOverview: async () => true,
 }));
 
 describe("withLegacyDesign", () => {
@@ -50,6 +51,7 @@ describe("getDesignModuleFlags", () => {
   it("evaluates every module's own flag", async () => {
     flagMock.contacts = false;
     await expect(getDesignModuleFlags()).resolves.toEqual({
+      overview: true,
       wallets: true,
       contacts: false,
       payDeposit: true,

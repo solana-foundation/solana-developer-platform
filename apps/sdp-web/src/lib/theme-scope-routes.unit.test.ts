@@ -3,6 +3,7 @@ import { themeScopeForPath } from "./theme-scope-routes";
 
 describe("themeScopeForPath", () => {
   it.each([
+    "/dashboard",
     "/dashboard/payments",
     "/dashboard/payments/pay",
     "/dashboard/payments/counterparty/cp_1",
@@ -19,7 +20,6 @@ describe("themeScopeForPath", () => {
   });
 
   it.each([
-    "/dashboard",
     "/dashboard/wallets/connections",
     "/dashboard/wallets/switch",
     "/dashboard/wallets/fb_wallet/policy",

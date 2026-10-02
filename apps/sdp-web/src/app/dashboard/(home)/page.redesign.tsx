@@ -1,21 +1,19 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { custody, issuance } from "@/flags";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { HomeWorkspace } from "../home-workspace";
+import { HomeWorkspace } from "../home-workspace.redesign";
 import { resolveTotalBalance } from "../payments/payments-overview.utils";
 import {
   fetchPaymentsAggregate,
   fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
 } from "../payments/payments-page.data";
-import RedesignCurrentDashboardPage from "./page.redesign";
 
-async function DashboardPage() {
+async function CurrentDashboardPage() {
   const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
@@ -96,4 +94,4 @@ async function DashboardPage() {
   }
 }
 
-export default withLegacyDesign(RedesignCurrentDashboardPage, DashboardPage, "overview");
+export default CurrentDashboardPage;
