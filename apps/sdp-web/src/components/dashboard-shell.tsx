@@ -321,9 +321,9 @@ function DashboardSidebarContent({
       {/* Refresh: an 8px inset, the workspace row 3px under the top inset, and a scrollbar that
           only shows under the pointer, so the rows keep the design's full 264px width. */}
       <div className="sdp-quiet-scroll min-h-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto overscroll-contain p-3 refresh:p-2">
-        {/* 3px above sets the 32px avatar 19px from the top, as the design does; 20px below
+        {/* 7px above sets the 32px avatar 19px from the top, as the design does; 20px below
             keeps the group gap at 24 from the avatar's bottom. */}
-        <div className="py-3 refresh:mt-0.75 refresh:mb-5 refresh:py-0">
+        <div className="py-3 refresh:mt-1.75 refresh:mb-5 refresh:py-0">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
               <WorkspaceSwitcher
@@ -768,6 +768,8 @@ export function DashboardShell({
     <main
       {...themeScopeAttributes(themeScope)}
       data-sdp-new-design={newDesignEnabled ? "" : undefined}
+      // globals.css drops the root's reserved scrollbar track while the shell is locked.
+      data-sdp-locked-viewport={shouldLockShellViewport ? "" : undefined}
       aria-busy={isWorkspaceSwitching}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
@@ -939,14 +941,14 @@ export function DashboardShell({
                   ].join(" ")}
                 >
                   {/* Refresh: the gutter sits outside the centred column, so the title's left edge is
-                  the content's at every width; 32px above the title and 24px from the title to
-                  the tabs are the design's. */}
+                  the content's at every width; 44px above the title row (a 34px button sits on it)
+                  and 24px from the title to the tabs are the design's. */}
                   <div
                     className={cn(
                       "shrink-0",
                       isRefresh && [
                         refreshGutterClass,
-                        pageConfig.flushTopOnDesktop ? "pt-6 md:pt-0" : "pt-6 md:pt-8",
+                        pageConfig.flushTopOnDesktop ? "pt-6 md:pt-0" : "pt-6 md:pt-11",
                       ]
                     )}
                   >

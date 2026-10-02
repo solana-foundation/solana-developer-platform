@@ -112,8 +112,9 @@ export function DashboardHeaderAction({
       asChild
       variant={action.variant === "primary" ? "default" : "outline"}
       size="sm"
-      // The refresh header's action is 34px, 2px under the shared small button.
-      className="refresh:[--button-height-md:2.125rem]"
+      // The refresh header's action is 34px from md, 2px under the shared small button; on a
+      // phone, where it sits alone under the title, the design draws it 38px with 16px sides.
+      className="refresh:[--button-height-md:2.125rem] max-md:refresh:[--button-height-md:2.375rem] max-md:refresh:[--button-padding-x-md:1rem]"
     >
       {action.download ? (
         <a href={href} download>
@@ -166,7 +167,8 @@ export function HeaderBackAction({
   return (
     <Link
       href={href}
-      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:h-5 refresh:gap-1"
+      // Refresh: the chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 8px to its label.
+      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:-ml-1.5 refresh:h-5 refresh:gap-2"
     >
       <ArrowLeftIcon className="h-4 w-4 refresh:hidden" />
       <ChevronLeftIcon className="hidden size-4 refresh:block" />
@@ -230,7 +232,7 @@ function MobileNavButton({ onClick }: { onClick: () => void }) {
 
 /**
  * The refresh title block. On a phone it is the design's three rows: the navigation button, the
- * title 8px under it, then the page's action 12px under that. From md the button goes and the
+ * title 8px under it, then the page's action 16px under that. From md the button goes and the
  * action sits on the title's row. Any utilities (Payments' demo mode switch) sit at the far right
  * of the phone's navigation row, and from md on the title's row, before the action.
  */
@@ -263,9 +265,12 @@ export function StackedDashboardTopBar({
         <h1 className="sr-only">{title}</h1>
       ) : (
         <div className="col-span-3 row-start-2 min-w-0 md:col-span-1 md:col-start-1 md:row-start-1">
-          {/* A flex row, so the back link's 20px line is the row's height: an inline one
-              sat on the text strut and pushed the title 5px further down. */}
-          {above ? <div className={cn("flex", mark ? "mb-4" : "mb-2")}>{above}</div> : null}
+          {/* The back link's row: the design's 32px top row with the link centred, 4px over the
+              title, so the link reads 12px lower than a page's title would and the title 36px
+              below the top. A flex row, so the link's 20px line sets the height, not the strut. */}
+          {above ? (
+            <div className={cn("flex items-center", mark ? "mb-4" : "h-8 mb-1")}>{above}</div>
+          ) : null}
           {mark ? (
             <div className="flex min-w-0 items-center gap-4">
               <span className="shrink-0">{mark}</span>
@@ -285,7 +290,7 @@ export function StackedDashboardTopBar({
           `data-align-title` (a token's Explorer) sits on the title's row rather than centred
           beside the back link and the title together. */}
       {action ? (
-        <div className="col-span-3 row-start-3 mt-1 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-3 md:row-start-1 md:mt-0 md:ml-3 md:has-[[data-align-title]]:self-end">
+        <div className="col-span-3 row-start-3 mt-2 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-3 md:row-start-1 md:mt-0 md:ml-3 md:has-[[data-align-title]]:self-end">
           {action}
         </div>
       ) : null}
@@ -861,7 +866,8 @@ function getIssuanceRoutePageConfig(
   if (pathname === "/dashboard/issuance") {
     return {
       title: t("Shared.dashboardShell.issuance"),
-      headerTabs: playgroundHeaderTabs(t),
+      // The design keeps Overview and API Playground on a phone too.
+      headerTabs: { ...playgroundHeaderTabs(t), hideOnMobile: false },
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardIssuance.newDesign.createDraft"),

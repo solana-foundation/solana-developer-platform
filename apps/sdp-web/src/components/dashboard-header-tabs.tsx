@@ -131,9 +131,10 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
     >
       {/* A refresh tab never wraps: the design's phone keeps "Card or bank through a provider"
           on one line and lets the strip scroll if it must. */}
-      {/* 14px under a refresh label to its underline, 3px more than above it, as drawn; the tab
-          sets its padding inline, hence the important. */}
-      <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6 refresh:[&>*]:whitespace-nowrap refresh:[&_[role=tab]]:!pb-3.5">
+      {/* From md, 14px under a refresh label to its underline, 3px more than above it, as drawn;
+          a phone draws 7px above and 11px under. The tab sets its padding inline, hence the
+          important. */}
+      <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6.5 refresh:[&>*]:whitespace-nowrap max-md:refresh:[&_[role=tab]]:!pt-1.75 md:refresh:[&_[role=tab]]:!pb-3.5">
         {tabs.map((tab) => (
           <Tab key={tab.id} value={tab.id}>
             {tab.id in headerTabCountByTabId
