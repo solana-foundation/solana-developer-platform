@@ -24,6 +24,7 @@ import { isEarnEnabled, isPrivateChannelsEnabled } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
+import { installOutboundDispatcher } from "@/runtime/outbound-dispatcher";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
@@ -376,6 +377,7 @@ export function describeCronFailure(error: unknown): Record<string, unknown> {
 
 const invokedPath = process.argv[1];
 if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
+  installOutboundDispatcher();
   runCronJob()
     .then(() => process.exit(0))
     .catch((err: unknown) => {

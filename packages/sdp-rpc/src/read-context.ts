@@ -1,5 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { RpcTransport } from "@solana/kit";
+import { fetchWithReadSocketRetry } from "./socket-retry";
+
+/**
+ * Provider read transports sit on these, below any in-flight sharing and the
+ * read context, so one re-send serves every joiner with the scoped payload.
+ */
+export { fetchWithReadSocketRetry, withReadSocketRetry } from "./socket-retry";
 
 const reads = new AsyncLocalStorage<{
   minimumSlot: number;
@@ -44,6 +51,37 @@ export function withMinimumRpcSlot<T>(minimumSlot: number, read: () => Promise<T
     }
     return value;
   });
+}
+
+/** The minimum slot the current balance-read scope requires, if any. */
+export function currentMinimumRpcSlot(): number | undefined {
+  return reads.getStore()?.minimumSlot;
+}
+
+let readClock = 0;
+const readFloors = new AsyncLocalStorage<number>();
+
+/** A process-local stamp, strictly greater than every stamp taken before it. */
+export function readStamp(): number {
+  readClock += 1;
+  return readClock;
+}
+
+/**
+ * Run `read` so in-flight sharing below it joins only requests stamped after
+ * `floor`, never one sent before it. Chain freshness still comes from the
+ * minimum-slot scope.
+ */
+export function withReadFloor<T>(floor: number, read: () => Promise<T>): Promise<T> {
+  if (!Number.isSafeInteger(floor) || floor < 0) {
+    throw new Error("Invalid read floor");
+  }
+  return readFloors.run(floor, read);
+}
+
+/** The current read's floor, if any. A shared request stamped at or before it is never joined. */
+export function readFloor(): number | undefined {
+  return readFloors.getStore();
 }
 
 /** Only scoped balance reads change commitment; execution and history do not. */
@@ -113,38 +151,43 @@ function restoreRpcResponse(payload: unknown, response: unknown): unknown {
   return Array.isArray(result?.value) ? { ...envelope, result: result.value } : response;
 }
 
-/** web3.js accepts a fetch seam; kit and direct JSON clients use the helpers above. */
-export const contextAwareRpcFetch: typeof fetch = async (input, init) => {
-  if (!reads.getStore() || typeof init?.body !== "string") return fetch(input, init);
-  const originalPayload: unknown = JSON.parse(init.body);
-  const payload = prepareRpcRead(originalPayload);
-  try {
-    const response = await fetch(input, { ...init, body: JSON.stringify(payload) });
-    if (response.ok) {
-      const body: unknown = await response.clone().json();
-      observeRpcRead(payload, body);
-      const restored = restoreRpcResponse(originalPayload, body);
-      if (restored !== body) {
-        const headers = new Headers(response.headers);
-        headers.delete("content-length");
-        headers.delete("content-encoding");
-        return new Response(JSON.stringify(restored), {
-          status: response.status,
-          statusText: response.statusText,
-          headers,
-        });
+/** `contextAwareRpcFetch` over `send`, e.g. a fetch that shares identical requests. */
+export function withRpcReadContextFetch(send: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    if (!reads.getStore() || typeof init?.body !== "string") return send(input, init);
+    const originalPayload: unknown = JSON.parse(init.body);
+    const payload = prepareRpcRead(originalPayload);
+    try {
+      const response = await send(input, { ...init, body: JSON.stringify(payload) });
+      if (response.ok) {
+        const body: unknown = await response.clone().json();
+        observeRpcRead(payload, body);
+        const restored = restoreRpcResponse(originalPayload, body);
+        if (restored !== body) {
+          const headers = new Headers(response.headers);
+          headers.delete("content-length");
+          headers.delete("content-encoding");
+          return new Response(JSON.stringify(restored), {
+            status: response.status,
+            statusText: response.statusText,
+            headers,
+          });
+        }
+      } else {
+        const context = reads.getStore();
+        if (context) context.stale = true;
       }
-    } else {
+      return response;
+    } catch (error) {
       const context = reads.getStore();
       if (context) context.stale = true;
+      throw error;
     }
-    return response;
-  } catch (error) {
-    const context = reads.getStore();
-    if (context) context.stale = true;
-    throw error;
-  }
-};
+  };
+}
+
+/** web3.js accepts a fetch seam; kit and direct JSON clients use the helpers above. */
+export const contextAwareRpcFetch: typeof fetch = withRpcReadContextFetch(fetchWithReadSocketRetry);
 
 /** Server-only middleware; the shared Solana client also serves browser callers. */
 export function withRpcReadContext(transport: RpcTransport): RpcTransport {
