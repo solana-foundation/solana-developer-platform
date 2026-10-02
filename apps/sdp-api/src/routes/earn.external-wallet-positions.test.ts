@@ -506,6 +506,7 @@ describe("external-wallet position reads", () => {
         provider: "kamino",
         positionCount: 1,
         error: "RPC unavailable",
+        causeChain: ["Error: RPC unavailable"],
       }),
       "vault position: live hydration unavailable"
     );

@@ -191,18 +191,74 @@ export async function hydrateVaultPositions(
     settled.forEach((result, index) => {
       if (result.status !== "rejected") return;
       const job = hydrationJobs[index];
+      // Provider messages may embed the owner, so an end-user owner is
+      // scrubbed from them as well as from the fields.
+      const redactedOwner = options.ownerKind === "external-wallet" ? job?.owner : undefined;
       getLogger().warn(
         {
           provider: job?.provider,
           ...(job ? ownerTelemetryFields(options.ownerKind, job.owner) : {}),
           positionCount: job?.positionCount,
-          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+          error: scrubLoggedText(
+            result.reason instanceof Error ? result.reason.message : String(result.reason),
+            redactedOwner
+          ),
+          causeChain: describeHydrationFailure(result.reason, redactedOwner),
         },
         "vault position: live hydration unavailable"
       );
     });
   }
   return live;
+}
+
+/** Bounds on the cause chain one hydration warning carries. */
+const MAX_LOGGED_CAUSES = 16;
+const MAX_LOGGED_CAUSE_DEPTH = 16;
+const MAX_LOGGED_TEXT_LENGTH = 300;
+// An RPC endpoint carries its API key in the path (Alchemy, Triton, QuickNode)
+// or the query string (Helius), so a URL is dropped whole, as is a bare query.
+const LOGGED_URL = /\b[a-z][a-z0-9+.-]{0,15}:\/\/[^\s"'<>]+/gi;
+const LOGGED_QUERY = /\?[^\s"'<>=]*=[^\s"'<>]*/g;
+
+/**
+ * The rejection's cause tree, flattened depth-first into `name[code]: message`
+ * lines, so the warning says WHY a value is unavailable. Providers wrap the
+ * transport failure several layers deep and nest per-vault failures in an
+ * `AggregateError`, none of which the top-level message shows.
+ */
+export function describeHydrationFailure(error: unknown, redactedOwner?: string): string[] {
+  const chain: string[] = [];
+  const seen = new Set<Error>();
+  const visit = (node: unknown, depth: number): void => {
+    if (chain.length >= MAX_LOGGED_CAUSES || depth > MAX_LOGGED_CAUSE_DEPTH) return;
+    if (!(node instanceof Error)) {
+      if (typeof node === "string") chain.push(scrubLoggedText(node, redactedOwner));
+      return;
+    }
+    if (seen.has(node)) return;
+    seen.add(node);
+    const code = (node as { code?: unknown }).code;
+    const name =
+      typeof code === "string" || typeof code === "number" ? `${node.name}[${code}]` : node.name;
+    chain.push(scrubLoggedText(`${name}: ${node.message}`, redactedOwner));
+    if (node instanceof AggregateError) {
+      for (const member of node.errors) visit(member, depth + 1);
+    }
+    visit(node.cause, depth + 1);
+  };
+  visit(error, 0);
+  return chain;
+}
+
+function scrubLoggedText(text: string, redactedOwner: string | undefined): string {
+  // Redact the owner before clipping, so a cut cannot leave part of it behind.
+  const anonymous = redactedOwner ? text.split(redactedOwner).join("[owner]") : text;
+  const clipped =
+    anonymous.length > MAX_LOGGED_TEXT_LENGTH
+      ? `${anonymous.slice(0, MAX_LOGGED_TEXT_LENGTH)}...`
+      : anonymous;
+  return clipped.replace(LOGGED_URL, "[url]").replace(LOGGED_QUERY, "[query]");
 }
 
 /** End-user owner addresses are omitted before the payload reaches the logger. */

@@ -942,6 +942,9 @@ transaction signed by the organization custody wallet or external owner.
   matches nothing and silently returns an empty page.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
   zero is a claim about someone's money that a failed RPC call cannot support.
+  The "live hydration unavailable" warning carries `causeChain`, the flattened
+  `.cause`/`AggregateError` tree with URLs, query strings and external-wallet
+  owners scrubbed: the top-level message never names the transport failure.
   Every owner/provider job shares one request-wide `VaultDeadline` and runs in
   bounded waves of eight. Giving each queued owner a new deadline makes the
   route's latency ceiling grow with portfolio size. Empty-position close-out
@@ -1482,7 +1485,9 @@ pins remain isolated. Otherwise, executing provider read/build operations use
 the ordered managed-provider pool only for `SOLANA_NETWORK`. Each candidate
 must prove its genesis hash before SDK work. Transient nested transport errors
 may retry the unsigned read/build within the same workflow deadline; deterministic
-refusals and cluster mismatches do not. Concurrent operations have independent
+refusals and cluster mismatches do not. A per-vault fan-out (Veda and Kamino
+`readVaultPositions` throw an `AggregateError` cause) retries only when every
+member failure is transient, since the all-or-nothing read would fail again. Concurrent operations have independent
 endpoint cursors, and each later operation starts at the primary. Missing history
 remains unknown, never proof of payout or failure. Signing and broadcast are outside
 this retry runner. Infrastructure failures may still occur at those boundaries;

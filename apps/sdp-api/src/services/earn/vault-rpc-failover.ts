@@ -5,13 +5,38 @@ import type { SolanaCluster } from "@sdp/types";
 import type { Env } from "@/types/env";
 import type { VaultDeadline } from "./vault-deadline";
 
+/**
+ * Deepest nesting `transientCause` follows. Veda's fan-out read is already six
+ * deep (SdpVedaError > AggregateError > per-vault wrapper > vaultUnreadable >
+ * TypeError > socket error); the cap only stops a pathological chain.
+ */
+const MAX_CAUSE_DEPTH = 16;
+
+/**
+ * Whether another endpoint could succeed: some error on the `.cause` chain is a
+ * transient RPC failure. A per-vault fan-out reports an `AggregateError` whose
+ * failures sit in `.errors`, so those count too, but only when EVERY member is
+ * transient: the read is all-or-nothing, and one deterministic failure would
+ * fail the retry anyway.
+ */
 function transientCause(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  for (let cause = error; cause instanceof Error && !seen.has(cause); cause = cause.cause) {
-    seen.add(cause);
-    if (isTransientRpcError(cause)) return true;
-  }
-  return false;
+  const verdicts = new Map<Error, boolean>();
+  const visit = (node: unknown, depth: number): boolean => {
+    if (!(node instanceof Error) || depth > MAX_CAUSE_DEPTH) return false;
+    const known = verdicts.get(node);
+    if (known !== undefined) return known;
+    // Provisional verdict: a cycle back to this node proves nothing.
+    verdicts.set(node, false);
+    const verdict =
+      isTransientRpcError(node) ||
+      (node instanceof AggregateError &&
+        node.errors.length > 0 &&
+        node.errors.every((member: unknown) => visit(member, depth + 1))) ||
+      visit(node.cause, depth + 1);
+    verdicts.set(node, verdict);
+    return verdict;
+  };
+  return visit(error, 0);
 }
 
 /**
