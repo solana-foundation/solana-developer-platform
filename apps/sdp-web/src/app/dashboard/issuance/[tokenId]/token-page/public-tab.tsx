@@ -164,7 +164,8 @@ export function TokenPublicTab({ token, ops, form }: TokenTabProps) {
 
   return (
     <div className="flex flex-col">
-      <div className="grid gap-12 @3xl:grid-cols-2">
+      {/* Stacked, the preview sits 24px under the fields, as the phone design does. */}
+      <div className="grid gap-6 @3xl:grid-cols-2 @3xl:gap-12">
         <PublicFieldsBlock
           values={values}
           isPublic={isPublic}
@@ -215,41 +216,44 @@ function PublicFieldsBlock({
   const publicCount = FIELDS.filter(isPublic).length;
   return (
     <RecordBlock title={t("DashboardIssuance.newDesign.publicInfo.included")} className="gap-6">
-      <p className="text-body text-secondary">
-        {t("DashboardIssuance.newDesign.publicInfo.count", {
-          count: publicCount,
-          total: FIELDS.length,
-        })}
-      </p>
-      <div className="h-1 overflow-hidden rounded-full bg-fill">
-        <i
-          className="block h-full rounded-full bg-primary"
-          style={{ width: `${Math.round((publicCount / FIELDS.length) * 100)}%` }}
-        />
-      </div>
-      <div className="flex flex-col">
-        {FIELDS.map((field) => {
-          const locked = field.core || field.private || !canEdit;
-          return (
-            <IssuanceCheckRow
-              key={field.id}
-              checked={isPublic(field)}
-              disabled={locked || saving}
-              onChange={(on) => onToggle(field, on)}
-              className="items-center py-2.5"
-              aside={
-                <>
-                  <span className="max-w-56 truncate text-meta text-secondary">
-                    {values[field.id] || t("DashboardIssuance.newDesign.notSet")}
-                  </span>
-                  {field.why ? <LockHint text={t(field.why)} /> : null}
-                </>
-              }
-            >
-              <span className="text-body text-primary">{t(field.label)}</span>
-            </IssuanceCheckRow>
-          );
-        })}
+      {/* A phone draws 16px from the count to the meter and from the meter to the rows. */}
+      <div className="flex flex-col gap-4 md:gap-6">
+        <p className="text-body text-secondary">
+          {t("DashboardIssuance.newDesign.publicInfo.count", {
+            count: publicCount,
+            total: FIELDS.length,
+          })}
+        </p>
+        <div className="h-1 overflow-hidden rounded-full bg-fill">
+          <i
+            className="block h-full rounded-full bg-primary"
+            style={{ width: `${Math.round((publicCount / FIELDS.length) * 100)}%` }}
+          />
+        </div>
+        <div className="flex flex-col">
+          {FIELDS.map((field) => {
+            const locked = field.core || field.private || !canEdit;
+            return (
+              <IssuanceCheckRow
+                key={field.id}
+                checked={isPublic(field)}
+                disabled={locked || saving}
+                onChange={(on) => onToggle(field, on)}
+                className="items-center py-2.5"
+                aside={
+                  <>
+                    <span className="max-w-56 truncate text-meta text-secondary">
+                      {values[field.id] || t("DashboardIssuance.newDesign.notSet")}
+                    </span>
+                    {field.why ? <LockHint text={t(field.why)} /> : null}
+                  </>
+                }
+              >
+                <span className="text-body text-primary">{t(field.label)}</span>
+              </IssuanceCheckRow>
+            );
+          })}
+        </div>
       </div>
     </RecordBlock>
   );
