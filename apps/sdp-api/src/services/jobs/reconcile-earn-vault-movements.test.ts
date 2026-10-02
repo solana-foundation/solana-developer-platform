@@ -1,3 +1,4 @@
+import { readFloor, readStamp } from "@sdp/rpc/read-context";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
@@ -407,6 +408,25 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     await expect(positionRow(seeded.position.id)).resolves.toMatchObject({
       closed_at: expect.any(String),
     });
+  });
+
+  it("reads the post-exit balance under a floor stamped for this close", async () => {
+    const seeded = await seedExternalWalletWithdrawal();
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1004500"));
+    const floors: Array<number | undefined> = [];
+    readVaultPositions.mockImplementation(async () => {
+      floors.push(readFloor());
+      return liveSnapshot(seeded.position, EXTERNAL_OWNER, "0");
+    });
+    const before = readStamp();
+
+    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(floors).toEqual([expect.any(Number)]);
+    expect(floors[0]).toBeGreaterThan(before);
   });
 
   it("leaves the holding open when live shares remain after a partial exit", async () => {

@@ -1,4 +1,4 @@
-import { createRpc, getSignatureStatuses } from "@sdp/rpc/solana";
+import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types";
 import type { Signature } from "@solana/kit";
 import { getDb } from "@/db";
@@ -6,6 +6,45 @@ import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-mo
 import { notFound, providerUnavailable } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint, earnClusterFor, resolveClusterRpcUrl } from "./execution-registry";
+
+/** How long a finalized signature's status is reused before it is read again. */
+export const FINALIZED_SIGNATURE_STATUS_TTL_MS = 600_000;
+const FINALIZED_SIGNATURE_STATUS_CAPACITY = 1_024;
+
+/**
+ * A finalized signature's slot and error never change, so polls that keep
+ * naming the same movement skip `getSignatureStatuses` for it. Keyed by
+ * cluster and signature, and filled only with a status read from the RPC that
+ * passed every check below; a confirmed-only status is always read again.
+ */
+const finalizedStatuses = new Map<string, { status: SignatureStatusInfo; expiresAt: number }>();
+
+/** Test seam: forget the memoised finalized statuses. */
+export function resetFinalizedSignatureStatuses(): void {
+  finalizedStatuses.clear();
+}
+
+function finalizedStatus(key: string): SignatureStatusInfo | undefined {
+  const entry = finalizedStatuses.get(key);
+  if (!entry) return undefined;
+  finalizedStatuses.delete(key);
+  if (entry.expiresAt <= Date.now()) return undefined;
+  finalizedStatuses.set(key, entry);
+  return entry.status;
+}
+
+function rememberFinalizedStatus(key: string, status: SignatureStatusInfo): void {
+  finalizedStatuses.delete(key);
+  finalizedStatuses.set(key, {
+    status,
+    expiresAt: Date.now() + FINALIZED_SIGNATURE_STATUS_TTL_MS,
+  });
+  while (finalizedStatuses.size > FINALIZED_SIGNATURE_STATUS_CAPACITY) {
+    const oldest = finalizedStatuses.keys().next().value;
+    if (oldest === undefined) break;
+    finalizedStatuses.delete(oldest);
+  }
+}
 
 export async function resolveVaultBalanceReadContext(
   env: Env,
@@ -51,15 +90,26 @@ export async function resolveVaultBalanceReadContext(
   const cluster = earnClusterFor(input.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
   await assertClusterEndpoint(env, cluster, rpcUrl);
-  const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: 3_000 });
-  const statuses = await getSignatureStatuses(
-    rpc,
-    movements.map((movement) => movement.signature as Signature),
-    { searchTransactionHistory: true, retryDelaysMs: [] }
+  const keys = movements.map((movement) => `${cluster}\n${movement.signature}`);
+  const statuses: Array<SignatureStatusInfo | null | undefined> = keys.map(finalizedStatus);
+  const unread = movements.flatMap((movement, index) =>
+    statuses[index] ? [] : [{ index, signature: movement.signature as Signature }]
   );
-  if (statuses.length !== movements.length) {
-    throw providerUnavailable("Earn balance confirmation is unavailable");
+  if (unread.length > 0) {
+    const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: 3_000 });
+    const read = await getSignatureStatuses(
+      rpc,
+      unread.map(({ signature }) => signature),
+      { searchTransactionHistory: true, retryDelaysMs: [] }
+    );
+    if (read.length !== unread.length) {
+      throw providerUnavailable("Earn balance confirmation is unavailable");
+    }
+    unread.forEach(({ index }, position) => {
+      statuses[index] = read[position];
+    });
   }
+  const readNow = new Set(unread.map(({ index }) => index));
   let minimumSlot = 0;
   const minimumSlotByPositionId = new Map<string, number>();
   for (const [index, status] of statuses.entries()) {
@@ -72,6 +122,9 @@ export async function resolveVaultBalanceReadContext(
       slot < 0
     ) {
       throw providerUnavailable("Earn balance confirmation is unavailable");
+    }
+    if (readNow.has(index) && status.confirmationStatus === "finalized") {
+      rememberFinalizedStatus(keys[index], status);
     }
     minimumSlot = Math.max(minimumSlot, slot);
     const positionId = movements[index]?.position_id;
