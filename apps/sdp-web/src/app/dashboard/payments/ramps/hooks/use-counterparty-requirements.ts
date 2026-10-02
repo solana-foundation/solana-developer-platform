@@ -317,6 +317,141 @@ function payoutTreeOf(answer: CounterpartyRequirements | undefined): PayoutRequi
   return answer !== undefined && answer.status === "collect_account" ? answer.payout : null;
 }
 
+type PendingAgreements = Extract<
+  CounterpartyRequirements,
+  { status: "counterparty_collect_agreement" }
+>["agreements"];
+
+/**
+ * Names the request corridor: every field of the request that, when it
+ * changes, resets the collected answers.
+ *
+ * @param params - The hook's request, or null when it is disabled.
+ * @returns The subject key, empty when disabled.
+ */
+function requirementsSubjectKey(params: CounterpartyRequirementsParams | null): string {
+  return params === null
+    ? ""
+    : `${params.counterpartyId}:${params.provider}:${params.direction}:${params.assetRail}:${params.fiatCurrency}:${params.destinationCustodyWalletId}`;
+}
+
+/**
+ * The request subject plus the routing choice living outside the subject key —
+ * the collected destination country and the explicitly picked account: together
+ * the full submission an advance or poll response answers for.
+ */
+function corridorIdentityOf(
+  subjectKey: string,
+  destinationCountry: string | undefined,
+  selectedPayoutAccountId: string | null
+): string {
+  return `${subjectKey}:${destinationCountry === undefined ? "" : destinationCountry}:${
+    selectedPayoutAccountId === null ? "" : selectedPayoutAccountId
+  }`;
+}
+
+/**
+ * Reads a corridor-tagged record only while it answers for the current corridor.
+ *
+ * @param record - The stored record, tagged with the corridor it answered for.
+ * @param corridor - The current corridor identity.
+ * @returns The record, or null when it belongs to another corridor.
+ */
+function recordForCorridor<Entry extends { corridor: string }>(
+  record: Entry | null,
+  corridor: string
+): Entry | null {
+  return record !== null && record.corridor === corridor ? record : null;
+}
+
+/**
+ * Keys the onboarding status poll, or disables it while there is nothing pending to poll.
+ *
+ * @param advance - The current corridor's advance, if any.
+ * @param params - The hook's request.
+ * @param corridorIdentity - The current corridor identity.
+ * @returns The poll key, or null.
+ */
+function onboardingPollKey(
+  advance: AdvanceRecord | null,
+  params: CounterpartyRequirementsParams | null,
+  corridorIdentity: string
+) {
+  return advance !== null &&
+    params?.provider &&
+    isCounterpartyRequirementsPollStatus(advance.result.status)
+    ? paymentsQueryKeys.requirementsStatusPoll({
+        subjectKey: `${corridorIdentity}#${advance.advanceId}`,
+      })
+    : null;
+}
+
+/**
+ * The freshest onboarding answer for the current corridor: the poll's when it
+ * has one, otherwise the advance response.
+ */
+function currentOnboarding(
+  advance: AdvanceRecord | null,
+  polled: CounterpartyRequirements | undefined
+): CounterpartyRequirements | null {
+  return advance === null ? null : polled !== undefined ? polled : advance.result;
+}
+
+/**
+ * Reads the agreements awaiting consent off a requirements answer.
+ *
+ * @param answer - Requirements answer to inspect.
+ * @returns The agreements, or null when the step collects fields instead.
+ */
+function pendingAgreementsOf(
+  answer: CounterpartyRequirements | undefined
+): PendingAgreements | null {
+  return answer !== undefined && answer.status === "counterparty_collect_agreement"
+    ? answer.agreements
+    : null;
+}
+
+/**
+ * Whether every pending agreement and its privacy policy has been checked.
+ *
+ * @param pending - Agreements awaiting consent, or null when there are none.
+ * @param acceptedAgreements - Consent keys checked so far.
+ * @returns False when nothing is pending.
+ */
+function everyAgreementAccepted(
+  pending: PendingAgreements | null,
+  acceptedAgreements: readonly string[]
+): boolean {
+  if (pending === null) {
+    return false;
+  }
+  const accepted = new Set(acceptedAgreements);
+  return pending.every((agreement) => {
+    const keys = bvnkAgreementConsentKeys(agreement);
+    return accepted.has(keys.agreement) && accepted.has(keys.privacyPolicy);
+  });
+}
+
+/**
+ * Every status the provider can return is handled: "collect" → needsCollection,
+ * "ready" → proceed, "unsupported" → block with its reason, plus fetch errors.
+ * A fetch error only blocks while no usable answer exists — a failed
+ * post-advance refresh must not strand a wizard whose advance succeeded.
+ */
+function requirementsBlockReason(
+  error: unknown,
+  requirementsData: CounterpartyRequirements | undefined,
+  data: CounterpartyRequirements | undefined
+): string | null {
+  if (error instanceof Error && requirementsData === undefined) {
+    return error.message;
+  }
+  if (data?.status === "unsupported") {
+    return data.reason;
+  }
+  return null;
+}
+
 export interface CounterpartyRequirementsState {
   /** Fields the client must collect; empty unless the provider returned `collect`. */
   fields: RequirementField[];
@@ -361,6 +496,8 @@ export interface CounterpartyRequirementsState {
   isAdvancing: boolean;
   /** Re-runs the advance (POST) to retry — used by the customer funding provisioning failure action. */
   retryOnboarding: () => void;
+  /** Reads the onboarding status now instead of on the poll's next tick. */
+  refreshOnboarding: () => Promise<void>;
   /** Agreements awaiting consent on the requirements step, or null when the step collects fields. */
   pendingAgreements:
     | Extract<CounterpartyRequirements, { status: "counterparty_collect_agreement" }>["agreements"]
@@ -418,10 +555,7 @@ export function useCounterpartyRequirements(
   // the previous value during render (React's no-effect way to reset state on a change),
   // so stale KYC or bank details never leak into a different corridor's payload and a
   // pending onboarding never survives into one.
-  const subjectKey =
-    params === null
-      ? ""
-      : `${params.counterpartyId}:${params.provider}:${params.direction}:${params.assetRail}:${params.fiatCurrency}:${params.destinationCustodyWalletId}`;
+  const subjectKey = requirementsSubjectKey(params);
   const [trackedSubject, setTrackedSubject] = useState(subjectKey);
   // The completed advance, tagged with the corridor it answered for. Responses
   // are data addressed by their corridor, never commands: a write from a
@@ -433,12 +567,11 @@ export function useCounterpartyRequirements(
     result: CounterpartyRequirements;
   } | null>(null);
   const [isAdvancing, setIsAdvancing] = useState(false);
-  // The request subject plus the routing choice living outside the subject key —
-  // the collected destination country and the explicitly picked account: together
-  // the full submission an advance or poll response answers for.
-  const corridorIdentity = `${subjectKey}:${
-    collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry
-  }:${selectedPayoutAccountId === null ? "" : selectedPayoutAccountId}`;
+  const corridorIdentity = corridorIdentityOf(
+    subjectKey,
+    collectedData.destinationCountry,
+    selectedPayoutAccountId
+  );
   if (subjectKey !== trackedSubject) {
     setTrackedSubject(subjectKey);
     setCollectedData({});
@@ -452,8 +585,7 @@ export function useCounterpartyRequirements(
       accepted ? [...previous, key] : previous.filter((acceptedKey) => acceptedKey !== key)
     );
   }, []);
-  const advance =
-    advanceRecord !== null && advanceRecord.corridor === corridorIdentity ? advanceRecord : null;
+  const advance = recordForCorridor(advanceRecord, corridorIdentity);
 
   const key = buildCounterpartyRequirementsKey(params);
   // Requirements never revalidate on their own — `needsCollection` (and thus the
@@ -541,15 +673,8 @@ export function useCounterpartyRequirements(
   // https://github.com/vercel/swr/discussions/2293) and cache.delete cannot
   // stop an in-flight tick from repopulating a shared key, so no two advances
   // ever share a key.
-  const pollKey =
-    advance !== null &&
-    params?.provider &&
-    isCounterpartyRequirementsPollStatus(advance.result.status)
-      ? paymentsQueryKeys.requirementsStatusPoll({
-          subjectKey: `${corridorIdentity}#${advance.advanceId}`,
-        })
-      : null;
-  const { data: polledOnboarding } = useSWR(
+  const pollKey = onboardingPollKey(advance, params, corridorIdentity);
+  const { data: polledOnboarding, mutate: refreshPolledOnboarding } = useSWR(
     pollKey,
     () => {
       if (advance === null || !params?.provider) {
@@ -579,8 +704,7 @@ export function useCounterpartyRequirements(
   // The live onboarding lifecycle for the CURRENT corridor: the freshest of the
   // advance response and its status poll. Both sources are corridor-addressed,
   // so an abandoned corridor's result can never surface here.
-  const onboarding =
-    advance === null ? null : polledOnboarding !== undefined ? polledOnboarding : advance.result;
+  const onboarding = currentOnboarding(advance, polledOnboarding);
   const advanceReady = lightsparkOfframpReadyAnswer(onboarding);
   const resolvedProviderAccountId = advanceReady === null ? null : advanceReady.providerAccountId;
 
@@ -593,22 +717,9 @@ export function useCounterpartyRequirements(
   );
   // Furthest collect stage wins for stage/field selection; the payout tree
   // prefers the GET answer, which a post-advance refetch keeps fresh.
-  const collectAnswer =
-    collectRecord !== null && collectRecord.corridor === corridorIdentity
-      ? collectRecord.result
-      : undefined;
-  const requirementsData = collectAnswer !== undefined ? collectAnswer : data;
-  const pendingAgreements =
-    requirementsData !== undefined && requirementsData.status === "counterparty_collect_agreement"
-      ? requirementsData.agreements
-      : null;
-  const accepted = new Set(acceptedAgreements);
-  const allAgreementsAccepted =
-    pendingAgreements !== null &&
-    pendingAgreements.every((agreement) => {
-      const keys = bvnkAgreementConsentKeys(agreement);
-      return accepted.has(keys.agreement) && accepted.has(keys.privacyPolicy);
-    });
+  const collectAnswer = recordForCorridor(collectRecord, corridorIdentity);
+  const requirementsData = collectAnswer !== null ? collectAnswer.result : data;
+  const pendingAgreements = pendingAgreementsOf(requirementsData);
   const freshTree = payoutTreeOf(data);
   const payout = freshTree !== null ? freshTree : payoutTreeOf(requirementsData);
   const fields = useMemo<RequirementField[]>(() => {
@@ -639,19 +750,10 @@ export function useCounterpartyRequirements(
   const isComplete =
     requirementsData !== undefined &&
     (pendingAgreements !== null
-      ? allAgreementsAccepted
+      ? everyAgreementAccepted(pendingAgreements, acceptedAgreements)
       : selectedPayoutAccount !== null || fieldsComplete);
 
-  // Every status the provider can return is handled: "collect" → needsCollection,
-  // "ready" → proceed, "unsupported" → block with its reason, plus fetch errors.
-  // A fetch error only blocks while no usable answer exists — a failed
-  // post-advance refresh must not strand a wizard whose advance succeeded.
-  let blockReason: string | null = null;
-  if (error instanceof Error && requirementsData === undefined) {
-    blockReason = error.message;
-  } else if (data?.status === "unsupported") {
-    blockReason = data.reason;
-  }
+  const blockReason = requirementsBlockReason(error, requirementsData, data);
 
   return {
     fields,
@@ -671,6 +773,9 @@ export function useCounterpartyRequirements(
     submitRequirements,
     isAdvancing,
     retryOnboarding,
+    refreshOnboarding: async () => {
+      await refreshPolledOnboarding();
+    },
     pendingAgreements,
     acceptedAgreements,
     toggleAgreement,
