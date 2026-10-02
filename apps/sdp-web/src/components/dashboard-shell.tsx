@@ -941,7 +941,13 @@ export function DashboardShell({
                   the content's at every width; 32px above the title and 24px from the title to
                   the tabs are the design's. */}
                   <div
-                    className={cn("shrink-0", isRefresh && [refreshGutterClass, "pt-6 md:pt-8"])}
+                    className={cn(
+                      "shrink-0",
+                      isRefresh && [
+                        refreshGutterClass,
+                        pageConfig.flushTopOnDesktop ? "pt-6 md:pt-0" : "pt-6 md:pt-8",
+                      ]
+                    )}
                   >
                     <div
                       className={cn(

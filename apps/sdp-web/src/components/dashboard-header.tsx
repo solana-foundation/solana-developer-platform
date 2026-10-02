@@ -53,6 +53,11 @@ type DashboardPageConfig = {
   /** The page's one primary action, set in the title row (Download CSV, Add, New). */
   headerAction?: DashboardHeaderActionConfig;
   hideTitle?: boolean;
+  /**
+   * A refresh flow that hides its title and sets its own top spacing: the header keeps its
+   * padding only on a phone, where it holds the menu button.
+   */
+  flushTopOnDesktop?: boolean;
   hideTitleOnMobile?: boolean;
   backAction?: {
     href: string;
@@ -862,6 +867,7 @@ function getIssuanceRoutePageConfig(
     return {
       title: t("DashboardIssuance.newDesign.draft.pageTitle"),
       hideTitle: true,
+      flushTopOnDesktop: true,
       contentWidthClass: "max-w-none",
       headerWidthClass: "max-w-flow",
     };
