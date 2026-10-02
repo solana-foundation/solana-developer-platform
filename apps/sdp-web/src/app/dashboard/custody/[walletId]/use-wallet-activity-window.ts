@@ -60,6 +60,9 @@ export function useWalletActivityWindow(walletId: string) {
     /** The shown window loaded once, but its latest refresh failed. */
     refreshFailed: data !== undefined && shown.error !== undefined,
     /** Rows older than the shown window exist and the feed can still widen to them. */
+    // TODO(api): page past WALLET_ACTIVITY_MAX_LIMIT once the API serves one activity feed per
+    // wallet with a cursor. The two lists it merges can't be paged together, so the window only
+    // widens, and stops at the cap. Known limitation of the API, not of this tab.
     canLoadOlder: data?.hasMore === true && loadedLimit < WALLET_ACTIVITY_MAX_LIMIT,
     loadingOlder: widening && !olderFailed,
     olderFailed,

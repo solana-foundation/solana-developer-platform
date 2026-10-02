@@ -45,7 +45,14 @@ function matchesActivity(
     .includes(needle);
 }
 
-/** Search, type and status filters over the loaded rows, a page at a time. */
+/**
+ * Search, type and status filters over the loaded rows, a page at a time.
+ *
+ * TODO(api): search and filter the wallet's whole history once the API serves one activity feed
+ * per wallet. Activity merges two separately paged lists, payment transfers and issuance
+ * transactions, and issuance transactions have no search, so these cover the loaded rows only.
+ * Known limitation of the API, not of this tab.
+ */
 function useActivityFilters(rows: readonly WalletActivityRow[]) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<string | undefined>();
