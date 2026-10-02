@@ -140,6 +140,7 @@ export function MemoStepContent({ rows, onChange }: MemoStepContentProps) {
         <span className="size-9" />
       </div>
 
+      {/* react-doctor-disable-next-line duplicate-jsx-subtree -- redesign sibling of main's memo-step-content.tsx; goes away when the old design is removed */}
       <div className="space-y-2">
         {editableRows.map((row, index) => {
           const rowErrors = errors.filter((error) => error.row === index + 1);
