@@ -175,8 +175,14 @@ function DraftFlow({
 
   const savable = classified && draftSchema.safeParse(draft).success;
 
+  // The draft flow sits at the top of the page, with no title over it: the design draws its
+  // progress 48px from the top, 10px over its bar, and the step's heading 26px over the fields,
+  // where the shared frame (under a Payments title) has 36, 8 and 24.
   return (
-    <div className="h-full min-h-0" data-issuance-draft-flow>
+    <div
+      className="h-full min-h-0 md:[&_[data-wizard-scroll-region]]:pt-12 [&_[data-wizard-stepper]>div:first-child]:gap-y-2.5 [&_[data-wizard-heading]]:mb-6.5"
+      data-issuance-draft-flow
+    >
       <WizardFrame
         steps={STEPS.map((entry) => ({ label: t(entry.label), title: t(entry.title) }))}
         currentStep={step}
@@ -262,8 +268,10 @@ function DraftFlowFooter({
   const router = useRouter();
   const last = step === STEPS.length - 1;
 
+  // The design's flow buttons keep the 40px height with 16px sides, 2px less than the shared
+  // large button.
   return (
-    <div className="flex flex-wrap items-center gap-4">
+    <div className="flex flex-wrap items-center gap-4 [&_button]:[--button-padding-x-lg:1rem]">
       {step > 0 ? (
         <Button variant="outline" disabled={pending} onClick={() => onStep(step - 1)}>
           {t("DashboardIssuance.newDesign.draft.back")}

@@ -90,7 +90,7 @@ function CurrentIssuanceCreateSkeleton() {
   return (
     <div
       aria-busy="true"
-      className="mx-auto flex w-full max-w-flow flex-col gap-12 px-4 pt-9 md:px-0"
+      className="mx-auto flex w-full max-w-flow flex-col gap-12 px-4 pt-9 md:px-0 md:pt-12"
       data-issuance-loading-layout="flow"
     >
       <div className="flex flex-col gap-2.5">
