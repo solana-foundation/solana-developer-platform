@@ -169,6 +169,7 @@ describe("EarnVaultAsyncWithdrawModal", () => {
       intermediateMint: "wylds",
       assetMint: "asset",
       minimumShares: "2000",
+      minimumIntermediateAmount: "0.000001",
       shareDecimals: 6,
       assetDecimals: 6,
       cancelable: true,

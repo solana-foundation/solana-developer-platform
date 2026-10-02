@@ -67,6 +67,14 @@ authenticated.
    doppler login
    ```
 
+   Run root commands with your personal config (`DOPPLER_CONFIG=dev_personal pnpm dev`)
+   and set the [required variables](#required-environment-variables) in it. It inherits
+   the shared Development Clerk instance, which cannot deliver webhooks to your machine,
+   so new organizations never link. Point it at your own Clerk app instead
+   ([`clerk-setup.md`](docs/self-hosting/clerk-setup.md)): override `CLERK_ISSUER`,
+   `CLERK_JWKS_URL`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
+   `CLERK_WEBHOOK_SECRET` and `WEBHOOK_INGEST_DOMAIN`.
+
    **Option B: Using local `.env.local` (external contributors)**
    ```bash
    cp apps/sdp-api/.env.local.example apps/sdp-api/.env.local
@@ -198,9 +206,19 @@ reuse the custody keypair as the fee payer in local dev (the same keypair
 can serve both roles); use distinct keys for any non-dev deployment. Add
 `--quiet` to print only the custody secret (useful for piping into `pbcopy`).
 
-In self-hosted mode every configured provider is automatically entitled
-regardless of organization tier. Per-org `providerOverrides` still apply as
-a disable-only mechanism.
+Provider access is organization-scoped in every deployment mode. Configured,
+generally available providers work for every organization. Manual providers,
+including the local signer, need an override in the Clerk organization's
+private metadata:
+
+```json
+{ "sdp": { "providerOverrides": { "custody": { "local": true } } } }
+```
+
+Set it in the Clerk dashboard (Organizations → your org → Metadata → Private;
+the `organization.updated` webhook syncs it) or with
+`pnpm --filter @sdp/api org:tier:local --clerk-org-id <org_…> --tier individual --overrides '{"custody":{"local":true}}'`.
+Without it, choosing the local signer returns `403 Local requires manual activation`.
 
 For the Clerk side of self-hosting (account creation, session token customization, webhook
 relay via an ngrok tunnel), follow [`docs/self-hosting/clerk-setup.md`](docs/self-hosting/clerk-setup.md).

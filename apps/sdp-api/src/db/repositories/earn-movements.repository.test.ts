@@ -8,7 +8,7 @@ import {
   EARN_TERMINAL_MOVEMENT_STATUSES,
 } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import type { EarnRepository } from "./earn.repository";
@@ -305,6 +305,201 @@ describe("Unified earn movement ledger (postgres)", () => {
   });
 
   describe("vault deposits", () => {
+    it("claims untouched deposits before a larger retry backlog and spaces every retry", async () => {
+      const now = Date.now();
+      const retryBefore = new Date(now - 15 * 60_000).toISOString();
+      const retried: string[] = [];
+      const untouched: string[] = [];
+      for (let index = 0; index < 5; index++) {
+        const created = await ledger.createSignedVaultDepositIntent(intent());
+        const settledAt = new Date(now - (120 - index) * 60_000).toISOString();
+        await ledger.advanceVaultMovement({
+          movementId: created.movement.id,
+          organizationId: ORG,
+          toStatus: "finalized",
+          confirmedAt: settledAt,
+          settledAt,
+        });
+        if (index < 3) {
+          retried.push(created.movement.id);
+          await getDb(env)
+            .prepare("UPDATE earn_movements SET reconciliation_attempted_at = ? WHERE id = ?")
+            .bind(new Date(now - (60 - index) * 60_000).toISOString(), created.movement.id)
+            .run();
+        } else {
+          untouched.push(created.movement.id);
+          // New deposits settled after all of the old rows' unsuccessful attempts.
+          await getDb(env)
+            .prepare("UPDATE earn_movements SET settled_at = ? WHERE id = ?")
+            .bind(new Date(now - (5 - index) * 60_000).toISOString(), created.movement.id)
+            .run();
+        }
+      }
+
+      const claimIds = async (limit: number) =>
+        (await ledger.claimUnvaluedKaminoDeposits({ limit, retryBefore })).map((row) => row.id);
+      expect(new Set(await claimIds(2))).toEqual(new Set(untouched));
+      expect(new Set(await claimIds(2))).toEqual(new Set(retried.slice(0, 2)));
+      expect(await claimIds(2)).toEqual(retried.slice(2));
+      expect(await claimIds(2)).toEqual([]);
+      // Failed observations are delayed, never discarded or treated as valued.
+      expect(
+        await ledger.claimUnvaluedKaminoDeposits({
+          limit: 5,
+          retryBefore: new Date(Date.now() + 1_000).toISOString(),
+        })
+      ).toHaveLength(5);
+    });
+
+    it("keeps a finalized Kamino amount unknown until a scoped receipt is recorded once", async () => {
+      const created = await ledger.createSignedVaultDepositIntent(intent());
+      const observedAt = new Date().toISOString();
+      await ledger.advanceVaultMovement({
+        movementId: created.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: observedAt,
+        settledAt: observedAt,
+      });
+      expect(await onlyMovement()).toMatchObject({
+        amount_requested: "100",
+        amount_settled: null,
+        token_amount_settled: null,
+      });
+      const receipt = {
+        movementId: created.movement.id,
+        organizationId: ORG,
+        amount: "3",
+        sharesOut: "2.9",
+      };
+      expect(
+        await ledger.recordKaminoDepositReceipt({ ...receipt, organizationId: ORG_OTHER })
+      ).toBe(false);
+      expect(await ledger.recordKaminoDepositReceipt({ ...receipt, amount: "100.000001" })).toBe(
+        false
+      );
+      expect(await ledger.recordKaminoDepositReceipt(receipt)).toBe(true);
+      expect(await ledger.recordKaminoDepositReceipt({ ...receipt, amount: "4" })).toBe(false);
+      expect(await onlyMovement()).toMatchObject({
+        amount_requested: "100",
+        amount_settled: "3",
+        token_amount_settled: "3",
+        shares_out: "2.9",
+      });
+      expect(
+        await ledger.sumVaultDepositExposure({
+          environment: "sandbox",
+          provider: "kamino",
+          vaultAddress: VAULT,
+        })
+      ).toBe("3");
+    });
+
+    it("hides legacy projections and rejects premature receipt provenance", async () => {
+      const created = await ledger.createSignedVaultDepositIntent(intent());
+      await getDb(env)
+        .prepare("UPDATE earn_movements SET amount_settled = amount_requested WHERE id = ?")
+        .bind(created.movement.id)
+        .run();
+      expect(
+        await ledger.getMovementById({ organizationId: ORG, movementId: created.movement.id })
+      ).toMatchObject({ amount_settled: null });
+      await expect(
+        getDb(env)
+          .prepare(
+            "UPDATE earn_movements SET deposit_receipt_observed_at = sdp_iso_now() WHERE id = ?"
+          )
+          .bind(created.movement.id)
+          .run()
+      ).rejects.toThrow(/kamino_deposit_receipt_check/);
+      await expect(
+        ledger.advanceVaultMovement({
+          movementId: created.movement.id,
+          organizationId: ORG,
+          toStatus: "confirmed",
+          confirmedAt: new Date().toISOString(),
+          depositReceipt: { amount: "3", sharesOut: "2.9" },
+        })
+      ).rejects.toThrow(/finalized/);
+    });
+
+    it("migration 0121 preserves old-revision writes while new readers repair historical guesses", async () => {
+      const created = await ledger.createSignedVaultDepositIntent(intent());
+      const observedAt = new Date().toISOString();
+      await ledger.advanceVaultMovement({
+        movementId: created.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: observedAt,
+        settledAt: observedAt,
+      });
+      const migration = readFileSync(
+        path.join(__dirname, "../migrations/postgres/0121_earn_kamino_deposit_receipts.sql"),
+        "utf8"
+      );
+      // The repair index builds CONCURRENTLY on the live ledger, so it lives in
+      // its own non-transactional migration and cannot run inside this block.
+      const indexMigration = readFileSync(
+        path.join(__dirname, "../migrations/postgres/0122_earn_kamino_receipt_repair_index.sql"),
+        "utf8"
+      );
+      expect(indexMigration).toMatch(/^-- sdp:migration-mode: non-transactional$/m);
+      expect(indexMigration).toContain(
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_earn_movements_kamino_receipt_repair"
+      );
+      await getDb(env).transaction(async (tx) => {
+        // Connection-local copies let the actual migration run against old data
+        // without changing other tests' tables or dropping live constraints.
+        await tx.execute(
+          "CREATE TEMP TABLE earn_movements ON COMMIT DROP AS SELECT * FROM public.earn_movements WHERE id = ?",
+          [created.movement.id]
+        );
+        await tx.execute("ALTER TABLE earn_movements DROP COLUMN deposit_receipt_observed_at");
+        await tx.execute(
+          "UPDATE earn_movements SET amount_settled = amount_requested, token_amount_settled = amount_requested, shares_out = '99'"
+        );
+        await tx.execute(migration);
+        expect(
+          await tx.queryOne(
+            "SELECT amount_requested, amount_settled, token_amount_settled, shares_out, status, signature FROM earn_movements"
+          )
+        ).toMatchObject({
+          amount_requested: "100",
+          amount_settled: "100",
+          token_amount_settled: "100",
+          shares_out: "99",
+          status: "finalized",
+          signature: created.movement.signature,
+        });
+        const migratedLedger = createPostgresEarnMovementsRepository(asTransactionalClient(tx));
+        const scope = { organizationId: ORG, movementId: created.movement.id };
+        expect(await migratedLedger.getMovementById(scope)).toMatchObject({
+          amount_settled: null,
+          token_amount_settled: null,
+          shares_out: null,
+        });
+        expect(
+          await migratedLedger.claimUnvaluedKaminoDeposits({
+            limit: 1,
+            retryBefore: new Date().toISOString(),
+          })
+        ).toHaveLength(1);
+        expect(
+          await migratedLedger.recordKaminoDepositReceipt({
+            ...scope,
+            amount: "3",
+            sharesOut: "2.9",
+          })
+        ).toBe(true);
+        expect(await migratedLedger.getMovementById(scope)).toMatchObject({
+          amount_requested: "100",
+          amount_settled: "3",
+          token_amount_settled: "3",
+          shares_out: "2.9",
+        });
+      });
+    });
+
     it("projects the holding and the movement, with mint-denominated amounts", async () => {
       const created = await ledger.createSignedVaultDepositIntent(intent());
 
@@ -379,10 +574,8 @@ describe("Unified earn movement ledger (postgres)", () => {
         status: "confirmed",
         confirmed_at: confirmedAt,
         shares_out: "99.5",
-        // The chain has spoken, so what moved is known: the requested amount,
-        // which the service pinned numerically equal to the plan's canonical
-        // amount before signing.
-        amount_settled: "100",
+        // Confirmation does not establish how much of Kamino's maximum moved.
+        amount_settled: null,
         // Commitment is not settlement, so nothing is settled yet.
         settled_at: null,
       });
@@ -394,6 +587,7 @@ describe("Unified earn movement ledger (postgres)", () => {
         toStatus: "finalized",
         confirmedAt: settledAt,
         settledAt,
+        depositReceipt: { amount: "100", sharesOut: "99.5" },
       });
       expect(await onlyMovement()).toMatchObject({
         status: "finalized",
@@ -600,11 +794,11 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(reopened.closed_at).toBeNull();
     });
 
-    it("stamps the deposit-token settlement on finalization (0103)", async () => {
+    it("stamps the observed Kamino debit rather than its requested maximum", async () => {
       const deposit = await ledger.createSignedVaultDepositIntent(intent());
       const settledAt = "2026-08-19T12:30:00.000Z";
-      // A deposit's token amount is its settled amount; a caller-supplied
-      // value is ignored for that direction.
+      // The receipt describes partial acceptance. Generic withdrawal payout
+      // metadata cannot override the provider's deposit receipt.
       await ledger.advanceVaultMovement({
         movementId: deposit.movement.id,
         organizationId: ORG,
@@ -612,10 +806,13 @@ describe("Unified earn movement ledger (postgres)", () => {
         confirmedAt: settledAt,
         settledAt,
         tokenAmountSettled: "999",
+        depositReceipt: { amount: "99.9", sharesOut: "99.5" },
       });
       expect(await onlyMovement()).toMatchObject({
-        amount_settled: "100",
-        token_amount_settled: "100",
+        amount_requested: "100",
+        amount_settled: "99.9",
+        token_amount_settled: "99.9",
+        shares_out: "99.5",
       });
 
       const withdrawal = await ledger.createSignedVaultWithdrawalIntent({

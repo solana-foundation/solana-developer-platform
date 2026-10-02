@@ -97,34 +97,18 @@ did not account for. Both were verified against the deployed configuration:
   instead of the fee alone. devnet reserves ~9.9M lamports against ~2.04M of real
   ATA rent, so it over-reserves.
 
-Rent is **recoverable, but only because this package makes it so.** klend's
-`withdrawIxs` bundle historically carried no cleanup instructions, so the share
-ATA was never closed and its 2,039,280 lamports stayed locked in a zero-share
-account on every exit, whoever had paid. `buildShareAccountCloseInstruction`
-(`./withdraw-instructions.ts`) closes it when the exit provably empties it and
-sends the rent to whoever actually funded it.
+Rent stays in the share ATA after an exit. A pre-build read and a
+recorded creation claim cannot prove who paid for its current instance:
+idempotent creates can race, and the owner can close and recreate an account
+outside SDP. `rentRefundTo` therefore cannot authorize an automatic refund.
+The empty account remains owner-controlled and its rent remains recoverable
+through an explicit owner-authorized close outside SDP. The SDP reclaim action
+is tracked in [#2166](https://github.com/solana-foundation/solana-developer-platform/issues/2166).
 
-**The pinned SDK now closes it too, and that copy is stripped.** klend-sdk
-10.0.0 emits its own `CloseAccount` in `postWithdrawIxs` on a full exit,
-refunding the OWNER unconditionally. Two closes of one account cannot both
-land — the second fails with `InvalidAccountData` and takes the whole exit with
-it (found by a full-exit E2E against a surfpool devnet fork, 2026-08-26). The
-plan builder removes the SDK's copy (`isShareAtaCloseInstruction`), because
-SDP's close is the attribution-aware one. Two rules that follow:
-
-- **Pass the recorded funder, never the current sponsor.** Rent is paid when the
-  account is created and the fee mode can flip before the exit, so `rentRefundTo`
-  must come from persisted state. Refunding today's sponsor for rent the customer
-  paid takes the customer's lamports. One exception, and `./sdk.ts` implements it:
-  when THIS exit creates the account (consolidation's idempotent create), its own
-  `rentPayer` funded it moments earlier in the same transaction and the recorded
-  value describes an older instance.
-- **The close condition is exact, not optimistic.** `CloseAccount` fails on a
-  non-zero balance and rides the same transaction as the redemptions, so guessing
-  wrong fails the customer's exit rather than merely stranding rent. It takes two
-  equalities: the redeemed quantity must match both what the ATA will hold and
-  the owner's total across every share account, because closing on an
-  emptied-but-not-exited position hands the next entry a stale funder.
+The SDK's unconditional full-exit `CloseAccount` is stripped and SDP appends no
+share-account close. Even a same-transaction creation can use lamports sent to
+the address beforehand, so creation alone does not prove one payer funded all
+its rent. Newly created accounts and partial exits retain rent too.
 
 Still bounding the decision: `max_allowed_lamports` caps a sponsored transaction
 at 4 new ATAs on devnet, and a re-entry after a close pays rent again. Full
@@ -164,8 +148,15 @@ crank funds.
   discriminators, pinned to their sha256 derivation by test). The decoded total
   must equal the accepted request exactly or the plan is refused.
 
-## Known gaps (deliberate, and owed to the caller)
+## Known gaps
 
+- **Deposit amounts require finalized receipts.** A deposit encodes a maximum,
+  and the program can accept less. `deposit-receipt.ts` validates the recorded
+  signature, cluster program, owner, vault, both mints, maximum and share floor,
+  then reads token transfers and minted shares inside that deposit invocation.
+  It does not use the wallet's net balance, which can include swap proceeds.
+  Missing or unfamiliar metadata stays unvalued. API migration 0121 adds receipt
+  provenance; reads ignore historical guesses and repair retries durably.
 - **Exit quotes are conservative, and exits still carry no on-chain floor.**
   `quoteKaminoWithdraw` prices an exit through the SDK's `ShareExitLiquidityPlan`
   with the effective penalties (`max(vault, global config)` per field). The SDK
@@ -179,7 +170,9 @@ crank funds.
   only when the aggregate is.
   The kvault withdraw instruction takes only a share amount, so `assetsOut`
   informs the caller and nothing enforces it on chain; the Kamino slippage
-  policy leaves the exit floor-less.
+  policy leaves the exit floor-less. `buildVaultWithdrawal` explicitly refuses
+  a supplied `minAmountOut` with `WITHDRAW_REFUSED` before any RPC or build.
+  It must never silently drop a requested protection.
 - **The deposit cap clamp is detected, not read.** klend-sdk's
   `estimateSharesFromTokens` silently clamps to the remaining cap the way the
   program does. `observeDepositPricing` replicates its AUM inputs and
@@ -267,16 +260,24 @@ rather than becoming a false empty portfolio.
 `vitest run`, and **offline by default** — the repo rule is that package tests
 touch no network.
 
-`sdk.smoke.test.ts` is the exception: env-gated (`KAMINO_SMOKE_RPC_URL` +
-`KAMINO_SMOKE_SIGNER`), skipped when unset, so CI never runs it. Run it against a
-surfpool surfnet forking mainnet — real kvault program, real vault, no mainnet
-money at risk:
+`sdk.smoke.test.ts` is the exception: env-gated by `KAMINO_SMOKE_RPC_URL` and
+skipped when unset. It requires a loopback Surfpool fork, generates a fresh
+ephemeral signer, and funds it using local cheatcodes. No private key is needed.
+Run it against a mainnet fork:
 
 ```bash
-KAMINO_SMOKE_RPC_URL=http://127.0.0.1:8899 KAMINO_SMOKE_SIGNER=<64 hex chars> pnpm --filter @sdp/kamino test
+KAMINO_SMOKE_RPC_URL=http://127.0.0.1:8899 pnpm --filter @sdp/kamino exec vitest run src/sdk.smoke.test.ts
 ```
 
-Fund the signer first with SOL and the vault's deposit token via surfpool's
-`surfnet_setAccount` / `surfnet_setTokenAccount` cheatcodes. It proves what the
-offline tests cannot: that the emitted instructions simulate, land, and mint
-shares the position read then reports.
+The default vault is Steakhouse USDC. Override `KAMINO_SMOKE_VAULT` for another
+vault. A devnet fork also needs `KAMINO_SMOKE_CLUSTER=devnet` and a devnet vault
+address. The fixture currently funds 100 million token base units and deposits
+25 whole units, so use a six-decimal deposit mint.
+
+The tests verify an impossible deposit floor fails with the named program
+error where supported, then lands a deposit and partial and full withdrawals.
+They check exact share changes, returned deposit tokens, retained account rent,
+lookup-table compilation and transaction size. Mainnet and devnet fork runs
+use synthetic funds; provider program code and vault data are not patched by
+cheatcodes. Upstream RPC failures while Surfpool fetches accounts can still
+prevent a run from completing.

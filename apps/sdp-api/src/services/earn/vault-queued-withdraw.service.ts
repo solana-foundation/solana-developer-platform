@@ -89,10 +89,13 @@ export interface QueuedWithdrawalTermsInput {
   mechanism?: "solver_queue";
 }
 
-export interface ParRedemptionTermsInput {
-  shares: string;
-  mechanism: "operator_redemption";
-}
+/**
+ * A par request redeems position shares, or intermediate the owner already
+ * holds (a cancelled request's wYLDS), never both.
+ */
+export type ParRedemptionTermsInput =
+  | { mechanism: "operator_redemption"; shares: string; intermediateAmount?: undefined }
+  | { mechanism: "operator_redemption"; intermediateAmount: string; shares?: undefined };
 
 export type AsyncWithdrawalTermsInput = QueuedWithdrawalTermsInput | ParRedemptionTermsInput;
 
@@ -191,6 +194,28 @@ function asyncMechanism(terms: AsyncWithdrawalTermsInput): EarnVaultWithdrawalMe
   return terms.mechanism === "operator_redemption" ? "operator_redemption" : "solver_queue";
 }
 
+function parSource(
+  terms: ParRedemptionTermsInput
+): { shares: string } | { intermediateAmount: string } {
+  return terms.intermediateAmount === undefined
+    ? { shares: terms.shares }
+    : { intermediateAmount: terms.intermediateAmount };
+}
+
+/**
+ * The terms a recorded par request was built from. Shares are validated
+ * positive for the shares source, so a recorded zero means it redeemed held
+ * intermediate instead.
+ */
+export function parTermsFromRecordedRequest(recorded: {
+  shares: string;
+  intermediate_amount: string;
+}): ParRedemptionTermsInput {
+  return compareDecimalAmounts(recorded.shares, "0") === 0
+    ? { mechanism: "operator_redemption", intermediateAmount: recorded.intermediate_amount }
+    : { mechanism: "operator_redemption", shares: recorded.shares };
+}
+
 function requestFingerprint(input: {
   environment: SdpEnvironment;
   provider: string;
@@ -203,7 +228,7 @@ function requestFingerprint(input: {
       environment: input.environment,
       provider: input.provider,
       positionId: input.positionId,
-      shares: input.terms.shares,
+      ...parSource(input.terms),
       ...(input.transactionId ? { transactionId: input.transactionId } : {}),
     });
   }
@@ -250,9 +275,10 @@ async function quoteAndBuildRequest(
     if (input.terms.mechanism === "operator_redemption") {
       const client = resolveVaultParRedemptionClient(env, input.position.provider, deadline);
       if (!client) throw notImplemented(input.position.provider, "par redemptions");
+      const source = parSource(input.terms);
       const parQuote: EarnVaultParRedemptionQuote = await client.quoteParRedemption(runtime, {
         providerReference: input.position.vaultAddress,
-        shares: input.terms.shares,
+        ...source,
       });
       throwBlockingQuote(parQuote);
       const parPlan: EarnVaultParRedemptionRequestPlan = await client.buildParRedemptionRequest(
@@ -260,20 +286,32 @@ async function quoteAndBuildRequest(
         {
           providerReference: input.position.vaultAddress,
           owner: input.position.ownerAddress,
-          shares: input.terms.shares,
+          ...source,
           // Same sponsorship hand-off as the queued-withdrawal branch below:
           // the provider charges what it can to the sponsor and pre-funds the
           // owner for the rents its program hardcodes.
           ...(input.rentPayer === undefined ? {} : { rentPayer: input.rentPayer }),
         }
       );
+      // The caller's intent is the source amount, compared numerically: the
+      // shares to burn, or the held intermediate to redeem with no shares.
+      const intentHeld =
+        "shares" in source
+          ? compareDecimalAmounts(parPlan.expectedRequest.shares, source.shares) === 0
+          : compareDecimalAmounts(parPlan.expectedRequest.shares, "0") === 0 &&
+            compareDecimalAmounts(
+              parPlan.expectedRequest.intermediateAmount,
+              source.intermediateAmount
+            ) === 0;
       if (
         parPlan.assetIdentity.depositTokenMint !== input.position.tokenMint ||
         parPlan.assetIdentity.shareMint !== input.position.shareMint ||
         parPlan.expectedRequest.assetMint !== input.position.tokenMint ||
-        compareDecimalAmounts(parPlan.expectedRequest.shares, input.terms.shares) !== 0
+        !intentHeld
       ) {
-        throw internalError("Par-redemption builder changed the position asset identity or shares");
+        throw internalError(
+          "Par-redemption builder changed the position asset identity or the requested amount"
+        );
       }
       quote = {
         shares: parQuote.shares,
@@ -1176,7 +1214,10 @@ export async function submitExternalQueuedWithdrawalAction(
     }
     const terms: AsyncWithdrawalTermsInput =
       build.mechanism === "operator_redemption"
-        ? { mechanism: "operator_redemption", shares: build.shares }
+        ? parTermsFromRecordedRequest({
+            shares: build.shares,
+            intermediate_amount: build.intermediate_amount as string,
+          })
         : {
             mechanism: "solver_queue",
             shares: build.shares,
