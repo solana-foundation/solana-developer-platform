@@ -1,13 +1,18 @@
 const PLAYGROUND_TAB_PATHS = new Set([
   "/dashboard/issuance",
   "/dashboard/payments",
-  "/dashboard/payments/counterparty",
-  "/dashboard/payments/requests",
   // Private Channels serves its playground as a tab on the overview route, so
   // a cross-route jump and the legacy /api-playground redirect both land here
   // carrying tab=playground. Without this entry the tab is stripped on the
   // pathname change and the destination silently reverts to Overview.
   "/dashboard/integrations/private-channels/overview",
+]);
+
+// The previous design also serves Counterparty's and Requests' playgrounds as tabs on their own
+// routes; the new design folds them into the Payments playground.
+const LEGACY_DESIGN_PLAYGROUND_TAB_PATHS = new Set([
+  "/dashboard/payments/counterparty",
+  "/dashboard/payments/requests",
 ]);
 
 function normalizePathname(pathname: string): string {
@@ -23,14 +28,21 @@ export function shouldClearDashboardTabAfterPathnameChange({
   previousPathname,
   pathname,
   tab,
+  newDesign = true,
 }: {
   previousPathname: string;
   pathname: string;
   tab: string | null;
+  /** Whether the destination page renders in the new design (isNewDesignPage). */
+  newDesign?: boolean;
 }): boolean {
   if (normalizePathname(previousPathname) === normalizePathname(pathname) || !tab) {
     return false;
   }
 
-  return tab !== "playground" || !PLAYGROUND_TAB_PATHS.has(normalizePathname(pathname));
+  const destination = normalizePathname(pathname);
+  const keepsPlaygroundTab =
+    PLAYGROUND_TAB_PATHS.has(destination) ||
+    (!newDesign && LEGACY_DESIGN_PLAYGROUND_TAB_PATHS.has(destination));
+  return tab !== "playground" || !keepsPlaygroundTab;
 }
