@@ -274,7 +274,7 @@ function DetailsField({
     <div className="flex flex-col gap-2">
       <Label
         htmlFor={locked ? undefined : id}
-        className="flex items-center gap-1 text-meta font-normal text-secondary"
+        className="flex h-4 items-center gap-1 text-meta font-normal text-secondary"
       >
         {label}
         {hint ? <InfoHint text={hint} /> : null}
@@ -313,7 +313,8 @@ function CurrencyField({ form }: DetailsFormProps) {
   const { draft, updateDraft, saving } = form;
   return (
     <div className="flex flex-col gap-2">
-      <span className="flex items-center gap-1">
+      {/* A 16px label row like the fields beside it, so Clear can't push the picker down. */}
+      <span className="flex h-4 items-center gap-1">
         <Label className="text-meta font-normal text-secondary">
           {t("DashboardIssuance.newDesign.details.currency")}
         </Label>
@@ -330,6 +331,7 @@ function CurrencyField({ form }: DetailsFormProps) {
         ) : null}
       </span>
       <Select
+        size="xl"
         ariaLabel={t("DashboardIssuance.newDesign.details.currency")}
         placeholder={t("DashboardIssuance.newDesign.draft.selectCurrency")}
         value={draft.pegCurrency ?? ""}
