@@ -30,7 +30,7 @@ import {
 } from "../asset-profile/transactions.data";
 import { TOKEN_TRANSACTIONS_KEY } from "../asset-profile/transactions-cache";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
-import { SupplyOperationForm } from "./supply-operation-form";
+import { LockSupplyForm, SupplyOperationForm } from "./supply-operation-form";
 import { activityEventLabel } from "./token-activity";
 import {
   accessControlLabel,
@@ -223,9 +223,15 @@ function SupplyBlock({
   const left = cap !== null && Number.isFinite(cap) ? Math.max(0, cap - issued) : null;
   // Mint or burn opens in place under the issued supply, its own button giving way to the form.
   const openAction = rows ? ops.fundManagementModalAction : null;
+  // Lock supply opens the same way under the cap.
+  const lockOpen = Boolean(rows) && ops.lockSupplyModalOpen && ops.lockSupplyRemaining !== null;
   const actions = (ids: ReadonlySet<string>) => (
     <OperationButtons
-      rows={rows?.filter((row) => ids.has(row.id) && row.id !== openAction) ?? []}
+      rows={
+        rows?.filter(
+          (row) => ids.has(row.id) && row.id !== openAction && !(lockOpen && row.id === LOCK_SUPPLY)
+        ) ?? []
+      }
       pending={ops.isPending}
     />
   );
@@ -236,7 +242,9 @@ function SupplyBlock({
         <OperationLine
           label={t("DashboardIssuance.newDesign.overview.issuedSupply")}
           actions={actions(ISSUED_SUPPLY_OPERATIONS)}
-          open={openAction ? <SupplyOperationForm ops={ops} action={openAction} /> : null}
+          open={
+            openAction ? <SupplyOperationForm token={token} ops={ops} action={openAction} /> : null
+          }
         >
           <span>{formatDecimalAmount(token.totalSupply || "0", locale)}</span>
           <span className="rounded-control bg-fill-subtle px-1.5 text-meta text-secondary">
@@ -247,6 +255,7 @@ function SupplyBlock({
           label={t("DashboardIssuance.newDesign.overview.supplyCap")}
           hint={t("DashboardIssuance.newDesign.operations.supplyCapHint")}
           actions={actions(SUPPLY_CAP_OPERATIONS)}
+          open={lockOpen ? <LockSupplyForm ops={ops} /> : null}
         >
           {cap === null
             ? t("DashboardIssuance.newDesign.overview.noCap")

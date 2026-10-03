@@ -1,12 +1,16 @@
 "use client";
 
 import { type ReactNode, useId } from "react";
+import { formatDecimalAmount } from "@/app/dashboard/payments/payments-presentation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import type { FundManagementModalAction } from "../token-fund-management-section";
-import { getSignerWalletUnavailableReason } from "../token-management-workspace.utils";
+import {
+  getSignerWalletUnavailableReason,
+  isValidSolanaAddressInput,
+} from "../token-management-workspace.utils";
 import { TokenSignerSelect } from "../token-signer-select";
 import type { TokenTabProps } from "./token-page.shared";
 
@@ -16,10 +20,12 @@ import type { TokenTabProps } from "./token-page.shared";
  * only when the token has several signers and none is set. Burning says it cannot be undone.
  */
 export function SupplyOperationForm({
+  token,
   ops,
   action,
-}: Pick<TokenTabProps, "ops"> & { action: FundManagementModalAction }) {
+}: Pick<TokenTabProps, "token" | "ops"> & { action: FundManagementModalAction }) {
   const t = useTranslations();
+  const locale = useLocale();
   const id = useId();
   const mint = action === "mint";
   const form = mint ? ops.mintForm : ops.burnForm;
@@ -138,11 +144,7 @@ export function SupplyOperationForm({
           variant={mint ? "default" : "destructive"}
           disabled={ops.isPending || blocked}
         >
-          {t(
-            mint
-              ? "DashboardIssuance.management.mintTokens"
-              : "DashboardIssuance.management.burnTokens"
-          )}
+          <SubmitLabel mint={mint} amount={form.amount} symbol={token.symbol} locale={locale} />
         </Button>
         <Button
           type="button"
@@ -155,6 +157,147 @@ export function SupplyOperationForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Lock supply opened in place under the supply cap, as the design draws it: where the rest of
+ * the supply goes, what locking means, then Mint and lock and Cancel. With nothing left to mint
+ * it is a bare lock. If the mint landed and the lock did not, it says so and retries the lock.
+ */
+export function LockSupplyForm({ ops }: Pick<TokenTabProps, "ops">) {
+  const t = useTranslations();
+  const id = useId();
+  const remaining = ops.lockSupplyRemaining ?? "";
+  const needsMint = !ops.lockSupplyMinted && /[1-9]/.test(remaining);
+  const { destination, signingWalletId } = ops.lockSupplyForm;
+  const signer = ops.lockSupplySignerSelection;
+  const needsSigner = signer.wallets.length > 1 && !signingWalletId;
+  const destinationInvalid =
+    needsMint && destination.trim().length > 0 && !isValidSolanaAddressInput(destination);
+  const blocked =
+    (needsMint && !destination.trim()) ||
+    destinationInvalid ||
+    !signingWalletId ||
+    Boolean(signer.unavailableReason) ||
+    Boolean(getSignerWalletUnavailableReason(signer.wallets, signingWalletId, t));
+  const walletsListId = `${id}-wallets`;
+
+  return (
+    <form
+      data-supply-operation="lock"
+      className="flex max-w-lg flex-col gap-4 pt-1 pb-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!blocked) void ops.handleLockSupply();
+      }}
+    >
+      {needsSigner ? (
+        <TokenSignerSelect
+          signerWallets={signer.wallets}
+          signerWalletId={signingWalletId}
+          signerUnavailableReason={signer.unavailableReason}
+          onSignerWalletIdChange={(value) =>
+            ops.setLockSupplyForm((previous) => ({ ...previous, signingWalletId: value }))
+          }
+        />
+      ) : null}
+      {needsMint ? (
+        <FormField
+          id={`${id}-destination`}
+          label={t("DashboardIssuance.forms.destination")}
+          error={destinationInvalid ? t("DashboardIssuance.forms.enterSolanaAddress") : null}
+        >
+          <Input
+            id={`${id}-destination`}
+            size="xl"
+            autoComplete="off"
+            list={walletsListId}
+            placeholder={t("DashboardIssuance.newDesign.operations.addressPlaceholder")}
+            value={destination}
+            aria-invalid={destinationInvalid}
+            disabled={ops.isPending}
+            onChange={(event) => {
+              const next = event.currentTarget.value;
+              ops.setLockSupplyForm((previous) => ({ ...previous, destination: next }));
+            }}
+          />
+          <datalist id={walletsListId}>
+            {ops.authorityWallets.map((wallet) => (
+              <option key={wallet.id} value={wallet.publicKey}>
+                {wallet.label?.trim() || wallet.publicKey}
+              </option>
+            ))}
+          </datalist>
+        </FormField>
+      ) : null}
+      {ops.lockSupplyRevokeFailed ? (
+        <p className="text-body text-error">
+          {t("DashboardIssuance.management.lockSupplyPartialTitle")}.{" "}
+          {t("DashboardIssuance.management.lockSupplyPartialBody")}
+        </p>
+      ) : (
+        <p className="text-body text-warning">
+          {t("DashboardIssuance.newDesign.operations.lockWarning")}
+        </p>
+      )}
+      <div className="flex items-center gap-4 [--button-height-md:2.125rem] @xl:[--button-height-md:1.75rem]">
+        <Button type="submit" size="sm" variant="destructive" disabled={ops.isPending || blocked}>
+          {ops.lockSupplyRevokeFailed
+            ? t("DashboardIssuance.management.lockSupplyRetryRevoke")
+            : needsMint
+              ? t("DashboardIssuance.newDesign.operations.mintAndLock")
+              : t("DashboardIssuance.management.lockSupplyConfirm")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={ops.isPending}
+          onClick={ops.closeLockSupplyModal}
+        >
+          {t("DashboardIssuance.workspace.cancel")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * "Mint tokens" until an amount is entered, then the amount with the token's symbol in a chip
+ * a shade darker than the button ("Mint 5.00 vUSD"), as the design labels the action.
+ */
+function SubmitLabel({
+  mint,
+  amount,
+  symbol,
+  locale,
+}: {
+  mint: boolean;
+  amount: string;
+  symbol: string;
+  locale: string;
+}) {
+  const t = useTranslations();
+  const value = Number(amount);
+  if (!amount.trim() || !Number.isFinite(value) || value <= 0) {
+    return t(
+      mint ? "DashboardIssuance.management.mintTokens" : "DashboardIssuance.management.burnTokens"
+    );
+  }
+  const formatted = formatDecimalAmount(amount, locale);
+  return (
+    <>
+      {t(
+        mint
+          ? "DashboardIssuance.newDesign.operations.mintAmount"
+          : "DashboardIssuance.newDesign.operations.burnAmount",
+        { amount: formatted }
+      )}
+      <span className="ml-1.5 inline-flex h-5 items-center rounded-control bg-current/15 px-1.5">
+        {symbol}
+      </span>
+    </>
   );
 }
 

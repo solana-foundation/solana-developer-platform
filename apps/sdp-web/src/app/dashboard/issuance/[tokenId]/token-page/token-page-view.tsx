@@ -86,7 +86,7 @@ export function TokenPageView({
       {tab === "operations" ? <TokenOperationsTab {...page} onOpenTab={openTab} /> : null}
       {tab === "permissions" ? <TokenPermissionsTab {...page} /> : null}
       {tab === "activity" ? <TokenActivityTab token={token} /> : null}
-      <TokenDialogs ops={ops} token={token} />
+      <TokenDialogs ops={ops} />
     </DashboardWorkspaceOverviewPanel>
   );
 }
