@@ -19,11 +19,12 @@
     "overrides": {
       "@token-acl/abl-sdk": "npm:@solana/token-acl-gate-sdk@0.2.0",
       "@babel/core": "7.29.7",
-      "axios": "1.18.1",
-      "brace-expansion": "5.0.9",
+      "axios": "1.20.0",
+      "brace-expansion": "5.0.12",
       "bigint-buffer": "workspace:*",
+      "@grpc/grpc-js": "1.14.5",
       "esbuild": "0.28.1",
-      "fast-uri": "3.1.7",
+      "fast-uri": "3.1.8",
       "js-yaml": "4.3.0",
       "postcss>nanoid": "3.3.18",
       "postcss": "^8.5.22",
@@ -31,14 +32,14 @@
       "sharp": "0.35.4",
       "stream-json": "3.7.0",
       "toml": "4.3.0",
-      "undici": "7.29.0",
+      "undici": "7.29.1",
       "vite": "7.3.6",
       "jayson>uuid": "11.1.1",
       "ws": "8.21.0"
     },
     "patchedDependencies": {
       "next-themes@0.4.6": "patches/next-themes@0.4.6.patch",
-      "brace-expansion@5.0.9": "patches/brace-expansion@5.0.9.patch"
+      "brace-expansion@5.0.12": "patches/brace-expansion@5.0.12.patch"
     },
     "packageExtensions": {
       "@kamino-finance/klend-sdk@10.0.0": {

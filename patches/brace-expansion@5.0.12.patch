@@ -1,8 +1,8 @@
 diff --git a/dist/commonjs/index.js b/dist/commonjs/index.js
-index 869a6bee23807b9f01c18c99ab8e952b4b242f97..a9735f9913c7181905042062d8538c6757d67ccd 100644
+index 48cf0d3..8f41beb 100644
 --- a/dist/commonjs/index.js
 +++ b/dist/commonjs/index.js
-@@ -286,4 +286,11 @@ function expand_(str, max, maxLength, isTop) {
+@@ -330,4 +330,11 @@ function expand_(str, max, maxLength, maxDepth, depth, maxRewrites, isTop) {
      }
      return acc;
  }
@@ -14,3 +14,4 @@ index 869a6bee23807b9f01c18c99ab8e952b4b242f97..a9735f9913c7181905042062d8538c67
 +Object.defineProperty(expand, "__esModule", { value: true });
 +module.exports = expand;
  //# sourceMappingURL=index.js.map
+\ No newline at end of file
