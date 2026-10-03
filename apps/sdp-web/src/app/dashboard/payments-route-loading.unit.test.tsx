@@ -9,9 +9,11 @@ import CounterpartyLoading, {
   PreviousCounterpartyLoading as LegacyCounterpartyLoading,
 } from "./payments/counterparty/loading";
 import { CounterpartyPlaygroundLoading } from "./payments/counterparty-menu-loading.redesign";
-import DepositLoading from "./payments/deposit/loading";
+import DepositLoading, {
+  PreviousDepositLoading as LegacyDepositLoading,
+} from "./payments/deposit/loading";
 import PaymentsLoading from "./payments/loading";
-import PayLoading from "./payments/pay/loading";
+import PayLoading, { PreviousPayLoading as LegacyPayLoading } from "./payments/pay/loading";
 import {
   CounterpartyDirectorySkeleton,
   PaymentRequestsPageSkeleton,
@@ -102,9 +104,10 @@ describe("home and payments route loading states", () => {
     const markup = renderScopedLoadingStates();
 
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(5);
-    expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
-    // A contact's page and the two blocks of a schedule's page.
-    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(3);
+    // Pay, a new contact and a new schedule; Deposit opens on its address tab, not a wizard.
+    expect(markup.match(/data-loading-wizard/g)).toHaveLength(3);
+    // A contact's page, Deposit's terms, and the two blocks of a schedule's page.
+    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(4);
     expect(markup).toContain("lg:grid-cols-2");
     expect(markup).toContain("size-[208px]");
   });
@@ -186,10 +189,8 @@ describe("home and payments route loading states", () => {
     );
   });
 
-  it("matches the initial counterparty picker in every payment wizard", () => {
+  it("matches the initial counterparty picker in the schedule wizard", () => {
     const wizardCases = [
-      ["payments-pay", renderToStaticMarkup(<PaymentsPayPageSkeleton />)],
-      ["payments-deposit", renderToStaticMarkup(<PaymentsDepositPageSkeleton />)],
       ["recurring-payment-create", renderToStaticMarkup(<RecurringPaymentCreateSkeleton />)],
     ];
 
@@ -228,6 +229,24 @@ describe("home and payments route loading states", () => {
       expect(markup).toContain("min-w-[760px]");
       expect(markup).not.toContain("data-loading-mobile-rows");
     }
+  });
+
+  it("opens Pay on its details step and Deposit on its address tab", () => {
+    const pay = renderToStaticMarkup(<PaymentsPayPageSkeleton />);
+    expect(pay).toContain('data-loading-layout="payments-pay"');
+    expect(pay.match(/data-loading-stepper=/g)).toHaveLength(1);
+    expect(pay.match(/data-loading-field=/g)).toHaveLength(5);
+    expect(pay).toContain("max-w-flow");
+    // The step scrolls in its own column; the footer band stays at the bottom of the page.
+    expect(pay).toContain("overflow-y-auto");
+    expect(pay).toContain("shrink-0 border-t");
+    expect(pay).not.toContain("data-loading-counterparty-picker");
+
+    const deposit = renderToStaticMarkup(<PaymentsDepositPageSkeleton />);
+    expect(deposit).toContain('data-loading-layout="payments-deposit"');
+    expect(deposit.match(/data-loading-deposit-address=/g)).toHaveLength(1);
+    expect(deposit).toContain("size-28");
+    expect(deposit).not.toContain("data-loading-wizard");
   });
 
   it("keeps recurring detail scrollable while its data is pending", () => {
@@ -301,6 +320,10 @@ describe("payments route loading with NEW DESIGN off", () => {
     designMock.newDesign = false;
     expect(renderToStaticMarkup(<CounterpartyLoading />)).toBe(
       renderToStaticMarkup(<LegacyCounterpartyLoading />)
+    );
+    expect(renderToStaticMarkup(<PayLoading />)).toBe(renderToStaticMarkup(<LegacyPayLoading />));
+    expect(renderToStaticMarkup(<DepositLoading />)).toBe(
+      renderToStaticMarkup(<LegacyDepositLoading />)
     );
   });
 });

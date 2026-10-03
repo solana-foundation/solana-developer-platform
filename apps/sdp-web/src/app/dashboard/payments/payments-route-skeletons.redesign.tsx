@@ -131,8 +131,114 @@ function ListPageSkeleton({
   );
 }
 
+function UnderlineFieldSkeleton({ value = "w-48" }: { value?: string }) {
+  return (
+    <div className="space-y-1.5" data-loading-field>
+      <SkeletonBlock className="h-3.5 w-24" />
+      <div className="flex h-9 items-center border-b border-border-default">
+        <SkeletonBlock className={`h-4 max-w-full ${value}`} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A refresh flow's first step: the step name and bar, its fields, and the footer band pinned
+ * to the bottom of the viewport, as WizardFrame lays them out.
+ */
+function FlowPageSkeleton({
+  layout,
+  stepper = true,
+  children,
+}: {
+  layout: "payments-pay" | "recurring-payment-create" | "payment-request-create";
+  /** A single-page form has no step bar, and its fields sit 24px apart instead of 32. */
+  stepper?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="flex h-full min-h-0 w-full flex-col"
+      data-loading-layout={layout}
+      data-loading-wizard
+      aria-busy="true"
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-9 pb-10 md:px-6">
+        <div className="mx-auto w-full max-w-flow">
+          {stepper ? (
+            <div className="mb-12 space-y-2" data-loading-stepper>
+              <div className="flex items-center justify-between gap-3">
+                <SkeletonBlock className="h-4 w-24" />
+                <SkeletonBlock className="h-4 w-20" />
+              </div>
+              <SkeletonBlock className="h-1 w-full rounded-full" />
+            </div>
+          ) : null}
+          <div className={stepper ? "space-y-8" : "space-y-6"}>{children}</div>
+        </div>
+      </div>
+      <div className="shrink-0 border-t border-border-subtle bg-surface px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6">
+        <div className="mx-auto flex w-full max-w-flow items-center justify-end gap-3">
+          <SkeletonBlock className="h-control-lg w-20 rounded-control" />
+          <SkeletonBlock className="h-control-lg w-40 rounded-control" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailRowsSkeleton({ count = 8 }: { count?: number }) {
+  return (
+    <div className="divide-y divide-border-default" data-loading-detail-rows>
+      {DETAIL_ROW_IDS.slice(0, count).map((id, index) => (
+        <div key={id} className="flex min-h-12 items-center justify-between gap-6 py-3">
+          <SkeletonBlock className="h-4 w-24 shrink-0" />
+          <SkeletonBlock className={index % 3 === 0 ? "h-5 w-24 rounded-full" : "h-4 w-40"} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function CounterpartyDirectorySkeleton() {
   return <ListPageSkeleton layout="counterparty-directory" />;
+}
+
+/** Pay's details step: contact, destination, source wallet, then amount beside token. */
+export function PaymentsPayPageSkeleton() {
+  return (
+    <FlowPageSkeleton layout="payments-pay">
+      <UnderlineFieldSkeleton value="w-40" />
+      <UnderlineFieldSkeleton value="w-56" />
+      <UnderlineFieldSkeleton value="w-36" />
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,10rem)] gap-6">
+        <UnderlineFieldSkeleton value="w-24" />
+        <UnderlineFieldSkeleton value="w-16" />
+      </div>
+    </FlowPageSkeleton>
+  );
+}
+
+/** Deposit opens on its address tab: the wallet's address and QR card, then its terms. */
+export function PaymentsDepositPageSkeleton() {
+  return (
+    <div
+      className="mx-auto w-full max-w-flow space-y-10 pt-2"
+      data-loading-layout="payments-deposit"
+      data-loading-deposit-address
+      aria-busy="true"
+    >
+      <div className="flex flex-col gap-6 rounded-card border border-border-default bg-fill-subtle p-6 sm:flex-row sm:items-start">
+        <div className="min-w-0 flex-1 space-y-4">
+          <SkeletonBlock className="h-5 w-40 max-w-full" />
+          <SkeletonBlock className="h-5 w-full" />
+          <SkeletonBlock className="h-4 w-64 max-w-full" />
+        </div>
+        <SkeletonBlock className="size-28 shrink-0 rounded-control" />
+      </div>
+      <DetailRowsSkeleton count={3} />
+    </div>
+  );
 }
 
 /** One block of the contact page loading: its heading, then a few table rows under a header. */
@@ -185,13 +291,11 @@ export function CounterpartyDetailSkeleton() {
   );
 }
 
-// Pay, Deposit, Transactions, Requests and Schedules keep the previous design's skeletons until
-// they are redesigned. A new contact's wizard loads as it did before: its layout is unchanged.
+// Transactions, Requests and Schedules keep the previous design's skeletons until they are
+// redesigned. A new contact's wizard loads as it did before: its layout is unchanged.
 export {
   CounterpartyCreateSkeleton,
   PaymentRequestsPageSkeleton,
-  PaymentsDepositPageSkeleton,
-  PaymentsPayPageSkeleton,
   PaymentsTransactionsPageSkeleton,
   RecurringPaymentCreateSkeleton,
   RecurringPaymentDetailSkeleton,

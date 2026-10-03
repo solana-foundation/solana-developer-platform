@@ -276,6 +276,11 @@ export const newDesignContacts = newDesignModuleFlag(
   "Payments' Contacts (the list, a new contact, one contact's page)"
 );
 
+export const newDesignPayDeposit = newDesignModuleFlag(
+  "pay-deposit",
+  "Payments' Pay and Deposit flows"
+);
+
 export const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
 export const rampProviderLightspark = rampProviderFlag("lightspark", "Lightspark");
 export const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");

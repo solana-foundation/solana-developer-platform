@@ -1,8 +1,10 @@
 import "server-only";
 
+import { loadInstance } from "@/app/dashboard/integrations/private-channels/private-channels-page.data";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import { fetchCounterparties } from "@/app/dashboard/payments/counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols } from "@/app/dashboard/payments/payments-page.data";
+import { privateChannels } from "@/flags";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import {
   fetchProviderAvailability,
@@ -15,7 +17,21 @@ const UNLINKED_ONBOARDING_STATUS = {
   organization: null,
 } satisfies OnboardingStatusResponse;
 
-export async function loadPaymentsActionPageData() {
+/**
+ * Whether the project can send privately, for Pay's notice: null when Private Channels is off,
+ * otherwise whether an instance is active. A failed read counts as not connected.
+ */
+async function loadPrivateSendStatus(
+  apiClient: Awaited<ReturnType<typeof createSdpApiClient>>
+): Promise<{ enabled: boolean; connected: boolean } | null> {
+  if (!(await privateChannels())) return null;
+  const instance = await loadInstance(apiClient);
+  return { enabled: true, connected: instance.ok && instance.data?.isActive === true };
+}
+
+export async function loadPaymentsActionPageData(
+  options: { includePrivateSendStatus?: boolean } = {}
+) {
   const [orgClient, apiClient] = await Promise.all([createOrgSdpApiClient(), createSdpApiClient()]);
   const onboardingStatusPromise = orgClient
     .fetch<OnboardingStatusResponse>("/v1/onboarding/status")
@@ -27,13 +43,19 @@ export async function loadPaymentsActionPageData() {
         )
       : null
   );
-  const [issuedTokenSymbolsResult, counterpartiesResult, providerAccess, enabledRampProviders] =
-    await Promise.all([
-      fetchPaymentsIssuedTokenSymbols(apiClient.request),
-      fetchCounterparties(apiClient.request),
-      providerAccessPromise,
-      getEnabledRampProviders(),
-    ]);
+  const [
+    issuedTokenSymbolsResult,
+    counterpartiesResult,
+    providerAccess,
+    enabledRampProviders,
+    privateSend,
+  ] = await Promise.all([
+    fetchPaymentsIssuedTokenSymbols(apiClient.request),
+    fetchCounterparties(apiClient.request),
+    providerAccessPromise,
+    getEnabledRampProviders(),
+    options.includePrivateSendStatus ? loadPrivateSendStatus(apiClient) : null,
+  ]);
 
   return {
     issuedTokenSymbolsByMint: Object.fromEntries(
@@ -45,5 +67,6 @@ export async function loadPaymentsActionPageData() {
       ? filterEnabledRampProviderAccess(providerAccess.rampProviderAccess, enabledRampProviders)
       : null,
     counterpartiesResult,
+    privateSend,
   };
 }

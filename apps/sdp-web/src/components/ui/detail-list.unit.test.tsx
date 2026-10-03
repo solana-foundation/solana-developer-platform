@@ -40,4 +40,40 @@ describe("DetailList", () => {
 
     expect(markup).toMatch(/^<dl class="mt-6">/);
   });
+
+  it("draws a summary on the default divider instead of per-row rules", () => {
+    const markup = renderToStaticMarkup(
+      <DetailList variant="summary">
+        <DetailRow label="To">Acme</DetailRow>
+      </DetailList>
+    );
+
+    expect(markup).toMatch(/^<dl class="divide-y divide-border-default">/);
+    expect(markup).not.toContain("border-border-subtle");
+    expect(markup).toMatch(/<dt[^>]*>To<\/dt><dd[^>]*>Acme<\/dd>/);
+  });
+
+  it("keeps a summary row's icon out of the refresh design", () => {
+    const markup = renderToStaticMarkup(
+      <DetailList variant="summary">
+        <DetailRow icon={<svg data-testid="icon" />} label="To">
+          Acme
+        </DetailRow>
+      </DetailList>
+    );
+
+    expect(markup).toMatch(
+      /<span class="[^"]*refresh:hidden[^"]*"><svg data-testid="icon"><\/svg><\/span>To/
+    );
+  });
+
+  it("ignores an icon on a record row", () => {
+    const markup = renderToStaticMarkup(
+      <DetailRow icon={<svg data-testid="icon" />} label="Type">
+        Business
+      </DetailRow>
+    );
+
+    expect(markup).not.toContain("<svg");
+  });
 });

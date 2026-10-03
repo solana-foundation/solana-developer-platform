@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   fetchPaymentsIssuedTokenSymbols: vi.fn(),
   fetchProviderAvailability: vi.fn(),
   getEnabledRampProviders: vi.fn(),
+  privateChannels: vi.fn(),
+  loadInstance: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -29,6 +31,10 @@ vi.mock(import("@/lib/provider-availability"), async (importOriginal) => {
 });
 vi.mock("@/flags/ramps", () => ({
   getEnabledRampProviders: mocks.getEnabledRampProviders,
+}));
+vi.mock("@/flags", () => ({ privateChannels: mocks.privateChannels }));
+vi.mock("@/app/dashboard/integrations/private-channels/private-channels-page.data", () => ({
+  loadInstance: mocks.loadInstance,
 }));
 
 import { loadPaymentsActionPageData } from "./payments-action-page.server";
@@ -96,6 +102,30 @@ describe("loadPaymentsActionPageData", () => {
         stripe: { entitled: true, configured: true, enabled: true },
       },
       counterpartiesResult,
+      privateSend: null,
     });
+  });
+
+  it("reports private send status only when asked, and only with the flag on", async () => {
+    mocks.createOrgSdpApiClient.mockResolvedValue({
+      request: vi.fn(),
+      fetch: vi.fn().mockResolvedValue({ linked: false, organization: null }),
+    });
+    mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
+    mocks.fetchPaymentsIssuedTokenSymbols.mockResolvedValue({ ok: true, data: [] });
+    mocks.fetchCounterparties.mockResolvedValue({ ok: true, data: [], total: 0 });
+    mocks.getEnabledRampProviders.mockResolvedValue([]);
+    mocks.loadInstance.mockResolvedValue({ ok: true, data: { isActive: true } });
+
+    mocks.privateChannels.mockResolvedValue(true);
+    expect((await loadPaymentsActionPageData()).privateSend).toBeNull();
+    expect(
+      (await loadPaymentsActionPageData({ includePrivateSendStatus: true })).privateSend
+    ).toEqual({ enabled: true, connected: true });
+
+    mocks.privateChannels.mockResolvedValue(false);
+    expect(
+      (await loadPaymentsActionPageData({ includePrivateSendStatus: true })).privateSend
+    ).toBeNull();
   });
 });
