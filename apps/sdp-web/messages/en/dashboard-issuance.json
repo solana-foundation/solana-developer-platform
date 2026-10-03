@@ -1512,7 +1512,7 @@
         "freezeAuthorityWhy": "Signs freeze and unfreeze.",
         "metadataAuthorityWhy": "Signs changes to the name, symbol and image.",
         "delegateAuthorityWhy": "Signs recovery operations: force transfer and force burn.",
-        "keysNote": "Only this project’s SDP wallets can hold a draft’s keys. After deploy, an authority can move to an outside address, which then signs its own operations.",
+        "keysNote": "A wallet outside SDP custody signs its own operations. SDP cannot act for it, and it cannot be handed back automatically.",
         "noWallets": "Every key needs a wallet to hold it, and this project has none yet.",
         "createWallet": "Create a wallet",
         "classification": "Classification",
