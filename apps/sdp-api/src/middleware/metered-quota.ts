@@ -51,7 +51,7 @@ export interface AnonymousMeteredQuotaConfig {
  * only under-admits.
  *
  * Reads identity from the auth context (set by the auth middleware from the
- * verified API key / Clerk JWT / session cookie), never from request input.
+ * verified API key or Clerk JWT), never from request input.
  *
  * @param c - Request context with auth and kv populated.
  * @param config - Counter namespace and per-window ceilings.
@@ -112,7 +112,7 @@ export function meteredQuota(config: MeteredQuotaConfig) {
 /** Preserve an existing keyed quota when its route also admits anonymous callers. */
 export function authenticatedMeteredQuota(config: MeteredQuotaConfig) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (c.get("apiKey") || c.get("clerk") || c.get("session")) {
+    if (c.get("apiKey") || c.get("clerk") || c.get("approvedOperationActor")) {
       await enforceMeteredQuota(c, config);
     }
     await next();
@@ -121,13 +121,13 @@ export function authenticatedMeteredQuota(config: MeteredQuotaConfig) {
 
 /**
  * Meter only requests that reached an optional-auth route anonymously. A
- * verified key or dashboard session keeps the route's existing keyed quota
+ * verified key or Clerk user keeps the route's existing keyed quota
  * behavior; anonymous paid-upstream traffic is isolated by client IP and
  * fails closed when the counter store is unavailable.
  */
 export function anonymousMeteredQuota(config: AnonymousMeteredQuotaConfig) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (c.get("apiKey") || c.get("clerk") || c.get("session")) {
+    if (c.get("apiKey") || c.get("clerk") || c.get("approvedOperationActor")) {
       await next();
       return;
     }

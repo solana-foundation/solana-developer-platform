@@ -58,7 +58,7 @@ function callerMeteredQuota(config: MeteredQuotaConfig) {
 }
 
 dvp.use("*", requireDvpFeature);
-dvp.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+dvp.use("*", unifiedAuthMiddleware());
 dvp.use("*", projectContextMiddleware());
 
 // Every route below pairs `wallets:read` with its own scope, the way Payments
