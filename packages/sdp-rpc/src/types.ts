@@ -42,7 +42,6 @@ export interface RpcEnv extends ManagedRpcEnv {
   /** Per-cluster RPC overrides; the non-default cluster needs one (see `resolveClusterRpcUrl`). */
   SOLANA_DEVNET_RPC_URL?: string;
   SOLANA_MAINNET_RPC_URL?: string;
-  SDP_DEPLOYMENT_MODE?: string;
 }
 
 export interface PreparedStatement {
