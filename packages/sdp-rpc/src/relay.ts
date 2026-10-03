@@ -10,7 +10,6 @@ import {
   resolveOrganizationProviderEntitlements,
 } from "@sdp/types";
 import {
-  applyApiKeyTemplate,
   resolveDefaultCluster,
   withAlchemyApiKey,
   withHeliusApiKey,
@@ -400,7 +399,7 @@ function resolveManagedProviders(env: RpcEnv): ManagedRpcProvider[] {
     }
     providers.push({
       id: "triton",
-      url: applyApiKeyTemplate(env.SOLANA_RPC_TRITON_URL, env.SOLANA_RPC_TRITON_API_KEY ?? ""),
+      url: withOptionalApiKeyTemplate(env.SOLANA_RPC_TRITON_URL, env.SOLANA_RPC_TRITON_API_KEY),
       headers,
     });
   }
@@ -435,9 +434,9 @@ function resolveManagedProviders(env: RpcEnv): ManagedRpcProvider[] {
   if (env.SOLANA_RPC_VALIDATIONCLOUD_URL) {
     providers.push({
       id: "validationcloud",
-      url: applyApiKeyTemplate(
+      url: withOptionalApiKeyTemplate(
         env.SOLANA_RPC_VALIDATIONCLOUD_URL,
-        env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY ?? ""
+        env.SOLANA_RPC_VALIDATIONCLOUD_API_KEY
       ),
       headers: {},
     });
