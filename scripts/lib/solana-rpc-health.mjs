@@ -1,40 +1,13 @@
 const GET_LATEST_BLOCKHASH_METHOD = "getLatestBlockhash";
 
 const PROVIDERS = [
-  {
-    id: "alchemy",
-    urlKey: "SOLANA_RPC_ALCHEMY_URL",
-    apiKey: "SOLANA_RPC_ALCHEMY_API_KEY",
-  },
-  {
-    id: "quicknode",
-    urlKey: "SOLANA_RPC_QUICKNODE_URL",
-    apiKey: "SOLANA_RPC_QUICKNODE_API_KEY",
-  },
-  {
-    id: "triton",
-    urlKey: "SOLANA_RPC_TRITON_URL",
-    apiKey: "SOLANA_RPC_TRITON_API_KEY",
-  },
-  {
-    id: "default",
-    urlKey: "SOLANA_RPC_URL",
-  },
-  {
-    id: "helius",
-    urlKey: "SOLANA_RPC_HELIUS_URL",
-    apiKey: "SOLANA_RPC_HELIUS_API_KEY",
-  },
-  {
-    id: "validationcloud",
-    urlKey: "SOLANA_RPC_VALIDATIONCLOUD_URL",
-    apiKey: "SOLANA_RPC_VALIDATIONCLOUD_API_KEY",
-  },
-  {
-    id: "nodit",
-    urlKey: "SOLANA_RPC_NODIT_URL",
-    apiKey: "SOLANA_RPC_NODIT_API_KEY",
-  },
+  { id: "alchemy", urlKey: "SOLANA_RPC_ALCHEMY_URL_DEVNET" },
+  { id: "quicknode", urlKey: "SOLANA_RPC_QUICKNODE_URL_DEVNET" },
+  { id: "triton", urlKey: "SOLANA_RPC_TRITON_URL_DEVNET" },
+  { id: "default", urlKey: "SOLANA_RPC_DEFAULT_URL_DEVNET" },
+  { id: "helius", urlKey: "SOLANA_RPC_HELIUS_URL_DEVNET" },
+  { id: "validationcloud", urlKey: "SOLANA_RPC_VALIDATIONCLOUD_URL_DEVNET" },
+  { id: "nodit", urlKey: "SOLANA_RPC_NODIT_URL_DEVNET" },
 ];
 
 export async function selectHealthySolanaRpcUrl(env, options = {}) {
@@ -66,23 +39,14 @@ export function getSolanaRpcCandidates(env) {
   const providers = orderProviders(preferred);
 
   return providers.flatMap((provider) => {
-    const rawUrl = env[provider.urlKey];
-    if (!rawUrl) {
-      return [];
-    }
-
-    const url = applyApiKeyTemplate(rawUrl, provider.apiKey ? env[provider.apiKey] : undefined);
-    if (seen.has(url)) {
+    const url = env[provider.urlKey];
+    if (!url || seen.has(url)) {
       return [];
     }
 
     seen.add(url);
     return [{ ...provider, url }];
   });
-}
-
-export function solanaRpcKeys() {
-  return PROVIDERS.map((provider) => provider.urlKey);
 }
 
 export async function solanaJsonRpc(rpcUrl, method, params = [], options = {}) {
@@ -140,18 +104,6 @@ async function assertSolanaRpcHealthy(rpcUrl, options) {
   if (!payload?.value?.blockhash) {
     throw new Error("missing latest blockhash");
   }
-}
-
-function applyApiKeyTemplate(url, apiKey) {
-  if (!apiKey) {
-    return url;
-  }
-
-  if (url.includes("{API_KEY}")) {
-    return url.replaceAll("{API_KEY}", encodeURIComponent(apiKey));
-  }
-
-  return url;
 }
 
 async function fetchWithTimeout(url, init, timeoutMs) {

@@ -1,8 +1,14 @@
-export type SdpRpcErrorCode = "BAD_REQUEST" | "SOLANA_RPC_ERROR";
+export type SdpRpcErrorCode =
+  | "BAD_REQUEST"
+  | "SOLANA_RPC_ERROR"
+  | "RPC_NOT_CONFIGURED"
+  | "RPC_CLUSTER_MISMATCH";
 
 const ERROR_STATUS_CODES: Record<SdpRpcErrorCode, number> = {
   BAD_REQUEST: 400,
   SOLANA_RPC_ERROR: 502,
+  RPC_NOT_CONFIGURED: 503,
+  RPC_CLUSTER_MISMATCH: 500,
 };
 
 export class SdpRpcError extends Error {

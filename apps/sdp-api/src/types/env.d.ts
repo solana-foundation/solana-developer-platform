@@ -9,11 +9,12 @@ import type {
   Permission,
   SdpRampProviderStages,
 } from "@sdp/types";
+import type { ManagedRpcEnv } from "@sdp/rpc";
 import type { RequestGateContext } from "@/middleware/request-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
 
-export interface Env {
+export interface Env extends ManagedRpcEnv {
   // Runtime data services
   DATABASE_URL?: string;
   REDIS_URL?: string;
