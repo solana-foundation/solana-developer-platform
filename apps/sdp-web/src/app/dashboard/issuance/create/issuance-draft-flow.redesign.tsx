@@ -9,6 +9,7 @@ import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { saveIssuanceDraft } from "./actions";
 import {
   ClassifyStep,
@@ -78,6 +79,23 @@ function initialDraft(wallets: readonly PaymentsDashboardWallet[]): DraftState {
       "freeze-authority": first,
       "permanent-delegate": first,
     },
+  };
+}
+
+/**
+ * The draft demo mode opens with, every step already filled in (a stablecoin, its details,
+ * the sample wallets on its keys), so the flow can be walked to Create draft on Continue alone.
+ */
+function demoDraft(wallets: readonly PaymentsDashboardWallet[]): DraftState {
+  return {
+    ...initialDraft(wallets),
+    name: "Harbor Dollar",
+    symbol: "HRBR",
+    description:
+      "A dollar stablecoin for paying suppliers, backed one to one by cash at a regulated bank.",
+    maxSupply: "10000000",
+    issuerName: "Hoodies Inc",
+    pegCurrency: "USD",
   };
 }
 
@@ -391,10 +409,12 @@ function useDraftFlowState(
   keptId: string | null,
   resumeFrom: LocalDraft | null
 ) {
+  // Demo mode starts a new draft filled in; a kept draft opens as it was left.
+  const demo = usePaymentsDemo();
   const [step, setStep] = useState(() =>
     resumeFrom ? Math.min(Math.max(resumeFrom.step, 0), STEPS.length - 1) : 0
   );
-  const [classified, setClassified] = useState(resumeFrom !== null);
+  const [classified, setClassified] = useState(resumeFrom !== null || demo);
   const [draft, setDraft] = useState<DraftState>(() =>
     resumeFrom
       ? restoreDraft(
@@ -402,7 +422,9 @@ function useDraftFlowState(
           resumeFrom.draft,
           new Set(wallets.map((wallet) => wallet.id))
         )
-      : initialDraft(wallets)
+      : demo
+        ? demoDraft(wallets)
+        : initialDraft(wallets)
   );
   const [access, setAccess] = useState<DraftAccess>(resumeFrom?.access ?? "blocklist");
   const { storageKey } = useLocalDrafts();
