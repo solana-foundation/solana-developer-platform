@@ -156,16 +156,17 @@ export function ClassifyStep({ draft, update }: { draft: DraftState; update: Upd
           onChange={(event) => update({ name: event.currentTarget.value })}
         />
       </Field>
-      <div className="flex flex-col gap-4 pt-10">
-        {/* 32px from the heading row to what follows, as the design spaces the choice. */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-col gap-4 pt-6 md:pt-10">
+        {/* 32px from the heading row to what follows, as the design spaces the choice; on a
+            phone the button takes its own row 24px under the heading, 28px over the choice. */}
+        <div className="mb-3 flex flex-col items-start gap-6 md:mb-4 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-4">
           <h3 className="text-subheading font-medium text-primary">
             {t("DashboardIssuance.newDesign.draft.chooseClassification")}
           </h3>
           <Button
             variant="outline"
             size="sm"
-            className="[--button-height-md:1.875rem]"
+            className="[--button-height-md:2.25rem] md:[--button-height-md:1.875rem]"
             aria-expanded={explain}
             onClick={() => setExplain((open) => !open)}
           >
