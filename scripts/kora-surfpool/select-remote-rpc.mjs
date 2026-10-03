@@ -5,10 +5,8 @@ try {
   const selected = await selectHealthySolanaRpcUrl(process.env);
 
   if (!selected) {
-    console.error(
-      "No managed Solana RPC URL is configured for Surfpool remote mode; embedded Surfpool will run offline."
-    );
-    process.exit(0);
+    console.error("No SOLANA_RPC_<PROVIDER>_URL_DEVNET is configured; Surfpool must fork devnet.");
+    process.exit(1);
   }
 
   console.error(

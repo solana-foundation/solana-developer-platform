@@ -7,7 +7,6 @@
 
 import {
   type Address,
-  airdropFactory,
   type Base64EncodedWireTransaction,
   type Blockhash,
   type Commitment,
@@ -15,10 +14,8 @@ import {
   createDefaultRpcTransport,
   type createSolanaRpc,
   createSolanaRpcFromTransport,
-  createSolanaRpcSubscriptions,
   getBase64Decoder,
   getTransactionDecoder,
-  lamports as kitLamports,
   type RpcTransport,
   type Signature,
   type Slot,
@@ -293,17 +290,6 @@ export function createRpcForSdk<TSdkRpc>(
   return createRpc(env, options) as unknown as SolanaRpcSdkBridge<TSdkRpc>;
 }
 
-/**
- * Create RPC subscriptions client for real-time updates
- */
-export function createRpcSubscriptions(env: RpcEnv) {
-  const config = getSolanaConfig(env);
-  // Convert HTTP URL to WebSocket URL
-  const wsUrl = config.rpcUrl.replace("https://", "wss://").replace("http://", "ws://");
-
-  return createSolanaRpcSubscriptions(wsUrl);
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Blockhash Operations
 // ═══════════════════════════════════════════════════════════════════════════
@@ -462,46 +448,6 @@ export async function confirmTransaction(
   }
 
   throw solanaRpcError(`Transaction ${signature} confirmation timed out after ${timeoutMs}ms`);
-}
-
-/**
- * Request an airdrop and wait for confirmation.
- */
-export async function requestAndConfirmAirdrop(
-  env: RpcEnv,
-  address: Address,
-  lamports: bigint | number,
-  options?: {
-    commitment?: Commitment;
-    timeoutMs?: number;
-  }
-): Promise<TransactionConfirmation> {
-  const rpc = createRpc(env);
-  const commitment = options?.commitment ?? "confirmed";
-  const airdrop = airdropFactory({
-    rpc,
-    rpcSubscriptions: createRpcSubscriptions(env),
-  } as unknown as Parameters<typeof airdropFactory>[0]);
-
-  const signature = await airdrop({
-    commitment,
-    lamports: kitLamports(BigInt(lamports)),
-    recipientAddress: address,
-  });
-
-  const confirmation = await confirmTransaction(rpc, signature, {
-    commitment: options?.commitment,
-    timeoutMs: options?.timeoutMs,
-  });
-
-  if (confirmation.err) {
-    const serializedError = JSON.stringify(confirmation.err, (_key, value) =>
-      typeof value === "bigint" ? value.toString() : value
-    );
-    throw new Error(`Airdrop transaction ${confirmation.signature} failed: ${serializedError}`);
-  }
-
-  return confirmation;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -12,8 +12,9 @@ import type {
   Permission,
   WalletOperationHumanActorType,
 } from "@sdp/types";
+import type { ManagedRpcEnv } from "@sdp/rpc";
 
-export interface Env {
+export interface Env extends ManagedRpcEnv {
   // Runtime data services
   DATABASE_URL?: string;
   REDIS_URL?: string;
