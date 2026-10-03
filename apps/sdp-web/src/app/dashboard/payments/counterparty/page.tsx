@@ -1,14 +1,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
 import { fetchCounterparties } from "./counterparty-page.data";
 import { CounterpartyWorkspace } from "./counterparty-workspace";
+import RedesignCounterpartyPage from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 
-export default async function CounterpartyPage() {
+async function CounterpartyPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -46,3 +48,5 @@ export default async function CounterpartyPage() {
     );
   });
 }
+
+export default withLegacyDesign(RedesignCounterpartyPage, CounterpartyPage, "contacts");

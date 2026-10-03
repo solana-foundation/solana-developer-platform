@@ -1,13 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { fetchCounterpartyDetail } from "../counterparty-detail.data";
-import { CounterpartyDetailWorkspace } from "../counterparty-detail-workspace";
-import RedesignCounterpartyDetailRoute from "./page.redesign";
-
-export const dynamic = "force-dynamic";
+import { fetchCounterpartyDetail, fetchCounterpartyPayouts } from "../counterparty-detail.data";
+import { CounterpartyDetailWorkspace } from "../counterparty-detail-workspace.redesign";
 
 async function CounterpartyDetailRoute({
   params,
@@ -27,14 +23,24 @@ async function CounterpartyDetailRoute({
   return withDashboardPageTrace(
     "dashboard.counterparty.detail.page",
     async ({ trace, apiClient }) => {
-      const detail = await trace.step("fetch_counterparty_detail", () =>
-        fetchCounterpartyDetail(apiClient.request, counterpartyId)
-      );
+      const [detail, payouts] = await Promise.all([
+        trace.step("fetch_counterparty_detail", () =>
+          fetchCounterpartyDetail(apiClient.request, counterpartyId)
+        ),
+        trace.step("fetch_counterparty_payouts", () =>
+          fetchCounterpartyPayouts(apiClient.request, counterpartyId)
+        ),
+      ]);
 
       trace.log({
         ok: detail.counterparty !== null,
         accounts: detail.accounts.length,
+        accountsFailed: detail.accountsFailed,
         transfers: detail.transfers.length,
+        transfersFailed: detail.transfersFailed,
+        payouts: payouts.data.length,
+        payoutsTotal: payouts.total,
+        payoutsFailed: !payouts.ok,
       });
 
       if (!detail.counterparty) {
@@ -46,7 +52,13 @@ async function CounterpartyDetailRoute({
           <CounterpartyDetailWorkspace
             counterparty={detail.counterparty}
             initialAccounts={detail.accounts}
+            accountsTotal={detail.accountsTotal}
+            accountsFailed={detail.accountsFailed}
             initialTransfers={detail.transfers}
+            transfersFailed={detail.transfersFailed}
+            payouts={payouts.data}
+            payoutsTotal={payouts.total}
+            payoutsFailed={!payouts.ok}
           />
         </div>
       );
@@ -54,8 +66,4 @@ async function CounterpartyDetailRoute({
   );
 }
 
-export default withLegacyDesign(
-  RedesignCounterpartyDetailRoute,
-  CounterpartyDetailRoute,
-  "contacts"
-);
+export default CounterpartyDetailRoute;
