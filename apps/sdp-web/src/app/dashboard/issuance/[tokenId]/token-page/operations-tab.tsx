@@ -329,21 +329,27 @@ function OperationLine({
   children: ReactNode;
 }) {
   return (
-    <div className="grid min-h-12.5 grid-cols-1 items-center gap-x-6 gap-y-2 border-b border-border-subtle py-2.5 last:border-b-0 @xl:grid-cols-[10.5rem_minmax(0,1fr)_auto]">
+    <div className="grid min-h-12.5 grid-cols-1 items-center gap-x-6 gap-y-1.5 border-b border-border-subtle py-2.5 last:border-b-0 @xl:grid-cols-[10.5rem_minmax(0,1fr)_auto] @xl:gap-y-2">
       <dt className="flex items-center gap-1.5 text-nav text-secondary">
         {label}
-        {hint ? <InfoHint text={hint} /> : null}
+        {hint ? <InfoHint text={hint} className="[&_svg]:size-3.5" /> : null}
       </dt>
       <dd className="flex min-w-0 flex-wrap items-center gap-2 text-nav text-primary tabular-nums">
         {children}
       </dd>
-      {actions ? <dd className="flex items-center gap-2 empty:hidden">{actions}</dd> : null}
+      {/* Stacked on a phone, the buttons sit 14px under the value. */}
+      {actions ? (
+        <dd className="mt-2 flex items-center gap-2 empty:hidden @xl:mt-0">{actions}</dd>
+      ) : null}
     </div>
   );
 }
 
+/** The design's 36px buttons on a phone, 30px once a row lays out across. */
+const OPERATION_BUTTON_HEIGHT = "[--button-height-md:2.25rem] @xl:[--button-height-md:1.875rem]";
+
 /**
- * The operations a row offers, as 30px outline buttons; one that cannot run says why on hover.
+ * The operations a row offers, as outline buttons; one that cannot run says why on hover.
  * The access list opens Compliance instead, as a link.
  */
 function OperationButtons({
@@ -365,7 +371,7 @@ function OperationButtons({
           <Button
             variant="ghost"
             size="sm"
-            className="text-secondary [--button-height-md:1.875rem] hover:text-primary"
+            className={cn("text-secondary hover:text-primary", OPERATION_BUTTON_HEIGHT)}
             onClick={row.onAction}
             iconRight={<ArrowUpRightIcon aria-hidden="true" />}
           >
@@ -382,7 +388,8 @@ function OperationButtons({
             variant="outline"
             size="sm"
             className={cn(
-              "shrink-0 [--button-height-md:1.875rem]",
+              "shrink-0",
+              OPERATION_BUTTON_HEIGHT,
               DANGER_OPERATIONS.has(row.id) && "text-error refresh:border-error/40"
             )}
             disabled={disabled}
@@ -504,7 +511,8 @@ function OperationRows({
               variant="outline"
               size="sm"
               className={cn(
-                "shrink-0 [--button-height-md:1.875rem]",
+                "shrink-0",
+                OPERATION_BUTTON_HEIGHT,
                 DANGER_OPERATIONS.has(row.id) && "text-error refresh:border-error/40"
               )}
               disabled={pending || Boolean(row.disabledReason)}

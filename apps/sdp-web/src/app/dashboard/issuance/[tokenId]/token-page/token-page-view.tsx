@@ -115,15 +115,11 @@ function useExplorerAction(href: string | null | undefined) {
   return useMemo(
     () =>
       href ? (
-        <Button
-          asChild
-          variant="ghost"
-          size="sm"
-          className="text-secondary hover:text-primary"
-          iconRight={<ArrowUpRightIcon aria-hidden="true" />}
-        >
+        // asChild renders its one child only, so the arrow goes inside the link.
+        <Button asChild variant="ghost" size="sm" className="text-secondary hover:text-primary">
           <a href={href} target="_blank" rel="noreferrer" data-token-explorer data-align-title>
             {label}
+            <ArrowUpRightIcon aria-hidden="true" />
           </a>
         </Button>
       ) : undefined,
