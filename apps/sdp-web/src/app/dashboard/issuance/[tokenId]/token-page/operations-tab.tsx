@@ -30,6 +30,7 @@ import {
 } from "../asset-profile/transactions.data";
 import { TOKEN_TRANSACTIONS_KEY } from "../asset-profile/transactions-cache";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
+import { SupplyOperationForm } from "./supply-operation-form";
 import { activityEventLabel } from "./token-activity";
 import {
   accessControlLabel,
@@ -158,8 +159,14 @@ export function TokenOperationsTab({
     token,
     canManageTokenAdmin,
     t,
-    onSelect: (action) =>
-      action === "allowlist" ? onOpenTab("compliance") : setActiveAction(action),
+    onSelect: (action) => {
+      if (action === "allowlist") {
+        onOpenTab("compliance");
+        return;
+      }
+      ops.prefillDemoOperation(action);
+      setActiveAction(action);
+    },
     labels,
   });
   const onChain = isOnChain(state);
@@ -214,8 +221,13 @@ function SupplyBlock({
   const issued = Number(token.totalSupply || 0);
   const cap = token.maxSupply ? Number(token.maxSupply) : null;
   const left = cap !== null && Number.isFinite(cap) ? Math.max(0, cap - issued) : null;
+  // Mint or burn opens in place under the issued supply, its own button giving way to the form.
+  const openAction = rows ? ops.fundManagementModalAction : null;
   const actions = (ids: ReadonlySet<string>) => (
-    <OperationButtons rows={rows?.filter((row) => ids.has(row.id)) ?? []} pending={ops.isPending} />
+    <OperationButtons
+      rows={rows?.filter((row) => ids.has(row.id) && row.id !== openAction) ?? []}
+      pending={ops.isPending}
+    />
   );
 
   return (
@@ -224,6 +236,7 @@ function SupplyBlock({
         <OperationLine
           label={t("DashboardIssuance.newDesign.overview.issuedSupply")}
           actions={actions(ISSUED_SUPPLY_OPERATIONS)}
+          open={openAction ? <SupplyOperationForm ops={ops} action={openAction} /> : null}
         >
           <span>{formatDecimalAmount(token.totalSupply || "0", locale)}</span>
           <span className="rounded-control bg-fill-subtle px-1.5 text-meta text-secondary">
@@ -321,11 +334,14 @@ function OperationLine({
   label,
   hint,
   actions,
+  open,
   children,
 }: {
   label: string;
   hint?: string;
   actions?: ReactNode;
+  /** An operation opened in place under the row (mint or burn), across its full width. */
+  open?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -341,6 +357,7 @@ function OperationLine({
       {actions ? (
         <dd className="mt-2 flex items-center gap-2 empty:hidden @xl:mt-0">{actions}</dd>
       ) : null}
+      {open ? <dd className="col-span-full">{open}</dd> : null}
     </div>
   );
 }

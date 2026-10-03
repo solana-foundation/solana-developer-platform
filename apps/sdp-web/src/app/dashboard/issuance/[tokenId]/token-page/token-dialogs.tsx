@@ -1,7 +1,6 @@
 "use client";
 
 import type { Token } from "@sdp/types";
-import { OpsActionForms } from "../asset-profile/tabs/ops-action-forms";
 import type { TokenOperations } from "../asset-profile/use-token-operations";
 import { TokenActionConfirmationDialog } from "../token-action-confirmation-dialog";
 import { TokenAuthorityModal } from "../token-authority-modal";
@@ -10,9 +9,9 @@ import { TokenLockSupplyModal } from "../token-lock-supply-modal";
 import { TokenManagementModalShell } from "../token-management-modal-shell";
 
 /**
- * The dialogs every token operation goes through, shared with the previous design's page:
- * mint and burn, lock supply, moving an authority, the signer confirmation and the deploy's
- * signing wallet. The page's tabs open them through `ops`.
+ * The dialogs token operations go through, shared with the previous design's page: lock
+ * supply, moving an authority, the signer confirmation and the deploy's signing wallet. The
+ * page's tabs open them through `ops`; mint and burn open in place on Operations.
  */
 export function TokenDialogs({ ops, token }: { ops: TokenOperations; token: Token }) {
   return (
@@ -32,23 +31,6 @@ export function TokenDialogs({ ops, token }: { ops: TokenOperations; token: Toke
         onCancel={ops.handleAuthorityModalClose}
         onConfirm={ops.handleAuthorityModalConfirm}
       />
-
-      <TokenManagementModalShell
-        isOpen={Boolean(ops.fundManagementModalAction)}
-        isPending={ops.isPending}
-        onClose={ops.closeFundManagementModal}
-      >
-        {ops.fundManagementModalAction ? (
-          <OpsActionForms
-            ops={ops}
-            token={token}
-            activeAction={ops.fundManagementModalAction}
-            submitAlignment="end"
-            onMint={() => ops.submitFundManagementAction("mint")}
-            onBurn={() => ops.submitFundManagementAction("burn")}
-          />
-        ) : null}
-      </TokenManagementModalShell>
 
       {/* Its own shell: the flow stays open across submission so a failed revoke can be
           retried after a successful mint. */}

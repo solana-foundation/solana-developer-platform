@@ -1,5 +1,5 @@
 /**
- * The amounts demo mode starts each Payments form with, so a flow can be walked straight to its
+ * The amounts demo mode starts each Payments and Issuance form with, so a flow can be walked straight to its
  * end. Each fits every provider and every sample wallet: a deposit clears the highest provider
  * minimum (MoonPay's 20 USD), and a payout or send is well inside the wallets' balances.
  */
@@ -16,4 +16,20 @@ export const DEMO_PREFILL_AMOUNTS = {
   request: "120",
   /** Each run of a schedule. */
   schedule: "500",
+  /** New supply minted to the signing wallet, well inside every sample token's cap. */
+  mint: "1000",
+  /** Supply burned from the signing wallet, well inside every sample token's issued supply. */
+  burn: "100",
+  /** Tokens moved by force transfer, and burned by force burn. */
+  seize: "50",
+  forceBurn: "25",
+} as const;
+
+/** The memos and reasons demo mode starts Issuance's operations with. */
+export const DEMO_PREFILL_MEMOS = {
+  mint: "Issued to Treasury",
+  burn: "Redeemed from Treasury",
+  seize: "Recovery transfer",
+  forceBurn: "Recovery burn",
+  freeze: "Under compliance review",
 } as const;
