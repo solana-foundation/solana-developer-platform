@@ -1,6 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { SdpPaymentsError } from "@sdp/payments/errors";
-import { SdpRpcError } from "@sdp/rpc/errors";
+import { RpcHttpStatusError, SdpRpcError } from "@sdp/rpc/errors";
+import { SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, SolanaError } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
@@ -26,6 +27,18 @@ const FEE_UNAVAILABLE_PATH = "/__fee_unavailable_test_throw";
 const FEE_NETWORK_PATH = "/__fee_network_test_throw";
 const FEE_RATE_LIMITED_PATH = "/__fee_rate_limited_test_throw";
 const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
+const RPC_THROTTLED_PATH = "/__rpc_throttled_test_throw";
+const RPC_THROTTLED_NO_HINT_PATH = "/__rpc_throttled_no_hint_test_throw";
+const RPC_THROTTLED_LONG_HINT_PATH = "/__rpc_throttled_long_hint_test_throw";
+const FEE_THROTTLED_PATH = "/__fee_throttled_test_throw";
+
+function kitHttpError(statusCode: number, headers: Record<string, string> = {}) {
+  return new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
+    headers: new Headers(headers),
+    message: "Too Many Requests",
+    statusCode,
+  });
+}
 
 function makeObservability(): {
   obs: Observability;
@@ -124,6 +137,22 @@ function buildApp(observability: Observability) {
   });
   app.all(FEE_RATE_LIMITED_PATH, () => {
     throw new FeePaymentError("Kora rate limited", "RATE_LIMITED");
+  });
+  app.all(RPC_THROTTLED_PATH, () => {
+    throw new Error("balance read failed", { cause: kitHttpError(429, { "Retry-After": "7" }) });
+  });
+  app.all(RPC_THROTTLED_NO_HINT_PATH, () => {
+    throw new RpcHttpStatusError(429, "RPC request failed with HTTP 429", null);
+  });
+  app.all(FEE_THROTTLED_PATH, () => {
+    throw new FeePaymentError(
+      "Transaction submission failed",
+      "SUBMISSION_FAILED",
+      kitHttpError(429, { "Retry-After": "11" })
+    );
+  });
+  app.all(RPC_THROTTLED_LONG_HINT_PATH, () => {
+    throw kitHttpError(429, { "Retry-After": "3600" });
   });
   app.all(FEE_AMBIGUOUS_PATH, () => {
     throw new FeePaymentError("KMS response timed out after signing", "SIGNING_FAILED");
@@ -445,5 +474,75 @@ describe("createApp onError capture", () => {
     expect(res.status).toBe(500);
     expect(JSON.stringify(await res.json())).not.toContain("jane.doe@example.com");
     loggerError.mockRestore();
+  });
+});
+
+describe("createApp onError RPC provider throttling", () => {
+  let ipSuffix = 0;
+  // Each request gets its own client IP so this block does not share the
+  // anonymous per-IP rate-limit bucket the rest of the file has drained.
+  const requestFromFreshIp = (app: ReturnType<typeof buildApp>, path: string) => {
+    ipSuffix += 1;
+    return app.request(
+      path,
+      { headers: { "x-forwarded-for": `198.51.100.${ipSuffix}` } },
+      { ...baseEnv, TRUST_PROXY_HEADERS: "true" }
+    );
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("maps a provider 429 to 503 with the provider's Retry-After and no internal error", async () => {
+    const loggerError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+    const loggerWarn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+    const { obs, captureException } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await requestFromFreshIp(app, RPC_THROTTLED_PATH);
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("7");
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("SERVICE_UNAVAILABLE");
+    expect(JSON.stringify(loggerError.mock.calls)).not.toContain("sdp_api_internal_error");
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "sdp_api_rpc_throttled", retry_after_seconds: 7 }),
+      "sdp_api_rpc_throttled"
+    );
+    expect(captureException).not.toHaveBeenCalled();
+    loggerError.mockRestore();
+    loggerWarn.mockRestore();
+  });
+
+  it("falls back to a default Retry-After when the provider sent none", async () => {
+    const { obs } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await requestFromFreshIp(app, RPC_THROTTLED_NO_HINT_PATH);
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("5");
+  });
+
+  it("caps a long provider Retry-After", async () => {
+    const { obs } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await requestFromFreshIp(app, RPC_THROTTLED_LONG_HINT_PATH);
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("60");
+  });
+
+  it("leaves a fee submission that failed on provider throttling to the fee-payment mapping", async () => {
+    const { obs } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await requestFromFreshIp(app, FEE_THROTTLED_PATH);
+
+    expect(res.status).toBe(502);
+    expect(res.headers.get("Retry-After")).toBeNull();
   });
 });

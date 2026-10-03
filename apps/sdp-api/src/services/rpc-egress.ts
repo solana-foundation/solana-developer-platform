@@ -124,7 +124,8 @@ export function createRpcTransportForTarget(
     if (!upstream.ok) {
       throw new RpcHttpStatusError(
         upstream.status,
-        `RPC request failed with HTTP ${upstream.status}`
+        `RPC request failed with HTTP ${upstream.status}`,
+        upstream.headers.get("retry-after")
       );
     }
 

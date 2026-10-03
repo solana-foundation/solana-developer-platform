@@ -1,3 +1,4 @@
+import { getRpcThrottling } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
@@ -1065,7 +1066,10 @@ export const inspectMint = async (c: AppContext) => {
   let inspection: Awaited<ReturnType<typeof inspectDvpMint>>;
   try {
     inspection = await inspectDvpMint(solanaRpc.createRpc(c.env), parsed);
-  } catch {
+  } catch (error) {
+    if (getRpcThrottling(error)) {
+      throw error;
+    }
     // The read failed, so nothing is known about the mint: retryable, never "not found".
     throw solanaRpcError("Could not read the mint from Solana. Try again.");
   }

@@ -6,12 +6,17 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SolanaError,
 } from "@solana/kit";
-import { solanaRpcError } from "./errors";
-import { isTransientRpcError, withTransientRpcRetry } from "./transient";
+import { RpcHttpStatusError, solanaRpcError } from "./errors";
+import { getRpcThrottling, isTransientRpcError, withTransientRpcRetry } from "./transient";
 
-async function kitHttpError(status: number, statusText: string): Promise<unknown> {
+async function kitHttpError(
+  status: number,
+  statusText: string,
+  headers?: Record<string, string>
+): Promise<unknown> {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => new Response(null, { status, statusText })) as typeof fetch;
+  globalThis.fetch = (async () =>
+    new Response(null, { status, statusText, headers })) as typeof fetch;
   try {
     const transport = createDefaultRpcTransport({ url: "https://rpc.example.test" });
     await transport({ payload: { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] } });
@@ -198,4 +203,68 @@ test("does not retry a Kit HTTP 400", async () => {
     (error) => error === badRequest
   );
   assert.equal(calls, 1);
+});
+
+test("reports provider throttling for a Kit HTTP 429 with its Retry-After", async () => {
+  assert.deepEqual(
+    getRpcThrottling(await kitHttpError(429, "Too Many Requests", { "Retry-After": "7" })),
+    { retryAfterSeconds: 7 }
+  );
+  assert.deepEqual(getRpcThrottling(await kitHttpError(429, "")), { retryAfterSeconds: null });
+  const inTwentySeconds = new Date(Date.now() + 20_000).toUTCString();
+  const dated = getRpcThrottling(
+    await kitHttpError(429, "Too Many Requests", { "Retry-After": inTwentySeconds })
+  );
+  assert.ok(dated?.retryAfterSeconds !== null && dated?.retryAfterSeconds !== undefined);
+  assert.ok(dated.retryAfterSeconds >= 18 && dated.retryAfterSeconds <= 21);
+  assert.deepEqual(
+    getRpcThrottling(
+      await kitHttpError(429, "Too Many Requests", {
+        "Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT",
+      })
+    ),
+    { retryAfterSeconds: 0 }
+  );
+  assert.deepEqual(
+    getRpcThrottling(await kitHttpError(429, "Too Many Requests", { "Retry-After": "soon" })),
+    { retryAfterSeconds: null }
+  );
+});
+
+test("reports provider throttling for a relay 429 and through a cause chain", async () => {
+  assert.deepEqual(
+    getRpcThrottling(new RpcHttpStatusError(429, "RPC request failed with HTTP 429", null)),
+    {
+      retryAfterSeconds: null,
+    }
+  );
+  assert.deepEqual(
+    getRpcThrottling(new RpcHttpStatusError(429, "RPC request failed with HTTP 429", "30")),
+    { retryAfterSeconds: 30 }
+  );
+  const wrapped = new Error("balance read failed", {
+    cause: await kitHttpError(429, "Too Many Requests", { "Retry-After": "3" }),
+  });
+  assert.deepEqual(getRpcThrottling(wrapped), { retryAfterSeconds: 3 });
+});
+
+test("does not report throttling for other failures", async () => {
+  assert.equal(getRpcThrottling(await kitHttpError(503, "Service Unavailable")), null);
+  assert.equal(getRpcThrottling(await kitHttpError(400, "Bad Request")), null);
+  assert.equal(
+    getRpcThrottling(new RpcHttpStatusError(502, "RPC request failed with HTTP 502", null)),
+    null
+  );
+  assert.equal(getRpcThrottling(new Error("429 Too Many Requests")), null);
+  assert.equal(getRpcThrottling(solanaRpcError("rate limited")), null);
+  assert.equal(getRpcThrottling(undefined), null);
+});
+
+test("stops looking for throttling past five causes", async () => {
+  let nested: unknown = new RpcHttpStatusError(429, "RPC request failed with HTTP 429", null);
+  for (let depth = 0; depth < 4; depth += 1) {
+    nested = new Error(`wrap ${depth}`, { cause: nested });
+  }
+  assert.deepEqual(getRpcThrottling(nested), { retryAfterSeconds: null });
+  assert.equal(getRpcThrottling(new Error("wrap 4", { cause: nested })), null);
 });

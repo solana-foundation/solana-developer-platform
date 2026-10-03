@@ -1,6 +1,11 @@
 import { hashString } from "@sdp/payments/hash";
+import * as solanaRpc from "@sdp/rpc/solana";
 import type { CachedApiKey, Permission } from "@sdp/types";
-import { getAddressDecoder } from "@solana/kit";
+import {
+  getAddressDecoder,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
+  SolanaError,
+} from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
@@ -519,6 +524,32 @@ describe("DvP routes", () => {
   afterEach(async () => {
     env.MARKETS_ENABLED = originalMarkets;
     await clearKVStores(env);
+  });
+
+  it("answers a provider throttling a mint read with 503 and Retry-After", async () => {
+    const throttled = new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
+      headers: new Headers({ "Retry-After": "9" }),
+      message: "Too Many Requests",
+      statusCode: 429,
+    });
+    const rpc = new Proxy(
+      {},
+      { get: () => () => ({ send: () => Promise.reject(throttled) }) }
+    ) as ReturnType<typeof solanaRpc.createRpc>;
+    const createRpc = vi.spyOn(solanaRpc, "createRpc").mockReturnValue(rpc);
+
+    try {
+      const res = await app.request(
+        "/v1/dvp/mints/So11111111111111111111111111111111111111112",
+        { headers: authHeaders() },
+        env
+      );
+
+      expect(res.status).toBe(503);
+      expect(res.headers.get("Retry-After")).toBe("9");
+    } finally {
+      createRpc.mockRestore();
+    }
   });
 
   it("returns 403 when Markets is off", async () => {

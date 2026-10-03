@@ -30,7 +30,8 @@ export class SdpRpcError extends Error {
 export class RpcHttpStatusError extends Error {
   constructor(
     public readonly httpStatus: number,
-    message: string
+    message: string,
+    public readonly retryAfter: string | null
   ) {
     super(message);
   }
