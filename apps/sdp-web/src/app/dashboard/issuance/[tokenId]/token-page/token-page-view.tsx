@@ -71,7 +71,11 @@ export function TokenPageView({
   const explorer = useExplorerAction(ops.explorerHref);
 
   return (
-    <DashboardWorkspaceOverviewPanel data-token-page={tab}>
+    <DashboardWorkspaceOverviewPanel
+      data-token-page={tab}
+      // An open edit's save bar sits on the bottom edge, not 64px over it.
+      className="has-[[data-token-save-footer]]:!pb-0"
+    >
       <DashboardPageTitle title={token.name} actions={explorer} />
       {tab === "overview" ? (
         <TokenOverviewTab {...page} latestDeploy={latestDeploy} onOpenTab={openTab} />
