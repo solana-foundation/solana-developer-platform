@@ -174,7 +174,7 @@ function OverviewStateBand({
         </Button>
       </TokenDisabledActionTooltip>
     ) : state === "deploying" && latestDeploy ? (
-      <span className="text-meta text-secondary">
+      <span className="text-meta leading-5 text-secondary">
         {t("DashboardIssuance.newDesign.overview.submittedAgo", {
           minutes: minutesSince(latestDeploy.createdAt),
         })}
@@ -185,13 +185,15 @@ function OverviewStateBand({
     <div
       data-state-band={TOKEN_LIFECYCLE_BAND[state]}
       className={cn(
-        "flex flex-col items-start gap-3 rounded-card px-5 py-3 md:flex-row md:items-center md:justify-between md:gap-6",
+        "flex flex-col items-start gap-3 rounded-card px-5 py-3 md:flex-row md:justify-between md:gap-6",
+        // A button centres on the band; a note (how long a deploy has run) reads on the state's line.
+        state === "deploying" ? "md:items-start" : "md:items-center",
         tint.band
       )}
     >
       <div className="flex min-w-0 flex-col gap-0.5 md:flex-1">
         <p className={cn("text-body font-medium", tint.word)}>{t(TOKEN_LIFECYCLE_LABEL[state])}</p>
-        <p className="max-w-[40em] text-body text-secondary">{t(TOKEN_LIFECYCLE_WHY[state])}</p>
+        <p className="max-w-md text-body text-secondary">{t(TOKEN_LIFECYCLE_WHY[state])}</p>
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>
