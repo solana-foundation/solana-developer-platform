@@ -197,7 +197,7 @@ describe("Payments dashboard navigation", () => {
       "Shared.dashboardShell.pay",
       "Shared.dashboardShell.deposit",
       "Shared.dashboardShell.requests",
-      "Shared.dashboardShell.recurring",
+      "Shared.dashboardShell.newDesign.recurring",
     ]);
   });
 

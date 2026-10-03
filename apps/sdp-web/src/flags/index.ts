@@ -281,6 +281,11 @@ export const newDesignPayDeposit = newDesignModuleFlag(
   "Payments' Pay and Deposit flows"
 );
 
+export const newDesignActivity = newDesignModuleFlag(
+  "activity",
+  "the rest of Payments (the overview and its API playground, Transactions, Requests, Schedules)"
+);
+
 export const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
 export const rampProviderLightspark = rampProviderFlag("lightspark", "Lightspark");
 export const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
