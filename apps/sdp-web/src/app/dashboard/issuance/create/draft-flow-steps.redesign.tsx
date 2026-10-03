@@ -99,7 +99,9 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="flex items-center gap-1">
+      {/* One 16px row whatever sits beside the label (an info icon, Clear), so fields side by
+          side keep their labels and fields level. */}
+      <span className="flex h-4 items-center gap-1">
         <Label htmlFor={id} className="text-meta font-normal text-secondary">
           {label}
         </Label>
@@ -333,6 +335,7 @@ export function DetailsStep({ draft, update }: { draft: DraftState; update: Upda
           }
         >
           <Select
+            size="xl"
             ariaLabel={t("DashboardIssuance.newDesign.details.currency")}
             placeholder={t("DashboardIssuance.newDesign.draft.selectCurrency")}
             value={draft.pegCurrency ?? ""}
