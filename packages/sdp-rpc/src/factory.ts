@@ -54,8 +54,11 @@ const MANAGED_RPC_ENV_KEYS = {
   }
 >;
 
-/** `<cluster> <url>` pairs whose genesis hash matched; only matches are cached. */
-const verifiedGenesis = new Set<string>();
+/** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
+const GENESIS_PROOF_TTL_MS = 30_000;
+
+/** `<cluster> <url>` to the time its last genesis match expires; only matches are recorded. */
+const genesisProofExpiry = new Map<string, number>();
 
 /**
  * The managed endpoint URLs for one cluster, preferred provider first, duplicates removed.
@@ -89,14 +92,15 @@ function managedRpcUrls(env: ManagedRpcEnv, cluster: SolanaCluster): string[] {
 }
 
 /**
- * Wrap one endpoint's transport so its first request proves the endpoint serves `cluster`.
+ * Wrap one endpoint's transport so it proves the endpoint serves `cluster` before the first
+ * request and again once the previous proof is older than `GENESIS_PROOF_TTL_MS`.
  * A probe network error propagates as an ordinary transport failure (failover may hop);
  * a mismatch throws a non-transient error, so failover and retries stop on it.
  *
  * @param transport - The raw transport for `url`.
  * @param cluster - The cluster the endpoint is configured for.
  * @param url - The endpoint URL, used only as the cache key.
- * @returns A transport that probes `getGenesisHash` until a match is cached.
+ * @returns A transport that probes `getGenesisHash` whenever no unexpired match is recorded.
  */
 function withGenesisGuard(
   transport: RpcTransport,
@@ -105,7 +109,8 @@ function withGenesisGuard(
 ): RpcTransport {
   const cacheKey = `${cluster} ${url}`;
   return async <TResponse>(request: Parameters<RpcTransport>[0]) => {
-    if (!verifiedGenesis.has(cacheKey)) {
+    const proofExpiresAt = genesisProofExpiry.get(cacheKey);
+    if (proofExpiresAt === undefined || proofExpiresAt <= Date.now()) {
       const genesisHash = await createSolanaRpcFromTransport(transport)
         .getGenesisHash()
         .send({ abortSignal: request.signal });
@@ -116,7 +121,7 @@ function withGenesisGuard(
           { cluster, genesisHash }
         );
       }
-      verifiedGenesis.add(cacheKey);
+      genesisProofExpiry.set(cacheKey, Date.now() + GENESIS_PROOF_TTL_MS);
     }
     return await transport<TResponse>(request);
   };
