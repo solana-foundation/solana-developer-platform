@@ -28,6 +28,7 @@ import type {
   EarnVaultDirectMovementStatus,
   SdpEnvironment,
 } from "@sdp/types";
+import { earnProviderDepositSettlement, earnProviderWithdrawalSettlement } from "@sdp/types";
 import { earnDepositStyle, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import type { z } from "zod";
 import { getDb } from "@/db";
@@ -1496,6 +1497,10 @@ function toExternalWalletMovementWire(
     providerReference: movement.vault_address,
     direction: movement.direction,
     status: status as EarnVaultDirectMovementStatus,
+    settlement:
+      movement.direction === "deposit"
+        ? earnProviderDepositSettlement(movement.provider)
+        : earnProviderWithdrawalSettlement(movement.provider),
     signature: movement.signature,
     ownerAddress: movement.owner_address,
     amount: movement.amount_requested,

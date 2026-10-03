@@ -101,7 +101,7 @@ const earnStrategySchema = z
       description:
         "Non-null when this provider's withdrawal builder refuses to run without an explicit " +
         "`minAmountOut`: call the withdrawal preview first and derive the floor from " +
-        "`assetsOut`. Null when the floor is optional.",
+        "`assetsOut`. Null when this withdrawal cannot enforce a floor; omit `minAmountOut`.",
     }),
     hostCluster: z.enum(["devnet", "mainnet-beta"]).openapi({
       description: "The cluster the INSTRUMENT lives on — a stored fact about the vault.",
@@ -492,7 +492,7 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
   })
 );
 
-const earnExternalWalletWithdrawalPreviewResponseFields = {
+export const earnExternalWalletWithdrawalPreviewResponseFields = {
   assetsOut: earnDecimalAmountSchema.openapi({
     description:
       "What redeeming the shares would pay at the live rate, decimal string in the deposit " +
@@ -619,7 +619,7 @@ const earnParRedemptionOptionsSchema = z.object({
   }),
 });
 
-const earnQueuedWithdrawalOptionsFields = {
+export const earnQueuedWithdrawalOptionsFields = {
   instant: z.boolean().openapi({
     description: "Whether an atomic withdrawal is independently available.",
   }),
@@ -693,7 +693,7 @@ export const earnExternalWalletQueuedWithdrawalPreviewRequest = z
       "Preview a solver-queue or operator-redemption request against live provider limits. Read-only: nothing is built or persisted.",
   });
 
-const earnQueuedWithdrawalPreviewFields = {
+export const earnQueuedWithdrawalPreviewFields = {
   assetMint: earnSolanaMintSchema,
   shares: earnDecimalAmountSchema,
   shareDecimals: z.number().int().min(0).max(38),
@@ -715,7 +715,7 @@ const earnQueuedWithdrawalPreviewFields = {
   blockingIssues: z.array(earnVaultQuoteIssueSchema),
 } as const;
 
-const earnParRedemptionPreviewFields = {
+export const earnParRedemptionPreviewFields = {
   mechanism: z.literal("operatorRedemption"),
   shares: earnParRedemptionSharesSchema,
   shareDecimals: z.number().int().min(0).max(38),
@@ -1016,6 +1016,10 @@ const earnExternalWalletMovementSchema = z
         "yet confirmed it reached the network. `confirmed` is optimistic and can still be " +
         "dropped by a fork; only `finalized` and `failed` are terminal.",
     }),
+    settlement: z.enum(["atomic", "provider_order"]).openapi({
+      description:
+        "Atomic transfers may show Done at confirmed while SDP tracks finality. Provider orders remain pending until fulfillment; chain confirmation alone is not payout. Older servers may omit this field; treat absent settlement semantics as unknown.",
+    }),
     signature: z.string().openapi({ description: "The transaction signature, for explorers." }),
     ownerAddress: earnOwnerAddressSchema,
     amount: earnDecimalAmountSchema.openapi({
@@ -1033,8 +1037,7 @@ const earnExternalWalletMovementSchema = z
     }),
     tokenAmount: earnDecimalAmountSchema.nullable().openapi({
       description:
-        "Quantity in `tokenMint` units. A deposit's amount; a withdrawal's observed payout " +
-        "once `finalized`, otherwise null (also null when the payout could not be observed).",
+        "Quantity in `tokenMint` units. Kamino deposits and all withdrawals require a finalized observation; null beforehand or when the actual debit/payout cannot be observed. Other deposits report their fixed input amount.",
     }),
     failureReason: z.string().nullable(),
     createdAt: isoDateTimeSchema,
@@ -1135,7 +1138,7 @@ const earnLiveDecimalAmountSchema = z
     example: "25.42",
   });
 
-const earnExternalWalletPositionSchema = z
+export const earnExternalWalletPositionSchema = z
   .object({
     id: z.string().openapi({ example: "earn_position_example" }),
     ownerAddress: earnOwnerAddressSchema,

@@ -30,7 +30,24 @@ describe("GET /api/dashboard/markets/earn/vault-positions", () => {
     });
   });
 
+  it("forwards confirmation movement ids to the authenticated positions API", async () => {
+    const request = new Request(
+      "https://dashboard.example.test/api/vault-positions?afterMovementIds=earn_one,earn_two"
+    );
+    await GET(request);
+    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/v1/earn/vault-positions?afterMovementIds=earn_one%2Cearn_two",
+      })
+    );
+  });
+
   it.each([
+    "?afterMovementIds=",
+    "?afterMovementIds=one,,two",
+    "?afterMovementIds=one&afterMovementIds=two",
+    `?afterMovementIds=${Array.from({ length: 101 }, (_, i) => `movement_${i}`).join(",")}`,
+
     "?limit=0",
     "?limit=101",
     "?limit=01",

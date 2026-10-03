@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   closeEmptyHydratedPositions,
+  describeHydrationFailure,
   type HydratedVaultPositionValue,
   hydratedHoldingTokenValue,
 } from "./vault-position-hydration";
 
 const WYLDS = "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih";
+const OWNER = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
 describe("closeEmptyHydratedPositions", () => {
   it("keeps a position whose shares are gone while its par intermediate remains", async () => {
@@ -95,5 +97,50 @@ describe("hydratedHoldingTokenValue", () => {
       })
     ).toBeUndefined();
     expect(hydratedHoldingTokenValue(undefined)).toBeUndefined();
+  });
+});
+
+describe("describeHydrationFailure", () => {
+  it("flattens a fan-out failure down to its socket cause, without the endpoint or owner", () => {
+    const socket = Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" });
+    const failure = Object.assign(
+      new Error("Veda could not read 1 of 1 requested vault positions", {
+        cause: new AggregateError(
+          [
+            new Error(`Veda vault vault_1 read failed for ${OWNER}`, {
+              cause: new Error(
+                "request to https://rpc.example.invalid/PATH_KEY?api-key=QUERY_KEY failed",
+                { cause: new TypeError("fetch failed", { cause: socket }) }
+              ),
+            }),
+          ],
+          "Veda vault position reads failed"
+        ),
+      }),
+      { name: "SdpVedaError", code: "VAULT_UNREADABLE" }
+    );
+
+    const chain = describeHydrationFailure(failure, OWNER);
+
+    expect(chain).toEqual([
+      "SdpVedaError[VAULT_UNREADABLE]: Veda could not read 1 of 1 requested vault positions",
+      "AggregateError: Veda vault position reads failed",
+      "Error: Veda vault vault_1 read failed for [owner]",
+      "Error: request to [url] failed",
+      "TypeError: fetch failed",
+      "Error[UND_ERR_SOCKET]: other side closed",
+    ]);
+    expect(JSON.stringify(chain)).not.toMatch(/PATH_KEY|QUERY_KEY/);
+  });
+
+  it("drops a bare query string, clips long text, and stops at a cycle", () => {
+    const cyclic = new Error("rpc.example.invalid/?api-key=QUERY_KEY refused");
+    cyclic.cause = cyclic;
+    expect(describeHydrationFailure(cyclic)).toEqual([
+      "Error: rpc.example.invalid/[query] refused",
+    ]);
+    expect(describeHydrationFailure(new Error("x".repeat(1_000)))).toEqual([
+      `Error: ${"x".repeat(293)}...`,
+    ]);
   });
 });

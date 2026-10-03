@@ -23,6 +23,7 @@
   "dependencies": {
     "@jup-ag/lend": "0.2.0",
     "@sdp/earn": "workspace:*",
+    "@sdp/rpc": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana/web3.js": "1.99.0",
     "bn.js": "5.2.5"

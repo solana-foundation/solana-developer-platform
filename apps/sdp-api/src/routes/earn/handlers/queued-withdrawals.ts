@@ -77,7 +77,10 @@ import {
   earnVaultWithdrawalRequestsQuerySchema,
 } from "../schemas";
 import { resolveExternalWalletExit } from "./external-wallet";
-import { throwOnPriorEarnPolicyOperation } from "./policy-replay";
+import {
+  recoverFailedVaultPolicyExecution,
+  throwOnPriorEarnPolicyOperation,
+} from "./policy-replay";
 import { parseParams, parseQuery } from "./shared";
 import {
   assertBoundWalletIdentifierIsUnique,
@@ -594,37 +597,41 @@ export async function findEarnVaultWithdrawalRequestIdempotentKeyReplay(
 export async function createEarnVaultWithdrawalRequest(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalRequestSchema>
 ) {
-  const { body, resolved } = getPolicyGateContext<CustodyRequestBody, ResolvedCustodyQueueRequest>(
-    c
-  );
-  if (!resolved.requestId) {
-    throw internalError(
-      "Asynchronous withdrawal execution reached the handler without an idempotency key"
-    );
-  }
-  const result = await createCustodyQueuedWithdrawal(
-    c.env,
-    {
-      actor: resolved.actor,
-      position: resolved.position,
-      terms: queuedTerms(body),
-      clientRequestId: resolved.requestId,
-    },
-    {
-      runIntentTransaction: (mutation) => runApprovedWalletOperationEffectTransaction(c, mutation),
-    }
-  );
-  if (result.replayed && approvedWalletOperationId(c)) {
-    await beginApprovedWalletOperationEffect(c);
-    if (result.request.status === "failed" || result.action.status === "failed") {
-      throw conflict(
-        "Approved asynchronous vault withdrawal execution is incomplete and requires manual reconciliation"
+  return recoverFailedVaultPolicyExecution(c, async () => {
+    const { body, resolved } = getPolicyGateContext<
+      CustodyRequestBody,
+      ResolvedCustodyQueueRequest
+    >(c);
+    if (!resolved.requestId) {
+      throw internalError(
+        "Asynchronous withdrawal execution reached the handler without an idempotency key"
       );
     }
-  }
-  await recordQueuedWithdrawalActionAudit(c, result);
-  return success(c, {
-    withdrawalRequest: withdrawalRequestWire(result.request, result.replayed),
+    const result = await createCustodyQueuedWithdrawal(
+      c.env,
+      {
+        actor: resolved.actor,
+        position: resolved.position,
+        terms: queuedTerms(body),
+        clientRequestId: resolved.requestId,
+      },
+      {
+        runIntentTransaction: (mutation) =>
+          runApprovedWalletOperationEffectTransaction(c, mutation),
+      }
+    );
+    if (result.replayed && approvedWalletOperationId(c)) {
+      await beginApprovedWalletOperationEffect(c);
+      if (result.request.status === "failed" || result.action.status === "failed") {
+        throw conflict(
+          "Approved asynchronous vault withdrawal execution is incomplete and requires manual reconciliation"
+        );
+      }
+    }
+    await recordQueuedWithdrawalActionAudit(c, result);
+    return success(c, {
+      withdrawalRequest: withdrawalRequestWire(result.request, result.replayed),
+    });
   });
 }
 

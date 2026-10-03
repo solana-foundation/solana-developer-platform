@@ -70,6 +70,51 @@ describe("fetchFundingWallets", () => {
 });
 
 describe("live funding wallet balances", () => {
+  it("constrains only affected wallets and other bindings of the same chain address", async () => {
+    const affected = wallet({ id: "affected" });
+    const alias = wallet({ id: "alias" });
+    const unrelated = wallet({ id: "unrelated", publicKey: "11111111111111111111111111111111" });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      Response.json({
+        data: { balanceReadContext: { minimumSlot: 101 }, walletBalances: { balances: [] } },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await refreshFundingWalletBalances([affected, alias, unrelated], new Map([[affected.id, 101]]));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/dashboard/payments/wallets/provider-affected/balances?minimumSlot=101",
+      "/api/dashboard/payments/wallets/provider-alias/balances?minimumSlot=101",
+      "/api/dashboard/payments/wallets/provider-unrelated/balances",
+    ]);
+  });
+  it("requires the wallet API to acknowledge the position confirmation slot", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: { walletBalances: { balances: [] } } }))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { balanceReadContext: { minimumSlot: 100 }, walletBalances: { balances: [] } },
+        })
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { balanceReadContext: { minimumSlot: 101 }, walletBalances: { balances: [] } },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchLiveFundingWalletBalance("wallet", 101)).rejects.toThrow(
+      "confirmation freshness"
+    );
+    await expect(fetchLiveFundingWalletBalance("wallet", 101)).rejects.toThrow(
+      "confirmation freshness"
+    );
+    await expect(fetchLiveFundingWalletBalance("wallet", 101)).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/dashboard/payments/wallets/wallet/balances?minimumSlot=101",
+      { cache: "no-store" }
+    );
+  });
+
   it("bypasses the cached collection and reads the wallet balance endpoint", async () => {
     const balances = [
       {
@@ -90,7 +135,7 @@ describe("live funding wallet balances", () => {
     );
   });
 
-  it("updates healthy wallets while preserving an unavailable wallet observation", async () => {
+  it("rejects a partial refresh instead of returning a cached balance as fresh", async () => {
     const first = wallet({
       id: "first",
       balances: [
@@ -103,7 +148,7 @@ describe("live funding wallet balances", () => {
         },
       ],
     });
-    const unavailable = wallet({ id: "unavailable", balances: undefined });
+    const unavailable = wallet({ id: "unavailable", balances: first.balances });
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -128,9 +173,10 @@ describe("live funding wallet balances", () => {
       })
     );
 
-    const refreshed = await refreshFundingWalletBalances([first, unavailable]);
-    expect(refreshed[0]?.balances?.[0]?.uiAmount).toBe("0.5");
-    expect(refreshed[1]).toBe(unavailable);
-    expect(refreshed[1]?.balances).toBeUndefined();
+    await expect(refreshFundingWalletBalances([first, unavailable])).rejects.toThrow(
+      "Request failed (503)"
+    );
+    expect(first.balances?.[0]?.uiAmount).toBe("1");
+    expect(unavailable.balances?.[0]?.uiAmount).toBe("1");
   });
 });

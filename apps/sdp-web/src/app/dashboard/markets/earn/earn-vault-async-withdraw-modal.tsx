@@ -5,6 +5,7 @@ import type {
   EarnVaultAsyncWithdrawalEvent,
   EarnVaultAsyncWithdrawalRoute,
 } from "./earn-vault-async-withdrawal";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import {
   EarnVaultParRedemptionModal,
   type EarnVaultParRedemptionSource,
@@ -15,12 +16,13 @@ import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 interface EarnVaultAsyncWithdrawModalProps {
   environment: SdpEnvironment;
   onClose: () => void;
+  onSubmissionStart?: VaultSubmissionObserver;
   onRequested?: (event: EarnVaultAsyncWithdrawalEvent) => void;
   onSettled?: (event: EarnVaultAsyncWithdrawalEvent) => void;
   onMovementUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
   onWithdrawn?: (
     withdrawal: EarnVaultWithdrawal,
-    intent: { amount: string; projectBalance: boolean; submittedAt: number }
+    intent: { amount: string; submittedAt: number }
   ) => void;
   /** A par route may redeem the position's held intermediate instead of shares. */
   parSource?: EarnVaultParRedemptionSource;

@@ -21,13 +21,13 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/dvp` | Generated @solana/kit client for the DvP atomic swap program. | None |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
-| `@sdp/hastra` | Hastra PRIME mint/stake, Jupiter DEX exit, par-redemption lifecycle, and position plans. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/hastra` | Hastra PRIME mint/stake, Jupiter DEX exit, par-redemption lifecycle, and position plans. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/helius-rings` | Helius Rings shielded-wallet domain types, state machine, and gateway port (devnet). | `@sdp/types` |
 | `@sdp/helius-rings-sdk` | Helius Rings gateway adapter running the Zolana SDK in process: health, identity provisioning, and shielded balance reads. | `@sdp/helius-rings` |
 | `@sdp/issuance` | Token issuance domain services and Mosaic integration. | `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
-| `@sdp/jupiter-lend` | Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK. | `@sdp/earn`, `@sdp/types` |
-| `@sdp/kamino` | Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
-| `@sdp/ondo` | Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/jupiter-lend` | Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK. | `@sdp/earn`, `@sdp/rpc`, `@sdp/types` |
+| `@sdp/kamino` | Kit-native Kamino K-Vault deposit/withdraw instruction plans over klend-sdk. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/ondo` | Ondo USDY secondary-market swap plans and position reads over an injected Jupiter port. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/payments` | Payment domain services, fee payment, and ramp providers. | `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/policy` | Wallet-operation policy engine: rule evaluation and enforcement orchestration. | `@sdp/solana`, `@sdp/types` |
 | `@sdp/private-channels` | Solana Private Channels gateway, auth, and instance clients. | `@sdp/rpc`, `@sdp/types` |
@@ -37,8 +37,8 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None |
 | `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | None |
 | `@sdp/types` | Shared runtime types, constants, and product contracts. | None |
-| `@sdp/veda` | Kit-native Veda SVM vault deposit, instant and queued withdrawal plans, plus position and lifecycle reads over @vedatech/svm-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
-| `@sdp/wisdomtree` | Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads. | `@sdp/earn`, `@sdp/types` |
+| `@sdp/veda` | Kit-native Veda SVM vault deposit, instant and queued withdrawal plans, plus position and lifecycle reads over @vedatech/svm-sdk. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
+| `@sdp/wisdomtree` | Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads. | `@sdp/earn`, `@sdp/rpc`, `@sdp/types` |
 | `bigint-buffer` | Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding. | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
 | `sdp-web` | Dashboard application. | `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types` |
@@ -52,13 +52,13 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/dvp` -> None
 - `@sdp/earn` -> `@sdp/redaction`, `@sdp/types`
 - `@sdp/env-config` -> None
-- `@sdp/hastra` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
+- `@sdp/hastra` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/helius-rings` -> `@sdp/types`
 - `@sdp/helius-rings-sdk` -> `@sdp/helius-rings`
 - `@sdp/issuance` -> `@sdp/payments`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
-- `@sdp/jupiter-lend` -> `@sdp/earn`, `@sdp/types`
-- `@sdp/kamino` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
-- `@sdp/ondo` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
+- `@sdp/jupiter-lend` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/types`
+- `@sdp/kamino` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
+- `@sdp/ondo` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/payments` -> `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/policy` -> `@sdp/solana`, `@sdp/types`
 - `@sdp/private-channels` -> `@sdp/rpc`, `@sdp/types`
@@ -68,8 +68,8 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/spc-escrow` -> None
 - `@sdp/spc-withdraw` -> None
 - `@sdp/types` -> None
-- `@sdp/veda` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
-- `@sdp/wisdomtree` -> `@sdp/earn`, `@sdp/types`
+- `@sdp/veda` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
+- `@sdp/wisdomtree` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/types`
 - `bigint-buffer` -> None
 - `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
 - `sdp-web` -> `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`

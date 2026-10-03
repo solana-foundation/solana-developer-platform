@@ -1188,7 +1188,7 @@ describe("Earn queued withdrawal repository", () => {
     ).rejects.toBe(rollback);
   });
 
-  it("keeps a paid request reconcilable if another movement already used its caller key", async () => {
+  it("records a paid request even if another movement already used its caller key", async () => {
     const created = await createRequest();
     await createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultWithdrawalIntent({
       organizationId: ORG,
@@ -1215,14 +1215,37 @@ describe("Earn queued withdrawal repository", () => {
         closingSignature: "solver-key-collision",
         assetsPaid: "9.9",
       })
-    ).rejects.toThrow(/idx_earn_movements_vault_request/);
+    ).resolves.toBeDefined();
     expect(
       await repository.getById({
         organizationId: ORG,
         environment: "sandbox",
         withdrawalRequestId: created.request.id,
       })
-    ).toMatchObject({ status: "creating", assets_paid: null });
+    ).toMatchObject({ status: "fulfilled", assets_paid: "9.9" });
+    const payout = await getDb(env)
+      .prepare(
+        "SELECT request_id, withdrawal_request_id, token_amount_settled FROM earn_movements WHERE id = ?"
+      )
+      .bind(`earn_queue_fulfillment_${created.request.id}`)
+      .first();
+    expect(payout).toEqual({
+      request_id: null,
+      withdrawal_request_id: created.request.id,
+      token_amount_settled: "9.9",
+    });
+    // The previous API revision still writes a client key. The migration's
+    // trigger makes that old writer safe too, including after rollback.
+    await getDb(env)
+      .prepare("UPDATE earn_movements SET request_id = ? WHERE id = ?")
+      .bind(created.request.client_request_id, `earn_queue_fulfillment_${created.request.id}`)
+      .run();
+    expect(
+      await getDb(env)
+        .prepare("SELECT request_id FROM earn_movements WHERE id = ?")
+        .bind(`earn_queue_fulfillment_${created.request.id}`)
+        .first()
+    ).toEqual({ request_id: null });
   });
 
   it("does not fail or release a provider-proven request when its PDA later disappears", async () => {
@@ -1596,5 +1619,47 @@ describe("Earn queued withdrawal repository", () => {
       last_index_error: "provider timed out",
       next_check_at: "2099-01-01T00:00:00.000Z",
     });
+  });
+  it("expands observed payout keys without rewriting historical rows and can rerun", async () => {
+    const created = await createRequest();
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "fulfilled",
+      closingSignature: "upgrade-payout",
+      assetsPaid: "9.9",
+    });
+    const migration = readFileSync(
+      new URL("../migrations/postgres/0123_earn_observed_payout_keys.sql", import.meta.url),
+      "utf8"
+    );
+    const rollback = new Error("rollback migration fixture");
+    await expect(
+      getDb(env).transaction(async (tx) => {
+        await tx.execute("DROP TRIGGER earn_observed_payout_key ON earn_movements");
+        await tx.execute(
+          "UPDATE earn_movements SET request_id = 'old-observed-key' WHERE withdrawal_request_id IS NOT NULL"
+        );
+        await tx.execute("ALTER TABLE earn_movements ALTER COLUMN request_id SET NOT NULL");
+        await tx.execute(migration);
+        await tx.execute(migration);
+        expect(
+          await tx.queryOne(
+            "SELECT request_id FROM earn_movements WHERE withdrawal_request_id = ?",
+            [created.request.id]
+          )
+        ).toEqual({ request_id: "old-observed-key" });
+        await tx.execute(
+          "UPDATE earn_movements SET request_id = 'another-old-writer-key' WHERE withdrawal_request_id IS NOT NULL"
+        );
+        expect(
+          await tx.queryOne(
+            "SELECT request_id, token_amount_settled FROM earn_movements WHERE withdrawal_request_id = ?",
+            [created.request.id]
+          )
+        ).toEqual({ request_id: null, token_amount_settled: "9.9" });
+        throw rollback;
+      })
+    ).rejects.toBe(rollback);
   });
 });

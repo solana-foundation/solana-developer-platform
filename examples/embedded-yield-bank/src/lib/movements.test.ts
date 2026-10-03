@@ -2,13 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { DashboardData, YieldMovement } from "@/types";
 import {
   ACTIVE_MOVEMENT_REFRESH_MS,
-  applyInFlight,
   applySubmittedTransfers,
-  foldSettledTransfers,
   isMovementAwaitingFinality,
   isPendingMovement,
   isSettledMovement,
-  partitionSettledTransfersBySnapshot,
   reconcileInFlight,
   reconcileMovementPolling,
   reconcileSubmittedTransfers,
@@ -107,56 +104,6 @@ describe("in-flight transfers", () => {
     expect(isMovementAwaitingFinality(createMovement("finalized"))).toBe(false);
   });
 
-  it("shows the balances a pending transfer will produce and keeps the total", () => {
-    const base = dashboard({ checking: "19", savings: "1", total: "20" });
-    const live = dashboard({
-      checking: "19",
-      savings: "3",
-      total: "22",
-      movements: [{ ...createMovement("submitted"), tokenAmount: "2" }],
-    });
-
-    const view = applyInFlight(base, live, [
-      {
-        movementId: "movement-1",
-        direction: "deposit",
-        amount: "2",
-        expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
-      },
-    ]);
-
-    expect(view.checking.balance).toBe("17");
-    expect(view.savings.balance).toBe("3");
-    expect(view.savings.withdrawable).toBe("3");
-    expect(view.total).toBe("20");
-  });
-
-  it("folds a settled transfer into the base so the rest projects from fresh footing", () => {
-    const base = dashboard({ checking: "19", savings: "1", total: "20" });
-    const first = {
-      movementId: "m1",
-      direction: "deposit" as const,
-      amount: "2",
-      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
-    };
-    const second = {
-      movementId: "m2",
-      direction: "deposit" as const,
-      amount: "3",
-      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
-    };
-
-    const folded = foldSettledTransfers(base, [first]);
-    expect(folded.checking.balance).toBe("17");
-    expect(folded.savings.balance).toBe("3");
-
-    const live = dashboard({ checking: "17", savings: "3", total: "20" });
-    const view = applyInFlight(folded, live, [second]);
-    expect(view.checking.balance).toBe("14");
-    expect(view.savings.balance).toBe("6");
-    expect(view.total).toBe("20");
-  });
-
   it("folds confirmed transfers and drops failed ones without applying them", () => {
     const inFlight = [
       {
@@ -201,97 +148,21 @@ describe("in-flight transfers", () => {
       "slow",
       "unseen",
     ]);
-    const base = dashboard({ checking: "19", savings: "1", total: "20" });
-    expect(foldSettledTransfers(base, settled).checking.balance).toBe("17");
   });
 
-  it("returns live data untouched once nothing is in flight", () => {
-    const live = dashboard({ checking: "17", savings: "3", total: "20" });
-    expect(applyInFlight(live, live, [])).toBe(live);
-  });
-
-  it("keeps a confirmed deposit projected until both balances reflect it", () => {
-    const base = dashboard({ checking: "19", savings: "1", total: "20" });
-    const transfer = {
-      movementId: "movement-1",
-      direction: "deposit" as const,
-      amount: "2",
-      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
-    };
-
+  it("keeps provider orders and unknown settlement pending at confirmation", () => {
     expect(
-      partitionSettledTransfersBySnapshot(
-        base,
-        dashboard({ checking: "17", savings: "1", total: "18" }),
-        [transfer]
-      )
-    ).toEqual({ reflected: [], waiting: [transfer] });
+      isSettledMovement({
+        ...createMovement("confirmed"),
+        settlement: "provider_order",
+      })
+    ).toBe(false);
     expect(
-      partitionSettledTransfersBySnapshot(
-        base,
-        dashboard({ checking: "17", savings: "2", total: "19" }),
-        [transfer]
-      )
-    ).toEqual({ reflected: [], waiting: [transfer] });
-    expect(
-      partitionSettledTransfersBySnapshot(
-        base,
-        dashboard({ checking: "17", savings: "3", total: "20" }),
-        [transfer]
-      )
-    ).toEqual({ reflected: [transfer], waiting: [] });
-  });
-
-  it("hands a confirmed withdrawal back after both live balances move", () => {
-    const base = dashboard({ checking: "17", savings: "3", total: "20" });
-    const transfer = {
-      movementId: "movement-1",
-      direction: "withdrawal" as const,
-      amount: "1",
-      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
-    };
-
-    expect(
-      partitionSettledTransfersBySnapshot(
-        base,
-        dashboard({ checking: "17.5", savings: "2.5", total: "20" }),
-        [transfer]
-      )
-    ).toEqual({ reflected: [], waiting: [transfer] });
-    expect(
-      partitionSettledTransfersBySnapshot(
-        base,
-        dashboard({ checking: "18", savings: "2", total: "20" }),
-        [transfer]
-      )
-    ).toEqual({ reflected: [transfer], waiting: [] });
-  });
-
-  it("hands netted opposite-direction transfers back as one snapshot", () => {
-    const base = dashboard({ checking: "19", savings: "1", total: "20" });
-    const deposit = {
-      movementId: "deposit",
-      direction: "deposit" as const,
-      amount: "2",
-      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
-    };
-    const withdrawal = {
-      movementId: "withdrawal",
-      direction: "withdrawal" as const,
-      amount: "2",
-      expiresAt: SETTLEMENT_POLL_TIMEOUT_MS,
-    };
-
-    expect(
-      partitionSettledTransfersBySnapshot(base, base, [deposit, withdrawal])
-    ).toEqual({ reflected: [deposit, withdrawal], waiting: [] });
-    expect(
-      partitionSettledTransfersBySnapshot(
-        base,
-        dashboard({ checking: "19.01", savings: "1.02", total: "20.03" }),
-        [deposit, withdrawal]
-      )
-    ).toEqual({ reflected: [deposit, withdrawal], waiting: [] });
+      isSettledMovement({
+        ...createMovement("confirmed"),
+        settlement: undefined,
+      })
+    ).toBe(false);
   });
 });
 
@@ -308,7 +179,9 @@ describe("submitted transfer activity", () => {
 
     const view = applySubmittedTransfers(live, submitted);
 
-    expect(view.movements).toEqual([{ ...withdrawal, tokenAmount: "1.5" }]);
+    expect(view.movements).toEqual([
+      { ...withdrawal, requestedTokenAmount: "1.5" },
+    ]);
   });
 
   it("uses the live status without losing the requested withdrawal amount", () => {
@@ -330,7 +203,8 @@ describe("submitted transfer activity", () => {
     expect(view.movements[0]).toMatchObject({
       status: "confirmed",
       signature: "confirmed-signature",
-      tokenAmount: "1.5",
+      tokenAmount: null,
+      requestedTokenAmount: "1.5",
     });
   });
 
@@ -485,6 +359,7 @@ function createMovement(status: YieldMovement["status"]): YieldMovement {
     providerReference: "vault",
     direction: "deposit",
     status,
+    settlement: "atomic",
     signature: "signature",
     amount: "25",
     denomination: "usdc-mint",

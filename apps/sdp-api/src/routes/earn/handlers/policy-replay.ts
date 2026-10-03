@@ -1,6 +1,65 @@
 import { getDb } from "@/db";
 import { AppError, conflict } from "@/lib/errors";
+import { getPolicyGateContext } from "@/middleware/policy-gate";
+import { getLogger } from "@/runtime/logger";
+import { approvedWalletOperationId } from "@/services/policy/approved-operation-replay";
 import type { AppContext } from "../context";
+
+/**
+ * Only for custody vault handlers that persist signed intent BEFORE broadcast.
+ * A failed build may release its policy key; an ambiguous send may not. Never
+ * use this for provider-managed program withdrawals or approval executors.
+ */
+export async function recoverFailedVaultPolicyExecution<T>(
+  c: AppContext,
+  execute: () => Promise<T>
+): Promise<T> {
+  try {
+    return await execute();
+  } catch (error) {
+    const { enforcement } = getPolicyGateContext(c);
+    if (enforcement?.evaluation.decision === "allow" && !approvedWalletOperationId(c)) {
+      const operation = enforcement.operation;
+      try {
+        await getDb(c.env)
+          .prepare(
+            `UPDATE wallet_operations operation
+             SET status = 'failed', idempotency_key = NULL,
+                 execution_error = 'Vault execution failed before durable intent was recorded',
+                 updated_at = sdp_iso_now()
+             WHERE operation.id = ? AND operation.organization_id = ?
+               AND operation.project_id IS NOT DISTINCT FROM ?
+               AND operation.idempotency_key = ? AND operation.status = 'evaluated'
+               AND operation.operation_type IN ('earn_vault_deposit', 'earn_vault_withdrawal')
+               AND operation.execution_started_at IS NULL
+               AND operation.execution_effect_started_at IS NULL
+               AND NOT EXISTS (SELECT 1 FROM approval_requests
+                 WHERE wallet_operation_id = operation.id)
+               AND NOT EXISTS (SELECT 1 FROM earn_movements
+                 WHERE organization_id = operation.organization_id
+                   AND request_id = operation.idempotency_key)
+               AND NOT EXISTS (SELECT 1 FROM earn_vault_withdrawal_requests
+                 WHERE organization_id = operation.organization_id
+                   AND client_request_id = operation.idempotency_key)`
+          )
+          .bind(
+            operation.id,
+            operation.organizationId,
+            operation.projectId,
+            operation.idempotencyKey
+          )
+          .run();
+      } catch (recoveryError) {
+        // Failure to prove absence retains the key. Do not mask the original error.
+        getLogger().error(
+          { err: recoveryError, walletOperationId: operation.id },
+          "Earn policy recovery failed"
+        );
+      }
+    }
+    throw error;
+  }
+}
 
 /**
  * Pre-execution policy replays, shared by every Earn money mover: a key that
@@ -89,7 +148,11 @@ export async function throwOnPriorEarnPolicyOperation(
     );
   }
   if (prior.decision === "deny" || prior.status === "canceled") {
-    throw new AppError("FORBIDDEN", "Wallet operation denied by policy", details);
+    throw new AppError("FORBIDDEN", "Wallet operation denied by policy", {
+      ...details,
+      intentOutcome: "denied",
+      idempotencyKey: params.idempotencyKey,
+    });
   }
   throw conflict(`The prior ${params.operationNoun} policy operation has no replayable movement`);
 }

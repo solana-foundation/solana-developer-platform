@@ -13,18 +13,20 @@ import {
   type EarnVaultAsyncWithdrawalEvent,
   earnVaultAsyncWithdrawalRoute,
 } from "./earn-vault-async-withdrawal";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import type { EarnVaultParRedemptionSource } from "./earn-vault-par-redemption-modal";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
 interface EarnVaultExitModalProps {
   environment: SdpEnvironment;
   onClose: () => void;
+  onSubmissionStart?: VaultSubmissionObserver;
   onMovementUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
   onAsyncRequest?: (event: EarnVaultAsyncWithdrawalEvent) => void;
   onAsyncRequestSettled?: (event: EarnVaultAsyncWithdrawalEvent) => void;
   onWithdrawn?: (
     withdrawal: EarnVaultWithdrawal,
-    intent: { amount: string; projectBalance: boolean; submittedAt: number }
+    intent: { amount: string; submittedAt: number }
   ) => void;
   /**
    * "intermediate" opens straight into the par route over the position's held
@@ -255,6 +257,7 @@ export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
         onClose={props.onClose}
         onMovementUpdated={props.onMovementUpdated}
         onWithdrawn={props.onWithdrawn}
+        onSubmissionStart={props.onSubmissionStart}
         position={position}
         projectId={props.projectId}
       />
@@ -270,6 +273,7 @@ export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
         onRequested={props.onAsyncRequest}
         onSettled={props.onAsyncRequestSettled}
         onWithdrawn={props.onWithdrawn}
+        onSubmissionStart={props.onSubmissionStart}
         parSource={props.parSource}
         position={position}
         projectId={props.projectId}

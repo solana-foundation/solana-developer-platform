@@ -164,7 +164,8 @@ export interface EarnMovementRow {
   signed_transaction: string | null;
   /** NUMERIC in Postgres, read back as a string so uint64 round-trips exactly. */
   last_valid_block_height: string | null;
-  request_id: string;
+  /** Null for observed payouts; command identity belongs to initiated movements. */
+  request_id: string | null;
   idempotency_fingerprint: string;
   provider_data: Record<string, unknown>;
   created_by: string | null;
@@ -1024,7 +1025,7 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     signature: row.signature as string | null,
     signed_transaction: row.signed_transaction as string | null,
     last_valid_block_height: row.last_valid_block_height as string | null,
-    request_id: row.request_id as string,
+    request_id: row.request_id as string | null,
     idempotency_fingerprint: row.idempotency_fingerprint as string,
     provider_data: (row.provider_data ?? {}) as Record<string, unknown>,
     created_by: row.created_by as string | null,
@@ -1123,7 +1124,7 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     signature: String(row.closing_signature),
     signed_transaction: null,
     last_valid_block_height: null,
-    request_id: String(row.client_request_id),
+    request_id: null,
     idempotency_fingerprint: String(row.idempotency_fingerprint),
     provider_data: {
       observation: "provider_solver_fulfillment",
