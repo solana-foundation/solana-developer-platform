@@ -481,7 +481,7 @@ function RecentActivity({ tokenId, onViewAll }: { tokenId: string; onViewAll: ()
               >
                 <span className="flex min-w-0 flex-col gap-1">
                   <span className="flex items-center gap-2 text-body font-medium text-primary">
-                    {activityEventLabel(event.action, t)}
+                    {activityEventLabel(event.action, t, event.resourceType)}
                     <StatusText tone={status.tone} className="font-normal">
                       {status.label}
                     </StatusText>

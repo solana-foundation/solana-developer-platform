@@ -1842,7 +1842,9 @@
           "unpause": "Resume",
           "create": "Token created",
           "update": "Settings updated",
-          "revoke": "Authority given up"
+          "revoke": "Authority given up",
+          "listAdd": "Added to the list",
+          "listRemove": "Removed from the list"
         },
         "loadOlder": "Load older events",
         "olderFailed": "Older events could not be loaded. The events above are still current.",
