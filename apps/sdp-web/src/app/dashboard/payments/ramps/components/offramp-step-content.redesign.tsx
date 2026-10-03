@@ -7,10 +7,12 @@ import { useMemo } from "react";
 import { Combobox } from "@/components/ui/combobox";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard.redesign";
 import { walletComboboxOptions } from "../wallet-options";
 import { BvnkAgreementConsent } from "./bvnk-agreement-consent.redesign";
+import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { ManualInstructionsQuote } from "./manual-instructions-quote.redesign";
 import { MemoStepContent } from "./memo-step-content.redesign";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
@@ -277,6 +279,7 @@ function OfframpMoneygramStep({
 
 function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
+  const demo = usePaymentsDemo();
   const {
     quote,
     transferStatus,
@@ -315,6 +318,22 @@ function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
 
   if (transferStatus?.status === "completed") {
     return <RampCompleteScreen direction="offramp" quote={quote} transfer={transferStatus} />;
+  }
+
+  // A provider's own page or widget can't open on sample data; the demo stands in for it.
+  if (demo && quote.deliveryMode !== "manual_instructions") {
+    return (
+      <div className="space-y-6">
+        <DemoProviderCheckout
+          direction="offramp"
+          provider={quote.provider}
+          transfer={transferStatus}
+        />
+        <div className="border-t border-border-default pt-5">
+          <RampStatusPanel direction="offramp" transfer={transferStatus} />
+        </div>
+      </div>
+    );
   }
 
   if (quote.deliveryMode === "hosted") {

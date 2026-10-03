@@ -106,6 +106,8 @@
   "src/flags/index.ts:253:3:Show the Earn workspace (strategy catalogue, deposits, withdrawals). A sub-module of Markets, so it also requires the markets flag.",
   "src/flags/index.ts:256:21:Hidden",
   "src/flags/index.ts:257:20:Enabled",
+  "src/flags/index.ts:282:21:Hidden",
+  "src/flags/index.ts:283:20:Enabled",
   "src/flags/index.ts:69:5:`Show ${title} as a selectable provider in the onramp and offramp wizards.`",
   "src/flags/index.ts:71:23:Hidden",
   "src/flags/index.ts:72:22:Enabled",

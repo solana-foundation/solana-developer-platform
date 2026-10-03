@@ -31,6 +31,10 @@ function offrampPrimaryLabel(
       return t("DashboardPayments.processing");
     case verificationPending:
       return t("DashboardPayments.verificationPending");
+    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
+      return wizard.verificationSimulating
+        ? t("DashboardPayments.demo.verification.simulating")
+        : t("DashboardPayments.demo.verification.simulate");
     case verificationUrl !== undefined:
       return t("DashboardPayments.completeVerification");
     case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
@@ -47,6 +51,8 @@ function offrampPrimaryAction(
   verificationUrl: string | undefined
 ): () => void {
   switch (true) {
+    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
+      return () => void wizard.simulateVerification();
     case verificationUrl !== undefined:
       return () => openExternalRampUrl(verificationUrl);
     case wizard.isLastStep:
@@ -54,6 +60,17 @@ function offrampPrimaryAction(
     default:
       return () => void wizard.handlePrimary();
   }
+}
+
+/** Whether the footer's primary button waits: on a quote, a verification, or the wallets. */
+function offrampPrimaryDisabled(wizard: OfframpWizard, verificationPending: boolean): boolean {
+  return (
+    wizard.hostedQuoteLoading ||
+    verificationPending ||
+    wizard.verificationSimulating ||
+    !wizard.canProceed ||
+    (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
+  );
 }
 
 /** The final step's heading once the payout reached an outcome worth naming. */
@@ -209,12 +226,7 @@ export function OfframpRail({
       steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
       completionTitle={offrampCompletionTitle(wizard, t)}
-      primaryDisabled={
-        wizard.hostedQuoteLoading ||
-        verificationPending ||
-        !wizard.canProceed ||
-        (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
-      }
+      primaryDisabled={offrampPrimaryDisabled(wizard, verificationPending)}
       primaryLabel={offrampPrimaryLabel(wizard, verificationPending, verificationUrl, t)}
       walletsError={wizard.liveWalletsError}
       onPrimary={offrampPrimaryAction(wizard, verificationUrl)}

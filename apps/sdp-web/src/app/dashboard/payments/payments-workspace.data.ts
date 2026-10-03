@@ -844,6 +844,33 @@ export async function simulateSandboxTransfer(
   }
 }
 
+/**
+ * Demo mode only: the provider approves the contact's identity check (Simulate verification).
+ * Its own path, which only demo mode answers: outside the demo it is refused before reaching
+ * the SDP API, whose sandbox has no such step.
+ */
+export async function simulateDemoVerification(
+  input: { provider: "bvnk"; counterpartyId: string },
+  t: Translate
+): Promise<void> {
+  const response = await fetch("/api/dashboard/payments/demo/verifications", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        await response.json().catch(() => null),
+        t("DashboardPayments.demo.verification.failed")
+      )
+    );
+  }
+}
+
 export async function runComplianceCheck(
   address: string,
   intent: ComplianceIntent

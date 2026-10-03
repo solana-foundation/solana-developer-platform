@@ -24,6 +24,8 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { PAYMENT_REQUESTS_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
 import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
@@ -393,7 +395,8 @@ function PaymentRequestCreateForm({
     [counterparties]
   );
 
-  const [amount, setAmount] = useState("");
+  const demo = usePaymentsDemo();
+  const [amount, setAmount] = useState(demo ? DEMO_PREFILL_AMOUNTS.request : "");
   const [pickedToken, setPickedToken] = useState("");
   const [pickedWallet, setPickedWallet] = useState("");
   const [pickedFrom, setPickedFrom] = useState(ANYONE);
@@ -444,14 +447,18 @@ function PaymentRequestCreateForm({
     } finally {
       setSubmitting(false);
     }
-    const copied = created?.publicToken
-      ? await copyToClipboard(`${window.location.origin}/pay/${created.publicToken}`)
-      : false;
+    // A demo request lives in this browser only, so the public pay page can't open its link.
+    const copied =
+      !demo && created?.publicToken
+        ? await copyToClipboard(`${window.location.origin}/pay/${created.publicToken}`)
+        : false;
     toast.success(t("DashboardPayments.requests.requestCreated"), {
       id: "payment-request-created",
-      description: copied
-        ? t("DashboardPayments.requests.linkOnClipboard")
-        : t("DashboardPayments.requests.copyLinkFromRequest"),
+      description: demo
+        ? t("DashboardPayments.demo.noPayLink")
+        : copied
+          ? t("DashboardPayments.requests.linkOnClipboard")
+          : t("DashboardPayments.requests.copyLinkFromRequest"),
     });
     router.push(created?.id ? paymentRequestHref(created.id) : PAYMENT_REQUESTS_HREF);
   }

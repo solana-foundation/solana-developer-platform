@@ -271,6 +271,19 @@ export const newDesign = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
+export const paymentsDemoMode = flag<boolean, DashboardFlagEntities>({
+  key: "payments-demo-mode",
+  adapter: vercelAdapter(),
+  identify: identifyDashboardEntities,
+  defaultValue: flagDefault("SDP_FLAG_PAYMENTS_DEMO_MODE", process.env.VERCEL_ENV !== "production"),
+  description:
+    "Offer Payments' Demo switch: sample data and simulated provider, KYC and settlement steps in every ramp flow, per project. Requires the new-design flag, and serves only Payments pages on the new design.",
+  options: [
+    { value: false, label: "Hidden" },
+    { value: true, label: "Enabled" },
+  ],
+});
+
 export const newDesignContacts = newDesignModuleFlag(
   "contacts",
   "Payments' Contacts (the list, a new contact, one contact's page)"

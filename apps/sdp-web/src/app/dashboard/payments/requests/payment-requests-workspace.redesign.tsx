@@ -22,6 +22,7 @@ import { StatusText } from "@/components/ui/status-text";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
   PAYMENT_REQUEST_NEW_HREF,
   PAYMENT_REQUESTS_HREF,
@@ -408,6 +409,7 @@ export function PaymentRequestsWorkspace({
   listState,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
+  const demo = usePaymentsDemo();
   const locale = useLocale();
   const { fromLabel, amountLabel, counterpartyNameById } = usePaymentRequestLabels(counterparties);
   const router = useRouter();
@@ -435,6 +437,11 @@ export function PaymentRequestsWorkspace({
   const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
   const copyLink = (request: PaymentRequest) => {
+    // A demo request lives in this browser only, so the public pay page can't open its link.
+    if (demo) {
+      toast.info(t("DashboardPayments.demo.noPayLink"));
+      return;
+    }
     void navigator.clipboard.writeText(`${window.location.origin}/pay/${request.publicToken}`);
     toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
   };
