@@ -12,28 +12,22 @@ const apiKeyWalletBindingSchema = z.object({
   permissions: z.array(z.enum(PERMISSIONS)).optional(),
 });
 
-const apiKeyWalletProvisioningSchema = z.union([
-  z.boolean(),
-  z.object({ connectionId: z.string().min(1) }).strict(),
-]);
-
 export const apiKeyCreateSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
-  role: z.enum(["api_admin", "api_developer", "api_readonly"]).optional(),
+  role: z.enum(["api_admin", "api_developer", "api_readonly"]),
   permissions: z.array(z.enum(PERMISSIONS)).optional(),
   walletScope: z.enum(["all", "selected"]),
   allowedIps: z.array(apiKeyAllowedIpSchema).optional(),
-  expiresAt: z.string().datetime().optional(),
+  expiresAt: z.iso
+    .datetime()
+    .refine((value) => Date.parse(value) > Date.now(), {
+      message: "expiresAt must be in the future",
+    })
+    .optional(),
   signingWalletId: z.string().min(1).optional(),
   signingWalletIds: z.array(z.string().min(1)).optional(),
   walletBindings: z.array(apiKeyWalletBindingSchema).optional(),
-  provisionWallet: apiKeyWalletProvisioningSchema.optional(),
-  connectionId: z.never().optional(),
-  walletLabel: z.string().max(100).optional(),
-  walletPurpose: z
-    .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
-    .optional(),
 });
 
 export const apiKeyUpdateSchema = z.object({
@@ -41,7 +35,7 @@ export const apiKeyUpdateSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   walletScope: z.enum(["all", "selected"]).optional(),
   allowedIps: z.array(apiKeyAllowedIpSchema).nullable().optional(),
-  expiresAt: z.string().datetime().nullable().optional(),
+  expiresAt: z.iso.datetime().nullable().optional(),
   permissions: z.array(z.enum(PERMISSIONS)).nullable().optional(),
   signingWalletId: z.string().min(1).nullable().optional(),
   signingWalletIds: z.array(z.string().min(1)).nullable().optional(),

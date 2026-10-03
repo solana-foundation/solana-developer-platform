@@ -3,7 +3,6 @@ import { z } from "zod";
 
 import {
   addProjectMemberRequestSchema,
-  createApiKeyRequestSchema,
   errorResponseSchema,
   includeArchivedQuerySchema,
   memberIdParamSchema,
@@ -13,8 +12,6 @@ import {
 } from "../schemas";
 import { errorResponses, jsonContent } from "./helpers";
 import {
-  apiKeyCreateResponse,
-  listProjectApiKeysResponse,
   listProjectMembersResponse,
   listProjectsResponse,
   projectMemberResponse,
@@ -185,54 +182,6 @@ export function registerProjectPaths(registry: OpenAPIRegistry) {
         description: "Project member removed",
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/projects/{projectId}/api-keys",
-    tags: ["Projects"],
-    summary: "List project API keys",
-    operationId: "listProjectApiKeys",
-    description: "Lists API keys scoped to the project.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      params: z.object({
-        projectId: projectIdParamSchema,
-      }),
-    },
-    responses: {
-      200: {
-        description: "Project API keys",
-        content: jsonContent(listProjectApiKeysResponse),
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/projects/{projectId}/api-keys",
-    tags: ["Projects"],
-    summary: "Create project API key",
-    operationId: "createProjectApiKey",
-    description: "Creates an API key scoped to the project. The full key is returned once.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      params: z.object({
-        projectId: projectIdParamSchema,
-      }),
-      body: {
-        required: true,
-        content: jsonContent(createApiKeyRequestSchema),
-      },
-    },
-    responses: {
-      201: {
-        description: "Project API key created",
-        content: jsonContent(apiKeyCreateResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 }

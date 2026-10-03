@@ -5,7 +5,6 @@ import {
   updateMemberSchema as updateMemberSchemaBase,
   updateProjectSchema as updateProjectSchemaBase,
 } from "../../routes/projects/schemas";
-import { apiKeyListItemSchema } from "./api-keys";
 import {
   isoDateTimeSchema,
   orgIdParamSchema,
@@ -136,12 +135,6 @@ export const listProjectMembersResponseSchema = z
     members: z.array(projectMemberWithUserSchema).openapi({ description: "Project members." }),
   })
   .openapi({ description: "List of project members." });
-
-export const listProjectApiKeysResponseSchema = z
-  .object({
-    apiKeys: z.array(apiKeyListItemSchema).openapi({ description: "Project API keys." }),
-  })
-  .openapi({ description: "List of project API keys." });
 
 export const updateProjectRequestSchema = updateProjectSchemaBase
   .extend({

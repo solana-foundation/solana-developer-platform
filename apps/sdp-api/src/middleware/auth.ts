@@ -29,6 +29,7 @@ import {
 } from "@/lib/api-key-cache";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { requireUserAuth } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
@@ -367,6 +368,21 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   void scheduleApiKeyLastUsedUpdate(getDb(c.env), cachedKey.id);
 
   return authContext;
+}
+
+/**
+ * Route gate for operations only a signed-in user may perform.
+ * Runs ahead of `requirePermissions` so a key actor is told the real rule
+ * (credentials are minted by people) instead of a generic permission miss.
+ *
+ * @param operation Short noun phrase for the 403 message, e.g. "API key creation".
+ * @returns Hono middleware that refuses API-key actors with 403.
+ */
+export function requireUserActor(operation: string) {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    requireUserAuth(c, operation);
+    await next();
+  };
 }
 
 /**
