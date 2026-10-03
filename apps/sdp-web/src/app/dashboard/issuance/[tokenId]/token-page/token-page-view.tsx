@@ -9,7 +9,11 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardTab, useDashboardUrlState } from "@/lib/dashboard-url-state";
+import {
+  refreshKeepingDashboardUrl,
+  useDashboardTab,
+  useDashboardUrlState,
+} from "@/lib/dashboard-url-state";
 import { useAssetProfileForm } from "../asset-profile/use-asset-profile-form";
 import { useTokenOperations } from "../asset-profile/use-token-operations";
 import { TokenActivityTab } from "./activity-tab";
@@ -94,7 +98,7 @@ function useRefreshWhileDeploying(deploying: boolean) {
   const router = useRouter();
   useEffect(() => {
     if (!deploying) return;
-    const timer = window.setInterval(() => router.refresh(), DEPLOY_POLL_MS);
+    const timer = window.setInterval(() => refreshKeepingDashboardUrl(router), DEPLOY_POLL_MS);
     return () => window.clearInterval(timer);
   }, [deploying, router]);
 }

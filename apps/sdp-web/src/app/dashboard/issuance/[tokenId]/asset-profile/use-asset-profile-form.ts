@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { buildIssuanceMetadata, getAssetDetailsErrors } from "../../create/draft-mapping";
 import type { DraftState } from "../../create/issuance-draft-wizard.types";
 import {
@@ -199,7 +200,7 @@ export function useAssetProfileForm({
           })
         );
       }
-      router.refresh();
+      refreshKeepingDashboardUrl(router);
       return true;
     } finally {
       setSaving(false);

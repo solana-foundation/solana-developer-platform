@@ -81,6 +81,22 @@ function applySearchParamUpdates(updates: Record<string, string | null>, mode: "
 }
 
 /**
+ * Re-reads the page from the server like `router.refresh()`, keeping the shallow params.
+ * A shallow replace leaves Next's own copy of the URL behind, and a refresh writes that copy
+ * back, so a tab picked since the page loaded would fall back to the first one. Handing
+ * Next the live URL first (its history patch restores it, without a fetch) keeps it.
+ *
+ * @param router - The App Router instance from `useRouter`.
+ */
+export function refreshKeepingDashboardUrl(router: { refresh: () => void }): void {
+  if (typeof window !== "undefined") {
+    const { pathname, search, hash } = window.location;
+    window.history.replaceState(null, "", `${pathname}${search}${hash}`);
+  }
+  router.refresh();
+}
+
+/**
  * Reads the active dashboard tab straight from the current URL, bypassing the
  * reactive snapshot behind `useDashboardTab`. Use where the snapshot can lag
  * the real URL: App Router `<Link>` navigation fires no popstate/custom event,
