@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.82.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.81.0...v0.82.0) (2026-10-03)
+
+### Features
+
+* **design-tokens:** [1/10] add the @sdp/design-tokens package ([#2176](https://github.com/solana-foundation/solana-developer-platform/pull/2176)) ([3c8869c](https://github.com/solana-foundation/solana-developer-platform/commit/3c8869cb16b5c3e4c93a2f8b27d90d81bb6ffd07))
+* **earn:** redeem a position's held wYLDS at par ([8b8231c](https://github.com/solana-foundation/solana-developer-platform/commit/8b8231ce462c191323efb42edfebf280514c9695))
+
+### Bug Fixes
+
+* **wallets:** keep wallet detail balances current ([#2180](https://github.com/solana-foundation/solana-developer-platform/pull/2180)) ([54c9ce5](https://github.com/solana-foundation/solana-developer-platform/commit/54c9ce577e2d0f45dd5abf06d07bdc4609d1bf70))
+* **api:** repair local Clerk setup docs and org:tier:local ([#2179](https://github.com/solana-foundation/solana-developer-platform/pull/2179)) ([c10a759](https://github.com/solana-foundation/solana-developer-platform/commit/c10a759c3219294549c50e110e752e647032069d))
+* **earn:** harden Kamino settlement and rent handling ([#2163](https://github.com/solana-foundation/solana-developer-platform/pull/2163)) ([14ba045](https://github.com/solana-foundation/solana-developer-platform/commit/14ba0455eea092725f6a8995fc2b92e2dd62badf))
+* **earn:** harden Ondo swaps and settlement recovery ([#2161](https://github.com/solana-foundation/solana-developer-platform/pull/2161)) ([f9d9620](https://github.com/solana-foundation/solana-developer-platform/commit/f9d9620b18bd0ddea7152d9ce8bd501d83218c2a))
+* **earn:** harden Veda async withdrawal reconciliation ([#2162](https://github.com/solana-foundation/solana-developer-platform/pull/2162)) ([bfef26b](https://github.com/solana-foundation/solana-developer-platform/commit/bfef26be8b05535e4efa894d10a49612df5f5ffa))
+* **earn:** keep a cancelled Hastra request's wYLDS on its position ([900c8fc](https://github.com/solana-foundation/solana-developer-platform/commit/900c8fcccd4d46530bb9f534ea305d3b359eb4be))
+* **earn:** treat wYLDS left by a cancelled redemption as share backing ([#2160](https://github.com/solana-foundation/solana-developer-platform/pull/2160)) ([3251a30](https://github.com/solana-foundation/solana-developer-platform/commit/3251a30acd05ec0a8aa0ca701e26f345399cba62))
+* **earn:** name open queued withdrawals in earnings and reconciliation ([308868d](https://github.com/solana-foundation/solana-developer-platform/commit/308868d5373e294d53041112f97340d1f4a0fd17))
+
+### Refactors
+
+* **auth:** remove the legacy cookie session and login tracking ([#2183](https://github.com/solana-foundation/solana-developer-platform/pull/2183)) ([7c0d87d](https://github.com/solana-foundation/solana-developer-platform/commit/7c0d87d7279a9b62fd18e9b69ab195c4d17519f0))
+
+### Maintenance
+
+* **deps:** bump the minor-patch group across 1 directory with 27 updates ([#2186](https://github.com/solana-foundation/solana-developer-platform/pull/2186)) ([6e90096](https://github.com/solana-foundation/solana-developer-platform/commit/6e9009650a4f1d991104a68e8220612024f75f44))
+* **earn:** describe Hastra PRIME's source as Figure home equity lending ([f12c4fa](https://github.com/solana-foundation/solana-developer-platform/commit/f12c4fa80c5c5e04a0bee6207e326867213a3bfd))
+
 ## [0.81.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.80.0...v0.81.0) (2026-09-29)
 
 ### Features
