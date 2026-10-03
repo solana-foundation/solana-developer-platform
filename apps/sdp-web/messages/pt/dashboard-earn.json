@@ -126,7 +126,8 @@
       "devnetStrategiesUnavailable": "Não foi possível carregar as estratégias do Devnet. As estratégias da Mainnet continuam disponíveis.",
       "mainnetStrategiesLoading": "Carregando estratégias da Mainnet. As estratégias do Devnet continuam disponíveis.",
       "mainnetStrategiesUnavailable": "Não foi possível carregar as estratégias da Mainnet. As estratégias do Devnet continuam disponíveis.",
-      "sandboxUnavailable": "Somente Produção"
+      "sandboxUnavailable": "Somente Produção",
+      "redeemIntermediate": "Resgatar wYLDS"
     },
     "earnProgram": {
       "eyebrow": "Yield embutido",
@@ -902,7 +903,8 @@
       "vaultFailedBody": "A transação de depósito falhou na Solana. Nenhum saldo de posição foi creditado a partir desta movimentação. Revise a transação antes de tentar novamente.",
       "vaultFailedStatus": "Falhou",
       "vaultFailedNote": "O Dashboard não projetou um saldo a partir desta movimentação falha.",
-      "vaultFloorUnavailable": "A SDP não conseguiu confirmar os termos exatos com os quais a tentativa anterior deste depósito foi enviada, então nada foi enviado. Verifique sua posição e tente novamente em instantes."
+      "vaultFloorUnavailable": "A SDP não conseguiu confirmar os termos exatos com os quais a tentativa anterior deste depósito foi enviada, então nada foi enviado. Verifique sua posição e tente novamente em instantes.",
+      "vaultBackingFigureHomeEquity": "Pool Figure home equity"
     },
     "vaultWithdraw": {
       "title": "Retirar de {position}",
@@ -1042,7 +1044,14 @@
       "activeSummary": "{amount} esperado pelo par · aguardando liquidação do operador sem tempo de conclusão garantido",
       "activeSummaryCreating": "{amount} esperado pelo par · confirmando a solicitação de resgate na Solana",
       "activeSummaryCancelling": "{amount} solicitado · cancelando a solicitação do operador; o wYLDS permanece na sua Wallet",
-      "activeSummaryChecking": "{amount} solicitado · a solicitação foi encerrada; verificando se o USDC foi pago ou se o wYLDS foi mantido"
+      "activeSummaryChecking": "{amount} solicitado · a solicitação foi encerrada; verificando se o USDC foi pago ou se o wYLDS foi mantido",
+      "titleIntermediate": "Resgatar wYLDS de {position}",
+      "detailsBodyIntermediate": "Informe um valor de wYLDS desta posição para resgatar pelo par pelo operador da Hastra.",
+      "intermediateUnit": "wYLDS",
+      "operatorNoticeIntermediate": "A solicitação delega o wYLDS à autoridade de resgate da Hastra sem transferi-lo ou fazer burn dele. A USDC chega apenas quando a Hastra conclui a liquidação. Cancelar revoga a solicitação e deixa o wYLDS na sua Wallet.",
+      "reviewBodyIntermediate": "Revise a liquidação ao par esperada antes que qualquer coisa seja movida.",
+      "reviewNoticeIntermediate": "Enviar cria uma solicitação de resgate pelo operador; ela não entrega USDC na mesma transação. Você pode cancelar enquanto ela estiver pendente, e o wYLDS permanece na sua Wallet.",
+      "positionIntermediate": "Inclui {amount} wYLDS"
     },
     "queuedWithdraw": {
       "title": "Solicitar saque de {position}",
