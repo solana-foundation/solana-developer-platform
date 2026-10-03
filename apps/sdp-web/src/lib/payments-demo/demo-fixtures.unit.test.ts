@@ -407,7 +407,12 @@ describe("Payments overview", () => {
       "EURC",
       "SOL",
     ]);
-    expect(await fetchIssuedTokensByMint(harness.request)).toEqual({});
+    // The Issuance demo's deployed tokens, which Payments names by their mint.
+    expect(
+      Object.values(await fetchIssuedTokensByMint(harness.request))
+        .map((token) => token.symbol)
+        .sort()
+    ).toEqual(["EURH", "MRDN", "STAR", "VUSD"]);
   });
 
   it("counts contacts, open requests and active schedules", async () => {
@@ -443,7 +448,8 @@ describe("Payments overview", () => {
     expect(NOW.getTime() - Date.parse(transfers.data?.[0]?.createdAt ?? "")).toBeLessThan(
       60 * 60_000
     );
-    expect(tokens).toEqual({ ok: true, data: [] });
+    expect(tokens.ok).toBe(true);
+    expect(tokens.data?.every((token) => token.mintAddress && token.symbol)).toBe(true);
     expect(wallets.ok).toBe(true);
     expect(wallets.data?.every((wallet) => wallet.balances === undefined)).toBe(true);
 

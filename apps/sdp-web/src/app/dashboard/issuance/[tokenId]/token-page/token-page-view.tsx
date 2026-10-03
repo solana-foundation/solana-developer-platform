@@ -2,7 +2,8 @@
 
 import type { AssetProfile, Token } from "@sdp/types";
 import { ArrowUpRightIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo } from "react";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,7 @@ export function TokenPageView({
     draftWallets: ops.authorityWalletsError ? [] : ops.authorityWallets,
   });
   const state = tokenPageLifecycle(token, latestDeploy);
+  useRefreshWhileDeploying(state === "deploying");
   const page = { token, assetProfile: form.assetProfile, ops, form, state, canManageTokenAdmin };
   const explorer = useExplorerAction(ops.explorerHref);
 
@@ -79,6 +81,22 @@ export function TokenPageView({
       <TokenDialogs ops={ops} token={token} />
     </DashboardWorkspaceOverviewPanel>
   );
+}
+
+/** How often a token mid-deploy reads itself again, as the list does for its deploying rows. */
+const DEPLOY_POLL_MS = 5_000;
+
+/**
+ * Re-reads the page every few seconds while its deploy is in flight, so the token turns live
+ * (or failed) on screen when the deploy lands, without the visitor reloading.
+ */
+function useRefreshWhileDeploying(deploying: boolean) {
+  const router = useRouter();
+  useEffect(() => {
+    if (!deploying) return;
+    const timer = window.setInterval(() => router.refresh(), DEPLOY_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [deploying, router]);
 }
 
 /** The mint on the explorer, at the header's end on every tab once the token is on chain. */
