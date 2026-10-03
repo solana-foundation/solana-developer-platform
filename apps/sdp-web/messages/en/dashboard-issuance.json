@@ -1599,6 +1599,7 @@
         "explorer": "Explorer",
         "mintTokens": "Mint tokens",
         "submittedAgo": "Submitted {minutes} min ago",
+        "submittedJustNow": "Submitted just now",
         "deployTitle": "Deploy this token",
         "deployBody": "Deploying creates the mint with the settings below.",
         "signingWallet": "Signing wallet",

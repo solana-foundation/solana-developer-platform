@@ -175,9 +175,11 @@ function OverviewStateBand({
       </TokenDisabledActionTooltip>
     ) : state === "deploying" && latestDeploy ? (
       <span className="text-meta leading-5 text-secondary">
-        {t("DashboardIssuance.newDesign.overview.submittedAgo", {
-          minutes: minutesSince(latestDeploy.createdAt),
-        })}
+        {minutesSince(latestDeploy.createdAt) === 0
+          ? t("DashboardIssuance.newDesign.overview.submittedJustNow")
+          : t("DashboardIssuance.newDesign.overview.submittedAgo", {
+              minutes: minutesSince(latestDeploy.createdAt),
+            })}
       </span>
     ) : null;
 
