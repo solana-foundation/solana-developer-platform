@@ -10,12 +10,12 @@
 | Relevant push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true` | Production API | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the merge deploy is held instead and dispatches `Apply pending migrations to prod`, which deploys that commit once a `release-production` reviewer approves it |
 | `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows |
 | Release publication job on `main` | Production API | Verifies the published tag and SHA, promotes the signed release image, and updates the production service, worker, and cron job. Runs no migrations: a release whose commit carries migrations production has not applied is refused until their approval run has deployed them |
-| Release publication job on `main` | Production web | Verifies the published tag and SHA, builds sdp-web from that commit, and deploys it to Vercel production |
+| Push to `main` | Production web | Vercel's git integration builds sdp-web from that commit and holds it until the `sdp-web production gate` commit status passes: immediately when the merge has no production API deploy, after the production API deploy succeeds, or, for merges held on pending migrations, after `Apply pending migrations to prod` deploys the API |
 | Manual dev workflow dispatch | Dev | Rebuilds and deploys the selected workflow revision |
 | Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations |
-| Manual sdp-web workflow dispatch | Production web | Builds and deploys the provided ref to Vercel production |
+| Vercel dashboard redeploy or instant rollback | Production web | Redeploys or restores an earlier sdp-web production deployment |
 
-Vercel's git integration builds previews for pull-request branches only; `apps/sdp-web/vercel.json` skips git-triggered builds on `main`, so sdp-web reaches production exclusively through the release flow's production deployment job.
+Vercel's git integration builds previews for pull-request branches and deploys sdp-web to production on every merge to `main`. No GitHub workflow deploys sdp-web; `deploy.yml` and `apply-prod-migrations.yml` call [`release-sdp-web-prod.yml`](../../.github/workflows/release-sdp-web-prod.yml), which only posts the `sdp-web production gate` status, which the sdp-web project requires under Settings → Build and Deployment → Deployment Checks.
 
 The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, and cron jobs.
 
@@ -47,10 +47,6 @@ Release automation also reads these repository variables:
 - `RELEASE_APP_ID` — GitHub App ID used by release automation
 - `RELEASE_APP_PRIVATE_KEY` — corresponding GitHub App private key
 - `TRANSLATION_AGENT_USERNAME` and `TRANSLATION_AGENT_PASSWORD` — HTTP Basic credentials required when a release has missing UI translations
-
-### Production environment secrets
-
-- `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` — Vercel CLI credentials used by the sdp-web production deployment
 
 The release GitHub App needs `contents: write` and `pull_requests: write`, and it must be allowed to maintain the generated release branch and enable auto-merge.
 
@@ -130,12 +126,9 @@ Every run posts or updates one comment, so a missing comment means the job never
 
 ### 3. Deploy and publish production
 
-Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag, publishes the GitHub release, resolves the tag to the exact `main` commit, and then starts two independent production deployments with that immutable tag and SHA:
+Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag, publishes the GitHub release, resolves the tag to the exact `main` commit, and then starts [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) with that immutable tag and SHA to deploy the production API. sdp-web needs no release step: Vercel already deployed the release commit to production when it landed on `main`.
 
-- [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) deploys the production API.
-- The `deploy-web-production` job in [`release-please.yml`](../../.github/workflows/release-please.yml) deploys sdp-web to Vercel production. [`deploy-sdp-web-vercel-prod.yml`](../../.github/workflows/deploy-sdp-web-vercel-prod.yml) remains the manual recovery path.
-
-Both deployments retain the `main` event context required by the `production` environment. Before using production credentials, they verify that the checked-out SHA matches the published tag, belongs to `origin/main`, and has the matching version in `package.json`. The web deployment is a normal job in the release workflow so its Vercel credentials remain scoped to the protected `production` environment; they are not inherited across a reusable-workflow boundary.
+The API deployment retains the `main` event context required by the `production` environment. Before using production credentials, it verifies that the checked-out SHA matches the published tag, belongs to `origin/main`, and has the matching version in `package.json`.
 
 The production deploy workflow:
 

@@ -278,3 +278,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run apply-prod-migrations.yml --repo "${{ github.repository }}" --ref main -f image_sha="${{ github.sha }}"
+
+  release-web-prod:
+    name: Release sdp-web production
+    needs: [changes, deploy-api-prod]
+    if: >-
+      always() && github.event_name == 'push' && needs.changes.result == 'success' &&
+      (needs.changes.outputs.prod != 'true' || needs.deploy-api-prod.result == 'success')
+    permissions:
+      statuses: write
+    uses: ./.github/workflows/release-sdp-web-prod.yml
+    with:
+      sha: ${{ github.sha }}

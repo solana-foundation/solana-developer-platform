@@ -127,3 +127,12 @@ jobs:
     with:
       image_sha: ${{ inputs.image_sha }}
       approved_schema: true
+
+  release-web-prod:
+    name: Release sdp-web production
+    needs: deploy
+    permissions:
+      statuses: write
+    uses: ./.github/workflows/release-sdp-web-prod.yml
+    with:
+      sha: ${{ inputs.image_sha }}

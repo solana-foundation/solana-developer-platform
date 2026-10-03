@@ -1,0 +1,26 @@
+name: Release sdp-web production
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: "Commit whose held sdp-web production deployment Vercel may promote"
+        type: string
+        required: true
+
+permissions:
+  statuses: write
+
+jobs:
+  release:
+    name: Mark the sdp-web production gate passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Post the sdp-web production gate status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+            -f state=success -f context="sdp-web production gate" -f description="Production API is live for this commit"
