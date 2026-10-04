@@ -31,12 +31,7 @@ export function TokenTable({
 }) {
   return (
     <div className={cn(className, "overflow-x-auto refresh:-mx-3")}>
-      <Table
-        className={cn(
-          tableClassName,
-          "table-fixed rounded-none border-0"
-        )}
-      >
+      <Table className={cn(tableClassName, "table-fixed rounded-none border-0")}>
         <colgroup>
           {columns.map((column) => (
             <col key={column.label} className={column.className} />

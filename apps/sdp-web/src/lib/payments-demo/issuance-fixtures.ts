@@ -66,7 +66,11 @@ export interface IssuanceWorld {
 
 type WalletKey = "treasury" | "payroll" | "settlement";
 
-type DemoTokenState = "live" | "paused" | "draft" | "deploying" | "failed";
+/**
+ * No seeded token is mid-deploy: the world is rebuilt from the request's time with no session
+ * start to count from, so a seeded deploy could never land. A visitor's own deploy does.
+ */
+type DemoTokenState = "live" | "paused" | "draft" | "failed";
 
 interface DemoTokenSpec {
   key: string;
@@ -89,7 +93,10 @@ interface DemoTokenSpec {
   issuerName: string;
   website: string | null;
   pegCurrency: string | null;
-  /** Mints after deploy, as [days ago, amount, holder index]; burns as negative amounts. */
+  /**
+   * Mints after deploy, as [days ago, amount, holder index]; burns as negative amounts. Holder 0
+   * is the signing wallet itself, so the issuer's treasury holds supply it can burn.
+   */
   supplyMoves: ReadonlyArray<readonly [days: number, amount: string, holder: number]>;
   controlList: ReadonlyArray<readonly [holder: number, label: string, days: number]>;
   frozen: ReadonlyArray<readonly [holder: number, reason: string, days: number]>;
@@ -271,7 +278,7 @@ const TOKEN_SPECS: readonly DemoTokenSpec[] = [
     category: "stablecoin",
     assetType: "fiat_backed",
     decimals: 6,
-    state: "deploying",
+    state: "draft",
     createdDaysAgo: 0,
     signer: "treasury",
     maxSupply: "5000000",
@@ -289,6 +296,11 @@ const TOKEN_SPECS: readonly DemoTokenSpec[] = [
 ];
 
 /** Addresses the seeded mints, control lists and freezes point at. */
+/** The metadata authority: given up when null; a token that never set one answers with its mint's. */
+export function metadataAuthorityOf(token: PublicToken): string | null {
+  return token.metadataAuthority === undefined ? token.mintAuthority : token.metadataAuthority;
+}
+
 export function holderAddress(tokenKey: string, index: number): string {
   return demoAddress(`issuance-holder:${tokenKey}:${index}`);
 }
@@ -531,7 +543,7 @@ function seedSupply(context: SeedContext): bigint {
     const createdAt = clock.ago(days * DAY_MS + (index + 1) * 37 * MINUTE_MS);
     const burn = amount.startsWith("-");
     const value = burn ? amount.slice(1) : amount;
-    const address = holderAddress(spec.key, holder);
+    const address = holder === 0 ? context.signerKey : holderAddress(spec.key, holder);
     supply += toUnits(amount, spec.decimals);
     const params = burn
       ? { source: address, amount: value, memo: null }
@@ -609,26 +621,22 @@ function seedFrozen(context: SeedContext): FrozenAccount[] {
   });
 }
 
-/** The deploy that failed, or the one still in flight, of a token with no mint yet. */
+/** The deploy that failed, of a token with no mint yet. */
 function seedDeployAttempt(context: SeedContext) {
   const { spec, id, aclMode, clock, history } = context;
-  const failed = spec.state === "failed";
-  const createdAt = failed
-    ? clock.ago(spec.createdDaysAgo * DAY_MS - HOUR_MS)
-    : clock.ago(2 * MINUTE_MS);
+  const createdAt = clock.ago(spec.createdDaysAgo * DAY_MS - HOUR_MS);
   const seed = `${spec.key}-deploy`;
   history.transactions.push(
     demoTransaction({
       tokenId: id,
       type: "deploy",
-      status: failed ? "failed" : "processing",
+      status: "failed",
       params: { operation: "deploy", feePayment: "wallet", aclMode },
       createdAt,
       seed,
-      error: failed ? DEMO_DEPLOY_FAILURE : null,
+      error: DEMO_DEPLOY_FAILURE,
     })
   );
-  if (!failed) return;
   history.audit.push(
     demoAuditEvent({
       tokenId: id,
@@ -676,8 +684,9 @@ function buildToken(
   const signerKey = signer?.publicKey ?? demoAddress(`wallet:${spec.signer}`);
   const walletId = signer?.id ?? `demo_cwlt_${spec.signer}`;
   const id = demoTokenId(spec.key);
-  const createdAt =
-    spec.state === "deploying" ? clock.ago(6 * MINUTE_MS) : clock.ago(spec.createdDaysAgo * DAY_MS);
+  const createdAt = clock.ago(
+    spec.createdDaysAgo * DAY_MS + (spec.createdDaysAgo ? 0 : 6 * MINUTE_MS)
+  );
   const deployed = spec.state === "live" || spec.state === "paused";
   const deployedAt = deployed ? clock.ago(spec.createdDaysAgo * DAY_MS - 2 * HOUR_MS) : null;
   const mintAddress = deployed ? demoAddress(`issuance-mint:${spec.key}`) : null;
@@ -712,7 +721,7 @@ function buildToken(
       { mode: "execute" }
     );
   }
-  if (spec.state === "failed" || spec.state === "deploying") seedDeployAttempt(context);
+  if (spec.state === "failed") seedDeployAttempt(context);
 
   const issuanceMetadata = seededMetadata(spec, aclMode, walletIds);
   const token: PublicToken = {

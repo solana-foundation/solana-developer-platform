@@ -3,7 +3,13 @@ import { z } from "zod";
 import { type DemoWorld, findWallet } from "./demo-fixtures";
 import type { DemoAnswer, DemoWriteResult, WriteContext } from "./demo-handlers";
 import { type DemoOp, newDemoId } from "./demo-ops";
-import { type DemoIssuedToken, findIssuedToken, toUnits } from "./issuance-fixtures";
+import {
+  type DemoIssuedToken,
+  findIssuedToken,
+  fromUnits,
+  metadataAuthorityOf,
+  toUnits,
+} from "./issuance-fixtures";
 
 /*
  * What the demo answers for the Issuance writes: a draft created, its fields and profile edited,
@@ -413,10 +419,32 @@ function mint(context: WriteContext): DemoWriteResult {
   );
 }
 
-function supplyRefusal(entry: DemoIssuedToken, value: string) {
+/**
+ * What an address holds of the token, from its settled history: mints and seizures into it, less
+ * burns, force burns and seizures out of it.
+ */
+function holdingOf(entry: DemoIssuedToken, address: string): bigint {
+  const { decimals } = entry.token;
+  let held = 0n;
+  for (const tx of entry.transactions) {
+    if (tx.status !== "finalized" && tx.status !== "confirmed") continue;
+    const params = (tx.params ?? {}) as Record<string, unknown>;
+    if (typeof params.amount !== "string") continue;
+    const value = toUnits(params.amount, decimals);
+    const into = tx.type === "mint" || tx.type === "seize";
+    const outOf = tx.type === "burn" || tx.type === "force_burn" || tx.type === "seize";
+    if (into && params.destination === address) held += value;
+    if (outOf && params.source === address) held -= value;
+  }
+  return held < 0n ? 0n : held;
+}
+
+/** Supply leaves an account only up to what that account holds, as on chain. */
+function holdingRefusal(entry: DemoIssuedToken, source: string, value: string) {
   const { token } = entry;
-  return toUnits(value, token.decimals) > toUnits(token.totalSupply, token.decimals)
-    ? badRequest(`Only ${token.totalSupply} ${token.symbol} is in circulation.`)
+  const held = holdingOf(entry, source);
+  return toUnits(value, token.decimals) > held
+    ? badRequest(`That address holds ${fromUnits(held, token.decimals)} ${token.symbol}.`)
     : null;
 }
 
@@ -439,7 +467,7 @@ function burn(context: WriteContext): DemoWriteResult {
     notDeployed(entry.token) ??
     walletRefusal(context, body.signingCustodyWalletId) ??
     precisionRefusal(entry.token, body.burn.amount) ??
-    supplyRefusal(entry, body.burn.amount);
+    holdingRefusal(entry, body.burn.source, body.burn.amount);
   if (refusal) return refusal;
   const tx = txId();
   return record(
@@ -494,7 +522,7 @@ function seize(context: WriteContext): DemoWriteResult {
     delegateRefusal(entry) ??
     walletRefusal(context, body.signingCustodyWalletId) ??
     precisionRefusal(entry.token, body.seize.amount) ??
-    supplyRefusal(entry, body.seize.amount);
+    holdingRefusal(entry, body.seize.source, body.seize.amount);
   if (refusal) return refusal;
   const tx = txId();
   return record(
@@ -537,7 +565,7 @@ function forceBurn(context: WriteContext): DemoWriteResult {
     delegateRefusal(entry) ??
     walletRefusal(context, body.signingCustodyWalletId) ??
     precisionRefusal(entry.token, body.forceBurn.amount) ??
-    supplyRefusal(entry, body.forceBurn.amount);
+    holdingRefusal(entry, body.forceBurn.source, body.forceBurn.amount);
   if (refusal) return refusal;
   const tx = txId();
   return record(
@@ -672,7 +700,7 @@ function changeAuthority(context: WriteContext): DemoWriteResult {
       : body.authority.role === "freeze"
         ? token.freezeAuthority
         : body.authority.role === "metadata"
-          ? (token.metadataAuthority ?? token.mintAuthority)
+          ? metadataAuthorityOf(token)
           : (token.extensions?.permanentDelegate ?? null);
   if (current === null) {
     return badRequest("That authority has already been given up.");

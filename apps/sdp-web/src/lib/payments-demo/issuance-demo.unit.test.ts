@@ -94,7 +94,7 @@ describe("the token list", () => {
       ["demo_tok_hdr", "demo_tok_usdp", "demo_tok_acme", "demo_tok_vusd", "demo_tok_mrdn"].map(
         lifecycle
       )
-    ).toEqual(["deploying", "failed", "draft", "live", "paused"]);
+    ).toEqual(["draft", "failed", "draft", "live", "paused"]);
   });
 
   it("filters, searches and sorts as the API does", () => {
@@ -241,30 +241,53 @@ describe("a draft to a live token", () => {
 describe("a live token's operations", () => {
   const VUSD = "/v1/issuance/tokens/demo_tok_vusd";
 
-  it("burns, seizes and force-burns within the supply", () => {
+  it("burns, seizes and force-burns only what the source holds", () => {
+    // The issuer's treasury signs and holds the seeded supply; ADDRESS holds none of it.
+    const treasury = token("demo_tok_vusd").mintAuthority as string;
     expect(
-      refusal(write("POST", `${VUSD}/burn`, { burn: { source: ADDRESS, amount: "1" } }))[0]
+      refusal(write("POST", `${VUSD}/burn`, { burn: { source: treasury, amount: "1" } }))[0]
     ).toBe(400);
-    write("POST", `${VUSD}/burn`, {
-      signingCustodyWalletId: TREASURY,
-      burn: { source: ADDRESS, amount: "50000" },
-    });
-    expect(token("demo_tok_vusd").totalSupply).toBe("200000");
-    write("POST", `${VUSD}/seize`, {
-      seize: { source: holderAddress("vusd", 0), destination: ADDRESS, amount: "10" },
-    });
-    expect(token("demo_tok_vusd").totalSupply).toBe("200000");
-    write("POST", `${VUSD}/force-burn`, {
-      forceBurn: { source: holderAddress("vusd", 0), amount: "0.5" },
-    });
-    expect(token("demo_tok_vusd").totalSupply).toBe("199999.5");
     expect(
       refusal(
         write("POST", `${VUSD}/burn`, {
           signingCustodyWalletId: TREASURY,
-          burn: { source: ADDRESS, amount: "999999999" },
+          burn: { source: ADDRESS, amount: "1" },
         })
       )[0]
+    ).toBe(400);
+    write("POST", `${VUSD}/burn`, {
+      signingCustodyWalletId: TREASURY,
+      burn: { source: treasury, amount: "50000" },
+    });
+    expect(token("demo_tok_vusd").totalSupply).toBe("200000");
+    write("POST", `${VUSD}/seize`, {
+      seize: { source: treasury, destination: ADDRESS, amount: "10" },
+    });
+    expect(token("demo_tok_vusd").totalSupply).toBe("200000");
+    write("POST", `${VUSD}/force-burn`, { forceBurn: { source: ADDRESS, amount: "0.5" } });
+    expect(token("demo_tok_vusd").totalSupply).toBe("199999.5");
+    expect(
+      refusal(
+        write("POST", `${VUSD}/force-burn`, { forceBurn: { source: ADDRESS, amount: "20" } })
+      )[0]
+    ).toBe(400);
+    expect(
+      refusal(
+        write("POST", `${VUSD}/burn`, {
+          signingCustodyWalletId: TREASURY,
+          burn: { source: treasury, amount: "999999999" },
+        })
+      )[0]
+    ).toBe(400);
+  });
+
+  it("keeps a given-up metadata authority given up", () => {
+    write("POST", `${VUSD}/authority`, { authority: { role: "metadata", newAuthority: null } });
+    const detail = read(`${VUSD}?includeMetadataAuthority=true`).body.data;
+    expect(detail.metadataAuthority).toBeNull();
+    expect(
+      write("POST", `${VUSD}/authority`, { authority: { role: "metadata", newAuthority: ADDRESS } })
+        .status
     ).toBe(400);
   });
 

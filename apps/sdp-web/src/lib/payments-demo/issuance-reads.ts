@@ -7,7 +7,12 @@ import {
   TOKEN_TRANSACTION_TYPES,
 } from "@sdp/types";
 import type { DemoAnswer } from "./demo-handlers";
-import { type DemoIssuedToken, findIssuedToken, type IssuanceWorld } from "./issuance-fixtures";
+import {
+  type DemoIssuedToken,
+  findIssuedToken,
+  type IssuanceWorld,
+  metadataAuthorityOf,
+} from "./issuance-fixtures";
 
 /*
  * What the demo answers for the Issuance reads: tokens and their facets, one token with the
@@ -153,9 +158,7 @@ function tokenDetail(entry: DemoIssuedToken, params: URLSearchParams): DemoAnswe
       ? { allowlistAuthority: token.ablListAddress ? token.mintAuthority : null }
       : {}),
     ...(asked("includeFreezeAuthority") ? { freezeAuthority: token.freezeAuthority } : {}),
-    ...(asked("includeMetadataAuthority")
-      ? { metadataAuthority: token.metadataAuthority ?? token.mintAuthority }
-      : {}),
+    ...(asked("includeMetadataAuthority") ? { metadataAuthority: metadataAuthorityOf(token) } : {}),
     ...(asked("includePauseAuthority")
       ? {
           pauseAuthority: token.extensions?.pausable

@@ -1,7 +1,7 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
@@ -18,11 +18,13 @@ const walletLabel = (wallet: PaymentsDashboardWallet) =>
 /**
  * A deployed token's authority moved in place under its row, as the design draws it: the
  * holder, then Save authority and Cancel. Giving the authority up (None, where the role allows
- * it) says what that ends before it is saved. A holder outside the project's wallets stays
- * listed so the field shows who holds it now.
+ * it) says what that ends, and Save asks once more in place before anything is sent, as the
+ * dialog did. A holder outside the project's wallets stays listed so the field shows who holds
+ * it now.
  */
 export function AuthorityForm({ ops }: Pick<TokenTabProps, "ops">) {
   const t = useTranslations();
+  const [confirmingNone, setConfirmingNone] = useState(false);
   const row = ops.authorityModalRow;
   if (!row) return null;
 
@@ -38,13 +40,46 @@ export function AuthorityForm({ ops }: Pick<TokenTabProps, "ops">) {
     signer.unavailableReason ?? getSignerWalletUnavailableReason(signer.wallets, signerWalletId, t);
   const blocked = next === current || needsSigner || Boolean(signerReason) || (!next && !canRemove);
 
+  if (confirmingNone && !next) {
+    const copy = getNoneConfirmationCopy(row, t);
+    return (
+      <div data-authority-form className="flex max-w-lg flex-col gap-2 ps-7 pt-1">
+        <p className="text-body font-medium text-primary">{copy.title}</p>
+        <p className="text-body text-warning">
+          {copy.description} {copy.impact}
+        </p>
+        <div className="mt-2 flex items-center gap-4 [--button-height-md:2.125rem] @xl:[--button-height-md:1.75rem]">
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            disabled={ops.isPending || blocked}
+            onClick={() => void ops.handleAuthorityModalConfirm()}
+          >
+            {t("DashboardIssuance.authority.confirmNone")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={ops.isPending}
+            onClick={() => setConfirmingNone(false)}
+          >
+            {t("DashboardIssuance.create.back")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <HolderForm
       submitLabel={t("DashboardIssuance.authority.save")}
       cancelLabel={t("DashboardIssuance.newDesign.permissions.cancel")}
       disabled={ops.isPending}
       blocked={blocked}
-      onSubmit={() => void ops.handleAuthorityModalConfirm()}
+      // Giving an authority up asks once more; handing it to another holder saves at once.
+      onSubmit={() => (next ? void ops.handleAuthorityModalConfirm() : setConfirmingNone(true))}
       onCancel={ops.handleAuthorityModalClose}
       signer={
         needsSigner ? (

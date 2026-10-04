@@ -74,9 +74,14 @@ describe("AuthorityForm", () => {
     expect(ops.handleAuthorityModalClose).toHaveBeenCalledOnce();
   });
 
-  it("says what giving the authority up ends", () => {
-    renderForm("");
-    expect(screen.getByText(messages.DashboardIssuance.authority.freezeNoneImpact)).toBeTruthy();
-    expect((save() as HTMLButtonElement).disabled).toBe(false);
+  it("says what giving the authority up ends, and asks once more before sending it", () => {
+    const ops = renderForm("");
+    const authority = messages.DashboardIssuance.authority;
+    expect(screen.getByText(authority.freezeNoneImpact)).toBeTruthy();
+    fireEvent.click(save());
+    expect(ops.handleAuthorityModalConfirm).not.toHaveBeenCalled();
+    expect(screen.getByText(authority.freezeNoneTitle)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: authority.confirmNone }));
+    expect(ops.handleAuthorityModalConfirm).toHaveBeenCalledOnce();
   });
 });
