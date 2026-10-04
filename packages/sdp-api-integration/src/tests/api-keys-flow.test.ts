@@ -1,4 +1,3 @@
-import { apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { MintApiResponse, TokenApiResponse } from "../helpers/api-types";
 import {
@@ -8,9 +7,8 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
+  signInTestUser,
 } from "../helpers/integration";
-
-const { TEST_PROJECT } = apiTestSupport;
 
 type WalletListResponse = {
   data: {
@@ -78,13 +76,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
       throw new Error("Expected at least one active custody wallet for integration flow");
     }
 
-    const createKeyRes = await adminRequest(`/v1/projects/${TEST_PROJECT.id}/api-keys`, {
+    const userRequest = await signInTestUser();
+    const createKeyRes = await userRequest("/v1/api-keys", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({
         name: `PRO-966 key ${Date.now()}`,
+        role: "api_developer",
         permissions: [
           "tokens:read",
           "tokens:write",

@@ -7,7 +7,7 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
-  TEST_PROJECT,
+  signInTestUser,
 } from "../helpers/integration";
 
 type CreateApiKeyResponse = {
@@ -61,15 +61,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Payments Wallet S
       fundLamports: 12_000_000,
     });
 
-    const createKeyRes = await adminRequest("/v1/api-keys", {
+    const userRequest = await signInTestUser();
+    const createKeyRes = await userRequest("/v1/api-keys", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({
         name: `Wallet scope key ${Date.now()}`,
         role: "api_admin",
-        projectId: TEST_PROJECT.id,
         walletScope: "selected",
         signingWalletId: walletA.walletId,
         signingWalletIds: [walletA.walletId],

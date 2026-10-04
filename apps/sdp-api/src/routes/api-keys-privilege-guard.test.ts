@@ -167,169 +167,6 @@ describe("API key privilege guards", () => {
     expect(row?.expires_at).toBe(expiresAt);
   });
 
-  it("refuses a wallet-scoped key granting a wallet outside its own scope", async () => {
-    const scopedHash = await hashString("sk_test_privilege_scoped", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
-      ...WRITER_CACHED,
-      id: "key_privilege_scoped",
-      walletScope: "selected",
-      signingWalletIds: ["wal_scope_own"],
-      walletBindings: [{ walletId: "wal_scope_own", permissions: ["*"] }],
-    });
-
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer sk_test_privilege_scoped",
-        },
-        body: JSON.stringify({
-          name: "Escaping key",
-          role: "api_readonly",
-          walletScope: "selected",
-          signingWalletId: "wal_scope_other",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("outside your own wallet scope");
-  });
-
-  it("refuses a wallet-scoped key minting an all-wallets key", async () => {
-    const scopedHash = await hashString("sk_test_privilege_scoped3", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
-      ...WRITER_CACHED,
-      id: "key_privilege_scoped3",
-      walletScope: "selected",
-      signingWalletIds: ["wal_scope_own"],
-      walletBindings: [{ walletId: "wal_scope_own", permissions: ["*"] }],
-    });
-
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer sk_test_privilege_scoped3",
-        },
-        body: JSON.stringify({
-          name: "All wallets escape",
-          role: "api_readonly",
-          walletScope: "all",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("outside your own wallet scope");
-  });
-
-  it("lets a wallet-scoped key grant a wallet inside its own scope", async () => {
-    const db = getDb(env);
-    await db
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-         VALUES ('cust_privilege_scope', ?, ?, 'local', 'test-config',
-                 'sdp-custody-encryption-v1', 'active')`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES ('cwlt_privilege_scope', 'cust_privilege_scope', 'wal_scope_own',
-                 'wal_scope_own_public_key', 'active')`
-      )
-      .run();
-    await seedKeyRow(
-      { id: "key_privilege_scoped2", raw: "sk_test_privilege_scoped2" },
-      "api_developer",
-      null
-    );
-    await db
-      .prepare(
-        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES ('akw_privilege_scope', 'key_privilege_scoped2', 'wal_scope_own', '["*"]')`
-      )
-      .run();
-    const scopedHash = await hashString("sk_test_privilege_scoped2", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
-      ...WRITER_CACHED,
-      id: "key_privilege_scoped2",
-      walletScope: "selected",
-      signingWalletIds: ["wal_scope_own"],
-      walletBindings: [{ walletId: "wal_scope_own", permissions: ["*"] }],
-    });
-
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer sk_test_privilege_scoped2",
-        },
-        body: JSON.stringify({
-          name: "Scoped key",
-          role: "api_readonly",
-          walletScope: "selected",
-          signingWalletId: "wal_scope_own",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { data: { apiKey: { id: string } } };
-    const bindings = await getDb(env)
-      .prepare("SELECT wallet_id FROM api_key_wallet_permissions WHERE api_key_id = ?")
-      .bind(body.data.apiKey.id)
-      .all<{ wallet_id: string }>();
-    expect(bindings.results?.map((row) => row.wallet_id)).toEqual(["wal_scope_own"]);
-  });
-
-  it("refuses a wallet-scoped key granting wider permissions on its own wallet", async () => {
-    const scopedHash = await hashString("sk_test_privilege_scoped6", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
-      ...WRITER_CACHED,
-      id: "key_privilege_scoped6",
-      walletScope: "selected",
-      signingWalletIds: ["wal_scope_own"],
-      walletBindings: [{ walletId: "wal_scope_own", permissions: ["tokens:read"] }],
-    });
-
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer sk_test_privilege_scoped6",
-        },
-        body: JSON.stringify({
-          name: "Widened wallet grant",
-          role: "api_readonly",
-          walletScope: "selected",
-          walletBindings: [{ walletId: "wal_scope_own", permissions: ["*"] }],
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("beyond your own");
-  });
-
   it("refuses a wallet-scoped key rotating a key with broader wallet access", async () => {
     await seedKeyRow(READONLY_TARGET_KEY, "api_readonly", null);
     await getDb(env)
@@ -368,90 +205,6 @@ describe("API key privilege guards", () => {
     expect(replacement).toEqual({ count: 0 });
   });
 
-  it("refuses a wallet-scoped key provisioning a wallet", async () => {
-    const scopedHash = await hashString("sk_test_privilege_scoped5", env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, scopedHash, {
-      ...WRITER_CACHED,
-      id: "key_privilege_scoped5",
-      permissions: [...WRITER_CACHED.permissions, "custody:admin"],
-      walletScope: "selected",
-      signingWalletIds: ["wal_scope_own"],
-      walletBindings: [{ walletId: "wal_scope_own", permissions: ["*"] }],
-    });
-
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer sk_test_privilege_scoped5",
-        },
-        body: JSON.stringify({
-          name: "Provisioned escape",
-          role: "api_readonly",
-          walletScope: "selected",
-          provisionWallet: true,
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("Cannot provision a wallet");
-  });
-
-  it("refuses a non-admin key minting an api_admin key with matching permissions", async () => {
-    await reseedActor();
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({
-          name: "Escalated admin",
-          role: "api_admin",
-          walletScope: "all",
-          permissions: ["api-keys:read", "api-keys:write", "payments:read"],
-        }),
-      },
-      env
-    );
-
-    const body = (await res.json()) as { error: { message: string } };
-    expect(res.status, JSON.stringify(body)).toBe(403);
-    expect(body.error.message).toContain("api_admin");
-  });
-
-  it("refuses a non-admin key holding a custom org:admin permission from minting api_admin", async () => {
-    await reseedActor();
-    const writerHash = await hashString(WRITER_KEY.raw, env.API_KEY_PEPPER);
-    await seedCachedApiKey(env, writerHash, {
-      ...WRITER_CACHED,
-      permissions: [...WRITER_CACHED.permissions, "org:admin"],
-    });
-
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({
-          name: "Escalated via org:admin permission",
-          role: "api_admin",
-          walletScope: "all",
-          permissions: ["api-keys:read", "api-keys:write", "payments:read"],
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("api_admin");
-  });
-
   it("refuses a non-admin key rotating an api_admin key with matching permissions", async () => {
     await reseedActor();
     const targetHash = await hashString("sk_test_privilege_admin_rotate", env.API_KEY_PEPPER);
@@ -480,6 +233,32 @@ describe("API key privilege guards", () => {
     expect(body.error.message).toContain("api_admin");
   });
 
+  it("refuses an API key minting an API key", async () => {
+    await reseedAdminActor();
+    const res = await app.request(
+      "/v1/api-keys",
+      {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({
+          name: "Key-minted key",
+          role: "api_readonly",
+          walletScope: "all",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toBe("API key creation requires a signed-in user");
+    const minted = await getDb(env)
+      .prepare("SELECT COUNT(*)::int AS count FROM api_keys WHERE name = ?")
+      .bind("Key-minted key")
+      .first<{ count: number }>();
+    expect(minted).toEqual({ count: 0 });
+  });
+
   it("refuses a key updating its own record", async () => {
     await reseedActor();
     const res = await app.request(
@@ -495,84 +274,6 @@ describe("API key privilege guards", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("being used for this request");
-  });
-
-  it("clones the creator's policy foundation onto a key it mints", async () => {
-    await reseedActor();
-    const db = getDb(env);
-    const profileId = "akcp_creator_profile";
-    const revisionId = "akcpr_creator_revision";
-    await db
-      .prepare(
-        `INSERT INTO api_key_control_profiles (id, organization_id, project_id, api_key_id, name, status, created_by)
-         VALUES (?, ?, ?, ?, ?, 'active', ?)`
-      )
-      .bind(profileId, TEST_ORG.id, TEST_PROJECT.id, WRITER_KEY.id, "creator profile", TEST_USER.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO api_key_control_profile_revisions (id, profile_id, revision_number, rules, default_action, created_by)
-         VALUES (?, ?, 1, ?::jsonb, 'deny', ?)`
-      )
-      .bind(
-        revisionId,
-        profileId,
-        JSON.stringify([{ id: "cap-transfers", kind: "always", action: "deny" }]),
-        TEST_USER.id
-      )
-      .run();
-    await db
-      .prepare("UPDATE api_key_control_profiles SET active_revision_id = ? WHERE id = ?")
-      .bind(revisionId, profileId)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO api_key_wallet_policy_bindings (id, api_key_id, binding_scope, api_key_control_profile_id)
-         VALUES (?, ?, 'all', ?)`
-      )
-      .bind("akwpol_creator_binding", WRITER_KEY.id, profileId)
-      .run();
-
-    const res = await app.request(
-      "/v1/api-keys",
-      {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({
-          name: "policy-bound sibling",
-          role: "api_readonly",
-          permissions: ["tokens:read"],
-          walletScope: "all",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { data: { apiKey: { id: string } } };
-    const siblingId = body.data.apiKey.id;
-
-    // The sibling must be born under a copy of the creator's policy, not free
-    // of it — profile, active revision, rules, and binding all cloned.
-    const clonedProfile = await db
-      .prepare(`SELECT id, active_revision_id FROM api_key_control_profiles WHERE api_key_id = ?`)
-      .bind(siblingId)
-      .first<{ id: string; active_revision_id: string | null }>();
-    expect(clonedProfile).toBeTruthy();
-    expect(clonedProfile?.id).not.toBe(profileId);
-    expect(clonedProfile?.active_revision_id).toBeTruthy();
-    const clonedRevision = await db
-      .prepare(`SELECT rules, default_action FROM api_key_control_profile_revisions WHERE id = ?`)
-      .bind(clonedProfile?.active_revision_id)
-      .first<{ rules: unknown; default_action: string }>();
-    expect(clonedRevision?.default_action).toBe("deny");
-    const clonedBinding = await db
-      .prepare(
-        `SELECT api_key_control_profile_id FROM api_key_wallet_policy_bindings WHERE api_key_id = ?`
-      )
-      .bind(siblingId)
-      .first<{ api_key_control_profile_id: string | null }>();
-    expect(clonedBinding?.api_key_control_profile_id).toBe(clonedProfile?.id);
   });
 
   it.each([

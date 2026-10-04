@@ -567,26 +567,16 @@ describe("OpenAPI spec", () => {
     });
   });
 
-  it("documents optional exact Connection provisioning for both API-key create routes", () => {
-    const doc = createOpenApiDocument();
+  it("documents API-key create as a Clerk-only internal operation that requires a role", () => {
+    const internal = createOpenApiDocument();
+    const publicDocument = createPublicOpenApiDocument();
+    const operation = internal.paths?.["/v1/api-keys"]?.post;
 
-    for (const path of ["/v1/api-keys", "/v1/projects/{projectId}/api-keys"]) {
-      const operation = doc.paths?.[path]?.post;
-      const requestSchema = getJsonSchema(operation?.requestBody);
-
-      expect(requestSchema.properties?.connectionId).toBeUndefined();
-      expect(JSON.stringify(requestSchema.properties?.provisionWallet)).toContain("connectionId");
-      expect(JSON.stringify(requestSchema.properties?.provisionWallet)).toContain("boolean");
-      expect(requestSchema.example).toMatchObject({
-        provisionWallet: { connectionId: "cconn_123" },
-      });
-      expect(operation?.responses?.["201"]).toBeDefined();
-      expect(operation?.responses?.["400"]).toBeDefined();
-      expect(operation?.responses?.["403"]).toBeDefined();
-      expect(operation?.responses?.["404"]).toBeDefined();
-      expect(operation?.responses?.["409"]).toBeDefined();
-      expect(operation?.responses?.["503"]).toBeDefined();
-    }
+    expect(operation?.security).toEqual([{ clerkBearerAuth: [] }]);
+    expect(getJsonSchema(operation?.requestBody).required).toContain("role");
+    expect(internal.paths?.["/v1/projects/{projectId}/api-keys"]).toBeUndefined();
+    expect(publicDocument.paths?.["/v1/api-keys"]?.post).toBeUndefined();
+    expect(publicDocument.paths?.["/v1/api-keys"]?.get).toBeDefined();
   });
 
   it("documents the 422 SIGNING_REJECTED response on sponsored submit operations", () => {

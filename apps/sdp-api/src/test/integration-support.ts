@@ -39,6 +39,7 @@ import {
   TEST_PROJECT_API_KEY,
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
+import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -47,6 +48,7 @@ export type ApiTestCustodyWallet = CustodyWallet;
 
 export const apiTestSupport = {
   app,
+  authenticateTestClerkUser,
   buildExternalWalletDepositTransaction,
   buildExternalWalletWithdrawalTransaction,
   closeAllRedisClients,
