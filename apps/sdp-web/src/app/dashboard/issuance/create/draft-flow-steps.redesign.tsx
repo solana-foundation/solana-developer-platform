@@ -163,10 +163,12 @@ export function ClassifyStep({ draft, update }: { draft: DraftState; update: Upd
           <h3 className="text-subheading font-medium text-primary">
             {t("DashboardIssuance.newDesign.draft.chooseClassification")}
           </h3>
+          {/* A quiet link, as the token page's Explorer is: secondary text, no frame, its words
+              on the column's edge (the left one on a phone, the right one beside the heading). */}
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="[--button-height-md:2.25rem] md:[--button-height-md:1.875rem]"
+            className="-ms-3 text-secondary hover:text-primary md:ms-0 md:-me-3 [--button-height-md:2.25rem] md:[--button-height-md:1.875rem]"
             aria-expanded={explain}
             onClick={() => setExplain((open) => !open)}
           >
