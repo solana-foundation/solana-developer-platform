@@ -432,7 +432,7 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
     }),
     expiresAt: withOpenApi(apiKeyCreateSchemaBase.shape.expiresAt, {
       description: "Optional expiration timestamp. Must be in the future.",
-      example: "2025-12-31T00:00:00.000Z",
+      example: "2027-12-31T00:00:00.000Z",
     }),
     permissions: withOpenApi(apiKeyCreateSchemaBase.shape.permissions, {
       description:
@@ -484,7 +484,7 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
     }),
     expiresAt: withOpenApi(apiKeyUpdateSchemaBase.shape.expiresAt, {
       description: "Updated expiration. Use null to clear.",
-      example: "2026-01-01T00:00:00.000Z",
+      example: "2027-12-31T00:00:00.000Z",
     }),
     permissions: withOpenApi(apiKeyUpdateSchemaBase.shape.permissions, {
       description: "Updated explicit permission set. Use null to revert to role defaults.",

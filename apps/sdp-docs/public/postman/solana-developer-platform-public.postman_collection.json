@@ -63,30 +63,6 @@
           }
         },
         {
-          "name": "Create API key",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys",
-            "description": "Creates a new API key in the project selected by x-project-id. Signed-in users only: API keys cannot mint API keys. The full key is returned once.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key\",\n  \"role\": \"api_developer\",\n  \"walletScope\": \"selected\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\"\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
           "name": "Get API key",
           "request": {
             "method": "GET",
@@ -110,7 +86,7 @@
             "description": "Updates API key attributes. Use null to clear optional fields.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key Updated\",\n  \"description\": \"Rotated key for new service.\",\n  \"walletScope\": \"all\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2026-01-01T00:00:00.000Z\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Primary Key Updated\",\n  \"description\": \"Rotated key for new service.\",\n  \"walletScope\": \"all\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2027-12-31T00:00:00.000Z\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
