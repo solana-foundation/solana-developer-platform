@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { formatDecimalAmount } from "@/app/dashboard/payments/payments-presentation";
 import { RecordAmount } from "@/app/dashboard/payments/payments-record";
@@ -215,6 +215,11 @@ function DeployElapsed({ since }: { since: string }) {
   const t = useTranslations();
   const locale = useLocale();
   const [now, setNow] = useState(() => Date.now());
+  // Built once per locale: a formatter is slow to construct and the count re-renders each tenth.
+  const tenths = useMemo(
+    () => new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    [locale]
+  );
   const elapsed = Math.max(0, now - new Date(since).getTime());
   const underMinute = elapsed < 60_000;
   useEffect(() => {
@@ -227,10 +232,7 @@ function DeployElapsed({ since }: { since: string }) {
     <span suppressHydrationWarning className="text-body text-secondary tabular-nums">
       {underMinute
         ? t("DashboardIssuance.newDesign.overview.elapsedSeconds", {
-            seconds: new Intl.NumberFormat(locale, {
-              minimumFractionDigits: 1,
-              maximumFractionDigits: 1,
-            }).format(Math.floor(elapsed / 100) / 10),
+            seconds: tenths.format(Math.floor(elapsed / 100) / 10),
           })
         : t("DashboardIssuance.newDesign.overview.elapsedMinutes", {
             minutes: Math.floor(seconds / 60),
