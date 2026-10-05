@@ -6,8 +6,9 @@ import {
 } from "@/app/dashboard/issuance/issuance-tokens.data";
 import { buildWorld, demoPathParts } from "./demo-fixtures";
 import { demoWrite } from "./demo-handlers";
-import { type DemoOp, parseDemoOps } from "./demo-ops";
+import type { DemoOp } from "./demo-ops";
 import { applyDemoOps } from "./demo-replay";
+import { decodeDemoOps, encodeDemoOps } from "./demo-session";
 import { DEMO_DEPLOY_FAILURE, DEMO_DEPLOY_MS, holderAddress } from "./issuance-fixtures";
 import { issuanceRead } from "./issuance-reads";
 
@@ -404,6 +405,6 @@ describe("the session", () => {
       issuanceMetadata: { asset: { name: "Round Trip" } },
     });
     write("POST", "/v1/issuance/tokens/demo_tok_vusd/pause", {});
-    expect(parseDemoOps(JSON.parse(JSON.stringify(ops)))).toEqual(ops);
+    expect(decodeDemoOps(encodeDemoOps(ops))).toEqual(ops);
   });
 });

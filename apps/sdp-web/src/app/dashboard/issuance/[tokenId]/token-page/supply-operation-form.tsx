@@ -1,5 +1,6 @@
 "use client";
 
+import type { PaymentsDashboardWallet } from "@sdp/types";
 import { type ReactNode, useId } from "react";
 import { formatDecimalAmount } from "@/app/dashboard/payments/payments-presentation";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,51 @@ import {
 import { TokenSignerSelect } from "../token-signer-select";
 import type { TokenTabProps } from "./token-page.shared";
 
+type Ops = TokenTabProps["ops"];
+type Translate = ReturnType<typeof useTranslations>;
+type SupplyPatch = { address?: string; amount?: string; memo?: string };
+
+/** What the open mint or burn form shows and allows, read from the token's operations. */
+function readSupplyOperation(ops: Ops, action: FundManagementModalAction, t: Translate) {
+  const mint = action === "mint";
+  const form = mint ? ops.mintForm : ops.burnForm;
+  const address = mint ? ops.mintForm.destination : ops.burnForm.source;
+  const errors = mint ? ops.mintValidationErrors : ops.burnValidationErrors;
+  const addressError = mint
+    ? ops.mintValidationErrors.destination
+    : ops.burnValidationErrors.source;
+  const signer = ops.getActionSignerProps(action);
+  const signerWallets = signer?.signerWallets ?? [];
+  const needsSigner = signerWallets.length > 1 && !form.signingWalletId;
+  const blocked =
+    !address.trim() ||
+    !form.amount.trim() ||
+    Boolean(ops.fundManagementDisabledReasons[action]) ||
+    Boolean(signer?.signerUnavailableReason) ||
+    Boolean(getSignerWalletUnavailableReason(signerWallets, form.signingWalletId, t)) ||
+    needsSigner;
+  return { mint, form, address, errors, addressError, signer, signerWallets, needsSigner, blocked };
+}
+
+/** Writes a field of the mint form (its destination) or the burn form (its source). */
+function updateSupplyForm(ops: Ops, mint: boolean, patch: SupplyPatch) {
+  if (mint) {
+    ops.setMintForm((previous) => ({
+      ...previous,
+      ...(patch.address !== undefined && { destination: patch.address }),
+      ...(patch.amount !== undefined && { amount: patch.amount }),
+      ...(patch.memo !== undefined && { memo: patch.memo }),
+    }));
+  } else {
+    ops.setBurnForm((previous) => ({
+      ...previous,
+      ...(patch.address !== undefined && { source: patch.address }),
+      ...(patch.amount !== undefined && { amount: patch.amount }),
+      ...(patch.memo !== undefined && { memo: patch.memo }),
+    }));
+  }
+}
+
 /**
  * Mint or burn opened in place under the issued supply, as the design draws it: the address,
  * the amount and a memo, then the action and Cancel. The default signer signs; a picker shows
@@ -27,42 +73,9 @@ export function SupplyOperationForm({
   const t = useTranslations();
   const locale = useLocale();
   const id = useId();
-  const mint = action === "mint";
-  const form = mint ? ops.mintForm : ops.burnForm;
-  const address = mint ? ops.mintForm.destination : ops.burnForm.source;
-  const errors = mint ? ops.mintValidationErrors : ops.burnValidationErrors;
-  const addressError = mint
-    ? ops.mintValidationErrors.destination
-    : ops.burnValidationErrors.source;
-  const signer = ops.getActionSignerProps(action);
-  const signerWallets = signer?.signerWallets ?? [];
-  const needsSigner = signerWallets.length > 1 && !form.signingWalletId;
-
-  const update = (patch: { address?: string; amount?: string; memo?: string }) => {
-    if (mint) {
-      ops.setMintForm((previous) => ({
-        ...previous,
-        ...(patch.address !== undefined && { destination: patch.address }),
-        ...(patch.amount !== undefined && { amount: patch.amount }),
-        ...(patch.memo !== undefined && { memo: patch.memo }),
-      }));
-    } else {
-      ops.setBurnForm((previous) => ({
-        ...previous,
-        ...(patch.address !== undefined && { source: patch.address }),
-        ...(patch.amount !== undefined && { amount: patch.amount }),
-        ...(patch.memo !== undefined && { memo: patch.memo }),
-      }));
-    }
-  };
-
-  const blocked =
-    !address.trim() ||
-    !form.amount.trim() ||
-    Boolean(ops.fundManagementDisabledReasons[action]) ||
-    Boolean(signer?.signerUnavailableReason) ||
-    Boolean(getSignerWalletUnavailableReason(signerWallets, form.signingWalletId, t)) ||
-    needsSigner;
+  const { mint, form, address, errors, addressError, signer, signerWallets, needsSigner, blocked } =
+    readSupplyOperation(ops, action, t);
+  const update = (patch: SupplyPatch) => updateSupplyForm(ops, mint, patch);
   const walletsListId = `${id}-wallets`;
 
   return (
@@ -98,13 +111,7 @@ export function SupplyOperationForm({
           onChange={(event) => update({ address: event.currentTarget.value })}
         />
         {/* The project's wallets as suggestions; any Solana address can still be typed. */}
-        <datalist id={walletsListId}>
-          {ops.authorityWallets.map((wallet) => (
-            <option key={wallet.id} value={wallet.publicKey}>
-              {wallet.label?.trim() || wallet.publicKey}
-            </option>
-          ))}
-        </datalist>
+        <WalletSuggestions id={walletsListId} wallets={ops.authorityWallets} />
       </FormField>
       <FormField
         id={`${id}-amount`}
@@ -160,14 +167,8 @@ export function SupplyOperationForm({
   );
 }
 
-/**
- * Lock supply opened in place under the supply cap, as the design draws it: where the rest of
- * the supply goes, what locking means, then Mint and lock and Cancel. With nothing left to mint
- * it is a bare lock. If the mint landed and the lock did not, it says so and retries the lock.
- */
-export function LockSupplyForm({ ops }: Pick<TokenTabProps, "ops">) {
-  const t = useTranslations();
-  const id = useId();
+/** What the open lock form shows and allows, read from the token's operations. */
+function readLockSupply(ops: Ops, t: Translate) {
   const remaining = ops.lockSupplyRemaining ?? "";
   const needsMint = !ops.lockSupplyMinted && /[1-9]/.test(remaining);
   const { destination, signingWalletId } = ops.lockSupplyForm;
@@ -181,6 +182,42 @@ export function LockSupplyForm({ ops }: Pick<TokenTabProps, "ops">) {
     !signingWalletId ||
     Boolean(signer.unavailableReason) ||
     Boolean(getSignerWalletUnavailableReason(signer.wallets, signingWalletId, t));
+  return {
+    needsMint,
+    destination,
+    signingWalletId,
+    signer,
+    needsSigner,
+    destinationInvalid,
+    blocked,
+  };
+}
+
+/** The lock's action: a retry of the lock alone, Mint and lock, or the bare lock. */
+function lockSupplyLabel(ops: Ops, needsMint: boolean, t: Translate) {
+  if (ops.lockSupplyRevokeFailed) return t("DashboardIssuance.management.lockSupplyRetryRevoke");
+  return needsMint
+    ? t("DashboardIssuance.newDesign.operations.mintAndLock")
+    : t("DashboardIssuance.management.lockSupplyConfirm");
+}
+
+/**
+ * Lock supply opened in place under the supply cap, as the design draws it: where the rest of
+ * the supply goes, what locking means, then Mint and lock and Cancel. With nothing left to mint
+ * it is a bare lock. If the mint landed and the lock did not, it says so and retries the lock.
+ */
+export function LockSupplyForm({ ops }: Pick<TokenTabProps, "ops">) {
+  const t = useTranslations();
+  const id = useId();
+  const {
+    needsMint,
+    destination,
+    signingWalletId,
+    signer,
+    needsSigner,
+    destinationInvalid,
+    blocked,
+  } = readLockSupply(ops, t);
   const walletsListId = `${id}-wallets`;
 
   return (
@@ -222,32 +259,13 @@ export function LockSupplyForm({ ops }: Pick<TokenTabProps, "ops">) {
               ops.setLockSupplyForm((previous) => ({ ...previous, destination: next }));
             }}
           />
-          <datalist id={walletsListId}>
-            {ops.authorityWallets.map((wallet) => (
-              <option key={wallet.id} value={wallet.publicKey}>
-                {wallet.label?.trim() || wallet.publicKey}
-              </option>
-            ))}
-          </datalist>
+          <WalletSuggestions id={walletsListId} wallets={ops.authorityWallets} />
         </FormField>
       ) : null}
-      {ops.lockSupplyRevokeFailed ? (
-        <p className="text-body text-error">
-          {t("DashboardIssuance.management.lockSupplyPartialTitle")}.{" "}
-          {t("DashboardIssuance.management.lockSupplyPartialBody")}
-        </p>
-      ) : (
-        <p className="text-body text-warning">
-          {t("DashboardIssuance.newDesign.operations.lockWarning")}
-        </p>
-      )}
+      <LockSupplyNotice revokeFailed={ops.lockSupplyRevokeFailed} />
       <div className="flex items-center gap-4 [--button-height-md:2.125rem] @xl:[--button-height-md:1.75rem]">
         <Button type="submit" size="sm" variant="destructive" disabled={ops.isPending || blocked}>
-          {ops.lockSupplyRevokeFailed
-            ? t("DashboardIssuance.management.lockSupplyRetryRevoke")
-            : needsMint
-              ? t("DashboardIssuance.newDesign.operations.mintAndLock")
-              : t("DashboardIssuance.management.lockSupplyConfirm")}
+          {lockSupplyLabel(ops, needsMint, t)}
         </Button>
         <Button
           type="button"
@@ -260,6 +278,34 @@ export function LockSupplyForm({ ops }: Pick<TokenTabProps, "ops">) {
         </Button>
       </div>
     </form>
+  );
+}
+
+/** What locking means, or, when the mint landed and the lock did not, that the lock failed. */
+function LockSupplyNotice({ revokeFailed }: { revokeFailed: boolean }) {
+  const t = useTranslations();
+  return revokeFailed ? (
+    <p className="text-body text-error">
+      {t("DashboardIssuance.management.lockSupplyPartialTitle")}.{" "}
+      {t("DashboardIssuance.management.lockSupplyPartialBody")}
+    </p>
+  ) : (
+    <p className="text-body text-warning">
+      {t("DashboardIssuance.newDesign.operations.lockWarning")}
+    </p>
+  );
+}
+
+/** The project's wallets offered under an address field, by label where they have one. */
+function WalletSuggestions({ id, wallets }: { id: string; wallets: PaymentsDashboardWallet[] }) {
+  return (
+    <datalist id={id}>
+      {wallets.map((wallet) => (
+        <option key={wallet.id} value={wallet.publicKey}>
+          {wallet.label?.trim() || wallet.publicKey}
+        </option>
+      ))}
+    </datalist>
   );
 }
 

@@ -5,8 +5,11 @@ import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
-import { getNoneConfirmationCopy } from "../token-authority-modal";
-import { getSignerWalletUnavailableReason } from "../token-management-workspace.utils";
+import type { PermissionRow } from "../token-management-workspace.types";
+import {
+  getNoneConfirmationCopy,
+  getSignerWalletUnavailableReason,
+} from "../token-management-workspace.utils";
 import { TokenSignerSelect } from "../token-signer-select";
 import { shortAddress, type TokenTabProps } from "./token-page.shared";
 
@@ -14,6 +17,27 @@ const NONE = "__none_authority__";
 
 const walletLabel = (wallet: PaymentsDashboardWallet) =>
   wallet.label?.trim() || shortAddress(wallet.publicKey);
+
+type Ops = TokenTabProps["ops"];
+type Translate = ReturnType<typeof useTranslations>;
+
+/** What the open authority form shows and allows, read from the token's operations. */
+function readAuthorityForm(ops: Ops, row: PermissionRow, t: Translate) {
+  const wallets = ops.authorityWallets.filter((wallet) => wallet.publicKey.trim());
+  const current = (ops.authorityModalCurrentAuthority ?? "").trim();
+  const next = ops.authorityModalNewAuthority.trim();
+  const external = next && !wallets.some((wallet) => wallet.publicKey === next) ? next : null;
+  const canRemove = !row.removalDisabledReason;
+  const signer = ops.authorityModalSignerSelection;
+  const signerWalletId = ops.authorityModalSignerWalletId;
+  const needsSigner = signer.wallets.length > 1 && !signerWalletId;
+  const signerReason =
+    signer.unavailableReason ?? getSignerWalletUnavailableReason(signer.wallets, signerWalletId, t);
+  const blocked = next === current || needsSigner || Boolean(signerReason) || (!next && !canRemove);
+  return { wallets, current, next, external, canRemove, needsSigner, signerReason, blocked };
+}
+
+type AuthorityFormState = ReturnType<typeof readAuthorityForm>;
 
 /**
  * A deployed token's authority moved in place under its row, as the design draws it: the
@@ -28,47 +52,16 @@ export function AuthorityForm({ ops }: Pick<TokenTabProps, "ops">) {
   const row = ops.authorityModalRow;
   if (!row) return null;
 
-  const wallets = ops.authorityWallets.filter((wallet) => wallet.publicKey.trim());
-  const current = (ops.authorityModalCurrentAuthority ?? "").trim();
-  const next = ops.authorityModalNewAuthority.trim();
-  const external = next && !wallets.some((wallet) => wallet.publicKey === next) ? next : null;
-  const canRemove = !row.removalDisabledReason;
-  const signer = ops.authorityModalSignerSelection;
-  const signerWalletId = ops.authorityModalSignerWalletId;
-  const needsSigner = signer.wallets.length > 1 && !signerWalletId;
-  const signerReason =
-    signer.unavailableReason ?? getSignerWalletUnavailableReason(signer.wallets, signerWalletId, t);
-  const blocked = next === current || needsSigner || Boolean(signerReason) || (!next && !canRemove);
+  const state = readAuthorityForm(ops, row, t);
 
-  if (confirmingNone && !next) {
-    const copy = getNoneConfirmationCopy(row, t);
+  if (confirmingNone && !state.next) {
     return (
-      <div data-authority-form className="flex max-w-lg flex-col gap-2 ps-7 pt-1">
-        <p className="text-body font-medium text-primary">{copy.title}</p>
-        <p className="text-body text-warning">
-          {copy.description} {copy.impact}
-        </p>
-        <div className="mt-2 flex items-center gap-4 [--button-height-md:2.125rem] @xl:[--button-height-md:1.75rem]">
-          <Button
-            type="button"
-            size="sm"
-            variant="destructive"
-            disabled={ops.isPending || blocked}
-            onClick={() => void ops.handleAuthorityModalConfirm()}
-          >
-            {t("DashboardIssuance.authority.confirmNone")}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={ops.isPending}
-            onClick={() => setConfirmingNone(false)}
-          >
-            {t("DashboardIssuance.create.back")}
-          </Button>
-        </div>
-      </div>
+      <ConfirmNoneForm
+        ops={ops}
+        row={row}
+        blocked={state.blocked}
+        onBack={() => setConfirmingNone(false)}
+      />
     );
   }
 
@@ -77,43 +70,117 @@ export function AuthorityForm({ ops }: Pick<TokenTabProps, "ops">) {
       submitLabel={t("DashboardIssuance.authority.save")}
       cancelLabel={t("DashboardIssuance.newDesign.permissions.cancel")}
       disabled={ops.isPending}
-      blocked={blocked}
+      blocked={state.blocked}
       // Giving an authority up asks once more; handing it to another holder saves at once.
-      onSubmit={() => (next ? void ops.handleAuthorityModalConfirm() : setConfirmingNone(true))}
+      onSubmit={() =>
+        state.next ? void ops.handleAuthorityModalConfirm() : setConfirmingNone(true)
+      }
       onCancel={ops.handleAuthorityModalClose}
       signer={
-        needsSigner ? (
+        state.needsSigner ? (
           <TokenSignerSelect
-            signerWallets={signer.wallets}
-            signerWalletId={signerWalletId}
-            signerUnavailableReason={signer.unavailableReason}
+            signerWallets={ops.authorityModalSignerSelection.wallets}
+            signerWalletId={ops.authorityModalSignerWalletId}
+            signerUnavailableReason={ops.authorityModalSignerSelection.unavailableReason}
             onSignerWalletIdChange={ops.setAuthorityModalSignerWalletId}
           />
         ) : null
       }
-      field={
-        <Select
-          size="xl"
-          ariaLabel={row.title}
-          placeholder={t("DashboardIssuance.authority.selectWallet")}
-          value={next || (canRemove ? NONE : "")}
-          disabled={ops.isPending}
-          onValueChange={(value) =>
-            ops.setAuthorityModalNewAuthority(!value || value === NONE ? "" : value)
-          }
+      field={<AuthorityHolderSelect ops={ops} row={row} state={state} />}
+    >
+      <AuthorityFormNotes ops={ops} row={row} state={state} />
+    </HolderForm>
+  );
+}
+
+/** Giving the authority up, asked once more in place: what it ends, then confirm or go back. */
+function ConfirmNoneForm({
+  ops,
+  row,
+  blocked,
+  onBack,
+}: {
+  ops: Ops;
+  row: PermissionRow;
+  blocked: boolean;
+  onBack: () => void;
+}) {
+  const t = useTranslations();
+  const copy = getNoneConfirmationCopy(row, t);
+  return (
+    <div data-authority-form className="flex max-w-lg flex-col gap-2 ps-7 pt-1">
+      <p className="text-body font-medium text-primary">{copy.title}</p>
+      <p className="text-body text-warning">
+        {copy.description} {copy.impact}
+      </p>
+      <div className="mt-2 flex items-center gap-4 [--button-height-md:2.125rem] @xl:[--button-height-md:1.75rem]">
+        <Button
+          type="button"
+          size="sm"
+          variant="destructive"
+          disabled={ops.isPending || blocked}
+          onClick={() => void ops.handleAuthorityModalConfirm()}
         >
-          {wallets.map((wallet) => (
-            <SelectItem key={wallet.id} value={wallet.publicKey}>
-              {walletLabel(wallet)}
-            </SelectItem>
-          ))}
-          {external ? <SelectItem value={external}>{shortAddress(external)}</SelectItem> : null}
-          {canRemove ? (
-            <SelectItem value={NONE}>{t("DashboardIssuance.wallet.none")}</SelectItem>
-          ) : null}
-        </Select>
+          {t("DashboardIssuance.authority.confirmNone")}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" disabled={ops.isPending} onClick={onBack}>
+          {t("DashboardIssuance.create.back")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** The holder: the project's wallets, a holder outside them, and None where the role allows it. */
+function AuthorityHolderSelect({
+  ops,
+  row,
+  state,
+}: {
+  ops: Ops;
+  row: PermissionRow;
+  state: AuthorityFormState;
+}) {
+  const t = useTranslations();
+  const { wallets, next, external, canRemove } = state;
+  return (
+    <Select
+      size="xl"
+      ariaLabel={row.title}
+      placeholder={t("DashboardIssuance.authority.selectWallet")}
+      value={next || (canRemove ? NONE : "")}
+      disabled={ops.isPending}
+      onValueChange={(value) =>
+        ops.setAuthorityModalNewAuthority(!value || value === NONE ? "" : value)
       }
     >
+      {wallets.map((wallet) => (
+        <SelectItem key={wallet.id} value={wallet.publicKey}>
+          {walletLabel(wallet)}
+        </SelectItem>
+      ))}
+      {external ? <SelectItem value={external}>{shortAddress(external)}</SelectItem> : null}
+      {canRemove ? (
+        <SelectItem value={NONE}>{t("DashboardIssuance.wallet.none")}</SelectItem>
+      ) : null}
+    </Select>
+  );
+}
+
+/** Under the holder: a wallet load error, what giving the authority up ends, a signer problem. */
+function AuthorityFormNotes({
+  ops,
+  row,
+  state,
+}: {
+  ops: Ops;
+  row: PermissionRow;
+  state: AuthorityFormState;
+}) {
+  const t = useTranslations();
+  const { next, canRemove, current, signerReason, needsSigner } = state;
+  return (
+    <>
       {ops.authorityWalletsError ? (
         <p className="text-meta text-error">{ops.authorityWalletsError}</p>
       ) : null}
@@ -121,7 +188,7 @@ export function AuthorityForm({ ops }: Pick<TokenTabProps, "ops">) {
         <p className="text-body text-warning">{getNoneConfirmationCopy(row, t).impact}</p>
       ) : null}
       {signerReason && !needsSigner ? <p className="text-meta text-error">{signerReason}</p> : null}
-    </HolderForm>
+    </>
   );
 }
 
@@ -201,8 +268,7 @@ function HolderForm({
     <form
       data-authority-form
       className="flex max-w-lg flex-col gap-4 ps-7 pt-1"
-      onSubmit={(event) => {
-        event.preventDefault();
+      action={() => {
         if (!blocked && !disabled) onSubmit();
       }}
     >

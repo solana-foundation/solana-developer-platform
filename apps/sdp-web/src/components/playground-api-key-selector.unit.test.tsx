@@ -10,7 +10,9 @@ import {
   PLAYGROUND_API_KEY_INACTIVITY_TIMEOUT_MS,
 } from "@/lib/playground-api-keys";
 import { usePlaygroundApiKeySecret } from "@/lib/use-playground-api-key-secret";
+import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
 import { PlaygroundApiKeySelector } from "./playground-api-key-selector";
+import { ThemeScopeProvider } from "./theme-scope-provider";
 
 const workspace = vi.hoisted(() => ({
   dashboardAccess: { capabilities: { canManageApiKeys: true } },
@@ -30,6 +32,7 @@ const workspace = vi.hoisted(() => ({
       environment: "sandbox",
     },
   ],
+  sdpEnvironment: "sandbox" as const,
   selectedPlaygroundApiKeyId: null as string | null,
   setSelectedPlaygroundApiKeyId: vi.fn((id: string | null) => {
     workspace.selectedPlaygroundApiKeyId = id;
@@ -38,6 +41,14 @@ const workspace = vi.hoisted(() => ({
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => workspace,
+}));
+
+vi.mock("@/lib/dashboard-url-state", () => ({
+  useDashboardUrlState: () => ({ replaceSearchParams: vi.fn(), searchParams: { get: () => null } }),
+}));
+
+vi.mock("@/lib/shiki-code", () => ({
+  HighlightedCode: ({ content }: { content: string }) => <pre>{content}</pre>,
 }));
 
 /**
@@ -300,5 +311,112 @@ describe("PlaygroundApiKeySelector", () => {
 
     expect(secretInput.value).toBe("");
     expect(getStoredApiKeySecret({ apiKeyId: "key_test" })).toBeNull();
+  });
+});
+
+describe("PlaygroundApiKeySelector in the refresh playground", () => {
+  const endpoint: ApiPlaygroundEndpointConfig = {
+    id: "test-request",
+    title: "Test request",
+    method: "GET",
+    path: "/v1/test",
+    pathFields: [],
+    bodyFields: [],
+    expectedResponse: {},
+  };
+
+  /** The resolve route names the key; the execute route answers the run. */
+  function mockPlaygroundRoutes(resolved: { ok: boolean; body: unknown }) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+      String(input) === "/api/playground/api-key"
+        ? { ok: resolved.ok, json: async () => resolved.body }
+        : {
+            ok: true,
+            json: async () => ({ ok: true, status: 200, statusText: "OK", body: {}, headers: {} }),
+          }
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function sentTo(fetchMock: ReturnType<typeof mockPlaygroundRoutes>, url: string) {
+    return fetchMock.mock.calls
+      .filter(([input]) => String(input) === url)
+      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+  }
+
+  /** The playground as a page renders it: the shell's key prop lags the field by a render. */
+  function playground() {
+    return render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ThemeScopeProvider scope="refresh">
+          <ApiPlaygroundShell
+            apiKeyId={workspace.selectedPlaygroundApiKeyId}
+            apiKeySelector={<PlaygroundApiKeySelector />}
+            endpoints={[endpoint]}
+            productName="Test product"
+          />
+        </ThemeScopeProvider>
+      </I18nProvider>
+    );
+  }
+
+  beforeEach(() => {
+    clearStoredApiKeySecrets();
+    workspace.selectedPlaygroundApiKeyId = null;
+  });
+
+  afterEach(() => {
+    cleanup();
+    clearStoredApiKeySecrets();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("identifies a key pasted with the popover open before ⌘↵ runs the request", async () => {
+    // Greptile: the paste detached the previous key, and the popover identifies the new one
+    // only as it closes, so the shortcut ran with no key at all.
+    const fetchMock = mockPlaygroundRoutes({
+      ok: true,
+      body: { id: "key_test", name: "Test key", keyPrefix: "sk_test_example" },
+    });
+    const view = playground();
+
+    fireEvent.click(view.getByRole("button", { name: "Paste a key" }));
+    const secretInput = view.getByLabelText("API key value");
+    fireEvent.change(secretInput, { target: { value: "sk_test_session_secret" } });
+    fireEvent.keyDown(secretInput, { key: "Enter", metaKey: true });
+
+    await waitFor(() =>
+      expect(sentTo(fetchMock, "/api/playground/execute")).toEqual([
+        expect.objectContaining({ apiKey: "sk_test_session_secret", path: "/v1/test" }),
+      ])
+    );
+    // Identified once, before the run: the popover's close and the run share the answer.
+    expect(sentTo(fetchMock, "/api/playground/api-key")).toEqual([
+      { apiKey: "sk_test_session_secret" },
+    ]);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/playground/api-key");
+    expect(getStoredApiKeySecret({ apiKeyId: "key_test" })).toBe("sk_test_session_secret");
+  });
+
+  it("does not run with a key the server refuses", async () => {
+    const fetchMock = mockPlaygroundRoutes({
+      ok: false,
+      body: { error: "API key is not available for the selected project" },
+    });
+    const view = playground();
+
+    fireEvent.click(view.getByRole("button", { name: "Paste a key" }));
+    const secretInput = view.getByLabelText("API key value");
+    fireEvent.change(secretInput, { target: { value: "sk_test_not_mine" } });
+    fireEvent.keyDown(secretInput, { key: "Enter", ctrlKey: true });
+
+    await waitFor(() =>
+      expect(view.getByRole("alert").textContent).toBe(
+        "API key is not available for the selected project"
+      )
+    );
+    expect(sentTo(fetchMock, "/api/playground/execute")).toEqual([]);
   });
 });

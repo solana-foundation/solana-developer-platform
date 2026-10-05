@@ -127,8 +127,8 @@ const createSchema = z
     signingCustodyWalletId: walletId.optional(),
     decimals: z.number().int().min(0).max(18).optional(),
     description: z.string().max(500).optional(),
-    uri: z.string().url().max(512).optional(),
-    imageUrl: z.string().url().max(512).optional(),
+    uri: z.url().max(512).optional(),
+    imageUrl: z.url().max(512).optional(),
     maxSupply: z.string().regex(DECIMAL).optional(),
     template: z.enum(["stablecoin", "rwa", "arcade", "tokenized-security", "custom"]).optional(),
     requiresAllowlist: z.boolean().optional(),
@@ -200,20 +200,18 @@ function createDraft(context: WriteContext): DemoWriteResult {
   );
 }
 
-const nullableUrl = z.string().url().max(512).nullable();
-const patchSchema = z
-  .object({
-    signingCustodyWalletId: walletId.optional(),
-    name: z.string().trim().min(1).max(100).optional(),
-    symbol: z.string().trim().min(1).max(10).regex(SYMBOL).optional(),
-    decimals: z.number().int().min(0).max(18).optional(),
-    description: z.string().max(500).nullable().optional(),
-    uri: nullableUrl.optional(),
-    imageUrl: nullableUrl.optional(),
-    requiresAllowlist: z.boolean().optional(),
-    maxSupply: z.string().regex(DECIMAL).nullable().optional(),
-  })
-  .strict();
+const nullableUrl = z.url().max(512).nullable();
+const patchSchema = z.strictObject({
+  signingCustodyWalletId: walletId.optional(),
+  name: z.string().trim().min(1).max(100).optional(),
+  symbol: z.string().trim().min(1).max(10).regex(SYMBOL).optional(),
+  decimals: z.number().int().min(0).max(18).optional(),
+  description: z.string().max(500).nullable().optional(),
+  uri: nullableUrl.optional(),
+  imageUrl: nullableUrl.optional(),
+  requiresAllowlist: z.boolean().optional(),
+  maxSupply: z.string().regex(DECIMAL).nullable().optional(),
+});
 
 /** `PATCH /tokens/:id`: name, description, links and supply cap; the rest only before deploy. */
 function updateToken(context: WriteContext): DemoWriteResult {
@@ -300,20 +298,17 @@ function updateProfile(context: WriteContext): DemoWriteResult {
 
 // ─── Deploy ──────────────────────────────────────────────────────────────────
 
-const deploySchema = z
-  .object({
-    signingCustodyWalletId: walletId.optional(),
-    authorityCustodyWalletIds: z
-      .object({
-        metadata: walletId.optional(),
-        freeze: walletId.optional(),
-        permanentDelegate: walletId.optional(),
-      })
-      .strict()
-      .optional(),
-    feePayment: z.enum(["sponsored", "wallet"]).default("sponsored"),
-  })
-  .strict();
+const deploySchema = z.strictObject({
+  signingCustodyWalletId: walletId.optional(),
+  authorityCustodyWalletIds: z
+    .strictObject({
+      metadata: walletId.optional(),
+      freeze: walletId.optional(),
+      permanentDelegate: walletId.optional(),
+    })
+    .optional(),
+  feePayment: z.enum(["sponsored", "wallet"]).default("sponsored"),
+});
 
 /** `POST /tokens/:id/deploy`: submits the deploy; it lands a few seconds later. */
 function deploy(context: WriteContext): DemoWriteResult {
@@ -363,13 +358,11 @@ function onBlocklist(entry: DemoIssuedToken, target: string) {
   );
 }
 
-const mintSchema = z
-  .object({
-    signingCustodyWalletId: walletId.optional(),
-    mint: z.object({ destination: address, amount, memo }).strict(),
-    options: options.optional(),
-  })
-  .strict();
+const mintSchema = z.strictObject({
+  signingCustodyWalletId: walletId.optional(),
+  mint: z.strictObject({ destination: address, amount, memo }),
+  options: options.optional(),
+});
 
 /** `POST /tokens/:id/mint`: new supply to an address, within the cap. */
 function mint(context: WriteContext): DemoWriteResult {
@@ -448,13 +441,11 @@ function holdingRefusal(entry: DemoIssuedToken, source: string, value: string) {
     : null;
 }
 
-const burnSchema = z
-  .object({
-    signingCustodyWalletId: walletId,
-    burn: z.object({ source: address, amount, memo }).strict(),
-    options: options.optional(),
-  })
-  .strict();
+const burnSchema = z.strictObject({
+  signingCustodyWalletId: walletId,
+  burn: z.strictObject({ source: address, amount, memo }),
+  options: options.optional(),
+});
 
 /** `POST /tokens/:id/burn`: supply out of an address the signer holds. */
 function burn(context: WriteContext): DemoWriteResult {
@@ -494,21 +485,17 @@ function delegateRefusal(entry: DemoIssuedToken) {
     : badRequest("This token has no permanent delegate.");
 }
 
-const seizeSchema = z
-  .object({
-    signingCustodyWalletId: walletId.optional(),
-    seize: z
-      .object({
-        source: address,
-        destination: address,
-        amount,
-        delegateAuthority: z.string().optional(),
-        memo,
-      })
-      .strict(),
-    options: options.optional(),
-  })
-  .strict();
+const seizeSchema = z.strictObject({
+  signingCustodyWalletId: walletId.optional(),
+  seize: z.strictObject({
+    source: address,
+    destination: address,
+    amount,
+    delegateAuthority: z.string().optional(),
+    memo,
+  }),
+  options: options.optional(),
+});
 
 /** `POST /tokens/:id/seize`: the permanent delegate moves tokens out of an account. */
 function seize(context: WriteContext): DemoWriteResult {
@@ -543,15 +530,16 @@ function seize(context: WriteContext): DemoWriteResult {
   );
 }
 
-const forceBurnSchema = z
-  .object({
-    signingCustodyWalletId: walletId.optional(),
-    forceBurn: z
-      .object({ source: address, amount, delegateAuthority: z.string().optional(), memo })
-      .strict(),
-    options: options.optional(),
-  })
-  .strict();
+const forceBurnSchema = z.strictObject({
+  signingCustodyWalletId: walletId.optional(),
+  forceBurn: z.strictObject({
+    source: address,
+    amount,
+    delegateAuthority: z.string().optional(),
+    memo,
+  }),
+  options: options.optional(),
+});
 
 /** `POST /tokens/:id/force-burn`: the permanent delegate burns tokens out of an account. */
 function forceBurn(context: WriteContext): DemoWriteResult {
@@ -588,13 +576,11 @@ function forceBurn(context: WriteContext): DemoWriteResult {
 
 // ─── Freeze and pause ────────────────────────────────────────────────────────
 
-const freezeSchema = z
-  .object({
-    accountAddress: address,
-    reason: z.string().max(500).optional(),
-    signingCustodyWalletId: walletId.optional(),
-  })
-  .strict();
+const freezeSchema = z.strictObject({
+  accountAddress: address,
+  reason: z.string().max(500).optional(),
+  signingCustodyWalletId: walletId.optional(),
+});
 
 function frozenAnswer(tokenId: string, account: string, tx: string, status: number) {
   return (world: DemoWorld) => {
@@ -640,9 +626,10 @@ function freeze(frozen: boolean): Handler {
   };
 }
 
-const pauseSchema = z
-  .object({ signingCustodyWalletId: walletId.optional(), options: options.optional() })
-  .strict();
+const pauseSchema = z.strictObject({
+  signingCustodyWalletId: walletId.optional(),
+  options: options.optional(),
+});
 
 /** `POST /tokens/:id/pause` and `/unpause`. */
 function pause(paused: boolean): Handler {
@@ -670,19 +657,15 @@ function pause(paused: boolean): Handler {
 
 // ─── Authorities and the control list ────────────────────────────────────────
 
-const authoritySchema = z
-  .object({
-    signingCustodyWalletId: walletId.optional(),
-    authority: z
-      .object({
-        role: z.enum(["mint", "freeze", "permanentDelegate", "metadata"]),
-        currentAuthority: z.string().optional(),
-        newAuthority: address.nullable(),
-      })
-      .strict(),
-    options: options.optional(),
-  })
-  .strict();
+const authoritySchema = z.strictObject({
+  signingCustodyWalletId: walletId.optional(),
+  authority: z.strictObject({
+    role: z.enum(["mint", "freeze", "permanentDelegate", "metadata"]),
+    currentAuthority: z.string().optional(),
+    newAuthority: address.nullable(),
+  }),
+  options: options.optional(),
+});
 
 /** `POST /tokens/:id/authority`: hands an authority to another address, or gives it up. */
 function changeAuthority(context: WriteContext): DemoWriteResult {
@@ -721,18 +704,11 @@ function changeAuthority(context: WriteContext): DemoWriteResult {
   );
 }
 
-const listAddSchema = z
-  .object({
-    address: z
-      .string()
-      .trim()
-      .min(32)
-      .max(44)
-      .regex(SOLANA_ADDRESS, "Enter a valid Solana address."),
-    label: z.string().max(100).optional(),
-    signingCustodyWalletId: walletId.optional(),
-  })
-  .strict();
+const listAddSchema = z.strictObject({
+  address: z.string().trim().min(32).max(44).regex(SOLANA_ADDRESS, "Enter a valid Solana address."),
+  label: z.string().max(100).optional(),
+  signingCustodyWalletId: walletId.optional(),
+});
 
 /** `POST /tokens/:id/allowlist`: an address onto the allowlist or blocklist. */
 function addToList(context: WriteContext): DemoWriteResult {
