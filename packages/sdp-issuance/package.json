@@ -65,7 +65,7 @@
     "@solana/token-acl-gate-sdk": "0.3.1"
   },
   "devDependencies": {
-    "tsx": "4.23.13",
+    "tsx": "4.23.15",
     "typescript": "6.0.3"
   }
 }

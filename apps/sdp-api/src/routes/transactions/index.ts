@@ -17,7 +17,7 @@ export const UNIFIED_TRANSACTIONS_QUOTA = {
 
 const transactions = new Hono<{ Bindings: Env }>();
 
-transactions.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+transactions.use("*", unifiedAuthMiddleware());
 transactions.use("*", projectContextMiddleware());
 transactions.get(
   "/",

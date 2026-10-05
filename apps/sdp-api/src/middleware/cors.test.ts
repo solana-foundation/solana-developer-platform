@@ -95,7 +95,7 @@ describe("corsMiddleware", () => {
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
   });
 
-  it("passes a credentialed preflight from an allowed origin in development", async () => {
+  it("passes a preflight from an allowed origin in development without credentials", async () => {
     const app = buildApp("development");
     const res = await app.request("/v1/earn/vault-withdrawals", {
       method: "OPTIONS",
@@ -105,6 +105,6 @@ describe("corsMiddleware", () => {
       },
     });
     expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
-    expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(res.headers.get("access-control-allow-credentials")).toBeNull();
   });
 });

@@ -36,7 +36,7 @@ import {
 const apiKeys = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
-apiKeys.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+apiKeys.use("*", unifiedAuthMiddleware());
 apiKeys.use("*", projectContextMiddleware());
 
 apiKeys.get("/", requirePermissions("api-keys:read"), listApiKeys);

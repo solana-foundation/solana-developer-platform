@@ -190,13 +190,13 @@ function resolveActor(c: AppContext): {
     };
   }
 
-  const session = c.get("session");
-  if (session) {
+  const replayActor = c.get("approvedOperationActor");
+  if (replayActor) {
     return {
-      organizationId: session.organizationId,
-      permissions: session.permissions,
+      organizationId: replayActor.organizationId,
+      permissions: replayActor.permissions,
       apiKeyId: null,
-      userId: session.userId,
+      userId: replayActor.userId,
     };
   }
 

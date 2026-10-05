@@ -36,10 +36,10 @@ SDP Docs is the comprehensive external-facing documentation for the SDP platform
 
 2. **Start the dev server:**
    ```bash
-   # From repo root
+   # Whole platform (API, web, docs) from the repo root
    pnpm dev
 
-   # Or from apps/sdp-docs directory
+   # Docs site only; needs no Doppler session
    pnpm dev:docs
    ```
 

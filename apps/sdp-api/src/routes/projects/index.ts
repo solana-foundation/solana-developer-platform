@@ -21,7 +21,7 @@ import { addMemberSchema, updateMemberSchema, updateProjectSchema } from "./sche
 const projects = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
-projects.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+projects.use("*", unifiedAuthMiddleware());
 
 // API keys are bound to one project. Apply this at the router boundary so
 // every current and future path-scoped project handler inherits the check.

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { requireProjectId } from "@/lib/auth";
+import { getClerkAuth, requireProjectId } from "@/lib/auth";
 import { forbidden, unauthorized } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -23,10 +23,10 @@ const verifyApiKeySchema = z.object({
 
 const playgroundInternal = new Hono<{ Bindings: Env }>();
 
-playgroundInternal.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+playgroundInternal.use("*", unifiedAuthMiddleware());
 playgroundInternal.use("*", async (c, next) => {
-  if (!c.get("clerk") && !c.get("session")) {
-    throw unauthorized("Dashboard session required");
+  if (!c.get("clerk")) {
+    throw unauthorized("Clerk JWT required");
   }
   await next();
 });
@@ -34,7 +34,7 @@ playgroundInternal.use("*", projectContextMiddleware());
 
 // Metered: each call hashes a caller-supplied key against the DB, which
 // would otherwise be an unthrottled credential-testing oracle for dashboard
-// sessions.
+// users.
 playgroundInternal.post(
   "/api-key/verify",
   requirePermissions("api-keys:read"),
@@ -43,10 +43,7 @@ playgroundInternal.post(
   async (c: ValidatedBodyContext<typeof verifyApiKeySchema>) => {
     const { apiKey } = c.req.valid("json");
 
-    const actor = c.get("clerk") ?? c.get("session");
-    if (!actor) {
-      throw unauthorized("Dashboard session required");
-    }
+    const actor = getClerkAuth(c);
 
     const identity = await new ApiKeyService(
       getDb(c.env),
