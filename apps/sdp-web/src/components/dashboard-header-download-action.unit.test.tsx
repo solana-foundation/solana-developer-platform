@@ -48,7 +48,7 @@ describe("DashboardHeaderAction downloads", () => {
     vi.stubGlobal("fetch", fetchMock);
     const view = renderAction();
 
-    fireEvent.click(view.getByRole("link", { name: "Download CSV" }));
+    fireEvent.click(view.getByRole("button", { name: "Download CSV" }));
 
     await waitFor(() =>
       expect(toastMock.error).toHaveBeenCalledWith(
@@ -70,7 +70,7 @@ describe("DashboardHeaderAction downloads", () => {
     );
     const view = renderAction();
 
-    fireEvent.click(view.getByRole("link", { name: "Download CSV" }));
+    fireEvent.click(view.getByRole("button", { name: "Download CSV" }));
 
     await waitFor(() =>
       expect(toastMock.error).toHaveBeenCalledWith("The download didn't finish. Try again.")
@@ -98,7 +98,7 @@ describe("DashboardHeaderAction downloads", () => {
     });
     const view = renderAction();
 
-    fireEvent.click(view.getByRole("link", { name: "Download CSV" }));
+    fireEvent.click(view.getByRole("button", { name: "Download CSV" }));
 
     await waitFor(() =>
       expect(clicked).toEqual([{ href: "blob:csv", download: "sdp-transactions-2026-10-05.csv" }])
