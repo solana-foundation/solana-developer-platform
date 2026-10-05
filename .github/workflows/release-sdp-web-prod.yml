@@ -3,24 +3,47 @@ name: Release sdp-web production
 on:
   workflow_call:
     inputs:
-      sha:
-        description: "Commit whose held sdp-web production deployment Vercel may promote"
+      api_sha:
+        description: "Commit whose API production now serves"
         type: string
         required: true
 
 permissions:
+  contents: read
   statuses: write
 
 jobs:
   release:
     name: Mark the sdp-web production gate passed
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
-      - name: Post the sdp-web production gate status
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+          ref: main
+
+      # Only main's head is ever released, so an older held build can never be
+      # promoted over a newer one; heads with API changes past api_sha wait for
+      # their own API deploy to release them.
+      - name: Post the sdp-web production gate status for main's head
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ inputs.sha }}
+          API_SHA: ${{ inputs.api_sha }}
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
-            -f state=success -f context="sdp-web production gate" -f description="Production API is live for this commit"
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          if ! git merge-base --is-ancestor "${API_SHA}" "${head_sha}"; then
+            echo "${API_SHA} is not on main; nothing released." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          api_changes="$(git diff --name-only "${API_SHA}" "${head_sha}" | { grep -E "$(cat .github/scripts/sdp-api-deploy-paths.regex)" || [[ $? == 1 ]]; })"
+          if [[ -n "${api_changes}" ]]; then
+            printf 'main head %s carries API changes past %s; its own API deploy releases it:\n\n%s\n' \
+              "${head_sha}" "${API_SHA}" "${api_changes}" >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${head_sha}" \
+            -f state=success -f context="sdp-web production gate" -f description="Production API serves this commit's API"
+          echo "Released sdp-web production for ${head_sha}." >> "${GITHUB_STEP_SUMMARY}"

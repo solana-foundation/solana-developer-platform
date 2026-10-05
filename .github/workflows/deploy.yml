@@ -55,7 +55,7 @@ jobs:
             none) ;;
             api) api=true ;;
             auto|*)
-              if match "^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod|-stage)?)?\.yml|\.github/workflows/sdp-stage-smoke\.yml)"; then
+              if match "$(cat .github/scripts/sdp-api-deploy-paths.regex)"; then
                 api=true
               fi
               ;;
@@ -279,14 +279,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run apply-prod-migrations.yml --repo "${{ github.repository }}" --ref main -f image_sha="${{ github.sha }}"
 
+  # A merge without API changes inherits its parent's gate: production serves
+  # this merge's API only if it already served the parent's. A parent still held
+  # (pending migrations, failed deploy, release in flight) is released later by
+  # whichever API deploy catches production up to main.
+  web-parent-gate:
+    name: Read the parent's sdp-web production gate
+    needs: changes
+    if: github.event_name == 'push' && needs.changes.outputs.api == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      statuses: read
+    outputs:
+      released: ${{ steps.gate.outputs.released }}
+    steps:
+      - id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PARENT_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          state="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${PARENT_SHA}/status" \
+            --jq '[.statuses[] | select(.context == "sdp-web production gate") | .state] | first')"
+          if [[ "${state}" == success ]]; then
+            echo "released=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "released=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   release-web-prod:
     name: Release sdp-web production
-    needs: [changes, deploy-api-prod]
+    needs: [deploy-api-prod, web-parent-gate]
     if: >-
-      always() && github.event_name == 'push' && needs.changes.result == 'success' &&
-      (needs.changes.outputs.prod != 'true' || needs.deploy-api-prod.result == 'success')
+      always() &&
+      (needs.deploy-api-prod.result == 'success' || needs.web-parent-gate.outputs.released == 'true')
     permissions:
+      contents: read
       statuses: write
     uses: ./.github/workflows/release-sdp-web-prod.yml
     with:
-      sha: ${{ github.sha }}
+      api_sha: ${{ needs.deploy-api-prod.result == 'success' && github.sha || github.event.before }}

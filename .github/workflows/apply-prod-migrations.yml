@@ -132,7 +132,8 @@ jobs:
     name: Release sdp-web production
     needs: deploy
     permissions:
+      contents: read
       statuses: write
     uses: ./.github/workflows/release-sdp-web-prod.yml
     with:
-      sha: ${{ inputs.image_sha }}
+      api_sha: ${{ inputs.image_sha }}

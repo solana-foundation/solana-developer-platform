@@ -187,3 +187,13 @@ jobs:
     with:
       release_sha: ${{ needs.publish-release.outputs.release_sha }}
       release_tag: ${{ needs.publish-release.outputs.release_tag }}
+
+  release-web-prod:
+    name: Release sdp-web production
+    needs: [publish-release, deploy-api-production]
+    permissions:
+      contents: read
+      statuses: write
+    uses: ./.github/workflows/release-sdp-web-prod.yml
+    with:
+      api_sha: ${{ needs.publish-release.outputs.release_sha }}
