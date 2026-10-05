@@ -5,7 +5,7 @@
 #     docker build -f apps/sdp-api/Dockerfile -t sdp-api .
 
 # Digest pinned so rebuilds don't float onto a new node:24-slim.
-FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS base
+FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS base
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH
 RUN corepack enable && corepack prepare pnpm@10.16.0 --activate
@@ -77,7 +77,7 @@ COPY packages/sdp-ondo ./packages/sdp-ondo
 WORKDIR /repo/apps/sdp-api
 RUN node scripts/build-node.mjs
 
-FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runner
+FROM node:24-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
