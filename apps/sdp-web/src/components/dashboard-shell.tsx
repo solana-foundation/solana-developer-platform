@@ -47,7 +47,10 @@ import {
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
-import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import {
+  useDashboardUrlState,
+  useSyncDashboardUrlStateWithRouter,
+} from "@/lib/dashboard-url-state";
 import { isNewDesignPage } from "@/lib/design-modules";
 import { themeScopeForPath } from "@/lib/theme-scope-routes";
 import { cn } from "@/lib/utils";
@@ -419,6 +422,7 @@ export function DashboardShell({
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = usePathname();
+  useSyncDashboardUrlStateWithRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);

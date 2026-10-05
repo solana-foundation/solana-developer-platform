@@ -89,4 +89,29 @@ describe("dashboard workspace tab URL state", () => {
       ).toBe(false);
     }
   );
+
+  it.each(["custody", "rpc", "ramps", "compliance", "privacy"])(
+    "keeps the %s tab an Integrations submenu link opens from another page",
+    (tab) => {
+      expect(
+        shouldClearDashboardTabAfterPathnameChange({
+          previousPathname: "/dashboard/payments",
+          pathname: "/dashboard/integrations",
+          tab,
+        })
+      ).toBe(false);
+    }
+  );
+
+  it("clears tabs the Integrations hub does not own", () => {
+    for (const tab of ["playground", "overview"]) {
+      expect(
+        shouldClearDashboardTabAfterPathnameChange({
+          previousPathname: "/dashboard/payments",
+          pathname: "/dashboard/integrations",
+          tab,
+        })
+      ).toBe(true);
+    }
+  });
 });
