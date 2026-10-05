@@ -97,7 +97,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
-    "turbo": "2.11.4",
+    "turbo": "2.11.5",
     "typescript": "6.0.3",
     "yaml": "2.9.1"
   },
