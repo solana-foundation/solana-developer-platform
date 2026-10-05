@@ -1337,3 +1337,19 @@ export function getForceBurnValidationReason(args: {
   const errors = getForceBurnValidationErrors(args);
   return getFirstValidationError(errors.source, errors.amount);
 }
+
+/** The network a deploy lands on, as the deploy's copy names it: mainnet in production. */
+export function deployNetworkName(
+  sdpEnvironment: string | null | undefined,
+  t: (
+    key:
+      | "DashboardIssuance.newDesign.overview.networkMainnet"
+      | "DashboardIssuance.newDesign.overview.networkDevnet"
+  ) => string
+): string {
+  return t(
+    sdpEnvironment === "production"
+      ? "DashboardIssuance.newDesign.overview.networkMainnet"
+      : "DashboardIssuance.newDesign.overview.networkDevnet"
+  );
+}

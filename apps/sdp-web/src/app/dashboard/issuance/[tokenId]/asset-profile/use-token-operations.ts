@@ -23,6 +23,7 @@ import {
   createInitialFreezeForm,
   createInitialMintForm,
   createInitialSeizeForm,
+  deployNetworkName,
   findWalletByCustodyWalletId,
   getBurnValidationErrors,
   getBurnValidationReason,
@@ -364,7 +365,12 @@ export function useTokenOperations({
         body: buildDraftDeployRequest(signingCustodyWalletId, assignments),
       },
       {
-        submitToast: t("DashboardIssuance.management.submittingDeploy"),
+        submitToast: t("DashboardIssuance.newDesign.overview.deployToastTitle", {
+          symbol: token.symbol,
+        }),
+        submitToastDescription: t("DashboardIssuance.newDesign.overview.deployToastBody", {
+          network: deployNetworkName(sdpEnvironment, t),
+        }),
         successToast: t("DashboardIssuance.management.deployFinalized"),
       }
     );
