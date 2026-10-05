@@ -3,9 +3,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
 import { DateField } from "./date-field";
+import { EnglishUiI18nProvider } from "./testing/english-ui-i18n";
 
 afterEach(cleanup);
 
@@ -20,7 +19,7 @@ function Harness({
 }) {
   const [value, setValue] = useState(initial);
   return (
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishUiI18nProvider>
       <label htmlFor="send-on">Send on</label>
       <DateField
         id="send-on"
@@ -33,7 +32,7 @@ function Harness({
           onChange(next);
         }}
       />
-    </I18nProvider>
+    </EnglishUiI18nProvider>
   );
 }
 

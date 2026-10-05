@@ -244,7 +244,7 @@ export function AmountField({
         // is what makes the "N decimals" explainer hint unnecessary.
         onChange={(event) => {
           const next = event.target.value;
-          if (!/^\d*\.?\d*$/.test(next)) {
+          if (!/^\d*(?:\.\d*)?$/.test(next)) {
             return;
           }
           if (decimals !== null && exceedsScale(next, decimals)) {
