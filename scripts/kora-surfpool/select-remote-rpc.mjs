@@ -5,7 +5,9 @@ try {
   const selected = await selectHealthySolanaRpcUrl(process.env);
 
   if (!selected) {
-    console.error("No SOLANA_RPC_<PROVIDER>_URL_DEVNET is configured; Surfpool must fork devnet.");
+    console.error(
+      "No SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL is configured; Surfpool must fork devnet."
+    );
     process.exit(1);
   }
 
