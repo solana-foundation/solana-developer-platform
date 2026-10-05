@@ -126,7 +126,8 @@ function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symb
   }
 
   return (
-    <div className="flex items-start gap-6 border-t border-border-default pt-4">
+    // On a phone the tile sits over the link, so the link and its actions keep the full width.
+    <div className="flex flex-col gap-4 border-t border-border-default pt-4 sm:flex-row sm:items-start sm:gap-6">
       {/* The design's 128px tile: a 96px code on white with a 16px quiet zone; a demo request has
           no link to draw. */}
       {demo ? null : (
