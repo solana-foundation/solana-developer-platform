@@ -11,7 +11,7 @@ import {
 import {
   type IdentifyPendingApiKey,
   PendingApiKeyContext,
-} from "@/components/playground-api-key-selector";
+} from "@/components/playground-pending-api-key";
 import { useThemeScope } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
