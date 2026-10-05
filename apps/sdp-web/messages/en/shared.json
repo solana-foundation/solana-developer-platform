@@ -16,11 +16,57 @@
     "dismissCancel": "Keep quick start",
     "dismissConfirm": "Dismiss quick start",
     "minimize": "Minimize SDP quick start",
+    "sidebarTitle": "Setup",
+    "progressCount": "{settled} of {total}",
+    "dismiss": "Dismiss",
+    "hide": "Hide",
+    "show": "Show",
+    "state": {
+      "done": "done",
+      "skipped": "skipped",
+      "pending": "not done yet",
+      "checking": "checking",
+      "failing": "failing"
+    },
+    "rpcTitle": "Solana requests are answering",
+    "rpcManaged": "Managed RPC",
+    "rpcOwnProvider": "Use your own provider",
+    "rpcChangeProvider": "Change provider",
+    "rpcDoneDescription": "{provider}, {cluster}. A probe answered {when}.",
+    "rpcDoneMeta": "Proven · probe {status} · {when}",
+    "rpcCheckingDescription": "{provider}, {cluster}. Sending a probe now.",
+    "rpcCheckingMeta": "Checking",
+    "rpcFailingDescription": "{provider}, {cluster}. The last probe came back {status}.",
+    "rpcFailingMeta": "Failing · probe {status}",
+    "rpcUnknownDescription": "{provider}, {cluster}. A probe couldn’t run just now.",
+    "rpcUnknownMeta": "Not checked",
+    "custodyTitle": "Connect custody",
+    "custodyDoneDescription": "A custody provider holds this organization’s funds.",
+    "custodyDoneMeta": "Connected",
+    "custodySkippedDescription": "Skipped {when}. Nothing holds funds until a provider is connected.",
+    "custodySkippedMeta": "Skipped · {when}",
+    "custodyPendingDescription": "Connect a provider so wallets have somewhere to hold funds.",
+    "custodyPendingMeta": "Not connected",
+    "custodyConnect": "Connect",
+    "custodySkip": "Skip for now",
+    "custodyManage": "Manage",
+    "firstCallTitle": "Your first call has arrived",
+    "firstCallNeedsKeyDescription": "Opens once you create a key to sign requests.",
+    "firstCallNeedsKeyMeta": "Needs a key",
+    "firstCallWaitingDescription": "Sign a request with one of your keys and it lands here.",
+    "firstCallWaitingMeta": "Waiting for a call",
+    "firstCallDoneDescription": "A key last signed a request {when}.",
+    "firstCallDoneMeta": "Received · {when}",
+    "createApiKey": "Create an API key",
+    "viewApiKeys": "View API keys",
     "settingsTitle": "Onboarding",
     "settingsDescription": "Create an API key, set up a wallet, and try SDP with test USDC.",
     "settingsContinue": "Continue quick start",
     "settingsRestart": "Restart quick start",
     "settingsRestartDescription": "Revisit the guide whenever you need a refresher.",
+    "settingsProgress": "{settled} of {total} steps done",
+    "settingsShow": "Show quick start",
+    "settingsOpen": "Open Overview",
     "settingsComplete": "Your workspace is already set up.",
     "settingsSandbox": "Switch to Sandbox to use SDP quick start.",
     "settingsUnavailable": "Quick start is unavailable right now. Refresh the page to try again.",
@@ -36,7 +82,12 @@
     "faucetTitle": "Get test USDC",
     "faucetDescription": "Open Circle’s faucet, select USDC and Solana Devnet, and enter your wallet address. Test USDC has no monetary value.",
     "openFaucet": "Open Circle faucet",
-    "finish": "Finish quick start"
+    "finish": "Finish quick start",
+    "newDesign": {
+      "title": "Quick start",
+      "settingsDescription": "Check that Solana requests answer, connect custody, and make your first API call.",
+      "settingsSandbox": "Switch to Sandbox to use the quick start."
+    }
   },
   "tabs": {
     "overview": "Overview",
@@ -310,7 +361,9 @@
       "newCounterparty": "New counterparty",
       "recurringPayments": "Schedules",
       "recurringPayment": "Schedule",
-      "backToRecurringPayments": "Schedules"
+      "backToRecurringPayments": "Schedules",
+      "home": "Overview",
+      "backToHome": "Back to Overview"
     }
   },
   "validation": {
@@ -403,7 +456,66 @@
     "holdingsSharePercent": "{percent}%",
     "holdingsUnavailable": "Holdings are unavailable right now.",
     "holdingsCount": "{count} tokens",
-    "holdingsCountSingle": "1 token"
+    "holdingsCountSingle": "1 token",
+    "quickActionToken": "Create a draft token",
+    "quickActionTokenBody": "Classify it, then deploy.",
+    "actionsLabel": "Start something",
+    "summary": {
+      "wallets": {
+        "one": "wallet",
+        "other": "wallets"
+      },
+      "tokens": {
+        "one": "token held",
+        "other": "tokens held"
+      },
+      "volume": "today’s volume"
+    },
+    "needsYou": {
+      "title": "Needs you",
+      "count": "{count} waiting on you",
+      "all": "All approvals",
+      "row": "{operation} from {wallet}",
+      "approvalRequired": "Approval required"
+    },
+    "recentActivity": "Recent activity",
+    "issuanceStatus": "{type} {status}",
+    "notMinted": "Not minted",
+    "notSent": "Not sent",
+    "noAddress": "None",
+    "network": {
+      "title": "Solana network",
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "sample": "Sample data",
+      "updated": "Updated {when}",
+      "rangeLabel": "Time range",
+      "range30d": "30D",
+      "range90d": "90D",
+      "range1y": "1Y",
+      "changeOver": "over {range}",
+      "chartReading": "{value} on {date}",
+      "source": "solana.com/data",
+      "stablecoinSupply": "Stablecoin supply",
+      "stablecoinSupplyHint": "Dollar value of every stablecoin circulating on Solana.",
+      "stablecoinTransfers": "Stablecoin transfers",
+      "stablecoinTransfersHint": "Stablecoin transfers settled on Solana.",
+      "stablecoinShare": "Stablecoin share of activity",
+      "stablecoinShareHint": "Stablecoin transfers as a share of all non-vote transactions on Solana.",
+      "costPerTransaction": "Cost per transaction",
+      "costPerTransactionHint": "Average fee paid per Solana transaction, in US dollars.",
+      "unitUsd": "USD",
+      "unitCount": "Count",
+      "unitPercent": "%"
+    },
+    "newDesign": {
+      "totalBalance": "Total balance",
+      "firstRunTitle": "Start with a wallet",
+      "firstRunBody": "Everything else here needs one. A token you issue has to be held somewhere, and a payment has to leave from somewhere.",
+      "quickActionWalletsBody": "Somewhere to hold funds.",
+      "quickActionApiKeysBody": "So your systems can call.",
+      "quickActionPaymentsBody": "Onchain or fiat, checked."
+    }
   },
   "integrations": {
     "pageDescription": "Every provider SDP can run for this organization, with what is connected and what to do next. Custody installs from Wallets; other families are provisioned per deployment.",

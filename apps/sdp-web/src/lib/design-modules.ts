@@ -8,6 +8,8 @@
  * flags/new-design.ts. The first matching route wins, so a catch-all module goes last.
  */
 const DESIGN_MODULE_ROUTES = {
+  // The dashboard's Overview, and the quick start it shares with the sidebar and Settings.
+  overview: /^\/dashboard\/?$/,
   // The Wallets list, its create flow and one wallet's page, under both the current and the
   // legacy custody prefix. A wallet's policy editor and audit pages keep the base design.
   // `connections` and `switch` are pages of their own, not wallets.

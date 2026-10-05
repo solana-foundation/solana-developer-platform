@@ -74,7 +74,7 @@ test.describe("dashboard theme e2e", () => {
   }) => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
     // Nothing theme-shaped in the page chrome until the account menu opens.
     await expect(page.getByText("Color theme")).toHaveCount(0);
@@ -107,7 +107,7 @@ test.describe("dashboard theme e2e", () => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "dark" });
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
     await openAccountMenu(page);
     await expect(themeSegment(page, "System")).toHaveAttribute("aria-pressed", "true");
@@ -153,7 +153,7 @@ test.describe("dashboard theme e2e", () => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "dark" });
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
     await expect(page.locator("html")).toHaveClass(/dark/);
     await expect(page.locator("body")).toHaveCSS("color-scheme", "dark");
 
@@ -249,11 +249,11 @@ test.describe("dashboard theme e2e", () => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light" });
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
     const secondPage = await page.context().newPage();
     await secondPage.goto("/dashboard");
-    await expect(secondPage.getByRole("heading", { name: "Home" })).toBeVisible();
+    await expect(secondPage.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
     await setThemePreference(page, "Dark");
     await expect(page.locator("html")).toHaveClass(/dark/);
@@ -266,7 +266,7 @@ test.describe("dashboard theme e2e", () => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
     // Assert transition-property, not duration: `transition-none` clears the property
     // list but leaves the design system's --default-transition-duration in place, so a
@@ -285,7 +285,7 @@ test.describe("dashboard theme e2e", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await clearThemePreferenceBeforeNavigation(page);
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
     // On a phone NEW DESIGN opens the navigation drawer, which carries the account menu, from the
     // header's menu button; the previous design keeps the menu in the bottom bar's More sheet.

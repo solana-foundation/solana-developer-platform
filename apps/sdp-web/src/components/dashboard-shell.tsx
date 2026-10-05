@@ -35,7 +35,7 @@ import {
   DashboardPageTitleContext,
   type DashboardPageTitleOverride,
 } from "@/components/dashboard-page-title-context";
-import { DashboardQuickStart } from "@/components/dashboard-quick-start";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start.redesign";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
@@ -839,6 +839,7 @@ export function DashboardShell({
                   issuanceEnabled={issuanceEnabled}
                   paymentsEnabled={paymentsEnabled}
                   onOpenMore={() => setMoreSheetOpen(true)}
+                  newDesign={isDesignModuleOn(flags, "overview")}
                 />
               )}
 

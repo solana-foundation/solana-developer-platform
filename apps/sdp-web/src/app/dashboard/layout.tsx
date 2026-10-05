@@ -12,9 +12,11 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { resolveDashboardProjectSelection } from "@/lib/dashboard-project-selection";
+import { isDesignModuleOn } from "@/lib/design-modules";
 import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
 import { loadQuickStartStep } from "@/lib/quick-start-server";
+import { loadQuickStartStatus } from "@/lib/quick-start-server.redesign";
 import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
 
 async function loadProjects(): Promise<Project[] | null> {
@@ -45,11 +47,16 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     userId,
   } satisfies DashboardCacheScope;
 
-  const [loadedProjects, cookieStore, initialQuickStartStep] = await Promise.all([
-    loadProjects(),
-    cookies(),
-    loadQuickStartStep(),
-  ]);
+  // Each design has its own quick start, the new one part of the Overview module; only the one
+  // on screen is read.
+  const overviewNewDesign = isDesignModuleOn(flags, "overview");
+  const [loadedProjects, cookieStore, initialQuickStartStatus, initialQuickStartStep] =
+    await Promise.all([
+      loadProjects(),
+      cookies(),
+      overviewNewDesign ? loadQuickStartStatus() : null,
+      overviewNewDesign ? null : loadQuickStartStep(),
+    ]);
   const projects = loadedProjects ?? [];
   const cookieProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;
   const projectSelection = resolveDashboardProjectSelection(projects, cookieProjectId, {
@@ -61,6 +68,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       key={getDashboardCacheScopeKey(dashboardCacheScope)}
       scopeRefreshFallback={<DashboardScopeLoadingScreen />}
       dashboardAccess={dashboardAccess}
+      initialQuickStartStatus={initialQuickStartStatus}
       initialQuickStartStep={initialQuickStartStep}
       flags={flags}
       serverDashboardCacheScope={dashboardCacheScope}

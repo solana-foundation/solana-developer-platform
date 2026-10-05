@@ -1,5 +1,6 @@
 "use client";
 
+import { DesignSwitch } from "@/components/new-design";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
@@ -10,8 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
 import { useHomeQuickStartPending } from "../use-home-quick-start";
+import RedesignDashboardLoading from "./loading.redesign";
 
 // Mirrors the hero: three context figures under the balance, then the allocation.
 const HERO_STAT_IDS = ["home-hero-stat-1", "home-hero-stat-2", "home-hero-stat-3"];
@@ -25,7 +26,7 @@ const ACTIVITY_ROW_IDS = [
   "home-table-skeleton-6",
 ];
 
-export default function DashboardLoading() {
+export function PreviousDashboardLoading() {
   const quickStartPending = useHomeQuickStartPending();
   return (
     <div className="w-full space-y-8 py-2" data-loading-layout="home" aria-busy="true">
@@ -167,5 +168,15 @@ export default function DashboardLoading() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function DashboardLoading() {
+  return (
+    <DesignSwitch
+      designModule="overview"
+      current={<RedesignDashboardLoading />}
+      legacy={<PreviousDashboardLoading />}
+    />
   );
 }

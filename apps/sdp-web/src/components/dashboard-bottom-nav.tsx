@@ -43,18 +43,23 @@ export function DashboardBottomNav({
   issuanceEnabled,
   paymentsEnabled,
   onOpenMore,
+  newDesign = true,
 }: {
   pathname: string;
   custodyEnabled: boolean;
   issuanceEnabled: boolean;
   paymentsEnabled: boolean;
   onOpenMore: () => void;
+  /** NEW DESIGN names the first tab Overview; the previous design, Home. */
+  newDesign?: boolean;
 }) {
   const t = useTranslations();
 
   const items: BottomNavItem[] = [
     {
-      label: t("Shared.dashboardShell.home"),
+      label: newDesign
+        ? t("Shared.dashboardShell.newDesign.home")
+        : t("Shared.dashboardShell.home"),
       href: DASHBOARD_SIDE_NAV_HREFS.home,
       icon: LayoutDashboardIcon,
     },
