@@ -5,6 +5,8 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
+import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import {
   DashboardHeaderAction,
@@ -13,6 +15,7 @@ import {
   HeaderBackAction,
 } from "@/components/dashboard-header";
 import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
+import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
 import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
 import { DashboardMoreSheet } from "@/components/dashboard-more-sheet";
 import {
@@ -23,6 +26,7 @@ import {
   getNavSections,
   type NavItem,
   type NavSection,
+  type SubNavItem,
   withSubnavOpen,
   withSubnavToggled,
 } from "@/components/dashboard-nav";
@@ -41,6 +45,7 @@ import { SentryUserContext } from "@/components/sentry-user-context";
 import { SidebarUserMenu } from "@/components/sidebar-user-menu";
 import { type ThemeScope, themeScopeAttributes } from "@/components/theme-scope";
 import { ThemeScopeProvider } from "@/components/theme-scope-provider";
+import { useWalletFavorites } from "@/components/use-wallet-favorites";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
@@ -50,7 +55,7 @@ import {
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { isNewDesignPage } from "@/lib/design-modules";
+import { isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
 import { isPaymentsPath } from "@/lib/payments-demo/demo-cookie";
 import {
   isPaymentsDemoOn,
@@ -59,6 +64,7 @@ import {
 } from "@/lib/payments-demo/payments-demo-context";
 import { themeScopeForPath } from "@/lib/theme-scope-routes";
 import { cn } from "@/lib/utils";
+import { subscribeWalletFavoriteAdded } from "@/lib/wallet-favorites";
 
 // On NEW DESIGN the sidebar is the refresh design's on every route, whatever the page beside it
 // is built on: its container carries the scope, and its menus re-stamp it through the provider
@@ -82,6 +88,20 @@ const childNavItemBase =
 const childNavItemActive = `${navItemActive} refresh:font-medium`;
 const childNavItemInactive =
   "text-secondary hover:bg-fill-strong hover:text-primary refresh:hover:bg-fill";
+
+/** A sub-item's artwork: its own leading mark (kept on the refresh sidebar), else its icon. */
+function SubNavItemLeading({ item }: { item: SubNavItem }) {
+  if (item.leading) {
+    return (
+      <span aria-hidden="true" className="inline-flex shrink-0">
+        {item.leading}
+      </span>
+    );
+  }
+  return item.icon ? (
+    <item.icon aria-hidden="true" className="size-4 shrink-0 refresh:hidden" />
+  ) : null;
+}
 
 function SidebarGroup({
   title,
@@ -236,13 +256,8 @@ function SidebarGroup({
                           <span
                             className={cn(childNavItemBase, "cursor-not-allowed text-tertiary")}
                           >
-                            {child.icon ? (
-                              <child.icon
-                                aria-hidden="true"
-                                className="size-4 shrink-0 refresh:hidden"
-                              />
-                            ) : null}
-                            {child.label}
+                            <SubNavItemLeading item={child} />
+                            <span className="min-w-0 truncate">{child.label}</span>
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
                         ) : (
@@ -254,13 +269,8 @@ function SidebarGroup({
                               childActive ? childNavItemActive : childNavItemInactive
                             )}
                           >
-                            {child.icon ? (
-                              <child.icon
-                                aria-hidden="true"
-                                className="size-4 shrink-0 refresh:hidden"
-                              />
-                            ) : null}
-                            {child.label}
+                            <SubNavItemLeading item={child} />
+                            <span className="min-w-0 truncate">{child.label}</span>
                           </Link>
                         )}
                       </div>
@@ -365,6 +375,28 @@ function DashboardSidebarContent({
   );
 }
 
+/**
+ * What the shell hands its pages: the setter a page names itself through, and the slot at the
+ * right end of the header tab row that `DashboardHeaderTabsTrailing` portals into.
+ */
+function DashboardShellPageContexts({
+  setPageTitle,
+  headerTabsTrailingSlot,
+  children,
+}: {
+  setPageTitle: (override: DashboardPageTitleOverride | null) => void;
+  headerTabsTrailingSlot: HTMLElement | null;
+  children: ReactNode;
+}) {
+  return (
+    <DashboardPageTitleContext.Provider value={setPageTitle}>
+      <DashboardHeaderTabsTrailingContext.Provider value={headerTabsTrailingSlot}>
+        {children}
+      </DashboardHeaderTabsTrailingContext.Provider>
+    </DashboardPageTitleContext.Provider>
+  );
+}
+
 function clipsDashboardHorizontalOverflow(pathname: string): boolean {
   return (
     pathname === "/dashboard/payments" ||
@@ -453,10 +485,13 @@ export function DashboardShell({
   const [pageTitleOverride, setPageTitleOverride] = useState<DashboardPageTitleOverride | null>(
     null
   );
+  // Set once the header tab row's trailing slot mounts, so a page's controls portal into it.
+  const [headerTabsTrailingSlot, setHeaderTabsTrailingSlot] = useState<HTMLElement | null>(null);
   const [openSubnavs, setOpenSubnavs] = useState<Record<DashboardSubnavKey, boolean>>(() => {
     const initial = {} as Record<DashboardSubnavKey, boolean>;
     for (const [key, group] of Object.entries(DASHBOARD_SUBNAV_GROUPS)) {
-      initial[key as DashboardSubnavKey] = pathname.startsWith(group.pathPrefix);
+      initial[key as DashboardSubnavKey] =
+        group.defaultOpen || pathname.startsWith(group.pathPrefix);
     }
     return initial;
   });
@@ -485,6 +520,19 @@ export function DashboardShell({
     newDesignEnabled,
     flags.newDesignModules
   );
+  const { favorites: walletFavorites } = useWalletFavorites();
+  const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
+    label: favorite.name,
+    href: `/dashboard/wallets/${encodeURIComponent(favorite.walletId)}`,
+    leading: (
+      <WalletProviderMark
+        provider={
+          favorite.provider && isKnownCustodyProvider(favorite.provider) ? favorite.provider : null
+        }
+        size="nav"
+      />
+    ),
+  }));
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     custodyEnabled,
@@ -497,20 +545,24 @@ export function DashboardShell({
     pendingApprovalCount,
     policiesEnabled,
     privateChannelsEnabled,
+    // Pinned wallets are a NEW DESIGN feature; the previous design's sidebar lists none.
+    walletFavorites: isDesignModuleOn(flags, "wallets") ? walletFavoriteItems : undefined,
     newDesign: newDesignEnabled,
     newDesignModules: flags.newDesignModules,
   });
-  const pageTitle =
+  const activeTitleOverride =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname
-      ? pageTitleOverride.title
-      : pageConfig.title;
+      ? pageTitleOverride
+      : null;
+  const pageTitle = activeTitleOverride?.title ?? pageConfig.title;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const headerTabs = pageConfig.headerTabs;
   const routeTabs = pageConfig.routeTabs;
   const hasHeaderTabs = Boolean(headerTabs || routeTabs);
   // A refresh action page sets its way back over a left title, in the page's column, as the
   // design does; the base shell keeps it in the title row beside a centred title.
-  const stacksBackAboveTitle = isRefresh && Boolean(pageConfig.backAction) && !hasHeaderTabs;
+  // A refresh page sets its way back over its title, tabs or not (a wallet's page has both).
+  const stacksBackAboveTitle = isRefresh && Boolean(pageConfig.backAction);
   const backAction = pageConfig.backAction ? (
     <HeaderBackAction
       href={pageConfig.backAction.href}
@@ -528,9 +580,23 @@ export function DashboardShell({
   // The dashboard's own URL store rather than useSearchParams: list filters update the query
   // shallowly, and an export has to follow them.
   const { searchParams: urlSearchParams } = useDashboardUrlState();
-  const headerAction = pageConfig.headerAction ? (
-    <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
-  ) : null;
+  const routeAction =
+    pageConfig.headerAction &&
+    (!pageConfig.headerAction.capability ||
+      dashboardAccess.capabilities[pageConfig.headerAction.capability]) ? (
+      <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
+    ) : null;
+  // A page's own actions (a wallet's star) sit before the route's action, in the same slot.
+  const pageActions = activeTitleOverride?.actions;
+  const headerAction =
+    pageActions && routeAction ? (
+      <span className="flex items-center gap-2">
+        {pageActions}
+        {routeAction}
+      </span>
+    ) : (
+      (pageActions ?? routeAction)
+    );
   // Refresh pages put the title, the tabs and the content in one column with one gutter, so all
   // three share a left edge, and drop the full-bleed rule under the tabs. The column is the
   // design's 900px page column, or the flow's 660px when the page's content box is wider than
@@ -596,6 +662,19 @@ export function DashboardShell({
     setOpenSubnavs(next);
     persistSubnav(key, true);
   };
+
+  // Pinning a wallet promises it is in the sidebar under Wallets, so the group opens even if it
+  // was folded. The write sits outside the updater, which React may replay.
+  useEffect(
+    () =>
+      subscribeWalletFavoriteAdded(() => {
+        if (subnavHydratedRef.current) {
+          window.localStorage.setItem(dashboardSubnavStorageKey("wallets"), "true");
+        }
+        setOpenSubnavs((current) => withSubnavOpen(current, "wallets"));
+      }),
+    []
+  );
 
   useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
@@ -689,7 +768,10 @@ export function DashboardShell({
       ].join(" ")}
     >
       <ThemeScopeProvider scope={themeScope}>
-        <DashboardPageTitleContext.Provider value={setPageTitleOverride}>
+        <DashboardShellPageContexts
+          setPageTitle={setPageTitleOverride}
+          headerTabsTrailingSlot={headerTabsTrailingSlot}
+        >
           <PaymentsDemoProvider value={paymentsDemoOn}>
             {paymentsDemoOn ? <PaymentsDemoNotice /> : null}
             <SentryUserContext />
@@ -883,6 +965,7 @@ export function DashboardShell({
                           hasHeaderTabs={hasHeaderTabs}
                           action={headerAction}
                           above={stacksBackAboveTitle ? backAction : undefined}
+                          mark={activeTitleOverride?.mark}
                           layout={isRefresh ? "refresh" : "base"}
                           hasBottomNav={hasBottomNav}
                           utilities={
@@ -911,13 +994,23 @@ export function DashboardShell({
                         >
                           <div
                             className={cn(
-                              "flex items-end",
-                              alignsHeaderWithContent
-                                ? "sdp-quiet-scroll min-w-0 overflow-x-auto"
-                                : "px-3 md:px-6"
+                              "flex items-end gap-4",
+                              !alignsHeaderWithContent && "px-3 md:px-6"
                             )}
                           >
-                            <DashboardHeaderTabs {...headerTabs} />
+                            <div
+                              className={cn(
+                                "flex min-w-0 items-end",
+                                alignsHeaderWithContent && "sdp-quiet-scroll overflow-x-auto"
+                              )}
+                            >
+                              <DashboardHeaderTabs {...headerTabs} />
+                            </div>
+                            {/* A page's own controls for the tab row (DashboardHeaderTabsTrailing). */}
+                            <div
+                              ref={setHeaderTabsTrailingSlot}
+                              className="ml-auto flex shrink-0 items-center gap-4 self-center empty:hidden"
+                            />
                           </div>
                         </div>
                       ) : null}
@@ -994,7 +1087,7 @@ export function DashboardShell({
               </section>
             </div>
           </PaymentsDemoProvider>
-        </DashboardPageTitleContext.Provider>
+        </DashboardShellPageContexts>
       </ThemeScopeProvider>
     </main>
   );

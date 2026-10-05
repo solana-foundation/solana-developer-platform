@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import type { KnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import { ApiPlaygroundShell } from "@/components/api-playground-shell";
 import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
+import { usePlaygroundCreateKeyHref } from "@/components/use-playground-create-key-href";
 import { useTranslations } from "@/i18n/provider";
 import {
   buildWalletsPlaygroundEndpointConfigs,
@@ -30,6 +31,7 @@ export function WalletsPlayground({
   walletsError,
 }: WalletsPlaygroundProps) {
   const t = useTranslations();
+  const createApiKeyHref = usePlaygroundCreateKeyHref();
   const endpoints = useMemo(
     () => buildWalletsPlaygroundEndpointConfigs({ connectedProviders, wallets, t }),
     [connectedProviders, t, wallets]
@@ -44,6 +46,7 @@ export function WalletsPlayground({
         apiBaseUrl={apiBaseUrl}
         apiKeyId={apiKeyId}
         apiKeySelector={<PlaygroundApiKeySelector />}
+        createApiKeyHref={createApiKeyHref}
         requiresApiKey={!hasActiveApiKeys}
         leftMessages={[
           ...(configsError ? [{ text: configsError, tone: "critical" as const }] : []),

@@ -284,6 +284,11 @@ export const paymentsDemoMode = flag<boolean, DashboardFlagEntities>({
   ],
 });
 
+export const newDesignWallets = newDesignModuleFlag(
+  "wallets",
+  "Wallets (the list, the create flow, one wallet's page, pinned wallets in the sidebar)"
+);
+
 export const newDesignContacts = newDesignModuleFlag(
   "contacts",
   "Payments' Contacts (the list, a new contact, one contact's page)"

@@ -8,6 +8,7 @@ import {
   ApiPlaygroundEndpointOptions,
   ApiPlaygroundRefreshLayout,
 } from "@/components/api-playground-refresh-layout";
+import { buildSnippets } from "@/components/api-playground-snippets";
 import {
   type IdentifyPendingApiKey,
   PendingApiKeyContext,
@@ -84,6 +85,8 @@ interface ApiPlaygroundShellProps {
   apiBaseUrl?: string | null;
   apiKeyId: string | null;
   apiKeySelector?: ReactNode;
+  /** A refresh playground with no key offers this instead of Run (usePlaygroundCreateKeyHref). */
+  createApiKeyHref?: string;
   defaultEndpointId?: string;
   endpoints: ApiPlaygroundEndpointConfig[];
   leftMessages?: ApiPlaygroundMessage[];
@@ -1137,6 +1140,19 @@ function useApiPlaygroundState({
         : "",
     [activeEndpoint, effectiveApiBaseUrl, requestBody, resolvedPath]
   );
+  // A refresh playground writes the call in cURL, TypeScript or Python; the key stays out of it.
+  const snippets = useMemo(
+    () =>
+      buildSnippets({
+        method: activeEndpoint?.method ?? "GET",
+        url: `${effectiveApiBaseUrl || "https://api.example.com"}${resolvedPath}`,
+        body:
+          activeEndpoint && requestBody && hasRequestBody(activeEndpoint.method)
+            ? requestBody
+            : null,
+      }),
+    [activeEndpoint, effectiveApiBaseUrl, requestBody, resolvedPath]
+  );
   const exampleBody = useMemo(
     () => (activeEndpoint ? prettyJson(activeEndpoint.expectedResponse) : "{}"),
     [activeEndpoint]
@@ -1176,6 +1192,7 @@ function useApiPlaygroundState({
     requestBody,
     resolvedPath,
     codeSnippet,
+    snippets,
     exampleBody,
     responseBody,
     aiInstructions,
@@ -1186,6 +1203,7 @@ export function ApiPlaygroundShell({
   apiBaseUrl,
   apiKeyId,
   apiKeySelector,
+  createApiKeyHref,
   defaultEndpointId,
   endpoints,
   leftMessages = [],
@@ -1218,6 +1236,7 @@ export function ApiPlaygroundShell({
     requestBody,
     resolvedPath,
     codeSnippet,
+    snippets,
     exampleBody,
     responseBody,
     aiInstructions,
@@ -1327,7 +1346,7 @@ export function ApiPlaygroundShell({
         getFieldId={getFieldId}
         resolvedPath={resolvedPath}
         requestBody={requestBody}
-        codeSnippet={codeSnippet}
+        snippets={snippets}
         aiInstructions={aiInstructions}
         exampleBody={exampleBody}
         execution={getRefreshExecution(isExecuting, executionResult, executeError, t)}
@@ -1337,6 +1356,7 @@ export function ApiPlaygroundShell({
         onReset={handleReset}
         onCopy={(text, action) => void copyText(text, action)}
         copiedAction={copiedAction}
+        createApiKeyHref={createApiKeyHref}
       />
     );
   }

@@ -18,12 +18,14 @@ interface WalletCardBalanceValueProps {
   initialBalances: CustodyWalletTokenBalance[];
 }
 
-export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
-  const t = useTranslations();
-  const { data: batchBalances, error: batchError } = usePersistedDashboardSWR<
-    Record<string, CustodyWalletTokenBalance[]>
-  >(
-    walletId ? custodyQueryKeys.walletCardBalances() : null,
+/**
+ * Every wallet's balances in one request, refreshed every 30 seconds. SWR shares the one read
+ * between the cards and the Wallets page's refresh control, which calls `mutate` to re-read now;
+ * an airdrop refreshes it through `custodyQueryKeys.isWalletLiveDataKey`.
+ */
+export function useWalletCardBalances(enabled = true) {
+  return usePersistedDashboardSWR<Record<string, CustodyWalletTokenBalance[]>>(
+    enabled ? custodyQueryKeys.walletCardBalances() : null,
     fetchWalletBalances,
     {
       revalidateOnFocus: true,
@@ -38,6 +40,11 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
       version: 2,
     }
   );
+}
+
+export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
+  const t = useTranslations();
+  const { data: batchBalances, error: batchError } = useWalletCardBalances(Boolean(walletId));
   const batchFailed =
     Boolean(batchError) || (batchBalances !== undefined && batchBalances[walletId] === undefined);
   const { data: fallbackBalances, error: fallbackError } = usePersistedDashboardSWR<

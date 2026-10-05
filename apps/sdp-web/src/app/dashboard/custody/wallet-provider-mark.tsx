@@ -66,19 +66,25 @@ const PROVIDER_LOGOS: Partial<
 
 interface WalletProviderMarkProps {
   provider?: KnownCustodyProvider | null;
-  size?: "xs" | "sm" | "md";
+  /**
+   * `nav`, `row` and `page` are the refresh design's round marks: a sidebar pin, a card or list
+   * row, and the 48px mark beside a wallet page's title.
+   */
+  size?: "nav" | "xs" | "sm" | "row" | "md" | "page";
 }
+
+const MARK_SIZES = {
+  nav: { box: "size-5 rounded-full", image: "20px", icon: 11, padding: "p-0.5" },
+  xs: { box: "h-6 w-6 rounded-md", image: "24px", icon: 14, padding: null },
+  sm: { box: "h-7 w-7 rounded-md", image: "28px", icon: 16, padding: null },
+  row: { box: "size-8 rounded-full", image: "32px", icon: 16, padding: "p-1.5" },
+  md: { box: "h-12 w-12 rounded-2xl", image: "48px", icon: 22, padding: null },
+  page: { box: "size-12 rounded-full", image: "48px", icon: 22, padding: "p-2.5" },
+} as const;
 
 export function WalletProviderMark({ provider, size = "md" }: WalletProviderMarkProps) {
   const logo = provider ? PROVIDER_LOGOS[provider] : undefined;
-  const dimensionClass =
-    size === "xs"
-      ? "h-6 w-6 rounded-md"
-      : size === "sm"
-        ? "h-7 w-7 rounded-md"
-        : "h-12 w-12 rounded-2xl";
-  const imageSizes = size === "xs" ? "24px" : size === "sm" ? "28px" : "48px";
-  const iconSize = size === "xs" ? 14 : size === "sm" ? 16 : 22;
+  const { box: dimensionClass, image: imageSizes, icon: iconSize, padding } = MARK_SIZES[size];
 
   return (
     <div
@@ -91,7 +97,7 @@ export function WalletProviderMark({ provider, size = "md" }: WalletProviderMark
       aria-hidden="true"
     >
       {logo ? (
-        <div className={["relative h-full w-full", logo.paddingClassName].join(" ")}>
+        <div className={["relative h-full w-full", padding ?? logo.paddingClassName].join(" ")}>
           <Image src={logo.src} alt="" fill sizes={imageSizes} className="object-contain" />
         </div>
       ) : (
