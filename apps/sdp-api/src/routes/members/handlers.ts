@@ -12,7 +12,6 @@ import {
   type ClerkOrganizationInvitation,
   ClerkOrganizationsService,
 } from "@/services/clerk-organizations.service";
-import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import type { acceptSchema, inviteSchema } from "./schemas";
 
@@ -41,11 +40,11 @@ function resolveActor(c: AppContext): {
     };
   }
 
-  const session = c.get("session");
-  if (session) {
+  const replayActor = c.get("approvedOperationActor");
+  if (replayActor) {
     return {
-      organizationId: session.organizationId,
-      userId: session.userId,
+      organizationId: replayActor.organizationId,
+      userId: replayActor.userId,
       apiKeyId: null,
     };
   }
@@ -65,7 +64,7 @@ function callerHasPermission(c: AppContext, permission: Permission): boolean {
   const permissions =
     c.get("apiKey")?.permissions ??
     c.get("clerk")?.permissions ??
-    c.get("session")?.permissions ??
+    c.get("approvedOperationActor")?.permissions ??
     null;
 
   if (!permissions) {
@@ -800,8 +799,8 @@ export const removeMember = async (c: AppContext) => {
     throw badRequest("Member has already been removed");
   }
 
-  // Removing yourself revokes your own sessions mid-request and, for a sole
-  // admin, leaves the organization with nobody able to administer it.
+  // Removing yourself as the sole admin leaves the organization with nobody
+  // able to administer it.
   if (userId && member.user_id === userId) {
     throw badRequest("You cannot remove yourself from the organization");
   }
@@ -889,13 +888,6 @@ export const removeMember = async (c: AppContext) => {
   await removeClerkMembership(c, organizationId, member.user_id).catch((error) =>
     getLogger().error({ error }, "Failed to remove Clerk membership after member removal")
   );
-
-  const sessionService = new SessionService(getDb(c.env));
-  await sessionService
-    .revokeUserOrganizationSessions(member.user_id, organizationId)
-    .catch((error) =>
-      getLogger().error({ error }, "Failed to revoke sessions after member removal")
-    );
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

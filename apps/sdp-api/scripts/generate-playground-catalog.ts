@@ -3,14 +3,57 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  isReferenceObject,
+  type OpenAPIObject,
+  type OperationObject,
+  type ParameterObject,
+  type ReferenceObject,
+  type RequestBodyObject,
+  type ResponseObject,
+  type SchemaObject,
+  type SecurityRequirementObject,
+} from "openapi3-ts/oas30";
 
 import { createPublicOpenApiDocument } from "../src/openapi/spec";
 
-type JsonRecord = Record<string, unknown>;
 type PlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type PlaygroundModule = "wallets" | "payments" | "counterparties" | "issuance";
 
-const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
+interface PlaygroundFieldOption {
+  label: string;
+  value: string;
+}
+
+interface PlaygroundField {
+  key: string;
+  label: string;
+  description?: string;
+  defaultValue?: string;
+  required: boolean;
+  kind?: "select" | "textarea";
+  options?: PlaygroundFieldOption[];
+  valueType?: "boolean" | "number" | "string_array" | "json";
+}
+
+interface PlaygroundOperation {
+  id: string;
+  operationId: string;
+  title: string;
+  method: PlaygroundMethod;
+  path: string;
+  pathFields: PlaygroundField[];
+  bodyFields: PlaygroundField[];
+  expectedResponse: unknown;
+}
+
+const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
+type HttpMethod = (typeof HTTP_METHODS)[number];
+const HTTP_METHOD_SET: ReadonlySet<string> = new Set(HTTP_METHODS);
+
+function isHttpMethod(key: string): key is HttpMethod {
+  return HTTP_METHOD_SET.has(key);
+}
 const TAG_TO_MODULE = new Map<string, PlaygroundModule>([
   ["Wallets", "wallets"],
   ["Payments", "payments"],
@@ -25,49 +68,94 @@ const outputPath = path.resolve(
   "../../sdp-web/src/lib/api-playground-catalog.generated.json"
 );
 
-function isRecord(value: unknown): value is JsonRecord {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+/**
+ * Whether an operation is callable with an API key. Operations that only
+ * accept dashboard credentials would 401 under the playground's key auth.
+ *
+ * @param security The operation's security requirements; absent means the document default applies.
+ * @returns True when some requirement is empty or names `apiKeyAuth`.
+ */
+function acceptsApiKeyAuth(security: SecurityRequirementObject[] | undefined): boolean {
+  if (security === undefined) return true;
+  return security.some(
+    (requirement) => "apiKeyAuth" in requirement || Object.keys(requirement).length === 0
+  );
 }
 
-function requiresSessionCookie(security: unknown): boolean {
-  if (!Array.isArray(security)) return false;
-  return security.some((requirement) => isRecord(requirement) && "sessionCookie" in requirement);
-}
-
-function dereferenceSchema(schema: unknown, document: JsonRecord): JsonRecord {
-  if (!isRecord(schema)) {
-    return {};
+/**
+ * Resolves a local `#/components/<section>/<name>` reference against the document.
+ *
+ * @param reference The `$ref` string.
+ * @param section The components section the reference must point into.
+ * @param document The OpenAPI document.
+ * @returns The referenced component.
+ */
+function resolveComponent<T>(
+  reference: string,
+  section: ComponentSection,
+  document: OpenAPIObject
+): T | ReferenceObject {
+  const prefix = `#/components/${section}/`;
+  if (!reference.startsWith(prefix)) {
+    throw new Error(`Unsupported $ref outside components.${section}: ${reference}`);
   }
-
-  const reference = schema.$ref;
-  if (typeof reference !== "string" || !reference.startsWith("#/")) {
-    return schema;
+  const name = reference.slice(prefix.length).replaceAll("~1", "/").replaceAll("~0", "~");
+  const components = document.components;
+  if (!components) {
+    throw new Error(`Document has no components but ${reference} was referenced`);
   }
-
-  const resolved = reference
-    .slice(2)
-    .split("/")
-    .reduce<unknown>((current, segment) => {
-      if (!isRecord(current)) {
-        return undefined;
-      }
-      return current[segment.replaceAll("~1", "/").replaceAll("~0", "~")];
-    }, document);
-
-  return dereferenceSchema(resolved, document);
+  const entry = (components[section] as Record<string, T | ReferenceObject> | undefined)?.[name];
+  if (entry === undefined) {
+    throw new Error(`Unresolved $ref: ${reference}`);
+  }
+  return entry;
 }
 
-function sampleObjectFromSchema(schema: JsonRecord, document: JsonRecord): JsonRecord {
-  const properties = isRecord(schema.properties) ? schema.properties : {};
-  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
-  const sample: JsonRecord = {};
+type ComponentSection = "schemas" | "parameters" | "requestBodies" | "responses";
 
-  for (const [name, propertySchema] of Object.entries(properties)) {
+/**
+ * Follows `$ref` chains until a concrete component object is reached.
+ *
+ * @param value The inline object or a reference to one.
+ * @param section The components section the reference must resolve within.
+ * @param document The OpenAPI document.
+ * @returns The concrete object.
+ */
+function dereference<T extends object>(
+  value: T | ReferenceObject,
+  section: ComponentSection,
+  document: OpenAPIObject
+): T {
+  if (!isReferenceObject(value)) return value;
+  return dereference(resolveComponent<T>(value.$ref, section, document), section, document);
+}
+
+const dereferenceSchema = (schema: SchemaObject | ReferenceObject, document: OpenAPIObject) =>
+  dereference<SchemaObject>(schema, "schemas", document);
+const dereferenceParameter = (
+  parameter: ParameterObject | ReferenceObject,
+  document: OpenAPIObject
+) => dereference<ParameterObject>(parameter, "parameters", document);
+const dereferenceRequestBody = (
+  requestBody: RequestBodyObject | ReferenceObject,
+  document: OpenAPIObject
+) => dereference<RequestBodyObject>(requestBody, "requestBodies", document);
+const dereferenceResponse = (response: ResponseObject | ReferenceObject, document: OpenAPIObject) =>
+  dereference<ResponseObject>(response, "responses", document);
+
+function sampleObjectFromSchema(
+  schema: SchemaObject,
+  document: OpenAPIObject
+): Record<string, unknown> {
+  const required = new Set(schema.required ?? []);
+  const sample: Record<string, unknown> = {};
+
+  for (const [name, propertySchema] of Object.entries(schema.properties ?? {})) {
     const property = dereferenceSchema(propertySchema, document);
     const hasUsefulSample =
       required.has(name) ||
-      "example" in property ||
-      "default" in property ||
+      property.example !== undefined ||
+      property.default !== undefined ||
       Array.isArray(property.enum) ||
       property.type === "object" ||
       property.type === "array" ||
@@ -82,57 +170,38 @@ function sampleObjectFromSchema(schema: JsonRecord, document: JsonRecord): JsonR
   return sample;
 }
 
-function sampleFromSchema(input: unknown, document: JsonRecord, propertyName?: string): unknown {
+function sampleFromSchema(
+  input: SchemaObject | ReferenceObject,
+  document: OpenAPIObject,
+  propertyName?: string
+): unknown {
   const schema = dereferenceSchema(input, document);
 
-  if ("example" in schema) {
-    return schema.example;
-  }
-  if ("default" in schema) {
-    return schema.default;
-  }
+  if (schema.example !== undefined) return schema.example;
+  if (schema.default !== undefined) return schema.default;
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
 
-  const enumValues = schema.enum;
-  if (Array.isArray(enumValues) && enumValues.length > 0) {
-    return enumValues[0];
+  if (schema.allOf && schema.allOf.length > 0) {
+    return Object.assign(
+      {},
+      ...schema.allOf.map((variant) => sampleFromSchema(variant, document, propertyName))
+    );
   }
+  const variant = schema.oneOf?.[0] ?? schema.anyOf?.[0];
+  if (variant) return sampleFromSchema(variant, document, propertyName);
 
-  for (const variantKey of ["oneOf", "anyOf", "allOf"]) {
-    const variants = schema[variantKey];
-    if (Array.isArray(variants) && variants.length > 0) {
-      if (variantKey === "allOf") {
-        return Object.assign(
-          {},
-          ...variants.map((variant) => sampleFromSchema(variant, document, propertyName))
-        );
-      }
-      return sampleFromSchema(variants[0], document, propertyName);
-    }
-  }
-
-  if (schema.type === "object" || isRecord(schema.properties)) {
+  if (schema.type === "object" || schema.properties !== undefined) {
     return sampleObjectFromSchema(schema, document);
   }
-
   if (schema.type === "array") {
-    return [sampleFromSchema(schema.items, document, propertyName)];
+    return schema.items ? [sampleFromSchema(schema.items, document, propertyName)] : [];
   }
-  if (schema.type === "boolean") {
-    return false;
-  }
-  if (schema.type === "integer" || schema.type === "number") {
-    return 1;
-  }
+  if (schema.type === "boolean") return false;
+  if (schema.type === "integer" || schema.type === "number") return 1;
 
-  if (schema.format === "date-time") {
-    return "2026-01-01T00:00:00.000Z";
-  }
-  if (schema.format === "date") {
-    return "2026-01-01";
-  }
-  if (schema.format === "uri" || schema.format === "url") {
-    return "https://example.com";
-  }
+  if (schema.format === "date-time") return "2026-01-01T00:00:00.000Z";
+  if (schema.format === "date") return "2026-01-01";
+  if (schema.format === "uri" || schema.format === "url") return "https://example.com";
 
   if (propertyName?.toLowerCase().endsWith("id")) {
     return `${propertyName.replace(/Id$/i, "").toLowerCase()}_example`;
@@ -143,34 +212,25 @@ function sampleFromSchema(input: unknown, document: JsonRecord, propertyName?: s
   return "example";
 }
 
-function fieldFromParameter(parameterInput: unknown, document: JsonRecord): JsonRecord | null {
-  const parameter = dereferenceSchema(parameterInput, document);
-  if (parameter.in !== "path" && parameter.in !== "query") {
-    return null;
-  }
+function fieldFromParameter(
+  parameter: ParameterObject,
+  document: OpenAPIObject
+): PlaygroundField | null {
+  if (parameter.in !== "path" && parameter.in !== "query") return null;
+  if (!parameter.name) return null;
 
-  const name = typeof parameter.name === "string" ? parameter.name : "";
-  if (!name) {
-    return null;
-  }
-
-  const schema = dereferenceSchema(parameter.schema, document);
-  const example = sampleFromSchema(schema, document, name);
+  const schema = parameter.schema ? dereferenceSchema(parameter.schema, document) : {};
+  const example = sampleFromSchema(schema, document, parameter.name);
   const shouldDefault =
     parameter.in === "path" ||
     parameter.required === true ||
-    "example" in parameter ||
-    "example" in schema ||
-    "default" in schema;
-  const field: JsonRecord = {
-    key: name,
-    label: parameter.in === "path" ? `{${name}}` : name,
-    description:
-      typeof parameter.description === "string"
-        ? parameter.description
-        : typeof schema.description === "string"
-          ? schema.description
-          : undefined,
+    parameter.example !== undefined ||
+    schema.example !== undefined ||
+    schema.default !== undefined;
+  const field: PlaygroundField = {
+    key: parameter.name,
+    label: parameter.in === "path" ? `{${parameter.name}}` : parameter.name,
+    description: parameter.description ?? schema.description,
     defaultValue: shouldDefault
       ? example === undefined || example === null
         ? ""
@@ -183,10 +243,7 @@ function fieldFromParameter(parameterInput: unknown, document: JsonRecord): Json
 
   if (Array.isArray(schema.enum)) {
     field.kind = "select";
-    field.options = schema.enum.map((value) => ({
-      label: String(value),
-      value: String(value),
-    }));
+    field.options = schema.enum.map((value) => ({ label: String(value), value: String(value) }));
   } else if (schema.type === "boolean") {
     field.kind = "select";
     field.options = [
@@ -200,26 +257,22 @@ function fieldFromParameter(parameterInput: unknown, document: JsonRecord): Json
     field.valueType = "string_array";
   }
 
-  return Object.fromEntries(Object.entries(field).filter(([, value]) => value !== undefined));
+  return field;
 }
 
-function buildPathWithQuery(pathname: string, parameters: JsonRecord[]): string {
+function buildPathWithQuery(pathname: string, parameters: ParameterObject[]): string {
   const queryNames = parameters
-    .filter((parameter) => parameter.in === "query" && typeof parameter.name === "string")
+    .filter((parameter) => parameter.in === "query")
     .map((parameter) => `${parameter.name}={${parameter.name}}`);
 
   return queryNames.length > 0 ? `${pathname}?${queryNames.join("&")}` : pathname;
 }
 
-function buildBodyFields(operation: JsonRecord, document: JsonRecord): JsonRecord[] {
-  const requestBody = dereferenceSchema(operation.requestBody, document);
-  const content = isRecord(requestBody.content) ? requestBody.content : {};
-  const jsonContent = isRecord(content["application/json"]) ? content["application/json"] : {};
-  const schema = jsonContent.schema;
-
-  if (!schema) {
-    return [];
-  }
+function buildBodyFields(operation: OperationObject, document: OpenAPIObject): PlaygroundField[] {
+  if (!operation.requestBody) return [];
+  const requestBody = dereferenceRequestBody(operation.requestBody, document);
+  const schema = requestBody.content["application/json"]?.schema;
+  if (!schema) return [];
 
   return [
     {
@@ -234,17 +287,15 @@ function buildBodyFields(operation: JsonRecord, document: JsonRecord): JsonRecor
   ];
 }
 
-function buildExpectedResponse(operation: JsonRecord, document: JsonRecord): unknown {
-  const responses = isRecord(operation.responses) ? operation.responses : {};
-  const successEntry = Object.entries(responses).find(([status]) => /^2\d\d$/.test(status));
-  if (!successEntry) {
-    return {};
-  }
+function buildExpectedResponse(operation: OperationObject, document: OpenAPIObject): unknown {
+  const successEntry = Object.entries(operation.responses).find(([status]) =>
+    /^2\d\d$/.test(status)
+  );
+  if (!successEntry) return {};
 
-  const response = dereferenceSchema(successEntry[1], document);
-  const content = isRecord(response.content) ? response.content : {};
-  const jsonContent = isRecord(content["application/json"]) ? content["application/json"] : {};
-  return jsonContent.schema ? sampleFromSchema(jsonContent.schema, document) : {};
+  const response = dereferenceResponse(successEntry[1], document);
+  const schema = response.content?.["application/json"]?.schema;
+  return schema ? sampleFromSchema(schema, document) : {};
 }
 
 function toEndpointId(operationId: string): string {
@@ -256,68 +307,62 @@ function toEndpointId(operationId: string): string {
 
 interface CatalogEntry {
   module: PlaygroundModule;
-  op: JsonRecord;
+  op: PlaygroundOperation;
 }
 
 function buildCatalogEntry(
   pathname: string,
-  method: string,
-  operationInput: JsonRecord,
-  pathParameters: unknown[],
-  document: JsonRecord
+  method: HttpMethod,
+  operation: OperationObject,
+  pathParameters: (ParameterObject | ReferenceObject)[],
+  document: OpenAPIObject
 ): CatalogEntry | null {
-  const tag = Array.isArray(operationInput.tags) ? operationInput.tags[0] : undefined;
-  const module = typeof tag === "string" ? TAG_TO_MODULE.get(tag) : undefined;
+  const tag = operation.tags?.[0];
+  const module = tag === undefined ? undefined : TAG_TO_MODULE.get(tag);
   if (!module) return null;
-  // Session-cookie ops would 401 under API-key playground auth.
-  if (requiresSessionCookie(operationInput.security)) return null;
+  if (!acceptsApiKeyAuth(operation.security)) return null;
 
-  const operationId =
-    typeof operationInput.operationId === "string"
-      ? operationInput.operationId
-      : `${method}-${pathname}`;
-  const rawParameters = [
-    ...pathParameters,
-    ...(Array.isArray(operationInput.parameters) ? operationInput.parameters : []),
-  ];
-  const parameters = rawParameters
-    .map((parameter) => dereferenceSchema(parameter, document))
-    .filter((parameter) => parameter.in === "path" || parameter.in === "query");
+  const operationId = operation.operationId ?? `${method}-${pathname}`;
+  const parameters = [...pathParameters, ...(operation.parameters ?? [])].map((parameter) =>
+    dereferenceParameter(parameter, document)
+  );
+  const pathAndQuery = parameters.filter(
+    (parameter) => parameter.in === "path" || parameter.in === "query"
+  );
 
   return {
     module,
     op: {
       id: toEndpointId(operationId),
       operationId,
-      title: typeof operationInput.summary === "string" ? operationInput.summary : operationId,
+      title: operation.summary ?? operationId,
       method: method.toUpperCase() as PlaygroundMethod,
-      path: buildPathWithQuery(pathname, parameters),
-      pathFields: rawParameters
+      path: buildPathWithQuery(pathname, pathAndQuery),
+      pathFields: parameters
         .map((parameter) => fieldFromParameter(parameter, document))
-        .filter((field): field is JsonRecord => field !== null),
-      bodyFields: buildBodyFields(operationInput, document),
-      expectedResponse: buildExpectedResponse(operationInput, document),
+        .filter((field): field is PlaygroundField => field !== null),
+      bodyFields: buildBodyFields(operation, document),
+      expectedResponse: buildExpectedResponse(operation, document),
     },
   };
 }
 
 function generateCatalog(): string {
-  const document = createPublicOpenApiDocument() as unknown as JsonRecord;
-  const paths = isRecord(document.paths) ? document.paths : {};
-  const modules: Record<PlaygroundModule, JsonRecord[]> = {
+  const document = createPublicOpenApiDocument();
+  const modules: Record<PlaygroundModule, PlaygroundOperation[]> = {
     wallets: [],
     payments: [],
     counterparties: [],
     issuance: [],
   };
 
-  for (const [pathname, pathItemInput] of Object.entries(paths)) {
-    if (!isRecord(pathItemInput)) continue;
-    const pathParameters = Array.isArray(pathItemInput.parameters) ? pathItemInput.parameters : [];
-
-    for (const [method, operationInput] of Object.entries(pathItemInput)) {
-      if (!HTTP_METHODS.has(method) || !isRecord(operationInput)) continue;
-      const entry = buildCatalogEntry(pathname, method, operationInput, pathParameters, document);
+  for (const [pathname, pathItem] of Object.entries(document.paths)) {
+    const pathParameters = pathItem.parameters ?? [];
+    for (const key of Object.keys(pathItem)) {
+      if (!isHttpMethod(key)) continue;
+      const operation = pathItem[key];
+      if (!operation) continue;
+      const entry = buildCatalogEntry(pathname, key, operation, pathParameters, document);
       if (entry) modules[entry.module].push(entry.op);
     }
   }

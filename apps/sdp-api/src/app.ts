@@ -36,7 +36,6 @@ import { requestTracingMiddleware } from "@/middleware/request-tracing";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import assetProfiles from "@/routes/asset-profiles";
-import auth from "@/routes/auth";
 import compliance from "@/routes/compliance";
 import counterparties from "@/routes/counterparties";
 import wallets from "@/routes/custody";
@@ -269,7 +268,7 @@ function captureUnexpectedError(
     scope.setTag("http_path", path);
 
     const apiKey = c.get("apiKey");
-    const session = c.get("session");
+    const replayActor = c.get("approvedOperationActor");
     const clerk = c.get("clerk");
 
     if (apiKey) {
@@ -279,10 +278,10 @@ function captureUnexpectedError(
         scope.setTag("project_id", apiKey.projectId);
       }
       scope.setUser({ id: `api_key:${apiKey.id}` });
-    } else if (session) {
-      scope.setTag("auth_type", "session");
-      scope.setTag("organization_id", session.organizationId);
-      scope.setUser({ id: session.userId });
+    } else if (replayActor) {
+      scope.setTag("auth_type", "approved_operation");
+      scope.setTag("organization_id", replayActor.organizationId);
+      scope.setUser({ id: replayActor.userId });
     } else if (clerk) {
       scope.setTag("auth_type", "clerk");
       scope.setTag("organization_id", clerk.organizationId);
@@ -365,7 +364,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     return next();
   });
 
-  // KV store — populates c.var.kv. Must precede rate-limit / auth / session
+  // KV store — populates c.var.kv. Must precede rate-limit and auth
   // middleware (all of which read from c.var.kv).
   app.use("*", kvStoreMiddleware(...KV_FREE_PATHS));
 
@@ -391,7 +390,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/api-keys", apiKeys);
   v1.route("/counterparties", counterparties);
   v1.route("/members", members);
-  v1.route("/auth", auth);
   v1.route("/projects", projects);
   v1.route("/rpc", rpc);
   // Asset profiles live under the issuance namespace, as a sibling of

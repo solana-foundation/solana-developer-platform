@@ -400,6 +400,46 @@ describe("PlaygroundApiKeySelector in the refresh playground", () => {
     expect(getStoredApiKeySecret({ apiKeyId: "key_test" })).toBe("sk_test_session_secret");
   });
 
+  it("runs once when Run is pressed again while the pasted key is identified", async () => {
+    // Greptile P1: every press waited on the same key check, then each one sent the request.
+    let releaseResolve: (() => void) | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (String(input) === "/api/playground/api-key") {
+        await new Promise<void>((resolve) => {
+          releaseResolve = resolve;
+        });
+        return {
+          ok: true,
+          json: async () => ({ id: "key_test", name: "Test key", keyPrefix: "sk_test_example" }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ ok: true, status: 200, statusText: "OK", body: {}, headers: {} }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = playground();
+
+    fireEvent.click(view.getByRole("button", { name: "Paste a key" }));
+    const secretInput = view.getByLabelText("API key value");
+    fireEvent.change(secretInput, { target: { value: "sk_test_session_secret" } });
+    fireEvent.keyDown(secretInput, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(releaseResolve).toBeDefined());
+
+    // Both arrive while the key check is still out.
+    fireEvent.keyDown(document.body, { key: "Enter", metaKey: true });
+    fireEvent.click(view.getByRole("button", { name: /Run request/ }));
+    releaseResolve?.();
+
+    await waitFor(() => expect(sentTo(fetchMock, "/api/playground/execute")).toHaveLength(1));
+    await waitFor(() =>
+      expect(view.getByRole("button", { name: /Run request/ }).hasAttribute("disabled")).toBe(false)
+    );
+    expect(sentTo(fetchMock, "/api/playground/execute")).toHaveLength(1);
+    expect(sentTo(fetchMock, "/api/playground/api-key")).toHaveLength(1);
+  });
+
   it("does not run with a key the server refuses", async () => {
     const fetchMock = mockPlaygroundRoutes({
       ok: false,
