@@ -1,6 +1,6 @@
 ---
 name: sdp-make-pr
-description: Prepare and open an SDP pull request with a 120-word body (200 ceiling): one or two sentences, up to six one-line bullets, one verification line, a table only for three or more same-shape rows. Use when opening or updating a pull request for SDP work.
+description: "Prepare and open an SDP pull request with a 120-word body (200 ceiling): one or two sentences, up to six one-line bullets, one verification line, a table only for three or more same-shape rows. Use when opening or updating a pull request for SDP work."
 ---
 
 # SDP make PR

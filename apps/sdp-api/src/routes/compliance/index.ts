@@ -9,7 +9,7 @@ import { screenAddressSchema } from "./schemas";
 
 const compliance = new Hono<{ Bindings: Env }>();
 
-compliance.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+compliance.use("*", unifiedAuthMiddleware());
 compliance.use("*", projectContextMiddleware());
 
 // Uses payments read permission so existing dashboard roles can call this endpoint.

@@ -35,7 +35,7 @@
  * This is a standalone script rather than a lint rule because the repo lints
  * with Biome, which has no custom-rule authoring mechanism in use here, and the
  * established convention for bespoke static checks is scripts/check-*.mjs with a
- * sibling .test.mjs (see check-module-boundaries.mjs, check-env-contract.mjs).
+ * sibling .test.mjs (see check-module-boundaries.mjs).
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";

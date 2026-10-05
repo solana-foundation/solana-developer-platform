@@ -17,7 +17,6 @@ import {
   counterpartyFieldOptionsResponseSchema,
   counterpartyRequirementsResponseSchema,
   counterpartyResponseSchema,
-  currentUserResponseSchema,
   custodyConfigResponseSchema,
   custodyConfigsResponseSchema,
   custodyWalletAggregateResponseSchema,
@@ -49,7 +48,6 @@ import {
   listProjectApiKeysResponseSchema,
   listProjectMembersResponseSchema,
   listProjectsResponseSchema,
-  listSessionsResponseSchema,
   listTemplatesResponseSchema,
   offrampCurrenciesResponseSchema,
   onboardingCompleteResponseSchema,
@@ -263,8 +261,6 @@ export const executeUpdateAuthorityResponse = successResponseSchema(
 export const executePauseResponse = successResponseSchema(executePauseResponseSchema);
 export const executeUnpauseResponse = successResponseSchema(executeUnpauseResponseSchema);
 
-export const currentUserResponse = successResponseSchema(currentUserResponseSchema);
-export const listSessionsResponse = successResponseSchema(listSessionsResponseSchema);
 export const custodyConfigResponse = successResponseSchema(custodyConfigResponseSchema);
 export const custodyConfigsResponse = successResponseSchema(custodyConfigsResponseSchema);
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
