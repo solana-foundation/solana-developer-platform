@@ -5,8 +5,9 @@ import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootst
 
 // The new design's Issuance (new-design-issuance on): the token list, the draft flow and one
 // token's page. issuance.e2e.spec.ts keeps covering the previous design, which production
-// still serves. Both start from the same seeded fixtures; the operation dialogs are shared
-// with the previous design, so their steps match it.
+// still serves. Both start from the same seeded fixtures. Pause and freeze open in place on the
+// new design; the other operation dialogs are shared with the previous design, so their steps
+// match it.
 
 type TokenTab = "overview" | "details" | "public" | "compliance" | "operations" | "permissions";
 
@@ -99,6 +100,11 @@ async function waitForToast(page: Page, text: string, previousCount = 0): Promis
   await expect
     .poll(async () => page.getByText(text).count(), { timeout: 120_000 })
     .toBeGreaterThan(previousCount);
+}
+
+/** A transfer operation opened in place on Operations (pause or freeze). */
+function transferForm(page: Page, operation: "pause" | "freeze") {
+  return page.locator(`[data-transfer-operation="${operation}"]`);
 }
 
 async function confirmAction(page: Page, confirmButtonLabel: string): Promise<void> {
@@ -277,21 +283,20 @@ test.describe
 
       await expect(operationButton(page, "pause")).toHaveText("Pause", { timeout: 120_000 });
       let successCount = await page.getByText("Pause transaction finalized.").count();
+      // Pause opens in place and is its own confirmation: no dialog follows.
       await operationButton(page, "pause").click();
-      await expect(
-        page.getByRole("heading", { name: "Pause transfers for all holders?" })
-      ).toBeVisible();
-      await confirmAction(page, "Pause all transfers");
+      const pauseForm = transferForm(page, "pause");
+      await expect(pauseForm).toContainText("Every holder is affected at once");
+      await pauseForm.getByRole("button", { name: "Pause transfers", exact: true }).click();
       await waitForToast(page, "Pause transaction finalized.", successCount);
       await expect(recordValue(page, "Transfers")).toContainText("Paused", { timeout: 120_000 });
 
       await expect(operationButton(page, "pause")).toHaveText("Resume", { timeout: 120_000 });
       successCount = await page.getByText("Unpause transaction finalized.").count();
       await operationButton(page, "pause").click();
-      await expect(
-        page.getByRole("heading", { name: "Resume transfers for all holders?" })
-      ).toBeVisible();
-      await confirmAction(page, "Resume transfers");
+      await transferForm(page, "pause")
+        .getByRole("button", { name: "Resume transfers", exact: true })
+        .click();
       await waitForToast(page, "Unpause transaction finalized.", successCount);
       await expect(recordValue(page, "Transfers")).toContainText("Running", { timeout: 120_000 });
     });

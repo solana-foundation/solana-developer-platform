@@ -684,7 +684,8 @@ export function useTokenOperations({
     );
   };
 
-  const handlePause = (pause: boolean) => {
+  /** `confirmed` when the caller already asked (the new design's in-place pause); else a dialog asks. */
+  const handlePause = (pause: boolean, { confirmed = false }: { confirmed?: boolean } = {}) => {
     if (effectivePauseDisabledReason) {
       toast.error(effectivePauseDisabledReason);
       return;
@@ -700,7 +701,7 @@ export function useTokenOperations({
         body: {},
       },
       {
-        requiresConfirmation: true,
+        requiresConfirmation: !confirmed,
         confirmationTitle: pause
           ? t("DashboardIssuance.management.pauseConfirmationTitle")
           : t("DashboardIssuance.management.unpauseConfirmationTitle"),
