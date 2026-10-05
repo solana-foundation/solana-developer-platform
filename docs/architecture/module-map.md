@@ -37,11 +37,12 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/spc-escrow` | Generated @solana/kit client for the Private Channels escrow program. | None |
 | `@sdp/spc-withdraw` | Generated @solana/kit client for the Private Channels withdraw program. | None |
 | `@sdp/types` | Shared runtime types, constants, and product contracts. | None |
+| `@sdp/ui` | Dashboard UI primitives built on @solana/design-system and @sdp/design-tokens. | `@sdp/design-tokens`, `@sdp/solana` |
 | `@sdp/veda` | Kit-native Veda SVM vault deposit, instant and queued withdrawal plans, plus position and lifecycle reads over @vedatech/svm-sdk. | `@sdp/earn`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/wisdomtree` | Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads. | `@sdp/earn`, `@sdp/types` |
 | `bigint-buffer` | Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding. | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
-| `sdp-web` | Dashboard application. | `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types` |
+| `sdp-web` | Dashboard application. | `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui` |
 
 ## Declared Workspace Graph
 
@@ -68,8 +69,9 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/spc-escrow` -> None
 - `@sdp/spc-withdraw` -> None
 - `@sdp/types` -> None
+- `@sdp/ui` -> `@sdp/design-tokens`, `@sdp/solana`
 - `@sdp/veda` -> `@sdp/earn`, `@sdp/solana`, `@sdp/types`
 - `@sdp/wisdomtree` -> `@sdp/earn`, `@sdp/types`
 - `bigint-buffer` -> None
 - `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
-- `sdp-web` -> `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`
+- `sdp-web` -> `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui`

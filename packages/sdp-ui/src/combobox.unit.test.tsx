@@ -3,9 +3,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
 import { Combobox, type ComboboxOption } from "./combobox";
+import { EnglishUiI18nProvider } from "./testing/english-ui-i18n";
 
 const options: ComboboxOption[] = [
   { value: "ok", label: "Treasury" },
@@ -22,7 +21,7 @@ function renderCombobox() {
   const onChange = vi.fn();
   const onEnterSelect = vi.fn();
   render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishUiI18nProvider>
       <Combobox
         label="Wallet"
         value={null}
@@ -31,7 +30,7 @@ function renderCombobox() {
         options={options}
         searchPlaceholder="Search wallets"
       />
-    </I18nProvider>
+    </EnglishUiI18nProvider>
   );
   return { onChange, onEnterSelect };
 }
