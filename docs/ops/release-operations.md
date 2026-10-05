@@ -170,7 +170,7 @@ The workflow validates the SHA, resolves its tag to an immutable digest, verifie
 ## Production Rollback
 
 1. Identify the last healthy release's full Git SHA from a successful, trusted production release workflow. Confirm its recorded digest and `sdp-api-public:<sha>` image still match in the production Artifact Registry repository.
-2. If production web depends on API behavior newer than that SHA, first use Vercel instant rollback on sdp-web to a deployment no newer than it.
+2. If production web depends on API behavior newer than that SHA, first use Vercel instant rollback on sdp-web to a deployment no newer than it. If the API rollback then fails to complete, promote the previous sdp-web deployment back.
 3. Open `Deploy sdp-api to Cloud Run (prod)` in GitHub Actions and choose **Run workflow** from `main`.
 4. Enter the full SHA as `image_sha`.
 5. Approve the `production` environment gate if configured.
