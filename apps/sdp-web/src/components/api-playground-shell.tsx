@@ -1224,6 +1224,9 @@ export function ApiPlaygroundShell({
   } = useApiPlaygroundState({ apiBaseUrl, defaultEndpointId, endpoints, productName, t });
   // The key field fills this, so a run can identify a key pasted a moment before.
   const identifyPendingApiKey = useRef<IdentifyPendingApiKey | null>(null);
+  // Set from the press until the run settles, key check included: a second Run or ⌘↵ meanwhile
+  // would wait on the same check and then send the request again.
+  const runPending = useRef(false);
 
   if (!activeEndpoint) {
     return null;
@@ -1298,9 +1301,15 @@ export function ApiPlaygroundShell({
   };
 
   const handleExecute = () => {
+    if (runPending.current) {
+      return;
+    }
+    runPending.current = true;
     setExecuteError(null);
     setExecutionResult(null);
-    void runWithIdentifiedKey();
+    void runWithIdentifiedKey().finally(() => {
+      runPending.current = false;
+    });
   };
 
   if (refresh) {
