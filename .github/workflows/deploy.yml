@@ -44,18 +44,18 @@ jobs:
           set -euo pipefail
           BEFORE="${{ github.event.before }}"
           if [ "${{ github.event_name }}" = "push" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
-            CHANGED_FILES=$(git diff --name-only "$BEFORE" HEAD)
+            BASE="$BEFORE"
           else
-            CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
+            BASE="HEAD^"
           fi
-          match() { echo "$CHANGED_FILES" | grep -qE "$1"; }
+          API_CHANGES="$(.github/scripts/sdp-api-changes.sh "$BASE" HEAD)"
 
           api=false
           case "$MODE" in
             none) ;;
             api) api=true ;;
             auto|*)
-              if match "$(cat .github/scripts/sdp-api-deploy-paths.regex)"; then
+              if [ -n "$API_CHANGES" ]; then
                 api=true
               fi
               ;;

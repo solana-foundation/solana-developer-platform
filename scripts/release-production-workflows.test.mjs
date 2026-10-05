@@ -37,8 +37,8 @@ test("release publication passes an immutable identity to the production API dep
 });
 
 const workflowsDir = path.resolve(here, "../.github/workflows");
-const apiDeployPathsRegex = fs.readFileSync(
-  path.resolve(here, "../.github/scripts/sdp-api-deploy-paths.regex"),
+const apiChangesScript = fs.readFileSync(
+  path.resolve(here, "../.github/scripts/sdp-api-changes.sh"),
   "utf8"
 );
 const hermeticGitEnv = { ...process.env, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: "1" };
@@ -101,7 +101,7 @@ function commit(repo, message, filePaths) {
   return git(repo, ["rev-parse", "HEAD"]);
 }
 
-function createSandbox(t, regex) {
+function createSandbox(t, changesScript) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sdp-web-gate-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const sandbox = {
@@ -111,7 +111,9 @@ function createSandbox(t, regex) {
     summary: path.join(root, "summary.md"),
   };
   fs.mkdirSync(path.join(sandbox.repo, ".github/scripts"), { recursive: true });
-  fs.writeFileSync(path.join(sandbox.repo, ".github/scripts/sdp-api-deploy-paths.regex"), regex);
+  fs.writeFileSync(path.join(sandbox.repo, ".github/scripts/sdp-api-changes.sh"), changesScript, {
+    mode: 0o755,
+  });
   fs.mkdirSync(sandbox.bin);
   fs.writeFileSync(
     path.join(sandbox.bin, "gh"),
@@ -149,7 +151,7 @@ function readGhCalls(sandbox) {
 const releaseGateCases = [
   {
     name: "posts for main's head when head is the deployed API commit",
-    regex: apiDeployPathsRegex,
+    changesScript: apiChangesScript,
     succeeds: true,
     build: (repo) => {
       const apiSha = commit(repo, "base", []);
@@ -158,7 +160,7 @@ const releaseGateCases = [
   },
   {
     name: "posts for main's head when only sdp-web changed past the deployed API commit",
-    regex: apiDeployPathsRegex,
+    changesScript: apiChangesScript,
     succeeds: true,
     build: (repo) => {
       const apiSha = commit(repo, "base", []);
@@ -167,7 +169,7 @@ const releaseGateCases = [
   },
   {
     name: "posts nothing when main's head carries API changes past the deployed API commit",
-    regex: apiDeployPathsRegex,
+    changesScript: apiChangesScript,
     succeeds: true,
     build: (repo) => {
       const apiSha = commit(repo, "base", []);
@@ -177,7 +179,7 @@ const releaseGateCases = [
   },
   {
     name: "posts nothing when the deployed API commit is not an ancestor of main's head",
-    regex: apiDeployPathsRegex,
+    changesScript: apiChangesScript,
     succeeds: true,
     build: (repo) => {
       commit(repo, "base", []);
@@ -189,7 +191,7 @@ const releaseGateCases = [
   },
   {
     name: "fails without posting when the API path regex is invalid",
-    regex: "(",
+    changesScript: apiChangesScript.replace(/grep -E '[^']*'/, "grep -E '('"),
     succeeds: false,
     build: (repo) => {
       const apiSha = commit(repo, "base", []);
@@ -201,7 +203,7 @@ const releaseGateCases = [
 
 for (const releaseGateCase of releaseGateCases) {
   test(`sdp-web release gate ${releaseGateCase.name}`, (t) => {
-    const sandbox = createSandbox(t, releaseGateCase.regex);
+    const sandbox = createSandbox(t, releaseGateCase.changesScript);
     const { apiSha, postedShas } = releaseGateCase.build(sandbox.repo);
 
     const result = runReleaseGate(sandbox, apiSha);
@@ -268,9 +270,7 @@ test("deploy.yml releases sdp-web after its API deploy or behind a released pare
   assert.ok(parentGate.includes(`PARENT_SHA: ${githubExpression("github.event.before")}`));
   assert.ok(parentGate.includes('select(.context == "sdp-web production gate")'));
   assert.ok(
-    jobBlock(deployWorkflow, "changes").includes(
-      "$(cat .github/scripts/sdp-api-deploy-paths.regex)"
-    )
+    jobBlock(deployWorkflow, "changes").includes('.github/scripts/sdp-api-changes.sh "$BASE" HEAD')
   );
 });
 

@@ -38,7 +38,7 @@ jobs:
             echo "${API_SHA} is not on main; nothing released." >> "${GITHUB_STEP_SUMMARY}"
             exit 0
           fi
-          api_changes="$(git diff --name-only "${API_SHA}" "${head_sha}" | { grep -E "$(cat .github/scripts/sdp-api-deploy-paths.regex)" || [[ $? == 1 ]]; })"
+          api_changes="$(.github/scripts/sdp-api-changes.sh "${API_SHA}" "${head_sha}")"
           if [[ -n "${api_changes}" ]]; then
             printf 'main head %s carries API changes past %s; its own API deploy releases it:\n\n%s\n' \
               "${head_sha}" "${API_SHA}" "${api_changes}" >> "${GITHUB_STEP_SUMMARY}"
