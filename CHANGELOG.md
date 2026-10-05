@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.83.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.82.0...v0.83.0) (2026-10-05)
+
+### Features
+
+* **dashboard:** [1/11] add the new design foundation with per-area flags ([#2177](https://github.com/solana-foundation/solana-developer-platform/pull/2177)) ([6889633](https://github.com/solana-foundation/solana-developer-platform/commit/6889633e1f415886da402f84c6504e541f3d7578))
+
+### Maintenance
+
+* **scripts:** prune dead root scripts and collapse dev:local into dev ([#2181](https://github.com/solana-foundation/solana-developer-platform/pull/2181)) ([2813d52](https://github.com/solana-foundation/solana-developer-platform/commit/2813d52ddd82e76b535f315cdbedb1d734b87cb9))
+
 ## [0.82.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.81.0...v0.82.0) (2026-10-03)
 
 ### Features

@@ -431,7 +431,11 @@
       "update": "Enregistrer les modifications",
       "updating": "Enregistrement…",
       "updateSuccess": "Connexion mise à jour.",
-      "connectionTestSuccess": "La connexion fonctionne."
+      "connectionTestSuccess": "La connexion fonctionne.",
+      "endpointsSection": "Endpoints",
+      "programsSection": "Programs",
+      "programAddressPlaceholder": "Adresse du programme",
+      "accountAddressPlaceholder": "Adresse du compte"
     },
     "playground": {
       "productName": "Private Channels",
