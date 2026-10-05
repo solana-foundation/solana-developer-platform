@@ -44,6 +44,7 @@ const LOCAL_CUSTODY_PRIVATE_KEY = "local-custody-test-private-key";
 
 let originalDeploymentMode: "managed" | "self_hosted" | undefined;
 let originalCustodyPrivateKey: string | undefined;
+let originalCustodyEncryptionKey: string | undefined;
 let originalManagedProviderEnv: Record<string, string | undefined>;
 
 const managedCustodyProviderEnvKeys = [
@@ -127,9 +128,11 @@ describe("Custody routes — self-hosted deployment mode", () => {
   beforeEach(async () => {
     originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
     originalCustodyPrivateKey = env.CUSTODY_PRIVATE_KEY;
+    originalCustodyEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
     originalManagedProviderEnv = readManagedProviderEnv();
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CUSTODY_PRIVATE_KEY = LOCAL_CUSTODY_PRIVATE_KEY;
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
     clearManagedProviderEnv();
     await seedTestDatabase(env);
   });
@@ -137,8 +140,30 @@ describe("Custody routes — self-hosted deployment mode", () => {
   afterEach(async () => {
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
+    env.CUSTODY_ENCRYPTION_KEY = originalCustodyEncryptionKey;
     writeManagedProviderEnv(originalManagedProviderEnv);
     await clearKVStores(env);
+  });
+
+  it("POST /v1/wallets/initialize creates a local wallet", async () => {
+    await seedAuth("individual");
+
+    const res = await app.request(
+      "/v1/wallets/initialize",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ provider: "local" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { publicKey: string } };
+    expect(body.data.publicKey).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
   });
 
   it("POST /v1/wallets/initialize with a non-configured provider returns 403", async () => {
