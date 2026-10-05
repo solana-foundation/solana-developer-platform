@@ -120,8 +120,19 @@ const ACTION_LABEL: Record<string, MessageKey> = {
 
 export const ACTIVITY_ACTIONS = Object.keys(ACTION_LABEL);
 
-export function activityEventLabel(action: string, t: Translate): string {
-  const key = ACTION_LABEL[action];
+/**
+ * A control list change, which the API logs as `create` or `revoke` on the list entry rather
+ * than on the token: read on its own, `create` would say the token was created.
+ */
+const LIST_ACTION_LABEL: Record<string, MessageKey> = {
+  create: "DashboardIssuance.newDesign.activity.events.listAdd",
+  revoke: "DashboardIssuance.newDesign.activity.events.listRemove",
+};
+
+export function activityEventLabel(action: string, t: Translate, resourceType?: string): string {
+  const key =
+    (resourceType === "token_allowlist" ? LIST_ACTION_LABEL[action] : undefined) ??
+    ACTION_LABEL[action];
   if (key) return t(key);
   // An event the catalog has no words for reads in sentence case, as the named ones do.
   const words = action.replaceAll("_", " ");

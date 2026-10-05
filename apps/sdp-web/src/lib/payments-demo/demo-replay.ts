@@ -27,6 +27,7 @@ import {
 } from "./demo-fixtures";
 import type { DemoOp, DemoOpOf } from "./demo-ops";
 import { isDemoRampRail, railAsset } from "./demo-ramp-assets";
+import { applyIssuanceOp, isIssuanceOp, sortIssuance } from "./issuance-replay";
 
 /*
  * The session's actions applied to the fixture world, oldest first. Each one changes the world
@@ -543,6 +544,10 @@ function applyScheduleUpdate(world: DemoWorld, op: DemoOpOf<"schedule-update">):
 }
 
 function applyOp(world: DemoWorld, op: DemoOp, now: number): void {
+  if (isIssuanceOp(op)) {
+    applyIssuanceOp(world, op, now);
+    return;
+  }
   switch (op.k) {
     case "contact":
       applyContact(world, op);
@@ -596,6 +601,7 @@ function applyOp(world: DemoWorld, op: DemoOp, now: number): void {
 export function applyDemoOps(world: DemoWorld, ops: readonly DemoOp[], now: Date): DemoWorld {
   if (ops.length === 0) return world;
   for (const op of ops) applyOp(world, op, now.getTime());
+  sortIssuance(world);
   world.transfers.sort((left, right) =>
     right.transfer.createdAt.localeCompare(left.transfer.createdAt)
   );

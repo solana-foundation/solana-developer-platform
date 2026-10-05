@@ -119,6 +119,7 @@ export function TokenOverviewTab({
       {/* The state band sits 24px over what follows it, closer than the parts below. */}
       <div className="flex flex-col gap-6">
         <OverviewStateBand
+          onOpenTab={onOpenTab}
           state={state}
           ops={ops}
           latestDeploy={latestDeploy}
@@ -157,7 +158,8 @@ function OverviewStateBand({
   ops,
   latestDeploy,
   canManageTokenAdmin,
-}: Pick<OverviewTabProps, "state" | "ops" | "latestDeploy" | "canManageTokenAdmin">) {
+  onOpenTab,
+}: Pick<OverviewTabProps, "state" | "ops" | "latestDeploy" | "canManageTokenAdmin" | "onOpenTab">) {
   const t = useTranslations();
   const tint = BAND_TINT[TOKEN_LIFECYCLE_BAND[state]];
   const mintBlocked = ops.operationAvailability.mint ?? null;
@@ -168,16 +170,22 @@ function OverviewStateBand({
           size="sm"
           className="[--button-height-md:1.875rem]"
           disabled={ops.isPending || Boolean(mintBlocked)}
-          onClick={() => ops.openFundManagementModal("mint")}
+          onClick={() => {
+            // Minting opens in place on Operations, under the issued supply.
+            ops.openFundManagementModal("mint");
+            onOpenTab("operations");
+          }}
         >
           {t("DashboardIssuance.newDesign.overview.mintTokens")}
         </Button>
       </TokenDisabledActionTooltip>
     ) : state === "deploying" && latestDeploy ? (
-      <span className="text-meta text-secondary">
-        {t("DashboardIssuance.newDesign.overview.submittedAgo", {
-          minutes: minutesSince(latestDeploy.createdAt),
-        })}
+      <span className="text-meta leading-5 text-secondary">
+        {minutesSince(latestDeploy.createdAt) === 0
+          ? t("DashboardIssuance.newDesign.overview.submittedJustNow")
+          : t("DashboardIssuance.newDesign.overview.submittedAgo", {
+              minutes: minutesSince(latestDeploy.createdAt),
+            })}
       </span>
     ) : null;
 
@@ -185,13 +193,15 @@ function OverviewStateBand({
     <div
       data-state-band={TOKEN_LIFECYCLE_BAND[state]}
       className={cn(
-        "flex flex-col items-start gap-3 rounded-card px-5 py-3 md:flex-row md:items-center md:justify-between md:gap-6",
+        "flex flex-col items-start gap-3 rounded-card px-5 py-3 md:flex-row md:justify-between md:gap-6",
+        // A button centres on the band; a note (how long a deploy has run) reads on the state's line.
+        state === "deploying" ? "md:items-start" : "md:items-center",
         tint.band
       )}
     >
       <div className="flex min-w-0 flex-col gap-0.5 md:flex-1">
         <p className={cn("text-body font-medium", tint.word)}>{t(TOKEN_LIFECYCLE_LABEL[state])}</p>
-        <p className="max-w-[40em] text-body text-secondary">{t(TOKEN_LIFECYCLE_WHY[state])}</p>
+        <p className="max-w-md text-body text-secondary">{t(TOKEN_LIFECYCLE_WHY[state])}</p>
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>
@@ -481,7 +491,7 @@ function RecentActivity({ tokenId, onViewAll }: { tokenId: string; onViewAll: ()
               >
                 <span className="flex min-w-0 flex-col gap-1">
                   <span className="flex items-center gap-2 text-body font-medium text-primary">
-                    {activityEventLabel(event.action, t)}
+                    {activityEventLabel(event.action, t, event.resourceType)}
                     <StatusText tone={status.tone} className="font-normal">
                       {status.label}
                     </StatusText>

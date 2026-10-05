@@ -490,7 +490,7 @@ function CustomAuthorityWarning() {
   );
 }
 
-function getNoneConfirmationCopy(
+export function getNoneConfirmationCopy(
   row: PermissionRow,
   t: ReturnType<typeof useTranslations>
 ): {

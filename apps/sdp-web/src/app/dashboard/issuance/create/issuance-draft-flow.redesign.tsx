@@ -9,6 +9,7 @@ import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { saveIssuanceDraft } from "./actions";
 import {
   ClassifyStep,
@@ -78,6 +79,23 @@ function initialDraft(wallets: readonly PaymentsDashboardWallet[]): DraftState {
       "freeze-authority": first,
       "permanent-delegate": first,
     },
+  };
+}
+
+/**
+ * The draft demo mode opens with, every step already filled in (a stablecoin, its details,
+ * the sample wallets on its keys), so the flow can be walked to Create draft on Continue alone.
+ */
+function demoDraft(wallets: readonly PaymentsDashboardWallet[]): DraftState {
+  return {
+    ...initialDraft(wallets),
+    name: "Harbor Dollar",
+    symbol: "HRBR",
+    description:
+      "A dollar stablecoin for paying suppliers, backed one to one by cash at a regulated bank.",
+    maxSupply: "10000000",
+    issuerName: "Hoodies Inc",
+    pegCurrency: "USD",
   };
 }
 
@@ -176,11 +194,12 @@ function DraftFlow({
   const savable = classified && draftSchema.safeParse(draft).success;
 
   // The draft flow sits at the top of the page, with no title over it: the design draws its
-  // progress 48px from the top, 10px over its bar, and the step's heading 26px over the fields,
-  // where the shared frame (under a Payments title) has 36, 8 and 24.
+  // progress 48px from the top (16px under the menu row on a phone), 10px over its bar, and the
+  // step's heading 26px over the fields (24px on a phone), where the shared frame (under a
+  // Payments title) has 36, 8 and 24.
   return (
     <div
-      className="h-full min-h-0 md:[&_[data-wizard-scroll-region]]:pt-12 [&_[data-wizard-stepper]>div:first-child]:gap-y-2.5 [&_[data-wizard-heading]]:mb-6.5"
+      className="h-full min-h-0 [&_[data-wizard-scroll-region]]:pt-4 md:[&_[data-wizard-scroll-region]]:pt-12 [&_[data-wizard-stepper]>div:first-child]:gap-y-2.5 [&_[data-wizard-heading]]:mb-6 md:[&_[data-wizard-heading]]:mb-6.5"
       data-issuance-draft-flow
     >
       <WizardFrame
@@ -391,10 +410,12 @@ function useDraftFlowState(
   keptId: string | null,
   resumeFrom: LocalDraft | null
 ) {
+  // Demo mode starts a new draft filled in; a kept draft opens as it was left.
+  const demo = usePaymentsDemo();
   const [step, setStep] = useState(() =>
     resumeFrom ? Math.min(Math.max(resumeFrom.step, 0), STEPS.length - 1) : 0
   );
-  const [classified, setClassified] = useState(resumeFrom !== null);
+  const [classified, setClassified] = useState(resumeFrom !== null || demo);
   const [draft, setDraft] = useState<DraftState>(() =>
     resumeFrom
       ? restoreDraft(
@@ -402,7 +423,9 @@ function useDraftFlowState(
           resumeFrom.draft,
           new Set(wallets.map((wallet) => wallet.id))
         )
-      : initialDraft(wallets)
+      : demo
+        ? demoDraft(wallets)
+        : initialDraft(wallets)
   );
   const [access, setAccess] = useState<DraftAccess>(resumeFrom?.access ?? "blocklist");
   const { storageKey } = useLocalDrafts();

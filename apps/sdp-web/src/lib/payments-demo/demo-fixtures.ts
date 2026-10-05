@@ -28,6 +28,8 @@ import {
   type UnifiedTransaction,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
+import { buildIssuanceWorld, type IssuanceWorld } from "./issuance-fixtures";
+import { issuanceRead } from "./issuance-reads";
 
 /*
  * Demo data for the Payments screens. Every GET the Payments pages send upstream is answered
@@ -39,7 +41,7 @@ import {
 
 export const MINUTE_MS = 60_000;
 export const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
+export const DAY_MS = 24 * HOUR_MS;
 
 export const ORGANIZATION_ID = "demo_org";
 export const PROJECT_ID = "demo_prj";
@@ -797,16 +799,18 @@ export interface DemoWorld {
   consents: string[];
   /** When a ramp provider approved a contact's identity check, by `provider:counterpartyId`. */
   verifications: Record<string, number>;
+  /** The Issuance screens' tokens, signing with these wallets. */
+  issuance: IssuanceWorld;
 }
 
-interface Clock {
+export interface Clock {
   /** ISO time `ms` before now. */
   ago: (ms: number) => string;
   /** ISO time at a signed offset from now. */
   at: (offset: number) => string;
 }
 
-function createClock(now: Date): Clock {
+export function createClock(now: Date): Clock {
   // Whole minutes, so every read in one render agrees on the same world.
   const nowMs = Math.floor(now.getTime() / MINUTE_MS) * MINUTE_MS;
   return {
@@ -1214,6 +1218,7 @@ export function buildWorld(now: Date): DemoWorld {
     attempts: scheduleOutputs.flatMap((output) => output.attempts),
     consents: [],
     verifications: {},
+    issuance: buildIssuanceWorld(base.wallets, clock),
   };
 }
 
@@ -1849,10 +1854,6 @@ function counterpartiesRoute(rest: string[], params: URLSearchParams, world: Dem
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
-function emptyIssuedTokensBody(params: URLSearchParams) {
-  return { data: [], meta: paginatedMeta(pageOf([], params)) };
-}
-
 function decodeSegment(segment: string): string {
   try {
     return decodeURIComponent(segment);
@@ -1902,8 +1903,10 @@ export function demoWorldBody(world: DemoWorld, pathWithQuery: string): unknown 
       return rest.length === 0 ? transactionsBody(world, params) : undefined;
     case "counterparties":
       return counterpartiesRoute(rest, params, world);
-    case "issuance":
-      return rest.length === 1 && rest[0] === "tokens" ? emptyIssuedTokensBody(params) : undefined;
+    case "issuance": {
+      const answer = issuanceRead(world.issuance, rest, params);
+      return answer?.status === 200 ? answer.body : undefined;
+    }
     default:
       return undefined;
   }

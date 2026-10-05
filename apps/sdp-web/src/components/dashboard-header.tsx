@@ -167,8 +167,8 @@ export function HeaderBackAction({
   return (
     <Link
       href={href}
-      // Refresh: the chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 8px to its label.
-      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:-ml-1.5 refresh:h-5 refresh:gap-2"
+      // Refresh: the chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
+      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:-ml-1.5 refresh:h-5 refresh:gap-1.5"
     >
       <ArrowLeftIcon className="h-4 w-4 refresh:hidden" />
       <ChevronLeftIcon className="hidden size-4 refresh:block" />
@@ -272,11 +272,10 @@ export function StackedDashboardTopBar({
         <h1 className="sr-only">{title}</h1>
       ) : (
         <div className="col-span-3 row-start-2 min-w-0 md:col-span-1 md:col-start-1 md:row-start-1">
-          {/* The back link's row: the design's 32px top row with the link centred, 4px over the
-              title, so the link reads 12px lower than a page's title would and the title 36px
-              below the top. A flex row, so the link's 20px line sets the height, not the strut. */}
+          {/* The back link's row: the design's 32px top row with the link centred, 2px over the
+              title. A flex row, so the link's 20px line sets the height, not the strut. */}
           {above ? (
-            <div className={cn("flex items-center max-md:hidden", mark ? "mb-4" : "h-8 mb-1")}>
+            <div className={cn("flex items-center max-md:hidden", mark ? "mb-4" : "h-8 mb-0.5")}>
               {above}
             </div>
           ) : null}

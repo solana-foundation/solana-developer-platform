@@ -30,6 +30,7 @@ import {
 } from "../asset-profile/transactions.data";
 import { TOKEN_TRANSACTIONS_KEY } from "../asset-profile/transactions-cache";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
+import { LockSupplyForm, SupplyOperationForm } from "./supply-operation-form";
 import { activityEventLabel } from "./token-activity";
 import {
   accessControlLabel,
@@ -158,8 +159,14 @@ export function TokenOperationsTab({
     token,
     canManageTokenAdmin,
     t,
-    onSelect: (action) =>
-      action === "allowlist" ? onOpenTab("compliance") : setActiveAction(action),
+    onSelect: (action) => {
+      if (action === "allowlist") {
+        onOpenTab("compliance");
+        return;
+      }
+      ops.prefillDemoOperation(action);
+      setActiveAction(action);
+    },
     labels,
   });
   const onChain = isOnChain(state);
@@ -214,8 +221,19 @@ function SupplyBlock({
   const issued = Number(token.totalSupply || 0);
   const cap = token.maxSupply ? Number(token.maxSupply) : null;
   const left = cap !== null && Number.isFinite(cap) ? Math.max(0, cap - issued) : null;
+  // Mint or burn opens in place under the issued supply, its own button giving way to the form.
+  const openAction = rows ? ops.fundManagementModalAction : null;
+  // Lock supply opens the same way under the cap.
+  const lockOpen = Boolean(rows) && ops.lockSupplyModalOpen && ops.lockSupplyRemaining !== null;
   const actions = (ids: ReadonlySet<string>) => (
-    <OperationButtons rows={rows?.filter((row) => ids.has(row.id)) ?? []} pending={ops.isPending} />
+    <OperationButtons
+      rows={
+        rows?.filter(
+          (row) => ids.has(row.id) && row.id !== openAction && !(lockOpen && row.id === LOCK_SUPPLY)
+        ) ?? []
+      }
+      pending={ops.isPending}
+    />
   );
 
   return (
@@ -224,6 +242,9 @@ function SupplyBlock({
         <OperationLine
           label={t("DashboardIssuance.newDesign.overview.issuedSupply")}
           actions={actions(ISSUED_SUPPLY_OPERATIONS)}
+          open={
+            openAction ? <SupplyOperationForm token={token} ops={ops} action={openAction} /> : null
+          }
         >
           <span>{formatDecimalAmount(token.totalSupply || "0", locale)}</span>
           <span className="rounded-control bg-fill-subtle px-1.5 text-meta text-secondary">
@@ -234,6 +255,7 @@ function SupplyBlock({
           label={t("DashboardIssuance.newDesign.overview.supplyCap")}
           hint={t("DashboardIssuance.newDesign.operations.supplyCapHint")}
           actions={actions(SUPPLY_CAP_OPERATIONS)}
+          open={lockOpen ? <LockSupplyForm ops={ops} /> : null}
         >
           {cap === null
             ? t("DashboardIssuance.newDesign.overview.noCap")
@@ -321,29 +343,39 @@ function OperationLine({
   label,
   hint,
   actions,
+  open,
   children,
 }: {
   label: string;
   hint?: string;
   actions?: ReactNode;
+  /** An operation opened in place under the row (mint or burn), across its full width. */
+  open?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className="grid min-h-12.5 grid-cols-1 items-center gap-x-6 gap-y-2 border-b border-border-subtle py-2.5 last:border-b-0 @xl:grid-cols-[10.5rem_minmax(0,1fr)_auto]">
+    <div className="grid min-h-12.5 grid-cols-1 items-center gap-x-6 gap-y-1.5 border-b border-border-subtle py-2.5 last:border-b-0 @xl:grid-cols-[10.5rem_minmax(0,1fr)_auto] @xl:gap-y-2">
       <dt className="flex items-center gap-1.5 text-nav text-secondary">
         {label}
-        {hint ? <InfoHint text={hint} /> : null}
+        {hint ? <InfoHint text={hint} className="[&_svg]:size-3.5" /> : null}
       </dt>
       <dd className="flex min-w-0 flex-wrap items-center gap-2 text-nav text-primary tabular-nums">
         {children}
       </dd>
-      {actions ? <dd className="flex items-center gap-2 empty:hidden">{actions}</dd> : null}
+      {/* Stacked on a phone, the buttons sit 14px under the value. */}
+      {actions ? (
+        <dd className="mt-2 flex items-center gap-2 empty:hidden @xl:mt-0">{actions}</dd>
+      ) : null}
+      {open ? <dd className="col-span-full">{open}</dd> : null}
     </div>
   );
 }
 
+/** The design's 36px buttons on a phone, 30px once a row lays out across. */
+const OPERATION_BUTTON_HEIGHT = "[--button-height-md:2.25rem] @xl:[--button-height-md:1.875rem]";
+
 /**
- * The operations a row offers, as 30px outline buttons; one that cannot run says why on hover.
+ * The operations a row offers, as outline buttons; one that cannot run says why on hover.
  * The access list opens Compliance instead, as a link.
  */
 function OperationButtons({
@@ -365,7 +397,7 @@ function OperationButtons({
           <Button
             variant="ghost"
             size="sm"
-            className="text-secondary [--button-height-md:1.875rem] hover:text-primary"
+            className={cn("text-secondary hover:text-primary", OPERATION_BUTTON_HEIGHT)}
             onClick={row.onAction}
             iconRight={<ArrowUpRightIcon aria-hidden="true" />}
           >
@@ -382,7 +414,8 @@ function OperationButtons({
             variant="outline"
             size="sm"
             className={cn(
-              "shrink-0 [--button-height-md:1.875rem]",
+              "shrink-0",
+              OPERATION_BUTTON_HEIGHT,
               DANGER_OPERATIONS.has(row.id) && "text-error refresh:border-error/40"
             )}
             disabled={disabled}
@@ -504,7 +537,8 @@ function OperationRows({
               variant="outline"
               size="sm"
               className={cn(
-                "shrink-0 [--button-height-md:1.875rem]",
+                "shrink-0",
+                OPERATION_BUTTON_HEIGHT,
                 DANGER_OPERATIONS.has(row.id) && "text-error refresh:border-error/40"
               )}
               disabled={pending || Boolean(row.disabledReason)}

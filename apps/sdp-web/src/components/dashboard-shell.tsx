@@ -56,7 +56,7 @@ import {
 } from "@/lib/dashboard-navigation-loading";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
-import { isPaymentsPath } from "@/lib/payments-demo/demo-cookie";
+import { isDemoPath } from "@/lib/payments-demo/demo-cookie";
 import {
   isPaymentsDemoOn,
   PaymentsDemoProvider,
@@ -476,8 +476,7 @@ export function DashboardShell({
   // Demo data is part of the new design and has a flag of its own (payments-demo-mode; absent in
   // older fixtures, it follows NEW DESIGN). A page on the previous design never shows it or its
   // switch.
-  const demoAvailable =
-    isPaymentsPath(pathname) && newDesignPage && flags.paymentsDemoMode !== false;
+  const demoAvailable = isDemoPath(pathname) && newDesignPage && flags.paymentsDemoMode !== false;
   const demoMode =
     newDesignEnabled &&
     flags.paymentsDemoMode !== false &&

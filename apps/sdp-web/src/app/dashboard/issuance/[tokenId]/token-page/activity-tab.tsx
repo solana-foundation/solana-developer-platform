@@ -60,7 +60,11 @@ export function TokenActivityTab({ token }: { token: Token }) {
   const needle = search.trim().toLowerCase();
   const events = history.events.filter((event) =>
     needle
-      ? [activityEventLabel(event.action, t), event.actorLabel, activityStatus(event, t).label]
+      ? [
+          activityEventLabel(event.action, t, event.resourceType),
+          event.actorLabel,
+          activityStatus(event, t).label,
+        ]
           .join(" ")
           .toLowerCase()
           .includes(needle)
@@ -235,7 +239,7 @@ function ActivityTable({
         return (
           <TableRow key={event.id}>
             <TableCell className={`${PAYMENTS_TABLE_CELL} truncate font-medium text-primary`}>
-              {activityEventLabel(event.action, t)}
+              {activityEventLabel(event.action, t, event.resourceType)}
             </TableCell>
             <TableCell className={`${PAYMENTS_TABLE_CELL} truncate text-primary`}>
               {event.actorLabel}

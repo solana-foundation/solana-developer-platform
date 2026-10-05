@@ -2,13 +2,18 @@
 
 import type { AssetProfile, Token } from "@sdp/types";
 import { ArrowUpRightIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo } from "react";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardTab, useDashboardUrlState } from "@/lib/dashboard-url-state";
+import {
+  refreshKeepingDashboardUrl,
+  useDashboardTab,
+  useDashboardUrlState,
+} from "@/lib/dashboard-url-state";
 import { useAssetProfileForm } from "../asset-profile/use-asset-profile-form";
 import { useTokenOperations } from "../asset-profile/use-token-operations";
 import { TokenActivityTab } from "./activity-tab";
@@ -61,11 +66,16 @@ export function TokenPageView({
     draftWallets: ops.authorityWalletsError ? [] : ops.authorityWallets,
   });
   const state = tokenPageLifecycle(token, latestDeploy);
+  useRefreshWhileDeploying(state === "deploying");
   const page = { token, assetProfile: form.assetProfile, ops, form, state, canManageTokenAdmin };
   const explorer = useExplorerAction(ops.explorerHref);
 
   return (
-    <DashboardWorkspaceOverviewPanel data-token-page={tab}>
+    <DashboardWorkspaceOverviewPanel
+      data-token-page={tab}
+      // An open edit's save bar sits on the bottom edge, not 64px over it.
+      className="has-[[data-token-save-footer]]:!pb-0"
+    >
       <DashboardPageTitle title={token.name} actions={explorer} />
       {tab === "overview" ? (
         <TokenOverviewTab {...page} latestDeploy={latestDeploy} onOpenTab={openTab} />
@@ -76,9 +86,25 @@ export function TokenPageView({
       {tab === "operations" ? <TokenOperationsTab {...page} onOpenTab={openTab} /> : null}
       {tab === "permissions" ? <TokenPermissionsTab {...page} /> : null}
       {tab === "activity" ? <TokenActivityTab token={token} /> : null}
-      <TokenDialogs ops={ops} token={token} />
+      <TokenDialogs ops={ops} />
     </DashboardWorkspaceOverviewPanel>
   );
+}
+
+/** How often a token mid-deploy reads itself again, as the list does for its deploying rows. */
+const DEPLOY_POLL_MS = 5_000;
+
+/**
+ * Re-reads the page every few seconds while its deploy is in flight, so the token turns live
+ * (or failed) on screen when the deploy lands, without the visitor reloading.
+ */
+function useRefreshWhileDeploying(deploying: boolean) {
+  const router = useRouter();
+  useEffect(() => {
+    if (!deploying) return;
+    const timer = window.setInterval(() => refreshKeepingDashboardUrl(router), DEPLOY_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [deploying, router]);
 }
 
 /** The mint on the explorer, at the header's end on every tab once the token is on chain. */
@@ -89,15 +115,11 @@ function useExplorerAction(href: string | null | undefined) {
   return useMemo(
     () =>
       href ? (
-        <Button
-          asChild
-          variant="ghost"
-          size="sm"
-          className="text-secondary hover:text-primary"
-          iconRight={<ArrowUpRightIcon aria-hidden="true" />}
-        >
+        // asChild renders its one child only, so the arrow goes inside the link.
+        <Button asChild variant="ghost" size="sm" className="text-secondary hover:text-primary">
           <a href={href} target="_blank" rel="noreferrer" data-token-explorer data-align-title>
             {label}
+            <ArrowUpRightIcon aria-hidden="true" />
           </a>
         </Button>
       ) : undefined,

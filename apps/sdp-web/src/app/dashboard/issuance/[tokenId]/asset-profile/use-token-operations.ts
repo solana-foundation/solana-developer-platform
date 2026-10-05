@@ -5,6 +5,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { DEMO_PREFILL_AMOUNTS, DEMO_PREFILL_MEMOS } from "@/lib/payments-demo/demo-prefill";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { getTokenAccessControlMode, hasAccessControlList } from "../../access-control.utils";
 import { buildDraftDeployRequest } from "../../draft-permissions";
 import type { FundManagementModalAction } from "../token-fund-management-section";
@@ -79,6 +81,7 @@ export function useTokenOperations({
   const [deployWalletDialogOpen, setDeployWalletDialogOpen] = useState(false);
   const [deployCustodyWalletId, setDeployCustodyWalletId] = useState("");
   const [deployAuthorities, setDeployAuthorities] = useState<Record<string, string>>();
+  const demo = usePaymentsDemo();
   const [mintForm, setMintForm] = useState(createInitialMintForm);
   const [burnForm, setBurnForm] = useState(createInitialBurnForm);
   const [seizeForm, setSeizeForm] = useState(createInitialSeizeForm);
@@ -951,27 +954,80 @@ export function useTokenOperations({
         unavailableReason: null,
       };
 
+  // Demo mode opens mint and burn filled in, against the signing wallet's own address, so the
+  // operation can run on one click.
+  const signerAddress = (walletId: string) =>
+    authorityWallets.find((wallet) => wallet.id === walletId)?.publicKey ?? "";
+
   const openFundManagementModal = (action: FundManagementModalAction) => {
     if (fundManagementDisabledReasons[action]) {
       return;
     }
 
     switch (action) {
-      case "mint":
+      case "mint": {
+        const signingWalletId = mintSignerSelection.defaultWalletId;
         setMintForm((previous) => ({
           ...previous,
-          signingWalletId: mintSignerSelection.defaultWalletId,
+          signingWalletId,
+          ...(demo && {
+            destination: signerAddress(signingWalletId),
+            amount: DEMO_PREFILL_AMOUNTS.mint,
+            memo: DEMO_PREFILL_MEMOS.mint,
+          }),
         }));
         break;
-      case "burn":
+      }
+      case "burn": {
+        const signingWalletId = burnSignerSelection.defaultWalletId;
         setBurnForm((previous) => ({
           ...previous,
-          signingWalletId: burnSignerSelection.defaultWalletId,
+          signingWalletId,
+          ...(demo && {
+            source: signerAddress(signingWalletId),
+            amount: DEMO_PREFILL_AMOUNTS.burn,
+            memo: DEMO_PREFILL_MEMOS.burn,
+          }),
         }));
         break;
+      }
     }
 
+    // One supply operation is open at a time.
+    setLockSupplyModalOpen(false);
     setFundManagementModalAction(action);
+  };
+
+  /**
+   * Fills a recovery or freeze form in demo mode: the mint signer's address as the holder, and
+   * another of the project's wallets as the account to move tokens to or to freeze.
+   */
+  const prefillDemoOperation = (action: "seize" | "force-burn" | "freeze") => {
+    if (!demo) return;
+    const holder = signerAddress(mintSignerSelection.defaultWalletId);
+    const other = authorityWallets.find((wallet) => wallet.publicKey !== holder)?.publicKey ?? "";
+    if (action === "seize") {
+      setSeizeForm((previous) => ({
+        ...previous,
+        source: holder,
+        destination: other,
+        amount: DEMO_PREFILL_AMOUNTS.seize,
+        memo: DEMO_PREFILL_MEMOS.seize,
+      }));
+    } else if (action === "force-burn") {
+      setForceBurnForm((previous) => ({
+        ...previous,
+        source: holder,
+        amount: DEMO_PREFILL_AMOUNTS.forceBurn,
+        memo: DEMO_PREFILL_MEMOS.forceBurn,
+      }));
+    } else {
+      setFreezeForm((previous) => ({
+        ...previous,
+        accountAddress: other,
+        reason: DEMO_PREFILL_MEMOS.freeze,
+      }));
+    }
   };
 
   const openLockSupplyModal = () => {
@@ -980,12 +1036,13 @@ export function useTokenOperations({
     }
 
     setLockSupplyForm({
-      destination: "",
+      destination: demo ? signerAddress(mintSignerSelection.defaultWalletId) : "",
       // The same authority signs both the mint and the revoke.
       signingWalletId: mintSignerSelection.defaultWalletId,
     });
     setLockSupplyMinted(false);
     setLockSupplyRevokeFailed(false);
+    setFundManagementModalAction(null);
     setLockSupplyModalOpen(true);
   };
 
@@ -1251,6 +1308,7 @@ export function useTokenOperations({
     confirmDeployWallet,
     fundManagementModalAction,
     openFundManagementModal,
+    prefillDemoOperation,
     closeFundManagementModal,
     submitFundManagementAction,
     // lock supply (mint to cap, then revoke the mint authority)

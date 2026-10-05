@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import type {
   ActionConfirmationState,
   ActionExecutionInput,
@@ -72,7 +73,7 @@ export function useTokenActionRunner(authorityWallets?: PaymentsDashboardWallet[
         toast.success(successToast, { id: toastId, position: "bottom-right" });
         try {
           await options.onSuccess?.(result);
-          router.refresh();
+          refreshKeepingDashboardUrl(router);
         } catch (refreshError) {
           console.error("Token action post-success refresh failed", refreshError);
         }
