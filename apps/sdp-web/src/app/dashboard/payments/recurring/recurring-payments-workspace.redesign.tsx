@@ -67,6 +67,49 @@ function scheduleHref(recurringPaymentId: string): string {
   return `/dashboard/payments/recurring/${encodeURIComponent(recurringPaymentId)}`;
 }
 
+/**
+ * The pager under the list, with which schedules of how many it shows. One page needs no pager,
+ * as the design's lists show none. A saved link can still name a page past the end, once
+ * schedules are gone; that page keeps the pager, its back arrow landing on the last page.
+ */
+function RecurringPaymentsPagination({
+  page,
+  pageSize,
+  total,
+  pending,
+  onPageChange,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  pending: boolean;
+  onPageChange: (page: number) => void;
+}) {
+  const t = useTranslations();
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  if (page === 1 && pageCount === 1) return null;
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, total);
+  return (
+    <ArrowPagination
+      page={page}
+      pageCount={pageCount}
+      onPageChange={(next) => onPageChange(Math.min(next, pageCount))}
+      disabled={pending}
+      // Past the end there are no rows to count: the pager names the page of how many.
+      summary={
+        page > pageCount
+          ? undefined
+          : t("DashboardPayments.newDesign.recurring.range", {
+              from: rangeStart,
+              to: rangeEnd,
+              total,
+            })
+      }
+    />
+  );
+}
+
 interface RecurringPaymentsWorkspaceProps {
   initialRecurringPayments: PaymentRecurringPayment[];
   total: number;
@@ -191,9 +234,6 @@ export function RecurringPaymentsWorkspace({
       .includes(needle);
   });
 
-  const pageCount = Math.max(1, Math.ceil(total / listState.pageSize));
-  const rangeStart = total === 0 ? 0 : (listState.page - 1) * listState.pageSize + 1;
-  const rangeEnd = Math.min(listState.page * listState.pageSize, total);
   const listIsEmpty = total === 0 && listState.status === null;
 
   if (initialError) {
@@ -367,19 +407,13 @@ export function RecurringPaymentsWorkspace({
           </Table>
         </div>
       )}
-      {pageCount > 1 ? (
-        <ArrowPagination
-          page={listState.page}
-          pageCount={pageCount}
-          onPageChange={(page) => applyListParams({ page })}
-          disabled={isPending}
-          summary={t("DashboardPayments.newDesign.recurring.range", {
-            from: rangeStart,
-            to: rangeEnd,
-            total,
-          })}
-        />
-      ) : null}
+      <RecurringPaymentsPagination
+        page={listState.page}
+        pageSize={listState.pageSize}
+        total={total}
+        pending={isPending}
+        onPageChange={(page) => applyListParams({ page })}
+      />
     </DashboardWorkspaceOverviewPanel>
   );
 }
