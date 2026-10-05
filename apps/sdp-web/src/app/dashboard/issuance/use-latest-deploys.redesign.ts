@@ -3,6 +3,7 @@
 import type { TokenTransaction } from "@sdp/types";
 import { useEffect, useMemo, useRef } from "react";
 import useSWR, { useSWRConfig } from "swr";
+import { DEMO_DEPLOY_POLL_MS, usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import type { DeployAttemptStatus } from "./issuance-token-state.redesign";
 
 /** How often the list re-reads deploys while one is still on its way. */
@@ -54,6 +55,7 @@ async function fetchLatestDeploy(tokenId: string): Promise<DeployAttemptStatus |
  */
 export function useLatestDeploys(tokens: readonly UndeployedToken[]): LatestDeploys {
   const { mutate } = useSWRConfig();
+  const pollMs = usePaymentsDemo() ? DEMO_DEPLOY_POLL_MS : DEPLOY_POLL_MS;
   const ids = useMemo(
     () =>
       tokens
@@ -71,8 +73,7 @@ export function useLatestDeploys(tokens: readonly UndeployedToken[]): LatestDepl
     {
       keepPreviousData: true,
       revalidateOnFocus: false,
-      refreshInterval: (latest) =>
-        latest && Object.values(latest).some(inFlight) ? DEPLOY_POLL_MS : 0,
+      refreshInterval: (latest) => (latest && Object.values(latest).some(inFlight) ? pollMs : 0),
     }
   );
 

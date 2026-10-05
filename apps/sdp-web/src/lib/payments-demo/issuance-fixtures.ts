@@ -37,8 +37,11 @@ import {
 /** Who the activity feed names for the team's own actions, the visitor's included. */
 export const DEMO_TEAM_MEMBER = "Alex Morgan";
 
-/** How long a demo deploy takes to land, from the moment it is submitted. */
-export const DEMO_DEPLOY_MS = 8_000;
+/**
+ * How long a demo deploy takes to land, from the moment it is submitted. The screens re-read
+ * every DEMO_DEPLOY_POLL_MS meanwhile, so it shows as live within a read of landing.
+ */
+export const DEMO_DEPLOY_MS = 4_000;
 
 /** Why the seeded failed deploy failed, as the API reports it. */
 export const DEMO_DEPLOY_FAILURE =
