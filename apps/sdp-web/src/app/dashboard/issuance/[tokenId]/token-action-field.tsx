@@ -75,7 +75,7 @@ export function ActionField({
         aria-describedby={hasError ? errorId : undefined}
         onInvalid={onInvalid}
         onChange={(event) => {
-          if (type === "number" && !/^\d*\.?\d*$/.test(event.currentTarget.value)) {
+          if (type === "number" && !/^\d*(?:\.\d*)?$/.test(event.currentTarget.value)) {
             event.currentTarget.value = value;
             event.currentTarget.setCustomValidity(t("DashboardIssuance.management.numberRequired"));
             setInvalidNumber(true);
