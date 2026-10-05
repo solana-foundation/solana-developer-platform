@@ -15,7 +15,7 @@
 | Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations |
 | Vercel dashboard redeploy or instant rollback | Production web | Redeploys or restores an earlier sdp-web production deployment |
 
-Vercel's git integration builds previews for pull-request branches and deploys sdp-web to production on every merge to `main`. No GitHub workflow deploys sdp-web, and nothing holds it for the API: web usually lands minutes before the per-merge API deploy, and stays ahead while that deploy is held or failing. Ship migrations as standalone pull requests, and land an API change before the web change that depends on it.
+Vercel's git integration builds previews for pull-request branches and deploys sdp-web to production on every merge to `main`. No GitHub workflow deploys sdp-web, and nothing holds it for the API: web usually lands minutes before the per-merge API deploy, and stays ahead while that deploy is held or failing. Ship migrations as standalone pull requests. Web code that depends on an API change ships behind a feature gate, or merges only after that change is live in production: a merged API change can still be held for migration approval or fail to deploy.
 
 The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, and cron jobs.
 
