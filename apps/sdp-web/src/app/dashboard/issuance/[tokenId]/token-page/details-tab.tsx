@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import { getTokenTypeLabel } from "../../issuance-token-fields";
 import { MetadataSigner } from "./metadata-signer";
 import { accessControlLabel, shortAddress, type TokenTabProps } from "./token-page.shared";
@@ -67,8 +68,10 @@ export function TokenDetailsTab({ token, ops, form }: TokenTabProps) {
               onEdit={() => setEditing(true)}
             />
           </div>
+          {/* The form sits 28px under its heading and keeps its fields 16px apart, as the
+              design spaces the open form. */}
           {editing ? (
-            <div className="flex flex-col gap-6">
+            <div className="mt-3 flex flex-col gap-4">
               <DetailsEdit token={token} form={form} />
             </div>
           ) : (
@@ -172,7 +175,7 @@ function DetailsView({ token, form }: Pick<TokenTabProps, "token" | "form">) {
 function DetailsEdit({ token, form }: Pick<TokenTabProps, "token" | "form">) {
   const t = useTranslations();
   const deployed = Boolean(token.mintAddress);
-  const decimalsLocked = deployed || token.template === "stablecoin";
+
   return (
     <>
       <DetailsField
@@ -192,17 +195,14 @@ function DetailsEdit({ token, form }: Pick<TokenTabProps, "token" | "form">) {
             form={form}
             name={F.decimals}
             label={t("DashboardIssuance.newDesign.details.decimals")}
-            locked={decimalsLocked}
+            locked={deployed}
+            fixed={token.template === "stablecoin"}
             inputMode={NUMERIC}
           />
         </div>
         {deployed ? (
           <p className="text-meta text-tertiary">
             {t("DashboardIssuance.newDesign.details.symbolDecimalsLocked")}
-          </p>
-        ) : token.template === "stablecoin" ? (
-          <p className="text-meta text-tertiary">
-            {t("DashboardIssuance.draftForm.stableDecimals")}
           </p>
         ) : null}
       </div>
@@ -255,6 +255,7 @@ function DetailsField({
   label,
   placeholder,
   locked,
+  fixed,
   hint,
   inputMode,
 }: DetailsFormProps & {
@@ -262,6 +263,8 @@ function DetailsField({
   label: string;
   placeholder?: string;
   locked?: boolean;
+  /** Set by the template rather than locked by the chain: shown as a plain value, no lock. */
+  fixed?: boolean;
   hint?: string;
   inputMode?: "numeric";
 }) {
@@ -273,8 +276,8 @@ function DetailsField({
   return (
     <div className="flex flex-col gap-2">
       <Label
-        htmlFor={locked ? undefined : id}
-        className="flex items-center gap-1 text-meta font-normal text-secondary"
+        htmlFor={locked || fixed ? undefined : id}
+        className="flex h-4 items-center gap-1 text-meta font-normal text-secondary"
       >
         {label}
         {hint ? <InfoHint text={hint} /> : null}
@@ -285,8 +288,13 @@ function DetailsField({
           />
         ) : null}
       </Label>
-      {locked ? (
-        <span className="flex h-9 items-center border-b border-border-default px-0.5 text-body text-secondary">
+      {locked || fixed ? (
+        <span
+          className={cn(
+            "flex h-9 items-center border-b border-border-default px-0.5 text-body",
+            locked ? "text-secondary" : "text-primary"
+          )}
+        >
           {value || <NotSet />}
         </span>
       ) : (
@@ -313,7 +321,8 @@ function CurrencyField({ form }: DetailsFormProps) {
   const { draft, updateDraft, saving } = form;
   return (
     <div className="flex flex-col gap-2">
-      <span className="flex items-center gap-1">
+      {/* A 16px label row like the fields beside it, so Clear can't push the picker down. */}
+      <span className="flex h-4 items-center gap-1">
         <Label className="text-meta font-normal text-secondary">
           {t("DashboardIssuance.newDesign.details.currency")}
         </Label>
@@ -330,6 +339,7 @@ function CurrencyField({ form }: DetailsFormProps) {
         ) : null}
       </span>
       <Select
+        size="xl"
         ariaLabel={t("DashboardIssuance.newDesign.details.currency")}
         placeholder={t("DashboardIssuance.newDesign.draft.selectCurrency")}
         value={draft.pegCurrency ?? ""}

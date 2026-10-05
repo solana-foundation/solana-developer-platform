@@ -5,9 +5,9 @@ import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootst
 
 // The new design's Issuance (new-design-issuance on): the token list, the draft flow and one
 // token's page. issuance.e2e.spec.ts keeps covering the previous design, which production
-// still serves. Both start from the same seeded fixtures. Pause and freeze open in place on the
-// new design; the other operation dialogs are shared with the previous design, so their steps
-// match it.
+// still serves. Both start from the same seeded fixtures. Mint, burn, lock supply, pause, freeze
+// and authority edits open in place on the new design; the confirmation dialogs are shared with
+// the previous design, so their steps match it.
 
 type TokenTab = "overview" | "details" | "public" | "compliance" | "operations" | "permissions";
 
@@ -259,14 +259,15 @@ test.describe
 
       await expect(operationButton(page, "mint")).toBeEnabled({ timeout: 120_000 });
       await operationButton(page, "mint").click();
-      // Inside the dialog only: the Operations tab behind it explains the token's access list in
-      // a tooltip whose label also reads "destinations".
-      const mintDialog = page.getByRole("dialog");
-      await mintDialog
+      // Mint opens in place under the issued supply; scoped to its form, since the Operations
+      // tab also explains the token's access list in a tooltip whose label reads "destinations".
+      const mintForm = page.locator('[data-supply-operation="mint"]');
+      await mintForm
         .getByLabel("Destination", { exact: true })
         .fill(fixtures.wallets.treasury.publicKey);
-      await mintDialog.getByLabel("Amount", { exact: true }).fill("10");
-      await mintDialog.getByRole("button", { name: "Mint tokens" }).click();
+      await mintForm.getByLabel("Amount", { exact: true }).fill("10");
+      // The submit reads the amount back ("Mint 10.00" and the symbol).
+      await mintForm.getByRole("button", { name: /^Mint 10/ }).click();
       const successCount = await page.getByText("Mint transaction finalized.").count();
       await confirmAction(page, "Mint now");
       await waitForToast(page, "Mint transaction finalized.", successCount);

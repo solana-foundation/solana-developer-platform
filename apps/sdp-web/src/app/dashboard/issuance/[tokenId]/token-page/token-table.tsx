@@ -14,8 +14,9 @@ export interface TokenTableColumn {
 
 /**
  * The frame every token-page table shares: a horizontal scroller, fixed column widths and the
- * heading row; the rows go in as children. Its first and last columns sit on the content's
- * edges, as the design aligns them with the toolbar above.
+ * heading row; the rows go in as children. Like the Payments tables, it reaches one edge padding
+ * past the content on each side, so the text lines up with the heading above while a hovered
+ * row's band keeps that padding around it.
  */
 export function TokenTable({
   columns,
@@ -29,13 +30,8 @@ export function TokenTable({
   children: ReactNode;
 }) {
   return (
-    <div className={cn(className, "overflow-x-auto")}>
-      <Table
-        className={cn(
-          tableClassName,
-          "table-fixed rounded-none border-0 [&_td:first-child]:ps-0 [&_td:last-child]:pe-0 [&_th:first-child]:ps-0 [&_th:last-child]:pe-0"
-        )}
-      >
+    <div className={cn(className, "overflow-x-auto refresh:-mx-3")}>
+      <Table className={cn(tableClassName, "table-fixed rounded-none border-0")}>
         <colgroup>
           {columns.map((column) => (
             <col key={column.label} className={column.className} />

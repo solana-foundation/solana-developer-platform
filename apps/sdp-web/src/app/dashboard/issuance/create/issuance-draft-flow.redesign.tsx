@@ -176,11 +176,12 @@ function DraftFlow({
   const savable = classified && draftSchema.safeParse(draft).success;
 
   // The draft flow sits at the top of the page, with no title over it: the design draws its
-  // progress 48px from the top, 10px over its bar, and the step's heading 26px over the fields,
-  // where the shared frame (under a Payments title) has 36, 8 and 24.
+  // progress 48px from the top (16px under the menu row on a phone), 10px over its bar, and the
+  // step's heading 26px over the fields (24px on a phone), where the shared frame (under a
+  // Payments title) has 36, 8 and 24.
   return (
     <div
-      className="h-full min-h-0 md:[&_[data-wizard-scroll-region]]:pt-12 [&_[data-wizard-stepper]>div:first-child]:gap-y-2.5 [&_[data-wizard-heading]]:mb-6.5"
+      className="h-full min-h-0 [&_[data-wizard-scroll-region]]:pt-4 md:[&_[data-wizard-scroll-region]]:pt-12 [&_[data-wizard-stepper]>div:first-child]:gap-y-2.5 [&_[data-wizard-heading]]:mb-6 md:[&_[data-wizard-heading]]:mb-6.5"
       data-issuance-draft-flow
     >
       <WizardFrame

@@ -118,6 +118,7 @@ export function TokenOverviewTab({
       {/* The state band sits 24px over what follows it, closer than the parts below. */}
       <div className="flex flex-col gap-6">
         <OverviewStateBand
+          onOpenTab={onOpenTab}
           state={state}
           ops={ops}
           latestDeploy={latestDeploy}
@@ -163,7 +164,8 @@ function OverviewStateBand({
   ops,
   latestDeploy,
   canManageTokenAdmin,
-}: Pick<OverviewTabProps, "state" | "ops" | "latestDeploy" | "canManageTokenAdmin">) {
+  onOpenTab,
+}: Pick<OverviewTabProps, "state" | "ops" | "latestDeploy" | "canManageTokenAdmin" | "onOpenTab">) {
   const t = useTranslations();
   const tint = BAND_TINT[TOKEN_LIFECYCLE_BAND[state]];
   const mintBlocked = ops.operationAvailability.mint ?? null;
@@ -174,7 +176,11 @@ function OverviewStateBand({
           size="sm"
           className="[--button-height-md:1.875rem]"
           disabled={ops.isPending || Boolean(mintBlocked)}
-          onClick={() => ops.openFundManagementModal("mint")}
+          onClick={() => {
+            // Minting opens in place on Operations, under the issued supply.
+            ops.openFundManagementModal("mint");
+            onOpenTab("operations");
+          }}
         >
           {t("DashboardIssuance.newDesign.overview.mintTokens")}
         </Button>
@@ -569,7 +575,7 @@ function RecentActivity({ tokenId, onViewAll }: { tokenId: string; onViewAll: ()
               >
                 <span className="flex min-w-0 flex-col gap-1">
                   <span className="flex items-center gap-2 text-body font-medium text-primary">
-                    {activityEventLabel(event.action, t)}
+                    {activityEventLabel(event.action, t, event.resourceType)}
                     <StatusText tone={status.tone} className="font-normal">
                       {status.label}
                     </StatusText>

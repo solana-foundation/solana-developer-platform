@@ -978,6 +978,8 @@ export function useTokenOperations({
         break;
     }
 
+    // One supply operation is open at a time.
+    setLockSupplyModalOpen(false);
     setFundManagementModalAction(action);
   };
 
@@ -993,6 +995,7 @@ export function useTokenOperations({
     });
     setLockSupplyMinted(false);
     setLockSupplyRevokeFailed(false);
+    setFundManagementModalAction(null);
     setLockSupplyModalOpen(true);
   };
 

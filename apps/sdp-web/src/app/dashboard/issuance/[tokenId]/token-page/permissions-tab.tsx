@@ -4,12 +4,12 @@ import { KeyRoundIcon, type LucideIcon, PencilIcon, SnowflakeIcon, UsersIcon } f
 import { useState } from "react";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { Button } from "@/components/ui/button";
-import { Select, SelectItem } from "@/components/ui/select";
 import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { getTokenTypeLabel } from "../../issuance-token-fields";
 import type { PermissionRowId } from "../token-management-workspace.types";
+import { AuthorityForm, DraftHolderForm } from "./authority-form";
 import {
   accessControlLabel,
   holderName,
@@ -46,7 +46,7 @@ const ROW_COPY: Record<PermissionRowId, { title: MessageKey; why: MessageKey }> 
 /**
  * Who holds each of the token's keys, and what the token was built with. A draft's holders
  * are picked from the project's wallets and saved with the draft; a deployed token's move on
- * chain through the authority dialog.
+ * chain. Either is edited in place under its row.
  */
 export function TokenPermissionsTab({
   token,
@@ -134,6 +134,8 @@ export function TokenPermissionsTab({
               form.saving ||
               (!draft && Boolean(row.editDisabledReason)) ||
               state === "revoked";
+            // The row being edited trades its holder and Edit for the form beneath it.
+            const open = draft ? editing === row.id : ops.authorityModalRow?.id === row.id;
             return (
               <div
                 key={row.id}
@@ -148,7 +150,7 @@ export function TokenPermissionsTab({
                       <span className="text-meta text-secondary">{t(copy.why)}</span>
                     </span>
                   </span>
-                  {editing === row.id ? null : (
+                  {open ? null : (
                     <span className="flex shrink-0 items-center gap-3 ps-7 @xl:ps-0">
                       <span className="text-body text-primary">{holder}</span>
                       <Button
@@ -170,47 +172,28 @@ export function TokenPermissionsTab({
                     </span>
                   )}
                 </div>
-                {editing === row.id ? (
-                  <div className="flex max-w-lg flex-col gap-4 ps-7">
-                    <Select
-                      ariaLabel={t(copy.title)}
-                      placeholder={t("DashboardIssuance.signer.select")}
-                      value={
-                        ops.authorityWallets.some((wallet) => wallet.id === choice) ? choice : ""
-                      }
-                      onValueChange={(value) => setChoice(value ?? "")}
-                    >
-                      {ops.authorityWallets.map((wallet) => (
-                        <SelectItem key={wallet.id} value={wallet.id}>
-                          {wallet.label?.trim() || shortAddress(wallet.publicKey)}
-                        </SelectItem>
-                      ))}
-                    </Select>
-                    <p className="text-meta text-secondary">
-                      {t("DashboardIssuance.newDesign.permissions.draftHolderHint")}
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        size="sm"
-                        disabled={!choice || form.saving}
-                        onClick={async () => {
-                          form.updateDraft({
-                            ...(row.id === "mint-authority" ? { signingWalletId: choice } : {}),
-                            authorityWalletIds: {
-                              ...form.draft.authorityWalletIds,
-                              [row.id]: choice,
-                            },
-                          });
-                          setEditing(null);
-                        }}
-                      >
-                        {t("DashboardIssuance.newDesign.permissions.keep")}
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
-                        {t("DashboardIssuance.newDesign.permissions.cancel")}
-                      </Button>
-                    </div>
-                  </div>
+                {open ? (
+                  draft ? (
+                    <DraftHolderForm
+                      title={t(copy.title)}
+                      wallets={ops.authorityWallets}
+                      value={choice}
+                      onValueChange={setChoice}
+                      onKeep={() => {
+                        form.updateDraft({
+                          ...(row.id === "mint-authority" ? { signingWalletId: choice } : {}),
+                          authorityWalletIds: {
+                            ...form.draft.authorityWalletIds,
+                            [row.id]: choice,
+                          },
+                        });
+                        setEditing(null);
+                      }}
+                      onCancel={() => setEditing(null)}
+                    />
+                  ) : (
+                    <AuthorityForm ops={ops} />
+                  )
                 ) : null}
               </div>
             );
