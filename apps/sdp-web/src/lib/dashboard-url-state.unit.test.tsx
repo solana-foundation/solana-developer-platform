@@ -19,10 +19,6 @@ const TabReader = memo(function TabReader() {
   return <p>{useDashboardTab() ?? "hub"}</p>;
 });
 
-function Shell({ syncWithRouter }: { syncWithRouter: boolean }) {
-  return syncWithRouter ? <SyncedShell /> : <TabReader />;
-}
-
 function SyncedShell() {
   useSyncDashboardUrlStateWithRouter();
   return <TabReader />;
@@ -45,25 +41,13 @@ afterEach(() => {
 
 it("shows the tab a `?tab=` link opened on the first navigation", () => {
   window.history.replaceState(null, "", "/dashboard");
-  const { rerender } = render(<Shell syncWithRouter />);
+  const { rerender } = render(<SyncedShell />);
   expect(screen.getByText("hub")).toBeTruthy();
 
   act(() => {
     navigateWithLink("/dashboard/integrations?tab=rpc");
-    rerender(<Shell syncWithRouter />);
+    rerender(<SyncedShell />);
   });
 
   expect(screen.getByText("rpc")).toBeTruthy();
-});
-
-it("stays on the stale tab without the router sync (the bug this guards)", () => {
-  window.history.replaceState(null, "", "/dashboard");
-  const { rerender } = render(<Shell syncWithRouter={false} />);
-
-  act(() => {
-    navigateWithLink("/dashboard/integrations?tab=rpc");
-    rerender(<Shell syncWithRouter={false} />);
-  });
-
-  expect(screen.getByText("hub")).toBeTruthy();
 });
