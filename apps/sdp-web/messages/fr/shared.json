@@ -151,7 +151,9 @@
     "apiKeyInUse": "En cours d'utilisation",
     "apiKeyNotAvailable": "Cette clé n'est pas disponible pour ce projet",
     "apiKeySecretPlaceholder": "Collez la clé complète pour cette session",
-    "apiKeySecretRequired": "Collez la valeur complète de la clé API sélectionnée avant d'exécuter une requête."
+    "apiKeySecretRequired": "Collez la valeur complète de la clé API sélectionnée avant d'exécuter une requête.",
+    "rowsCount": "{count} lignes",
+    "openCalendarFor": "Ouvrir le calendrier pour {field}"
   },
   "dashboardShell": {
     "workspace": "Espace de travail",
@@ -238,7 +240,8 @@
     "backToHome": "Retour à l'accueil",
     "manageAccount": "Gérer le compte",
     "signOut": "Se déconnecter",
-    "accountMenu": "Menu du compte"
+    "accountMenu": "Menu du compte",
+    "privacy": "Confidentialité"
   },
   "validation": {
     "allowlistValueRequired": "La valeur Allowlist est requise",

@@ -17,7 +17,7 @@ import { updateAssetProfileSchema } from "./schemas";
 
 const assetProfiles = new Hono<{ Bindings: Env }>();
 
-assetProfiles.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+assetProfiles.use("*", unifiedAuthMiddleware());
 assetProfiles.use("*", projectContextMiddleware());
 
 assetProfiles.get("/field-options", requirePermissions("tokens:read"), getAssetProfileFieldOptions);

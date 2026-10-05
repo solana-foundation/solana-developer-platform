@@ -73,8 +73,8 @@ describe("Private Channel transfer OpenAPI", () => {
       "x-project-id"
     );
 
-    expect(recipients?.security).toEqual([{ apiKeyAuth: [] }, { sessionCookie: [] }]);
-    expect(create?.security).toEqual([{ apiKeyAuth: [] }, { sessionCookie: [] }]);
+    expect(recipients?.security).toEqual([{ apiKeyAuth: [] }, { clerkBearerAuth: [] }]);
+    expect(create?.security).toEqual([{ apiKeyAuth: [] }, { clerkBearerAuth: [] }]);
     // Optional: an API key fixes the project itself and the header is ignored.
     expect(recipientProject).toMatchObject({ in: "header" });
     expect(recipientProject).not.toMatchObject({ required: true });
