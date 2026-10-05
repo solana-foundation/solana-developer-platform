@@ -38,6 +38,8 @@ COPY apps/sdp-web/package.json ./apps/sdp-web/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
 # Tokens and Tailwind theme imported by globals.css.
 COPY packages/sdp-design-tokens/package.json ./packages/sdp-design-tokens/
+# The UI primitives behind every components/ui import (re-export shims).
+COPY packages/sdp-ui/package.json ./packages/sdp-ui/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-solana/package.json ./packages/sdp-solana/
 COPY packages/sdp-policy/package.json ./packages/sdp-policy/
@@ -62,6 +64,7 @@ COPY --from=deps /repo /repo
 COPY apps/sdp-web ./apps/sdp-web
 COPY packages/sdp-types ./packages/sdp-types
 COPY packages/sdp-design-tokens ./packages/sdp-design-tokens
+COPY packages/sdp-ui ./packages/sdp-ui
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-solana ./packages/sdp-solana
 COPY packages/sdp-policy ./packages/sdp-policy
