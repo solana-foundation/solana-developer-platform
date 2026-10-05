@@ -949,7 +949,11 @@ export function DashboardShell({
                       isRefresh && [
                         refreshGutterClass,
                         pageConfig.flushTopOnDesktop
-                          ? "pt-6 md:pt-0"
+                          ? // A flow that sets its own top spacing, unless the demo switch sits
+                            // in its header: that keeps 24px over it rather than meeting the edge.
+                            newDesignEnabled && demoAvailable
+                            ? "pt-6"
+                            : "pt-6 md:pt-0"
                           : stacksBackAboveTitle
                             ? "pt-6 md:pt-10"
                             : "pt-6 md:pt-11",

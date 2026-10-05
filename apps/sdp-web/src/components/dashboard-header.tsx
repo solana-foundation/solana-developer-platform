@@ -96,8 +96,8 @@ function attachmentFilename(header: string | null): string | null {
 
 /**
  * A download action. The click fetches the file and saves it, the button spinning meanwhile (an
- * export can wait out the API's rate limit), and a failure shows as a toast. A modified click
- * keeps the browser's own handling of the link.
+ * export can wait out the API's rate limit), and a failure shows as a toast. It is a button, not
+ * a link: the page never navigates to the file.
  */
 function DashboardHeaderDownloadAction({
   href,
@@ -142,39 +142,20 @@ function DashboardHeaderDownloadAction({
 
   return (
     <Button
-      asChild
+      type="button"
       variant={variant === "primary" ? "default" : "outline"}
       size="sm"
       className={HEADER_ACTION_SIZE_CLASS}
+      disabled={pending}
+      aria-busy={pending || undefined}
+      onClick={() => void download()}
     >
-      <a
-        href={href}
-        download
-        aria-busy={pending || undefined}
-        aria-disabled={pending || undefined}
-        onClick={(event) => {
-          if (
-            event.button !== 0 ||
-            event.metaKey ||
-            event.ctrlKey ||
-            event.shiftKey ||
-            event.altKey
-          ) {
-            return;
-          }
-          event.preventDefault();
-          if (!pending) {
-            void download();
-          }
-        }}
-      >
-        {pending ? (
-          <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-        ) : (
-          <DownloadIcon className="size-4" aria-hidden="true" />
-        )}
-        {label}
-      </a>
+      {pending ? (
+        <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+      ) : (
+        <DownloadIcon className="size-4" aria-hidden="true" />
+      )}
+      {label}
     </Button>
   );
 }
@@ -405,8 +386,14 @@ export function StackedDashboardTopBar({
       {trailingContent ? (
         // On a phone it shares the navigation button's row; from md it sits on the title's row
         // before the action. The md columns have no gap, only margins, so a missing or hidden
-        // action leaves no empty gap at the right edge.
-        <div className="col-start-3 row-start-1 flex items-center justify-end empty:hidden md:col-start-2 md:ml-3">
+        // action leaves no empty gap at the right edge. Under a back link it keeps to the title's
+        // row as the action does, in a 36px box like the action's, so the two share a centre.
+        <div
+          className={cn(
+            "col-start-3 row-start-1 flex items-center justify-end empty:hidden md:col-start-2 md:ml-3",
+            above && "md:h-9 md:self-end"
+          )}
+        >
           {trailingContent}
         </div>
       ) : null}
