@@ -39,6 +39,8 @@ function navigateWithLink(path: string) {
 afterEach(() => {
   cleanup();
   window.history.replaceState(null, "", "/");
+  router.pathname = "/dashboard";
+  router.search = "";
 });
 
 it("shows the tab a `?tab=` link opened on the first navigation", () => {
