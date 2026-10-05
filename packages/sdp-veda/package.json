@@ -38,7 +38,7 @@
     "@vedatech/svm-sdk": "0.1.0-alpha.1"
   },
   "devDependencies": {
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.3",
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
