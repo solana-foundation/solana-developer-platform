@@ -15,7 +15,9 @@
 | Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations |
 | Manual sdp-web workflow dispatch | Production web | Builds and deploys the provided ref to Vercel production |
 
-Vercel's git integration builds previews for pull-request branches only; `apps/sdp-web/vercel.json` skips git-triggered builds on `main`, so sdp-web reaches production exclusively through the release flow's production deployment job.
+Vercel's git integration builds previews for pull-request branches and the `stage` environment on `main`; `apps/sdp-web/vercel.json` skips the other git-triggered builds on `main`, so sdp-web reaches production exclusively through the release flow's production deployment job.
+
+Release QA runs on the stage dashboard at `app-preview.solana.com`. Its `stage` Vercel environment builds every push to `main` and calls the stage API (`api-preview.solana.com`), which is redeployed on every push to `main` that touches API paths. Both halves therefore track `main`; after a web-only merge the API still runs the previous API-changing commit, which carries the same API behaviour. Pull-request preview dashboards call the dev API, which is redeployed only by `deploy-dev` labels and manual dispatch, so a preview verifies the web change only. Before trusting an API-side result on a preview, check the `build` field of `GET /health` on `api-dev.solana.com`: after a `deploy-dev` label deploy it is the pull request's merge commit, and after a manual dispatch it is the dispatched branch's head.
 
 The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, and cron jobs.
 
