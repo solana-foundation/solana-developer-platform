@@ -1,17 +1,10 @@
-import { DesignSwitch } from "@/components/new-design";
 import { RecurringPaymentsPageSkeleton } from "../payments-route-skeletons";
-import RedesignRecurringPaymentsLoading from "./loading.redesign";
 
 export function PreviousRecurringPaymentsLoading() {
   return <RecurringPaymentsPageSkeleton />;
 }
 
+// Schedules is still the previous design's page, so it loads as one with new-design-activity on.
 export default function RecurringPaymentsLoading() {
-  return (
-    <DesignSwitch
-      designModule="activity"
-      current={<RedesignRecurringPaymentsLoading />}
-      legacy={<PreviousRecurringPaymentsLoading />}
-    />
-  );
+  return <PreviousRecurringPaymentsLoading />;
 }
