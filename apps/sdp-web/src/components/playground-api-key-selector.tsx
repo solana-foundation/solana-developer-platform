@@ -4,15 +4,12 @@ import { SOLANA_CLUSTER_LABELS } from "@sdp/types";
 import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { Popover } from "radix-ui";
+import { useContext, useEffect, useId, useRef, useState } from "react";
 import {
-  createContext,
-  type RefObject,
-  useContext,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
+  type IdentifyPendingApiKey,
+  PendingApiKeyContext,
+  type PendingApiKeyOutcome,
+} from "@/components/playground-pending-api-key";
 import { useThemeScope, useThemeScopeAttributes } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,27 +23,6 @@ import {
 } from "@/lib/playground-api-keys";
 import { usePlaygroundApiKeySecret } from "@/lib/use-playground-api-key-secret";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-
-/** What a run finds in the key field: nothing pending, the pasted key identified, or refused. */
-export type PendingApiKeyOutcome =
-  | { kind: "none" }
-  | { kind: "identified"; apiKeyId: string }
-  | { kind: "rejected" };
-
-/**
- * Identifies the key material still pending in the key field. Editing the field detaches the
- * previous key at once, while the new material is identified only on blur or when the popover
- * closes, so a run straight after a paste (⌘↵ with the popover open) calls this first.
- */
-export type IdentifyPendingApiKey = () => Promise<PendingApiKeyOutcome>;
-
-/**
- * The playground's slot for the key field's {@link IdentifyPendingApiKey}: the shell provides
- * it, the key field fills it.
- */
-export const PendingApiKeyContext = createContext<RefObject<IdentifyPendingApiKey | null> | null>(
-  null
-);
 
 type Resolution =
   | { kind: "idle" }

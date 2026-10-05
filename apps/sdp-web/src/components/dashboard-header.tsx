@@ -82,8 +82,8 @@ function attachmentFilename(header: string | null): string | null {
 
 /**
  * A download action. The click fetches the file and saves it, the button spinning meanwhile (an
- * export can wait out the API's rate limit), and a failure shows as a toast. A modified click
- * keeps the browser's own handling of the link.
+ * export can wait out the API's rate limit), and a failure shows as a toast. It is a button, not
+ * a link: the page never navigates to the file.
  */
 function DashboardHeaderDownloadAction({
   href,
@@ -127,35 +127,20 @@ function DashboardHeaderDownloadAction({
   };
 
   return (
-    <Button asChild variant={variant === "primary" ? "default" : "outline"} size="sm">
-      <a
-        href={href}
-        download
-        aria-busy={pending || undefined}
-        aria-disabled={pending || undefined}
-        onClick={(event) => {
-          if (
-            event.button !== 0 ||
-            event.metaKey ||
-            event.ctrlKey ||
-            event.shiftKey ||
-            event.altKey
-          ) {
-            return;
-          }
-          event.preventDefault();
-          if (!pending) {
-            void download();
-          }
-        }}
-      >
-        {pending ? (
-          <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-        ) : (
-          <DownloadIcon className="size-4" aria-hidden="true" />
-        )}
-        {label}
-      </a>
+    <Button
+      type="button"
+      variant={variant === "primary" ? "default" : "outline"}
+      size="sm"
+      disabled={pending}
+      aria-busy={pending || undefined}
+      onClick={() => void download()}
+    >
+      {pending ? (
+        <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+      ) : (
+        <DownloadIcon className="size-4" aria-hidden="true" />
+      )}
+      {label}
     </Button>
   );
 }
