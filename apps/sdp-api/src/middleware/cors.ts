@@ -40,9 +40,8 @@ export function corsMiddleware(env: Env["ENVIRONMENT"]) {
 
   return cors({
     origin: (origin) => {
-      // Never reflect an unlisted origin: this middleware runs with
-      // `credentials: true` on the app mounting the earn money routes, and
-      // non-production deployments hold real devnet funds (PRO-1865).
+      // Never reflect an unlisted origin: this app mounts the earn money
+      // routes, and non-production deployments hold real devnet funds (PRO-1865).
       if (!origin) return null;
       return isAllowedOrigin(origin) ? origin : null;
     },
@@ -57,6 +56,5 @@ export function corsMiddleware(env: Env["ENVIRONMENT"]) {
       "X-RateLimit-Reset",
     ],
     maxAge: 86400,
-    credentials: true,
   });
 }

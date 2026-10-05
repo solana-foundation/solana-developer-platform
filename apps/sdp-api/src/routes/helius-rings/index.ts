@@ -36,7 +36,7 @@ async function requireHeliusRingsFeature(c: Context<{ Bindings: Env }>, next: Ne
 }
 
 heliusRings.use("*", requireHeliusRingsFeature);
-heliusRings.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+heliusRings.use("*", unifiedAuthMiddleware());
 heliusRings.use("*", projectContextMiddleware());
 
 heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);

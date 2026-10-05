@@ -30,7 +30,7 @@ export const switchSigningRequestSchema = withOpenApi(switchSigningSchemaBase, {
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   description:
-    "walletId is a Provider wallet ID. When omitted for an API key, its authenticated signing-wallet selection is used: the configured preference, otherwise the first resolved binding. Session-authenticated dashboard requests must provide walletId. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record.",
+    "walletId is a Provider wallet ID. When omitted for an API key, its authenticated signing-wallet selection is used: the configured preference, otherwise the first resolved binding. Clerk-authenticated dashboard requests must provide walletId. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record.",
   example: { walletId: "privy_wallet_123" },
 });
 

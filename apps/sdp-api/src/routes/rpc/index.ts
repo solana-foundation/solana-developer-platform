@@ -21,7 +21,7 @@ const MAX_BODY_BYTES = 1024 * 1024;
 
 const rpc = new Hono<{ Bindings: Env }>();
 
-rpc.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+rpc.use("*", unifiedAuthMiddleware());
 rpc.use("*", projectContextMiddleware());
 rpc.use(
   "*",

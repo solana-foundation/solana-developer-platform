@@ -4,10 +4,12 @@ import type { SolanaCluster } from "@sdp/types";
 import { ChevronDown, Droplets, Ellipsis, ShieldCheck } from "lucide-react";
 import { useTransition } from "react";
 import { toast } from "sonner";
+import { useSWRConfig } from "swr";
 import {
   checkWalletSignerMemoAction,
   requestDevnetSolanaFaucetAction,
 } from "@/app/dashboard/custody/actions";
+import { custodyQueryKeys } from "@/app/dashboard/custody/custody-query-key";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -58,6 +60,7 @@ export function WalletActionsMenu({
   const t = useTranslations();
   const { dashboardAccess, sandboxProject } = useDashboardWorkspace();
   const [isBusy, startTransition] = useTransition();
+  const { mutate } = useSWRConfig();
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);
   const resolvedTriggerLabel = triggerLabel ?? t("DashboardCustody.actions");
   const canRunSignerCheck =
@@ -119,6 +122,8 @@ export function WalletActionsMenu({
         );
 
         if (result.status === "success") {
+          // The action waited for confirmation, so a refetch now reads the funded balance.
+          void mutate(custodyQueryKeys.isWalletLiveDataKey);
           const explorerUrl = explorerTxUrl(result.signature, ACTION_EXPLORER_CLUSTER);
 
           toast.success(t("DashboardCustody.devnetSolRequested", { amount: result.amountSol }), {

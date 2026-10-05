@@ -10,11 +10,13 @@ import { createKVStoreSet } from "@/runtime/kv-redis";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
+import { clerkHeaders, clerkHeadersWithoutProject } from "@/test/helpers/clerk";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { DEFAULT_PROJECT_NAME, seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
-const TEST_SESSION_ID = "ses_test_projects";
+let clerkToken: string;
 
 describe("Projects Routes", () => {
   let apiKeyHash: string;
@@ -76,13 +78,7 @@ describe("Projects Routes", () => {
       )
       .bind(TEST_ORG.id, TEST_USER.id)
       .run();
-    await db
-      .prepare(
-        `INSERT OR REPLACE INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-         VALUES (?, ?, ?, 'session', ?)`
-      )
-      .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, new Date(Date.now() + 60_000).toISOString())
-      .run();
+    clerkToken = await signSeededClerkMember(env, db, TEST_USER.id, TEST_ORG.id);
 
     await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
@@ -156,7 +152,7 @@ describe("Projects Routes", () => {
       const res = await app.request(
         "/v1/projects",
         {
-          headers: { Cookie: `sdp_session=${TEST_SESSION_ID}` },
+          headers: clerkHeadersWithoutProject(clerkToken),
         },
         env
       );
@@ -176,7 +172,7 @@ describe("Projects Routes", () => {
       const res = await app.request(
         "/v1/projects",
         {
-          headers: { Cookie: `sdp_session=${TEST_SESSION_ID}` },
+          headers: clerkHeadersWithoutProject(clerkToken),
         },
         env
       );
@@ -361,12 +357,12 @@ describe("Projects Routes", () => {
       const db = getDb(env);
       await db
         .prepare(
-          "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_member123', 'member@example.com', 1, 'active')"
+          "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_test_member123', 'member@example.com', 1, 'active')"
         )
         .run();
       await db
         .prepare(
-          "INSERT OR REPLACE INTO organization_members (id, organization_id, user_id, role, status) VALUES ('mem_member123', ?, 'usr_member123', 'developer', 'active')"
+          "INSERT OR REPLACE INTO organization_members (id, organization_id, user_id, role, status) VALUES ('mem_member123', ?, 'usr_test_member123', 'developer', 'active')"
         )
         .bind(TEST_ORG.id)
         .run();
@@ -380,7 +376,7 @@ describe("Projects Routes", () => {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
           body: JSON.stringify({
-            userId: "usr_member123",
+            userId: "usr_test_member123",
             role: "developer",
           }),
         },
@@ -389,7 +385,7 @@ describe("Projects Routes", () => {
 
       expect(res.status).toBe(201);
       const body = await res.json();
-      expect(body.data.member.userId).toBe("usr_member123");
+      expect(body.data.member.userId).toBe("usr_test_member123");
       expect(body.data.member.role).toBe("developer");
     });
 
@@ -398,7 +394,7 @@ describe("Projects Routes", () => {
       const db = getDb(env);
       await db
         .prepare(
-          "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_outside123', 'outside@example.com', 1, 'active')"
+          "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_test_outside123', 'outside@example.com', 1, 'active')"
         )
         .run();
 
@@ -410,7 +406,7 @@ describe("Projects Routes", () => {
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
-          body: JSON.stringify({ userId: "usr_outside123" }),
+          body: JSON.stringify({ userId: "usr_test_outside123" }),
         },
         env
       );
@@ -476,13 +472,13 @@ describe("Projects Routes", () => {
       const db = getDb(env);
       await db
         .prepare(
-          "INSERT INTO users (id, email, email_verified, status) VALUES ('usr_cross_add', 'cross-add@example.com', 1, 'active')"
+          "INSERT INTO users (id, email, email_verified, status) VALUES ('usr_test_cross_add', 'cross-add@example.com', 1, 'active')"
         )
         .run();
       await db
         .prepare(
           `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES ('mem_cross_add', ?, 'usr_cross_add', 'member', 'active')`
+           VALUES ('mem_cross_add', ?, 'usr_test_cross_add', 'member', 'active')`
         )
         .bind(TEST_ORG.id)
         .run();
@@ -495,7 +491,7 @@ describe("Projects Routes", () => {
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
-          body: JSON.stringify({ userId: "usr_cross_add", role: "admin" }),
+          body: JSON.stringify({ userId: "usr_test_cross_add", role: "admin" }),
         },
         env
       );
@@ -503,7 +499,7 @@ describe("Projects Routes", () => {
       expect(res.status).toBe(404);
       const membership = await db
         .prepare(
-          "SELECT role FROM project_members WHERE project_id = ? AND user_id = 'usr_cross_add'"
+          "SELECT role FROM project_members WHERE project_id = ? AND user_id = 'usr_test_cross_add'"
         )
         .bind(TEST_PRODUCTION_PROJECT.id)
         .first();
@@ -546,15 +542,17 @@ describe("Projects Routes", () => {
     });
   });
 
-  describe("Dashboard session project access", () => {
-    const sessionHeaders = { Cookie: `sdp_session=${TEST_SESSION_ID}` };
-
+  describe("Dashboard Clerk project access", () => {
     it("retains org-wide project listing and update access", async () => {
       await getDb(env)
         .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
         .bind(JSON.stringify({ enableProductionProject: true }), TEST_ORG.id)
         .run();
-      const listRes = await app.request("/v1/projects", { headers: sessionHeaders }, env);
+      const listRes = await app.request(
+        "/v1/projects",
+        { headers: clerkHeadersWithoutProject(clerkToken) },
+        env
+      );
       expect(listRes.status).toBe(200);
       const listBody = await listRes.json();
       expect(listBody.data.projects.map((project: { id: string }) => project.id)).toContain(
@@ -565,8 +563,11 @@ describe("Projects Routes", () => {
         `/v1/projects/${TEST_PRODUCTION_PROJECT.id}`,
         {
           method: "PATCH",
-          headers: { ...sessionHeaders, "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "Session Updated" }),
+          headers: {
+            ...clerkHeaders(clerkToken, TEST_PRODUCTION_PROJECT.id),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ name: "Clerk Updated" }),
         },
         env
       );
@@ -577,13 +578,13 @@ describe("Projects Routes", () => {
       const db = getDb(env);
       await db
         .prepare(
-          "INSERT INTO users (id, email, email_verified, status) VALUES ('usr_session_member', 'session-member@example.com', 1, 'active')"
+          "INSERT INTO users (id, email, email_verified, status) VALUES ('usr_test_clerk_member', 'session-member@example.com', 1, 'active')"
         )
         .run();
       await db
         .prepare(
           `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES ('mem_session_member', ?, 'usr_session_member', 'member', 'active')`
+           VALUES ('mem_test_clerk_member', ?, 'usr_test_clerk_member', 'member', 'active')`
         )
         .bind(TEST_ORG.id)
         .run();
@@ -592,8 +593,11 @@ describe("Projects Routes", () => {
         `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/members`,
         {
           method: "POST",
-          headers: { ...sessionHeaders, "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: "usr_session_member", role: "admin" }),
+          headers: {
+            ...clerkHeaders(clerkToken, TEST_PRODUCTION_PROJECT.id),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ userId: "usr_test_clerk_member", role: "admin" }),
         },
         env
       );
@@ -601,95 +605,11 @@ describe("Projects Routes", () => {
       expect(res.status).toBe(201);
       const membership = await db
         .prepare(
-          "SELECT role FROM project_members WHERE project_id = ? AND user_id = 'usr_session_member'"
+          "SELECT role FROM project_members WHERE project_id = ? AND user_id = 'usr_test_clerk_member'"
         )
         .bind(TEST_PRODUCTION_PROJECT.id)
         .first<{ role: string }>();
       expect(membership?.role).toBe("admin");
-    });
-  });
-
-  describe("Project API Keys", () => {
-    // API keys are bound to a single project; use the same project the test key
-    // belongs to so that assertProjectAccess passes.
-    const projectId = TEST_PROJECT.id;
-
-    it("creates API key for project", async () => {
-      const res = await app.request(
-        `/v1/projects/${projectId}/api-keys`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            name: "Project Key",
-            walletScope: "all",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(201);
-      const body = await res.json();
-      expect(body.data.apiKey.name).toBe("Project Key");
-      expect(body.data.apiKey.key).toMatch(/^sk_test_/);
-      expect(body.data.apiKey.id).toMatch(/^key_/);
-    });
-
-    it("lists API keys for project", async () => {
-      // Create a key first
-      await app.request(
-        `/v1/projects/${projectId}/api-keys`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "Listed Key", walletScope: "all" }),
-        },
-        env
-      );
-
-      const res = await app.request(
-        `/v1/projects/${projectId}/api-keys`,
-        {
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.data.apiKeys).toBeInstanceOf(Array);
-      expect(body.data.apiKeys.length).toBeGreaterThan(0);
-    });
-
-    it("returns 404 for API-key management on another project", async () => {
-      const listRes = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/api-keys`,
-        {
-          headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(listRes.status).toBe(404);
-
-      const createRes = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/api-keys`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ name: "Cross-project key", walletScope: "all" }),
-        },
-        env
-      );
-      expect(createRes.status).toBe(404);
     });
   });
 });

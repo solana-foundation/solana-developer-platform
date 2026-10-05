@@ -6,7 +6,7 @@ import { listPolicyControlInventory } from "./handlers";
 
 const policies = new Hono<{ Bindings: Env }>();
 
-policies.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+policies.use("*", unifiedAuthMiddleware());
 policies.use("*", projectContextMiddleware());
 policies.get("/", listPolicyControlInventory);
 
