@@ -114,9 +114,9 @@ describe("FreezeAccountForm", () => {
 
   it("waits for an address", () => {
     renderWith(<FreezeAccountForm ops={makeOps()} onClose={vi.fn()} />);
-    expect(
-      (screen.getByRole("button", { name: copy.freezeSubmit }) as HTMLButtonElement).disabled
-    ).toBe(true);
+    for (const name of [copy.freezeSubmit, copy.unfreezeSubmit]) {
+      expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
+    }
   });
 
   it("hands a valid address to the freeze, which confirms in its dialog", () => {
@@ -128,31 +128,46 @@ describe("FreezeAccountForm", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("thaws a frozen address through the same handler, which confirms in its dialog", () => {
+    const ops = makeOps(ADDRESS);
+    const onClose = vi.fn();
+    renderWith(<FreezeAccountForm ops={ops} onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: copy.unfreezeSubmit }));
+    expect(ops.handleFreeze).toHaveBeenCalledExactlyOnceWith(true);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("signs with the only freeze authority wallet without asking", () => {
     renderWith(<FreezeAccountForm ops={makeOps(ADDRESS)} onClose={vi.fn()} />);
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
-  it("asks which wallet signs when several hold the freeze authority, and sends that one", async () => {
-    const user = userEvent.setup();
-    const onFreeze = vi.fn();
-    renderWith(
-      <FreezeWithSigners
-        signerWallets={[
-          freezeSigner("cw_ops", "Operations"),
-          freezeSigner("cw_treasury", "Treasury"),
-        ]}
-        onFreeze={onFreeze}
-      />
-    );
-    const freeze = screen.getByRole("button", { name: copy.freezeSubmit }) as HTMLButtonElement;
-    expect(freeze.disabled).toBe(true);
+  it.each([
+    { action: "freeze", label: copy.freezeSubmit, unfreeze: false },
+    { action: "unfreeze", label: copy.unfreezeSubmit, unfreeze: true },
+  ])(
+    "asks which wallet signs when several hold the authority, and sends that one: $action",
+    async ({ label, unfreeze }) => {
+      const user = userEvent.setup();
+      const onFreeze = vi.fn();
+      renderWith(
+        <FreezeWithSigners
+          signerWallets={[
+            freezeSigner("cw_ops", "Operations"),
+            freezeSigner("cw_treasury", "Treasury"),
+          ]}
+          onFreeze={onFreeze}
+        />
+      );
+      const submit = screen.getByRole("button", { name: label }) as HTMLButtonElement;
+      expect(submit.disabled).toBe(true);
 
-    await user.click(screen.getByRole("combobox"));
-    await user.click(await screen.findByRole("option", { name: /Treasury/ }));
-    expect(freeze.disabled).toBe(false);
+      await user.click(screen.getByRole("combobox"));
+      await user.click(await screen.findByRole("option", { name: /Treasury/ }));
+      expect(submit.disabled).toBe(false);
 
-    await user.click(freeze);
-    expect(onFreeze).toHaveBeenCalledWith(false, "cw_treasury");
-  });
+      await user.click(submit);
+      expect(onFreeze).toHaveBeenCalledExactlyOnceWith(unfreeze, "cw_treasury");
+    }
+  );
 });

@@ -1768,6 +1768,7 @@
         "freezeReason": "Reason",
         "freezeReasonPlaceholder": "Recorded in the audit history",
         "freezeSubmit": "Freeze account",
+        "unfreezeSubmit": "Unfreeze account",
         "listTitle": "Access list",
         "listDesc": "The addresses this token refuses, or the only ones it lets in.",
         "listAction": "Manage",
