@@ -2416,13 +2416,29 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
       idempotencyKey: null,
     } as const;
 
-    await expect(
-      repo.createWalletOperation({
-        ...candidate,
-        operationFamily: "program",
-        operationType: "earn_program_withdrawal",
-      })
-    ).resolves.not.toBeNull();
+    const admitted = await repo.createWalletOperation({
+      ...candidate,
+      operationFamily: "program",
+      operationType: "earn_program_withdrawal",
+    });
+    // Admission only means something if what it persisted IS the operation the
+    // candidate described, scoped to this tenant and fresh: a garbage row —
+    // another wallet, a foreign org, a drifted type, a stale status — used to
+    // pass a merely non-null check.
+    expect(admitted).not.toBeNull();
+    expect(admitted).toMatchObject({
+      organization_id: TEST_ORG.id,
+      project_id: TEST_PROJECT.id,
+      wallet_id: program.provider_wallet_ref,
+      custody_wallet_id: null,
+      api_key_id: TEST_API_KEY.id,
+      operation_family: "program",
+      operation_type: "earn_program_withdrawal",
+      asset: "usdc",
+      amount: "1.00",
+      destination: SOLANA_DESTINATION,
+      status: "created",
+    });
 
     await expect(
       repo.createWalletOperation({

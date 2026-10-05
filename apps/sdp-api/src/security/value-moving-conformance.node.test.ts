@@ -4,15 +4,19 @@ import { describe, expect, it, vi } from "vitest";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../../..");
 
-type ValueMovingFamily =
-  | "batch"
-  | "recurring"
-  | "issuance"
-  | "payments"
-  | "ramps"
-  | "custody"
-  | "earn"
-  | "dvp";
+/** The declared requirement: every family here needs at least one contract. */
+const REQUIRED_FAMILIES = [
+  "batch",
+  "recurring",
+  "issuance",
+  "payments",
+  "ramps",
+  "custody",
+  "earn",
+  "dvp",
+] as const;
+
+type ValueMovingFamily = (typeof REQUIRED_FAMILIES)[number];
 
 interface OrderedBoundary {
   file: string;
@@ -252,6 +256,32 @@ const contracts: ValueMovingContract[] = [
     ],
   },
   {
+    /** Mint: value creation, gated like its burn/unfreeze siblings. */
+    family: "issuance",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/issuance/handlers/mint.ts",
+      evidence: "const { auth, projectId, orgId } = requireProjectScope(c)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/issuance/index.ts",
+      section: '"/tokens/:tokenId/mint",',
+      before: "extract: extractMintPolicyCandidate",
+      after: "executeMint",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "returns an idempotent mint replay before fresh admission or policy writes",
+      },
+      {
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/routes/issuance.test.ts",
+        evidence: "stops a denied mint before signer and issuance side effects",
+      },
+    ],
+  },
+  {
     family: "payments",
     trustedContext: {
       file: "apps/sdp-api/src/routes/payments/context.ts",
@@ -367,6 +397,32 @@ const contracts: ValueMovingContract[] = [
       section: '"/quote",',
       before: "policyGate({ extract: extractOnrampQuotePolicyCandidate })",
       after: "\n  createOnrampQuote\n",
+    },
+    replay: [
+      {
+        mode: "provider_signature_window",
+        file: "apps/sdp-api/src/routes/webhooks/ramps/stripe.test.ts",
+        evidence: "accepts a correctly signed webhook and rejects a forged one",
+      },
+      {
+        mode: "provider_signature_window",
+        file: "apps/sdp-api/src/routes/webhooks/ramps/stripe.test.ts",
+        evidence: "rejects a correctly signed but stale webhook",
+      },
+    ],
+  },
+  {
+    /** Offramp quotes are gated like onramp quotes; payouts settle through the shared webhook pipeline. */
+    family: "ramps",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/payments/ramps/offramp/handlers.ts",
+      evidence: "organizationId: scope.auth.organizationId",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/payments/ramps/offramp/index.ts",
+      section: '"/quote",',
+      before: "policyGate({ extract: extractOfframpQuotePolicyCandidate })",
+      after: "\n  createOfframpQuote\n",
     },
     replay: [
       {
@@ -524,6 +580,69 @@ const contracts: ValueMovingContract[] = [
       },
     ],
   },
+  {
+    /**
+     * The queued exit half: a withdrawal REQUEST escrows shares (or hands a
+     * par redemption to the provider's operator) before any settlement, so
+     * the gate runs where value is first committed, not where it leaves.
+     */
+    family: "earn",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts",
+      evidence: "organizationId: target.auth.organizationId",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/earn/index.ts",
+      section: '"/vault-withdrawal-requests",',
+      before: "extract: extractEarnVaultWithdrawalRequestPolicyCandidate",
+      after: "createEarnVaultWithdrawalRequest",
+    },
+    replay: [
+      {
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/routes/earn.vault-withdrawals.test.ts",
+        evidence: "puts the delegated intermediate, not the share mint, in front of policy",
+      },
+      {
+        mode: "claimed_state_machine",
+        file: "apps/sdp-api/src/services/earn/vault-queued-withdrawal-reconciliation.service.test.ts",
+        evidence: "recovers a live request PDA when signature history is missing after expiry",
+      },
+    ],
+  },
+  {
+    /**
+     * The custodial program payout (HOO-1559): a program has no custody
+     * wallet, so the route pays a caller-supplied destination out of the
+     * organization's provider account under the API key's own control
+     * profile. Without the gate none of the deny rules, limits, destination
+     * controls or approval requirements would run.
+     */
+    family: "earn",
+    trustedContext: {
+      file: "apps/sdp-api/src/routes/earn/handlers/program.ts",
+      evidence: "await requireProgramContext(c, programId)",
+    },
+    authorization: {
+      file: "apps/sdp-api/src/routes/earn/index.ts",
+      section: '"/programs/:programId/withdrawals",',
+      before: "extract: extractEarnProgramWithdrawalPolicyCandidate",
+      after: "createEarnProgramWithdrawal",
+    },
+    replay: [
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/earn-program.test.ts",
+        evidence:
+          "resolves a caller-key retry from the ledger: one provider create, replay served live",
+      },
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/earn-program.test.ts",
+        evidence: "keeps two different Idempotency-Keys apart",
+      },
+    ],
+  },
 ];
 
 const signingSinkInventory: Record<string, string[]> = {
@@ -615,6 +734,23 @@ function discoverSigningSinks(): Record<string, string[]> {
   return inventory;
 }
 
+/**
+ * Every `extract: extractXPolicyCandidate` site in the production route tree.
+ * This is how a gated route announces that policy decides before the handler
+ * runs — so the set of those sites is the set of boundaries the contracts
+ * below must account for, read from production instead of transcribed.
+ */
+function discoverGatedExtractors(): string[] {
+  const extractorPattern = /extract:\s*(extract\w+PolicyCandidate)/g;
+  const extractors = new Set<string>();
+  for (const file of sourceFiles(path.join(repositoryRoot, "apps/sdp-api/src/routes"))) {
+    for (const match of readFileSync(file, "utf8").matchAll(extractorPattern)) {
+      extractors.add(match[1]);
+    }
+  }
+  return [...extractors].sort();
+}
+
 function sectionSource(boundary: OrderedBoundary): string {
   const source = readSource(boundary.file);
   const start = source.indexOf(boundary.section);
@@ -626,37 +762,48 @@ function sectionSource(boundary: OrderedBoundary): string {
 
 describe("value-moving authorization and replay conformance", () => {
   it("covers every required value-moving family", () => {
-    // `earn` appears twice: money-in (vault deposits) and money-out (vault
-    // withdrawals) are separately gated routes, and each carries its own
-    // authorization boundary and replay evidence. `issuance` repeats for the
-    // same reason: authority updates, seize, force-burn, burn, freeze,
-    // unfreeze, pause, unpause, deploy, allowlist add and allowlist remove
-    // are separately gated execute routes. `dvp` appears twice for fund and
-    // settle, the two actions that commit value; reclaim and cancel are the
-    // recovery paths and are deliberately ungoverned (routes/dvp/policy.ts).
-    expect(contracts.map((contract) => contract.family).sort()).toEqual([
-      "batch",
-      "custody",
-      "dvp",
-      "dvp",
-      "earn",
-      "earn",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "payments",
-      "ramps",
-      "recurring",
-    ]);
+    // Compared against the DECLARED requirement, not a transcription of the
+    // array below: this test used to compare `contracts` against a
+    // hand-maintained copy of its own families, so dropping a contract — the
+    // exact way `earn` once shipped ungoverned — only required editing this
+    // file twice to stay green.
+    const covered = new Set(contracts.map((contract) => contract.family));
+    expect([...covered].sort()).toEqual([...REQUIRED_FAMILIES].sort());
+  });
+
+  it("registers every policy-gated route exactly once", () => {
+    // A gated value-moving route with no contract is the `earn` failure shape
+    // this file exists to prevent; a contract claiming an extractor twice
+    // would let one boundary impersonate another. Family-level coverage above
+    // cannot see either gap when several contracts share a family (issuance
+    // has thirteen). Recurring and custody gate inside services without an
+    // extractor, so they stay pinned by their own contracts below.
+    const gated = discoverGatedExtractors();
+    expect(gated.length).toBeGreaterThan(0);
+
+    const claims = new Map<string, string[]>();
+    for (const contract of contracts) {
+      const extractor = /extract:\s*(extract\w+PolicyCandidate)/.exec(
+        contract.authorization.before
+      )?.[1];
+      if (extractor === undefined) continue;
+      const claimed = claims.get(extractor) ?? [];
+      claimed.push(contract.authorization.file);
+      claims.set(extractor, claimed);
+    }
+
+    for (const extractor of gated) {
+      expect(
+        claims.get(extractor),
+        `${extractor} gates a route in production but has no registered contract`
+      ).toHaveLength(1);
+    }
+    for (const [extractor, files] of claims) {
+      expect(
+        gated,
+        `${extractor} is claimed by ${files.join(", ")} but production no longer gates with it`
+      ).toContain(extractor);
+    }
   });
 
   it.each(contracts)("authorizes $family from trusted context before signing", (contract) => {
