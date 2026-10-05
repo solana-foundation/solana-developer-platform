@@ -18,78 +18,35 @@ import {
 import type { ManagedRpcEnv } from "./types";
 
 /**
- * Each cluster's managed pool env keys. Provider order is the failover order when no
- * preferred provider is named; `default` (often a public endpoint) last.
+ * Each cluster's managed pool env key per provider. Key order is the failover order;
+ * `default` (often a public endpoint) last.
  */
 const MANAGED_RPC_ENV_KEYS = {
   devnet: {
-    preferredProvider: "SOLANA_RPC_DEFAULT_PROVIDER_DEVNET",
-    urls: {
-      triton: "SOLANA_RPC_TRITON_DEVNET_API_KEY_URL",
-      helius: "SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL",
-      alchemy: "SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL",
-      quicknode: "SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL",
-      validationcloud: "SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL",
-      nodit: "SOLANA_RPC_NODIT_DEVNET_API_KEY_URL",
-      default: "SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL",
-    },
+    triton: "SOLANA_RPC_TRITON_DEVNET_API_KEY_URL",
+    helius: "SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL",
+    alchemy: "SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL",
+    quicknode: "SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL",
+    validationcloud: "SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL",
+    nodit: "SOLANA_RPC_NODIT_DEVNET_API_KEY_URL",
+    default: "SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL",
   },
   "mainnet-beta": {
-    preferredProvider: "SOLANA_RPC_DEFAULT_PROVIDER_MAINNET",
-    urls: {
-      triton: "SOLANA_RPC_TRITON_MAINNET_API_KEY_URL",
-      helius: "SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL",
-      alchemy: "SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL",
-      quicknode: "SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL",
-      validationcloud: "SOLANA_RPC_VALIDATIONCLOUD_MAINNET_API_KEY_URL",
-      nodit: "SOLANA_RPC_NODIT_MAINNET_API_KEY_URL",
-      default: "SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL",
-    },
+    triton: "SOLANA_RPC_TRITON_MAINNET_API_KEY_URL",
+    helius: "SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL",
+    alchemy: "SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL",
+    quicknode: "SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL",
+    validationcloud: "SOLANA_RPC_VALIDATIONCLOUD_MAINNET_API_KEY_URL",
+    nodit: "SOLANA_RPC_NODIT_MAINNET_API_KEY_URL",
+    default: "SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL",
   },
-} as const satisfies Record<
-  SolanaCluster,
-  {
-    preferredProvider: keyof ManagedRpcEnv;
-    urls: Record<OrganizationRpcProvider, keyof ManagedRpcEnv>;
-  }
->;
+} as const satisfies Record<SolanaCluster, Record<OrganizationRpcProvider, keyof ManagedRpcEnv>>;
 
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
 const GENESIS_PROOF_TTL_MS = 30_000;
 
-/** `<cluster> <url>` to the time its last genesis match expires; only matches are recorded. */
+/** `<cluster> <endpointUrl>` to the time its last genesis match expires; only matches are recorded. */
 const genesisProofExpiry = new Map<string, number>();
-
-/**
- * The managed endpoint URLs for one cluster, preferred provider first, duplicates removed.
- *
- * @param env - Process env carrying the keys in `MANAGED_RPC_ENV_KEYS`.
- * @param cluster - The cluster whose pool to read.
- * @returns At least one URL.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no URL, or the preferred provider has none.
- */
-function managedRpcUrls(env: ManagedRpcEnv, cluster: SolanaCluster): string[] {
-  const keys = MANAGED_RPC_ENV_KEYS[cluster];
-  const configured = Object.entries(keys.urls).flatMap(([provider, envKey]) => {
-    const url = env[envKey];
-    return url ? [{ provider, url }] : [];
-  });
-  if (configured.length === 0) {
-    throw new SdpRpcError("RPC_NOT_CONFIGURED", `No RPC endpoint is configured for ${cluster}`, {
-      cluster,
-    });
-  }
-  const preferredProvider = env[keys.preferredProvider];
-  const preferred = configured.filter((entry) => entry.provider === preferredProvider);
-  if (preferredProvider && preferred.length === 0) {
-    throw new SdpRpcError(
-      "RPC_NOT_CONFIGURED",
-      `${keys.preferredProvider} names ${preferredProvider}, which has no ${cluster} URL`,
-      { cluster, provider: preferredProvider }
-    );
-  }
-  return [...new Set([...preferred, ...configured].map((entry) => entry.url))];
-}
 
 /**
  * Wrap one endpoint's transport so it proves the endpoint serves `cluster` before the first
@@ -97,33 +54,33 @@ function managedRpcUrls(env: ManagedRpcEnv, cluster: SolanaCluster): string[] {
  * A probe network error propagates as an ordinary transport failure (failover may hop);
  * a mismatch throws a non-transient error, so failover and retries stop on it.
  *
- * @param transport - The raw transport for `url`.
+ * @param endpointTransport - The raw transport for `endpointUrl`.
  * @param cluster - The cluster the endpoint is configured for.
- * @param url - The endpoint URL, used only as the cache key.
+ * @param endpointUrl - The endpoint URL, used only as the proof cache key.
  * @returns A transport that probes `getGenesisHash` whenever no unexpired match is recorded.
  */
 function withGenesisGuard(
-  transport: RpcTransport,
+  endpointTransport: RpcTransport,
   cluster: SolanaCluster,
-  url: string
+  endpointUrl: string
 ): RpcTransport {
-  const cacheKey = `${cluster} ${url}`;
-  return async <TResponse>(request: Parameters<RpcTransport>[0]) => {
-    const proofExpiresAt = genesisProofExpiry.get(cacheKey);
+  const genesisProofKey = `${cluster} ${endpointUrl}`;
+  return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]) => {
+    const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
     if (proofExpiresAt === undefined || proofExpiresAt <= Date.now()) {
-      const genesisHash = await createSolanaRpcFromTransport(transport)
+      const servedGenesisHash = await createSolanaRpcFromTransport(endpointTransport)
         .getGenesisHash()
-        .send({ abortSignal: request.signal });
-      if (genesisHash !== GENESIS_HASH_BY_CLUSTER[cluster]) {
+        .send({ abortSignal: rpcRequest.signal });
+      if (servedGenesisHash !== GENESIS_HASH_BY_CLUSTER[cluster]) {
         throw new SdpRpcError(
           "RPC_CLUSTER_MISMATCH",
           `An RPC endpoint configured for ${cluster} serves a different cluster`,
-          { cluster, genesisHash }
+          { cluster, genesisHash: servedGenesisHash }
         );
       }
-      genesisProofExpiry.set(cacheKey, Date.now() + GENESIS_PROOF_TTL_MS);
+      genesisProofExpiry.set(genesisProofKey, Date.now() + GENESIS_PROOF_TTL_MS);
     }
-    return await transport<TResponse>(request);
+    return await endpointTransport<TResponse>(rpcRequest);
   };
 }
 
@@ -140,17 +97,25 @@ function withGenesisGuard(
  * @param env - Process env carrying the per-cluster managed pool.
  * @param cluster - The cluster every request must reach.
  * @returns The RPC client.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster's pool is empty or its preferred provider is missing.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
  */
 export function createRpc(env: ManagedRpcEnv, cluster: SolanaCluster): SolanaRpc {
-  const urls = managedRpcUrls(env, cluster);
-  const transports = urls.map((url) =>
+  const endpointUrls = Object.values(MANAGED_RPC_ENV_KEYS[cluster]).flatMap((envKey) => {
+    const endpointUrl = env[envKey];
+    return endpointUrl ? [endpointUrl] : [];
+  });
+  if (endpointUrls.length === 0) {
+    throw new SdpRpcError("RPC_NOT_CONFIGURED", `No RPC endpoint is configured for ${cluster}`, {
+      cluster,
+    });
+  }
+  const guardedEndpointTransports = endpointUrls.map((endpointUrl) =>
     withRequestTimeout(
-      withGenesisGuard(createDefaultRpcTransport({ url }), cluster, url),
+      withGenesisGuard(createDefaultRpcTransport({ url: endpointUrl }), cluster, endpointUrl),
       DEFAULT_RPC_REQUEST_TIMEOUT_MS
     )
   );
   return createSolanaRpcFromTransport(
-    createFailoverTransport(transports, { stickyKey: urls.join("|") })
+    createFailoverTransport(guardedEndpointTransports, { stickyKey: endpointUrls.join("|") })
   );
 }

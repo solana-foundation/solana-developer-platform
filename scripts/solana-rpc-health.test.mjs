@@ -1,106 +1,69 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getSolanaRpcCandidates } from "./lib/solana-rpc-health.mjs";
+import {
+  getSolanaRpcCandidates,
+  useSolanaRpcCandidateAsDefault,
+} from "./lib/solana-rpc-health.mjs";
 
-test("resolves managed RPC URL shapes without changing existing providers", () => {
-  const cases = [
-    {
-      id: "alchemy",
-      env: {
-        SOLANA_RPC_ALCHEMY_URL: "https://solana-devnet.g.alchemy.com/v2/{API_KEY}",
-        SOLANA_RPC_ALCHEMY_API_KEY: "alchemy123",
-      },
-      expected: "https://solana-devnet.g.alchemy.com/v2/alchemy123",
-    },
-    {
-      id: "quicknode",
-      env: {
-        SOLANA_RPC_QUICKNODE_URL: "https://example.solana-devnet.quiknode.pro/{API_KEY}",
-        SOLANA_RPC_QUICKNODE_API_KEY: "quicknode123",
-      },
-      expected: "https://example.solana-devnet.quiknode.pro/quicknode123",
-    },
-    {
-      id: "triton",
-      env: {
-        SOLANA_RPC_TRITON_URL: "https://example.devnet.rpcpool.com/{API_KEY}",
-        SOLANA_RPC_TRITON_API_KEY: "triton123",
-      },
-      expected: "https://example.devnet.rpcpool.com/triton123",
-    },
-    {
-      id: "default",
-      env: {
-        SOLANA_RPC_URL: "https://api.devnet.solana.com",
-      },
-      expected: "https://api.devnet.solana.com",
-    },
-    {
-      id: "helius",
-      env: {
-        SOLANA_RPC_HELIUS_URL: "https://devnet.helius-rpc.com/?api-key={API_KEY}",
-        SOLANA_RPC_HELIUS_API_KEY: "helius123",
-      },
-      expected: "https://devnet.helius-rpc.com/?api-key=helius123",
-    },
-    {
-      id: "validationcloud",
-      env: {
-        SOLANA_RPC_VALIDATIONCLOUD_URL: "https://devnet.solana.validationcloud.io/v1/{API_KEY}",
-        SOLANA_RPC_VALIDATIONCLOUD_API_KEY: "validationcloud123",
-      },
-      expected: "https://devnet.solana.validationcloud.io/v1/validationcloud123",
-    },
-    {
-      id: "nodit",
-      env: {
-        SOLANA_RPC_NODIT_URL: "https://solana-devnet.nodit.io/{API_KEY}",
-        SOLANA_RPC_NODIT_API_KEY: "a/b c?d=e%f",
-      },
-      expected: [
-        "https://solana-devnet.nodit.io/a",
-        "%2F",
-        "b",
-        "%20",
-        "c",
-        "%3F",
-        "d",
-        "%3D",
-        "e",
-        "%25",
-        "f",
-      ].join(""),
-    },
-    {
-      id: "nodit",
-      env: {
-        SOLANA_RPC_NODIT_URL: "https://nodit-proxy.example/rpc",
-      },
-      expected: "https://nodit-proxy.example/rpc",
-    },
-    {
-      id: "nodit",
-      env: {
-        SOLANA_RPC_NODIT_URL: "https://nodit-proxy.example/{API_KEY}?key={API_KEY}",
-        SOLANA_RPC_NODIT_API_KEY: "nodit-key",
-      },
-      expected: "https://nodit-proxy.example/nodit-key?key=nodit-key",
-    },
-    {
-      id: "alchemy",
-      env: {
-        SOLANA_RPC_ALCHEMY_URL: "https://alchemy-proxy.example/rpc",
-        SOLANA_RPC_ALCHEMY_API_KEY: "unused-key",
-      },
-      expected: "https://alchemy-proxy.example/rpc",
-    },
+test("reads each provider's devnet URL verbatim and ignores mainnet URLs", () => {
+  const providers = [
+    ["alchemy", "ALCHEMY"],
+    ["quicknode", "QUICKNODE"],
+    ["triton", "TRITON"],
+    ["default", "DEFAULT"],
+    ["helius", "HELIUS"],
+    ["validationcloud", "VALIDATIONCLOUD"],
+    ["nodit", "NODIT"],
   ];
 
-  for (const { id, env, expected } of cases) {
+  for (const [id, envName] of providers) {
+    const url = `https://rpc-health-${id}.test/devnet?api-key=${id}-key`;
+    const env = {
+      [`SOLANA_RPC_${envName}_DEVNET_API_KEY_URL`]: url,
+      [`SOLANA_RPC_${envName}_MAINNET_API_KEY_URL`]: `https://rpc-health-${id}.test/mainnet`,
+    };
+
     const candidates = getSolanaRpcCandidates(env).map((candidate) => ({
       id: candidate.id,
       url: candidate.url,
     }));
-    assert.deepEqual(candidates, [{ id, url: expected }]);
+
+    assert.deepEqual(candidates, [{ id, url }]);
   }
+});
+
+test("orders candidates by table order, preferred provider first, shared URLs once", () => {
+  const env = {
+    SOLANA_RPC_NODIT_DEVNET_API_KEY_URL: "https://rpc-health-nodit.test/devnet",
+    SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "https://rpc-health-shared.test/devnet",
+    SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://rpc-health-shared.test/devnet",
+    SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: "https://rpc-health-alchemy.test/devnet",
+  };
+
+  const ids = (candidateEnv) =>
+    getSolanaRpcCandidates(candidateEnv).map((candidate) => candidate.id);
+
+  assert.deepEqual(ids(env), ["alchemy", "triton", "nodit"]);
+  assert.deepEqual(ids({ ...env, SOLANA_RPC_CI_PREFERRED_PROVIDER: "nodit" }), [
+    "nodit",
+    "alchemy",
+    "triton",
+  ]);
+});
+
+test("replaces every provider URL key with the selected URL as the default and leaves unrelated keys alone", () => {
+  const env = {
+    SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://rpc-health-keep-triton.test/devnet",
+    SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "https://rpc-health-keep-helius.test/devnet",
+    SOLANA_RPC_NODIT_DEVNET_API_KEY_URL: "https://rpc-health-keep-nodit.test/devnet",
+    SDP_UNRELATED_SETTING: "unrelated-value",
+  };
+  const [, selected] = getSolanaRpcCandidates(env);
+
+  useSolanaRpcCandidateAsDefault(env, selected);
+
+  assert.deepEqual(env, {
+    SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: "https://rpc-health-keep-helius.test/devnet",
+    SDP_UNRELATED_SETTING: "unrelated-value",
+  });
 });

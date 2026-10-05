@@ -33,6 +33,13 @@ export async function selectHealthySolanaRpcUrl(env, options = {}) {
   throw new Error(`No healthy Solana RPC URL found. Checked: ${failures.join("; ")}`);
 }
 
+export function useSolanaRpcCandidateAsDefault(env, selected) {
+  for (const provider of PROVIDERS) {
+    delete env[provider.urlKey];
+  }
+  env.SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL = selected.url;
+}
+
 export function getSolanaRpcCandidates(env) {
   const seen = new Set();
   const preferred = env.SOLANA_RPC_CI_PREFERRED_PROVIDER;

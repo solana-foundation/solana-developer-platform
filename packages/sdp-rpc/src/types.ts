@@ -2,10 +2,9 @@ import type { OrganizationRpcProvider } from "@sdp/types";
 
 /**
  * The per-cluster managed pool: one complete endpoint URL (key embedded) per
- * provider per cluster, plus an optional preferred provider per cluster.
+ * provider per cluster.
  */
 export interface ManagedRpcEnv {
-  SOLANA_RPC_DEFAULT_PROVIDER_DEVNET?: OrganizationRpcProvider;
   SOLANA_RPC_TRITON_DEVNET_API_KEY_URL?: string;
   SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL?: string;
   SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL?: string;
@@ -13,7 +12,6 @@ export interface ManagedRpcEnv {
   SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL?: string;
   SOLANA_RPC_NODIT_DEVNET_API_KEY_URL?: string;
   SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL?: string;
-  SOLANA_RPC_DEFAULT_PROVIDER_MAINNET?: OrganizationRpcProvider;
   SOLANA_RPC_TRITON_MAINNET_API_KEY_URL?: string;
   SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL?: string;
   SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL?: string;
