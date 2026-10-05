@@ -22,6 +22,7 @@ function transaction(id: string): UnifiedTransaction {
     amount: "1",
     token: null,
     counterpartyId: null,
+    counterpartyAddress: null,
     custodyWalletId: null,
     custodyWalletLabel: null,
     signature: null,
