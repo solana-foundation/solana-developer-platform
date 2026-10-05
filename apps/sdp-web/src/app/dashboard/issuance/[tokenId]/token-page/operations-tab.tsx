@@ -41,6 +41,7 @@ import {
   transactionExplorerHref,
 } from "./token-page.shared";
 import { TokenTable } from "./token-table";
+import { FreezeAccountForm, PauseTransfersForm } from "./transfer-operation-forms";
 
 const TRANSACTIONS_PAGE_SIZE = 10;
 
@@ -96,6 +97,7 @@ const OPERATION_COPY: Record<string, { title: MessageKey; desc: MessageKey; acti
 
 const PAUSE = "pause";
 const RESUME = "resume";
+const FREEZE = "freeze";
 const DATE_TIME_FORMAT: Intl.DateTimeFormatOptions = {
   month: "short",
   day: "numeric",
@@ -281,7 +283,10 @@ const ACCESS_CONTROL_WHY: Record<"allowlist" | "blocklist" | "disabled", Message
   disabled: "DashboardIssuance.newDesign.permissions.noListWhy",
 };
 
-/** Transfers: whether they run, who freezes and who may hold; pause, freeze and the list beside them. */
+/**
+ * Transfers: whether they run, who freezes and who may hold; pause, freeze and the list beside
+ * them. Pause and freeze open in place under their rows; the list opens Compliance.
+ */
 function TransfersBlock({
   token,
   ops,
@@ -293,17 +298,35 @@ function TransfersBlock({
   rows: OperationRow[] | null;
 }) {
   const t = useTranslations();
+  // Pause and freeze open in place under their rows, the row's button giving way to the form.
+  const [open, setOpen] = useState<typeof PAUSE | typeof FREEZE | null>(null);
   const paused = state === "paused";
   const running = onChain
     ? t("DashboardIssuance.newDesign.operations.transfersRunning")
     : t("DashboardIssuance.newDesign.publicInfo.notDeployed");
   const actions = (id: string) => (
     <OperationButtons
-      rows={rows?.filter((row) => row.id === id) ?? []}
+      rows={
+        rows
+          ?.filter((row) => row.id === id && row.id !== open)
+          .map((row) =>
+            row.id === PAUSE || row.id === FREEZE
+              ? {
+                  ...row,
+                  onAction: () => {
+                    // Demo mode opens the freeze filled in, as the dialogs it replaced did.
+                    if (row.id === FREEZE) ops.prefillDemoOperation("freeze");
+                    setOpen(row.id === PAUSE ? PAUSE : FREEZE);
+                  },
+                }
+              : row
+          ) ?? []
+      }
       pending={ops.isPending}
       paused={paused}
     />
   );
+  const close = () => setOpen(null);
 
   return (
     <RecordBlock title={t("DashboardIssuance.newDesign.operations.transfers")} className="gap-6">
@@ -311,6 +334,11 @@ function TransfersBlock({
         <OperationLine
           label={t("DashboardIssuance.newDesign.operations.transfers")}
           actions={actions(PAUSE)}
+          open={
+            rows && open === PAUSE ? (
+              <PauseTransfersForm ops={ops} paused={paused} onClose={close} />
+            ) : null
+          }
         >
           {paused ? t("DashboardIssuance.newDesign.operations.transfersPaused") : running}
         </OperationLine>
@@ -318,7 +346,8 @@ function TransfersBlock({
           <OperationLine
             label={t("DashboardIssuance.newDesign.operations.freezeAuthority")}
             hint={t("DashboardIssuance.newDesign.permissions.freezeWhy")}
-            actions={actions("freeze")}
+            actions={actions(FREEZE)}
+            open={rows && open === FREEZE ? <FreezeAccountForm ops={ops} onClose={close} /> : null}
           >
             {holderName(token.freezeAuthority, ops.authorityWallets, t)}
           </OperationLine>
@@ -349,7 +378,7 @@ function OperationLine({
   label: string;
   hint?: string;
   actions?: ReactNode;
-  /** An operation opened in place under the row (mint or burn), across its full width. */
+  /** An operation opened in place under the row (mint, burn, lock, pause or freeze), across its full width. */
   open?: ReactNode;
   children: ReactNode;
 }) {
@@ -449,7 +478,7 @@ function RecoveryFold({ rows, pending }: { rows: OperationRow[]; pending: boolea
   );
 }
 
-/** The chosen operation's form in a modal; seize, force burn and freeze close it as they run. */
+/** The chosen recovery operation's form in a modal; seize and force burn close it as they run. */
 function OperationModal({
   token,
   ops,
