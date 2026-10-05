@@ -200,8 +200,13 @@ test.describe("dashboard theme e2e", () => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light" });
 
-    // The request's Code view renders before the response body, so first() is the snippet.
-    const codePanel = page.getByTestId("api-playground-code").first();
+    // The new design's playground (new-design on) puts the request's code behind a Code tab, and
+    // that view renders before the response body, so first() is the snippet. The previous design
+    // shows the code at once, in a line-numbered block.
+    const newDesignCodePanel = page.getByTestId("api-playground-code").first();
+    const previousCodePanel = page.locator(".code-block-line-numbers").first();
+    const codeTab = page.getByRole("tab", { name: "Code", exact: true });
+    let codePanel = newDesignCodePanel;
     const readCodeTokens = () =>
       codePanel.evaluate((element) => {
         const styles = getComputedStyle(element);
@@ -214,7 +219,13 @@ test.describe("dashboard theme e2e", () => {
     const openPlayground = async () => {
       await page.goto("/dashboard/payments");
       await page.getByRole("tab", { name: "API Playground" }).click();
-      await page.getByRole("tab", { name: "Code", exact: true }).click();
+      await expect(codeTab.or(previousCodePanel).first()).toBeVisible();
+      if (await codeTab.isVisible()) {
+        await codeTab.click();
+        codePanel = newDesignCodePanel;
+      } else {
+        codePanel = previousCodePanel;
+      }
       await expect(codePanel).toBeVisible();
     };
 
