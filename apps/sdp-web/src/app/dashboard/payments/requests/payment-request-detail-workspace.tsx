@@ -69,7 +69,8 @@ function useQrDataUrl(text: string, width: number): string | null {
 /**
  * The request's pay link on this origin, as the design lays it out: its QR code on a 128px tile,
  * the link beside it, and the copy, share and QR download under the link. A demo request lives
- * in this browser only, so its actions say so instead of handing out a link nobody can open.
+ * in this browser only, so it shows no code or link that would open a page that cannot find it,
+ * and its actions say so instead of handing out a link nobody can open.
  */
 function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symbol: string }) {
   const t = useTranslations();
@@ -79,7 +80,7 @@ function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symb
   const [origin, setOrigin] = useState("");
   useEffect(() => setOrigin(window.location.origin), []);
   const payLink = origin ? `${origin}/pay/${request.publicToken}` : "";
-  const qrDataUrl = useQrDataUrl(payLink, 256);
+  const qrDataUrl = useQrDataUrl(demo ? "" : payLink, 256);
   const amount = `${formatDecimalAmount(request.amount, locale)} ${symbol}`;
 
   const demoOnly = () => toast.info(t("DashboardPayments.demo.noPayLink"));
@@ -125,27 +126,37 @@ function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symb
   }
 
   return (
-    <div className="flex items-start gap-6 border-t border-border-default pt-4">
-      {/* The design's 128px tile: a 96px code on white with a 16px quiet zone. */}
-      <div className="size-32 shrink-0 rounded-xs bg-white p-4">
-        {qrDataUrl ? (
-          <Image
-            src={qrDataUrl}
-            alt={t("DashboardPayments.requestDetail.qrCodeAlt")}
-            width={96}
-            height={96}
-            unoptimized
-            className="size-full"
-          />
-        ) : (
-          <div className="size-full animate-pulse rounded-xs bg-fill" />
-        )}
-      </div>
+    // On a phone the tile sits over the link, so the link and its actions keep the full width.
+    <div className="flex flex-col gap-4 border-t border-border-default pt-4 sm:flex-row sm:items-start sm:gap-6">
+      {/* The design's 128px tile: a 96px code on white with a 16px quiet zone; a demo request has
+          no link to draw. */}
+      {demo ? null : (
+        <div className="size-32 shrink-0 rounded-xs bg-white p-4">
+          {qrDataUrl ? (
+            <Image
+              src={qrDataUrl}
+              alt={t("DashboardPayments.requestDetail.qrCodeAlt")}
+              width={96}
+              height={96}
+              unoptimized
+              className="size-full"
+            />
+          ) : (
+            <div className="size-full animate-pulse rounded-xs bg-fill" />
+          )}
+        </div>
+      )}
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <span className="text-meta text-secondary">
           {t("DashboardPayments.requestDetail.paymentLink")}
         </span>
-        <span className="min-w-0 truncate font-mono text-body text-primary">{payLink || null}</span>
+        {demo ? (
+          <p className="text-body text-secondary">{t("DashboardPayments.demo.noPayLink")}</p>
+        ) : (
+          <span className="min-w-0 truncate font-mono text-body text-primary">
+            {payLink || null}
+          </span>
+        )}
         {/* 16px to the design's 30px buttons, 8px apart; the copy is filled while the request
             can still be paid. */}
         <div className="mt-2.5 flex flex-wrap items-center gap-2 [&_button]:[--button-height-md:1.875rem]">

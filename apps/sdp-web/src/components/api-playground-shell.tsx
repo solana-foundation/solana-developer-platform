@@ -9,6 +9,10 @@ import {
   ApiPlaygroundRefreshLayout,
 } from "@/components/api-playground-refresh-layout";
 import { buildSnippets } from "@/components/api-playground-snippets";
+import {
+  type IdentifyPendingApiKey,
+  PendingApiKeyContext,
+} from "@/components/playground-api-key-selector";
 import { useThemeScope } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1237,10 +1241,16 @@ export function ApiPlaygroundShell({
     responseBody,
     aiInstructions,
   } = useApiPlaygroundState({ apiBaseUrl, defaultEndpointId, endpoints, productName, t });
+  // The key field fills this, so a run can identify a key pasted a moment before.
+  const identifyPendingApiKey = useRef<IdentifyPendingApiKey | null>(null);
 
   if (!activeEndpoint) {
     return null;
   }
+
+  const keySelector = apiKeySelector ? (
+    <PendingApiKeyContext value={identifyPendingApiKey}>{apiKeySelector}</PendingApiKeyContext>
+  ) : null;
 
   const panelContent = resolvePanelContent(activePanel, codeSnippet, responseBody, exampleBody);
   const panelLanguage: HighlightLanguage = activePanel === "code" ? "javascript" : "json";
@@ -1273,12 +1283,16 @@ export function ApiPlaygroundShell({
     setExecuteError(null);
   };
 
-  const handleExecute = () => {
-    setExecuteError(null);
-    setExecutionResult(null);
-    void executePlaygroundRequest({
+  const runWithIdentifiedKey = async () => {
+    // A key pasted a moment ago, its popover maybe still open, is identified before the run so
+    // the run uses it. A refused key stops the run; the key field says why.
+    const pending = (await identifyPendingApiKey.current?.()) ?? { kind: "none" };
+    if (pending.kind === "rejected") {
+      return;
+    }
+    await executePlaygroundRequest({
       activeEndpoint,
-      apiKeyId,
+      apiKeyId: pending.kind === "identified" ? pending.apiKeyId : apiKeyId,
       fieldValues,
       requestBody,
       requestBodyResult,
@@ -1302,13 +1316,19 @@ export function ApiPlaygroundShell({
     });
   };
 
+  const handleExecute = () => {
+    setExecuteError(null);
+    setExecutionResult(null);
+    void runWithIdentifiedKey();
+  };
+
   if (refresh) {
     return (
       <ApiPlaygroundRefreshLayout
         endpoints={endpoints}
         activeEndpoint={activeEndpoint}
         onEndpointChange={updateEndpointInUrl}
-        apiKeySelector={apiKeySelector}
+        apiKeySelector={keySelector}
         apiHost={apiHostOf(effectiveApiBaseUrl)}
         requiresApiKey={requiresApiKey}
         messages={[...leftMessages, ...rightMessages]}
@@ -1339,7 +1359,7 @@ export function ApiPlaygroundShell({
         endpoints={endpoints}
         activeEndpoint={activeEndpoint}
         onEndpointChange={updateEndpointInUrl}
-        apiKeySelector={apiKeySelector}
+        apiKeySelector={keySelector}
       />
 
       <PlaygroundSectionTabs mobileSection={mobileSection} onChange={setMobileSection} />

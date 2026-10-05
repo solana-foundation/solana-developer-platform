@@ -200,10 +200,12 @@ jobs:
         if: steps.changed.outputs.packages != ''
         env:
           CHANGED_PACKAGES: ${{ steps.changed.outputs.packages }}
+        # "...{dir}" selects the changed package and every workspace package that depends on it,
+        # so a change confined to a shared package (say @sdp/ui) still typechecks its consumers.
         run: |
           FILTERS=""
           for pkg in $CHANGED_PACKAGES; do
-            FILTERS="$FILTERS --filter ./$pkg"
+            FILTERS="$FILTERS --filter ...{./$pkg}"
           done
           pnpm --if-present $FILTERS typecheck
 
