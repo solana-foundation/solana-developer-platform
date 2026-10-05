@@ -5,9 +5,11 @@ import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
-import { getNoneConfirmationCopy } from "../token-authority-modal";
 import type { PermissionRow } from "../token-management-workspace.types";
-import { getSignerWalletUnavailableReason } from "../token-management-workspace.utils";
+import {
+  getNoneConfirmationCopy,
+  getSignerWalletUnavailableReason,
+} from "../token-management-workspace.utils";
 import { TokenSignerSelect } from "../token-signer-select";
 import { shortAddress, type TokenTabProps } from "./token-page.shared";
 
@@ -266,8 +268,7 @@ function HolderForm({
     <form
       data-authority-form
       className="flex max-w-lg flex-col gap-4 ps-7 pt-1"
-      onSubmit={(event) => {
-        event.preventDefault();
+      action={() => {
         if (!blocked && !disabled) onSubmit();
       }}
     >

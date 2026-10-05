@@ -205,6 +205,7 @@ function allTransactions(world: IssuanceWorld, params: URLSearchParams): DemoAns
       allowedStatuses: TOKEN_TRANSACTION_STATUSES,
     });
   }
+  const wantedTypes = new Set(types);
   const rows = world.tokens
     .flatMap(({ token, transactions }) =>
       transactions.map((transaction) => ({
@@ -219,7 +220,7 @@ function allTransactions(world: IssuanceWorld, params: URLSearchParams): DemoAns
     )
     .filter(
       ({ transaction }) =>
-        (types.length === 0 || types.includes(transaction.type)) &&
+        (wantedTypes.size === 0 || wantedTypes.has(transaction.type)) &&
         (status ? transaction.status === status : true)
     )
     .sort((left, right) => right.transaction.createdAt.localeCompare(left.transaction.createdAt));
@@ -302,11 +303,12 @@ function assetProfilesRoute(
 ): DemoAnswer | undefined {
   const [first, second] = rest;
   if (first === undefined) {
-    const tokenIds = params.get("tokenIds")?.split(",").filter(Boolean) ?? null;
+    const tokenIds = params.get("tokenIds")?.split(",").filter(Boolean);
+    const wantedTokenIds = tokenIds ? new Set(tokenIds) : null;
     const category = params.get("category");
     const profiles = world.tokens
       .map((entry) => entry.profile)
-      .filter((profile) => (tokenIds ? tokenIds.includes(profile.tokenId) : true))
+      .filter((profile) => (wantedTokenIds ? wantedTokenIds.has(profile.tokenId) : true))
       .filter((profile) => (category ? profile.assetCategory === category : true));
     const page = whole(params.get("page"), 1);
     const pageSize = Math.min(whole(params.get("pageSize"), 20), 100);

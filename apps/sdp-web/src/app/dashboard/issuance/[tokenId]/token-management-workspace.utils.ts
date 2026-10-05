@@ -641,6 +641,43 @@ export function getPermissionRows(
   ];
 }
 
+/** What giving an authority up ends, by role: asked once more before it is sent. */
+export function getNoneConfirmationCopy(
+  row: PermissionRow,
+  t: Translate
+): {
+  title: string;
+  description: string;
+  impact: string;
+} {
+  switch (row.authorityRole) {
+    case "mint":
+      return {
+        title: t("DashboardIssuance.authority.mintNoneTitle"),
+        description: t("DashboardIssuance.authority.mintNoneDescription"),
+        impact: t("DashboardIssuance.authority.mintNoneImpact"),
+      };
+    case "freeze":
+      return {
+        title: t("DashboardIssuance.authority.freezeNoneTitle"),
+        description: t("DashboardIssuance.authority.freezeNoneDescription"),
+        impact: t("DashboardIssuance.authority.freezeNoneImpact"),
+      };
+    case "permanentDelegate":
+      return {
+        title: t("DashboardIssuance.authority.delegateNoneTitle"),
+        description: t("DashboardIssuance.authority.delegateNoneDescription"),
+        impact: t("DashboardIssuance.authority.delegateNoneImpact"),
+      };
+    case "metadata":
+      return {
+        title: t("DashboardIssuance.authority.metadataNoneTitle"),
+        description: t("DashboardIssuance.authority.metadataNoneDescription"),
+        impact: t("DashboardIssuance.authority.metadataNoneImpact"),
+      };
+  }
+}
+
 // Classify who controls a single authority address. `none` = unset,
 // `unknown` = custody wallets not yet known (loading/error), `sdp` = the address
 // matches one of the org's custody wallets, `external` = a set address we don't
