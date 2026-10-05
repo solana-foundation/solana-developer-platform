@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { formatDecimalAmount } from "@/app/dashboard/payments/payments-presentation";
 import { RecordAmount } from "@/app/dashboard/payments/payments-record";
@@ -14,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { InfoHint } from "@/components/ui/info-hint";
 import { StatusText } from "@/components/ui/status-text";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
@@ -27,6 +29,7 @@ import {
 } from "../../issuance-token-state.redesign";
 import { TokenDisabledActionTooltip } from "../token-disabled-action-tooltip";
 import type { PermissionRowId } from "../token-management-workspace.types";
+import { deployNetworkName } from "../token-management-workspace.utils";
 import {
   activityActorType,
   activityEventLabel,
@@ -69,10 +72,6 @@ const BAND_TINT: Record<StateBandTone, { band: string; word: string }> = {
 const LAST_ROW_FLUSH = "[&>div:last-child]:min-h-0 [&>div:last-child]:pb-0";
 /** The same in two columns only: stacked on a phone, a column's last row sits over a rule. */
 const LAST_ROW_FLUSH_COLUMNS = "md:[&>div:last-child]:min-h-0 md:[&>div:last-child]:pb-0";
-
-function minutesSince(iso: string): number {
-  return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
-}
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -130,6 +129,10 @@ export function TokenOverviewTab({
           <DeployDraftBlock signingWalletName={signingWalletName} {...deployProps} />
         ) : null}
 
+        {state === "deploying" ? (
+          <DeployProgressBlock signingWalletName={signingWalletName} latestDeploy={latestDeploy} />
+        ) : null}
+
         {state === "failed" ? (
           <DeployFailedBlock state={state} latestDeploy={latestDeploy} {...deployProps} />
         ) : null}
@@ -152,7 +155,10 @@ export function TokenOverviewTab({
   );
 }
 
-/** The token's state, why it is there, and its one action: minting, or how long a deploy has run. */
+/**
+ * The token's state, why it is there, and its one action: minting, or how long a deploy has
+ * run, counting at the band's top end.
+ */
 function OverviewStateBand({
   state,
   ops,
@@ -180,31 +186,109 @@ function OverviewStateBand({
         </Button>
       </TokenDisabledActionTooltip>
     ) : state === "deploying" && latestDeploy ? (
-      <span className="text-meta leading-5 text-secondary">
-        {minutesSince(latestDeploy.createdAt) === 0
-          ? t("DashboardIssuance.newDesign.overview.submittedJustNow")
-          : t("DashboardIssuance.newDesign.overview.submittedAgo", {
-              minutes: minutesSince(latestDeploy.createdAt),
-            })}
-      </span>
+      <DeployElapsed since={latestDeploy.createdAt} />
     ) : null;
+  const deploying = state === "deploying";
 
   return (
     <div
       data-state-band={TOKEN_LIFECYCLE_BAND[state]}
       className={cn(
         "flex flex-col items-start gap-3 rounded-card px-5 py-3 md:flex-row md:justify-between md:gap-6",
-        // A button centres on the band; a note (how long a deploy has run) reads on the state's line.
-        state === "deploying" ? "md:items-start" : "md:items-center",
+        deploying ? "md:items-start" : "md:items-center",
         tint.band
       )}
     >
       <div className="flex min-w-0 flex-col gap-0.5 md:flex-1">
         <p className={cn("text-body font-medium", tint.word)}>{t(TOKEN_LIFECYCLE_LABEL[state])}</p>
-        <p className="max-w-md text-body text-secondary">{t(TOKEN_LIFECYCLE_WHY[state])}</p>
+        <p className={cn("text-body text-secondary", deploying ? "max-w-md" : "max-w-[40em]")}>
+          {t(TOKEN_LIFECYCLE_WHY[state])}
+        </p>
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>
+  );
+}
+
+/** How long the deploy has run, ticking: tenths of a second under a minute, then whole seconds. */
+function DeployElapsed({ since }: { since: string }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const [now, setNow] = useState(() => Date.now());
+  const elapsed = Math.max(0, now - new Date(since).getTime());
+  const underMinute = elapsed < 60_000;
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), underMinute ? 100 : 1_000);
+    return () => window.clearInterval(timer);
+  }, [underMinute]);
+  const seconds = Math.floor(elapsed / 1_000);
+  return (
+    // The server renders its own moment; the browser's clock takes over at once.
+    <span suppressHydrationWarning className="text-body text-secondary tabular-nums">
+      {underMinute
+        ? t("DashboardIssuance.newDesign.overview.elapsedSeconds", {
+            seconds: new Intl.NumberFormat(locale, {
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1,
+            }).format(Math.floor(elapsed / 100) / 10),
+          })
+        : t("DashboardIssuance.newDesign.overview.elapsedMinutes", {
+            minutes: Math.floor(seconds / 60),
+            seconds: seconds % 60,
+          })}
+    </span>
+  );
+}
+
+/**
+ * A deploy in flight, as the design walks it: signing with the token's wallet, sending to the
+ * network, confirming the mint. A pending deploy is still being signed; a processing one is
+ * sent and waits to confirm.
+ */
+function DeployProgressBlock({
+  signingWalletName,
+  latestDeploy,
+}: {
+  signingWalletName: string;
+  latestDeploy: LatestDeployAttempt | null;
+}) {
+  const t = useTranslations();
+  const { sdpEnvironment } = useDashboardWorkspace();
+  const network = deployNetworkName(sdpEnvironment, t);
+  const current = latestDeploy?.status === "processing" ? 2 : 0;
+  const steps = [
+    t("DashboardIssuance.newDesign.overview.deployStepSign", { wallet: signingWalletName }),
+    t("DashboardIssuance.newDesign.overview.deployStepSend", { network }),
+    t("DashboardIssuance.newDesign.overview.deployStepConfirm"),
+  ];
+  // 24px from the heading to the steps, each a 40px row over a rule; 32px under the last to the
+  // supply, as the draft's deploy block leaves.
+  return (
+    <section data-deploy-progress className="mb-2 flex min-w-0 flex-col gap-6">
+      <h2 className="text-subheading font-medium text-primary">
+        {t("DashboardIssuance.newDesign.overview.deployTitle")}
+      </h2>
+      <ol>
+        {steps.map((label, index) => (
+          <li
+            key={label}
+            aria-current={index === current ? "step" : undefined}
+            className="flex min-h-10 items-center gap-4.5 border-b border-border-subtle ps-1 last:border-b-0"
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                index < current ? "bg-success" : index === current ? "bg-info" : "bg-tertiary"
+              )}
+            />
+            <span className={cn("text-nav", index === current ? "text-primary" : "text-secondary")}>
+              {label}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

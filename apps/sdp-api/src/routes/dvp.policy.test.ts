@@ -1,16 +1,4 @@
-/**
- * Wallet-policy gating on DvP money movement (PRO-1975).
- *
- * Two of these matter more than the rest. `runs a reclaim ... even when the
- * wallet denies everything` and its cancel twin are the exit-safety
- * invariant: a policy must never be the reason a deposit cannot leave an
- * escrow. And `executes the funding once an approver allows it` is the other
- * half of a gate, because a gate that queues an operation nothing ever
- * executes has only broken the endpoint.
- *
- * The money services are stubbed; what is under test is the gate around them.
- */
-
+import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, PolicyRule } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,8 +7,10 @@ import { createPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -46,15 +36,11 @@ vi.mock("@/services/dvp/observe-now", async (importOriginal) => ({
   observeDvpTradeNow,
 }));
 
-const TEST_ORG = { id: "org_dvp_policy", name: "DvP Policy Org", slug: "dvp-policy-org" };
+const TEST_ORG = { id: "org_test_dvp_policy", name: "DvP Policy Org", slug: "dvp-policy-org" };
 const TEST_PROJECT = { id: "prj_dvp_policy", slug: "dvp-policy-project" };
-const TEST_USER = { id: "usr_dvp_policy", email: "dvp-policy@example.com" };
-/**
- * A second principal decides the approval. The requester cannot approve its own
- * request, and the requester of an API-key operation is the key's creator
- * (PRO-1955/PRO-1915), so approving as TEST_USER would be refused.
- */
-const APPROVER = { id: "usr_dvp_approver", email: "dvp-approver@example.com" };
+const TEST_USER = { id: "usr_test_dvp_policy", email: "dvp-policy@example.com" };
+
+const APPROVER = { id: "usr_test_dvp_approver", email: "dvp-approver@example.com" };
 const TEST_API_KEY = { id: "key_dvp_policy", raw: "sk_test_dvp_policy", prefix: "sk_test_dvp_pol" };
 
 const TEST_CACHED_API_KEY: CachedApiKey = {
@@ -84,12 +70,12 @@ const FUND_SIGNATURE =
   "4NC4dm4WmFqLCQLAvrfxQRoUwBJn7M6vXFRT2mHqMqfkNLeCHGscpVKb1pPcaLxDyPPwzm3CqPRMR4MAQVnpcgVj";
 const CLOSE_SIGNATURE =
   "5dRjDnZKcJfMe9vGkJCFbvuLPU4cJfKSMswkaTTd4oQGgtNDdk3vhkfaeKBCWa4sJGnNFdGCVAaKyYdPqvXNwYNG";
-/** The leg's target, and so the ceiling a fund approval sets. */
+
 const LEG_A_TARGET = "1000";
 
 let originalMarkets: string | undefined;
 
-function authHeaders(extra: Record<string, string> = {}) {
+function authHeaders(extra: Record<string, string>) {
   return {
     Authorization: `Bearer ${TEST_API_KEY.raw}`,
     "Content-Type": "application/json",
@@ -132,7 +118,7 @@ async function seedAuth(): Promise<void> {
       JSON.stringify(["*"])
     )
     .run();
-  // A separate org admin with a session, so an approval can actually be decided.
+
   await db
     .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
     .bind(APPROVER.id, APPROVER.email)
@@ -150,17 +136,14 @@ async function seedAuth(): Promise<void> {
          VALUES ('pm_dvp_policy', ?, ?, 'admin')`
       )
       .bind(TEST_PROJECT.id, APPROVER.id),
-    db
-      .prepare(
-        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-         VALUES ('ses_dvp_policy', ?, ?, 'session', '2099-01-01T00:00:00.000Z')`
-      )
-      .bind(APPROVER.id, TEST_ORG.id),
   ]);
 }
 
-function approverHeaders() {
-  return { Cookie: "sdp_session=ses_dvp_policy", "x-project-id": TEST_PROJECT.id };
+async function approverHeaders() {
+  return {
+    Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), APPROVER.id, TEST_ORG.id)}`,
+    "x-project-id": TEST_PROJECT.id,
+  };
 }
 
 async function seedCustody(): Promise<void> {
@@ -168,9 +151,6 @@ async function seedCustody(): Promise<void> {
   await db.batch([
     db
       .prepare(
-        // `privy`, not `local`: deciding an approval asserts the organization is
-        // entitled to the wallet's custody provider, and local custody requires
-        // manual activation.
         `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
          VALUES (?, ?, ?, 'privy', 'encrypted', 'active')`
       )
@@ -201,7 +181,7 @@ async function seedCustody(): Promise<void> {
   ]);
 }
 
-async function seedTrade(tradeId: string, status = "funded"): Promise<void> {
+async function seedTrade(tradeId: string, status: string): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO dvp_trades (
@@ -238,11 +218,10 @@ async function seedTrade(tradeId: string, status = "funded"): Promise<void> {
     .run();
 }
 
-/** Activates one wallet policy revision on a custody wallet. */
 async function seedWalletPolicy(
   custodyWalletId: string,
   rules: PolicyRule[],
-  defaultAction: "allow" | "deny" | "approval_required" = "allow"
+  defaultAction: "allow" | "deny" | "approval_required"
 ): Promise<void> {
   const repo = createPolicyRepository(
     env,
@@ -255,14 +234,14 @@ async function seedWalletPolicy(
     name: `policy for ${custodyWalletId}`,
     createdBy: TEST_USER.id,
   });
-  if (!profile) throw new Error("failed to create the wallet policy profile");
+  assert(profile);
   const revision = await repo.createWalletControlProfileRevision({
     profileId: profile.id,
     rules,
     defaultAction,
     createdBy: TEST_USER.id,
   });
-  if (!revision) throw new Error("failed to create the wallet policy revision");
+  assert(revision);
   await repo.activateWalletControlProfileRevision({
     profileId: profile.id,
     revisionId: revision.id,
@@ -274,7 +253,7 @@ function post(tradeId: string, action: string, body?: unknown, extra?: Record<st
     `/v1/dvp/trades/${tradeId}/${action}`,
     {
       method: "POST",
-      headers: authHeaders(extra),
+      headers: authHeaders({ ...extra }),
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
     env
@@ -313,10 +292,12 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
 
   describe("the two actions that commit value", () => {
     it("refuses a funding the wallet's policy denies, and sends nothing", async () => {
-      await seedTrade("dvp_policy_fund_deny");
-      await seedWalletPolicy(PARTY_A_WALLET.id, [
-        { id: "deny-fund", kind: "operation_type", operationTypes: ["dvp_fund"], action: "deny" },
-      ]);
+      await seedTrade("dvp_policy_fund_deny", "funded");
+      await seedWalletPolicy(
+        PARTY_A_WALLET.id,
+        [{ id: "deny-fund", kind: "operation_type", operationTypes: ["dvp_fund"], action: "deny" }],
+        "allow"
+      );
 
       const res = await post("dvp_policy_fund_deny", "fund", { side: "a" });
 
@@ -325,15 +306,19 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
     });
 
     it("refuses a settle the settlement wallet's policy denies", async () => {
-      await seedTrade("dvp_policy_settle_deny");
-      await seedWalletPolicy(SETTLEMENT_WALLET.id, [
-        {
-          id: "deny-settle",
-          kind: "operation_type",
-          operationTypes: ["dvp_settle"],
-          action: "deny",
-        },
-      ]);
+      await seedTrade("dvp_policy_settle_deny", "funded");
+      await seedWalletPolicy(
+        SETTLEMENT_WALLET.id,
+        [
+          {
+            id: "deny-settle",
+            kind: "operation_type",
+            operationTypes: ["dvp_settle"],
+            action: "deny",
+          },
+        ],
+        "allow"
+      );
 
       const res = await post("dvp_policy_settle_deny", "settle");
 
@@ -342,10 +327,12 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
     });
 
     it("holds a funding for approval instead of sending it", async () => {
-      await seedTrade("dvp_policy_fund_approval");
-      await seedWalletPolicy(PARTY_A_WALLET.id, [
-        { id: "approve-fund", kind: "approval", operationTypes: ["dvp_fund"] },
-      ]);
+      await seedTrade("dvp_policy_fund_approval", "funded");
+      await seedWalletPolicy(
+        PARTY_A_WALLET.id,
+        [{ id: "approve-fund", kind: "approval", operationTypes: ["dvp_fund"] }],
+        "allow"
+      );
 
       const res = await post("dvp_policy_fund_approval", "fund", { side: "a" });
 
@@ -358,13 +345,13 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
       expect(fundDvpTradeLeg).not.toHaveBeenCalled();
     });
 
-    // A gate that queues an operation nothing executes has only broken the
-    // endpoint. This is the half Gui asks about: does the queue submit.
     it("executes the funding once an approver allows it", async () => {
-      await seedTrade("dvp_policy_fund_approved");
-      await seedWalletPolicy(PARTY_A_WALLET.id, [
-        { id: "approve-fund", kind: "approval", operationTypes: ["dvp_fund"] },
-      ]);
+      await seedTrade("dvp_policy_fund_approved", "funded");
+      await seedWalletPolicy(
+        PARTY_A_WALLET.id,
+        [{ id: "approve-fund", kind: "approval", operationTypes: ["dvp_fund"] }],
+        "allow"
+      );
 
       const held = await post("dvp_policy_fund_approved", "fund", { side: "a" });
       expect(held.status).toBe(202);
@@ -376,28 +363,24 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
         `/v1/wallets/approval-requests/${error.details.approvalRequestId}/approve`,
         {
           method: "POST",
-          headers: { ...approverHeaders(), "Content-Type": "application/json" },
+          headers: { ...(await approverHeaders()), "Content-Type": "application/json" },
           body: JSON.stringify({}),
         },
         env
       );
       expect(decided.status).toBe(200);
 
-      // The approval executes by replaying the route, either inline on the
-      // decision or through the recovery sweep.
-      if (fundDvpTradeLeg.mock.calls.length === 0) {
-        await recoverApprovedWalletOperations(env);
-      }
+      await recoverApprovedWalletOperations(env);
       expect(fundDvpTradeLeg).toHaveBeenCalledTimes(1);
     });
 
-    // Settlement replays with no body of its own, through the close idempotency
-    // and its own effect fence, so funding's approval test does not cover it.
     it("executes the settlement once an approver allows it", async () => {
-      await seedTrade("dvp_policy_settle_approved");
-      await seedWalletPolicy(SETTLEMENT_WALLET.id, [
-        { id: "approve-settle", kind: "approval", operationTypes: ["dvp_settle"] },
-      ]);
+      await seedTrade("dvp_policy_settle_approved", "funded");
+      await seedWalletPolicy(
+        SETTLEMENT_WALLET.id,
+        [{ id: "approve-settle", kind: "approval", operationTypes: ["dvp_settle"] }],
+        "allow"
+      );
 
       const held = await post("dvp_policy_settle_approved", "settle");
       expect(held.status).toBe(202);
@@ -409,28 +392,24 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
         `/v1/wallets/approval-requests/${error.details.approvalRequestId}/approve`,
         {
           method: "POST",
-          headers: { ...approverHeaders(), "Content-Type": "application/json" },
+          headers: { ...(await approverHeaders()), "Content-Type": "application/json" },
           body: JSON.stringify({}),
         },
         env
       );
       expect(decided.status).toBe(200);
 
-      if (closeDvpTrade.mock.calls.length === 0) {
-        await recoverApprovedWalletOperations(env);
-      }
+      await recoverApprovedWalletOperations(env);
       expect(closeDvpTrade).toHaveBeenCalledTimes(1);
     });
 
-    // The judged amount is the leg's target, and the transfer only ever sends
-    // the outstanding part of it, so what moves is always inside what was
-    // approved. Recording the live shortfall instead would let a reclaim
-    // between approval and execution grow the send past the ceiling.
     it("judges the leg's full target, so the approval is a ceiling", async () => {
-      await seedTrade("dvp_policy_fund_ceiling");
-      await seedWalletPolicy(PARTY_A_WALLET.id, [
-        { id: "approve-fund", kind: "approval", operationTypes: ["dvp_fund"] },
-      ]);
+      await seedTrade("dvp_policy_fund_ceiling", "funded");
+      await seedWalletPolicy(
+        PARTY_A_WALLET.id,
+        [{ id: "approve-fund", kind: "approval", operationTypes: ["dvp_fund"] }],
+        "allow"
+      );
 
       await post("dvp_policy_fund_ceiling", "fund", { side: "a" });
 
@@ -441,8 +420,7 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
              FROM wallet_operations WHERE operation_type = 'dvp_fund'`
         )
         .first<Record<string, unknown>>();
-      // The mint and a decimal amount, the form asset and amount rules match on.
-      // 1000 base units at 6 decimals is 0.001, not 1000.
+
       expect(row).toMatchObject({
         amount: "0.001",
         asset: MINT_A,
@@ -454,12 +432,9 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
     });
   });
 
-  // Exit safety (ADR 0002, PRO-1958): no policy rule may trap funds. A deposit
-  // must always be able to leave an escrow, so the recovery paths are not
-  // gated and a deny-everything wallet cannot hold them.
   describe("the two recovery paths are not gated", () => {
     it("runs a reclaim even when the wallet denies everything", async () => {
-      await seedTrade("dvp_policy_reclaim_open");
+      await seedTrade("dvp_policy_reclaim_open", "funded");
       await seedWalletPolicy(PARTY_A_WALLET.id, [], "deny");
 
       const res = await post("dvp_policy_reclaim_open", "reclaim", { side: "a" });
@@ -469,7 +444,7 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
     });
 
     it("runs a cancel even when the settlement wallet denies everything", async () => {
-      await seedTrade("dvp_policy_cancel_open");
+      await seedTrade("dvp_policy_cancel_open", "funded");
       await seedWalletPolicy(SETTLEMENT_WALLET.id, [], "deny");
 
       const res = await post("dvp_policy_cancel_open", "cancel");
@@ -478,10 +453,8 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
       expect(closeDvpTrade).toHaveBeenCalledTimes(1);
     });
 
-    // The same wallet, the same revision: the one that denies the gated action
-    // still cannot hold the way out of the escrow.
     it("denies the funding and allows the reclaim under one policy", async () => {
-      await seedTrade("dvp_policy_mixed");
+      await seedTrade("dvp_policy_mixed", "funded");
       await seedWalletPolicy(PARTY_A_WALLET.id, [], "deny");
 
       expect((await post("dvp_policy_mixed", "fund", { side: "a" })).status).toBe(403);
@@ -492,10 +465,12 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
   });
 
   it("answers a dry run with the verdict and moves nothing", async () => {
-    await seedTrade("dvp_policy_dry_run");
-    await seedWalletPolicy(PARTY_A_WALLET.id, [
-      { id: "deny-fund", kind: "operation_type", operationTypes: ["dvp_fund"], action: "deny" },
-    ]);
+    await seedTrade("dvp_policy_dry_run", "funded");
+    await seedWalletPolicy(
+      PARTY_A_WALLET.id,
+      [{ id: "deny-fund", kind: "operation_type", operationTypes: ["dvp_fund"], action: "deny" }],
+      "allow"
+    );
 
     const res = await post("dvp_policy_dry_run", "fund", { side: "a" }, { "Dry-Run": "true" });
 
@@ -506,20 +481,20 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
     const operations = await getDb(env)
       .prepare("SELECT id FROM wallet_operations")
       .all<{ id: string }>();
-    expect(operations.results ?? []).toHaveLength(0);
+    expect(operations.results).toHaveLength(0);
   });
 
-  // An inbound trade belongs to the counterparty's project. The candidate must
-  // carry the CALLER's project, or the funding aborts before it is judged.
   it("judges an inbound trade against the caller's own project", async () => {
-    await seedTrade("dvp_policy_inbound");
+    await seedTrade("dvp_policy_inbound", "funded");
     await getDb(env)
       .prepare("UPDATE dvp_trades SET project_id = ?, organization_id = ? WHERE id = ?")
       .bind(`${TEST_PROJECT.id}_production`, TEST_ORG.id, "dvp_policy_inbound")
       .run();
-    await seedWalletPolicy(PARTY_A_WALLET.id, [
-      { id: "approve-fund", kind: "approval", operationTypes: ["dvp_fund"] },
-    ]);
+    await seedWalletPolicy(
+      PARTY_A_WALLET.id,
+      [{ id: "approve-fund", kind: "approval", operationTypes: ["dvp_fund"] }],
+      "allow"
+    );
 
     const res = await post("dvp_policy_inbound", "fund", { side: "a" });
 
@@ -527,11 +502,11 @@ describe("DvP wallet-policy gating (PRO-1975)", () => {
     const row = await getDb(env)
       .prepare("SELECT project_id FROM wallet_operations WHERE operation_type = 'dvp_fund'")
       .first<{ project_id: string }>();
-    expect(row?.project_id).toBe(TEST_PROJECT.id);
+    expect(required(row).project_id).toBe(TEST_PROJECT.id);
   });
 
   it("funds normally when no policy governs the wallet", async () => {
-    await seedTrade("dvp_policy_ungoverned");
+    await seedTrade("dvp_policy_ungoverned", "funded");
 
     const res = await post("dvp_policy_ungoverned", "fund", { side: "a" });
 

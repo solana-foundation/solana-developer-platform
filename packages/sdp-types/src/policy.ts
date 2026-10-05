@@ -451,6 +451,13 @@ export interface WalletOperationActor {
   [key: string]: unknown;
 }
 
+/**
+ * Actor types a human principal persists on a wallet operation. An approved
+ * operation replay re-emits the stored type so the operation fingerprint matches.
+ */
+export const WALLET_OPERATION_HUMAN_ACTOR_TYPES = ["clerk"] as const;
+export type WalletOperationHumanActorType = (typeof WALLET_OPERATION_HUMAN_ACTOR_TYPES)[number];
+
 export type WalletOperationContext = Record<string, unknown>;
 export type WalletOperationProviderExtensions = Record<string, unknown>;
 

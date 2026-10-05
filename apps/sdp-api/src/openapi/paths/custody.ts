@@ -298,7 +298,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Check signer via simulated memo transaction",
     operationId: "checkWalletSigner",
     description:
-      "Signs a server-authored memo message with the wallet selected by an authenticated API key or dashboard session, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
+      "Signs a server-authored memo message with the wallet selected by an authenticated API key or Clerk JWT, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -388,7 +388,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     const authorization =
       action === "cancel"
         ? "The requester may cancel its own request; otherwise the resolver must be an active member of the assigned approval group, or an organization/API admin when no group is assigned. A user and the API keys they created are treated as the same requester."
-        : "The resolver must differ from the requester, including across a user session and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned.";
+        : "The resolver must differ from the requester, including across a user's Clerk identity and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned.";
     registry.registerPath({
       method: "post",
       path: `/v1/wallets/approval-requests/{approvalRequestId}/${action}`,

@@ -25,6 +25,7 @@ import {
   createInitialFreezeForm,
   createInitialMintForm,
   createInitialSeizeForm,
+  deployNetworkName,
   findWalletByCustodyWalletId,
   getBurnValidationErrors,
   getBurnValidationReason,
@@ -367,7 +368,12 @@ export function useTokenOperations({
         body: buildDraftDeployRequest(signingCustodyWalletId, assignments),
       },
       {
-        submitToast: t("DashboardIssuance.management.submittingDeploy"),
+        submitToast: t("DashboardIssuance.newDesign.overview.deployToastTitle", {
+          symbol: token.symbol,
+        }),
+        submitToastDescription: t("DashboardIssuance.newDesign.overview.deployToastBody", {
+          network: deployNetworkName(sdpEnvironment, t),
+        }),
         successToast: t("DashboardIssuance.management.deployFinalized"),
       }
     );
@@ -687,7 +693,8 @@ export function useTokenOperations({
     );
   };
 
-  const handlePause = (pause: boolean) => {
+  /** `confirmed` when the caller already asked (the new design's in-place pause); else a dialog asks. */
+  const handlePause = (pause: boolean, { confirmed = false }: { confirmed?: boolean } = {}) => {
     if (effectivePauseDisabledReason) {
       toast.error(effectivePauseDisabledReason);
       return;
@@ -703,7 +710,7 @@ export function useTokenOperations({
         body: {},
       },
       {
-        requiresConfirmation: true,
+        requiresConfirmation: !confirmed,
         confirmationTitle: pause
           ? t("DashboardIssuance.management.pauseConfirmationTitle")
           : t("DashboardIssuance.management.unpauseConfirmationTitle"),

@@ -25,7 +25,6 @@ export type ErrorCode =
   | "INVALID_INVITATION"
   | "EXPIRED_INVITATION"
   | "INVALID_TOKEN"
-  | "EXPIRED_SESSION"
   // Token issuance errors
   | "TOKEN_NOT_FOUND"
   | "TOKEN_NOT_ACTIVE"
@@ -87,7 +86,6 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   INVALID_INVITATION: 400,
   EXPIRED_INVITATION: 400,
   INVALID_TOKEN: 401,
-  EXPIRED_SESSION: 401,
   // Token issuance errors
   TOKEN_NOT_FOUND: 404,
   TOKEN_NOT_ACTIVE: 400,
@@ -144,7 +142,6 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   INVALID_INVITATION: "Invalid invitation token",
   EXPIRED_INVITATION: "Invitation has expired",
   INVALID_TOKEN: "Invalid or expired token",
-  EXPIRED_SESSION: "Session has expired",
   // Token issuance errors
   TOKEN_NOT_FOUND: "Token not found",
   TOKEN_NOT_ACTIVE: "Token is not active",

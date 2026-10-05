@@ -1,18 +1,12 @@
+import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import { type CachedApiKey, type SolanaCluster, wellKnownMint } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { required } from "@/test/helpers/required";
 
-/**
- * Most tests here bypass the per-vault CURATED_VAULTS allowlists: the shipped
- * shelf changes with BD decisions, and the seeds use random references that no
- * real allowlist could carry — the same reason earn-program.test.ts bypasses
- * `isEarnProviderSurfaced`. The real config gets its own describe below
- * ("shipped V1 curation"), which flips this off and runs against the real
- * lists. HIDDEN_STRATEGY_TERMS stays real everywhere: seeds control their own
- * names.
- */
 const curation = vi.hoisted(() => ({ bypassCuratedVaults: true }));
 
 vi.mock("@/routes/earn/handlers/curation", async (importOriginal) => {
@@ -39,7 +33,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedCachedApiKey } from "@/test/mocks/kv";
 
 const TEST_ORG = {
-  id: "org_earn_routes",
+  id: "org_test_earn_routes",
   name: "Earn Routes Org",
   slug: "earn-routes",
 };
@@ -48,7 +42,7 @@ const TEST_PROJECT = {
   slug: "test-earn-routes-project",
 };
 const TEST_USER = {
-  id: "usr_earn_routes",
+  id: "usr_test_earn_routes",
   email: "earn-routes@example.com",
 };
 const TEST_API_KEY = {
@@ -73,7 +67,6 @@ const TEST_PRODUCTION_PROJECT = {
   id: "prj_test_earn_routes_prod",
   slug: "test-earn-routes-project-prod",
 };
-const TEST_SESSION_ID = "ses_earn_routes";
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
@@ -129,37 +122,19 @@ async function seedAuth(): Promise<void> {
   ]);
 }
 
-/**
- * Dashboard (session) callers resolve their environment from the membership-
- * verified x-project-id project, so the session fixture carries both the
- * sandbox project seedAuth created and a production sibling. Call after
- * seedAuth().
- */
-async function seedSessionAuth(): Promise<void> {
+async function seedClerkAuth(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO organization_members (id, organization_id, user_id, role, status)
          VALUES (?, ?, ?, 'member', 'active')`
       )
-      .bind("om_earn_routes_session", TEST_ORG.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-         VALUES (?, ?, ?, 'session', ?)`
-      )
-      .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      .bind("om_earn_routes_Clerk", TEST_ORG.id, TEST_USER.id),
   ]);
 }
 
-async function seedStrategy(
-  overrides: Partial<UpsertEarnStrategyInput> = {}
-): Promise<EarnStrategyRow> {
+async function seedStrategy(overrides: Partial<UpsertEarnStrategyInput>): Promise<EarnStrategyRow> {
   const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
-    // A SURFACED provider (EARN_PROVIDER_SURFACING in @sdp/types). Catalogue
-    // reads hide un-surfaced providers wholesale, so seeding one here would make
-    // every test in this file assert 404s for a reason it never meant to test.
-    // The provider-visibility rule gets its own test below.
     provider: "kamino",
     providerReference: `vault-${crypto.randomUUID()}`,
     name: "Test USDC Vault",
@@ -177,19 +152,10 @@ async function seedStrategy(
     environment: "sandbox",
     ...overrides,
   });
-  if (!strategy) {
-    throw new Error("Failed to seed earn strategy");
-  }
+  assert(strategy);
   return strategy;
 }
 
-/**
- * A real `earn_provider_wallets` row, so the `:programId` probes below ride an
- * id the handler actually resolves. Provider "upshift" on purpose: it is NOT
- * the entitled provider here (seedAuth entitles only "veda") and this file sets
- * no UPSHIFT credentials, which is exactly why the probe uses the one
- * per-program route that takes no provider gate at all.
- */
 async function seedProgram(): Promise<EarnProviderWalletRow> {
   const row = await createPostgresEarnRepository(getDb(env)).insertProviderWallet({
     organizationId: TEST_ORG.id,
@@ -200,13 +166,11 @@ async function seedProgram(): Promise<EarnProviderWalletRow> {
     label: null,
     createdBy: TEST_USER.id,
   });
-  if (!row) {
-    throw new Error("Failed to seed earn program");
-  }
+  assert(row);
   return row;
 }
 
-function getEarn(path: string, headers: Record<string, string> = {}) {
+function getEarn(path: string, headers: Record<string, string>) {
   return app.request(
     path,
     {
@@ -217,16 +181,19 @@ function getEarn(path: string, headers: Record<string, string> = {}) {
   );
 }
 
-function getEarnAnonymously(path: string, headers: Record<string, string> = {}) {
+function getEarnAnonymously(path: string, headers: Record<string, string>) {
   return app.request(path, { method: "GET", headers }, env);
 }
 
-function getEarnAsSession(path: string, projectId: string) {
+async function getEarnAsClerk(path: string, projectId: string) {
   return app.request(
     path,
     {
       method: "GET",
-      headers: { Cookie: `sdp_session=${TEST_SESSION_ID}`, "x-project-id": projectId },
+      headers: {
+        Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id)}`,
+        "x-project-id": projectId,
+      },
     },
     env
   );
@@ -235,7 +202,7 @@ function getEarnAsSession(path: string, projectId: string) {
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
-  // Earn is a Markets sub-module, so both gates have to be on to reach a route.
+
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   curation.bypassCuratedVaults = true;
@@ -254,7 +221,7 @@ describe("Earn routes — feature flag gate", () => {
     env.EARN_ENABLED = undefined;
     await seedAuth();
 
-    const res = await getEarn("/v1/earn/strategies");
+    const res = await getEarn("/v1/earn/strategies", {});
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string; message: string } };
@@ -263,11 +230,10 @@ describe("Earn routes — feature flag gate", () => {
   });
 
   it("returns 403 while MARKETS_ENABLED is off even though EARN_ENABLED is on", async () => {
-    // Regression: the parent Markets gate must kill the sub-module's routes.
     env.MARKETS_ENABLED = undefined;
     await seedAuth();
 
-    const res = await getEarn("/v1/earn/strategies");
+    const res = await getEarn("/v1/earn/strategies", {});
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string; message: string } };
@@ -278,7 +244,7 @@ describe("Earn routes — feature flag gate", () => {
   it("serves the same route once EARN_ENABLED is true", async () => {
     await seedAuth();
 
-    const res = await getEarn("/v1/earn/strategies");
+    const res = await getEarn("/v1/earn/strategies", {});
 
     expect(res.status).toBe(200);
   });
@@ -286,28 +252,21 @@ describe("Earn routes — feature flag gate", () => {
 
 describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
   it("serves 404 for the removed positions/movements/quotes/nav routes", async () => {
-    // The empty-ledger and permanently-501 surfaces were removed by the
-    // ledger-vs-live decision (ADR 0002 addendum). If any of these come back,
-    // it must be a deliberate re-introduction, not a leftover registration.
     await seedAuth();
-    // The NAV probe rides a REAL strategy id: a resurrected /nav route would
-    // 200 here, whereas a made-up id would 404 either way (vacuous).
-    const strategy = await seedStrategy();
+
+    const strategy = await seedStrategy({});
 
     for (const path of [
       "/v1/earn/positions",
       "/v1/earn/positions/pos_1",
-      // `/v1/earn/movements` is NOT in this list any more — see the deliberate
-      // re-introduction below. The ITEM route still is: PRO-1705 brought back the
-      // collection alone, and a movement is read by its family's detail route.
+
       "/v1/earn/movements/mov_1",
       `/v1/earn/strategies/${strategy.id}/nav`,
-      // The UI builder's persistence routes left with the builder itself; the
-      // integration guide is derived from the catalogue and stores nothing.
+
       "/v1/earn/button-configurations/current",
       "/v1/earn/button-configurations/public/AbCdEfGhIjKlMnOpQrStUvWx",
     ]) {
-      const res = await getEarn(path);
+      const res = await getEarn(path, {});
       expect(res.status, path).toBe(404);
     }
 
@@ -329,19 +288,9 @@ describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
   });
 
   it("serves the DELIBERATELY re-introduced movements collection (PRO-1705)", async () => {
-    // This is the re-introduction the test above demands be deliberate. PRO-1628
-    // pruned `/v1/earn/movements` together with 0048's never-written table, and
-    // PRO-1669 was explicit that the NAME was free while the SHAPE was not: the
-    // old route was a position-scoped read over base-unit amounts. What answers
-    // here is the unified ledger's cross-provider feed — a different contract that
-    // happens to reclaim the path.
-    //
-    // Paired with a real response rather than just a non-404, for the same reason
-    // the /nav probe rides a real strategy id: asserting the absence of a 404
-    // would pass on a route that is registered but broken.
     await seedAuth();
 
-    const res = await getEarn("/v1/earn/movements");
+    const res = await getEarn("/v1/earn/movements", {});
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -352,22 +301,6 @@ describe("Earn routes — retired surfaces stay retired (PRO-1628)", () => {
 });
 
 describe("Earn routes — retired program surfaces (PRO-1670)", () => {
-  // The singular `/program` family was an implicit create-or-update keyed on
-  // (organization, environment, provider), which stops being addressable the
-  // moment a second program exists. Every path below has an addressable
-  // `/programs[/:programId]` replacement; a stale registration would quietly
-  // hand callers the one-program model back.
-  //
-  // Both tests PAIR the 404s with a live probe of the replacement, because a 404
-  // for a URL that was never registered passes even if the replacement is
-  // broken — the same trap the /nav case above avoids by riding a real strategy
-  // id. This file's seedAuth entitles only "veda" and sets no UPSHIFT
-  // credentials, so the probes are deliberately the two program routes that
-  // answer without any provider call: the UNFILTERED collection (no provider
-  // named ⇒ no credential gate) and the withdrawal LEDGER list (no provider gate
-  // whatsoever, by design — ADR 0002: the audit trail outlives credential
-  // removal).
-
   it("serves 404 for the singular /program paths, while the collection answers", async () => {
     await seedAuth();
 
@@ -378,7 +311,7 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
       "/v1/earn/program/withdrawals",
       "/v1/earn/program/withdrawals/wd_x",
     ]) {
-      const res = await getEarn(path);
+      const res = await getEarn(path, {});
       expect(res.status, path).toBe(404);
     }
 
@@ -402,10 +335,7 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
       expect(res.status, `${method} ${path}`).toBe(404);
     }
 
-    // The pairing: /programs is registered and serves the collection envelope
-    // end to end. An empty collection is a 200, never a 404 — the plural surface
-    // cannot 404 for emptiness, which is what makes the 404s above meaningful.
-    const collection = await getEarn("/v1/earn/programs");
+    const collection = await getEarn("/v1/earn/programs", {});
     expect(collection.status).toBe(200);
     const body = (await collection.json()) as {
       data: { programs: unknown[]; total: number; page: number; pageSize: number };
@@ -417,17 +347,12 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
     await seedAuth();
     const program = await seedProgram();
 
-    // The retired sub-paths 404 …
     for (const path of ["/v1/earn/program/deposits", "/v1/earn/program/withdrawals"]) {
-      const res = await getEarn(path);
+      const res = await getEarn(path, {});
       expect(res.status, path).toBe(404);
     }
 
-    // … and the same shape under `/programs/:programId` resolves the row and
-    // answers. Non-vacuous by construction: swap in an id that does not exist
-    // and this is a 404 too, so the 200 proves the route is registered AND that
-    // the id addressed a real program.
-    const ledger = await getEarn(`/v1/earn/programs/${program.id}/withdrawals`);
+    const ledger = await getEarn(`/v1/earn/programs/${program.id}/withdrawals`, {});
     expect(ledger.status).toBe(200);
     const ledgerBody = (await ledger.json()) as {
       data: { withdrawals: unknown[]; total: number };
@@ -435,7 +360,10 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
     expect(ledgerBody.data.withdrawals).toEqual([]);
     expect(ledgerBody.data.total).toBe(0);
 
-    const unknownProgram = await getEarn("/v1/earn/programs/earn_provider_wallet_nope/withdrawals");
+    const unknownProgram = await getEarn(
+      "/v1/earn/programs/earn_provider_wallet_nope/withdrawals",
+      {}
+    );
     expect(unknownProgram.status).toBe(404);
   });
 });
@@ -443,79 +371,71 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
 describe("Earn routes — environment scoping", () => {
   it("hides production strategies from a sandbox API key", async () => {
     await seedAuth();
-    const sandbox = await seedStrategy();
+    const sandbox = await seedStrategy({});
     const production = await seedStrategy({ environment: "production" });
 
-    const visible = await getEarn(`/v1/earn/strategies/${sandbox.id}`);
+    const visible = await getEarn(`/v1/earn/strategies/${sandbox.id}`, {});
     expect(visible.status).toBe(200);
 
-    const hidden = await getEarn(`/v1/earn/strategies/${production.id}`);
+    const hidden = await getEarn(`/v1/earn/strategies/${production.id}`, {});
     expect(hidden.status).toBe(404);
     const hiddenBody = (await hidden.json()) as { error: { code: string } };
     expect(hiddenBody.error.code).toBe("NOT_FOUND");
 
-    const list = await getEarn("/v1/earn/strategies");
+    const list = await getEarn("/v1/earn/strategies", {});
     const listBody = (await list.json()) as { data: { strategies: Array<{ id: string }> } };
     expect(listBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
   });
 
   it("lets an anonymous caller pick the shelf, production unless it asks for sandbox", async () => {
-    // A keyless caller has no project, so the deployment's own ENVIRONMENT
-    // never decides (PRO-1998): the query does, and the detail route answers
-    // whichever shelf the id names.
-    const sandbox = await seedStrategy();
+    const sandbox = await seedStrategy({});
     const production = await seedStrategy({
       environment: "production",
       hostCluster: "mainnet-beta",
     });
 
-    const defaulted = await getEarnAnonymously("/v1/earn/strategies");
+    const defaulted = await getEarnAnonymously("/v1/earn/strategies", {});
     expect(defaulted.status).toBe(200);
     const defaultedBody = (await defaulted.json()) as {
       data: { strategies: Array<{ id: string }> };
     };
     expect(defaultedBody.data.strategies.map((s) => s.id)).toEqual([production.id]);
 
-    const sandboxShelf = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox");
+    const sandboxShelf = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox", {});
     expect(sandboxShelf.status).toBe(200);
     const sandboxBody = (await sandboxShelf.json()) as {
       data: { strategies: Array<{ id: string }> };
     };
     expect(sandboxBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
 
-    expect((await getEarnAnonymously(`/v1/earn/strategies/${sandbox.id}`)).status).toBe(200);
-    expect((await getEarnAnonymously(`/v1/earn/strategies/${production.id}`)).status).toBe(200);
+    expect((await getEarnAnonymously(`/v1/earn/strategies/${sandbox.id}`, {})).status).toBe(200);
+    expect((await getEarnAnonymously(`/v1/earn/strategies/${production.id}`, {})).status).toBe(200);
   });
 
   it("refuses a key that names a shelf other than its project's", async () => {
     await seedAuth();
-    await seedStrategy();
+    await seedStrategy({});
 
-    const mismatch = await getEarn("/v1/earn/strategies?environment=production");
+    const mismatch = await getEarn("/v1/earn/strategies?environment=production", {});
     expect(mismatch.status).toBe(400);
     const mismatchBody = (await mismatch.json()) as { error: { code: string; message: string } };
     expect(mismatchBody.error.code).toBe("BAD_REQUEST");
     expect(mismatchBody.error.message).toContain("follows the project");
 
-    const same = await getEarn("/v1/earn/strategies?environment=sandbox");
+    const same = await getEarn("/v1/earn/strategies?environment=sandbox", {});
     expect(same.status).toBe(200);
   });
 
   it("publishes depositSlippage for the caller's environment, the same answer the build gates on", async () => {
-    // Kamino declares a floor wherever its program can enforce one. The DEVNET
-    // kvault build lacks `deposit_with_min_shares_out`, so the sandbox row must
-    // read null, or a caller who follows the catalogue sends a floor the chain
-    // rejects with Anchor 101; the mainnet row must say 10 bps, or a caller
-    // builds without one and meets a 400.
     await seedAuth();
-    await seedSessionAuth();
-    const sandbox = await seedStrategy();
+    await seedClerkAuth();
+    const sandbox = await seedStrategy({});
     const production = await seedStrategy({
       environment: "production",
       hostCluster: "mainnet-beta",
     });
 
-    const sandboxRow = await getEarn(`/v1/earn/strategies/${sandbox.id}`);
+    const sandboxRow = await getEarn(`/v1/earn/strategies/${sandbox.id}`, {});
     expect(sandboxRow.status).toBe(200);
     const sandboxBody = (await sandboxRow.json()) as {
       data: { strategy: { provider: string; depositSlippage: unknown } };
@@ -525,7 +445,7 @@ describe("Earn routes — environment scoping", () => {
       depositSlippage: null,
     });
 
-    const productionRow = await getEarnAsSession(
+    const productionRow = await getEarnAsClerk(
       `/v1/earn/strategies/${production.id}`,
       TEST_PRODUCTION_PROJECT.id
     );
@@ -540,37 +460,31 @@ describe("Earn routes — environment scoping", () => {
   });
 });
 
-describe("Earn routes — session-caller environment resolution", () => {
-  it("scopes the catalogue to the session's selected project environment", async () => {
+describe("Earn routes — Clerk-caller environment resolution", () => {
+  it("scopes the catalogue to the Clerk's selected project environment", async () => {
     await seedAuth();
-    await seedSessionAuth();
-    const sandbox = await seedStrategy();
-    // On its own cluster, so the production default view (which lists the
-    // environment's own cluster since PRO-1742) includes it.
+    await seedClerkAuth();
+    const sandbox = await seedStrategy({});
+
     const production = await seedStrategy({
       environment: "production",
       hostCluster: "mainnet-beta",
     });
 
-    // A production-project session sees the production catalogue…
-    const productionList = await getEarnAsSession(
-      "/v1/earn/strategies",
-      TEST_PRODUCTION_PROJECT.id
-    );
+    const productionList = await getEarnAsClerk("/v1/earn/strategies", TEST_PRODUCTION_PROJECT.id);
     expect(productionList.status).toBe(200);
     const productionBody = (await productionList.json()) as {
       data: { strategies: Array<{ id: string }> };
     };
     expect(productionBody.data.strategies.map((s) => s.id)).toEqual([production.id]);
 
-    const hidden = await getEarnAsSession(
+    const hidden = await getEarnAsClerk(
       `/v1/earn/strategies/${sandbox.id}`,
       TEST_PRODUCTION_PROJECT.id
     );
     expect(hidden.status).toBe(404);
 
-    // …and a sandbox-project session keeps today's behavior exactly.
-    const sandboxList = await getEarnAsSession("/v1/earn/strategies", TEST_PROJECT.id);
+    const sandboxList = await getEarnAsClerk("/v1/earn/strategies", TEST_PROJECT.id);
     expect(sandboxList.status).toBe(200);
     const sandboxBody = (await sandboxList.json()) as {
       data: { strategies: Array<{ id: string }> };
@@ -579,17 +493,12 @@ describe("Earn routes — session-caller environment resolution", () => {
   });
 });
 
-// The Earn button-configuration routes (`/button-configurations/*`) were
-// removed with the UI builder; their 404 pins live in the retired-surfaces
-// describe above alongside the PRO-1628 removals.
-
 describe("Earn routes — strategy catalogue", () => {
   it("answers anonymous and keyed readers with the same public catalogue", async () => {
     await seedAuth();
-    await seedStrategy();
+    await seedStrategy({});
     const corsHeaders = { Origin: "http://localhost:3000" };
 
-    // The seeded row is sandbox; an anonymous reader must ask for that shelf.
     const anonymous = await getEarnAnonymously(
       "/v1/earn/strategies?environment=sandbox",
       corsHeaders
@@ -624,25 +533,27 @@ describe("Earn routes — strategy catalogue", () => {
       name: "Upshift USDC",
     });
 
-    const list = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox");
+    const list = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox", {});
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
       data: { strategies: Array<{ id: string }>; total: number };
     };
     expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([visible.id]);
     expect(body.data.total).toBe(1);
-    expect((await getEarnAnonymously(`/v1/earn/strategies/${hiddenByTerms.id}`)).status).toBe(404);
-    expect((await getEarnAnonymously(`/v1/earn/strategies/${hiddenByProvider.id}`)).status).toBe(
+    expect((await getEarnAnonymously(`/v1/earn/strategies/${hiddenByTerms.id}`, {})).status).toBe(
       404
     );
+    expect(
+      (await getEarnAnonymously(`/v1/earn/strategies/${hiddenByProvider.id}`, {})).status
+    ).toBe(404);
   });
 
   it("returns the paginated list envelope and omits non-active strategies", async () => {
     await seedAuth();
-    const active = await seedStrategy();
+    const active = await seedStrategy({});
     await seedStrategy({ status: "paused" });
 
-    const res = await getEarn("/v1/earn/strategies");
+    const res = await getEarn("/v1/earn/strategies", {});
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -659,21 +570,12 @@ describe("Earn routes — strategy catalogue", () => {
     expect(body.data.pageSize).toBe(20);
   });
 
-  /**
-   * `fundable` is derived per request, so the SAME row answers differently to a
-   * sandbox and a production caller — the wire-level warning a partner reads
-   * before treating a listed strategy as depositable. Since PRO-1742 a sandbox
-   * environment deliberately stores the mirrored mainnet shelf BESIDE its own,
-   * so the list defaults to the environment's own cluster: an integrator's
-   * default view stays a catalogue it can act on, and the mirrored rows are an
-   * explicit `?cluster=` opt-in whose rows arrive `fundable: false`.
-   */
   it("lists the environment's own cluster by default and the mirrored shelf on explicit opt-in", async () => {
     await seedAuth();
     const local = await seedStrategy({ hostCluster: "devnet" });
     const mirrored = await seedStrategy({ hostCluster: "mainnet-beta" });
 
-    const defaults = await getEarn("/v1/earn/strategies");
+    const defaults = await getEarn("/v1/earn/strategies", {});
     expect(defaults.status).toBe(200);
     const defaultBody = (await defaults.json()) as {
       data: {
@@ -685,15 +587,13 @@ describe("Earn routes — strategy catalogue", () => {
     expect(defaultBody.data.strategies[0]).toMatchObject({
       hostCluster: "devnet",
       fundable: true,
-      // Sponsorship is unset in this harness, so a fundable row still reads
-      // wallet-pays. The flag is a fact about the deployment, not the row.
+
       feeSponsored: false,
     });
-    // The filter runs in SQL: the total describes the default view, not the
-    // store, so pagination never walks a reader into hidden rows.
+
     expect(defaultBody.data.total).toBe(1);
 
-    const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
     expect(optIn.status).toBe(200);
     const optInBody = (await optIn.json()) as {
       data: {
@@ -702,7 +602,7 @@ describe("Earn routes — strategy catalogue", () => {
       };
     };
     expect(optInBody.data.strategies.map((s) => s.id)).toEqual([mirrored.id]);
-    // Listed, and explicitly not fundable — the row is honest about both.
+
     expect(optInBody.data.strategies[0]).toMatchObject({
       hostCluster: "mainnet-beta",
       fundable: false,
@@ -711,13 +611,6 @@ describe("Earn routes — strategy catalogue", () => {
     expect(optInBody.data.total).toBe(1);
   });
 
-  /**
-   * `feeSponsored` rides on the catalogue row, not on the deposit quote, so a
-   * provider that never quotes (Kamino has no deposit floor) still gets honest
-   * fee copy. It answers the execution gate (`isEarnVaultSponsorshipEnabled`
-   * against the row's cluster), and a row that cannot be funded is never
-   * sponsored, whatever the flag says.
-   */
   it("derives feeSponsored per request from the sponsorship gate and the row's cluster", async () => {
     await seedAuth();
     const local = await seedStrategy({ provider: "kamino", hostCluster: "devnet" });
@@ -725,7 +618,7 @@ describe("Earn routes — strategy catalogue", () => {
     const original = env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED;
     env.EARN_VAULT_FEE_SPONSORSHIP_ENABLED = "true";
     try {
-      const list = await getEarn("/v1/earn/strategies");
+      const list = await getEarn("/v1/earn/strategies", {});
       expect(list.status).toBe(200);
       const listBody = (await list.json()) as {
         data: { strategies: Array<{ id: string; fundable: boolean; feeSponsored: boolean }> };
@@ -734,13 +627,12 @@ describe("Earn routes — strategy catalogue", () => {
         expect.objectContaining({ id: local.id, fundable: true, feeSponsored: true }),
       ]);
 
-      const detail = await getEarn(`/v1/earn/strategies/${local.id}`);
+      const detail = await getEarn(`/v1/earn/strategies/${local.id}`, {});
       expect(detail.status).toBe(200);
       const detailBody = (await detail.json()) as { data: { strategy: { feeSponsored: boolean } } };
       expect(detailBody.data.strategy.feeSponsored).toBe(true);
 
-      // Sponsorship is devnet-only and the mirrored row is not fundable here.
-      const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+      const optIn = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
       const optInBody = (await optIn.json()) as {
         data: { strategies: Array<{ id: string; fundable: boolean; feeSponsored: boolean }> };
       };
@@ -755,18 +647,16 @@ describe("Earn routes — strategy catalogue", () => {
   it("rejects a cluster value outside the Solana cluster vocabulary", async () => {
     await seedAuth();
 
-    const res = await getEarn("/v1/earn/strategies?cluster=testnet");
+    const res = await getEarn("/v1/earn/strategies?cluster=testnet", {});
 
     expect(res.status).toBe(400);
   });
 
   it("carries hostCluster and fundable on the single-strategy read too", async () => {
-    // Deliberate asymmetry with the list default above: an explicitly
-    // addressed row is served whatever its cluster — honest, never hidden.
     await seedAuth();
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
 
-    const res = await getEarn(`/v1/earn/strategies/${strategy.id}`);
+    const res = await getEarn(`/v1/earn/strategies/${strategy.id}`, {});
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -775,13 +665,6 @@ describe("Earn routes — strategy catalogue", () => {
     expect(body.data.strategy).toMatchObject({ hostCluster: "mainnet-beta", fundable: false });
   });
 
-  /**
-   * Browse policy, which is a DIFFERENT question from `fundable` above and must
-   * not be collapsed into it: a hidden row is absent from the response entirely,
-   * while an un-fundable row is present and says so. Hiding is SDP's editorial
-   * choice about a source; `fundable` is a fact about where the instrument
-   * lives.
-   */
   it("stores Morpho and Aave rows but never returns them from strategy reads", async () => {
     await seedAuth();
     const visible = await seedStrategy({
@@ -797,8 +680,7 @@ describe("Earn routes — strategy catalogue", () => {
     const aave = await seedStrategy({
       providerReference: "aave-v3-usdc",
       name: "Aave V3 Core USDC",
-      // Pin the fallback matching path too: a related row remains hidden even
-      // if provider metadata arrives without an underlying-source value.
+
       underlyingSource: null,
     });
 
@@ -806,7 +688,7 @@ describe("Earn routes — strategy catalogue", () => {
     expect(await repository.getStrategyById(morpho.id)).not.toBeNull();
     expect(await repository.getStrategyById(aave.id)).not.toBeNull();
 
-    const list = await getEarn("/v1/earn/strategies?pageSize=1");
+    const list = await getEarn("/v1/earn/strategies?pageSize=1", {});
     expect(list.status).toBe(200);
     const listBody = (await list.json()) as {
       data: { strategies: Array<{ id: string }>; total: number; pageSize: number };
@@ -816,22 +698,11 @@ describe("Earn routes — strategy catalogue", () => {
     expect(listBody.data.pageSize).toBe(1);
 
     for (const hidden of [morpho, aave]) {
-      const detail = await getEarn(`/v1/earn/strategies/${hidden.id}`);
+      const detail = await getEarn(`/v1/earn/strategies/${hidden.id}`, {});
       expect(detail.status).toBe(404);
     }
   });
 
-  /**
-   * The OTHER visibility rule, and the one that scales: a provider SDP does not
-   * currently offer (`EARN_PROVIDER_SURFACING` in @sdp/types) contributes no
-   * rows at all, whatever they are named.
-   *
-   * Asserted against the stored row so the two halves stay honest: the sync
-   * keeps writing an un-surfaced provider's catalogue — which is what makes
-   * re-surfacing a deploy rather than an hour's wait — and only the read hides
-   * it. Upshift is an un-surfaced provider today; if that flips, this test
-   * should move to whichever provider is off rather than be deleted.
-   */
   it("stores an un-surfaced provider's rows but never returns them from strategy reads", async () => {
     await seedAuth();
     const surfaced = await seedStrategy({ providerReference: "kamino-visible-usdc" });
@@ -842,21 +713,19 @@ describe("Earn routes — strategy catalogue", () => {
       underlyingSource: "centrifuge",
     });
 
-    // Still stored — hiding is a read-time policy, never a refusal to persist.
     const repository = createPostgresEarnRepository(getDb(env));
     expect(await repository.getStrategyById(unsurfaced.id)).not.toBeNull();
 
-    const list = await getEarn("/v1/earn/strategies");
+    const list = await getEarn("/v1/earn/strategies", {});
     expect(list.status).toBe(200);
     const listBody = (await list.json()) as {
       data: { strategies: Array<{ id: string }>; total: number };
     };
     expect(listBody.data.strategies.map((strategy) => strategy.id)).toEqual([surfaced.id]);
-    // The filter runs in SQL, so the total describes the rows the caller can
-    // see rather than counting a row the page then drops.
+
     expect(listBody.data.total).toBe(1);
 
-    const detail = await getEarn(`/v1/earn/strategies/${unsurfaced.id}`);
+    const detail = await getEarn(`/v1/earn/strategies/${unsurfaced.id}`, {});
     expect(detail.status).toBe(404);
   });
 });
@@ -865,19 +734,13 @@ describe("Earn route middleware isolation", () => {
   it("charges an authenticated keyed-only route exactly once", async () => {
     await seedAuth();
 
-    const res = await getEarn("/v1/earn/movements");
+    const res = await getEarn("/v1/earn/movements", {});
 
     expect(res.status).toBe(200);
     expect(await readRateLimitCount(env, TEST_API_KEY.id)).toBe(1);
   });
 });
 
-/**
- * The REAL shipped curation (PRO-1727) — the one describe that runs against the
- * actual CURATED_VAULTS/HIDDEN_STRATEGY_TERMS config rather than the bypass.
- * Addresses are read from the config itself so a BD re-pick moves these tests
- * with it instead of breaking them on a literal.
- */
 describe("Earn strategy reads — shipped V1 curation", () => {
   async function shippedCuratedVaults() {
     const actual = await vi.importActual<typeof import("@/routes/earn/handlers/curation")>(
@@ -889,7 +752,7 @@ describe("Earn strategy reads — shipped V1 curation", () => {
   it("shows only the curated mainnet shelf on the mirrored view", async () => {
     curation.bypassCuratedVaults = false;
     await seedAuth();
-    const shelf = (await shippedCuratedVaults())["mainnet-beta"]?.kamino ?? [];
+    const shelf = required(required((await shippedCuratedVaults())["mainnet-beta"]).kamino);
     expect(shelf.length).toBeGreaterThan(0);
 
     const curated = await seedStrategy({
@@ -901,7 +764,7 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       hostCluster: "mainnet-beta",
     });
 
-    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
       data: { strategies: Array<{ id: string }>; total: number };
@@ -909,20 +772,20 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     expect(body.data.strategies.map((s) => s.id)).toEqual([curated.id]);
     expect(body.data.total).toBe(1);
 
-    expect((await getEarn(`/v1/earn/strategies/${uncurated.id}`)).status).toBe(404);
-    expect((await getEarn(`/v1/earn/strategies/${curated.id}`)).status).toBe(200);
+    expect((await getEarn(`/v1/earn/strategies/${uncurated.id}`, {})).status).toBe(404);
+    expect((await getEarn(`/v1/earn/strategies/${curated.id}`, {})).status).toBe(200);
   });
 
   it("shows only the curated devnet shelf on the sandbox default view", async () => {
     curation.bypassCuratedVaults = false;
     await seedAuth();
-    const shelf = (await shippedCuratedVaults()).devnet?.kamino ?? [];
+    const shelf = required(required((await shippedCuratedVaults()).devnet).kamino);
     expect(shelf.length).toBeGreaterThan(0);
 
     const curated = await seedStrategy({ providerReference: shelf[0] });
     await seedStrategy({ providerReference: "devnet-vault-not-picked" });
 
-    const list = await getEarn("/v1/earn/strategies");
+    const list = await getEarn("/v1/earn/strategies", {});
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
       data: { strategies: Array<{ id: string }>; total: number };
@@ -933,46 +796,30 @@ describe("Earn strategy reads — shipped V1 curation", () => {
 
   it("keeps the hidden Ethena PYUSD vaults off every strategy read", async () => {
     await seedAuth();
-    // Addresses read from the shipped HIDDEN_VAULTS so a re-pick of the hidden
-    // set moves this test with it instead of breaking it on a literal — the
-    // same rule the curated-shelf tests above follow. Every configured entry
-    // gets a seeded row and its own list and detail assertions, so a rule that
-    // only hid the FIRST vault — or lost a later one — fails here rather than
-    // shipping untested. Each configured cluster must also still carry at
-    // least one entry: an emptied cluster would seed no rows and pass its
-    // list assertions trivially, silently un-hiding that environment's shelf.
+
     const actual = await vi.importActual<typeof import("@/routes/earn/handlers/curation")>(
       "@/routes/earn/handlers/curation"
     );
     const hiddenClusters = Object.entries(actual.HIDDEN_VAULTS).map(([cluster, keys]) => ({
       cluster: cluster as SolanaCluster,
-      keys: keys ?? [],
+      keys,
     }));
-    if (hiddenClusters.some(({ keys }) => keys.length === 0)) {
-      throw new Error("Expected shipped HIDDEN_VAULTS entries in every configured cluster");
-    }
+    assert(!hiddenClusters.some(({ keys }) => keys.length === 0));
 
     const hidden: EarnStrategyRow[] = [];
     for (const { cluster, keys } of hiddenClusters) {
       for (const key of keys) {
         const reference = key.split(":")[1];
-        if (!reference) {
-          throw new Error(`Expected a provider-reference key in HIDDEN_VAULTS, got ${key}`);
-        }
+        assert(reference);
         hidden.push(await seedStrategy({ providerReference: reference, hostCluster: cluster }));
       }
     }
 
     const assertAllHidden = async () => {
       for (const { cluster } of hiddenClusters) {
-        // The seeded rows are the only ones on their cluster shelf, and all
-        // are hidden — so the list is empty and `total` must agree at zero
-        // rather than count rows the page then drops. Devnet rides the
-        // sandbox default view; the mirrored mainnet shelf is the explicit
-        // `?cluster=` opt-in.
         const path =
           cluster === "devnet" ? "/v1/earn/strategies" : `/v1/earn/strategies?cluster=${cluster}`;
-        const list = await getEarn(path);
+        const list = await getEarn(path, {});
         expect(list.status).toBe(200);
         const body = (await list.json()) as {
           data: { strategies: Array<{ id: string }>; total: number };
@@ -981,23 +828,16 @@ describe("Earn strategy reads — shipped V1 curation", () => {
         expect(body.data.total).toBe(0);
       }
       for (const strategy of hidden) {
-        expect((await getEarn(`/v1/earn/strategies/${strategy.id}`)).status).toBe(404);
+        expect((await getEarn(`/v1/earn/strategies/${strategy.id}`, {})).status).toBe(404);
       }
     };
 
-    // Direct denylist coverage first: the shipped HIDDEN_VAULTS must hide
-    // every configured entry ON ITS OWN, with the curated allowlist bypassed —
-    // otherwise a denylist regression for any one vault hides behind the shelf
-    // and neither list nor detail would notice.
     curation.bypassCuratedVaults = true;
     await assertAllHidden();
 
-    // The full shipped policy agrees: the real curated shelf plus the
-    // denylist, as production serves it.
     curation.bypassCuratedVaults = false;
     await assertAllHidden();
 
-    // Still stored — hiding is a read-time policy, never a refusal to persist.
     const repository = createPostgresEarnRepository(getDb(env));
     for (const strategy of hidden) {
       expect(await repository.getStrategyById(strategy.id)).not.toBeNull();
@@ -1005,9 +845,6 @@ describe("Earn strategy reads — shipped V1 curation", () => {
   });
 
   it("serves the restored Sentora PYUSD vault and still hides Ethena PYUSD Prime", async () => {
-    // Pinned by ADDRESS on purpose (PR #2027, 2026-09-24). The tests above read
-    // their cases from the shipped config, so a curation edit that re-hid
-    // Sentora or un-hid Ethena would move them along with it and fail neither.
     curation.bypassCuratedVaults = false;
     await seedAuth();
     const sentora = await seedStrategy({
@@ -1019,15 +856,15 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       hostCluster: "mainnet-beta",
     });
 
-    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
       data: { strategies: Array<{ id: string }>; total: number };
     };
     expect(body.data.strategies.map((s) => s.id)).toEqual([sentora.id]);
     expect(body.data.total).toBe(1);
-    expect((await getEarn(`/v1/earn/strategies/${sentora.id}`)).status).toBe(200);
-    expect((await getEarn(`/v1/earn/strategies/${ethena.id}`)).status).toBe(404);
+    expect((await getEarn(`/v1/earn/strategies/${sentora.id}`, {})).status).toBe(200);
+    expect((await getEarn(`/v1/earn/strategies/${ethena.id}`, {})).status).toBe(404);
   });
 
   it("publishes the Kamino deposit floor required by production builds", async () => {
@@ -1035,7 +872,7 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     await seedAuth();
     const kamino = await seedStrategy({ hostCluster: "mainnet-beta" });
 
-    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
       data: {
@@ -1068,7 +905,7 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       hostCluster: "mainnet-beta",
     });
 
-    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
       data: {
@@ -1084,21 +921,14 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       depositSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
       withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 10 },
     });
-    expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`)).status).toBe(200);
+    expect((await getEarn(`/v1/earn/strategies/${jupiter.id}`, {})).status).toBe(200);
   });
 
-  /**
-   * Ondo (PRO-1832): surfaced, uncurated (no `CURATED_VAULTS` pin, so the
-   * provider's whole shelf — one USDY row — passes), and mainnet-only. From a
-   * sandbox project the row is the PRO-1742 mirror: listed on the explicit
-   * `?cluster=` opt-in, `fundable: false`, and honest about having no rate.
-   * Both slippage policies are the swap builder's 50 bps, not Veda's 10.
-   */
   it("shows the Ondo USDY row uncurated, with the swap builder's 50 bps floors", async () => {
     curation.bypassCuratedVaults = false;
     await seedAuth();
-    const usdyMint = ONDO_DEPLOYMENTS["mainnet-beta"]?.usdyMint;
-    if (!usdyMint) throw new Error("test premise: Ondo's mainnet deployment is filled in");
+    const usdyMint = required(ONDO_DEPLOYMENTS["mainnet-beta"]).usdyMint;
+    assert(usdyMint);
     const ondo = await seedStrategy({
       provider: "ondo",
       providerReference: usdyMint,
@@ -1108,8 +938,7 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       depositMints: [wellKnownMint("USDC", "mainnet-beta") as string],
       shareMint: usdyMint,
       currentApy: null,
-      // The compliance disclosure the catalogue client writes (PRO-1832); the
-      // assertions below pin that it reaches the public list AND detail reads.
+
       riskMetadata: {
         curator: "ondo",
         eligibility: "Reg S: non-US persons only; not enforced on-chain",
@@ -1118,14 +947,13 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       hostCluster: "mainnet-beta",
     });
 
-    // Not on the sandbox default view: that shelf is devnet.
-    const own = await getEarn("/v1/earn/strategies");
+    const own = await getEarn("/v1/earn/strategies", {});
     expect(own.status).toBe(200);
     expect(
       ((await own.json()) as { data: { strategies: Array<{ id: string }> } }).data.strategies
     ).toEqual([]);
 
-    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta", {});
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
       data: {
@@ -1155,10 +983,10 @@ describe("Earn strategy reads — shipped V1 curation", () => {
       depositSlippage: { quoteRequired: true, defaultToleranceBps: 50 },
       withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: 50 },
     });
-    // No rate source yet (PRO-1833): the field is absent, never a derived figure.
-    expect(body.data.strategies[0]?.currentApy).toBeUndefined();
 
-    const detail = await getEarn(`/v1/earn/strategies/${ondo.id}`);
+    expect(required(body.data.strategies[0]).currentApy).toBeUndefined();
+
+    const detail = await getEarn(`/v1/earn/strategies/${ondo.id}`, {});
     expect(detail.status).toBe(200);
     const detailBody = (await detail.json()) as {
       data: { strategy: { riskMetadata: Record<string, unknown> } };

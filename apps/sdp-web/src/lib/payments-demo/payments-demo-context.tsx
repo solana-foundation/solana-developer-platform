@@ -39,3 +39,9 @@ export const PaymentsDemoProvider = PaymentsDemoContext.Provider;
 export function usePaymentsDemo(): boolean {
   return useContext(PaymentsDemoContext);
 }
+
+/**
+ * How often an Issuance screen re-reads a deploy in flight in demo mode: half the demo deploy's
+ * 4 seconds, so the token turns live on the read after it lands rather than up to 5s later.
+ */
+export const DEMO_DEPLOY_POLL_MS = 2_000;
