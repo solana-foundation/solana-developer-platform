@@ -4,7 +4,15 @@ import { SOLANA_CLUSTER_LABELS } from "@sdp/types";
 import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { Popover } from "radix-ui";
-import { useId, useRef, useState } from "react";
+import {
+  createContext,
+  type RefObject,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { useThemeScope, useThemeScopeAttributes } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +26,27 @@ import {
 } from "@/lib/playground-api-keys";
 import { usePlaygroundApiKeySecret } from "@/lib/use-playground-api-key-secret";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
+
+/** What a run finds in the key field: nothing pending, the pasted key identified, or refused. */
+export type PendingApiKeyOutcome =
+  | { kind: "none" }
+  | { kind: "identified"; apiKeyId: string }
+  | { kind: "rejected" };
+
+/**
+ * Identifies the key material still pending in the key field. Editing the field detaches the
+ * previous key at once, while the new material is identified only on blur or when the popover
+ * closes, so a run straight after a paste (⌘↵ with the popover open) calls this first.
+ */
+export type IdentifyPendingApiKey = () => Promise<PendingApiKeyOutcome>;
+
+/**
+ * The playground's slot for the key field's {@link IdentifyPendingApiKey}: the shell provides
+ * it, the key field fills it.
+ */
+export const PendingApiKeyContext = createContext<RefObject<IdentifyPendingApiKey | null> | null>(
+  null
+);
 
 type Resolution =
   | { kind: "idle" }
@@ -92,6 +121,8 @@ function usePastedApiKey() {
    * and the field reads from there. A null draft means "show what is stored".
    */
   const [draft, setDraft] = useState<string | null>(null);
+  // The draft as of the last edit, for an identification that runs before React re-renders.
+  const draftRef = useRef<string | null>(null);
   const [resolution, setResolution] = useState<Resolution>({ kind: "idle" });
 
   /**
@@ -101,6 +132,15 @@ function usePastedApiKey() {
    * overwrite what they typed next.
    */
   const identifyRequestRef = useRef(0);
+  /** The identification in flight, which a run started meanwhile waits on rather than repeats. */
+  const inflightRef = useRef<{ requestId: number; outcome: Promise<PendingApiKeyOutcome> } | null>(
+    null
+  );
+
+  const updateDraft = (next: string | null) => {
+    draftRef.current = next;
+    setDraft(next);
+  };
 
   const detachSecret = () => {
     if (selectedPlaygroundApiKeyId) {
@@ -112,37 +152,19 @@ function usePastedApiKey() {
   const onChange = (rawValue: string) => {
     const normalized = normalizeApiKeyInput(rawValue);
     identifyRequestRef.current += 1;
-    setDraft(normalized);
+    updateDraft(normalized);
     setResolution({ kind: "idle" });
     // A key already attached stops being the active key the moment the field is
     // edited, so a stale secret cannot outlive the value on screen.
     detachSecret();
   };
 
-  const onIdentify = async () => {
-    if (draft === null) {
-      return;
-    }
-    if (!draft) {
-      setResolution({ kind: "idle" });
-      return;
-    }
-    if (!isValidSdpApiKey(draft)) {
-      setResolution({
-        kind: "rejected",
-        message: t("Shared.SharedComponents.invalidApiKeyFormat"),
-      });
-      return;
-    }
-
-    const material = draft;
-    const requestId = identifyRequestRef.current + 1;
-    identifyRequestRef.current = requestId;
-
+  const identify = async (material: string, requestId: number): Promise<PendingApiKeyOutcome> => {
     setResolution({ kind: "checking" });
     const result = await resolveApiKey(material);
     if (requestId !== identifyRequestRef.current) {
-      return;
+      // The field has changed since; what it holds now is not identified.
+      return { kind: "rejected" };
     }
 
     if ("error" in result) {
@@ -150,14 +172,65 @@ function usePastedApiKey() {
         kind: "rejected",
         message: result.error || t("Shared.SharedComponents.apiKeyNotAvailable"),
       });
-      return;
+      return { kind: "rejected" };
     }
 
     storeApiKeySecret({ value: material, apiKeyId: result.id });
     setSelectedPlaygroundApiKeyId(result.id);
-    setDraft(null);
+    updateDraft(null);
     setResolution({ kind: "resolved", name: result.name, keyPrefix: result.keyPrefix });
+    return { kind: "identified", apiKeyId: result.id };
   };
+
+  /**
+   * Identifies what the field holds. A call while that material is already being identified
+   * shares the answer in flight, so a run started on the heels of a blur does not ask twice.
+   */
+  const onIdentify: IdentifyPendingApiKey = () => {
+    const material = draftRef.current;
+    if (material === null) {
+      return Promise.resolve({ kind: "none" });
+    }
+    const inflight = inflightRef.current;
+    if (inflight && inflight.requestId === identifyRequestRef.current) {
+      return inflight.outcome;
+    }
+    if (!material) {
+      setResolution({ kind: "idle" });
+      return Promise.resolve({ kind: "none" });
+    }
+    if (!isValidSdpApiKey(material)) {
+      setResolution({
+        kind: "rejected",
+        message: t("Shared.SharedComponents.invalidApiKeyFormat"),
+      });
+      return Promise.resolve({ kind: "rejected" });
+    }
+
+    const requestId = identifyRequestRef.current + 1;
+    identifyRequestRef.current = requestId;
+    const outcome = identify(material, requestId).finally(() => {
+      if (inflightRef.current?.requestId === requestId) {
+        inflightRef.current = null;
+      }
+    });
+    inflightRef.current = { requestId, outcome };
+    return outcome;
+  };
+
+  // The shell runs this before a request, so a key pasted a moment ago is the one it uses.
+  const pendingApiKeySlot = useContext(PendingApiKeyContext);
+  useEffect(() => {
+    if (!pendingApiKeySlot) {
+      return;
+    }
+    pendingApiKeySlot.current = onIdentify;
+    return () => {
+      if (pendingApiKeySlot.current === onIdentify) {
+        pendingApiKeySlot.current = null;
+      }
+    };
+  });
 
   return {
     value: draft ?? storedSecret ?? "",
@@ -200,7 +273,8 @@ function RefreshApiKeyPicker({ pasted }: { pasted: PastedApiKey }) {
   const triggerLabel = attached
     ? [attached.name, environmentKey ? t(environmentKey) : null].filter(Boolean).join(" · ")
     : t("Shared.SharedComponents.pasteApiKey");
-  // Closing the popover (outside click, Tab away, Escape, Enter) is what identifies the paste.
+  // Closing the popover (outside click, Tab away, Escape, Enter) is what identifies the paste. A
+  // run (⌘↵ from the field) closes it too and waits on that identification.
   const close = () => {
     setOpen(false);
     void pasted.onIdentify();
@@ -236,10 +310,14 @@ function RefreshApiKeyPicker({ pasted }: { pasted: PastedApiKey }) {
               size="md"
               onChange={(event) => pasted.onChange(event.currentTarget.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {
-                  event.preventDefault();
-                  close();
+                if (event.key !== "Enter") {
+                  return;
                 }
+                // ⌘↵ also runs the request: the page's shortcut takes it from here.
+                if (!event.metaKey && !event.ctrlKey) {
+                  event.preventDefault();
+                }
+                close();
               }}
               placeholder={t("Shared.SharedComponents.apiKeySecretPlaceholder")}
               spellCheck={false}
