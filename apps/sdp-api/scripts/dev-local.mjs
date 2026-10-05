@@ -146,7 +146,7 @@ async function resetLocalRedisState(url) {
   const { default: Redis } = await import("ioredis");
   const client = new Redis(url, { maxRetriesPerRequest: 1 });
   try {
-    for (const prefix of ["apiKeys", "rateLimits", "cache", "sessions"]) {
+    for (const prefix of ["apiKeys", "rateLimits", "cache"]) {
       let cursor = "0";
       const keysToDelete = new Set();
       do {

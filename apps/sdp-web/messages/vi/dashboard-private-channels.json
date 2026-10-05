@@ -442,7 +442,11 @@
       "update": "Lưu thay đổi",
       "updating": "Đang lưu…",
       "updateSuccess": "Đã cập nhật kết nối.",
-      "connectionTestSuccess": "Kết nối hoạt động."
+      "connectionTestSuccess": "Kết nối hoạt động.",
+      "endpointsSection": "Endpoints",
+      "programsSection": "Programs",
+      "programAddressPlaceholder": "Địa chỉ Program",
+      "accountAddressPlaceholder": "Địa chỉ Account"
     },
     "directory": {
       "setupChannel": "Thêm channel",

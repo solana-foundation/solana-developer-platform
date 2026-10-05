@@ -17,7 +17,7 @@ const PLACES_QUOTA: MeteredQuotaConfig = { name: "places", actorMax: 120, orgMax
 
 const places = new Hono<{ Bindings: Env }>();
 
-places.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+places.use("*", unifiedAuthMiddleware());
 
 // The quota sits after the permission gate: callers the route would reject
 // must not be able to charge the org-wide pool and starve authorized users.
