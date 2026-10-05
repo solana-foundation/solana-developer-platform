@@ -1,14 +1,16 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import type { PermissionRow } from "../token-management-workspace.types";
 import {
   getNoneConfirmationCopy,
   getSignerWalletUnavailableReason,
+  isValidSolanaAddressInput,
 } from "../token-management-workspace.utils";
 import { TokenSignerSelect } from "../token-signer-select";
 import { shortAddress, type TokenTabProps } from "./token-page.shared";
@@ -21,8 +23,11 @@ const walletLabel = (wallet: PaymentsDashboardWallet) =>
 type Ops = TokenTabProps["ops"];
 type Translate = ReturnType<typeof useTranslations>;
 
-/** What the open authority form shows and allows, read from the token's operations. */
-function readAuthorityForm(ops: Ops, row: PermissionRow, t: Translate) {
+/**
+ * What the open authority form shows and allows, read from the token's operations. A custom
+ * address must be a Solana address; giving the authority up is None in the wallet list.
+ */
+function readAuthorityForm(ops: Ops, row: PermissionRow, t: Translate, custom: boolean) {
   const wallets = ops.authorityWallets.filter((wallet) => wallet.publicKey.trim());
   const current = (ops.authorityModalCurrentAuthority ?? "").trim();
   const next = ops.authorityModalNewAuthority.trim();
@@ -33,8 +38,25 @@ function readAuthorityForm(ops: Ops, row: PermissionRow, t: Translate) {
   const needsSigner = signer.wallets.length > 1 && !signerWalletId;
   const signerReason =
     signer.unavailableReason ?? getSignerWalletUnavailableReason(signer.wallets, signerWalletId, t);
-  const blocked = next === current || needsSigner || Boolean(signerReason) || (!next && !canRemove);
-  return { wallets, current, next, external, canRemove, needsSigner, signerReason, blocked };
+  const invalidAddress = custom && Boolean(next) && !isValidSolanaAddressInput(next);
+  const blocked =
+    next === current ||
+    needsSigner ||
+    Boolean(signerReason) ||
+    (!next && (custom || !canRemove)) ||
+    invalidAddress;
+  return {
+    wallets,
+    current,
+    next,
+    external,
+    canRemove,
+    needsSigner,
+    signerReason,
+    custom,
+    invalidAddress,
+    blocked,
+  };
 }
 
 type AuthorityFormState = ReturnType<typeof readAuthorityForm>;
@@ -44,15 +66,28 @@ type AuthorityFormState = ReturnType<typeof readAuthorityForm>;
  * holder, then Save authority and Cancel. Giving the authority up (None, where the role allows
  * it) says what that ends, and Save asks once more in place before anything is sent, as the
  * dialog did. A holder outside the project's wallets stays listed so the field shows who holds
- * it now.
+ * it now. The project's wallets come first; a custom Solana address can be typed instead, as the
+ * dialog allowed, to hand the authority to a wallet outside SDP custody.
  */
 export function AuthorityForm({ ops }: Pick<TokenTabProps, "ops">) {
   const t = useTranslations();
   const [confirmingNone, setConfirmingNone] = useState(false);
+  // The holder chosen from the list before a custom address replaced it, restored when the field
+  // goes back to the list; null while the field lists the project's wallets.
+  const [listChoice, setListChoice] = useState<string | null>(null);
   const row = ops.authorityModalRow;
   if (!row) return null;
 
-  const state = readAuthorityForm(ops, row, t);
+  const state = readAuthorityForm(ops, row, t, listChoice !== null);
+  const toggleCustom = () => {
+    if (listChoice === null) {
+      setListChoice(ops.authorityModalNewAuthority);
+      ops.setAuthorityModalNewAuthority("");
+    } else {
+      ops.setAuthorityModalNewAuthority(listChoice);
+      setListChoice(null);
+    }
+  };
 
   if (confirmingNone && !state.next) {
     return (
@@ -86,8 +121,28 @@ export function AuthorityForm({ ops }: Pick<TokenTabProps, "ops">) {
           />
         ) : null
       }
-      field={<AuthorityHolderSelect ops={ops} row={row} state={state} />}
+      field={
+        state.custom ? (
+          <AuthorityAddressInput ops={ops} row={row} state={state} />
+        ) : (
+          <AuthorityHolderSelect ops={ops} row={row} state={state} />
+        )
+      }
     >
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="-ms-2.5 self-start"
+        disabled={ops.isPending}
+        onClick={toggleCustom}
+      >
+        {t(
+          state.custom
+            ? "DashboardIssuance.authority.chooseWallet"
+            : "DashboardIssuance.authority.useCustom"
+        )}
+      </Button>
       <AuthorityFormNotes ops={ops} row={row} state={state} />
     </HolderForm>
   );
@@ -167,6 +222,44 @@ function AuthorityHolderSelect({
   );
 }
 
+/**
+ * A custom holder typed in place of the project's wallets: a Solana address, with the dialog's
+ * warning that SDP cannot sign for a wallet it does not manage.
+ */
+function AuthorityAddressInput({
+  ops,
+  row,
+  state,
+}: {
+  ops: Ops;
+  row: PermissionRow;
+  state: AuthorityFormState;
+}) {
+  const t = useTranslations();
+  const id = useId();
+  return (
+    <>
+      <Input
+        size="xl"
+        aria-label={row.title}
+        aria-invalid={state.invalidAddress}
+        aria-describedby={id}
+        autoComplete="off"
+        placeholder={t("DashboardIssuance.authority.solanaAddress")}
+        value={ops.authorityModalNewAuthority}
+        disabled={ops.isPending}
+        onChange={(event) => ops.setAuthorityModalNewAuthority(event.currentTarget.value)}
+      />
+      {state.invalidAddress ? (
+        <p className="text-meta text-error">{t("DashboardIssuance.forms.enterSolanaAddress")}</p>
+      ) : null}
+      <p id={id} className="text-meta text-warning">
+        {t("DashboardIssuance.authority.customWalletWarning")}
+      </p>
+    </>
+  );
+}
+
 /** Under the holder: a wallet load error, what giving the authority up ends, a signer problem. */
 function AuthorityFormNotes({
   ops,
@@ -178,13 +271,14 @@ function AuthorityFormNotes({
   state: AuthorityFormState;
 }) {
   const t = useTranslations();
-  const { next, canRemove, current, signerReason, needsSigner } = state;
+  const { next, custom, canRemove, current, signerReason, needsSigner } = state;
   return (
     <>
       {ops.authorityWalletsError ? (
         <p className="text-meta text-error">{ops.authorityWalletsError}</p>
       ) : null}
-      {!next && canRemove && current ? (
+      {/* An empty custom address is unfinished, not None. */}
+      {!next && !custom && canRemove && current ? (
         <p className="text-body text-warning">{getNoneConfirmationCopy(row, t).impact}</p>
       ) : null}
       {signerReason && !needsSigner ? <p className="text-meta text-error">{signerReason}</p> : null}

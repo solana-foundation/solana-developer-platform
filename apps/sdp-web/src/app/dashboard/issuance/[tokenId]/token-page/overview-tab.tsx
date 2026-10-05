@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { formatDecimalAmount } from "@/app/dashboard/payments/payments-presentation";
 import { RecordAmount } from "@/app/dashboard/payments/payments-record";
@@ -130,7 +130,7 @@ export function TokenOverviewTab({
         ) : null}
 
         {state === "deploying" ? (
-          <DeployProgressBlock signingWalletName={signingWalletName} latestDeploy={latestDeploy} />
+          <DeployProgressBlock signingWalletName={signingWalletName} />
         ) : null}
 
         {state === "failed" ? (
@@ -215,6 +215,11 @@ function DeployElapsed({ since }: { since: string }) {
   const t = useTranslations();
   const locale = useLocale();
   const [now, setNow] = useState(() => Date.now());
+  // Built once per locale: a formatter is slow to construct and the count re-renders each tenth.
+  const tenths = useMemo(
+    () => new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    [locale]
+  );
   const elapsed = Math.max(0, now - new Date(since).getTime());
   const underMinute = elapsed < 60_000;
   useEffect(() => {
@@ -227,10 +232,7 @@ function DeployElapsed({ since }: { since: string }) {
     <span suppressHydrationWarning className="text-body text-secondary tabular-nums">
       {underMinute
         ? t("DashboardIssuance.newDesign.overview.elapsedSeconds", {
-            seconds: new Intl.NumberFormat(locale, {
-              minimumFractionDigits: 1,
-              maximumFractionDigits: 1,
-            }).format(Math.floor(elapsed / 100) / 10),
+            seconds: tenths.format(Math.floor(elapsed / 100) / 10),
           })
         : t("DashboardIssuance.newDesign.overview.elapsedMinutes", {
             minutes: Math.floor(seconds / 60),
@@ -242,20 +244,15 @@ function DeployElapsed({ since }: { since: string }) {
 
 /**
  * A deploy in flight, as the design walks it: signing with the token's wallet, sending to the
- * network, confirming the mint. A pending deploy is still being signed; a processing one is
- * sent and waits to confirm.
+ * network, confirming the mint. The API signs, sends and confirms in one request, and its deploy
+ * transaction stays pending until it lands: confirmed (the token goes live and this block gives
+ * way) or failed. Nothing in between tells the steps apart, so while the block shows every step
+ * is under way rather than one standing still at signing.
  */
-function DeployProgressBlock({
-  signingWalletName,
-  latestDeploy,
-}: {
-  signingWalletName: string;
-  latestDeploy: LatestDeployAttempt | null;
-}) {
+export function DeployProgressBlock({ signingWalletName }: { signingWalletName: string }) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
   const network = deployNetworkName(sdpEnvironment, t);
-  const current = latestDeploy?.status === "processing" ? 2 : 0;
   const steps = [
     t("DashboardIssuance.newDesign.overview.deployStepSign", { wallet: signingWalletName }),
     t("DashboardIssuance.newDesign.overview.deployStepSend", { network }),
@@ -269,22 +266,13 @@ function DeployProgressBlock({
         {t("DashboardIssuance.newDesign.overview.deployTitle")}
       </h2>
       <ol>
-        {steps.map((label, index) => (
+        {steps.map((label) => (
           <li
             key={label}
-            aria-current={index === current ? "step" : undefined}
             className="flex min-h-10 items-center gap-4.5 border-b border-border-subtle ps-1 last:border-b-0"
           >
-            <span
-              aria-hidden="true"
-              className={cn(
-                "size-1.5 shrink-0 rounded-full",
-                index < current ? "bg-success" : index === current ? "bg-info" : "bg-tertiary"
-              )}
-            />
-            <span className={cn("text-nav", index === current ? "text-primary" : "text-secondary")}>
-              {label}
-            </span>
+            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-info" />
+            <span className="text-nav text-primary">{label}</span>
           </li>
         ))}
       </ol>
