@@ -12,8 +12,10 @@ import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -35,7 +37,6 @@ vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
   createAuthenticatedSponsorshipFeePayment: signerCheckMocks.createSponsorship,
 }));
 
-/** Seeded wallets' public keys: valid addresses, distinct from the shared fixtures. */
 const SEEDED_PUBLIC_KEYS = {
   privyA: "HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH",
   privyB: "CKmTHyQ4xMzL3dYzzaTBV5BKLjGPYVLPA4Q5DMLRRXUm",
@@ -55,7 +56,7 @@ const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 const simulateTransactionMock = vi.spyOn(solanaRpc, "simulateTransaction");
 
 const TEST_ORG = {
-  id: "org_custody_wallet_scope",
+  id: "org_test_custody_wallet_scope",
   name: "Custody Wallet Scope Org",
   slug: "custody-wallet-scope-org",
 };
@@ -66,7 +67,7 @@ const TEST_PROJECT = {
 };
 
 const TEST_USER = {
-  id: "usr_custody_wallet_scope",
+  id: "usr_test_custody_wallet_scope",
   email: "custody-wallet-scope@example.com",
 };
 
@@ -76,7 +77,6 @@ const TEST_API_KEY = {
   prefix: "sk_test_cws",
 };
 
-const TEST_SESSION_ID = "ses_custody_wallet_scope";
 const TEST_SIGNATURE = signature("1".repeat(64));
 
 const TEST_CACHED_API_KEY: CachedApiKey = {
@@ -121,12 +121,6 @@ async function seedAuthAndConfigs(): Promise<void> {
     ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
   });
   await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-         VALUES (?, ?, ?, 'session', ?)`
-      )
-      .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
     getDb(env)
       .prepare(
         `INSERT INTO api_keys
@@ -244,7 +238,7 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
             .prepare("SELECT id FROM custody_wallets WHERE wallet_id = ? LIMIT 1")
             .bind(binding.walletId)
             .first<{ id: string }>();
-          return { ...binding, custodyWalletId: wallet?.id ?? binding.walletId };
+          return { ...binding, custodyWalletId: required(wallet).id };
         })
       )
     : undefined;
@@ -308,7 +302,7 @@ async function seedActiveConnectionWallet(
   ]);
 }
 
-function requestSignerCheck(body: SignerCheckRequest, actor: "api_key" | "session") {
+async function requestSignerCheck(body: SignerCheckRequest, actor: "api_key" | "clerk") {
   const headers = new Headers({
     "Content-Type": "application/json",
     "x-project-id": TEST_PROJECT.id,
@@ -316,7 +310,10 @@ function requestSignerCheck(body: SignerCheckRequest, actor: "api_key" | "sessio
   if (actor === "api_key") {
     headers.set("Authorization", `Bearer ${TEST_API_KEY.raw}`);
   } else {
-    headers.set("Cookie", `sdp_session=${TEST_SESSION_ID}`);
+    headers.set(
+      "Authorization",
+      `Bearer ${await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id)}`
+    );
   }
   return app.request(
     "/v1/wallets/signer-check",
@@ -433,7 +430,7 @@ describe("Custody wallet scope routes", () => {
           )
           .run();
       }
-      const response = await requestSignerCheck({ walletId: "privy_check" }, "session");
+      const response = await requestSignerCheck({ walletId: "privy_check" }, "clerk");
 
       expect(response.status).toBe(status);
       expect(await response.json()).toMatchObject({
@@ -468,7 +465,7 @@ describe("Custody wallet scope routes", () => {
       return service;
     });
 
-    const response = await requestSignerCheck({ walletId: "privy_check" }, "session");
+    const response = await requestSignerCheck({ walletId: "privy_check" }, "clerk");
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
@@ -485,7 +482,7 @@ describe("Custody wallet scope routes", () => {
     expect(createRpcFromTransportSpy).toHaveBeenCalledOnce();
   });
 
-  it.each(["session", "api_key"] as const)(
+  it.each(["clerk", "api_key"] as const)(
     "refuses ambiguous signer-check Provider IDs for %s callers",
     async (actor) => {
       await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
@@ -496,7 +493,7 @@ describe("Custody wallet scope routes", () => {
         signingWalletId: "privy_wallet_a",
         walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
       });
-      // The cache still names the original row when another owner introduces a duplicate.
+
       await seedActiveConnectionWallet(
         "duplicate",
         "privy_wallet_a",
@@ -506,7 +503,7 @@ describe("Custody wallet scope routes", () => {
 
       const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, actor);
 
-      expect(response.status).toBe(actor === "session" ? 409 : 403);
+      expect(response.status).toBe(actor === "clerk" ? 409 : 403);
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
@@ -516,11 +513,11 @@ describe("Custody wallet scope routes", () => {
   );
 
   it.each([
-    { actor: "session", connectionStatus: "active", configScope: "project" },
+    { actor: "clerk", connectionStatus: "active", configScope: "project" },
     { actor: "api_key", connectionStatus: "active", configScope: "project" },
     { actor: "selected_key", connectionStatus: "active", configScope: "project" },
-    { actor: "session", connectionStatus: "deactivated", configScope: "project" },
-    { actor: "session", connectionStatus: "active", configScope: "organization" },
+    { actor: "clerk", connectionStatus: "deactivated", configScope: "project" },
+    { actor: "clerk", connectionStatus: "active", configScope: "organization" },
   ])(
     "refuses a signer check for $actor with a $configScope Config and inactive duplicate in a $connectionStatus Connection",
     async ({ actor, connectionStatus, configScope }) => {
@@ -567,7 +564,7 @@ describe("Custody wallet scope routes", () => {
 
       const response = await requestSignerCheck(
         { walletId: "privy_wallet_a" },
-        actor === "session" ? "session" : "api_key"
+        actor === "clerk" ? "clerk" : "api_key"
       );
 
       expect(response.status).toBe(409);
@@ -598,7 +595,7 @@ describe("Custody wallet scope routes", () => {
         .bind(TEST_SOLANA_ADDRESSES.wallet2),
     ]);
 
-    const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, "session");
+    const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, "clerk");
 
     expect(response.status).toBe(200);
     expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
@@ -650,7 +647,7 @@ describe("Custody wallet scope routes", () => {
   it.each(["privy_missing", "cwlt_scope_privy_a"])(
     "preserves the missing-wallet error for signer-check selector %s",
     async (walletId) => {
-      const response = await requestSignerCheck({ walletId }, "session");
+      const response = await requestSignerCheck({ walletId }, "clerk");
 
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({
@@ -702,8 +699,7 @@ describe("Custody wallet scope routes", () => {
       TEST_PROJECT.id,
       "cwlt_scope_privy_a"
     );
-    // The signature is the wallet's own, verified locally and in simulation —
-    // never broadcast, and never paid for by sponsorship.
+
     expect(simulateTransactionMock).toHaveBeenCalledOnce();
     expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
   });
@@ -779,14 +775,14 @@ describe("Custody wallet scope routes", () => {
     }
   );
 
-  it("requires walletId for a session-authenticated signer check", async () => {
+  it("requires walletId for a Clerk-authenticated signer check", async () => {
     const response = await app.request(
       "/v1/wallets/signer-check",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Cookie: `sdp_session=${TEST_SESSION_ID}`,
+          Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id)}`,
           "x-project-id": TEST_PROJECT.id,
         },
         body: JSON.stringify({}),
@@ -798,14 +794,14 @@ describe("Custody wallet scope routes", () => {
     expect(await response.json()).toMatchObject({
       error: {
         code: "BAD_REQUEST",
-        message: "walletId is required for session or Clerk authentication",
+        message: expect.stringContaining("Clerk authentication"),
       },
     });
     expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
     expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
   });
 
-  it("generates the memo for a session request and strips a caller memo", async () => {
+  it("generates the memo for a Clerk request and strips a caller memo", async () => {
     const callerMemo = "caller-controlled memo";
     const response = await app.request(
       "/v1/wallets/signer-check",
@@ -813,7 +809,7 @@ describe("Custody wallet scope routes", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Cookie: `sdp_session=${TEST_SESSION_ID}`,
+          Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id)}`,
           "x-project-id": TEST_PROJECT.id,
         },
         body: JSON.stringify({ walletId: "privy_wallet_a", memo: callerMemo }),
@@ -1011,7 +1007,7 @@ describe("Custody wallet scope routes", () => {
 
     expect(response.status).toBe(200);
     expect(getMultipleAccountsLamportsMock).toHaveBeenCalledTimes(1);
-    expect(getMultipleAccountsLamportsMock.mock.calls[0]?.[1]).toHaveLength(3);
+    expect(required(getMultipleAccountsLamportsMock.mock.calls[0])[1]).toHaveLength(3);
     expect(getAccountInfoMock).not.toHaveBeenCalled();
   });
 
@@ -1039,8 +1035,6 @@ describe("Custody wallet scope routes", () => {
       expect(body.data.wallets.every((wallet) => wallet.balances === undefined)).toBe(true);
     }
 
-    // Every retry re-observes every wallet instead of replaying synthetic zeros
-    // from the short-lived balance cache.
     expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(6);
   });
 
@@ -1059,7 +1053,7 @@ describe("Custody wallet scope routes", () => {
     const recovered = await request();
     expect(recovered.status).toBe(200);
     expect(await recovered.json()).toMatchObject({ data: { aggregate: { walletCount: 3 } } });
-    // Successful wallet reads remain cached; only the missing one is retried.
+
     expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(4);
   });
 
@@ -1556,15 +1550,15 @@ describe("Custody wallet scope routes", () => {
     ]);
     await clearKVStores(env);
 
-    const requestPublicKey = (walletId = "") =>
+    const requestPublicKey = (walletId: string) =>
       app.request(
         `/v1/wallets/public-key${walletId ? `?walletId=${walletId}` : ""}`,
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
 
-    expect((await requestPublicKey()).status).toBe(404);
-    expect((await requestPublicKey()).status).toBe(404);
+    expect((await requestPublicKey("")).status).toBe(404);
+    expect((await requestPublicKey("")).status).toBe(404);
 
     const explicit = await requestPublicKey("privy_wallet_b");
     expect(explicit.status).toBe(200);
@@ -1629,7 +1623,7 @@ describe("Custody wallet scope routes", () => {
       .bind("para_wallet_a")
       .first<{ label: string | null }>();
 
-    expect(updated?.label).toBe("Operations");
+    expect(required(updated).label).toBe("Operations");
   });
 
   it("returns 404 when updating a wallet outside the API key bindings", async () => {
@@ -1677,7 +1671,7 @@ describe("Custody wallet scope routes", () => {
       .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
       .bind(PRIVY_CONFIG_ID)
       .first<{ default_wallet_id: string | null }>();
-    expect(config?.default_wallet_id).toBe("privy_wallet_a");
+    expect(required(config).default_wallet_id).toBe("privy_wallet_a");
   });
 
   it("prevents a project-scoped caller from deleting an organization wallet", async () => {
@@ -1702,7 +1696,7 @@ describe("Custody wallet scope routes", () => {
       .prepare("SELECT status FROM custody_wallets WHERE wallet_id = ?")
       .bind("privy_wallet_b")
       .first<{ status: string }>();
-    expect(wallet?.status).toBe("active");
+    expect(required(wallet).status).toBe("active");
   });
 
   describe("wallet-scoped key lifecycle mutations", () => {
@@ -1748,7 +1742,7 @@ describe("Custody wallet scope routes", () => {
         .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
         .bind(PRIVY_CONFIG_ID)
         .first<{ default_wallet_id: string | null }>();
-      expect(config?.default_wallet_id).toBe("privy_wallet_b");
+      expect(required(config).default_wallet_id).toBe("privy_wallet_b");
     });
 
     it("masks re-defaulting to a wallet outside the key bindings as unknown", async () => {
@@ -1778,7 +1772,7 @@ describe("Custody wallet scope routes", () => {
         .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
         .bind(PRIVY_CONFIG_ID)
         .first<{ default_wallet_id: string | null }>();
-      expect(config?.default_wallet_id).toBe("privy_wallet_a");
+      expect(required(config).default_wallet_id).toBe("privy_wallet_a");
     });
 
     it("returns 404 when a wallet-scoped key deletes a wallet outside its bindings", async () => {
@@ -1808,7 +1802,7 @@ describe("Custody wallet scope routes", () => {
         .prepare("SELECT status FROM custody_wallets WHERE wallet_id = ?")
         .bind("privy_wallet_b")
         .first<{ status: string }>();
-      expect(wallet?.status).toBe("active");
+      expect(required(wallet).status).toBe("active");
     });
 
     it("lets a bound wallet through the delete binding gate", async () => {
@@ -1833,8 +1827,6 @@ describe("Custody wallet scope routes", () => {
         env
       );
 
-      // Privy has no wallet deletion: the request passes the binding gate
-      // (no masked 404) and fails on provider capability instead.
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: { message: string } };
       expect(body.error.message).toMatch(/deletion not supported/i);

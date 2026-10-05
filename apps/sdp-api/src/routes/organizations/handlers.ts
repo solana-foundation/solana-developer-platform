@@ -22,7 +22,6 @@ import {
   assertProviderAvailable,
   getProviderAvailability,
 } from "@/services/provider-availability.service";
-import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import type { updateOrgSchema } from "./schemas";
 
@@ -319,16 +318,7 @@ export const deleteOrganization = async (c: AppContext) => {
       failures.push(...refreshFailures);
     }
   } catch (error) {
-    // Enumerating the keys is itself post-commit work: losing it must not
-    // cost the session revocation below.
     getLogger().error({ error }, "Failed to enumerate API keys after organization deletion");
-    failures.push(error);
-  }
-
-  try {
-    await new SessionService(db).revokeOrganizationSessions(orgId);
-  } catch (error) {
-    getLogger().error({ error }, "Failed to revoke sessions after organization deletion");
     failures.push(error);
   }
 

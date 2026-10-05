@@ -1,25 +1,4 @@
-/**
- * Authorization and reservation tests for the two instance-scoped Private
- * Channels money routes: `POST /deposits` and `POST /withdrawals`.
- *
- * Both routes used to accept ANY custody wallet in the project as their source,
- * gated only on `payments:write`. That let a caller deposit out of a wallet that
- * was never enrolled in Private Channels, and — the sharper edge — burn the
- * channel balance behind one while naming an arbitrary payout address. The gate
- * is now `private_channel_verified_wallets`: the wallet must have completed the
- * challenge → sign → verify handshake under the project's default principal on
- * this instance. These tests hold that gate, plus the `Idempotency-Key`
- * reservation that keeps a retry from moving funds twice.
- *
- * The principal is project-scoped, not per-user (migration 0073), so the seeds
- * here write the CURRENT row shape — `instance_id` + `is_default`, no `user_id`.
- * Seeding the legacy user-keyed shape is what let the first version of the seam
- * pass these tests while answering 403 against every real post-0073 project.
- *
- * The services are mocked: what is under test is the ACCESS DECISION and what
- * the route hands the service, not the chain work behind it.
- */
-
+import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, PrivateChannelDeposit, PrivateChannelWithdrawal } from "@sdp/types";
 import { PrivySigner } from "@solana/keychain-privy";
@@ -30,14 +9,17 @@ import {
   createPrivateChannelWithdrawalRepository,
 } from "@/db/repositories";
 import app from "@/index";
+import { verifyClerkJwt } from "@/lib/clerk-token";
 import {
   buildPrivateChannelDepositFingerprint,
   buildPrivateChannelWithdrawalFingerprint,
 } from "@/lib/idempotency";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -66,14 +48,14 @@ vi.mock("@/services/private-channels/auth/gateway-auth", async (importOriginal) 
   return { ...actual, resolveGatewayAuth: resolveGatewayAuthMock };
 });
 
-const ORGANIZATION_ID = "org_pc_value";
+const ORGANIZATION_ID = "org_test_pc_value";
 const PROJECT_ID = "prj_pc_value";
-const SESSION_ID = "ses_pc_value";
-const OTHER_SESSION_ID = "ses_pc_value_other";
-const ACTOR_USER_ID = "usr_pc_value_actor";
-const COLLEAGUE_USER_ID = "usr_pc_value_colleague";
-const NON_MEMBER_USER_ID = "usr_pc_value_non_member";
-const NON_MEMBER_SESSION_ID = "ses_pc_value_non_member";
+let CLERK_TOKEN: string;
+
+const ACTOR_USER_ID = "usr_test_pc_value_actor";
+const COLLEAGUE_USER_ID = "usr_test_pc_value_colleague";
+const NON_MEMBER_USER_ID = "usr_test_pc_value_non_member";
+let NON_MEMBER_CLERK_TOKEN: string;
 const INSTANCE_ID = "pci_pc_value";
 const ACTOR_PC_USER_ID = "pcu_pc_value_actor";
 const COLLEAGUE_PC_USER_ID = "pcu_pc_value_colleague";
@@ -83,7 +65,7 @@ const UNVERIFIED_WALLET_ID = "wallet_pc_value_unverified";
 const ACTOR_ADDRESS = "7C1Pu8mbHaDDTFnGH8YTqemNDofqXP3XEotzSo6TbwHz";
 const COLLEAGUE_ADDRESS = "J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi";
 const UNVERIFIED_ADDRESS = "Vote111111111111111111111111111111111111111";
-/** A real address nobody verified on this instance — a legitimate payout target. */
+
 const EXTERNAL_ADDRESS = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const ESCROW_PROGRAM_ID = "EscrowProgram11111111111111111111111111111";
 const WITHDRAW_PROGRAM_ID = "WithdrawProgram111111111111111111111111111";
@@ -93,7 +75,7 @@ const API_KEY = {
   raw: "sk_test_private_channel_value",
   prefix: "sk_test_pcv",
 };
-/** Selected-scope key bound to the colleague's wallet only. */
+
 const SCOPED_API_KEY = {
   id: "key_pc_value_scoped",
   raw: "sk_test_private_channel_value_scoped",
@@ -140,9 +122,9 @@ async function useConnectionSource() {
   ]);
 }
 
-function sessionHeaders(extra: Record<string, string> = {}) {
+function humanHeaders(extra: Record<string, string>) {
   return {
-    Cookie: `sdp_session=${SESSION_ID}`,
+    Authorization: `Bearer ${CLERK_TOKEN}`,
     "x-project-id": PROJECT_ID,
     "Content-Type": "application/json",
     "Idempotency-Key": "idem_pc_value",
@@ -162,7 +144,7 @@ function scopedApiKeyHeaders() {
   return { ...apiKeyHeaders(), Authorization: `Bearer ${SCOPED_API_KEY.raw}` };
 }
 
-function depositDto(overrides: Partial<PrivateChannelDeposit> = {}): PrivateChannelDeposit {
+function depositDto(overrides: Partial<PrivateChannelDeposit>): PrivateChannelDeposit {
   return {
     id: "dep_route_created",
     organizationId: ORGANIZATION_ID,
@@ -184,9 +166,7 @@ function depositDto(overrides: Partial<PrivateChannelDeposit> = {}): PrivateChan
   };
 }
 
-function withdrawalDto(
-  overrides: Partial<PrivateChannelWithdrawal> = {}
-): PrivateChannelWithdrawal {
+function withdrawalDto(overrides: Partial<PrivateChannelWithdrawal>): PrivateChannelWithdrawal {
   return {
     id: "wd_route_created",
     organizationId: ORGANIZATION_ID,
@@ -260,25 +240,6 @@ async function seedRouteState(): Promise<void> {
         ORGANIZATION_ID,
         NON_MEMBER_USER_ID
       ),
-    db
-      .prepare(
-        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-         VALUES (?, ?, ?, 'session', ?), (?, ?, ?, 'session', ?), (?, ?, ?, 'session', ?)`
-      )
-      .bind(
-        SESSION_ID,
-        ACTOR_USER_ID,
-        ORGANIZATION_ID,
-        new Date(Date.now() + 60_000).toISOString(),
-        OTHER_SESSION_ID,
-        COLLEAGUE_USER_ID,
-        ORGANIZATION_ID,
-        new Date(Date.now() + 60_000).toISOString(),
-        NON_MEMBER_SESSION_ID,
-        NON_MEMBER_USER_ID,
-        ORGANIZATION_ID,
-        new Date(Date.now() + 60_000).toISOString()
-      ),
   ]);
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
@@ -337,12 +298,6 @@ async function seedRouteState(): Promise<void> {
       .bind(SCOPED_API_KEY.id, COLLEAGUE_WALLET_ID, JSON.stringify(["payments:write"])),
     db
       .prepare(
-        // Principals are project-scoped and instance-scoped since 0073: `user_id`
-        // is nullable and carries no meaning here, so these rows are seeded the
-        // way the application now writes them — the acting one is the instance's
-        // DEFAULT principal, which is what the access seam resolves. Seeding the
-        // legacy user-keyed shape would let a seam that looks members up by user
-        // id pass here while answering 403 against a real project.
         `INSERT INTO private_channel_users
            (id, organization_id, project_id, instance_id, is_default, provisioned_at,
             spc_user_id, spc_username, spc_credential_ciphertext)
@@ -393,8 +348,7 @@ async function seedRouteState(): Promise<void> {
         UNVERIFIED_WALLET_ID,
         UNVERIFIED_ADDRESS
       ),
-    // The actor verified their own wallet; the colleague verified theirs. Nobody
-    // verified `UNVERIFIED_WALLET_ID`, and nobody verified EXTERNAL_ADDRESS.
+
     db
       .prepare(
         `INSERT INTO private_channel_verified_wallets
@@ -418,10 +372,7 @@ async function seedRouteState(): Promise<void> {
   ]);
 }
 
-async function postDeposit(
-  body: Record<string, unknown>,
-  headers: Record<string, string> = sessionHeaders()
-) {
+async function postDeposit(body: Record<string, unknown>, headers: Record<string, string>) {
   return app.request(
     "/v1/private-channels/deposits",
     { method: "POST", headers, body: JSON.stringify(body) },
@@ -429,10 +380,7 @@ async function postDeposit(
   );
 }
 
-async function postWithdrawal(
-  body: Record<string, unknown>,
-  headers: Record<string, string> = sessionHeaders()
-) {
+async function postWithdrawal(body: Record<string, unknown>, headers: Record<string, string>) {
   return app.request(
     "/v1/private-channels/withdrawals",
     { method: "POST", headers, body: JSON.stringify(body) },
@@ -440,7 +388,7 @@ async function postWithdrawal(
   );
 }
 
-async function recordedDeposit(recipient = ACTOR_ADDRESS) {
+async function recordedDeposit(recipient: string) {
   return createPrivateChannelDepositRepository(env).createDeposit({
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
@@ -462,7 +410,7 @@ async function recordedDeposit(recipient = ACTOR_ADDRESS) {
   });
 }
 
-async function recordedWithdrawal(destination = ACTOR_ADDRESS) {
+async function recordedWithdrawal(destination: string) {
   const row = await createPrivateChannelWithdrawalRepository(env).createWithdrawal({
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
@@ -482,12 +430,12 @@ async function recordedWithdrawal(destination = ACTOR_ADDRESS) {
       amount: "1.5",
     }),
   });
-  if (!row) throw new Error("Failed to seed withdrawal");
+  assert(row);
   return row;
 }
 
 async function abandonedWithdrawal() {
-  const row = await recordedWithdrawal();
+  const row = await recordedWithdrawal(ACTOR_ADDRESS);
   await getDb(env)
     .prepare("UPDATE private_channel_withdrawals SET updated_at = ? WHERE id = ?")
     .bind(new Date(Date.now() - 11 * 60_000).toISOString(), row.id)
@@ -515,19 +463,27 @@ describe("Private Channels — deposit and withdrawal access", () => {
     env.PRIVY_APP_ID = "pc-value-app";
     env.PRIVY_APP_SECRET = "pc-value-secret";
     providerSignerMock.mockReset().mockImplementation(createProviderSigner);
+    await seedTestDatabase(env);
+    await seedRouteState();
+    CLERK_TOKEN = await signSeededClerkMember(env, getDb(env), ACTOR_USER_ID, ORGANIZATION_ID);
+    NON_MEMBER_CLERK_TOKEN = await signSeededClerkMember(
+      env,
+      getDb(env),
+      NON_MEMBER_USER_ID,
+      ORGANIZATION_ID
+    );
+    await verifyClerkJwt(CLERK_TOKEN, env);
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async () =>
         Response.json({ address: ACTOR_ADDRESS, chain_type: "solana", id: ACTOR_WALLET_ID })
       )
     );
-    await seedTestDatabase(env);
-    await seedRouteState();
     createChannelDepositMock.mockReset();
     createChannelWithdrawalMock.mockReset();
     resolveGatewayAuthMock.mockReset();
-    createChannelDepositMock.mockResolvedValue(depositDto());
-    createChannelWithdrawalMock.mockResolvedValue(withdrawalDto());
+    createChannelDepositMock.mockResolvedValue(depositDto({}));
+    createChannelWithdrawalMock.mockResolvedValue(withdrawalDto({}));
     resolveGatewayAuthMock.mockResolvedValue({
       current: "spc-jwt",
       refresh: vi.fn(async () => "spc-jwt"),
@@ -546,8 +502,8 @@ describe("Private Channels — deposit and withdrawal access", () => {
     "uses role permissions when explicit permissions are absent (replay=%s)",
     async (replay) => {
       if (replay) {
-        await recordedDeposit();
-        await recordedWithdrawal();
+        await recordedDeposit(ACTOR_ADDRESS);
+        await recordedWithdrawal(ACTOR_ADDRESS);
       }
       await getDb(env)
         .prepare("UPDATE api_keys SET permissions = NULL WHERE id = ?")
@@ -564,7 +520,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   );
 
   it("uses the current role instead of the cached role when permissions are absent", async () => {
-    const original = await recordedDeposit();
+    const original = await recordedDeposit(ACTOR_ADDRESS);
     await getDb(env)
       .prepare("UPDATE api_keys SET role = 'api_readonly', permissions = NULL WHERE id = ?")
       .bind(API_KEY.id)
@@ -573,7 +529,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect((await postWithdrawal(body, apiKeyHeaders())).status).toBe(403);
     expect((await postDeposit(body, apiKeyHeaders())).status).toBe(403);
     const history = await app.request(
-      `/v1/private-channels/deposits/${original?.id}`,
+      `/v1/private-channels/deposits/${required(original).id}`,
       { headers: apiKeyHeaders() },
       env
     );
@@ -585,7 +541,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   it.each([{ permissions: [] }, { permissions: ["wallets:read"] }])(
     "does not inherit role permissions for explicit permissions $permissions",
     async ({ permissions }) => {
-      await recordedDeposit();
+      await recordedDeposit(ACTOR_ADDRESS);
       await setKeyPermissions(permissions);
       const body = { walletId: ACTOR_WALLET_ID, amount: "1.5" };
       expect((await postWithdrawal(body, apiKeyHeaders())).status).toBe(403);
@@ -609,7 +565,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
       .run();
 
     for (const replay of [false, true]) {
-      if (replay) await recordedDeposit();
+      if (replay) await recordedDeposit(ACTOR_ADDRESS);
       const response = await postDeposit(
         { walletId: ACTOR_WALLET_ID, amount: "1.5" },
         apiKeyHeaders()
@@ -664,12 +620,14 @@ describe("Private Channels — deposit and withdrawal access", () => {
 
     expect(response.status).toBe(403);
     const history = await app.request(
-      `/v1/private-channels/deposits/${original?.id}`,
+      `/v1/private-channels/deposits/${required(original).id}`,
       { headers: apiKeyHeaders() },
       env
     );
     expect(history.status).toBe(200);
-    expect(await history.json()).toMatchObject({ data: { id: original?.id, status: "pending" } });
+    expect(await history.json()).toMatchObject({
+      data: { id: required(original).id, status: "pending" },
+    });
     expect(providerSignerMock).not.toHaveBeenCalled();
     expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
   });
@@ -713,15 +671,20 @@ describe("Private Channels — deposit and withdrawal access", () => {
     await getDb(env)
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = 'cw-pcv-actor'")
       .run();
-    const response = await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.500" });
+    const response = await postWithdrawal(
+      { walletId: ACTOR_WALLET_ID, amount: "1.500" },
+      humanHeaders({})
+    );
     expect(response.status).toBe(404);
     const history = await app.request(
-      `/v1/private-channels/withdrawals/${original?.id}`,
-      { headers: sessionHeaders() },
+      `/v1/private-channels/withdrawals/${required(original).id}`,
+      { headers: humanHeaders({}) },
       env
     );
     expect(history.status).toBe(200);
-    expect(await history.json()).toMatchObject({ data: { id: original?.id, status: "pending" } });
+    expect(await history.json()).toMatchObject({
+      data: { id: required(original).id, status: "pending" },
+    });
     expect(providerSignerMock).not.toHaveBeenCalled();
     expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
   });
@@ -730,7 +693,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     await useConnectionSource();
     env.PRIVY_BYOK_ENABLED = "false";
     for (const post of [postDeposit, postWithdrawal]) {
-      const response = await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" });
+      const response = await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}));
       expect(response.status).toBe(403);
       expect(await response.json()).toMatchObject({
         error: { details: { reason: "runtime_execution_paused" } },
@@ -744,7 +707,9 @@ describe("Private Channels — deposit and withdrawal access", () => {
     await useConnectionSource();
     env.PRIVY_BYOK_ENABLED = "true";
     for (const post of [postDeposit, postWithdrawal]) {
-      expect((await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(200);
+      expect(
+        (await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+      ).toBe(200);
     }
     expect(providerSignerMock).toHaveBeenCalledTimes(2);
     expect(providerSignerMock).toHaveBeenCalledWith(
@@ -754,8 +719,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
 
   it("preserves Config execution when BYOK is disabled", async () => {
     env.PRIVY_BYOK_ENABLED = "false";
-    expect((await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(200);
-    expect((await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(200);
+    expect(
+      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+    ).toBe(200);
+    expect(
+      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+    ).toBe(200);
   });
 
   it.each(["credential", "entitlement"])(
@@ -777,9 +746,9 @@ describe("Private Channels — deposit and withdrawal access", () => {
           .run();
       }
       for (const post of [postDeposit, postWithdrawal]) {
-        expect((await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(
-          reason === "credential" ? 409 : 403
-        );
+        expect(
+          (await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+        ).toBe(reason === "credential" ? 409 : 403);
       }
       expect(providerSignerMock).not.toHaveBeenCalled();
       expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
@@ -796,8 +765,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
       (id, custody_config_id, wallet_id, public_key, status) VALUES ('cw-pcv-duplicate', 'cust-pcv', ?, ?, 'active')`)
         .bind(ACTOR_WALLET_ID, ACTOR_ADDRESS)
         .run();
-      expect((await postDeposit({ walletId: selector, amount: "1.5" })).status).toBe(409);
-      expect((await postWithdrawal({ walletId: selector, amount: "1.5" })).status).toBe(409);
+      expect(
+        (await postDeposit({ walletId: selector, amount: "1.5" }, humanHeaders({}))).status
+      ).toBe(409);
+      expect(
+        (await postWithdrawal({ walletId: selector, amount: "1.5" }, humanHeaders({}))).status
+      ).toBe(409);
       expect(providerSignerMock).not.toHaveBeenCalled();
       expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
     }
@@ -837,7 +810,9 @@ describe("Private Channels — deposit and withdrawal access", () => {
         .bind(ACTOR_ADDRESS)
         .run();
       for (const post of [postDeposit, postWithdrawal]) {
-        expect((await post({ walletId: ACTOR_ADDRESS, amount: "1.5" })).status).toBe(409);
+        expect(
+          (await post({ walletId: ACTOR_ADDRESS, amount: "1.5" }, humanHeaders({}))).status
+        ).toBe(409);
       }
       expect(providerSignerMock).not.toHaveBeenCalled();
       expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
@@ -852,26 +827,32 @@ describe("Private Channels — deposit and withdrawal access", () => {
       .run();
     expect(
       (
-        await postDeposit({
-          walletId: ACTOR_WALLET_ID,
-          amount: "1.5",
-          recipient: COLLEAGUE_ADDRESS,
-        })
+        await postDeposit(
+          {
+            walletId: ACTOR_WALLET_ID,
+            amount: "1.5",
+            recipient: COLLEAGUE_ADDRESS,
+          },
+          humanHeaders({})
+        )
       ).status
     ).toBe(200);
     expect(
       (
-        await postWithdrawal({
-          walletId: ACTOR_WALLET_ID,
-          amount: "1.5",
-          destination: COLLEAGUE_ADDRESS,
-        })
+        await postWithdrawal(
+          {
+            walletId: ACTOR_WALLET_ID,
+            amount: "1.5",
+            destination: COLLEAGUE_ADDRESS,
+          },
+          humanHeaders({})
+        )
       ).status
     ).toBe(200);
   });
 
   it("denies stale all-wallet access after the key is restricted in the database", async () => {
-    await recordedDeposit();
+    await recordedDeposit(ACTOR_ADDRESS);
     await getDb(env)
       .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
       VALUES ('akwp-pcv-restricted', ?, ?, '["payments:write"]')`)
@@ -887,7 +868,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   });
 
   it("denies revoked API keys even when their cached permissions allow replay", async () => {
-    await recordedDeposit();
+    await recordedDeposit(ACTOR_ADDRESS);
     await getDb(env)
       .prepare("UPDATE api_keys SET status = 'revoked', permissions = NULL WHERE id = ?")
       .bind(API_KEY.id)
@@ -942,13 +923,13 @@ describe("Private Channels — deposit and withdrawal access", () => {
   });
 
   it("preserves write-only deposit and withdrawal replay while Connection execution is paused", async () => {
-    const deposit = await recordedDeposit();
-    const withdrawal = await recordedWithdrawal();
+    const deposit = await recordedDeposit(ACTOR_ADDRESS);
+    const withdrawal = await recordedWithdrawal(ACTOR_ADDRESS);
     await useConnectionSource();
     env.PRIVY_BYOK_ENABLED = "false";
     await setKeyPermissions(["payments:write"]);
     for (const { post, id } of [
-      { post: postDeposit, id: deposit?.id },
+      { post: postDeposit, id: required(deposit).id },
       { post: postWithdrawal, id: withdrawal.id },
     ]) {
       const response = await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, apiKeyHeaders());
@@ -960,7 +941,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   });
 
   it("refuses to authorize a replacement source for replay while history remains readable", async () => {
-    const original = await recordedDeposit();
+    const original = await recordedDeposit(ACTOR_ADDRESS);
     await useConnectionSource();
     await getDb(env).batch([
       getDb(env).prepare(
@@ -974,13 +955,13 @@ describe("Private Channels — deposit and withdrawal access", () => {
     const body = { walletId: ACTOR_WALLET_ID, amount: "1.5" };
     expect((await postDeposit(body, apiKeyHeaders())).status).toBe(409);
     const read = await app.request(
-      `/v1/private-channels/deposits/${original?.id}`,
+      `/v1/private-channels/deposits/${required(original).id}`,
       { headers: apiKeyHeaders() },
       env
     );
     expect(read.status).toBe(200);
     expect(await read.json()).toMatchObject({
-      data: { id: original?.id, depositor: ACTOR_ADDRESS },
+      data: { id: required(original).id, depositor: ACTOR_ADDRESS },
     });
     expect(providerSignerMock).not.toHaveBeenCalled();
   });
@@ -992,38 +973,49 @@ describe("Private Channels — deposit and withdrawal access", () => {
     { walletId: COLLEAGUE_WALLET_ID },
     { recipient: COLLEAGUE_WALLET_ID },
   ])("conflicts on changed or unprovable historical payload %j", async (changed) => {
-    await recordedDeposit();
+    await recordedDeposit(ACTOR_ADDRESS);
     expect(
-      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5", ...changed })).status
+      (
+        await postDeposit(
+          { walletId: ACTOR_WALLET_ID, amount: "1.5", ...changed },
+          humanHeaders({})
+        )
+      ).status
     ).toBe(409);
     expect(providerSignerMock).not.toHaveBeenCalled();
   });
 
   it("replays a deposit whose recipient was named by walletId", async () => {
     const original = await recordedDeposit(COLLEAGUE_ADDRESS);
-    const response = await postDeposit({
-      walletId: ACTOR_WALLET_ID,
-      amount: "1.5",
-      recipient: COLLEAGUE_WALLET_ID,
-    });
+    const response = await postDeposit(
+      {
+        walletId: ACTOR_WALLET_ID,
+        amount: "1.5",
+        recipient: COLLEAGUE_WALLET_ID,
+      },
+      humanHeaders({})
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      data: { id: original?.id, recipient: COLLEAGUE_ADDRESS },
+      data: { id: required(original).id, recipient: COLLEAGUE_ADDRESS },
     });
     expect(providerSignerMock).not.toHaveBeenCalled();
     expect(createChannelDepositMock).not.toHaveBeenCalled();
   });
 
   it("replays a deposit whose recipient is the source named by walletId", async () => {
-    const original = await recordedDeposit();
-    const response = await postDeposit({
-      walletId: ACTOR_WALLET_ID,
-      amount: "1.5",
-      recipient: ACTOR_WALLET_ID,
-    });
+    const original = await recordedDeposit(ACTOR_ADDRESS);
+    const response = await postDeposit(
+      {
+        walletId: ACTOR_WALLET_ID,
+        amount: "1.5",
+        recipient: ACTOR_WALLET_ID,
+      },
+      humanHeaders({})
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      data: { id: original?.id, recipient: ACTOR_ADDRESS },
+      data: { id: required(original).id, recipient: ACTOR_ADDRESS },
     });
     expect(providerSignerMock).not.toHaveBeenCalled();
     expect(createChannelDepositMock).not.toHaveBeenCalled();
@@ -1031,11 +1023,14 @@ describe("Private Channels — deposit and withdrawal access", () => {
 
   it("replays a withdrawal whose destination was named by walletId", async () => {
     const original = await recordedWithdrawal(COLLEAGUE_ADDRESS);
-    const response = await postWithdrawal({
-      walletId: ACTOR_WALLET_ID,
-      amount: "1.5",
-      destination: COLLEAGUE_WALLET_ID,
-    });
+    const response = await postWithdrawal(
+      {
+        walletId: ACTOR_WALLET_ID,
+        amount: "1.5",
+        destination: COLLEAGUE_WALLET_ID,
+      },
+      humanHeaders({})
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       data: { id: original.id, destination: COLLEAGUE_ADDRESS },
@@ -1072,40 +1067,37 @@ describe("Private Channels — deposit and withdrawal access", () => {
 
   it("fails signer setup before opening an SPC session", async () => {
     providerSignerMock.mockRejectedValue(new Error("provider unavailable"));
-    expect((await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(503);
-    expect((await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(503);
+    expect(
+      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+    ).toBe(503);
+    expect(
+      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+    ).toBe(503);
     expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });
 
-  /**
-   * The SPC identity is a PROJECT-scoped principal since 0073, not a per-user
-   * membership, so value movement cannot be gated on who is calling — the seam
-   * resolves the instance's default principal, exactly as member transfers do.
-   * What still has to hold is that the project HAS one to act as.
-   */
   it("refuses a value movement when the project has no active principal", async () => {
     await getDb(env)
       .prepare("UPDATE private_channel_users SET is_default = FALSE WHERE id = ?")
       .bind(ACTOR_PC_USER_ID)
       .run();
 
-    expect((await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(403);
-    expect((await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(403);
+    expect(
+      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+    ).toBe(403);
+    expect(
+      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+    ).toBe(403);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });
 
-  /**
-   * Enrolment is the gate, and it does not depend on the caller's own identity:
-   * a session belonging to nobody in particular, and an API key, both get the
-   * same refusal for a wallet that was never verified under the principal.
-   */
   it.each([
     [
-      "a non-member session",
-      () => sessionHeaders({ Cookie: `sdp_session=${NON_MEMBER_SESSION_ID}` }),
+      "a non-member Clerk user",
+      () => humanHeaders({ Authorization: `Bearer ${NON_MEMBER_CLERK_TOKEN}` }),
     ],
     ["an API key", apiKeyHeaders],
   ])("refuses an unenrolled wallet for %s", async (_label, buildHeaders) => {
@@ -1137,43 +1129,50 @@ describe("Private Channels — deposit and withdrawal access", () => {
   });
 
   it("refuses a custody wallet that is not enrolled under the principal", async () => {
-    expect((await postDeposit({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" })).status).toBe(403);
-    expect((await postWithdrawal({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" })).status).toBe(
-      403
-    );
+    expect(
+      (await postDeposit({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" }, humanHeaders({})))
+        .status
+    ).toBe(403);
+    expect(
+      (await postWithdrawal({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" }, humanHeaders({})))
+        .status
+    ).toBe(403);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });
 
-  // The finding in one line: `payments:write` used to be enough to spend out of
-  // any project custody wallet, or to burn the channel balance behind it. This
-  // one is verified under a DIFFERENT, non-default principal — enrolled in SPC,
-  // but not under the principal this project acts as.
   it("does not let a caller move funds out of another principal's verified wallet", async () => {
-    expect((await postDeposit({ walletId: COLLEAGUE_WALLET_ID, amount: "1.5" })).status).toBe(403);
-    expect((await postWithdrawal({ walletId: COLLEAGUE_WALLET_ID, amount: "1.5" })).status).toBe(
-      403
-    );
+    expect(
+      (await postDeposit({ walletId: COLLEAGUE_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+    ).toBe(403);
+    expect(
+      (await postWithdrawal({ walletId: COLLEAGUE_WALLET_ID, amount: "1.5" }, humanHeaders({})))
+        .status
+    ).toBe(403);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });
 
   it("credits only addresses verified on this instance", async () => {
-    // A channel balance is only spendable by a verified wallet, so crediting an
-    // unverified address could only ever strand it.
-    const external = await postDeposit({
-      walletId: ACTOR_WALLET_ID,
-      amount: "1.5",
-      recipient: EXTERNAL_ADDRESS,
-    });
+    const external = await postDeposit(
+      {
+        walletId: ACTOR_WALLET_ID,
+        amount: "1.5",
+        recipient: EXTERNAL_ADDRESS,
+      },
+      humanHeaders({})
+    );
     expect(external.status).toBe(400);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
 
-    const colleague = await postDeposit({
-      walletId: ACTOR_WALLET_ID,
-      amount: "1.5",
-      recipient: COLLEAGUE_ADDRESS,
-    });
+    const colleague = await postDeposit(
+      {
+        walletId: ACTOR_WALLET_ID,
+        amount: "1.5",
+        recipient: COLLEAGUE_ADDRESS,
+      },
+      humanHeaders({})
+    );
     expect(colleague.status).toBe(200);
     expect(createChannelDepositMock).toHaveBeenCalledWith(
       expect.anything(),
@@ -1185,25 +1184,35 @@ describe("Private Channels — deposit and withdrawal access", () => {
     "rejects the %s address as a deposit recipient or withdrawal destination",
     async (_label, unsafe) => {
       expect(
-        (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5", recipient: unsafe })).status
+        (
+          await postDeposit(
+            { walletId: ACTOR_WALLET_ID, amount: "1.5", recipient: unsafe },
+            humanHeaders({})
+          )
+        ).status
       ).toBe(400);
       expect(
-        (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5", destination: unsafe }))
-          .status
+        (
+          await postWithdrawal(
+            { walletId: ACTOR_WALLET_ID, amount: "1.5", destination: unsafe },
+            humanHeaders({})
+          )
+        ).status
       ).toBe(400);
       expect(createChannelDepositMock).not.toHaveBeenCalled();
       expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
     }
   );
 
-  // A withdrawal exists to move value OUT, and the caller can only ever burn a
-  // balance they proved control of — so their own payout address is their call.
   it("allows an unverified withdrawal destination", async () => {
-    const response = await postWithdrawal({
-      walletId: ACTOR_WALLET_ID,
-      amount: "1.5",
-      destination: EXTERNAL_ADDRESS,
-    });
+    const response = await postWithdrawal(
+      {
+        walletId: ACTOR_WALLET_ID,
+        amount: "1.5",
+        destination: EXTERNAL_ADDRESS,
+      },
+      humanHeaders({})
+    );
 
     expect(response.status).toBe(200);
     expect(createChannelWithdrawalMock).toHaveBeenCalledWith(
@@ -1213,7 +1222,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   });
 
   it("refuses to move funds without an idempotency key", async () => {
-    const headers = sessionHeaders();
+    const headers = humanHeaders({});
     const { "Idempotency-Key": _omitted, ...withoutKey } = headers;
 
     expect(
@@ -1222,14 +1231,15 @@ describe("Private Channels — deposit and withdrawal access", () => {
     expect(
       (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, withoutKey)).status
     ).toBe(400);
-    // Nothing is resolved, signed or broadcast: without a key there is no way to
-    // tell a retry from a second movement, so the request never starts.
+
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
   });
 
   it("hands the service the resolved wallet, counterparty, acting member and key", async () => {
-    expect((await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(200);
+    expect(
+      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+    ).toBe(200);
     expect(createChannelDepositMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -1240,13 +1250,15 @@ describe("Private Channels — deposit and withdrawal access", () => {
           walletId: ACTOR_WALLET_ID,
           publicKey: ACTOR_ADDRESS,
         }),
-        // Defaulted to the depositor, which is already verified.
+
         recipient: ACTOR_ADDRESS,
         idempotencyKey: "idem_pc_value",
       })
     );
 
-    expect((await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" })).status).toBe(200);
+    expect(
+      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+    ).toBe(200);
     expect(createChannelWithdrawalMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({

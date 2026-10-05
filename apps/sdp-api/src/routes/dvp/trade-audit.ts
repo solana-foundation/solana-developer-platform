@@ -9,7 +9,7 @@
  * in the metadata rather than in the resource id.
  *
  * The actor is passed explicitly, never left to `log()`'s context fallback:
- * these routes accept an API key, a Clerk session and a dashboard session, and
+ * these routes accept an API key and a Clerk JWT, and
  * an event that names the wrong principal is worse than no event.
  *
  * The two directions take different failure postures on purpose, the same

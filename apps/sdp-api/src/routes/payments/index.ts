@@ -13,7 +13,7 @@ import walletPolicies from "./wallet-policies";
 
 const payments = new Hono<{ Bindings: Env }>();
 
-payments.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+payments.use("*", unifiedAuthMiddleware());
 payments.use("*", projectContextMiddleware());
 
 payments.route("/transfers", transfers);
