@@ -1,8 +1,17 @@
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
-import { isPublicRoute, rejectCrossSiteWrite } from "./proxy";
+import { config, isPublicRoute, rejectCrossSiteWrite } from "./proxy";
 
 describe("public web routes", () => {
+  it("lets the Sentry tunnel bypass auth without excluding protected routes", () => {
+    const matches = (url: string) => unstable_doesMiddlewareMatch({ config, nextConfig: {}, url });
+    expect(matches("/monitoring?o=1&p=2")).toBe(false);
+    expect(matches("/monitoring/")).toBe(false);
+    expect(matches("/monitoring-settings")).toBe(true);
+    expect(matches("/dashboard/payments")).toBe(true);
+    expect(matches("/api/dashboard/payments/transfers")).toBe(true);
+  });
   it("keeps the workspace loading transition available during bootstrap", () => {
     expect(isPublicRoute(new NextRequest("https://dashboard.example.com/workspace-loading"))).toBe(
       true

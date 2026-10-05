@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { sentryScrubbingHooks } from "@sdp/redaction";
 import { describe, expect, it } from "vitest";
+import { sentryDataCollection } from "./sentry-data-collection";
 
 const APP_ROOT = path.resolve(__dirname, "../..");
 
@@ -28,11 +29,29 @@ const SENTRY_INIT_FILES = [
 ];
 
 describe("Sentry initialization", () => {
+  it("disables v11 automatic collection of sensitive payload categories", () => {
+    expect(sentryDataCollection).toEqual({
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+      urlQueryParams: false,
+      graphQL: { document: false, variables: false },
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      stackFrameVariables: false,
+    });
+  });
   it.each(SENTRY_INIT_FILES)("%s spreads the shared scrubbing hooks", (relativePath) => {
     const source = readAppFile(relativePath);
 
     expect(source).toContain("...sentryScrubbingHooks");
-    expect(source).toContain("sendDefaultPii: false");
+    expect(source).toContain("dataCollection: sentryDataCollection");
+    expect(source).toContain('traceLifecycle: "static"');
+    expect(source).toContain(
+      "beforeSendSpan: Sentry.withStaticSpan(sentryScrubbingHooks.beforeSendSpan)"
+    );
   });
 
   it("has no other Sentry.init call site that could ship unscrubbed events", () => {

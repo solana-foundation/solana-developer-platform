@@ -66,6 +66,9 @@ patchedDependencies:
   brace-expansion@5.0.9:
     hash: cb7f184e2dafcba994a55ee67b21ef5a2cb11e980f3bce73203d9d93f42018c3
     path: patches/brace-expansion@5.0.9.patch
+  hono@4.13.10:
+    hash: 45c21b1642ad1f619c92fa11ab7daf54707e68cf12bdb19c19dd0864ca54bc53
+    path: patches/hono@4.13.10.patch
   next-themes@0.4.6:
     hash: 983c334c944dfaa33add5c77deaeb2c555ad196455d97b6216f4d23f70806dff
     path: patches/next-themes@0.4.6.patch
@@ -97,7 +100,7 @@ importers:
         version: 1.57.0(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
       '@hono/node-server':
         specifier: 2.1.1
-        version: 2.1.1(hono@4.13.10)
+        version: 2.1.1(hono@4.13.10(patch_hash=45c21b1642ad1f619c92fa11ab7daf54707e68cf12bdb19c19dd0864ca54bc53))
       '@sdp/custody':
         specifier: workspace:*
         version: link:../../packages/sdp-custody
@@ -232,7 +235,7 @@ importers:
         version: 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       hono:
         specifier: 4.13.10
-        version: 4.13.10
+        version: 4.13.10(patch_hash=45c21b1642ad1f619c92fa11ab7daf54707e68cf12bdb19c19dd0864ca54bc53)
       ioredis:
         specifier: 6.0.0
         version: 6.0.0
@@ -10658,9 +10661,9 @@ snapshots:
     dependencies:
       react: 19.3.0
 
-  '@hono/node-server@2.1.1(hono@4.13.10)':
+  '@hono/node-server@2.1.1(hono@4.13.10(patch_hash=45c21b1642ad1f619c92fa11ab7daf54707e68cf12bdb19c19dd0864ca54bc53))':
     dependencies:
-      hono: 4.13.10
+      hono: 4.13.10(patch_hash=45c21b1642ad1f619c92fa11ab7daf54707e68cf12bdb19c19dd0864ca54bc53)
 
   '@hubbleprotocol/hubble-config@5.0.0(@solana/web3.js@1.99.0(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@6.0.6))':
     dependencies:
@@ -17454,7 +17457,7 @@ snapshots:
     dependencies:
       hermes-estree: 0.25.1
 
-  hono@4.13.10: {}
+  hono@4.13.10(patch_hash=45c21b1642ad1f619c92fa11ab7daf54707e68cf12bdb19c19dd0864ca54bc53): {}
 
   hookified@1.15.1: {}
 

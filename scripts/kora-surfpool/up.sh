@@ -101,18 +101,20 @@ configure_embedded_remote_rpc() {
 embedded_surfpool_config_matches() {
   local file="$1"
   local remote_rpc_url="${SURFPOOL_REMOTE_RPC_URL:-}"
-  node - "${file}" "${remote_rpc_url}" <<'NODE'
+  node - "${file}" "${remote_rpc_url}" "${KORA_SURFPOOL_BLOCK_PRODUCTION_MODE:-clock}" "${KORA_SURFPOOL_SLOT_TIME_MS:-100}" <<'NODE'
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
-const [file, remoteRpcUrl] = process.argv.slice(2);
+const [file, remoteRpcUrl, blockProductionMode, slotTimeMs] = process.argv.slice(2);
 const payload = JSON.parse(await readFile(file, "utf8"));
 const expectedDigest = remoteRpcUrl
   ? createHash("sha256").update(remoteRpcUrl).digest("hex")
   : undefined;
 const actualDigest = payload.remoteRpcUrlSha256;
 
-if (actualDigest !== expectedDigest) {
+if (actualDigest !== expectedDigest ||
+    payload.blockProductionMode !== blockProductionMode ||
+    payload.slotTimeMs !== Number.parseInt(slotTimeMs, 10)) {
   process.exit(1);
 }
 NODE

@@ -14,10 +14,10 @@ const config = {
   offline: process.env.SURFPOOL_REMOTE_RPC_URL
     ? false
     : parseBoolean("KORA_SURFPOOL_OFFLINE", true),
-  blockProductionMode: process.env.KORA_SURFPOOL_BLOCK_PRODUCTION_MODE ?? "transaction",
-  ...(process.env.KORA_SURFPOOL_SLOT_TIME_MS && {
-    slotTimeMs: Number.parseInt(process.env.KORA_SURFPOOL_SLOT_TIME_MS, 10),
-  }),
+  // Surfpool 1.6 finalizes only after subsequent blocks. Keep producing them
+  // while tests poll commitments, even when no new transactions arrive.
+  blockProductionMode: process.env.KORA_SURFPOOL_BLOCK_PRODUCTION_MODE ?? "clock",
+  slotTimeMs: Number.parseInt(process.env.KORA_SURFPOOL_SLOT_TIME_MS ?? "100", 10),
   ...(process.env.SURFPOOL_REMOTE_RPC_URL && {
     remoteRpcUrl: process.env.SURFPOOL_REMOTE_RPC_URL,
   }),
@@ -31,6 +31,8 @@ const eventDrainInterval = setInterval(() => {
 eventDrainInterval.unref();
 
 const state = {
+  blockProductionMode: config.blockProductionMode,
+  slotTimeMs: config.slotTimeMs,
   instanceId: surfnet.instanceId,
   payer: surfnet.payer,
   pid: process.pid,

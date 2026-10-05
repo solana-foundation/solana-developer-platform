@@ -1,7 +1,14 @@
 import { type Address, address, type TransactionSigner } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildKaminoDepositPlan, buildKaminoWithdrawPlan, readKaminoPosition } from "./sdk";
+import { kaminoClusterConfig } from "./programs";
+import {
+  buildKaminoDepositPlan,
+  buildKaminoWithdrawPlan,
+  quoteKaminoDeposit,
+  quoteKaminoWithdraw,
+  readKaminoPosition,
+} from "./sdk";
 import { isShareAtaCloseInstruction } from "./withdraw-instructions";
 
 const VAULT = address("7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx");
@@ -20,6 +27,11 @@ const mocks = vi.hoisted(() => ({
   createKaminoRpc: vi.fn(),
   fetchGlobalConfig: vi.fn(),
   fetchReserveStates: vi.fn(),
+  fetchMarketStates: vi.fn(),
+  constructReserve: vi.fn(),
+  constructProbe: vi.fn(),
+  sendBlockTime: vi.fn(),
+  collateralInstant: vi.fn(),
   getState: vi.fn(),
   getUserShares: vi.fn(),
   getUserSharesState: vi.fn(),
@@ -55,15 +67,22 @@ vi.mock("@kamino-finance/klend-sdk", async (importOriginal) => {
         decimals: DecimalLike;
         readonly price: unknown;
         valid: boolean;
-      }
+      },
+      rpc: unknown,
+      slotDurationMs: number,
+      rewardsMaxAprBps: number,
+      scaledMultiplier: unknown,
+      programId: Address
     ) {
+      mocks.constructReserve(rpc, slotDurationMs, rewardsMaxAprBps, scaledMultiplier, programId);
       this.address = reserveAddress;
       this.state = state;
       this.tokenOraclePrice = tokenOraclePrice;
       mocks.stateOnlyOracles.push(tokenOraclePrice);
     }
 
-    getEstimatedCollateralExchangeRate() {
+    getEstimatedCollateralExchangeRate(ledgerInstant: unknown) {
+      mocks.collateralInstant(ledgerInstant);
       return this.tokenOraclePrice.decimals.div(6);
     }
 
@@ -76,7 +95,14 @@ vi.mock("@kamino-finance/klend-sdk", async (importOriginal) => {
     readonly address: Address;
     readonly programId: Address;
 
-    constructor(_rpc: unknown, vaultAddress: Address, _state: unknown, programId: Address) {
+    constructor(
+      rpc: unknown,
+      vaultAddress: Address,
+      slotDurationMs: number,
+      state: unknown,
+      programId: Address
+    ) {
+      mocks.constructProbe(rpc, vaultAddress, slotDurationMs, state, programId);
       this.address = vaultAddress;
       this.programId = programId;
     }
@@ -106,6 +132,7 @@ vi.mock("@kamino-finance/klend-sdk", async (importOriginal) => {
     KaminoVault: BoundVault,
     KVaultGlobalConfig: { fetch: mocks.fetchGlobalConfig },
     Reserve: { fetchMultiple: mocks.fetchReserveStates },
+    LendingMarket: { fetchMultiple: mocks.fetchMarketStates },
   };
 });
 
@@ -115,6 +142,7 @@ vi.mock("./rpc", () => ({ createKaminoRpc: mocks.createKaminoRpc }));
 function integer(value: number) {
   return {
     gt: () => false,
+    gtn: (other: number) => value > other,
     isZero: () => value === 0,
     lt: () => false,
     toNumber: () => value,
@@ -125,6 +153,16 @@ function integer(value: number) {
 const state = {
   baseVaultAuthority: VAULT,
   managementFeeBps: integer(0),
+  lastFeeChargeTimestamp: integer(1_700_000_000),
+  crankFundFeePerReserve: integer(0),
+  depositCap: integer(2_000_000),
+  minDepositAmount: integer(0),
+  minWithdrawAmount: integer(0),
+  rewardInfo: {
+    rewardPerSecond: integer(10_000),
+    rewardsAvailable: integer(100_000),
+    lastIssuanceTs: integer(1_699_999_995),
+  },
   pendingFeesSf: integer(0),
   performanceFeeBps: integer(0),
   sharesIssued: integer(1_000_000),
@@ -135,7 +173,14 @@ const state = {
   tokenMintDecimals: integer(6),
   tokenProgram: TOKEN_PROGRAM_ADDRESS,
   tokenVault: VAULT,
-  vaultAllocationStrategy: [{ ctokenAllocation: integer(0), reserve: RESERVE }],
+  vaultAllocationStrategy: [
+    {
+      ctokenAllocation: integer(0),
+      reserve: RESERVE,
+      targetAllocationWeight: integer(1),
+      tokenAllocationCap: integer(2_000_000),
+    },
+  ],
   withdrawalPenaltyBps: "0",
   withdrawalPenaltyLamports: "0",
 };
@@ -166,6 +211,7 @@ beforeEach(() => {
   mocks.stateOnlyOracles.length = 0;
   mocks.rpc = {
     getTokenAccountsByOwner: vi.fn(() => ({ send: mocks.sendTokenAccounts })),
+    getBlockTime: vi.fn(() => ({ send: mocks.sendBlockTime })),
   };
   mocks.createKaminoRpc.mockReturnValue(mocks.rpc);
   mocks.fetchGlobalConfig.mockResolvedValue({
@@ -173,6 +219,8 @@ beforeEach(() => {
     withdrawalPenaltyLamports: "0",
   });
   mocks.fetchReserveStates.mockResolvedValue([reserveState]);
+  mocks.fetchMarketStates.mockResolvedValue([{ reserveRewardsMaxAprBps: 275 }]);
+  mocks.sendBlockTime.mockResolvedValue(1_700_000_000n);
   mocks.getState.mockResolvedValue(state);
   mocks.getUserShares.mockResolvedValue({ stakedShares: "0" });
   mocks.getUserSharesState.mockImplementation(() => {
@@ -189,10 +237,73 @@ beforeEach(() => {
 });
 
 describe("oracle-free Kamino SDK execution", () => {
+  it("refuses a withdrawal when its selected slot has no block time", async () => {
+    mocks.sendBlockTime.mockResolvedValue(null);
+    await expect(
+      buildKaminoWithdrawPlan(runtime, { owner, shares: "1", slot: 123n, vault: VAULT })
+    ).rejects.toMatchObject({ code: "VAULT_UNREADABLE" });
+  });
+
+  it("keeps exact shares but withholds value when block time is unavailable", async () => {
+    mocks.sendBlockTime.mockResolvedValue(null);
+    const position = await readKaminoPosition(runtime, { owner: OWNER, slot: 123n, vault: VAULT });
+    expect(position.shares).toBe("1");
+    expect(position).not.toHaveProperty("tokenValue");
+  });
+
+  it.each([null, {}, { reserveRewardsMaxAprBps: -1 }])(
+    "refuses construction with unreadable lending-market rewards: %s",
+    async (market) => {
+      mocks.fetchMarketStates.mockResolvedValue([market]);
+      await expect(
+        buildKaminoDepositPlan(runtime, { amount: "1", owner, vault: VAULT })
+      ).rejects.toMatchObject({ code: "VAULT_UNREADABLE" });
+    }
+  );
+
+  it("quotes deposits with rewards vested at the selected block time", async () => {
+    const quote = await quoteKaminoDeposit(runtime, { amount: "0.4", slot: 123n, vault: VAULT });
+    expect(quote).toMatchObject({ sharesOut: "0.258064" });
+    expect(mocks.rpc.getBlockTime).toHaveBeenCalledWith(123n);
+    expect(mocks.collateralInstant).toHaveBeenCalledWith({ slot: 123n, blockTime: 1_700_000_000n });
+  });
+
+  it("reports a deposit-cap clamp using the same block-time rewards as the SDK", async () => {
+    const quote = await quoteKaminoDeposit(runtime, { amount: "1", slot: 123n, vault: VAULT });
+    expect(quote.sharesOut).toBe("0.290322");
+    expect(quote.issues).toContainEqual(expect.objectContaining({ code: "DEPOSIT_CAP_EXCEEDED" }));
+  });
+
+  it("quotes withdrawals using the same ledger instant as reserve accrual", async () => {
+    const quote = await quoteKaminoWithdraw(runtime, { shares: "0.5", slot: 123n, vault: VAULT });
+    expect(quote).toMatchObject({ assetsOut: "0.75" });
+    expect(mocks.rpc.getBlockTime).toHaveBeenCalledWith(123n);
+    expect(mocks.collateralInstant).toHaveBeenCalledWith({ slot: 123n, blockTime: 1_700_000_000n });
+  });
   it("executes the pinned SDK deposit builder with state-only reserves", async () => {
     const plan = await buildKaminoDepositPlan(runtime, { amount: "1", owner, vault: VAULT });
 
     expect(plan.accepted).toEqual({ amount: "1" });
+    const config = kaminoClusterConfig("devnet");
+    expect(mocks.constructProbe).toHaveBeenCalledWith(
+      mocks.rpc,
+      VAULT,
+      config.slotDurationMs,
+      undefined,
+      config.kvaultProgramId
+    );
+    expect(mocks.fetchMarketStates).toHaveBeenCalledWith(
+      mocks.rpc,
+      [LENDING_MARKET],
+      config.klendProgramId
+    );
+    expect(mocks.constructReserve).toHaveBeenCalledWith(
+      mocks.rpc,
+      config.slotDurationMs,
+      275,
+      undefined,
+      config.klendProgramId
+    );
     expect(plan.instructions.length).toBeGreaterThan(0);
     expect(mocks.stateOnlyOracles).toHaveLength(1);
     expect(mocks.stateOnlyOracles[0]?.valid).toBe(false);
@@ -225,6 +336,8 @@ describe("oracle-free Kamino SDK execution", () => {
     });
 
     expect(plan.accepted).toEqual({ shares: "1" });
+    expect(mocks.rpc.getBlockTime).toHaveBeenCalledWith(123n);
+    expect(mocks.collateralInstant).toHaveBeenCalledWith({ slot: 123n, blockTime: 1_700_000_000n });
     expect(plan.instructions.length).toBeGreaterThan(0);
     expect(mocks.stateOnlyOracles).toHaveLength(1);
     expect(mocks.stateOnlyOracles[0]?.valid).toBe(false);

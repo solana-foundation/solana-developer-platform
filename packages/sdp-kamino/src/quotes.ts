@@ -80,7 +80,7 @@ export interface KaminoDepositEstimate {
  * The verdict is cross-checked against the SDK's own output: the clamp is
  * reported only when the estimate equals the clamped prediction AND differs
  * from the uncapped one. `netAumBaseUnits` is this package's replica of the
- * SDK's pricing (it vests pending rewards against wall-clock time), so a
+ * SDK's pricing (it vests pending rewards at the selected ledger block time), so a
  * replica that drifts by a lamport can withhold the issue, never invent it.
  * A deposit that fills the remaining cap exactly is not a clamp: both
  * predictions agree and nothing is reported.

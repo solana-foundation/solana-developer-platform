@@ -155,7 +155,12 @@ try {
               : ["--filter=!@sdp/api-integration"];
     const cacheDir = process.env.TURBO_CACHE_DIR?.trim();
     const vitestShardArgs = testShard
-      ? [`--shard=${testShard}`, "--reporter=blob", "--reporter=default"]
+      ? [
+          `--shard=${testShard}`,
+          "--reporter=blob",
+          "--reporter=default",
+          `--outputFile.blob=.vitest-reports/blob-${testShard.replace("/", "-")}.json`,
+        ]
       : [];
     const passthroughArgs =
       forwardedArgs.length > 0 || vitestShardArgs.length > 0

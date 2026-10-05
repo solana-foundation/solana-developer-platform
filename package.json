@@ -38,7 +38,8 @@
     },
     "patchedDependencies": {
       "next-themes@0.4.6": "patches/next-themes@0.4.6.patch",
-      "brace-expansion@5.0.9": "patches/brace-expansion@5.0.9.patch"
+      "brace-expansion@5.0.9": "patches/brace-expansion@5.0.9.patch",
+      "hono@4.13.10": "patches/hono@4.13.10.patch"
     },
     "packageExtensions": {
       "@kamino-finance/klend-sdk@10.0.0": {

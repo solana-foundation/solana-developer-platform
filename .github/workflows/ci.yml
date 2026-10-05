@@ -400,7 +400,7 @@ jobs:
 
       - name: Merge coverage and enforce thresholds
         working-directory: apps/sdp-api
-        run: pnpm exec vitest run --merge-reports --coverage
+        run: pnpm exec vitest run --merge-reports=.vitest-reports --coverage
 
   test_embedded_yield_example:
     name: Unit Tests (embedded-yield-bank)
