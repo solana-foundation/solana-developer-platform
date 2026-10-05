@@ -169,6 +169,11 @@
       "import": "./src/table.tsx",
       "default": "./src/table.tsx"
     },
+    "./testing/english-ui-i18n": {
+      "types": "./src/testing/english-ui-i18n.tsx",
+      "import": "./src/testing/english-ui-i18n.tsx",
+      "default": "./src/testing/english-ui-i18n.tsx"
+    },
     "./theme-scope-provider": {
       "types": "./src/theme-scope-provider.tsx",
       "import": "./src/theme-scope-provider.tsx",
