@@ -43,6 +43,7 @@ const SIZE_STYLES = {
   xs: { box: "size-5", text: "text-[8px]", px: 20 },
   sm: { box: "size-6", text: "text-[9px]", px: 24 },
   md: { box: "size-8", text: "text-[10px]", px: 32 },
+  lg: { box: "size-9", text: "text-[11px]", px: 36 },
 } as const;
 
 export type TokenMarkSize = keyof typeof SIZE_STYLES;

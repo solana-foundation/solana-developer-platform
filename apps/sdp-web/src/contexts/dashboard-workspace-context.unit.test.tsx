@@ -107,6 +107,7 @@ function WorkspaceFixture() {
           payments: false,
           policies: false,
           privateChannels: false,
+          newDesign: true,
         }}
         serverDashboardCacheScope={{ orgId: "org-a", userId: "user-a" }}
         projects={projects}
