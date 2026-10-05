@@ -357,7 +357,7 @@
     "downloadFailed": "The download didn't finish. Try again.",
     "downloadRateLimited": "Too many requests to finish the download. Wait a minute and try again.",
     "newDesign": {
-      "recurring": "Scheduled",
+      "recurring": "Schedules",
       "newCounterparty": "New counterparty",
       "recurringPayments": "Schedules",
       "recurringPayment": "Schedule",

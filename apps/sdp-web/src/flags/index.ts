@@ -289,6 +289,11 @@ export const newDesignOverview = newDesignModuleFlag(
   "the dashboard's Overview (the page, its name in the sidebar, the new quick start)"
 );
 
+export const newDesignIssuance = newDesignModuleFlag(
+  "issuance",
+  "Issuance (the token list and its API playground, the draft flow, one token's page)"
+);
+
 export const newDesignWallets = newDesignModuleFlag(
   "wallets",
   "Wallets (the list, the create flow, one wallet's page, pinned wallets in the sidebar)"

@@ -19,11 +19,11 @@ function renderIndicator(newDesign: boolean) {
 afterEach(cleanup);
 
 describe("FullscreenLoadingIndicator", () => {
-  it("paints NEW DESIGN's ruled 272px sidebar and flat page, marked for its palette", () => {
+  it("paints NEW DESIGN's ruled 280px sidebar and flat page, marked for its palette", () => {
     const { container } = renderIndicator(true);
     const main = container.querySelector("main");
     expect(main?.hasAttribute("data-sdp-new-design")).toBe(true);
-    expect(container.querySelector('[style*="width: 272px"]')?.className).toContain("border-r");
+    expect(container.querySelector('[style*="width: 280px"]')?.className).toContain("border-r");
     expect(container.querySelector("section")?.className).not.toContain("rounded-2xl");
   });
 

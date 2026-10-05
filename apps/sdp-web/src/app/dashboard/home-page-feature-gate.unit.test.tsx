@@ -31,6 +31,7 @@ vi.mock("@/flags", () => ({
   newDesignOverview: async () => true,
   newDesignPayDeposit: async () => true,
   newDesignWallets: async () => true,
+  newDesignIssuance: async () => true,
 }));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
 vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: createSdpApiClientMock }));

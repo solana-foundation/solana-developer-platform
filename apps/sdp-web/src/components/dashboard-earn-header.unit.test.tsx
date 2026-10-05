@@ -125,7 +125,7 @@ describe("dashboard route headers", () => {
       "Shared.dashboardShell.walletControls",
     ],
     ["/dashboard/issuance", "Shared.dashboardShell.issuance"],
-    ["/dashboard/issuance/create", "Shared.dashboardShell.newAsset"],
+    ["/dashboard/issuance/create", "DashboardIssuance.newDesign.draft.pageTitle"],
     ["/dashboard/payments/counterparty", "Shared.dashboardShell.contactList"],
     ["/dashboard/payments/counterparty/create", "Shared.dashboardShell.newDesign.newCounterparty"],
     ["/dashboard/payments/counterparty/cp_1", "Shared.dashboardShell.contact"],
@@ -174,11 +174,33 @@ describe("dashboard route headers", () => {
   });
 
   it("uses the asset-management header only for enabled Asset Profiles", () => {
-    expect(getDashboardPageConfig("/dashboard/issuance/token_1", t, true, false).title).toBe(
-      "Shared.dashboardShell.assetManagement"
-    );
-    expect(getDashboardPageConfig("/dashboard/issuance/token_1", t, false, false).title).toBe(
-      "Shared.dashboardShell.issuance"
-    );
+    const legacy = (assetProfiles: boolean) =>
+      getDashboardPageConfig(
+        "/dashboard/issuance/token_1",
+        t,
+        assetProfiles,
+        false,
+        true,
+        true,
+        true,
+        false
+      ).title;
+    expect(legacy(true)).toBe("Shared.dashboardShell.assetManagement");
+    expect(legacy(false)).toBe("Shared.dashboardShell.issuance");
+  });
+
+  it("names a token's page Token on the new design, with or without Asset Profiles", () => {
+    for (const assetProfiles of [true, false]) {
+      expect(
+        getDashboardPageConfig("/dashboard/issuance/token_1", t, assetProfiles, false).title
+      ).toBe("DashboardIssuance.newDesign.token.pageTitle");
+    }
+  });
+
+  it("keeps the previous design's draft title with NEW DESIGN off", () => {
+    expect(
+      getDashboardPageConfig("/dashboard/issuance/create", t, false, true, true, true, true, false)
+        .title
+    ).toBe("Shared.dashboardShell.newAsset");
   });
 });

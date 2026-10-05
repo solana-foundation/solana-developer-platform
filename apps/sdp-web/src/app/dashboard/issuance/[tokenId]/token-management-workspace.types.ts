@@ -36,6 +36,8 @@ export interface RunActionOptions {
   confirmationDetails?: Array<{ label: string; value: string }>;
   confirmButtonLabel?: string;
   submitToast?: string;
+  /** A second line under the submit toast; the outcome's toast drops it. */
+  submitToastDescription?: string;
   successToast?: string;
   onSuccess?: (result: ActionExecutionResult) => Promise<void> | void;
 }
@@ -54,7 +56,10 @@ export interface ActionConfirmationState {
       | "successToast"
     >
   > &
-    Pick<RunActionOptions, "onSuccess" | "confirmationDetails" | "confirmationWarning">;
+    Pick<
+      RunActionOptions,
+      "onSuccess" | "confirmationDetails" | "confirmationWarning" | "submitToastDescription"
+    >;
 }
 
 export interface MetadataFormState {
