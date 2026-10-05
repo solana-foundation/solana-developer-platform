@@ -57,7 +57,7 @@ test.describe("payments command center and transaction ledger", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/dashboard/payments/transactions", { waitUntil: "domcontentloaded" });
 
-    const search = page.getByRole("textbox", { name: /search transactions/i });
+    const search = page.getByRole("searchbox", { name: /search transactions/i });
     await expect(search).toBeVisible();
     await search.fill("invoice-42");
     await search.press("Enter");
