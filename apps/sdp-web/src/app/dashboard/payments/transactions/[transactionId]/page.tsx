@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { PAYMENT_TRANSACTION_OPEN_PARAM, PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
+import { PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
 import { fetchIssuedTokensByMint } from "../../payments-page.data";
 import { fetchTransactionDetail } from "../transaction-detail.data";
 import { TransactionDetailWorkspace } from "../transaction-detail-workspace";
@@ -51,16 +51,18 @@ async function TransactionDetailRoute({ params }: { params: Promise<{ transactio
   );
 }
 
-/** The previous design has no transaction page: it opens the transaction over the list. */
+/**
+ * The previous design has no transaction page, and its list opens a transaction only from a row
+ * click. It lands on that list searched for the id, which the ledger matches as a prefix, so the
+ * transaction is the row to open.
+ */
 async function LegacyTransactionDetailRoute({
   params,
 }: {
   params: Promise<{ transactionId: string }>;
 }): Promise<never> {
   const { transactionId } = await params;
-  redirect(
-    `${PAYMENT_TRANSACTIONS_HREF}?${new URLSearchParams({ [PAYMENT_TRANSACTION_OPEN_PARAM]: transactionId })}`
-  );
+  redirect(`${PAYMENT_TRANSACTIONS_HREF}?${new URLSearchParams({ search: transactionId })}`);
 }
 
 export default withLegacyDesign(TransactionDetailRoute, LegacyTransactionDetailRoute, "activity");
