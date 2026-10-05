@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -35,6 +36,7 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import {
   sendTransactionMock,
@@ -42,6 +44,7 @@ import {
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -62,7 +65,7 @@ const TEST_CUSTODY_WALLET_ID = "cwlt_batch_payments_test";
 const TEST_DUPLICATE_CUSTODY_WALLET_ID = "cwlt_batch_exact_duplicate_test";
 const TEST_WALLET_ID = "wal_batch_payments_test";
 const TEST_ORG = {
-  id: "org_batch_payments_test",
+  id: "org_test_batch_payments_test",
   name: "Batch Payments Test Org",
   slug: "batch-payments-test-org",
 };
@@ -71,7 +74,7 @@ const TEST_PROJECT = {
   slug: "batch-payments-test-project",
 };
 const TEST_USER = {
-  id: "usr_batch_payments_test",
+  id: "usr_test_batch_payments_test",
   email: "batch-payments-test@example.com",
 };
 const TEST_API_KEY = {
@@ -102,14 +105,12 @@ const labeledSignatures = new Map<string, string>();
 
 function actualSignature(label: string): string {
   const signature = labeledSignatures.get(label);
-  if (signature === undefined) {
-    throw new Error(`No sponsored signature was recorded for label ${label}`);
-  }
+  assert(!(signature === undefined));
   return signature;
 }
 
 function ownedSubmissionAdapter(
-  signingOutcome = vi.fn().mockResolvedValue(FIRST_SIGNATURE)
+  signingOutcome: (transactionBytes: Uint8Array) => Promise<string>
 ): ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter> {
   return {
     providerId: "mock",
@@ -124,8 +125,13 @@ function ownedSubmissionAdapter(
       );
       return signed;
     }),
-    signAndSend: signingOutcome,
-  } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>;
+    signAndSend: async (transactionBytes: Uint8Array) => {
+      await signingOutcome(transactionBytes);
+      return getSignatureFromTransaction(
+        getTransactionDecoder().decode(await fullySignTestTransaction(transactionBytes))
+      );
+    },
+  };
 }
 
 function mockSourceTokenAccountRpc(params: {
@@ -404,9 +410,7 @@ async function seedWalletControlProfile(params: { rules: PolicyRule[] }): Promis
     createdBy: TEST_USER.id,
   });
 
-  if (!profile) {
-    throw new Error("Failed to create wallet control profile");
-  }
+  assert(profile);
 
   const revision = await repo.createWalletControlProfileRevision({
     profileId: profile.id,
@@ -414,9 +418,7 @@ async function seedWalletControlProfile(params: { rules: PolicyRule[] }): Promis
     createdBy: TEST_USER.id,
   });
 
-  if (!revision) {
-    throw new Error("Failed to create wallet control profile revision");
-  }
+  assert(revision);
 
   await repo.activateWalletControlProfileRevision({
     profileId: profile.id,
@@ -477,9 +479,8 @@ async function seedCryptoWalletCounterpartyAccount(params: {
   return id;
 }
 
-async function seedBatchApproverSession(): Promise<Record<string, string>> {
-  const approverUserId = "usr_batch_payment_approver";
-  const sessionId = "sess_batch_payment_approver";
+async function seedBatchApproverClerk(): Promise<Record<string, string>> {
+  const approverUserId = "usr_test_batch_payment_approver";
   await getDb(env).batch([
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
@@ -496,15 +497,9 @@ async function seedBatchApproverSession(): Promise<Record<string, string>> {
          VALUES (?, ?, ?, 'admin')`
       )
       .bind("pm_batch_payment_approver", TEST_PROJECT.id, approverUserId),
-    getDb(env)
-      .prepare(
-        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-         VALUES (?, ?, ?, 'session', ?)`
-      )
-      .bind(sessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
   ]);
   return {
-    Cookie: `sdp_session=${sessionId}`,
+    Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), approverUserId, TEST_ORG.id)}`,
     "x-project-id": TEST_PROJECT.id,
   };
 }
@@ -530,14 +525,16 @@ describe("payment transfer batches", () => {
       lastValidBlockHeight: 1000n,
     });
     confirmTransactionMock.mockImplementation(async () => ({
-      signature: (labeledSignatures.get(FIRST_SIGNATURE) ?? FIRST_SIGNATURE) as Awaited<
+      signature: actualSignature(FIRST_SIGNATURE) as Awaited<
         ReturnType<typeof solanaRpc.confirmTransaction>
       >["signature"],
       slot: 100n,
       confirmationStatus: "confirmed",
       err: null,
     }));
-    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter());
+    createFeePaymentAdapterMock.mockReturnValue(
+      ownedSubmissionAdapter(vi.fn().mockResolvedValue(FIRST_SIGNATURE))
+    );
     sendTransactionMock.mockImplementation(async (_rpc, transactionBytes) =>
       getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes))
     );
@@ -828,7 +825,7 @@ describe("payment transfer batches", () => {
       )
       .bind(body.data.batch.id)
       .all<{ status: string }>();
-    expect(settledBatch?.status).toBe("partially_failed");
+    expect(required(settledBatch).status).toBe("partially_failed");
     expect(settledRecipients.results.map((recipient) => recipient.status).sort()).toEqual([
       "confirmed",
       "failed",
@@ -901,7 +898,7 @@ describe("payment transfer batches", () => {
     };
     expect(body.data.batch.sourceCustodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
     expect(body.data.transfers).toHaveLength(1);
-    expect(body.data.transfers[0]?.custodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(required(body.data.transfers[0]).custodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
 
     const batchRow = await getDb(env)
       .prepare(
@@ -922,9 +919,9 @@ describe("payment transfer batches", () => {
     });
     const transferRow = await getDb(env)
       .prepare("SELECT custody_wallet_id FROM payment_transfers WHERE id = ?")
-      .bind(body.data.transfers[0]?.id)
+      .bind(required(body.data.transfers[0]).id)
       .first<{ custody_wallet_id: string | null }>();
-    expect(transferRow?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(required(transferRow).custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledOnce();
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
       env,
@@ -980,7 +977,7 @@ describe("payment transfer batches", () => {
         ),
       getDb(env)
         .prepare("UPDATE payment_transfers SET custody_wallet_id = ? WHERE id = ?")
-        .bind(otherCustodyWalletId, created.data.transfers[0]?.id),
+        .bind(otherCustodyWalletId, required(created.data.transfers[0]).id),
     ]);
 
     const detailRes = await app.request(
@@ -1109,7 +1106,7 @@ describe("payment transfer batches", () => {
         signed_transaction: Buffer.from(signedBytes).toString("base64"),
         last_valid_block_height: "1000",
       });
-      expect(row?.submission_started_at).not.toBeNull();
+      expect(required(row).submission_started_at).not.toBeNull();
       return signature;
     });
 
@@ -1195,21 +1192,21 @@ describe("payment transfer batches", () => {
     };
     expect(body.data.recipients).toMatchObject([{ status: "processing" }]);
     expect(body.data.transfers[0]).toMatchObject({ status: "processing" });
-    expect(body.data.transfers[0]?.signature).toBeTruthy();
+    expect(required(body.data.transfers[0]).signature).toBeTruthy();
     const row = await getDb(env)
       .prepare(
         `SELECT signed_transaction, last_valid_block_height, submission_started_at
            FROM payment_transfers WHERE id = ?`
       )
-      .bind(body.data.transfers[0]?.id)
+      .bind(required(body.data.transfers[0]).id)
       .first<{
         signed_transaction: string | null;
         last_valid_block_height: string | null;
         submission_started_at: string | null;
       }>();
-    expect(row?.signed_transaction).not.toBeNull();
-    expect(row?.last_valid_block_height).toBe("1000");
-    expect(row?.submission_started_at).not.toBeNull();
+    expect(required(row).signed_transaction).not.toBeNull();
+    expect(required(row).last_valid_block_height).toBe("1000");
+    expect(required(row).submission_started_at).not.toBeNull();
     expect(signAndSend).not.toHaveBeenCalled();
     expect(sendTransactionMock).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
@@ -1220,9 +1217,9 @@ describe("payment transfer batches", () => {
         organization_id: TEST_ORG.id,
         project_id: TEST_PROJECT.id,
         batch_id: body.data.batch.id,
-        transfer_id: body.data.transfers[0]?.id,
+        transfer_id: required(body.data.transfers[0]).id,
         transfer_type: "transfer_batch",
-        signature: body.data.transfers[0]?.signature,
+        signature: required(body.data.transfers[0]).signature,
         recipient_indexes: [0],
         error: "RPC response lost",
       }),
@@ -1278,7 +1275,7 @@ describe("payment transfer batches", () => {
     expect(body.data.batch.status).toBe("failed");
     expect(body.data.recipients).toMatchObject([{ status: "failed" }]);
     expect(body.data.transfers).toMatchObject([{ status: "failed" }]);
-    expect(body.data.transfers[0]?.signature).toBeTruthy();
+    expect(required(body.data.transfers[0]).signature).toBeTruthy();
   });
 
   it("dry-runs a transfer batch with zero writes", async () => {
@@ -1528,7 +1525,7 @@ describe("payment transfer batches", () => {
   });
 
   it("refuses an approved transfer batch replay after a counterparty destination changes", async () => {
-    const adminHeaders = await seedBatchApproverSession();
+    const adminHeaders = await seedBatchApproverClerk();
     await seedWalletControlProfile({
       rules: [
         {
@@ -1572,7 +1569,7 @@ describe("payment transfer batches", () => {
       createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
     );
     const pendingOperation = await repository.getWalletOperationById(walletOperationId);
-    expect(pendingOperation?.raw_payload).toMatchObject({
+    expect(required(pendingOperation).raw_payload).toMatchObject({
       recipients: [
         {
           counterpartyId,
@@ -1633,7 +1630,7 @@ describe("payment transfer batches", () => {
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
 
-    const adminHeaders = await seedBatchApproverSession();
+    const adminHeaders = await seedBatchApproverClerk();
     await seedWalletControlProfile({
       rules: [
         {
@@ -1687,9 +1684,13 @@ describe("payment transfer batches", () => {
         },
       },
     });
-    expect(pendingOperation?.raw_payload).not.toHaveProperty("sourceCustodyWalletId");
+    expect(required(pendingOperation).raw_payload).not.toHaveProperty("sourceCustodyWalletId");
     expect(
-      (pendingOperation?.raw_payload.executionRequest as { body?: Record<string, unknown> })?.body
+      required(
+        required(pendingOperation).raw_payload.executionRequest as {
+          body?: Record<string, unknown>;
+        }
+      ).body
     ).not.toHaveProperty("sourceCustodyWalletId");
 
     const approvedResponse = await app.request(
@@ -1889,8 +1890,9 @@ describe("payment transfer batches", () => {
         source_custody_wallet_id: string | null;
         idempotency_fingerprint: string | null;
       }>();
-    expect(stored?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    if (!stored?.idempotency_fingerprint) throw new Error("missing idempotency fingerprint");
+    expect(required(stored).source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    assert(stored);
+    assert(stored.idempotency_fingerprint);
     expect(JSON.parse(stored.idempotency_fingerprint)).toHaveProperty(
       "sourceCustodyWalletId",
       TEST_CUSTODY_WALLET_ID
@@ -2225,7 +2227,7 @@ describe("payment transfer batches", () => {
           LIMIT 1`
         )
         .first<{ status: string }>();
-      expect(settledBatch?.status).toBe("confirmed");
+      expect(required(settledBatch).status).toBe("confirmed");
     }
   );
 
@@ -2336,7 +2338,7 @@ describe("payment transfer batches", () => {
       .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
       .bind(body.data.batch.id)
       .first<{ status: string }>();
-    expect(settledBatch?.status).toBe("failed");
+    expect(required(settledBatch).status).toBe("failed");
   });
 
   it("rejects the whole transfer batch when one recipient is not on the wallet destination allowlist", async () => {
@@ -2519,13 +2521,10 @@ describe("payment transfer batches", () => {
     const memos = signingMock.mock.calls.map(([transactionBytes]) => {
       const transaction = getTransactionDecoder().decode(transactionBytes);
       const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
-      if (message.version !== 0) {
-        throw new Error("Expected batch chunk v0 transaction");
-      }
+      assert(!(message.version !== 0));
       const memoInstruction = message.instructions.at(-1);
-      if (!memoInstruction?.data) {
-        throw new Error("Expected batch chunk memo");
-      }
+      assert(memoInstruction);
+      assert(memoInstruction.data);
       return new TextDecoder("utf-8", { fatal: true }).decode(memoInstruction.data);
     });
     expect(memos[0]).toMatch(/^[0-9a-f-]{36}$/);
@@ -2604,8 +2603,10 @@ describe("payment transfer batches", () => {
       .prepare("SELECT status, error FROM payment_transfer_batches WHERE id = ?")
       .bind(body.data.batch.id)
       .first<{ status: string; error: string | null }>();
-    expect(batchRow?.status).toBe("partially_failed");
-    expect(batchRow?.error).toBe("One or more transfer batch transactions failed during execution");
+    expect(required(batchRow).status).toBe("partially_failed");
+    expect(required(batchRow).error).toBe(
+      "One or more transfer batch transactions failed during execution"
+    );
 
     const recipientRows = await getDb(env)
       .prepare(
@@ -2626,7 +2627,7 @@ describe("payment transfer batches", () => {
       ].sort(bySignature)
     );
     const failedRow = recipientRows.results.find((row) => row.status === "failed");
-    expect(failedRow?.error).toContain("InstructionError");
+    expect(required(failedRow).error).toContain("InstructionError");
   });
 
   it("settles a chunk's recipients as failed when its execution throws mid-flight", async () => {
@@ -2703,7 +2704,7 @@ describe("payment transfer batches", () => {
       const failedRecipient = body.data.recipients.find(
         (recipient) => recipient.status === "failed"
       );
-      expect(failedRecipient?.error).toContain("simulated transfer persistence failure");
+      expect(required(failedRecipient).error).toContain("simulated transfer persistence failure");
 
       const pendingRows = await getDb(env)
         .prepare(
@@ -2711,7 +2712,7 @@ describe("payment transfer batches", () => {
         )
         .bind(body.data.batch.id)
         .first<{ count: number | string }>();
-      expect(Number(pendingRows?.count)).toBe(0);
+      expect(Number(required(pendingRows).count)).toBe(0);
     } finally {
       repositorySpy.mockRestore();
     }
@@ -2790,7 +2791,7 @@ describe("payment transfer batches", () => {
           "SELECT COUNT(*) AS count FROM payment_transfers WHERE type = 'transfer_batch' AND status = 'processing'"
         )
         .first<{ count: number | string }>();
-      expect(Number(orphanRows?.count)).toBe(0);
+      expect(Number(required(orphanRows).count)).toBe(0);
 
       await trackPendingTransfers(env);
       await trackPendingTransfers(env);
@@ -2799,7 +2800,7 @@ describe("payment transfer batches", () => {
         .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
         .bind(body.data.batch.id)
         .first<{ status: string }>();
-      expect(batchRow?.status).toBe("failed");
+      expect(required(batchRow).status).toBe("failed");
     } finally {
       batchesSpy.mockRestore();
     }
@@ -2883,18 +2884,18 @@ describe("payment transfer batches", () => {
         .prepare("SELECT status, transfer_id FROM payment_transfer_recipients WHERE batch_id = ?")
         .bind(body.data.batch.id)
         .first<{ status: string; transfer_id: string | null }>();
-      expect(linkedRecipient?.transfer_id).not.toBeNull();
-      expect(linkedRecipient?.status).toBe("failed");
+      expect(required(linkedRecipient).transfer_id).not.toBeNull();
+      expect(required(linkedRecipient).status).toBe("failed");
 
       const transferRow = await getDb(env)
         .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
-        .bind(linkedRecipient?.transfer_id)
+        .bind(required(linkedRecipient).transfer_id)
         .first<{ status: string; signature: string | null }>();
       expect(transferRow).toMatchObject({ status: "failed", signature: null });
       expect(settleTransferBatchMock).toHaveBeenCalledOnce();
       expect(settleTransferBatchMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          transferId: linkedRecipient?.transfer_id,
+          transferId: required(linkedRecipient).transfer_id,
           transferStatus: "failed",
         })
       );
@@ -3050,14 +3051,16 @@ describe("payment transfer batches", () => {
       .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
       .bind(body.data.batch.id)
       .first<{ status: string }>();
-    expect(batchRow?.status).toBe("partially_failed");
+    expect(required(batchRow).status).toBe("partially_failed");
   });
 
   it("never regresses a terminal chunk status when a delayed reconciliation run settles late", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-    createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter());
+    createFeePaymentAdapterMock.mockReturnValueOnce(
+      ownedSubmissionAdapter(vi.fn().mockResolvedValue(FIRST_SIGNATURE))
+    );
 
     const counterpartyId = await seedCounterparty("batch_stale_settle_counterparty");
     const accountId = await seedCryptoWalletCounterpartyAccount({
@@ -3114,8 +3117,8 @@ describe("payment transfer batches", () => {
       .prepare("SELECT status, slot FROM payment_transfers WHERE id = ?")
       .bind(transferId)
       .first<{ status: string; slot: number | string }>();
-    expect(transferRow?.status).toBe("finalized");
-    expect(Number(transferRow?.slot)).toBe(500);
+    expect(required(transferRow).status).toBe("finalized");
+    expect(Number(required(transferRow).slot)).toBe(500);
 
     const guarded = await createPaymentsRepository(
       env,
@@ -3222,7 +3225,7 @@ describe("payment transfer batches", () => {
       )
       .bind(body.data.batch.id)
       .first<{ count: number | string }>();
-    expect(Number(distinctDestinations?.count)).toBe(500);
+    expect(Number(required(distinctDestinations).count)).toBe(500);
   }, 30_000);
 
   it("handles a burst of five concurrent batch creates", async () => {

@@ -1,8 +1,8 @@
-import type { Permission } from "@sdp/types";
+import { PERMISSIONS } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { asTransactionalClient, type DatabaseClient, getDb } from "@/db";
-import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { parsePostgresJson } from "@/db/postgres-utils";
 import {
   createPolicyRepository,
   createPostgresPolicyRepository,
@@ -13,6 +13,7 @@ import { AppError } from "@/lib/errors";
 import { createTenantScope, getRequestTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
+import { storedWalletOperationActorSchema } from "@/services/policy/enforcement.service";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
@@ -31,6 +32,16 @@ const walletOperationExecutionRequestSchema = z.object({
 });
 
 const legacyPaymentExecutionBodySchema = z.object({ source: z.string() }).catchall(z.unknown());
+
+const walletOperationRawPayloadSchema = z.looseObject({
+  actor: storedWalletOperationActorSchema.nullable().optional(),
+});
+
+const replayResponsePayloadSchema = z.looseObject({
+  error: z.looseObject({ message: z.string() }).optional(),
+});
+
+type ReplayResponsePayload = z.infer<typeof replayResponsePayloadSchema>;
 
 export type WalletOperationExecutionRequest = z.infer<typeof walletOperationExecutionRequestSchema>;
 
@@ -167,10 +178,10 @@ export async function reserveMintSupplyAtApprovedEffectBoundary(
 
 export async function tryApprovedOperationReplayAuth(
   c: Context<{ Bindings: Env }>
-): Promise<boolean> {
+): Promise<{ organizationId: string } | null> {
   const token = c.req.header(APPROVED_OPERATION_REPLAY_HEADER);
   if (!token) {
-    return false;
+    return null;
   }
 
   const capability = capabilities.get(token);
@@ -201,22 +212,19 @@ export async function tryApprovedOperationReplayAuth(
   const organizationId = operation.organization_id as string;
   const projectId = (operation.project_id as string | null | undefined) ?? null;
   const apiKeyId = (operation.api_key_id as string | null | undefined) ?? null;
-  const rawPayload = parsePostgresJsonOr<Record<string, unknown>>(operation.raw_payload, {});
-  const actor = isObject(rawPayload.actor) ? rawPayload.actor : null;
+  const rawPayload = walletOperationRawPayloadSchema.parse(
+    parsePostgresJson(operation.raw_payload)
+  );
 
   if (apiKeyId) {
     const apiKey = await loadActiveApiKey(db, apiKeyId, organizationId, projectId);
     c.set("apiKey", apiKey);
   } else {
-    const userId =
-      actor && typeof actor.userId === "string"
-        ? actor.userId
-        : actor && typeof actor.id === "string"
-          ? actor.id
-          : null;
-    if (!userId) {
+    const actor = rawPayload.actor;
+    if (!actor || actor.type === "api_key") {
       throw new AppError("FORBIDDEN", "Original wallet-operation actor is unavailable");
     }
+    const userId = actor.userId;
     const membership = await db
       .prepare(
         `SELECT om.role
@@ -232,18 +240,18 @@ export async function tryApprovedOperationReplayAuth(
       throw new AppError("FORBIDDEN", "Original wallet-operation actor is no longer authorized");
     }
     const { getPermissionsForOrgRole } = await import("@sdp/types");
-    c.set("session", {
-      id: `approved-operation:${capability.operationId}`,
+    c.set("approvedOperationActor", {
+      operationId: capability.operationId,
       userId,
+      storedActorType: actor.type,
       organizationId,
       permissions: getPermissionsForOrgRole(membership.role),
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
   }
 
   c.set("approvedWalletOperationId", capability.operationId);
   c.set("approvedWalletOperationAttemptId", capability.executionAttemptId);
-  return true;
+  return { organizationId };
 }
 
 async function loadActiveApiKey(
@@ -287,10 +295,10 @@ async function loadActiveApiKey(
     organizationId,
     projectId: projectId as string,
     role,
-    permissions: parsePostgresJsonOr<Permission[]>(
-      row.permissions,
-      getPermissionsForApiKeyRole(role)
-    ),
+    permissions:
+      row.permissions === null
+        ? getPermissionsForApiKeyRole(role)
+        : z.array(z.enum(PERMISSIONS)).parse(parsePostgresJson(row.permissions)),
     environment: row.environment as "sandbox" | "production",
     walletScope,
     signingWalletId,
@@ -532,24 +540,19 @@ function readExecutionRequest(operation: WalletOperationRow): WalletOperationExe
   };
 }
 
-async function readResponsePayload(response: Response): Promise<Record<string, unknown>> {
-  const value = await response.json().catch(() => null);
-  return isObject(value) ? value : { status: response.status };
+async function readResponsePayload(response: Response): Promise<ReplayResponsePayload> {
+  const parsed = replayResponsePayloadSchema.safeParse(await response.json().catch(() => null));
+  return parsed.success ? parsed.data : { status: response.status };
 }
 
-function responseError(payload: Record<string, unknown>, status: number): string {
-  const error = isObject(payload.error) ? payload.error : null;
-  return error && typeof error.message === "string"
-    ? error.message
+function responseError(payload: ReplayResponsePayload, status: number): string {
+  return payload.error
+    ? payload.error.message
     : `Approved operation replay returned HTTP ${status}`;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function approvedOperationTenantScope(operation: WalletOperationRow) {
