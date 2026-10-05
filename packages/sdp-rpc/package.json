@@ -14,11 +14,6 @@
       "import": "./src/blocked-address.ts",
       "default": "./src/blocked-address.ts"
     },
-    "./byok": {
-      "types": "./src/byok.ts",
-      "import": "./src/byok.ts",
-      "default": "./src/byok.ts"
-    },
     "./errors": {
       "types": "./src/errors.ts",
       "import": "./src/errors.ts",

@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { maskEndpoint } from "./relay";
+import type { RpcEnv } from "./types";
 
-const env = {} as Parameters<typeof maskEndpoint>[1];
+const env: RpcEnv = {};
 
 describe("maskEndpoint", () => {
-  it("masks a credential-shaped path segment of a customer endpoint", () => {
-    // A custom endpoint's key is not among the platform's own keys, so only
-    // the shape of the segment can catch it.
+  it("masks a credential-shaped path segment of a managed URL whose key SDP does not hold", () => {
     assert.equal(
       maskEndpoint("https://rpc.example.com/AbC123xyz456QwErTy789012", env),
       "https://rpc.example.com/***"
@@ -34,22 +33,4 @@ describe("maskEndpoint", () => {
       "https://rpc.example.com/rpc?api-key=***"
     );
   });
-});
-
-it("maskTenantEndpoint masks a credential-shaped path segment the apiKey field does not carry", async () => {
-  const { maskTenantEndpoint } = await import("./byok");
-  const masked = maskTenantEndpoint(
-    "https://rpc.example.com/v2/AbCdEf1234567890XyZ?cluster=devnet",
-    "some-other-key-1234567890abcdef"
-  );
-  assert.equal(masked, "https://rpc.example.com/v2/***?cluster=devnet");
-});
-
-it("maskTenantEndpoint keeps masking the known key and query heuristics", async () => {
-  const { maskTenantEndpoint } = await import("./byok");
-  const masked = maskTenantEndpoint(
-    "https://rpc.example.com/rpc?api-key=tenantsecret",
-    "tenantsecret"
-  );
-  assert.equal(masked, "https://rpc.example.com/rpc?api-key=***");
 });

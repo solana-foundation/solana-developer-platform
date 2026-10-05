@@ -1,6 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
-import { resolveRpcTarget } from "@sdp/rpc/relay";
-import { createRpcFromTransport, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
+import { createRpc, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
 import type { Address, SignatureBytes } from "@solana/kit";
 import {
@@ -30,7 +29,6 @@ import {
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError } from "@/services/ports";
-import { createRpcTransportForTarget } from "@/services/rpc-egress";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
 import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
@@ -103,29 +101,12 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // sponsorship — the transaction below is verified locally and in RPC
     // simulation, and is never broadcast.
     const feePayment = createAuthenticatedSponsorshipFeePayment(c);
-    const [signer, feePayer, rpcTarget] = await Promise.all([
+    const [signer, feePayer] = await Promise.all([
       createOrgSignerForCustodyWallet(c.env, auth.organizationId, auth.projectId, wallet.id),
       feePayment.getFeePayer(),
-      resolveRpcTarget({
-        env: c.env,
-        kv: c.var.kv,
-        db: getDb(c.env),
-        organizationId: auth.organizationId,
-        authProjectId: auth.projectId,
-        requestedProjectId: null,
-        // Deliberately no tenant connection lookup: signer check stays on the
-        // platform rail. It is API-key reachable and organization-wide, so
-        // routing it through the fail-closed resolver would let one mistyped
-        // key on an unrelated surface take this endpoint down for every
-        // caller. The blast radius of a bad tenant credential belongs to the
-        // RPC relay.
-      }),
     ]);
 
-    // The `custom` provider endpoint is project-supplied and only URL-checked
-    // on write, so it goes through the guarded transport like the relay's
-    // (HOO-1560). Platform targets keep the ordinary fetch.
-    const rpc = createRpcFromTransport(createRpcTransportForTarget(rpcTarget));
+    const rpc = createRpc(c.env);
 
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
 

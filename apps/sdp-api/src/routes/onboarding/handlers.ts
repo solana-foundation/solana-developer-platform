@@ -1,17 +1,10 @@
-import {
-  CUSTODY_PROVIDERS,
-  type CustodyProvider,
-  normalizeOrganizationTier,
-  ORGANIZATION_RPC_PROVIDERS,
-  type OrganizationRpcProvider,
-} from "@sdp/types";
+import { CUSTODY_PROVIDERS, type CustodyProvider, normalizeOrganizationTier } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertProviderAvailable } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import type { completeOnboardingSchema } from "./schemas";
 import { ONBOARDING_VERSION, resolveOnboardingSetup } from "./state";
@@ -55,17 +48,6 @@ async function fetchOrganization(db: DatabaseClient, orgId: string) {
     onboardingCompletedAt: org.onboarding_completed_at,
     onboardingVersion: org.onboarding_version,
   };
-}
-
-function resolveRpcProvider(settings: unknown): OrganizationRpcProvider | null {
-  if (!settings || typeof settings !== "object" || !("rpcProvider" in settings)) {
-    return null;
-  }
-
-  const provider = (settings as { rpcProvider?: unknown }).rpcProvider;
-  return ORGANIZATION_RPC_PROVIDERS.includes(provider as OrganizationRpcProvider)
-    ? (provider as OrganizationRpcProvider)
-    : null;
 }
 
 async function fetchCustodyProvider(
@@ -114,7 +96,6 @@ async function buildOnboardingSetup(params: {
   const custodyProvider = await fetchCustodyProvider(params.db, params.organization.id);
   return resolveOnboardingSetup({
     completedAt: params.organization.onboardingCompletedAt,
-    rpcProvider: resolveRpcProvider(params.organization.settings),
     custodyProvider,
     version: params.organization.onboardingVersion ?? ONBOARDING_VERSION,
     canManage: canManageOnboarding(params.clerkOrgRole),
@@ -177,12 +158,7 @@ export const completeOnboarding = async (
 
   const organization = await fetchOrganization(db, mapping.organization_id);
   const requestedProvider = c.req.valid("json").custodyProvider;
-  const rpcProvider = resolveRpcProvider(organization.settings);
   const custodyProvider = await fetchCustodyProvider(db, organization.id, requestedProvider);
-  if (!rpcProvider) {
-    throw badRequest("Select an RPC provider before finishing setup");
-  }
-  await assertProviderAvailable(c.env, db, organization.id, "rpc", rpcProvider);
   if (!custodyProvider) {
     throw badRequest(
       "Create and select a default custody wallet for the sandbox project before finishing setup"

@@ -1,10 +1,4 @@
-import type { ResolvedRpcTarget } from "@sdp/rpc/relay";
-import type {
-  ComplianceProviderId,
-  CustodyProvider,
-  OrganizationRpcProvider,
-  RampProviderId,
-} from "@sdp/types";
+import type { ComplianceProviderId, CustodyProvider, RampProviderId } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { isProviderConfigured } from "@/services/provider-availability.service";
@@ -16,16 +10,13 @@ import {
   replaceProviderCredential,
   submitProviderCredential,
 } from "@/services/provider-credential-submission.service";
-import { isCustomerSuppliedTarget } from "@/services/rpc-egress";
-import { probeRpcEndpoint } from "@/services/rpc-probe";
 import type { Env } from "@/types/env";
 
-export const PROVIDER_SETUP_FAMILIES = ["custody", "rpc", "compliance", "ramps"] as const;
+export const PROVIDER_SETUP_FAMILIES = ["custody", "compliance", "ramps"] as const;
 export type ProviderSetupFamily = (typeof PROVIDER_SETUP_FAMILIES)[number];
 
 type ProviderIdByFamily = {
   custody: CustodyProvider;
-  rpc: OrganizationRpcProvider;
   compliance: ComplianceProviderId;
   ramps: RampProviderId;
 };
@@ -130,36 +121,6 @@ async function storePrivyCredentials(input: PrivyStoreCredentialsInput) {
   return submitProviderCredential(input.context, input.payload, input.idempotencyKey);
 }
 
-export interface RpcConnectionCheckInput {
-  target: ResolvedRpcTarget;
-}
-
-export interface RpcConnectionCheckResult {
-  elapsedMs: number;
-  upstream: Response;
-  upstreamBody: unknown;
-}
-
-/**
- * Run the same read-only JSON-RPC probe used by POST /rpc/test.
- *
- * `/v1/rpc/test` resolves tenant connections and the project's own `custom`
- * endpoint, and `projects.settings.rpcEndpoint` behind the latter is validated
- * as a URL when written and nothing more, so the probe reaches a
- * customer-supplied host in both cases and both go under the guard. Managed
- * providers keep the ordinary fetch: their endpoints come from deployment
- * config and are private on purpose in local development and in the Surfpool
- * suites. The probe does not follow redirects, which it already refused before
- * the guard existed.
- */
-export async function checkResolvedRpcTargetConnection(
-  input: RpcConnectionCheckInput
-): Promise<RpcConnectionCheckResult> {
-  return probeRpcEndpoint(input.target, {
-    enforcePublicEgress: isCustomerSuppliedTarget(input.target),
-  });
-}
-
 export interface ProviderConfigurationCheckInput {
   env: Env;
   testMode?: boolean;
@@ -189,15 +150,6 @@ function rampConfigurationCheck(provider: RampProviderId) {
       : "not_configured",
     checkedAt: new Date().toISOString(),
   });
-}
-
-function rpcSetup<const Provider extends OrganizationRpcProvider>(provider: Provider) {
-  return {
-    family: "rpc",
-    provider,
-    setupMode: "platform_managed",
-    checkConnection: checkResolvedRpcTargetConnection,
-  } as const;
 }
 
 function complianceSetup<const Provider extends ComplianceProviderId>(provider: Provider) {
@@ -248,15 +200,6 @@ export const PROVIDER_SETUP_REGISTRY = {
     ibm_haven: { family: "custody", provider: "ibm_haven", setupMode: "contact" },
     anchorage: { family: "custody", provider: "anchorage", setupMode: "contact" },
     utila: { family: "custody", provider: "utila", setupMode: "contact" },
-  },
-  rpc: {
-    alchemy: rpcSetup("alchemy"),
-    default: rpcSetup("default"),
-    helius: rpcSetup("helius"),
-    nodit: rpcSetup("nodit"),
-    quicknode: rpcSetup("quicknode"),
-    triton: rpcSetup("triton"),
-    validationcloud: rpcSetup("validationcloud"),
   },
   compliance: {
     range: complianceSetup("range"),

@@ -200,7 +200,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
         buildSelectOrTextField(
           "provider",
           t("DashboardCustody.playgroundProviderField"),
-          t("DashboardCustody.rpcProvider"),
+          t("DashboardCustody.provider"),
           providerOptions
         ),
         {

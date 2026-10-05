@@ -1,10 +1,9 @@
 "use client";
 
-import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
+import type { ComplianceProviderId, RampProviderId } from "@sdp/types";
 import {
   ArrowLeftRightIcon,
   ChevronRight,
-  CircleDotDashedIcon,
   ShieldCheckIcon,
   VenetianMaskIcon,
   WalletIcon,
@@ -14,7 +13,6 @@ import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
 import type { CustodyProviderAvailability } from "@/app/dashboard/custody/provider-display-status";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
-import { RpcProviderMark } from "@/app/dashboard/integrations/rpc-provider-mark";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
@@ -135,7 +133,7 @@ function IntegrationCard({ row, t }: { row: IntegrationRowModel; t: Translate })
 }
 
 function LogoMark({ src, label }: { src: string; label: string }) {
-  // Mirrors the wallet and RPC marks: logos sit on a white chip so dark-mode
+  // Mirrors the wallet marks: logos sit on a white chip so dark-mode
   // artwork with transparent backgrounds stays legible.
   return (
     <span
@@ -150,11 +148,16 @@ function LogoMark({ src, label }: { src: string; label: string }) {
   );
 }
 
+/**
+ * The family title key for hub tiles and section headings.
+ *
+ * @param family - The integration family.
+ * @returns The message key for the family title.
+ */
 function familyLabelKey(family: IntegrationFamily) {
   return (
     {
       custody: "Shared.integrations.custodyTitle",
-      rpc: "Shared.integrations.rpcTitle",
       ramps: "Shared.integrations.rampsTitle",
       compliance: "Shared.integrations.complianceTitle",
       privacy: "Shared.integrations.privacyTitle",
@@ -162,11 +165,16 @@ function familyLabelKey(family: IntegrationFamily) {
   )[family];
 }
 
+/**
+ * The family description key for hub tiles and section headings.
+ *
+ * @param family - The integration family.
+ * @returns The message key for the family description.
+ */
 function familyDescriptionKey(family: IntegrationFamily) {
   return (
     {
       custody: "Shared.integrations.custodyDescription",
-      rpc: "Shared.integrations.rpcDescription",
       ramps: "Shared.integrations.rampsDescription",
       compliance: "Shared.integrations.complianceDescription",
       privacy: "Shared.integrations.privacyDescription",
@@ -176,7 +184,6 @@ function familyDescriptionKey(family: IntegrationFamily) {
 
 const FAMILY_ICONS = {
   custody: WalletIcon,
-  rpc: CircleDotDashedIcon,
   ramps: ArrowLeftRightIcon,
   compliance: ShieldCheckIcon,
   privacy: VenetianMaskIcon,
@@ -216,9 +223,20 @@ function IntegrationsHub({
   );
 }
 
+/**
+ * The integrations hub, or one family's provider cards when `?tab=` names an
+ * enabled family.
+ *
+ * @param props - The component props.
+ * @param props.custody - Custody providers with their status, or `null` when the lookup failed.
+ * @param props.ramps - Ramp providers with their status.
+ * @param props.compliance - Compliance providers with their status.
+ * @param props.privacy - Privacy integrations with their status.
+ * @param props.enabledFamilies - The families this organization can see.
+ * @returns The rendered catalog.
+ */
 export function IntegrationsCatalog({
   custody,
-  rpc,
   ramps,
   compliance,
   privacy = EMPTY_PRIVACY,
@@ -226,7 +244,6 @@ export function IntegrationsCatalog({
 }: {
   /** `null` when the connected-provider lookup failed: state unknown, not empty. */
   custody: CustodyProviderAvailability[] | null;
-  rpc: IntegrationEntry<OrganizationRpcProvider>[];
   ramps: IntegrationEntry<RampProviderId>[];
   compliance: IntegrationEntry<ComplianceProviderId>[];
   privacy?: IntegrationEntry<PrivacyProviderId>[];
@@ -256,16 +273,6 @@ export function IntegrationsCatalog({
       description: t(provider.entry.descriptionKey),
     }));
 
-    // No card carries an action: the detail page's header owns the
-    // state-correct one, and the section header links shared destinations.
-    const rpcRows: IntegrationRowModel[] = rpc.map((provider) => ({
-      family: "rpc",
-      provider: provider.provider,
-      label: provider.label,
-      status: provider.status,
-      icon: <RpcProviderMark provider={provider.provider} />,
-      description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
-    }));
     const rampRows: IntegrationRowModel[] = ramps.map((provider) => ({
       family: "ramps",
       provider: provider.provider,
@@ -292,8 +299,8 @@ export function IntegrationsCatalog({
       description: provider.descriptionKey ? t(provider.descriptionKey) : undefined,
     }));
 
-    return [...custodyRows, ...rpcRows, ...rampRows, ...complianceRows, ...privacyRows];
-  }, [custody, rpc, ramps, compliance, privacy, t]);
+    return [...custodyRows, ...rampRows, ...complianceRows, ...privacyRows];
+  }, [custody, ramps, compliance, privacy, t]);
 
   const visible = rows.filter(
     (row) =>

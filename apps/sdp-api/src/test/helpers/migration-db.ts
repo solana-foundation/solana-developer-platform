@@ -61,6 +61,40 @@ export async function seedOrgProject(
   return { organizationId, projectId, userId };
 }
 
+/**
+ * Seeds an active project-scoped credential stored in the database.
+ *
+ * @param client - Connection the seed runs on.
+ * @param input - The credential to seed.
+ * @param input.id - Credential id.
+ * @param input.label - Credential label.
+ * @param input.organizationId - Owning organization.
+ * @param input.projectId - Project the credential is scoped to.
+ * @param input.userId - User recorded as its creator.
+ * @param input.provider - Provider the credential is for.
+ * @returns Resolves once the row is inserted.
+ */
+export async function seedStoredProviderCredential(
+  client: Client,
+  input: {
+    id: string;
+    label: string;
+    organizationId: string;
+    projectId: string;
+    userId: string;
+    provider: string;
+  }
+): Promise<void> {
+  await client.query(
+    `INSERT INTO provider_credentials (
+       id, organization_id, project_id, provider, label, scope, source,
+       storage_backend, encrypted_secret_payload, status, created_by
+     ) VALUES ($1, $2, $3, $4, $5, 'project', 'stored',
+               'encrypted_db', 'test-only', 'active', $6)`,
+    [input.id, input.organizationId, input.projectId, input.provider, input.label, input.userId]
+  );
+}
+
 /** Seeds the active project connection required by Helius Rings operations. */
 export async function seedHeliusRingsConnection(
   client: Client,
@@ -74,14 +108,14 @@ export async function seedHeliusRingsConnection(
   const credentialId = `pcred_hr_${input.tag}`;
   const connectionId = `hrconn_${input.tag}`;
 
-  await client.query(
-    `INSERT INTO provider_credentials (
-       id, organization_id, project_id, provider, label, scope, source,
-       storage_backend, encrypted_secret_payload, status, created_by
-     ) VALUES ($1, $2, $3, 'helius_rings', $4, 'project', 'stored',
-               'encrypted_db', 'test-only', 'active', $5)`,
-    [credentialId, input.organizationId, input.projectId, input.tag, input.userId]
-  );
+  await seedStoredProviderCredential(client, {
+    id: credentialId,
+    label: input.tag,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    userId: input.userId,
+    provider: "helius_rings",
+  });
   await client.query(
     `INSERT INTO helius_rings_connections (
        id, organization_id, project_id, name, provider_credential_id,

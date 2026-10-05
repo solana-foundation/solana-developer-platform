@@ -567,7 +567,7 @@
             "description": "Updates project attributes.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Payments Updated\",\n  \"description\": \"Updated project description.\",\n  \"settings\": {\n    \"rpcProvider\": \"custom\",\n    \"rpcEndpoint\": \"https://rpc.example.com\"\n  }\n}",
+              "raw": "{\n  \"name\": \"Payments Updated\",\n  \"description\": \"Updated project description.\",\n  \"settings\": {\n    \"webhookUrl\": \"https://example.com/webhook\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -9,6 +9,7 @@ import {
   getProviderAvailability,
   isPersistedCustodyCompletionEnabled,
   parseClerkOrganizationTierMetadata,
+  parseProviderOverridesFromClerkMetadata,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { env } from "@/test/helpers/env";
@@ -39,14 +40,6 @@ const providerEnvKeys = [
   "UTILA_SERVICE_ACCOUNT_EMAIL",
   "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY",
   "UTILA_VAULT_ID",
-  "SOLANA_RPC_URL",
-  "SOLANA_RPC_ALCHEMY_URL",
-  "SOLANA_RPC_HELIUS_URL",
-  "SOLANA_RPC_QUICKNODE_URL",
-  "SOLANA_RPC_TRITON_URL",
-  "SOLANA_RPC_VALIDATIONCLOUD_URL",
-  "SOLANA_RPC_NODIT_URL",
-  "SOLANA_RPC_NODIT_API_KEY",
   "RANGE_API_KEY",
   "ELLIPTIC_API_TOKEN",
   "ELLIPTIC_API_KEY",
@@ -91,12 +84,6 @@ function setBaseProviderEnv(): void {
   writeProviderEnv({
     PRIVY_APP_ID: "privy_test_app",
     PRIVY_APP_SECRET: "privy_test_secret",
-    SOLANA_RPC_URL: "https://rpc.default.test",
-    SOLANA_RPC_HELIUS_URL: "https://rpc.helius.test",
-    SOLANA_RPC_TRITON_URL: "https://rpc.triton.test",
-    SOLANA_RPC_VALIDATIONCLOUD_URL: "https://rpc.validationcloud.test/v1/{API_KEY}",
-    SOLANA_RPC_NODIT_URL: "https://solana-devnet.nodit.io/{API_KEY}",
-    SOLANA_RPC_NODIT_API_KEY: "nodit_test_key",
     RANGE_API_KEY: "range_test_key",
     MOONPAY_API_KEY: "moonpay_test_key",
     MOONPAY_SECRET_KEY: "moonpay_test_secret",
@@ -198,9 +185,6 @@ describe("provider-availability.service", () => {
         custody: {
           local: true,
         },
-        rpc: {
-          helius: true,
-        },
         compliance: {
           range: true,
         },
@@ -216,11 +200,6 @@ describe("provider-availability.service", () => {
     expect(resolved.providers.custody.turnkey).toBe(true);
     expect(resolved.providers.custody.local).toBe(true);
     expect(resolved.providers.custody.para).toBe(true);
-    expect(resolved.providers.rpc.default).toBe(true);
-    expect(resolved.providers.rpc.helius).toBe(true);
-    expect(resolved.providers.rpc.triton).toBe(true);
-    expect(resolved.providers.rpc.validationcloud).toBe(true);
-    expect(resolved.providers.rpc.nodit).toBe(true);
     expect(resolved.providers.compliance.range).toBe(true);
     expect(resolved.providers.ramps.moonpay).toBe(true);
     expect(resolved.providers.ramps.lightspark).toBe(true);
@@ -238,19 +217,6 @@ describe("provider-availability.service", () => {
     expect(availability.providers.custody.coinbase_cdp.enabled).toBe(true);
     expect(availability.providers.custody.turnkey.enabled).toBe(true);
     expect(availability.providers.custody.para.enabled).toBe(true);
-    expect(availability.providers.rpc.default.enabled).toBe(true);
-    expect(availability.providers.rpc.helius.enabled).toBe(true);
-    expect(availability.providers.rpc.triton.enabled).toBe(true);
-    expect(availability.providers.rpc.validationcloud).toEqual({
-      entitled: true,
-      configured: true,
-      enabled: true,
-    });
-    expect(availability.providers.rpc.nodit).toEqual({
-      entitled: true,
-      configured: true,
-      enabled: true,
-    });
     expect(availability.providers.compliance.range).toEqual({
       entitled: false,
       configured: true,
@@ -300,45 +266,6 @@ describe("provider-availability.service", () => {
       entitled: true,
       configured: false,
       enabled: false,
-    });
-  });
-
-  it.each(["individual", "enterprise"] as const)(
-    "treats configured Nodit as general for the legacy %s tier and honors an explicit disable",
-    async (tier) => {
-      await setOrganizationTier(tier);
-
-      const enabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-      expect(enabled.providers.rpc.nodit).toEqual({
-        entitled: true,
-        configured: true,
-        enabled: true,
-      });
-
-      await getDb(env)
-        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-        .bind(JSON.stringify({ providerOverrides: { rpc: { nodit: false } } }), TEST_ORG_ID)
-        .run();
-
-      const disabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-      expect(disabled.providers.rpc.nodit).toEqual({
-        entitled: false,
-        configured: true,
-        enabled: false,
-      });
-    }
-  );
-
-  it("treats Nodit as configured when its URL is present like other RPC providers", async () => {
-    env.SOLANA_RPC_NODIT_URL = "https://rpc.proxy.test/nodit";
-    env.SOLANA_RPC_NODIT_API_KEY = undefined;
-
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-
-    expect(availability.providers.rpc.nodit).toEqual({
-      entitled: true,
-      configured: true,
-      enabled: true,
     });
   });
 
@@ -399,9 +326,6 @@ describe("provider-availability.service", () => {
                 local: true,
                 para: false,
               },
-              rpc: {
-                helius: true,
-              },
             },
           },
         },
@@ -419,9 +343,6 @@ describe("provider-availability.service", () => {
         custody: {
           local: true,
           para: false,
-        },
-        rpc: {
-          helius: true,
         },
       },
     });
@@ -567,7 +488,7 @@ describe("provider-availability.service", () => {
               local: true,
             },
           },
-          rpcProvider: "helius",
+          defaultEnvironment: "sandbox",
         }),
         TEST_ORG_ID
       )
@@ -587,7 +508,7 @@ describe("provider-availability.service", () => {
 
     expect(organization?.tier).toBe("enterprise");
     expect(organization?.settings ? JSON.parse(organization.settings) : null).toEqual({
-      rpcProvider: "helius",
+      defaultEnvironment: "sandbox",
     });
   });
 
@@ -612,12 +533,22 @@ describe("provider-availability.service", () => {
     }
   });
 
+  it("parseProviderOverridesFromClerkMetadata drops a stale rpc family and keeps the families it knows", () => {
+    expect(
+      parseProviderOverridesFromClerkMetadata({
+        rpc: { helius: true },
+        custody: { privy: true },
+      })
+    ).toEqual({ custody: { privy: true } });
+    expect(parseProviderOverridesFromClerkMetadata({ rpc: { helius: true } })).toBeUndefined();
+  });
+
   it("syncs enableProductionProject into settings when true and strips it when absent, preserving unrelated keys", async () => {
     await getDb(env)
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(
         JSON.stringify({
-          rpcProvider: "helius",
+          defaultEnvironment: "sandbox",
           enableProductionProject: true,
         }),
         TEST_ORG_ID
@@ -637,7 +568,7 @@ describe("provider-availability.service", () => {
       .bind(TEST_ORG_ID)
       .first<{ settings: string | null }>();
     expect(stripped?.settings ? JSON.parse(stripped.settings) : null).toEqual({
-      rpcProvider: "helius",
+      defaultEnvironment: "sandbox",
     });
   });
 

@@ -11,8 +11,11 @@ export type IntegrationFeatureFlags = {
 
 /**
  * Product-owned integration families follow the same release switch as their
- * dashboard module. RPC remains generally available because it is platform
- * infrastructure rather than a gated product workspace.
+ * dashboard module.
+ *
+ * @param family - The integration family to check.
+ * @param flags - The resolved dashboard feature flags.
+ * @returns Whether the family is shown in the catalog.
  */
 export function isIntegrationFamilyEnabled(
   family: IntegrationFamily,
@@ -27,12 +30,16 @@ export function isIntegrationFamilyEnabled(
       return flags.policies;
     case "privacy":
       return flags.privateChannels;
-    case "rpc":
-      return true;
   }
 }
 
-/** Keeps provider deep links aligned with the families shown in the catalog. */
+/**
+ * Keeps provider deep links aligned with the families shown in the catalog.
+ *
+ * @param provider - A provider id that `isKnownIntegrationProvider` accepted.
+ * @param flags - The resolved dashboard feature flags.
+ * @returns Whether the provider's family is enabled; false for an id outside every family.
+ */
 export function isIntegrationProviderEnabled(
   provider: string,
   flags: Pick<IntegrationFeatureFlags, "custody" | "payments" | "policies">
@@ -40,5 +47,5 @@ export function isIntegrationProviderEnabled(
   if (isKnownCustodyProvider(provider)) return flags.custody;
   if ((RAMP_PROVIDERS as readonly string[]).includes(provider)) return flags.payments;
   if ((COMPLIANCE_PROVIDERS as readonly string[]).includes(provider)) return flags.policies;
-  return true;
+  return false;
 }

@@ -13,10 +13,12 @@ function resolveMembersPage(value: string | string[] | undefined): number {
 }
 
 /**
- * RPC selection used to live here (HOO-787). It is managed on each provider's
- * page under Integrations now, which is also where the fallback warning for a
- * provider the deployment no longer offers is raised — so this page no longer
- * loads the organization or its provider availability at all.
+ * Organization settings: the quick start for API key managers and the members
+ * section for organization writers.
+ *
+ * @param props - The route props.
+ * @param props.searchParams - The query, carrying the members page.
+ * @returns The rendered settings page.
  */
 export default async function SettingsPage({
   searchParams,

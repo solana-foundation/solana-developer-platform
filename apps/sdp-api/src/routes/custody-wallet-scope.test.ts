@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import * as rpcRelay from "@sdp/rpc/relay";
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { CachedApiKey, SignerCheckRequest } from "@sdp/types";
 import { address, blockhash, generateKeyPairSigner, signature } from "@solana/kit";
@@ -45,12 +44,10 @@ const SEEDED_PUBLIC_KEYS = {
 
 const actualCreateSigningService = signingServiceModule.createSigningService;
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
-const createRpcFromTransportSpy = vi.spyOn(solanaRpc, "createRpcFromTransport");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getMultipleAccountsLamportsMock = vi.spyOn(solanaRpc, "getMultipleAccountsLamports");
 const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
 const createSigningServiceMock = vi.spyOn(signingServiceModule, "createSigningService");
-const resolveRpcTargetMock = vi.spyOn(rpcRelay, "resolveRpcTarget");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 const simulateTransactionMock = vi.spyOn(solanaRpc, "simulateTransaction");
@@ -350,14 +347,6 @@ describe("Custody wallet scope routes", () => {
         decimals: 6,
       },
     ]);
-    resolveRpcTargetMock.mockResolvedValue({
-      providerId: "default",
-      projectId: TEST_PROJECT.id,
-      endpoint: "https://solana-rpc.mock.invalid",
-      endpointLabel: "test",
-      headers: {},
-      selectionMode: "round_robin_default",
-    });
     getRecentBlockhashMock.mockResolvedValue({
       blockhash: blockhash("1".repeat(32)),
       lastValidBlockHeight: 1_000n,
@@ -439,8 +428,7 @@ describe("Custody wallet scope routes", () => {
       expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
-      expect(createRpcFromTransportSpy).not.toHaveBeenCalled();
+      expect(createRpcMock).not.toHaveBeenCalled();
       expect(simulateTransactionMock).not.toHaveBeenCalled();
     }
   );
@@ -479,7 +467,7 @@ describe("Custody wallet scope routes", () => {
     );
     expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
     expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
-    expect(createRpcFromTransportSpy).toHaveBeenCalledOnce();
+    expect(createRpcMock).toHaveBeenCalledExactlyOnceWith(env);
   });
 
   it.each(["clerk", "api_key"] as const)(
@@ -507,7 +495,7 @@ describe("Custody wallet scope routes", () => {
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+      expect(createRpcMock).not.toHaveBeenCalled();
       expect(simulateTransactionMock).not.toHaveBeenCalled();
     }
   );
@@ -574,7 +562,7 @@ describe("Custody wallet scope routes", () => {
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+      expect(createRpcMock).not.toHaveBeenCalled();
       expect(simulateTransactionMock).not.toHaveBeenCalled();
     }
   );
@@ -639,7 +627,7 @@ describe("Custody wallet scope routes", () => {
       expect(response.status).toBe(403);
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+      expect(createRpcMock).not.toHaveBeenCalled();
       expect(simulateTransactionMock).not.toHaveBeenCalled();
     }
   );
@@ -655,7 +643,7 @@ describe("Custody wallet scope routes", () => {
       });
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-      expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+      expect(createRpcMock).not.toHaveBeenCalled();
     }
   );
 
@@ -769,7 +757,7 @@ describe("Custody wallet scope routes", () => {
       } else {
         expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
         expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-        expect(resolveRpcTargetMock).not.toHaveBeenCalled();
+        expect(createRpcMock).not.toHaveBeenCalled();
       }
       expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
     }

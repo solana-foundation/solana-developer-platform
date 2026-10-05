@@ -63,12 +63,11 @@ export function getProjectUserRepository(c: AppContext) {
   return createProjectUserRepository(c.env);
 }
 
-/** Resolve this request's selected project RPC without exposing its endpoint. */
+/** Load this request's project RPC client without exposing its endpoint. */
 export function loadPrivateChannelProjectRpcClient(c: AppContext) {
   const auth = getAuth(c);
   return loadProjectRpcClient({
     env: c.env,
-    kv: c.var.kv,
     organizationId: auth.organizationId,
     projectId: requireProjectId(c),
     environment: c.get("projectEnvironment"),

@@ -1,7 +1,14 @@
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { describe, expect, it, vi } from "vitest";
-import { probeProjectRpcDeployment } from "./project-rpc";
+import * as solanaRpc from "@sdp/rpc/solana";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { getDb } from "@/db";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { env } from "@/test/helpers/env";
+import { type SeededDefaultProjects, seedDefaultProjects } from "@/test/helpers/projects";
+import { seedTestDatabase } from "@/test/mocks/db";
+import { loadProjectRpcClient, probeProjectRpcDeployment } from "./project-rpc";
 
 const OTHER_OWNER = "11111111111111111111111111111111";
 
@@ -111,5 +118,118 @@ describe("probeProjectRpcDeployment", () => {
       ok: false,
       error: "Escrow instance is not owned by the configured escrow program on mainnet-beta.",
     });
+  });
+});
+
+describe("loadProjectRpcClient", () => {
+  let projects: SeededDefaultProjects;
+  let managedRpc: SolanaRpc;
+  let createRpcMock: MockInstance<typeof solanaRpc.createRpc>;
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    const db = getDb(env);
+    await db
+      .prepare("INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+      .run();
+    await db
+      .prepare("INSERT INTO users (id, email) VALUES (?, ?)")
+      .bind(TEST_USER.id, TEST_USER.email)
+      .run();
+    projects = await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: "prj_project_rpc_sandbox", production: "prj_project_rpc_production" },
+    });
+    managedRpc = rpcWithAccounts({ program: null });
+    createRpcMock = vi.spyOn(solanaRpc, "createRpc").mockReturnValue(managedRpc);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("takes the cluster from the passed environment without reading the project row", async () => {
+    const client = await loadProjectRpcClient({
+      env,
+      organizationId: TEST_ORG.id,
+      projectId: "prj_project_rpc_unseeded",
+      environment: "production",
+    });
+
+    expect(client.cluster).toBe(CLUSTER_BY_SDP_ENVIRONMENT.production);
+    expect(client.rpc).toBe(managedRpc);
+  });
+
+  it.each(["sandbox", "production"] as const)(
+    "reads the cluster from the active %s project row when no environment is passed",
+    async (environment) => {
+      const client = await loadProjectRpcClient({
+        env,
+        organizationId: TEST_ORG.id,
+        projectId: projects[environment].id,
+      });
+
+      expect(client.cluster).toBe(CLUSTER_BY_SDP_ENVIRONMENT[environment]);
+    }
+  );
+
+  it("builds the client on the managed pool from env and binds the probe to it and the cluster", async () => {
+    const client = await loadProjectRpcClient({
+      env,
+      organizationId: TEST_ORG.id,
+      projectId: projects.production.id,
+    });
+
+    expect(createRpcMock).toHaveBeenCalledExactlyOnceWith(env);
+    await expect(client.probe(deployment)).resolves.toMatchObject({
+      ok: false,
+      error: `Escrow program is not deployed on ${CLUSTER_BY_SDP_ENVIRONMENT.production}.`,
+    });
+  });
+
+  it("throws for a project that does not exist", async () => {
+    await expect(
+      loadProjectRpcClient({
+        env,
+        organizationId: TEST_ORG.id,
+        projectId: "prj_project_rpc_missing",
+      })
+    ).rejects.toThrow(
+      "Active project prj_project_rpc_missing was not found while resolving its RPC"
+    );
+    expect(createRpcMock).not.toHaveBeenCalled();
+  });
+
+  it("throws for a project owned by another organization", async () => {
+    await expect(
+      loadProjectRpcClient({
+        env,
+        organizationId: "org_project_rpc_other",
+        projectId: projects.sandbox.id,
+      })
+    ).rejects.toThrow(
+      `Active project ${projects.sandbox.id} was not found while resolving its RPC`
+    );
+  });
+
+  it("throws for an archived project", async () => {
+    await getDb(env)
+      .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
+      .bind(projects.sandbox.id)
+      .run();
+
+    await expect(
+      loadProjectRpcClient({
+        env,
+        organizationId: TEST_ORG.id,
+        projectId: projects.sandbox.id,
+      })
+    ).rejects.toThrow(
+      `Active project ${projects.sandbox.id} was not found while resolving its RPC`
+    );
+    expect(createRpcMock).not.toHaveBeenCalled();
   });
 });

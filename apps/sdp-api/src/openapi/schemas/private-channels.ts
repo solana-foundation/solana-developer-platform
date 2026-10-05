@@ -15,7 +15,7 @@ export const privateChannelInstanceSchema = z
     gatewayUrl: z.string().openapi({ example: "http://34.71.147.163:8899" }),
     chainRpcUrl: z.string().openapi({
       description:
-        "Deprecated compatibility field. Private Channels execution uses the project's RPC integration.",
+        "Deprecated compatibility field. Private Channels execution uses SDP's managed RPC.",
       example: "https://devnet.helius-rpc.com/?api-key=…",
     }),
     escrowProgramId: solanaAddressSchema,
@@ -33,8 +33,7 @@ export const privateChannelInstanceInputSchema = z
   .object({
     gatewayUrl: z.string(),
     chainRpcUrl: z.string().optional().openapi({
-      description:
-        "Deprecated and ignored for execution. Configure RPC on the SDP project instead.",
+      description: "Deprecated and ignored for execution. Private Channels uses SDP's managed RPC.",
     }),
     escrowProgramId: solanaAddressSchema,
     withdrawProgramId: solanaAddressSchema,
@@ -122,7 +121,7 @@ export const privateChannelProbeBodySchema = z
   .meta(privateChannelProbeDeploymentConstraint)
   .openapi({
     description:
-      "Probe request body. When deployment addresses are supplied, the selected project's configured RPC verifies them automatically.",
+      "Probe request body. When deployment addresses are supplied, SDP's managed RPC verifies them automatically.",
   });
 
 export const privateChannelOverviewSchema = z
