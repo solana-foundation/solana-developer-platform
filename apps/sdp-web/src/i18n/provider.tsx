@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, type ReactNode, useContext, useMemo } from "react";
+import { UiI18nProvider, type UiTranslate } from "@sdp/ui/i18n";
+import { createContext, type ReactNode, useCallback, useContext, useMemo } from "react";
 import type { AppLocale } from "@/i18n/config";
 import { type MessageKey, type Messages, type TranslationValues, translate } from "@/i18n/messages";
 
@@ -17,7 +18,19 @@ export function I18nProvider({
   messages,
 }: I18nContextValue & { children: ReactNode }) {
   const value = useMemo(() => ({ locale, messages }), [locale, messages]);
-  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+  // The @sdp/ui primitives read their built-in labels (close, pagination, pickers) from this
+  // catalog through their own provider, so every tree with the app's translations has theirs.
+  const translateUi = useCallback<UiTranslate>(
+    (key, values) => translate(messages, key, values),
+    [messages]
+  );
+  return (
+    <I18nContext.Provider value={value}>
+      <UiI18nProvider locale={locale} translate={translateUi}>
+        {children}
+      </UiI18nProvider>
+    </I18nContext.Provider>
+  );
 }
 
 export function useLocale(): AppLocale {
