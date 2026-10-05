@@ -405,8 +405,14 @@ export function StackedDashboardTopBar({
       {trailingContent ? (
         // On a phone it shares the navigation button's row; from md it sits on the title's row
         // before the action. The md columns have no gap, only margins, so a missing or hidden
-        // action leaves no empty gap at the right edge.
-        <div className="col-start-3 row-start-1 flex items-center justify-end empty:hidden md:col-start-2 md:ml-3">
+        // action leaves no empty gap at the right edge. Under a back link it keeps to the title's
+        // row as the action does, in a 36px box like the action's, so the two share a centre.
+        <div
+          className={cn(
+            "col-start-3 row-start-1 flex items-center justify-end empty:hidden md:col-start-2 md:ml-3",
+            above && "md:h-9 md:self-end"
+          )}
+        >
           {trailingContent}
         </div>
       ) : null}
