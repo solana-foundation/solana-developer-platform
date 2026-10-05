@@ -161,8 +161,14 @@ export function TokenOperationsTab({
     token,
     canManageTokenAdmin,
     t,
-    onSelect: (action) =>
-      action === "allowlist" ? onOpenTab("compliance") : setActiveAction(action),
+    onSelect: (action) => {
+      if (action === "allowlist") {
+        onOpenTab("compliance");
+        return;
+      }
+      ops.prefillDemoOperation(action);
+      setActiveAction(action);
+    },
     labels,
   });
   const onChain = isOnChain(state);
@@ -307,7 +313,11 @@ function TransfersBlock({
             row.id === PAUSE || row.id === FREEZE
               ? {
                   ...row,
-                  onAction: () => setOpen(row.id === PAUSE ? PAUSE : FREEZE),
+                  onAction: () => {
+                    // Demo mode opens the freeze filled in, as the dialogs it replaced did.
+                    if (row.id === FREEZE) ops.prefillDemoOperation("freeze");
+                    setOpen(row.id === PAUSE ? PAUSE : FREEZE);
+                  },
                 }
               : row
           ) ?? []

@@ -1,4 +1,4 @@
-import { RAMP_PROVIDERS } from "@sdp/types";
+import { ASSET_CATEGORIES, RAMP_PROVIDERS } from "@sdp/types";
 import { z } from "zod";
 
 /*
@@ -12,6 +12,7 @@ import { z } from "zod";
 const id = z.string().min(1).max(80);
 const at = z.number().int().nonnegative();
 const text = z.string().max(200);
+const longText = z.string().max(600);
 
 const demoOpSchema = z.discriminatedUnion("k", [
   z.object({
@@ -114,6 +115,83 @@ const demoOpSchema = z.discriminatedUnion("k", [
     period: z.number().int().positive().optional(),
     wallet: id.optional(),
     account: id.optional(),
+  }),
+  // Issuance: `id` is the token's. A draft keeps what the create flow sent, metadata included.
+  z.object({
+    k: z.literal("iss-create"),
+    id,
+    at,
+    profile: id,
+    name: text,
+    symbol: text,
+    description: longText.nullable(),
+    decimals: z.number().int().min(0).max(18),
+    template: text,
+    category: z.enum(ASSET_CATEGORIES),
+    type: text,
+    requiresAllowlist: z.boolean(),
+    freezable: z.boolean(),
+    maxSupply: text.nullable(),
+    signer: id.nullable(),
+    metadata: z.record(z.string(), z.unknown()),
+  }),
+  /** A deploy submitted; it lands DEMO_DEPLOY_MS later. `auth` maps authority to wallet id. */
+  z.object({
+    k: z.literal("iss-deploy"),
+    id,
+    at,
+    tx: id,
+    signer: id.nullable(),
+    auth: z.record(z.string(), id),
+  }),
+  z.object({
+    k: z.literal("iss-supply"),
+    id,
+    at,
+    tx: id,
+    type: z.enum(["mint", "burn", "seize", "force_burn"]),
+    amount: text,
+    from: text.nullable(),
+    to: text.nullable(),
+    memo: text.nullable(),
+  }),
+  z.object({ k: z.literal("iss-pause"), id, at, tx: id, paused: z.boolean() }),
+  z.object({
+    k: z.literal("iss-freeze"),
+    id,
+    at,
+    tx: id,
+    frozen: z.boolean(),
+    account: text,
+    reason: longText.nullable(),
+  }),
+  z.object({
+    k: z.literal("iss-authority"),
+    id,
+    at,
+    tx: id,
+    role: z.enum(["mint", "freeze", "permanentDelegate", "metadata"]),
+    next: text.nullable(),
+  }),
+  z.object({
+    k: z.literal("iss-list-add"),
+    id,
+    at,
+    entry: id,
+    address: text,
+    label: text.nullable(),
+  }),
+  z.object({ k: z.literal("iss-list-remove"), id, at, entry: id }),
+  /** Token fields a PATCH changed, as the API accepts them. */
+  z.object({ k: z.literal("iss-update"), id, at, patch: z.record(z.string(), z.unknown()) }),
+  /** An asset profile's PATCH; `id` is the profile's. */
+  z.object({
+    k: z.literal("iss-profile"),
+    id,
+    at,
+    category: z.enum(ASSET_CATEGORIES).optional(),
+    type: text.optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   }),
 ]);
 

@@ -667,3 +667,46 @@ describe("session", () => {
     expect(decodeDemoOps(["not base64 at all"])).toEqual([]);
   });
 });
+
+describe("issuance", () => {
+  beforeEach(() => {
+    browser.pathname = "/dashboard/issuance";
+  });
+
+  it("answers the Issuance screens from the demo, judged by their own design module", async () => {
+    const tokens = await call("GET", "/v1/issuance/tokens?page=1&pageSize=24");
+    expect(tokens.status).toBe(200);
+    expect(tokens.body.meta.total).toBe(7);
+    expect(browser.newDesignModule).toBe("issuance");
+    expect((await call("GET", "/v1/issuance/tokens/demo_tok_nope")).status).toBe(404);
+    expect((await call("GET", "/v1/issuance/unknown")).body.error.message).toBe(
+      "That isn't part of the demo."
+    );
+  });
+
+  it("keeps a created draft and its deploy in the session, across requests", async () => {
+    const created = await call("POST", "/v1/issuance/asset-profiles", {
+      name: "Session Dollar",
+      symbol: "SUSD",
+      assetCategory: "generic",
+      assetType: "generic",
+      signingCustodyWalletId: "demo_cwlt_treasury",
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.data.token.id as string;
+    expect(
+      (await data<{ token: { status: string } }>(`/v1/issuance/tokens/${id}`)).token.status
+    ).toBe("pending");
+    expect((await call("POST", `/v1/issuance/tokens/${id}/deploy`, {})).status).toBe(200);
+    vi.setSystemTime(new Date(NOW.getTime() + 60_000));
+    const deployed = await data<{ token: { status: string; mintAddress: string | null } }>(
+      `/v1/issuance/tokens/${id}`
+    );
+    expect(deployed.token).toMatchObject({ status: "active", mintAddress: expect.any(String) });
+  });
+
+  it("stays out of the way on the Issuance screens without the demo cookie", async () => {
+    browser.jar.delete("sdp-payments-demo");
+    expect((await call("GET", "/v1/issuance/tokens")).status).toBeNull();
+  });
+});

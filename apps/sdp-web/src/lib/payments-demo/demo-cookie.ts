@@ -1,5 +1,5 @@
 /**
- * Holds the id of the project whose Payments screens run in demo mode. Naming the project means
+ * Holds the id of the project whose Payments and Issuance screens run in demo mode. Naming the project means
  * switching to another one (a production project included) turns the demo off by itself.
  */
 export const PAYMENTS_DEMO_COOKIE_NAME = "sdp-payments-demo";
@@ -14,11 +14,18 @@ export const DEMO_SESSION_COOKIE_PREFIX = "sdp-demo-session";
 
 export const PAYMENTS_PATH_PREFIX = "/dashboard/payments";
 
-/** Whether a dashboard path is a Payments screen. */
-export function isPaymentsPath(pathname: string | null | undefined): boolean {
-  return (
-    pathname === PAYMENTS_PATH_PREFIX || Boolean(pathname?.startsWith(`${PAYMENTS_PATH_PREFIX}/`))
-  );
+export const ISSUANCE_PATH_PREFIX = "/dashboard/issuance";
+
+function isUnder(pathname: string | null | undefined, prefix: string): boolean {
+  return pathname === prefix || Boolean(pathname?.startsWith(`${prefix}/`));
+}
+
+/**
+ * Whether a dashboard path is one the demo covers: the Payments and Issuance screens, which share
+ * one switch and one world (Issuance signs with the Payments demo's wallets).
+ */
+export function isDemoPath(pathname: string | null | undefined): boolean {
+  return isUnder(pathname, PAYMENTS_PATH_PREFIX) || isUnder(pathname, ISSUANCE_PATH_PREFIX);
 }
 
 /** Whether a cookie is one of the demo session's chunks. */
