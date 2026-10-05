@@ -1,0 +1,22 @@
+diff --git a/dist/types/context.d.ts b/dist/types/context.d.ts
+index c0a4bcf0e5826ab6322369d149fbeaed0a16231c..1feadfcb4deae5aadeec7bbff4e73b0f8d099386 100644
+--- a/dist/types/context.d.ts
++++ b/dist/types/context.d.ts
+@@ -135,7 +135,7 @@ interface JSONRespond {
+  *
+  * @returns {Response & TypedResponse<JSONParsed<T>, U, 'json'>} - The response after rendering the JSON object, typed with the provided object and status code types.
+  */
+-type JSONRespondReturn<T extends JSONValue | {} | InvalidJSONValue, U extends ContentfulStatusCode> = Response & TypedResponse<JSONParsed<T>, U, 'json'>;
++export type JSONRespondReturn<T extends JSONValue | {} | InvalidJSONValue, U extends ContentfulStatusCode> = Response & TypedResponse<JSONParsed<T>, U, 'json'>;
+ /**
+  * Interface representing a function that responds with HTML content.
+  *
+diff --git a/dist/types/index.d.ts b/dist/types/index.d.ts
+index 12bbd7aaf6dbc0f239d173591af47c77c96f30ed..9443c2d3897a3eec74ddb693ed332a871cb01404 100644
+--- a/dist/types/index.d.ts
++++ b/dist/types/index.d.ts
+@@ -4,3 +4,4 @@ import { Context, ContextRenderer, ContextVariableMap, ExecutionContext } from "
+ import { Hono } from "./hono.js";
+ import { ClientRequestOptions, InferRequestType, InferResponseType } from "./client/types.js";
+ export { type ClientRequestOptions, Context, type ContextRenderer, type ContextVariableMap, type Env, type ErrorHandler, type ExecutionContext, type Handler, Hono, type HonoRequest, type InferRequestType, type InferResponseType, type Input, type MiddlewareHandler, type Next, type NotFoundHandler, type NotFoundResponse, type Schema, type ToSchema, type TypedResponse, type ValidationTargets };
++export type { JSONRespondReturn } from "./context.js";

@@ -1,7 +1,7 @@
 import type { MoneygramRampEvent, PaymentTransferStatus } from "@sdp/types";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { builtinEnvironments, type EnvironmentReturn } from "vitest/environments";
+import { builtinEnvironments, type EnvironmentReturn } from "vitest/runtime";
 import { postMoneygramRampEvent } from "@/app/dashboard/payments/payments-workspace.data";
 import { getMessages, translate } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";

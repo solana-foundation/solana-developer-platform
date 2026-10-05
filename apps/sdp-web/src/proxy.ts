@@ -115,5 +115,6 @@ export const proxy = clerkMiddleware(async (auth, req) => {
 });
 
 export const config = {
-  matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],
+  // Sentry 11 tunnels pass through Proxy; telemetry must work before sign-in.
+  matcher: ["/((?!.*\\..*|_next|monitoring(?:/|$)).*)", "/", "/(api|trpc)(.*)"],
 };

@@ -4,7 +4,10 @@ import {
   KaminoVault,
   KaminoVaultClient,
   KVaultGlobalConfig,
+  type LedgerInstant,
+  LendingMarket,
   Reserve,
+  resolveLedgerInstantForSlot,
 } from "@kamino-finance/klend-sdk";
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import type { Address, Instruction } from "@solana/kit";
@@ -118,9 +121,9 @@ async function bindVault(
   const probe = new KaminoVault(
     rpc,
     vaultAddress as Kit2,
+    config.slotDurationMs,
     undefined,
-    config.kvaultProgramId as Kit2,
-    config.slotDurationMs
+    config.kvaultProgramId as Kit2
   );
 
   let state: Kit2;
@@ -180,6 +183,22 @@ async function loadStateOnlyReserves(
     throw vaultUnreadable(vaultAddress, runtime.cluster, cause);
   }
 
+  // SDK 12 accrues reserve rewards using the parent market's configured APR
+  // cap. Fetch each market once under this cluster's explicit lending program.
+  const marketAddresses = [
+    ...new Set(reserveStates.filter(Boolean).map((reserve) => reserve.lendingMarket)),
+  ];
+  let marketStates: Array<Kit2 | null>;
+  try {
+    marketStates =
+      marketAddresses.length === 0
+        ? []
+        : await LendingMarket.fetchMultiple(rpc, marketAddresses as Kit2, klendProgramId as Kit2);
+  } catch (cause) {
+    throw vaultUnreadable(vaultAddress, runtime.cluster, cause);
+  }
+  const markets = new Map(marketAddresses.map((market, index) => [market, marketStates[index]]));
+
   return new Map(
     reserveAddresses.map((reserveAddress, index) => {
       const reserveState = reserveStates[index];
@@ -188,6 +207,15 @@ async function loadStateOnlyReserves(
           vaultAddress,
           runtime.cluster,
           `allocated reserve ${reserveAddress} was not found`
+        );
+      }
+      const market = markets.get(reserveState.lendingMarket);
+      const rewardsMaxAprBps = market?.reserveRewardsMaxAprBps;
+      if (!Number.isSafeInteger(rewardsMaxAprBps) || rewardsMaxAprBps < 0) {
+        throw vaultUnreadable(
+          vaultAddress,
+          runtime.cluster,
+          `lending market ${reserveState.lendingMarket} has no valid reserve rewards APR cap`
         );
       }
       const unavailableOracle = {
@@ -210,11 +238,28 @@ async function loadStateOnlyReserves(
           reserveAddress as Kit2,
           unavailableOracle as Kit2,
           rpc,
-          slotDurationMs
+          slotDurationMs,
+          rewardsMaxAprBps,
+          undefined,
+          klendProgramId as Kit2
         ),
       ];
     })
   );
+}
+
+/** Never estimate accrued interest or rewards from the host's wall clock. */
+async function loadLedgerInstant(
+  runtime: KaminoRuntime,
+  vaultAddress: Address,
+  rpc: Kit2,
+  slot: bigint
+): Promise<LedgerInstant> {
+  try {
+    return await resolveLedgerInstantForSlot(rpc, slot as Kit2, "SDP Kamino");
+  } catch (cause) {
+    throw vaultUnreadable(vaultAddress, runtime.cluster, cause);
+  }
 }
 
 /** Decimal strings are the boundary currency; `Decimal` never escapes this file. */
@@ -492,29 +537,31 @@ export async function buildKaminoWithdrawPlan(
   // These reads are independent and share one deadline-bounded RPC client.
   // Keeping them concurrent removes several serial round trips from the exit
   // path without weakening any of the validation below.
-  const [shareAccountsResponse, reserves, globalConfig, lookupTables] = await Promise.all([
-    rpc
-      .getTokenAccountsByOwner(
-        input.owner.address,
-        { mint: assetIdentity.shareMint },
-        { encoding: "jsonParsed" }
-      )
-      .send(),
-    loadStateOnlyReserves(
-      runtime,
-      input.vault,
-      client,
-      state,
-      rpc,
-      config.klendProgramId,
-      config.slotDurationMs
-    ),
-    loadKvaultGlobalConfig(runtime, input.vault, config, rpc),
-    loadVaultLookupTableAddresses(
-      rpc as ReturnType<typeof createKaminoRpc>,
-      state.vaultLookupTable === undefined ? undefined : String(state.vaultLookupTable)
-    ),
-  ]);
+  const [shareAccountsResponse, reserves, globalConfig, lookupTables, ledgerInstant] =
+    await Promise.all([
+      rpc
+        .getTokenAccountsByOwner(
+          input.owner.address,
+          { mint: assetIdentity.shareMint },
+          { encoding: "jsonParsed" }
+        )
+        .send(),
+      loadStateOnlyReserves(
+        runtime,
+        input.vault,
+        client,
+        state,
+        rpc,
+        config.klendProgramId,
+        config.slotDurationMs
+      ),
+      loadKvaultGlobalConfig(runtime, input.vault, config, rpc),
+      loadVaultLookupTableAddresses(
+        rpc as ReturnType<typeof createKaminoRpc>,
+        state.vaultLookupTable === undefined ? undefined : String(state.vaultLookupTable)
+      ),
+      loadLedgerInstant(runtime, input.vault, rpc, input.slot),
+    ]);
   assertActive();
   const shareAccounts = parseShareTokenAccountBalances(shareAccountsResponse?.value);
   const consolidation = await buildShareAccountConsolidation({
@@ -565,7 +612,7 @@ export async function buildKaminoWithdrawPlan(
     bundle = await vault.withdrawIxs(
       input.owner as Kit2,
       shares,
-      input.slot as Kit2,
+      ledgerInstant,
       reserves,
       null,
       null,
@@ -778,20 +825,23 @@ export async function readKaminoPosition(
   let tokenValue: string | undefined;
   let rawRate: unknown;
   try {
-    const reserves = await loadStateOnlyReserves(
-      runtime,
-      input.vault,
-      client,
-      state,
-      rpc,
-      config.klendProgramId,
-      config.slotDurationMs
-    );
+    const [reserves, ledgerInstant] = await Promise.all([
+      loadStateOnlyReserves(
+        runtime,
+        input.vault,
+        client,
+        state,
+        rpc,
+        config.klendProgramId,
+        config.slotDurationMs
+      ),
+      loadLedgerInstant(runtime, input.vault, rpc, input.slot),
+    ]);
     rawRate = await client.getTokensPerShareSingleVault(
       state,
-      input.slot as Kit2,
+      ledgerInstant,
       reserves,
-      input.slot as Kit2
+      ledgerInstant
     );
   } catch {
     rawRate = undefined;
@@ -837,7 +887,7 @@ const EMPTY_ALLOCATION_RESERVE = "11111111111111111111111111111111";
 function observeDepositPricing(
   client: Kit2,
   state: Kit2,
-  slot: Kit2,
+  ledgerInstant: LedgerInstant,
   reserves: Kit2,
   tokenDecimals: number,
   amountBaseUnits: bigint
@@ -855,7 +905,7 @@ function observeDepositPricing(
 
   let netAum = 0n;
   if (sharesIssued > 0n) {
-    const holdings = client.computeVaultHoldings(state, slot, reserves, slot);
+    const holdings = client.computeVaultHoldings(state, ledgerInstant, reserves, ledgerInstant);
     const netAumTokens = requireNonNegativeFiniteDecimal(
       "vault net AUM",
       holdings.totalAUMIncludingFees.sub(holdings.pendingFees)
@@ -865,7 +915,7 @@ function observeDepositPricing(
     const issuedAt = bigintField("reward issuance timestamp", state.rewardInfo.lastIssuanceTs);
     let vested = 0n;
     if (perSecond > 0n && rewardsAvailable > 0n && issuedAt !== 0n) {
-      const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
+      const nowSeconds = BigInt(ledgerInstant.blockTime);
       const elapsed = nowSeconds > issuedAt ? nowSeconds - issuedAt : 0n;
       const accrued = elapsed * perSecond;
       vested = accrued < rewardsAvailable ? accrued : rewardsAvailable;
@@ -906,15 +956,18 @@ export async function quoteKaminoDeposit(
   const amount = toDecimal(acceptedAmount, "amount");
 
   assertActive();
-  const reserves = await loadStateOnlyReserves(
-    runtime,
-    input.vault,
-    client,
-    state,
-    rpc,
-    config.klendProgramId,
-    config.slotDurationMs
-  );
+  const [reserves, ledgerInstant] = await Promise.all([
+    loadStateOnlyReserves(
+      runtime,
+      input.vault,
+      client,
+      state,
+      rpc,
+      config.klendProgramId,
+      config.slotDurationMs
+    ),
+    loadLedgerInstant(runtime, input.vault, rpc, input.slot),
+  ]);
   assertActive();
 
   let sharesOutBaseUnits: bigint;
@@ -922,7 +975,7 @@ export async function quoteKaminoDeposit(
   try {
     const estimate = requireNonNegativeFiniteDecimal(
       "estimated shares",
-      client.estimateSharesFromTokens(state, amount, input.slot as Kit2, reserves)
+      client.estimateSharesFromTokens(state, amount, ledgerInstant, reserves)
     );
     // Same fixed-point round trip as the position read: what leaves this
     // package is scaled exactly like every other amount in SDP.
@@ -933,7 +986,7 @@ export async function quoteKaminoDeposit(
     pricing = observeDepositPricing(
       client,
       state,
-      input.slot as Kit2,
+      ledgerInstant,
       reserves,
       tokenDecimals,
       parseDecimalAmount(acceptedAmount, tokenDecimals)
@@ -969,7 +1022,7 @@ export async function quoteKaminoWithdraw(
   const shares = toDecimal(acceptedShares, "shares");
 
   assertActive();
-  const [reserves, globalConfig] = await Promise.all([
+  const [reserves, globalConfig, ledgerInstant] = await Promise.all([
     loadStateOnlyReserves(
       runtime,
       input.vault,
@@ -980,6 +1033,7 @@ export async function quoteKaminoWithdraw(
       config.slotDurationMs
     ),
     loadKvaultGlobalConfig(runtime, input.vault, config, rpc),
+    loadLedgerInstant(runtime, input.vault, rpc, input.slot),
   ]);
   assertActive();
   const withdrawalPenalties = effectiveWithdrawalPenalties(state, globalConfig);
@@ -988,9 +1042,9 @@ export async function quoteKaminoWithdraw(
   try {
     const tokensPerShare = await client.getTokensPerShareSingleVault(
       state,
-      input.slot as Kit2,
+      ledgerInstant,
       reserves,
-      input.slot as Kit2
+      ledgerInstant
     );
     // The Earn quote input names no owner, so the requested quantity is priced
     // on its own: the SDK clamps an exit to `totalUserShareTokens`, and passing
@@ -998,7 +1052,7 @@ export async function quoteKaminoWithdraw(
     // holds them is the builder's check (`buildShareAccountConsolidation`).
     plan = await client.getShareExitLiquidityPlan(
       state,
-      input.slot as Kit2,
+      ledgerInstant,
       reserves,
       shares,
       shares,

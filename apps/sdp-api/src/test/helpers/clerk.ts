@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { exportJWK, generateKeyPair, type JWTPayload, SignJWT } from "jose";
-import type { afterAll } from "vitest";
-import { getCurrentTest } from "vitest/suite";
+import { type afterAll, TestRunner } from "vitest";
 import type { DatabaseClient } from "@/db";
 import type { Env } from "@/types/env";
 
@@ -46,7 +45,7 @@ export async function ensureTestClerkIssuer(
     const started = startIssuer();
     issuerPromise = started;
     const hook = (globalThis as { afterAll?: typeof afterAll }).afterAll;
-    if (typeof hook === "function" && getCurrentTest() === undefined) {
+    if (typeof hook === "function" && TestRunner.getCurrentTest() === undefined) {
       hook(async () => {
         const { server } = await started;
         await new Promise<void>((resolve, reject) => {
