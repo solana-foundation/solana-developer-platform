@@ -16,10 +16,12 @@ DELETE FROM provider_credentials
 ALTER TABLE organizations
     DROP COLUMN rpc_credential_mode;
 
+-- Settings that held only RPC keys become NULL, the "never set" value the
+-- project and organization readers return as `null`.
 UPDATE projects
-   SET settings = ((settings::jsonb) - 'rpcProvider' - 'rpcEndpoint')::text
+   SET settings = NULLIF(((settings::jsonb) - 'rpcProvider' - 'rpcEndpoint')::text, '{}')
  WHERE settings LIKE '%rpcProvider%' OR settings LIKE '%rpcEndpoint%';
 
 UPDATE organizations
-   SET settings = (((settings::jsonb) - 'rpcProvider') #- '{providerOverrides,rpc}')::text
+   SET settings = NULLIF((((settings::jsonb) - 'rpcProvider') #- '{providerOverrides,rpc}')::text, '{}')
  WHERE settings LIKE '%rpcProvider%' OR settings LIKE '%"rpc"%';

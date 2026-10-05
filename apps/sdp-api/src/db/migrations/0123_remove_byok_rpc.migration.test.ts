@@ -83,6 +83,7 @@ describe("0123 BYOK RPC removal", () => {
     await restorePreRemovalSchema();
     const tenant = await seedOrgProject(client, "0123");
     const otherTenant = await seedOrgProject(client, "0123_other");
+    const rpcOnlyTenant = await seedOrgProject(client, "0123_rpc_only");
 
     for (const provider of ["helius", "nodit", "triton", "validationcloud", "privy"]) {
       await seedStoredProviderCredential(client, {
@@ -151,6 +152,14 @@ describe("0123 BYOK RPC removal", () => {
       JSON.stringify({ providerOverrides: { rpc: { triton: true } } }),
       otherTenant.organizationId,
     ]);
+    await client.query("UPDATE projects SET settings = $1 WHERE id = $2", [
+      JSON.stringify({ rpcProvider: "helius", rpcEndpoint: "https://x" }),
+      rpcOnlyTenant.projectId,
+    ]);
+    await client.query("UPDATE organizations SET settings = $1 WHERE id = $2", [
+      JSON.stringify({ rpcProvider: "helius" }),
+      rpcOnlyTenant.organizationId,
+    ]);
 
     await runPostgresMigrations({ databaseUrl, migrationsDir });
 
@@ -181,6 +190,8 @@ describe("0123 BYOK RPC removal", () => {
     expect(await settingsOf("organizations", otherTenant.organizationId)).toEqual({
       providerOverrides: {},
     });
+    expect(await settingsOf("projects", rpcOnlyTenant.projectId)).toBeNull();
+    expect(await settingsOf("organizations", rpcOnlyTenant.organizationId)).toBeNull();
     expect(await settingsOf("projects", `${tenant.projectId}_production`)).toBeNull();
   });
 });
