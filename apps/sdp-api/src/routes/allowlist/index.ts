@@ -13,7 +13,7 @@ import { addEntrySchema } from "./schemas";
 
 const allowlist = new Hono<{ Bindings: Env }>();
 
-allowlist.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+allowlist.use("*", unifiedAuthMiddleware());
 allowlist.use("*", projectContextMiddleware());
 allowlist.use("*", adminAuth);
 

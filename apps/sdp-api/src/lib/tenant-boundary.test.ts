@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { PUBLIC_SYSTEM_PATH_PREFIXES } from "@/middleware/database-identity";
 
 const sourceRoot = join(process.cwd(), "src");
 
@@ -15,6 +16,12 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("tenant data-access boundary", () => {
+  it("limits public system database access to webhooks and payment pages", () => {
+    expect(PUBLIC_SYSTEM_PATH_PREFIXES).toEqual([
+      { prefix: "/webhooks", component: "http:webhooks" },
+      { prefix: "/pay", component: "http:pay" },
+    ]);
+  });
   it("keeps raw TokenService construction out of authenticated issuance handlers", () => {
     const handlers = sourceFiles(join(sourceRoot, "routes", "issuance", "handlers"));
     const violations = handlers
@@ -76,7 +83,6 @@ describe("tenant data-access boundary", () => {
       // Pre-link Clerk surface: resolves the Clerk-org mapping before any
       // tenant exists, then narrows the request to the mapped organization.
       "middleware/clerk-onboarding.ts",
-      "middleware/session-auth.ts",
       "middleware/database-identity.ts",
       // The audit ledger's hash chain spans every organization by design; its
       // head/anchor reads run privileged while rows keep tenant attribution.

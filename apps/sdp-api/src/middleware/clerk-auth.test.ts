@@ -1,119 +1,117 @@
+import assert from "node:assert/strict";
+import { createServer, type Server } from "node:http";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import { getClerkAuth } from "@/lib/auth";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { optionalClerkAuth } from "@/middleware/clerk-auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, skipRateLimitPaths } from "@/middleware/rate-limit";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import {
+  ensureTestClerkIssuer,
+  seedClerkIdentity,
+  signTestClerkClaims,
+} from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
-const TEST_ORG = {
-  id: "org_clerk_cache_request_test",
-  name: "Clerk Cache Request Test Org",
-  slug: "clerk-cache-request-test-org",
-  tier: "individual" as const,
-  status: "active" as const,
-};
-
-function encodeJwtPart(value: Record<string, unknown>): string {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
-}
-
-function createJwt(payload: ClerkJwtPayload): string {
-  return `${encodeJwtPart({ alg: "RS256", typ: "JWT" })}.${encodeJwtPart(payload)}.signature`;
-}
-
 describe("Clerk auth request cache", () => {
+  const issuerReady = ensureTestClerkIssuer(env);
+  const apiServers: Server[] = [];
+
+  async function serveClerkApi(path: string, responseBody: () => unknown) {
+    const server = createServer((request, response) => {
+      if (!(request.method === "GET" && request.url === path)) {
+        response.writeHead(500);
+        response.end("Unexpected Clerk API request");
+        return;
+      }
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(responseBody()));
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    apiServers.push(server);
+    const address = server.address();
+    assert(address !== null && typeof address === "object");
+    env.CLERK_API_URL = `http://127.0.0.1:${address.port}/v1`;
+  }
+
   beforeEach(async () => {
+    await issuerReady;
+    await ensureTestClerkIssuer(env);
     await seedTestDatabase(env);
-
-    await getDb(env).batch([
-      getDb(env).prepare(
-        `CREATE TABLE IF NOT EXISTS auth_user_identities (
-           id TEXT PRIMARY KEY,
-           provider TEXT NOT NULL,
-           provider_user_id TEXT NOT NULL,
-           user_id TEXT NOT NULL,
-           email TEXT
-         )`
-      ),
-      getDb(env).prepare(
-        `CREATE TABLE IF NOT EXISTS auth_organization_identities (
-           id TEXT PRIMARY KEY,
-           provider TEXT NOT NULL,
-           provider_org_id TEXT NOT NULL,
-           organization_id TEXT NOT NULL,
-           slug TEXT
-         )`
-      ),
-    ]);
-
     await getDb(env).batch([
       getDb(env)
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
         .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status),
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind("usr_clerk_cached", "clerk-cache@example.com"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-         VALUES (?, 'clerk', ?, ?, ?)`
-        )
-        .bind(
-          "aui_clerk_cached",
-          "clerk_user_cached",
-          "usr_clerk_cached",
-          "clerk-cache@example.com"
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
-         VALUES (?, 'clerk', ?, ?, ?)`
-        )
-        .bind("aoi_clerk_cached", "clerk_org_cached", TEST_ORG.id, TEST_ORG.slug),
-      getDb(env)
-        .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES (?, ?, ?, 'admin', 'active')`
-        )
-        .bind("mem_clerk_cached", TEST_ORG.id, "usr_clerk_cached"),
+        .bind(TEST_USER.id, TEST_USER.email),
     ]);
+    await seedClerkIdentity(getDb(env), {
+      userId: TEST_USER.id,
+      email: TEST_USER.email,
+      clerkUserId: "clerk_user_cached",
+      organizationId: TEST_ORG.id,
+      clerkOrgId: "org_test_clerk_cached",
+      orgSlug: TEST_ORG.slug,
+      role: "admin",
+    });
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
+    await Promise.all(
+      apiServers.splice(0).map(
+        (server) =>
+          new Promise<void>((resolve, reject) => {
+            server.close((error) => {
+              if (error) reject(error);
+              else resolve();
+            });
+          })
+      )
+    );
     await clearKVStores(env);
     env.CLERK_ISSUER = undefined;
-    env.CLERK_JWKS_URL = undefined;
     env.CLERK_SECRET_KEY = undefined;
     env.CLERK_API_URL = undefined;
   });
 
-  function createProtectedApp(payload: ClerkJwtPayload) {
-    const token = createJwt(payload);
+  async function createProtectedApp(payload: ClerkJwtPayload) {
+    const token = await signTestClerkClaims(payload, 300);
     const app = new Hono<{ Bindings: Env }>();
+    let cachedBeforeAuth: ClerkJwtPayload | undefined;
+    let cachedAfterAuth: ClerkJwtPayload | undefined;
 
     app.use("*", kvStoreMiddleware());
-    app.use("*", async (c, next) => {
-      c.set("verifiedClerkJwt", { token, payload });
-      await next();
-    });
     app.use("*", skipRateLimitPaths());
-    app.use("*", unifiedAuthMiddleware({ allowClerk: true }));
+    app.use("*", async (c, next) => {
+      const verified = c.get("verifiedClerkJwt");
+      assert(verified !== undefined);
+      cachedBeforeAuth = verified.payload;
+      await next();
+      const after = c.get("verifiedClerkJwt");
+      assert(after !== undefined);
+      cachedAfterAuth = after.payload;
+    });
+    app.use("*", unifiedAuthMiddleware());
     app.get("/protected", requirePermissions("org:read"), (c) => {
       return c.json({
-        organizationId: c.get("clerk")?.organizationId ?? null,
-        email: c.get("clerk")?.email ?? null,
+        organizationId: getClerkAuth(c).organizationId,
+        email: getClerkAuth(c).email,
       });
     });
     app.get("/admin", requirePermissions("org:admin"), (c) => {
-      return c.json({ role: c.get("clerk")?.role ?? null });
+      return c.json({ role: getClerkAuth(c).role });
     });
     app.onError((error, c) => {
       if (error instanceof AppError) {
@@ -122,17 +120,17 @@ describe("Clerk auth request cache", () => {
       throw error;
     });
 
-    return { app, token };
+    return {
+      app,
+      token,
+      cachedPayloads: () => ({ before: cachedBeforeAuth, after: cachedAfterAuth }),
+    };
   }
 
-  function createStrictOptionalApp(payload: ClerkJwtPayload) {
-    const token = createJwt(payload);
+  async function createStrictOptionalApp(payload: ClerkJwtPayload) {
+    const token = await signTestClerkClaims(payload, 300);
     const app = new Hono<{ Bindings: Env }>();
 
-    app.use("*", async (c, next) => {
-      c.set("verifiedClerkJwt", { token, payload });
-      await next();
-    });
     app.use("*", optionalClerkAuth({ rejectInvalid: true }));
     app.get("/optional", (c) => c.json({ authenticated: Boolean(c.get("clerk")) }));
     app.onError((error, c) => {
@@ -148,9 +146,8 @@ describe("Clerk auth request cache", () => {
   it("strict optional auth rejects a verified Clerk token without an organization", async () => {
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_without_org",
-      iss: "https://clerk.example.test",
     };
-    const { app, token } = createStrictOptionalApp(payload);
+    const { app, token } = await createStrictOptionalApp(payload);
 
     const res = await app.request(
       "/optional",
@@ -190,15 +187,11 @@ describe("Clerk auth request cache", () => {
   it("reuses a cached Clerk JWT across rate limiting and auth in one request", async () => {
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_cached",
-      org_id: "clerk_org_cached",
-      org_role: "org:admin",
-      org_slug: TEST_ORG.slug,
-      email: "clerk-cache@example.com",
-      iss: "https://clerk.example.test",
+      v: 2,
+      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
+      email: TEST_USER.email,
     };
-    env.CLERK_ISSUER = payload.iss;
-    env.CLERK_JWKS_URL = undefined;
-    const { app, token } = createProtectedApp(payload);
+    const { app, token, cachedPayloads } = await createProtectedApp(payload);
 
     const res = await app.request(
       "/protected",
@@ -211,9 +204,12 @@ describe("Clerk auth request cache", () => {
     );
 
     expect(res.status).toBe(200);
+    const cached = cachedPayloads();
+    assert(cached.before !== undefined);
+    expect(cached.after).toBe(cached.before);
     expect(await res.json()).toEqual({
       organizationId: TEST_ORG.id,
-      email: "clerk-cache@example.com",
+      email: TEST_USER.email,
     });
 
     const projects = await getDb(env)
@@ -230,7 +226,7 @@ describe("Clerk auth request cache", () => {
     await getDb(env).batch([
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind("usr_clerk_second_admin", "second-admin@example.com"),
+        .bind("usr_test_clerk_second_admin", "second-admin@example.com"),
       getDb(env)
         .prepare(
           `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
@@ -239,7 +235,7 @@ describe("Clerk auth request cache", () => {
         .bind(
           "aui_clerk_second_admin",
           "clerk_user_second_admin",
-          "usr_clerk_second_admin",
+          "usr_test_clerk_second_admin",
           "second-admin@example.com"
         ),
     ]);
@@ -248,14 +244,13 @@ describe("Clerk auth request cache", () => {
       sub: "clerk_user_second_admin",
       v: 2,
       o: {
-        id: "clerk_org_cached",
+        id: "org_test_clerk_cached",
         rol: "admin",
         slg: TEST_ORG.slug,
       },
       email: "second-admin@example.com",
-      iss: "https://clerk.example.test",
     };
-    const { app, token } = createProtectedApp(payload);
+    const { app, token } = await createProtectedApp(payload);
 
     const res = await app.request("/admin", { headers: { Authorization: `Bearer ${token}` } }, env);
 
@@ -263,22 +258,20 @@ describe("Clerk auth request cache", () => {
     expect(await res.json()).toEqual({ role: "admin" });
     const membership = await getDb(env)
       .prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
-      .bind(TEST_ORG.id, "usr_clerk_second_admin")
+      .bind(TEST_ORG.id, "usr_test_clerk_second_admin")
       .first<{ role: string }>();
-    expect(membership?.role).toBe("admin");
+    assert(membership !== null);
+    expect(membership.role).toBe("admin");
   });
 
   it("counts Clerk dashboard requests against a per-user per-org limit", async () => {
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_cached",
-      org_id: "clerk_org_cached",
-      org_role: "org:admin",
-      org_slug: TEST_ORG.slug,
-      email: "clerk-cache@example.com",
-      iss: "https://clerk.example.test",
+      v: 2,
+      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
+      email: TEST_USER.email,
     };
-    env.CLERK_ISSUER = payload.iss;
-    const { app, token } = createProtectedApp(payload);
+    const { app, token } = await createProtectedApp(payload);
 
     const res = await app.request(
       "/protected",
@@ -287,23 +280,20 @@ describe("Clerk auth request cache", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await readRateLimitCount(env, `user:usr_clerk_cached:org:${TEST_ORG.id}`)).toBe(1);
+    expect(await readRateLimitCount(env, `user:${TEST_USER.id}:org:${TEST_ORG.id}`)).toBe(1);
   });
 
   it("429s Clerk dashboard traffic once the per-user limit is exhausted", async () => {
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_cached",
-      org_id: "clerk_org_cached",
-      org_role: "org:admin",
-      org_slug: TEST_ORG.slug,
-      email: "clerk-cache@example.com",
-      iss: "https://clerk.example.test",
+      v: 2,
+      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
+      email: TEST_USER.email,
     };
-    env.CLERK_ISSUER = payload.iss;
-    const { app, token } = createProtectedApp(payload);
+    const { app, token } = await createProtectedApp(payload);
     await seedRateLimit(
       env,
-      `user:usr_clerk_cached:org:${TEST_ORG.id}`,
+      `user:${TEST_USER.id}:org:${TEST_ORG.id}`,
       DASHBOARD_ACTOR_MAX_REQUESTS
     );
 
@@ -322,18 +312,16 @@ describe("Clerk auth request cache", () => {
       .prepare(
         "UPDATE organization_members SET status = 'removed' WHERE organization_id = ? AND user_id = ?"
       )
-      .bind(TEST_ORG.id, "usr_clerk_cached")
+      .bind(TEST_ORG.id, TEST_USER.id)
       .run();
 
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_cached",
-      org_id: "clerk_org_cached",
-      org_role: "org:admin",
-      org_slug: TEST_ORG.slug,
-      email: "clerk-cache@example.com",
-      iss: "https://clerk.example.test",
+      v: 2,
+      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
+      email: TEST_USER.email,
     };
-    const { app, token } = createProtectedApp(payload);
+    const { app, token } = await createProtectedApp(payload);
 
     const res = await app.request(
       "/protected",
@@ -344,53 +332,44 @@ describe("Clerk auth request cache", () => {
     expect(res.status).toBe(401);
     const membership = await getDb(env)
       .prepare("SELECT status FROM organization_members WHERE organization_id = ? AND user_id = ?")
-      .bind(TEST_ORG.id, "usr_clerk_cached")
+      .bind(TEST_ORG.id, TEST_USER.id)
       .first<{ status: string }>();
-    expect(membership?.status).toBe("removed");
+    assert(membership !== null);
+    expect(membership.status).toBe("removed");
   });
 
   it("does not link a first-time Clerk identity until its primary email is verified", async () => {
     await getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind("usr_email_collision_target", "collision-target@example.com")
+      .bind("usr_test_email_collision_target", "collision-target@example.com")
       .run();
 
     env.CLERK_SECRET_KEY = "sk_test_clerk_auth_user_lookup";
-    env.CLERK_API_URL = "https://clerk.example.test/v1";
     let verificationStatus = "unverified";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      expect(url).toBe(`${env.CLERK_API_URL}/users/clerk_user_first_login`);
-      return new Response(
-        JSON.stringify({
-          id: "clerk_user_first_login",
-          primary_email_address_id: "email_primary",
-          email_addresses: [
-            {
-              id: "email_primary",
-              email_address: "collision-target@example.com",
-              verification: { status: verificationStatus },
-            },
-            {
-              id: "email_secondary",
-              email_address: "verified-secondary@example.com",
-              verification: { status: "verified" },
-            },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    });
+    await serveClerkApi("/v1/users/clerk_user_first_login", () => ({
+      id: "clerk_user_first_login",
+      primary_email_address_id: "email_primary",
+      email_addresses: [
+        {
+          id: "email_primary",
+          email_address: "collision-target@example.com",
+          verification: { status: verificationStatus },
+        },
+        {
+          id: "email_secondary",
+          email_address: "verified-secondary@example.com",
+          verification: { status: "verified" },
+        },
+      ],
+    }));
 
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_first_login",
-      org_id: "clerk_org_cached",
-      org_role: "org:member",
-      org_slug: TEST_ORG.slug,
+      v: 2,
+      o: { id: "org_test_clerk_cached", rol: "member", slg: TEST_ORG.slug },
       email: "collision-target@example.com",
-      iss: "https://clerk.example.test",
     };
-    const { app, token } = createProtectedApp(payload);
+    const { app, token } = await createProtectedApp(payload);
 
     const unverified = await app.request(
       "/protected",
@@ -425,7 +404,8 @@ describe("Clerk auth request cache", () => {
       )
       .bind("clerk_user_first_login")
       .first<{ user_id: string }>();
-    expect(linkedIdentity?.user_id).toBe("usr_email_collision_target");
+    assert(linkedIdentity !== null);
+    expect(linkedIdentity.user_id).toBe("usr_test_email_collision_target");
   });
 
   it("provisions default projects when the membership webhook has not arrived", async () => {
@@ -436,13 +416,11 @@ describe("Clerk auth request cache", () => {
 
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_cached",
-      org_id: "clerk_org_cached",
-      org_role: "org:admin",
-      org_slug: TEST_ORG.slug,
-      email: "clerk-cache@example.com",
-      iss: "https://clerk.example.test",
+      v: 2,
+      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
+      email: TEST_USER.email,
     };
-    const { app, token } = createProtectedApp(payload);
+    const { app, token } = await createProtectedApp(payload);
 
     const res = await app.request(
       "/protected",
@@ -462,20 +440,18 @@ describe("Clerk auth request cache", () => {
     ]);
   });
 
-  /**
-   * Clerk's acceptance link outlives a local revocation, so signing in through
-   * it is the other way a withdrawn invitation could still be redeemed.
-   */
-  async function seedInvitation(status: string, createdAt: string, expiresInDays = 7) {
+  async function seedInvitation(status: string, createdAt: string, expiresInDays: number) {
     await getDb(env)
       .prepare(
         `INSERT INTO invitations
            (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
-         VALUES (?, ?, 'clerk-cache@example.com', 'member', 'usr_clerk_cached', ?, ?, ?, ?)`
+         VALUES (?, ?, ?, 'member', ?, ?, ?, ?, ?)`
       )
       .bind(
         `inv_${status}_${createdAt}`,
         TEST_ORG.id,
+        TEST_USER.email,
+        TEST_USER.id,
         `hash_${status}_${createdAt}`,
         new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
         status,
@@ -487,11 +463,9 @@ describe("Clerk auth request cache", () => {
   function cachedUserPayload(): ClerkJwtPayload {
     return {
       sub: "clerk_user_cached",
-      org_id: "clerk_org_cached",
-      org_role: "org:admin",
-      org_slug: TEST_ORG.slug,
-      email: "clerk-cache@example.com",
-      iss: "https://clerk.example.test",
+      v: 2,
+      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
+      email: TEST_USER.email,
     };
   }
 
@@ -500,9 +474,9 @@ describe("Clerk auth request cache", () => {
       .prepare("DELETE FROM organization_members WHERE organization_id = ?")
       .bind(TEST_ORG.id)
       .run();
-    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z", 7);
 
-    const { app, token } = createProtectedApp(cachedUserPayload());
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -517,27 +491,18 @@ describe("Clerk auth request cache", () => {
     expect(membership).toBeNull();
   });
 
-  /**
-   * A misconfigured Clerk token customization stored the literal
-   * `{{user.primary_email_address.email_address}}` as an identity email. It is matched
-   * against `invitations.email` here, so an affected user silently missed their own
-   * pending invitation: they were provisioned with the Clerk role instead of the invited
-   * one, and the invitation stayed pending forever.
-   */
   it("applies an invited role when the stored identity email is a template placeholder", async () => {
     await getDb(env)
       .prepare("DELETE FROM organization_members WHERE organization_id = ?")
       .bind(TEST_ORG.id)
       .run();
     await getDb(env)
-      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_test_clerk_user_cached'")
       .bind("{{user.primary_email_address.email_address}}")
       .run();
-    await seedInvitation("pending", "2026-02-01T00:00:00.000Z");
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z", 7);
 
-    // The token claims org:admin while the invitation grants member, so the invited role
-    // is only visible in the result if the invitation was actually matched.
-    const { app, token } = createProtectedApp(cachedUserPayload());
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -550,27 +515,24 @@ describe("Clerk auth request cache", () => {
       .prepare("SELECT role FROM organization_members WHERE organization_id = ?")
       .bind(TEST_ORG.id)
       .first<{ role: string }>();
-    expect(membership?.role).toBe("member");
+    assert(membership !== null);
+    expect(membership.role).toBe("member");
 
     const invitation = await getDb(env)
       .prepare("SELECT status FROM invitations WHERE organization_id = ?")
       .bind(TEST_ORG.id)
       .first<{ status: string }>();
-    expect(invitation?.status).toBe("accepted");
+    assert(invitation !== null);
+    expect(invitation.status).toBe("accepted");
   });
 
-  /**
-   * The established-user path returns before any provisioning runs, so it resolves the
-   * email straight out of storage. A placeholder is a non-null string, so it would win a
-   * COALESCE over the good copy sitting next to it.
-   */
   it("skips a stored placeholder email for a user who is already a member", async () => {
     await getDb(env)
-      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_test_clerk_user_cached'")
       .bind("{{user.primary_email_address.email_address}}")
       .run();
 
-    const { app, token } = createProtectedApp(cachedUserPayload());
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -580,28 +542,22 @@ describe("Clerk auth request cache", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       organizationId: TEST_ORG.id,
-      email: "clerk-cache@example.com",
+      email: TEST_USER.email,
     });
   });
 
-  /**
-   * Reading around the placeholder is not enough on its own. `inviteMember` matches
-   * `users.email` literally, so a row left corrupted keeps letting an existing member be
-   * re-invited — and the established-member path returns before `ensureClerkUser`, which
-   * used to be the only thing that repaired anything.
-   */
   it("repairs both stored copies for a member who is already established", async () => {
     const placeholder = "{{user.primary_email_address.email_address}}";
     await getDb(env)
-      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_clerk_cached'")
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_test_clerk_user_cached'")
       .bind(placeholder)
       .run();
     await getDb(env)
-      .prepare("UPDATE users SET email = ? WHERE id = 'usr_clerk_cached'")
-      .bind(placeholder)
+      .prepare("UPDATE users SET email = ? WHERE id = ?")
+      .bind(placeholder, TEST_USER.id)
       .run();
 
-    const { app, token } = createProtectedApp(cachedUserPayload());
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -610,14 +566,17 @@ describe("Clerk auth request cache", () => {
     expect(res.status).toBe(200);
 
     const identity = await getDb(env)
-      .prepare("SELECT email FROM auth_user_identities WHERE id = 'aui_clerk_cached'")
+      .prepare("SELECT email FROM auth_user_identities WHERE id = 'aui_test_clerk_user_cached'")
       .first<{ email: string }>();
     const user = await getDb(env)
-      .prepare("SELECT email FROM users WHERE id = 'usr_clerk_cached'")
+      .prepare("SELECT email FROM users WHERE id = ?")
+      .bind(TEST_USER.id)
       .first<{ email: string }>();
 
-    expect(identity?.email).toBe("clerk-cache@example.com");
-    expect(user?.email).toBe("clerk-cache@example.com");
+    assert(identity !== null);
+    expect(identity.email).toBe(TEST_USER.email);
+    assert(user !== null);
+    expect(user.email).toBe(TEST_USER.email);
   });
 
   it("still provisions when a revoked invitation was superseded by a live one", async () => {
@@ -625,69 +584,50 @@ describe("Clerk auth request cache", () => {
       .prepare("DELETE FROM organization_members WHERE organization_id = ?")
       .bind(TEST_ORG.id)
       .run();
-    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
-    await seedInvitation("pending", "2026-02-01T00:00:00.000Z");
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z", 7);
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z", 7);
 
-    const { app, token } = createProtectedApp(cachedUserPayload());
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
 
-    // Re-inviting a previously revoked address has to keep working.
     expect(res.status).toBe(200);
   });
 
   it("does not lock out an existing member carrying a stale revoked invitation", async () => {
-    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z");
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z", 7);
 
-    const { app, token } = createProtectedApp(cachedUserPayload());
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
 
-    // The guard runs only where no membership exists, so it can decline a join
-    // but never strip access from somebody who already has it.
     expect(res.status).toBe(200);
   });
 
   it("bootstraps an unlinked Clerk organization on the first authenticated request", async () => {
-    const originalFetch = globalThis.fetch;
     env.CLERK_SECRET_KEY = "sk_test_clerk_auth_bootstrap";
-    env.CLERK_API_URL = "https://clerk.example.test/v1";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      if (url === `${env.CLERK_API_URL}/organizations/clerk_org_new`) {
-        return new Response(
-          JSON.stringify({
-            id: "clerk_org_new",
-            name: "New Clerk Organization",
-            slug: "new-clerk-organization",
-            private_metadata: {
-              sdp: {
-                tier: "enterprise",
-                providerOverrides: { ramps: { coinbase: false } },
-              },
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
-      }
-      return originalFetch(input, init);
-    });
+    await serveClerkApi("/v1/organizations/org_test_clerk_new", () => ({
+      id: "org_test_clerk_new",
+      name: "New Clerk Organization",
+      slug: "new-clerk-organization",
+      private_metadata: {
+        sdp: { tier: "enterprise", providerOverrides: { ramps: { coinbase: false } } },
+      },
+    }));
 
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_cached",
-      org_id: "clerk_org_new",
-      org_role: "org:admin",
-      org_slug: "new-clerk-organization",
-      email: "clerk-cache@example.com",
-      iss: "https://clerk.example.test",
+      v: 2,
+      o: { id: "org_test_clerk_new", rol: "admin", slg: "new-clerk-organization" },
+      email: TEST_USER.email,
     };
-    const { app, token } = createProtectedApp(payload);
+    const { app, token } = await createProtectedApp(payload);
 
     const res = await app.request(
       "/protected",
@@ -705,16 +645,19 @@ describe("Clerk auth request cache", () => {
          FROM auth_organization_identities
          WHERE provider = 'clerk' AND provider_org_id = ?`
       )
-      .bind("clerk_org_new")
+      .bind("org_test_clerk_new")
       .first<{ organization_id: string }>();
-    expect(mapping?.organization_id).toBe(body.organizationId);
+    assert(mapping !== null);
+    expect(mapping.organization_id).toBe(body.organizationId);
 
     const organization = await getDb(env)
       .prepare("SELECT tier, settings FROM organizations WHERE id = ?")
       .bind(body.organizationId)
       .first<{ tier: string; settings: string | null }>();
-    expect(organization?.tier).toBe("enterprise");
-    expect(JSON.parse(organization?.settings ?? "{}")).toEqual({
+    assert(organization !== null);
+    expect(organization.tier).toBe("enterprise");
+    assert(typeof organization.settings === "string");
+    expect(JSON.parse(organization.settings)).toEqual({
       providerOverrides: { ramps: { coinbase: false } },
     });
 

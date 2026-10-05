@@ -1,12 +1,14 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { setupTestAuth } from "@/test/helpers/auth";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -14,12 +16,12 @@ import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
 
-const ORG = "org_connection_deactivation";
-const USER = "usr_connection_deactivation";
+const ORG = "org_test_connection_deactivation";
+const USER = "usr_test_connection_deactivation";
 const PROJECT = "prj_connection_deactivation";
 const CONNECTION = "cconn_connection_deactivation";
 const CREDENTIAL = "pcred_connection_deactivation";
-const SESSION = "ses_connection_deactivation";
+let clerkToken: string;
 const ORIGINAL_PRIVY_BYOK_ENABLED = env.PRIVY_BYOK_ENABLED;
 
 const app = new Hono<{ Bindings: Env }>();
@@ -36,23 +38,21 @@ app.onError((error, c) => {
 });
 
 function request(
-  path = `/connections/${CONNECTION}/deactivate`,
-  options: { method?: "GET" | "POST"; projectId?: string; authenticated?: boolean } = {}
+  path: string,
+  options: { method: "GET" | "POST"; projectId: string; authenticated: boolean }
 ) {
+  const headers: Record<string, string> = { "X-Project-ID": options.projectId };
+  if (options.authenticated) {
+    headers.Authorization = `Bearer ${clerkToken}`;
+  }
   return app.request(
     `/internal/dashboard/custody${path}`,
-    {
-      method: options.method ?? "POST",
-      headers: {
-        ...(options.authenticated === false ? {} : { Cookie: `sdp_session=${SESSION}` }),
-        "X-Project-ID": options.projectId ?? PROJECT,
-      },
-    },
+    { method: options.method, headers },
     env
   );
 }
 
-async function seedConnection(status: "pending" | "checking" | "failed" = "pending") {
+async function seedConnection(status: "pending" | "checking" | "failed") {
   const db = getDb(env);
   await db.execute(
     `INSERT INTO provider_credentials
@@ -89,7 +89,7 @@ async function lifecycleAudits() {
 }
 
 async function seedActiveConnection(walletStatus: "active" | "inactive") {
-  await seedConnection();
+  await seedConnection("pending");
   const db = getDb(env);
   await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [CREDENTIAL]);
   await db.execute(
@@ -152,11 +152,8 @@ describe("custody Connection deactivation", () => {
       members: [USER],
       ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
     });
-    await db.execute(
-      `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-      VALUES (?, ?, ?, 'session', '2999-01-01T00:00:00.000Z')`,
-      [SESSION, USER, ORG]
-    );
+    clerkToken = await signSeededClerkMember(env, db, USER, ORG);
+    await verifyClerkJwt(clerkToken, env);
     vi.stubGlobal(
       "fetch",
       vi.fn(() => {
@@ -177,11 +174,28 @@ describe("custody Connection deactivation", () => {
     async (status) => {
       await seedConnection(status);
       const persisted = await persistedState();
-      const before = await (await request(`/connections/${CONNECTION}`, { method: "GET" })).json();
-      const result = await request();
+      const before = await (
+        await request(`/connections/${CONNECTION}`, {
+          authenticated: true,
+          projectId: PROJECT,
+          method: "GET",
+        })
+      ).json();
+      const result = await request(`/connections/${CONNECTION}/deactivate`, {
+        authenticated: true,
+        method: "POST",
+        projectId: PROJECT,
+        ...{},
+      });
       expect(result.status).toBe(409);
       expect(await result.json()).toMatchObject({ error: { code: "CONFLICT" } });
-      const after = await (await request(`/connections/${CONNECTION}`, { method: "GET" })).json();
+      const after = await (
+        await request(`/connections/${CONNECTION}`, {
+          authenticated: true,
+          projectId: PROJECT,
+          method: "GET",
+        })
+      ).json();
       expect(after.data).toEqual(before.data);
       expect(await persistedState()).toEqual(persisted);
       expect(await lifecycleAudits()).toMatchObject([
@@ -210,7 +224,12 @@ describe("custody Connection deactivation", () => {
       [CONNECTION]
     );
     const before = await persistedState();
-    const result = await request();
+    const result = await request(`/connections/${CONNECTION}/deactivate`, {
+      authenticated: true,
+      method: "POST",
+      projectId: PROJECT,
+      ...{},
+    });
     expect(result.status).toBe(409);
     expect((await result.json()).error).toEqual({
       code: "CONFLICT",
@@ -229,7 +248,12 @@ describe("custody Connection deactivation", () => {
 
   it("deactivates a failed Connection and replays its current safe projection once", async () => {
     await seedConnection("failed");
-    const result = await request();
+    const result = await request(`/connections/${CONNECTION}/deactivate`, {
+      authenticated: true,
+      method: "POST",
+      projectId: PROJECT,
+      ...{},
+    });
     expect(result.status).toBe(200);
     const body = await result.json();
     expect(body.data).toEqual({
@@ -245,10 +269,19 @@ describe("custody Connection deactivation", () => {
         canCancel: false,
       },
     });
-    const replay = await request();
+    const replay = await request(`/connections/${CONNECTION}/deactivate`, {
+      authenticated: true,
+      method: "POST",
+      projectId: PROJECT,
+      ...{},
+    });
     expect(replay.status).toBe(200);
     expect((await replay.json()).data).toEqual(body.data);
-    const read = await request(`/connections/${CONNECTION}`, { method: "GET" });
+    const read = await request(`/connections/${CONNECTION}`, {
+      authenticated: true,
+      projectId: PROJECT,
+      method: "GET",
+    });
     expect((await read.json()).data.connection).toEqual(body.data.custodyConnection);
     expect(await lifecycleAudits()).toMatchObject([{ action: "deactivate", status: "success" }]);
     expect(
@@ -263,7 +296,12 @@ describe("custody Connection deactivation", () => {
   it("blocks active owned wallets without changing the Connection, Credential, wallets, or default", async () => {
     await seedActiveConnection("active");
     const before = await persistedState();
-    const result = await request();
+    const result = await request(`/connections/${CONNECTION}/deactivate`, {
+      authenticated: true,
+      method: "POST",
+      projectId: PROJECT,
+      ...{},
+    });
     expect(result.status).toBe(409);
     expect((await result.json()).error).toEqual({
       code: "CONFLICT",
@@ -288,7 +326,12 @@ describe("custody Connection deactivation", () => {
     vi.spyOn(AuditService.prototype, "log").mockRejectedValue(new Error(rawError));
     const logger = vi.spyOn(getLogger(), "error");
 
-    const response = await request();
+    const response = await request(`/connections/${CONNECTION}/deactivate`, {
+      authenticated: true,
+      method: "POST",
+      projectId: PROJECT,
+      ...{},
+    });
 
     expect(response.status).toBe(409);
     expect((await response.json()).error).toEqual({
@@ -323,7 +366,12 @@ describe("custody Connection deactivation", () => {
       ORG,
     ]);
     const before = await persistedState();
-    const result = await request();
+    const result = await request(`/connections/${CONNECTION}/deactivate`, {
+      authenticated: true,
+      method: "POST",
+      projectId: PROJECT,
+      ...{},
+    });
     expect(result.status).toBe(200);
     expect((await result.json()).data.custodyConnection).toMatchObject({
       id: CONNECTION,
@@ -348,7 +396,20 @@ describe("custody Connection deactivation", () => {
 
   it("serializes simultaneous requests to one transition and one lifecycle audit", async () => {
     await seedConnection("failed");
-    const responses = await Promise.all([request(), request()]);
+    const responses = await Promise.all([
+      request(`/connections/${CONNECTION}/deactivate`, {
+        authenticated: true,
+        method: "POST",
+        projectId: PROJECT,
+        ...{},
+      }),
+      request(`/connections/${CONNECTION}/deactivate`, {
+        authenticated: true,
+        method: "POST",
+        projectId: PROJECT,
+        ...{},
+      }),
+    ]);
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
     const bodies = await Promise.all(responses.map((response) => response.json()));
     expect(bodies[0].data).toEqual(bodies[1].data);
@@ -358,7 +419,11 @@ describe("custody Connection deactivation", () => {
   it("restores the Connection and preserves related state when its deactivation transaction fails", async () => {
     await seedActiveConnection("inactive");
     const persisted = await persistedState();
-    const before = await request(`/connections/${CONNECTION}`, { method: "GET" });
+    const before = await request(`/connections/${CONNECTION}`, {
+      authenticated: true,
+      projectId: PROJECT,
+      method: "GET",
+    });
     expect(before.status).toBe(200);
     const beforeBody = await before.json();
     const db = getDb(env);
@@ -375,7 +440,12 @@ describe("custody Connection deactivation", () => {
       })
     );
     try {
-      const response = await request();
+      const response = await request(`/connections/${CONNECTION}/deactivate`, {
+        authenticated: true,
+        method: "POST",
+        projectId: PROJECT,
+        ...{},
+      });
       expect(response.status).toBe(503);
       expect((await response.json()).error).toEqual({
         code: "PROVIDER_UNAVAILABLE",
@@ -388,7 +458,11 @@ describe("custody Connection deactivation", () => {
     } finally {
       transaction.mockRestore();
     }
-    const after = await request(`/connections/${CONNECTION}`, { method: "GET" });
+    const after = await request(`/connections/${CONNECTION}`, {
+      authenticated: true,
+      projectId: PROJECT,
+      method: "GET",
+    });
     expect(after.status).toBe(200);
     expect((await after.json()).data).toEqual(beforeBody.data);
     expect(await persistedState()).toEqual(persisted);
@@ -417,7 +491,12 @@ describe("custody Connection deactivation", () => {
       );
     });
     await locked;
-    const response = request();
+    const response = request(`/connections/${CONNECTION}/deactivate`, {
+      authenticated: true,
+      method: "POST",
+      projectId: PROJECT,
+      ...{},
+    });
     try {
       await vi.waitFor(
         async () => {
@@ -496,7 +575,12 @@ describe("custody Connection deactivation", () => {
         });
       });
 
-      const response = await request();
+      const response = await request(`/connections/${CONNECTION}/deactivate`, {
+        authenticated: true,
+        method: "POST",
+        projectId: PROJECT,
+        ...{},
+      });
 
       expect(response.status).toBe(409);
       expect((await response.json()).error).toEqual({
@@ -559,7 +643,16 @@ describe("custody Connection deactivation", () => {
   ] as const)("rejects %s requests before target mutation", async (_name, options, status) => {
     await seedConnection("failed");
     const before = await persistedState();
-    expect((await request(undefined, options)).status).toBe(status);
+    expect(
+      (
+        await request(`/connections/${CONNECTION}/deactivate`, {
+          authenticated: true,
+          method: "POST",
+          projectId: PROJECT,
+          ...options,
+        })
+      ).status
+    ).toBe(status);
     expect(await persistedState()).toEqual(before);
     expect(await lifecycleAudits()).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
@@ -575,7 +668,16 @@ describe("custody Connection deactivation", () => {
       USER,
     ]);
     const before = await persistedState();
-    expect((await request()).status).toBe(403);
+    expect(
+      (
+        await request(`/connections/${CONNECTION}/deactivate`, {
+          authenticated: true,
+          method: "POST",
+          projectId: PROJECT,
+          ...{},
+        })
+      ).status
+    ).toBe(403);
     expect(await persistedState()).toEqual(before);
     expect(await lifecycleAudits()).toEqual([]);
   });
@@ -586,7 +688,10 @@ describe("custody Connection deactivation", () => {
     const { header } = await setupTestAuth(env);
     const response = await app.request(
       `/internal/dashboard/custody/connections/${CONNECTION}/deactivate`,
-      { method: "POST", headers: { Authorization: header, "X-Project-ID": PROJECT } },
+      {
+        method: "POST",
+        headers: { Authorization: header, "X-Project-ID": PROJECT },
+      },
       env
     );
     expect(response.status).toBe(403);

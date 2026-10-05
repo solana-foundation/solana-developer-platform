@@ -4,14 +4,16 @@ import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import internalRpc from "@/routes/internal-rpc";
+import { clerkHeaders } from "@/test/helpers/clerk";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
-const ORG_ID = "org_internal_rpc_quota";
-const ADMIN_USER_ID = "usr_internal_rpc_quota_admin";
-const SESSION_ID = "ses_internal_rpc_quota";
+const ORG_ID = "org_test_internal_rpc_quota";
+const ADMIN_USER_ID = "usr_test_internal_rpc_quota_admin";
+let clerkToken: string;
 const PROJECT_ID = "prj_internal_rpc_quota";
 
 describe("internal RPC connectivity test quota", () => {
@@ -37,7 +39,7 @@ describe("internal RPC connectivity test quota", () => {
       db
         .prepare(
           `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
-           VALUES (?, ?, 'Quota Project', 'quota-project', 'sandbox', 'active', ?)`
+           VALUES (?, ?, 'Default Sandbox Project', 'default-sandbox', 'sandbox', 'active', ?)`
         )
         .bind(PROJECT_ID, ORG_ID, ADMIN_USER_ID),
       db
@@ -46,13 +48,8 @@ describe("internal RPC connectivity test quota", () => {
            VALUES ('pm_internal_rpc_quota', ?, ?, 'admin')`
         )
         .bind(PROJECT_ID, ADMIN_USER_ID),
-      db
-        .prepare(
-          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-           VALUES (?, ?, ?, 'session', '2999-01-01T00:00:00.000Z')`
-        )
-        .bind(SESSION_ID, ADMIN_USER_ID, ORG_ID),
     ]);
+    clerkToken = await signSeededClerkMember(env, db, ADMIN_USER_ID, ORG_ID);
   });
 
   afterEach(async () => {
@@ -80,7 +77,7 @@ describe("internal RPC connectivity test quota", () => {
       "/connections/rconn_any/test",
       {
         method: "POST",
-        headers: { Cookie: `sdp_session=${SESSION_ID}`, "x-project-id": PROJECT_ID },
+        headers: clerkHeaders(clerkToken, PROJECT_ID),
       },
       env
     );
@@ -107,7 +104,7 @@ describe("internal RPC connectivity test quota", () => {
       "/connections/%20/test",
       {
         method: "POST",
-        headers: { Cookie: `sdp_session=${SESSION_ID}`, "x-project-id": PROJECT_ID },
+        headers: clerkHeaders(clerkToken, PROJECT_ID),
       },
       env
     );

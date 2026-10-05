@@ -1,14 +1,11 @@
-/**
- * Authentication middleware tests
- */
-
 import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
-import { requireAdminApiKeyRole } from "@/middleware/auth";
+import { requireAdminApiKeyRole, unifiedAuthMiddleware } from "@/middleware/auth";
+import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import {
   TEST_API_KEY,
@@ -18,6 +15,11 @@ import {
 } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
+import {
+  authenticateTestClerkUser,
+  clerkHeadersWithoutProject,
+  ensureTestClerkIssuer,
+} from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -25,13 +27,13 @@ import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 describe("Auth Middleware", () => {
+  const issuerReady = ensureTestClerkIssuer(env);
   let validKeyHash: string;
 
   beforeEach(async () => {
-    // Set up database schema
+    await issuerReady;
     await seedTestDatabase(env);
 
-    // Seed organization for tests that need it
     await getDb(env)
       .prepare(
         "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
@@ -39,7 +41,6 @@ describe("Auth Middleware", () => {
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
       .run();
 
-    // Hash the test key with the configured pepper
     validKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   });
 
@@ -61,7 +62,6 @@ describe("Auth Middleware", () => {
         env
       );
 
-      // Should not be 401 (auth succeeded, might be 404 if org doesn't exist)
       expect(res.status).not.toBe(401);
     });
 
@@ -120,14 +120,12 @@ describe("Auth Middleware", () => {
         env
       );
 
-      // INVALID_API_KEY returns 401
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("INVALID_API_KEY");
     });
 
     it("rejects unknown API keys", async () => {
-      // Don't seed anything - key won't be found
       const unknownKey = "sk_test_unknown_fixture";
 
       const res = await app.request(
@@ -140,7 +138,6 @@ describe("Auth Middleware", () => {
         env
       );
 
-      // INVALID_API_KEY returns 401
       expect(res.status).toBe(401);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("INVALID_API_KEY");
@@ -159,7 +156,6 @@ describe("Auth Middleware", () => {
         env
       );
 
-      // Auth succeeded and org exists
       expect(res.status).toBe(200);
     });
 
@@ -271,7 +267,7 @@ describe("Auth Middleware", () => {
           TEST_USER.id,
           TEST_USER.email,
           TEST_USER.status,
-          "usr_api_key_creator",
+          "usr_test_api_key_creator",
           "api-key-creator@example.com",
           "active"
         )
@@ -293,7 +289,7 @@ describe("Auth Middleware", () => {
           TEST_API_KEY.id,
           TEST_ORG.id,
           TEST_PROJECT.id,
-          "usr_api_key_creator",
+          "usr_test_api_key_creator",
           "Restricted key",
           TEST_API_KEY.prefix,
           validKeyHash,
@@ -438,7 +434,6 @@ describe("Auth Middleware", () => {
         )
         .run();
 
-      // Simulate the pre-enforcement payload shape still present in Redis at deploy time.
       const { rotationDeadline: _, ...legacyCachedKey } = TEST_CACHED_API_KEY;
       await createKVStoreSet(env).apiKeys.put(
         `key:${validKeyHash}`,
@@ -578,58 +573,51 @@ describe("Auth Middleware", () => {
   });
 
   describe("requireAdminApiKeyRole", () => {
-    function gatedApp(actor: { apiKey?: { role: string }; session?: { permissions: string[] } }) {
+    function gatedApp() {
       const gated = new Hono<{ Bindings: Env }>();
-      gated.use("*", async (c, next) => {
-        if (actor.apiKey) {
-          // SAFETY: the gate reads only `role` from the cached key.
-          c.set("apiKey", actor.apiKey as never);
-        }
-        if (actor.session) {
-          // SAFETY: grantedPermissions reads only `permissions` from the session.
-          c.set("session", actor.session as never);
-        }
-        await next();
-      });
-      gated.onError((error, c) =>
-        c.json({ error: error instanceof Error ? error.message : "unknown" }, 403)
-      );
+      gated.use("*", kvStoreMiddleware());
+      gated.use("*", unifiedAuthMiddleware());
+      gated.onError((error, c) => c.json({ error: error.message }, 403));
       gated.put("/gated", requireAdminApiKeyRole(), (c) => c.json({ ok: true }));
       return gated;
     }
 
-    it("refuses a non-admin API key", async () => {
-      const res = await gatedApp({ apiKey: { role: "api_developer" } }).request(
+    it.each([
+      ["api_developer", 403],
+      ["api_admin", 200],
+    ] as const)("gates the %s API key role", async (role, status) => {
+      await seedCachedApiKey(env, validKeyHash, { ...TEST_CACHED_API_KEY, role });
+      const res = await gatedApp().request(
         "/gated",
-        { method: "PUT" },
+        { method: "PUT", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(status);
     });
 
-    it("allows an api_admin API key", async () => {
-      const res = await gatedApp({ apiKey: { role: "api_admin" } }).request(
+    it.each([
+      ["member", 403],
+      ["admin", 200],
+    ] as const)("gates a Clerk organization %s", async (role, status) => {
+      await getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(TEST_USER.id, TEST_USER.email)
+        .run();
+      const { token } = await authenticateTestClerkUser(env, getDb(env), {
+        userId: TEST_USER.id,
+        email: TEST_USER.email,
+        clerkUserId: "clerk_user_auth_gate",
+        organizationId: TEST_ORG.id,
+        clerkOrgId: "org_test_clerk_auth_gate",
+        orgSlug: TEST_ORG.slug,
+        role,
+      });
+      const res = await gatedApp().request(
         "/gated",
-        { method: "PUT" },
+        { method: "PUT", headers: clerkHeadersWithoutProject(token) },
         env
       );
-      expect(res.status).toBe(200);
-    });
-
-    it("refuses a dashboard session without org:admin", async () => {
-      // An org member holds wallets:write and payments:write, which used to be
-      // enough to author the wallet policies that gate money movement.
-      const res = await gatedApp({
-        session: { permissions: ["wallets:write", "payments:write", "api-keys:write"] },
-      }).request("/gated", { method: "PUT" }, env);
-      expect(res.status).toBe(403);
-    });
-
-    it("allows a dashboard session holding org:admin", async () => {
-      const res = await gatedApp({
-        session: { permissions: ["org:admin", "wallets:write", "payments:write"] },
-      }).request("/gated", { method: "PUT" }, env);
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(status);
     });
   });
 
@@ -650,7 +638,6 @@ describe("Auth Middleware", () => {
         env
       );
 
-      // Auth + permissions passed, org exists
       expect(res.status).toBe(200);
     });
 
@@ -670,14 +657,13 @@ describe("Auth Middleware", () => {
         env
       );
 
-      // Should pass permission check, org exists
       expect(res.status).toBe(200);
     });
 
     it("rejects requests without required permissions", async () => {
       await seedCachedApiKey(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
-        permissions: ["tokens:read"], // No org:read permission
+        permissions: ["tokens:read"],
       });
 
       const res = await app.request(

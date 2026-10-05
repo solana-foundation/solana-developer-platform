@@ -16,7 +16,7 @@ The SDP API provides a unified interface for blockchain operations on Solana, in
 
 ## Public API Routes
 
-The API exposes these public REST endpoints. Most require an API key or session
+The API exposes these public REST endpoints. Most require an API key or Clerk session
 token. Earn strategy reads, deposit/direct-withdrawal previews and unsigned
 instant builds, withdrawal-route discovery, and queued-withdrawal previews also
 accept anonymous requests. Submits, queued request/cancellation actions,
@@ -38,7 +38,6 @@ authenticated.
 
 - `/admin/allowlist/*` — Admin allowlist management
 - `/webhooks/clerk/link-orgs` — Clerk org sync webhook
-- `/v1/auth/*` — Session/token auth flows
 - `/v1/rpc/*` — Solana RPC proxy (internal)
 - `/v1/organizations/*` — Multi-tenant org management (internal)
 - `/v1/members/*` — Team member management (internal)
@@ -101,11 +100,11 @@ authenticated.
    pnpm kora:up
 
    # API with team/Doppler configuration (keep this process running)
-   pnpm dev:api:local
+   pnpm dev:api
    ```
 
    External contributors using only `.env.local` can replace the final command
-   with `pnpm -C apps/sdp-api dev:local` so no Doppler session is required.
+   with `pnpm -C apps/sdp-api dev` so no Doppler session is required.
 
    The API development process waits for Postgres and Redis and applies local
    migrations before starting the server.

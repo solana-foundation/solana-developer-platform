@@ -28,7 +28,6 @@ import {
 } from "@/services/clerk-users.service";
 import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook-events";
 import { ProjectService } from "@/services/project.service";
-import { SessionService } from "@/services/session.service";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./ramps/processor";
 import { parseRampWebhookProvider, RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "./ramps/registry";
@@ -129,19 +128,10 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       failures.push(...failedRefreshes);
     }
   } catch (error) {
-    // Enumerating the keys is itself post-commit work: losing it must not
-    // cost the session revocation below.
     getLogger().error(
       { error },
       "Failed to enumerate API keys after webhook organization deletion"
     );
-    failures.push(error);
-  }
-
-  try {
-    await new SessionService(db).revokeOrganizationSessions(mapping.organization_id);
-  } catch (error) {
-    getLogger().error({ error }, "Failed to revoke sessions after organization deletion");
     failures.push(error);
   }
 
@@ -287,13 +277,6 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
       .prepare("UPDATE organization_members SET status = 'removed' WHERE user_id = ?")
       .bind(identity.user_id),
   ]);
-
-  const sessionService = new SessionService(getDb(c.env));
-  await sessionService
-    .revokeAllUserSessions(identity.user_id)
-    .catch((error) =>
-      getLogger().error({ error }, "Failed to revoke sessions after user deletion")
-    );
 }
 
 /** The address the revoked-invitation rule is keyed on. */
@@ -320,12 +303,12 @@ async function upsertVerifiedMembership(
   const memberId = `mem_${crypto.randomUUID()}`;
   const existing = await getDb(c.env)
     .prepare(
-      `SELECT role, status
+      `SELECT status
        FROM organization_members
        WHERE organization_id = ? AND user_id = ?`
     )
     .bind(organizationId, data.userId)
-    .first<{ role: string; status: string }>();
+    .first<{ status: string }>();
 
   const email = await resolveMemberEmail(c, data.userId);
 
@@ -380,15 +363,6 @@ async function upsertVerifiedMembership(
     return;
   }
 
-  if (existing?.status === "active" && existing.role !== role) {
-    const sessionService = new SessionService(getDb(c.env));
-    await sessionService
-      .revokeUserOrganizationSessions(data.userId, organizationId)
-      .catch((error) =>
-        getLogger().error({ error }, "Failed to revoke sessions after membership role change")
-      );
-  }
-
   const projectService = new ProjectService(getDb(c.env));
   await Promise.all([
     projectService.findOrCreateDefault(organizationId, "sandbox", data.userId),
@@ -440,13 +414,6 @@ async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON)
     )
     .bind(mapping.organization_id, identity.user_id)
     .run();
-
-  const sessionService = new SessionService(getDb(c.env));
-  await sessionService
-    .revokeUserOrganizationSessions(identity.user_id, mapping.organization_id)
-    .catch((error) =>
-      getLogger().error({ error }, "Failed to revoke sessions after membership deletion")
-    );
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {

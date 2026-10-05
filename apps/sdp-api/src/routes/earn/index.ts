@@ -1,5 +1,4 @@
 import { type Context, Hono, type Next } from "hono";
-import { getCookie } from "hono/cookie";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
 import { isEarnEnabled } from "@/lib/feature-flags";
@@ -18,9 +17,7 @@ import {
 } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
-import { optionalSessionAuth } from "@/middleware/session-auth";
 import { validateBody } from "@/middleware/validate";
-import { SESSION_COOKIE_NAME } from "@/routes/auth/constants";
 import { getLogger } from "@/runtime/logger";
 import { APPROVED_OPERATION_REPLAY_HEADER } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
@@ -128,12 +125,10 @@ async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
 earnRoutes.use("*", requireEarnFeature);
 
 // Public routes authenticate a presented credential without requiring one.
-// Keep the same API-key -> Clerk -> session precedence as unified auth so a
-// second credential can never replace the tenant identity selected by the
-// first one.
+// Keep the same API-key -> Clerk precedence as unified auth so a second
+// credential can never replace the tenant identity selected by the first one.
 const tryApiKey = optionalAuth({ rejectInvalid: true });
 const tryClerk = optionalClerkAuth({ rejectInvalid: true });
-const trySession = optionalSessionAuth({ rejectInvalid: true });
 async function optionalEarnAuth(c: Context<{ Bindings: Env }>, next: Next) {
   const presentedApiKey = extractApiKey(c);
   await tryApiKey(c, async () => {
@@ -143,13 +138,7 @@ async function optionalEarnAuth(c: Context<{ Bindings: Env }>, next: Next) {
       await next();
       return;
     }
-    await tryClerk(c, async () => {
-      if (c.get("clerk")) {
-        await next();
-        return;
-      }
-      await trySession(c, next);
-    });
+    await tryClerk(c, next);
   });
 }
 
@@ -157,7 +146,7 @@ async function optionalEarnAuth(c: Context<{ Bindings: Env }>, next: Next) {
 // callers have no organization or project to resolve and continue untouched.
 const resolveProjectContext = projectContextMiddleware();
 function hasEarnAuth(c: Context<{ Bindings: Env }>): boolean {
-  return Boolean(c.get("apiKey") || c.get("clerk") || c.get("session"));
+  return Boolean(c.get("apiKey") || c.get("clerk"));
 }
 
 async function optionalEarnProjectContext(c: Context<{ Bindings: Env }>, next: Next) {
@@ -313,18 +302,14 @@ optionalAuthEarn.post(
 // existing permission matrix. Give anonymous callers the API-facing contract
 // before projectContextMiddleware can turn a missing project into a 400.
 async function requireKeyedEarnCredential(c: Context<{ Bindings: Env }>, next: Next) {
-  if (
-    !c.req.header("Authorization") &&
-    !getCookie(c, SESSION_COOKIE_NAME) &&
-    !c.req.header(APPROVED_OPERATION_REPLAY_HEADER)
-  ) {
+  if (!c.req.header("Authorization") && !c.req.header(APPROVED_OPERATION_REPLAY_HEADER)) {
     throw new AppError("UNAUTHORIZED", "API key required for this Earn route");
   }
   await next();
 }
 
 earn.use("*", requireKeyedEarnCredential);
-earn.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+earn.use("*", unifiedAuthMiddleware());
 earn.use("*", projectContextMiddleware());
 
 // Metered quotas for the Earn reads that fan out to a PAID upstream — the
