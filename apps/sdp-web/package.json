@@ -30,7 +30,7 @@
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@sdp/ui": "workspace:*",
-    "@sentry/nextjs": "10.74.0",
+    "@sentry/nextjs": "11.0.0",
     "@solana/design-system": "1.0.1",
     "@solana/fixed-points": "7.1.1",
     "@solana/qr-code-styling": "1.6.0",
