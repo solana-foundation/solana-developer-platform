@@ -64,17 +64,24 @@ test.describe
     test("creates and displays a recurring payment", async ({ page }) => {
       await page.goto("/dashboard/payments");
 
-      await expect(page.getByRole("link", { name: "Scheduled", exact: true })).toBeVisible();
-      await page.getByRole("link", { name: "Scheduled", exact: true }).click();
+      // The sidebar says "Scheduled" with new-design-activity on and "Recurring" with it off.
+      const schedulesLink = page.getByRole("link", { name: /^(Scheduled|Recurring)$/ });
+      await expect(schedulesLink).toBeVisible();
+      await schedulesLink.click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
       await expect(
         page.locator("main").getByRole("heading", { name: "Schedules" }).first()
       ).toBeVisible();
+      // Wait for the list itself, not the loading skeleton, whose table rows also match "tbody tr".
       await expect(
-        page.getByText("You haven't created a schedule yet").or(page.locator("tbody tr").first())
+        page
+          .getByText("You haven't created a schedule yet")
+          .or(page.locator("tbody tr:not([data-loading-table-row])").first())
       ).toBeVisible({ timeout: 120_000 });
 
-      await page.getByRole("link", { name: "New", exact: true }).click();
+      // An empty list hides the header's "New" and offers "New schedule" in its empty state; a
+      // list with rows keeps the header's. Exactly one of them is visible.
+      await page.getByRole("link", { name: /^New(?: schedule)?$/ }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring\/create$/);
 
       const app = page.locator("main");
