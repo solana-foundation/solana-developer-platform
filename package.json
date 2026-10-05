@@ -50,7 +50,7 @@
     }
   },
   "scripts": {
-    "dev": "scripts/doppler/run-with-config.sh turbo run dev dev:db dev:webhook --env-mode=loose",
+    "dev": "scripts/doppler/run-with-config.sh turbo run dev dev:db dev:webhook --env-mode=loose --continue=always",
     "dev:webhooks": "scripts/doppler/run-with-config.sh turbo run dev:webhook --env-mode=loose",
     "dev:web": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-web --env-mode=loose",
     "dev:docs": "turbo run dev --filter=sdp-docs",
