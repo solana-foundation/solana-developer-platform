@@ -63,7 +63,7 @@ In the dashboard the shell sets the attribute on `<main>` from the route
 (`themeScopeForPath` in `apps/sdp-web/src/lib/theme-scope-routes.ts`: the routes a redesigned area
 registers in `lib/design-modules.ts`, and the Privacy connect form), and on the sidebar whenever
 `new-design` is on. `ThemeScopeProvider` carries the scope to portaled content, which re-stamps it
-through `useThemeScopeAttributes` (`apps/sdp-web/src/components/theme-scope.ts`); where structure
+through `useThemeScopeAttributes` (`packages/sdp-ui/src/theme-scope.ts`); where structure
 differs as well, a client component reads `useThemeScope() === "refresh"`.
 
 When a component needs different styling inside a refresh surface, use the variant rather
