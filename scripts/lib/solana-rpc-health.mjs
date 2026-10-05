@@ -1,13 +1,13 @@
 const GET_LATEST_BLOCKHASH_METHOD = "getLatestBlockhash";
 
 const PROVIDERS = [
-  { id: "alchemy", urlKey: "SOLANA_RPC_ALCHEMY_URL_DEVNET" },
-  { id: "quicknode", urlKey: "SOLANA_RPC_QUICKNODE_URL_DEVNET" },
-  { id: "triton", urlKey: "SOLANA_RPC_TRITON_URL_DEVNET" },
-  { id: "default", urlKey: "SOLANA_RPC_DEFAULT_URL_DEVNET" },
-  { id: "helius", urlKey: "SOLANA_RPC_HELIUS_URL_DEVNET" },
-  { id: "validationcloud", urlKey: "SOLANA_RPC_VALIDATIONCLOUD_URL_DEVNET" },
-  { id: "nodit", urlKey: "SOLANA_RPC_NODIT_URL_DEVNET" },
+  { id: "alchemy", urlKey: "SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL" },
+  { id: "quicknode", urlKey: "SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL" },
+  { id: "triton", urlKey: "SOLANA_RPC_TRITON_DEVNET_API_KEY_URL" },
+  { id: "default", urlKey: "SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL" },
+  { id: "helius", urlKey: "SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL" },
+  { id: "validationcloud", urlKey: "SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL" },
+  { id: "nodit", urlKey: "SOLANA_RPC_NODIT_DEVNET_API_KEY_URL" },
 ];
 
 export async function selectHealthySolanaRpcUrl(env, options = {}) {
