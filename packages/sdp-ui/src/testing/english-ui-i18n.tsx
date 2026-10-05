@@ -2,8 +2,9 @@ import type { ReactNode } from "react";
 import { UiI18nProvider, type UiMessageKey, type UiTranslate } from "../i18n";
 
 // sdp-web's English catalog values for the keys the primitives read (messages/en/shared.json,
-// Shared.SharedComponents), so the suites assert the strings the dashboard renders.
-const ENGLISH: Record<UiMessageKey, string> = {
+// Shared.SharedComponents), so the suites assert the strings the dashboard renders. sdp-web's
+// ui-i18n-fixture test fails when a value here drifts from that catalog.
+export const ENGLISH_UI_MESSAGES: Record<UiMessageKey, string> = {
   "Shared.SharedComponents.chooseDate": "Choose date",
   "Shared.SharedComponents.chooseDateAndTime": "Choose date and time",
   "Shared.SharedComponents.chooseDateRange": "Choose date range",
@@ -26,13 +27,14 @@ const ENGLISH: Record<UiMessageKey, string> = {
   "Shared.SharedComponents.time": "Time",
 };
 
-const translate: UiTranslate = (key, values) =>
-  ENGLISH[key].replace(/\{(\w+)\}/g, (_, name: string) => String(values?.[name]));
+/** Fills a label's `{placeholders}` the way the dashboard's translator does. */
+export const translateEnglishUi: UiTranslate = (key, values) =>
+  ENGLISH_UI_MESSAGES[key].replace(/\{(\w+)\}/g, (_, name: string) => String(values?.[name]));
 
 /** The English labels sdp-web wires in, for suites that render the primitives on their own. */
 export function EnglishUiI18nProvider({ children }: { children: ReactNode }) {
   return (
-    <UiI18nProvider locale="en" translate={translate}>
+    <UiI18nProvider locale="en" translate={translateEnglishUi}>
       {children}
     </UiI18nProvider>
   );

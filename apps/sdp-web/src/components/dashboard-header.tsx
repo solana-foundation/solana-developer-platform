@@ -5,12 +5,14 @@ import {
   ArrowLeftIcon,
   ChevronLeftIcon,
   DownloadIcon,
+  Loader2Icon,
   MenuIcon,
   PanelRightIcon,
   PlusIcon,
 } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
+import { toast } from "sonner";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
@@ -66,9 +68,97 @@ export type DashboardHeaderActionConfig = {
   variant: "primary" | "outline";
   /** Appends the page's current query string, so an export follows the list's filters. */
   withCurrentQuery?: boolean;
-  /** A file download rather than a page: rendered as a plain anchor with `download`. */
+  /**
+   * A file download rather than a page: an anchor with `download` whose click fetches the file,
+   * so a failed export reaches the user as a message rather than a broken download.
+   */
   download?: boolean;
 };
+
+/** The saved file's name, off a Content-Disposition header. */
+function attachmentFilename(header: string | null): string | null {
+  return header?.match(/filename="([^"]+)"/)?.[1] ?? null;
+}
+
+/**
+ * A download action. The click fetches the file and saves it, the button spinning meanwhile (an
+ * export can wait out the API's rate limit), and a failure shows as a toast. A modified click
+ * keeps the browser's own handling of the link.
+ */
+function DashboardHeaderDownloadAction({
+  href,
+  label,
+  variant,
+}: {
+  href: string;
+  label: string;
+  variant: DashboardHeaderActionConfig["variant"];
+}) {
+  const t = useTranslations();
+  const [pending, setPending] = useState(false);
+
+  const download = async () => {
+    setPending(true);
+    try {
+      const response = await fetch(href);
+      if (!response.ok) {
+        toast.error(
+          t(
+            response.status === 429
+              ? "Shared.dashboardShell.downloadRateLimited"
+              : "Shared.dashboardShell.downloadFailed"
+          )
+        );
+        return;
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = attachmentFilename(response.headers.get("Content-Disposition")) ?? "";
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch {
+      toast.error(t("Shared.dashboardShell.downloadFailed"));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Button asChild variant={variant === "primary" ? "default" : "outline"} size="sm">
+      <a
+        href={href}
+        download
+        aria-busy={pending || undefined}
+        aria-disabled={pending || undefined}
+        onClick={(event) => {
+          if (
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey
+          ) {
+            return;
+          }
+          event.preventDefault();
+          if (!pending) {
+            void download();
+          }
+        }}
+      >
+        {pending ? (
+          <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <DownloadIcon className="size-4" aria-hidden="true" />
+        )}
+        {label}
+      </a>
+    </Button>
+  );
+}
 
 /**
  * The title row's page action.
@@ -85,21 +175,17 @@ export function DashboardHeaderAction({
 }) {
   const Icon = action.icon === undefined ? null : action.icon === "plus" ? PlusIcon : DownloadIcon;
   const href = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
-  const content = (
-    <>
-      {Icon === null ? null : <Icon className="size-4" aria-hidden="true" />}
-      {action.label}
-    </>
-  );
+  if (action.download) {
+    return (
+      <DashboardHeaderDownloadAction href={href} label={action.label} variant={action.variant} />
+    );
+  }
   return (
     <Button asChild variant={action.variant === "primary" ? "default" : "outline"} size="sm">
-      {action.download ? (
-        <a href={href} download>
-          {content}
-        </a>
-      ) : (
-        <Link href={href}>{content}</Link>
-      )}
+      <Link href={href}>
+        {Icon === null ? null : <Icon className="size-4" aria-hidden="true" />}
+        {action.label}
+      </Link>
     </Button>
   );
 }
@@ -1181,6 +1267,16 @@ function getLegacyDesignPageConfig(
   });
 }
 
+/**
+ * Requests and Schedules sit under new-design-activity, but their pages are still the previous
+ * design's, so they keep its header (the Requests playground switch included) with the flag on.
+ */
+function isHeldOnPreviousDesign(pathname: string): boolean {
+  return [PAYMENT_REQUESTS_HREF, "/dashboard/payments/recurring"].some(
+    (href) => pathname === href || pathname.startsWith(`${href}/`)
+  );
+}
+
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -1241,10 +1337,11 @@ export function getDashboardPageConfig(
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   // A Payments page no design module has redesigned keeps the previous design's header under
-  // NEW DESIGN too.
-  const legacyDesignConfig = !newDesignPage
-    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled)
-    : null;
+  // NEW DESIGN too, and so do Requests and Schedules until their redesign lands.
+  const legacyDesignConfig =
+    !newDesignPage || isHeldOnPreviousDesign(pathname)
+      ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled)
+      : null;
   if (legacyDesignConfig) {
     return legacyDesignConfig;
   }
