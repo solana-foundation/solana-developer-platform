@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:local": "node scripts/dev.mjs",
     "build": "pnpm generate:api && pnpm generate:ai && pnpm generate:source && next build",
     "start": "next start --port 3001",
     "pretypecheck": "pnpm generate:source",
