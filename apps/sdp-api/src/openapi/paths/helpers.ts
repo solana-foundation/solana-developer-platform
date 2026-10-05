@@ -6,7 +6,7 @@ export const jsonContent = (schema: z.ZodTypeAny) => ({
 
 /**
  * Shared request headers for routes gated by `projectContextMiddleware`.
- * `x-project-id` selects the active project for session/dashboard callers and
+ * `x-project-id` selects the active project for Clerk (dashboard) callers and
  * is ignored when authenticating with an API key (scope is fixed to the key).
  */
 export const projectScopeHeaders = z.object({

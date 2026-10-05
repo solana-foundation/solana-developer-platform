@@ -1,6 +1,6 @@
 {
   "name": "solana-developer-platform",
-  "version": "0.81.0",
+  "version": "0.83.0",
   "private": true,
   "packageManager": "pnpm@10.16.0",
   "engines": {
@@ -50,40 +50,26 @@
     }
   },
   "scripts": {
-    "dev": "scripts/doppler/run-with-config.sh turbo run dev:local dev:db dev:webhook --env-mode=loose",
+    "dev": "scripts/doppler/run-with-config.sh turbo run dev dev:db dev:webhook --env-mode=loose",
     "dev:webhooks": "scripts/doppler/run-with-config.sh turbo run dev:webhook --env-mode=loose",
     "dev:web": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-web --env-mode=loose",
-    "dev:docs": "scripts/doppler/run-with-config.sh turbo run dev --filter=sdp-docs --env-mode=loose",
-    "dev:docs:bare": "turbo run dev --filter=sdp-docs",
+    "dev:docs": "turbo run dev --filter=sdp-docs",
     "dev:example:embedded-yield": "pnpm -C examples/embedded-yield-bank dev",
     "dev:api": "scripts/doppler/run-with-config.sh turbo run dev --filter=@sdp/api --env-mode=loose",
-    "dev:api:local": "scripts/doppler/run-with-config.sh turbo run dev:local --filter=@sdp/api --env-mode=loose",
     "build": "turbo run build",
-    "build:web": "turbo run build --filter=sdp-web",
-    "build:docs": "turbo run build --filter=sdp-docs",
-    "build:api": "turbo run build --filter=@sdp/api",
-    "check:env-contract": "node scripts/check-env-contract.mjs",
-    "check:env-configurator-drift": "node scripts/check-env-configurator-drift.mjs",
     "check:migration-compat": "node scripts/check-migration-compat.mjs",
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
     "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
-    "check:kamino-dependency-boundary": "node scripts/check-kamino-dependency-boundary.mjs",
     "check:ui-flow-coverage": "node scripts/check-ui-flow-coverage.mjs",
     "check:secretref-serialization": "node scripts/check-secretref-serialization.mjs",
-    "check:veda-dependency-boundary": "node scripts/check-veda-dependency-boundary.mjs",
     "check:well-known-mints": "pnpm --filter @sdp/api exec tsx ../../scripts/check-well-known-mints.mjs",
     "check:api-playground": "pnpm -C apps/sdp-api playground:check",
     "generate:api-playground": "pnpm -C apps/sdp-api playground:generate",
     "generate:module-map": "node scripts/check-module-boundaries.mjs --write",
     "typecheck": "turbo run typecheck",
-    "typecheck:all": "turbo run typecheck",
-    "unified-transactions:generate": "pnpm --filter @sdp/api unified-transactions:generate",
-    "unified-transactions:drift": "pnpm --filter @sdp/api unified-transactions:drift",
     "lint": "biome check .",
-    "lint:all": "turbo run lint",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "format:check": "biome format .",
     "test": "scripts/doppler/run-with-config.sh node scripts/run-workspace-tests.mjs unit",
     "test:integration": "scripts/doppler/run-with-config.sh node scripts/run-workspace-tests.mjs integration",
     "test:private-channels": "SDP_PRIVATE_CHANNELS_SMOKE=1 pnpm --filter @sdp/private-channels test",
@@ -107,14 +93,13 @@
     "wisdomtree:surfpool:e2e": "scripts/kora-surfpool/e2e-wisdomtree.sh",
     "kora:surfpool:integration": "scripts/kora-surfpool/integration.sh",
     "kora:surfpool:test": "scripts/kora-surfpool/test.sh",
-    "kora:devnet:check": "infra/kora/cloud-run/check.sh",
     "kora:devnet:test": "TEST_DATABASE_URL=${KORA_DEVNET_DATABASE_URL:-${TEST_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp_test}} node scripts/run-workspace-tests.mjs integration -- src/tests/kora.test.ts src/tests/kora-flow.test.ts src/tests/kora-earn-sponsorship.test.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.12",
-    "turbo": "2.10.12",
+    "@biomejs/biome": "2.5.14",
+    "turbo": "2.11.4",
     "typescript": "6.0.3",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "workspaces": {
     "packages": [

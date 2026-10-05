@@ -5,7 +5,12 @@ import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
-import type { ApiKeyEnvironment, CachedSession, OrganizationRpcProvider, Permission } from "@sdp/types";
+import type {
+  ApiKeyEnvironment,
+  OrganizationRpcProvider,
+  Permission,
+  WalletOperationHumanActorType,
+} from "@sdp/types";
 
 export interface Env {
   // Runtime data services
@@ -372,8 +377,14 @@ declare module "hono" {
         permissions: Permission[];
       }>;
     };
-    // Session auth context set by middleware
-    session?: CachedSession;
+    // Original human actor of an approved wallet operation being replayed
+    approvedOperationActor?: {
+      operationId: string;
+      userId: string;
+      storedActorType: WalletOperationHumanActorType;
+      organizationId: string;
+      permissions: Permission[];
+    };
     // Clerk auth context set by middleware
     clerk?: {
       userId: string;

@@ -15,9 +15,9 @@ export function projectContextMiddleware() {
     }
 
     const clerk = c.get("clerk");
-    const session = c.get("session");
-    const orgId = clerk?.organizationId ?? session?.organizationId;
-    const userId = clerk?.userId ?? session?.userId;
+    const replayActor = c.get("approvedOperationActor");
+    const orgId = clerk?.organizationId ?? replayActor?.organizationId;
+    const userId = clerk?.userId ?? replayActor?.userId;
 
     if (!orgId || !userId) {
       throw unauthorized("Authentication is required");

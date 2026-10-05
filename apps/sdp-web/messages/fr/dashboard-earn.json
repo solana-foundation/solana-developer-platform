@@ -116,7 +116,8 @@
       "devnetStrategiesUnavailable": "Les stratégies Devnet n'ont pas pu être chargées. Les stratégies Mainnet restent disponibles.",
       "mainnetStrategiesLoading": "Chargement des stratégies Mainnet. Les stratégies Devnet restent disponibles.",
       "mainnetStrategiesUnavailable": "Les stratégies Mainnet n'ont pas pu être chargées. Les stratégies Devnet restent disponibles.",
-      "sandboxUnavailable": "Production uniquement"
+      "sandboxUnavailable": "Production uniquement",
+      "redeemIntermediate": "Racheter des wYLDS"
     },
     "earnProgram": {
       "eyebrow": "Yield intégré",
@@ -909,7 +910,8 @@
       "vaultFailedBody": "La transaction de dépôt a échoué sur Solana. Aucun solde de position n'a été crédité à la suite de cette opération. Examinez la transaction avant de réessayer.",
       "vaultFailedStatus": "Échoué",
       "vaultFailedNote": "Le tableau de bord n'a pas projeté de solde à partir de cette opération échouée.",
-      "vaultFloorUnavailable": "SDP n'a pas pu confirmer les conditions exactes avec lesquelles la tentative précédente de ce dépôt a été soumise, donc rien n'a été envoyé. Vérifiez votre position, puis réessayez dans un instant."
+      "vaultFloorUnavailable": "SDP n'a pas pu confirmer les conditions exactes avec lesquelles la tentative précédente de ce dépôt a été soumise, donc rien n'a été envoyé. Vérifiez votre position, puis réessayez dans un instant.",
+      "vaultBackingFigureHomeEquity": "Pool d'equity immobilière Figure"
     },
     "vaultWithdraw": {
       "title": "Retirer de {position}",
@@ -1049,7 +1051,14 @@
       "activeSummary": "{amount} attendus au pair · en attente du règlement de l'opérateur, sans délai d'achèvement garanti",
       "activeSummaryCreating": "{amount} attendus au pair · confirmation de la demande de redemption sur Solana",
       "activeSummaryCancelling": "{amount} demandés · annulation de la demande de l'opérateur ; le wYLDS reste dans votre wallet",
-      "activeSummaryChecking": "{amount} demandés · la demande a été clôturée ; vérification du paiement de l'USDC ou de la conservation du wYLDS"
+      "activeSummaryChecking": "{amount} demandés · la demande a été clôturée ; vérification du paiement de l'USDC ou de la conservation du wYLDS",
+      "titleIntermediate": "Racheter des wYLDS de {position}",
+      "detailsBodyIntermediate": "Saisissez un montant de wYLDS de cette position à racheter au pair via l'opérateur de Hastra.",
+      "intermediateUnit": "wYLDS",
+      "operatorNoticeIntermediate": "La demande délègue les wYLDS à l'autorité de rachat de Hastra sans les transférer ni les brûler. Les USDC n'arrivent que lorsque Hastra a terminé le règlement. L'annulation révoque la demande et laisse les wYLDS dans votre Wallet.",
+      "reviewBodyIntermediate": "Examinez le règlement au pair attendu avant tout mouvement.",
+      "reviewNoticeIntermediate": "L'envoi crée une demande de redemption par l'opérateur ; il ne livre pas d'USDC dans la même transaction. Vous pouvez annuler tant que la demande est en attente, et les wYLDS restent alors dans votre Wallet.",
+      "positionIntermediate": "Inclut {amount} wYLDS"
     },
     "queuedWithdraw": {
       "title": "Demander un retrait de {position}",

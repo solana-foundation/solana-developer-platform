@@ -306,7 +306,8 @@
       "vaultFailedBody": "Giao dịch nạp đã thất bại trên Solana. Không có số dư vị thế nào được ghi nhận từ giao dịch này. Hãy kiểm tra giao dịch trước khi thử lại.",
       "vaultFailedStatus": "Thất bại",
       "vaultFailedNote": "Dashboard không dự kiến số dư từ giao dịch thất bại này.",
-      "vaultFloorUnavailable": "SDP không xác nhận được các điều khoản chính xác của lần thử nạp trước đó, nên không có gì được gửi. Hãy kiểm tra vị thế của bạn, rồi thử lại sau giây lát."
+      "vaultFloorUnavailable": "SDP không xác nhận được các điều khoản chính xác của lần thử nạp trước đó, nên không có gì được gửi. Hãy kiểm tra vị thế của bạn, rồi thử lại sau giây lát.",
+      "vaultBackingFigureHomeEquity": "Pool home equity của Figure"
     },
     "tabs": {
       "opportunities": "Cơ hội",
@@ -473,7 +474,14 @@
       "activeSummary": "{amount} dự kiến nhận theo mệnh giá · đang chờ operator settlement, không đảm bảo thời gian hoàn tất",
       "activeSummaryCreating": "{amount} dự kiến nhận theo mệnh giá · đang xác nhận yêu cầu redemption trên Solana",
       "activeSummaryCancelling": "{amount} đã yêu cầu · đang hủy operator request; wYLDS vẫn ở trong Wallet của bạn",
-      "activeSummaryChecking": "{amount} đã yêu cầu · yêu cầu đã đóng; đang kiểm tra xem USDC đã được thanh toán hay wYLDS được giữ lại"
+      "activeSummaryChecking": "{amount} đã yêu cầu · yêu cầu đã đóng; đang kiểm tra xem USDC đã được thanh toán hay wYLDS được giữ lại",
+      "titleIntermediate": "Quy đổi wYLDS từ {position}",
+      "detailsBodyIntermediate": "Nhập số lượng wYLDS của vị thế này để quy đổi theo mệnh giá qua operator của Hastra.",
+      "intermediateUnit": "wYLDS",
+      "operatorNoticeIntermediate": "Yêu cầu ủy quyền wYLDS cho quyền quy đổi của Hastra mà không chuyển hay burn wYLDS. USDC chỉ đến khi Hastra hoàn tất thanh toán. Hủy sẽ thu hồi yêu cầu và wYLDS vẫn nằm trong Wallet của bạn.",
+      "reviewBodyIntermediate": "Hãy kiểm tra khoản thanh toán theo mệnh giá dự kiến trước khi bất kỳ khoản nào được chuyển.",
+      "reviewNoticeIntermediate": "Khi gửi sẽ tạo một yêu cầu operator-redemption; USDC không được chuyển trong cùng giao dịch. Bạn có thể hủy trong khi yêu cầu còn đang chờ, và wYLDS sau đó sẽ nằm trong Wallet của bạn.",
+      "positionIntermediate": "Bao gồm {amount} wYLDS"
     },
     "queuedWithdraw": {
       "title": "Yêu cầu rút từ {position}",
@@ -661,7 +669,8 @@
       "devnetStrategiesUnavailable": "Không tải được chiến lược Devnet. Chiến lược Mainnet vẫn khả dụng.",
       "mainnetStrategiesLoading": "Đang tải chiến lược Mainnet. Chiến lược Devnet vẫn khả dụng.",
       "mainnetStrategiesUnavailable": "Không tải được chiến lược Mainnet. Chiến lược Devnet vẫn khả dụng.",
-      "sandboxUnavailable": "Chỉ Production"
+      "sandboxUnavailable": "Chỉ Production",
+      "redeemIntermediate": "Quy đổi wYLDS"
     },
     "earnProgram": {
       "eyebrow": "Yield nhúng",
