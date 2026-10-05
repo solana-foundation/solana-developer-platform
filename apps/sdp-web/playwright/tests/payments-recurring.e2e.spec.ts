@@ -64,8 +64,10 @@ test.describe
     test("creates and displays a recurring payment", async ({ page }) => {
       await page.goto("/dashboard/payments");
 
-      await expect(page.getByRole("link", { name: "Scheduled", exact: true })).toBeVisible();
-      await page.getByRole("link", { name: "Scheduled", exact: true }).click();
+      // The sidebar says "Scheduled" with new-design-activity on and "Recurring" with it off.
+      const schedulesLink = page.getByRole("link", { name: /^(Scheduled|Recurring)$/ });
+      await expect(schedulesLink).toBeVisible();
+      await schedulesLink.click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
       await expect(
         page.locator("main").getByRole("heading", { name: "Recurring payments" }).first()
