@@ -5,7 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
-import { isValidSolanaAddressInput } from "../token-management-workspace.utils";
+import {
+  getSignerWalletUnavailableReason,
+  isValidSolanaAddressInput,
+} from "../token-management-workspace.utils";
+import { TokenSignerSelect } from "../token-signer-select";
 import type { TokenTabProps } from "./token-page.shared";
 
 /**
@@ -59,9 +63,10 @@ export function PauseTransfersForm({
 }
 
 /**
- * Freezing an account opened in place under the freeze authority, as the design draws it: the
- * holder's address and the reason the audit history keeps, then the action and Cancel. The
- * freeze still confirms in its dialog, with the token, the address and the network.
+ * Freezing or unfreezing an account opened in place under the freeze authority, as the design
+ * draws it: the holder's address and the reason the audit history keeps, then Freeze, Unfreeze
+ * and Cancel. When several wallets hold the freeze authority, the form first asks which one
+ * signs. Either action still confirms in its dialog, with the token, the address and the network.
  */
 export function FreezeAccountForm({
   ops,
@@ -71,7 +76,22 @@ export function FreezeAccountForm({
   const id = useId();
   const address = ops.freezeForm.accountAddress;
   const invalid = address.trim().length > 0 && !isValidSolanaAddressInput(address);
-  const blocked = !address.trim() || invalid;
+  const signer = ops.getActionSignerProps("freeze");
+  // The freeze sends the chosen wallet, else the only one; with several and none chosen it
+  // could not tell which signs, so it waits for a choice.
+  const chooseSigner = signer.signerWallets.length > 1;
+  const signerWalletId = ops.freezeForm.signingWalletId || signer.defaultSignerWalletId || "";
+  const signerBlocked =
+    Boolean(signer.signerUnavailableReason) ||
+    Boolean(getSignerWalletUnavailableReason(signer.signerWallets, signerWalletId, t)) ||
+    (chooseSigner && !ops.freezeForm.signingWalletId);
+  const blocked = !address.trim() || invalid || signerBlocked;
+  // The freeze authority both freezes and thaws; `handleFreeze(true)` unfreezes.
+  const run = (unfreeze: boolean) => {
+    if (blocked || ops.isPending) return;
+    onClose();
+    ops.handleFreeze(unfreeze);
+  };
 
   return (
     <form
@@ -79,11 +99,17 @@ export function FreezeAccountForm({
       className="flex max-w-lg flex-col gap-4 pt-2.5 pb-2"
       onSubmit={(event) => {
         event.preventDefault();
-        if (blocked || ops.isPending) return;
-        onClose();
-        ops.handleFreeze(false);
+        run(false);
       }}
     >
+      {chooseSigner ? (
+        <TokenSignerSelect
+          signerWallets={signer.signerWallets}
+          signerWalletId={ops.freezeForm.signingWalletId}
+          signerUnavailableReason={signer.signerUnavailableReason}
+          onSignerWalletIdChange={signer.onSignerWalletIdChange}
+        />
+      ) : null}
       <FormField
         id={`${id}-address`}
         label={t("DashboardIssuance.newDesign.operations.freezeAddress")}
@@ -121,6 +147,15 @@ export function FreezeAccountForm({
       <div className={`flex items-center gap-2.5 ${FORM_BUTTON_HEIGHT}`}>
         <Button type="submit" size="sm" disabled={ops.isPending || blocked}>
           {t("DashboardIssuance.newDesign.operations.freezeSubmit")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={ops.isPending || blocked}
+          onClick={() => run(true)}
+        >
+          {t("DashboardIssuance.newDesign.operations.unfreezeSubmit")}
         </Button>
         <Button type="button" size="sm" variant="ghost" disabled={ops.isPending} onClick={onClose}>
           {t("DashboardIssuance.workspace.cancel")}
