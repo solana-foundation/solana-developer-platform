@@ -174,7 +174,8 @@ The workflow validates the SHA, resolves its tag to an immutable digest, verifie
 3. Enter the full SHA as `image_sha`.
 4. Approve the `production` environment gate if configured.
 5. Follow the run until both the service and cron job reference the resolved digest.
-6. Repeat the production verification checklist and record the SHA, digest, reason, and operator in the incident timeline.
+6. If production web depends on API behavior newer than the restored SHA, use Vercel instant rollback on sdp-web to a deployment no newer than that SHA.
+7. Repeat the production verification checklist and record the SHA, digest, reason, and operator in the incident timeline.
 
 Database schema rollback is not automated. If the selected image is incompatible with the current schema, stop and prepare a forward fix instead of improvising a destructive migration.
 
