@@ -2,7 +2,11 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { safeHostname, selectHealthySolanaRpcUrl } from "./lib/solana-rpc-health.mjs";
+import {
+  safeHostname,
+  selectHealthySolanaRpcUrl,
+  useSolanaRpcCandidateAsDefault,
+} from "./lib/solana-rpc-health.mjs";
 
 const mode = process.argv[2];
 const rawForwardedArgs = process.argv.slice(3);
@@ -184,7 +188,6 @@ async function configureIntegrationSolanaRpc(env) {
 
   env.SOLANA_RPC_URL = selected.url;
   env.SOLANA_RPC_DEFAULT_PROVIDER = "default";
-  env.SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL = selected.url;
-  env.SOLANA_RPC_DEFAULT_PROVIDER_DEVNET = "default";
+  useSolanaRpcCandidateAsDefault(env, selected);
   console.log(`Using ${selected.id} Solana RPC for integration (${safeHostname(selected.url)}).`);
 }
