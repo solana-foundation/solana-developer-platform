@@ -15,6 +15,8 @@
 
 /* Ensure Tailwind scans app source files */
 @source "../**/*.{ts,tsx}";
+/* ...and the @sdp/ui primitives (packages/sdp-ui), which sit outside the app */
+@source "../../../../packages/sdp-ui/src/**/*.{ts,tsx}";
 
 @property --earn-processing-angle {
   syntax: "<angle>";
