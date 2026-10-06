@@ -11,10 +11,24 @@ describe("nextState", () => {
     expect(nextState("draft", undefined)).toBe("preparing");
   });
 
-  it("advances every guarded transition when the guard matches", () => {
-    const guarded = TRANSITIONS.filter((t) => t.guard);
-    for (const transition of guarded) {
-      expect(nextState(transition.from, transition.guard)).toBe(transition.to);
+  it("advances the linear pipeline under each state's own guard", () => {
+    expect(nextState("draft")).toBe("preparing");
+    expect(nextState("preparing", "policy_ok")).toBe("approval_required");
+    expect(nextState("approval_required", "approved")).toBe("proving");
+    expect(nextState("proving", "proof_received")).toBe("ready_to_sign");
+    expect(nextState("ready_to_sign", "signed")).toBe("submitted");
+    expect(nextState("submitted", "submitted")).toBe("indexing");
+    expect(nextState("indexing", "indexed")).toBe("completed");
+  });
+
+  it("advances a guarded state under its own guard only, refusing every other", () => {
+    const guards = [...new Set(TRANSITIONS.flatMap((t) => (t.guard ? [t.guard] : [])))];
+    for (const transition of TRANSITIONS) {
+      if (!transition.guard) continue;
+      for (const guard of guards) {
+        if (guard === transition.guard) continue;
+        expect(nextState(transition.from, guard)).toBeNull();
+      }
     }
   });
 
