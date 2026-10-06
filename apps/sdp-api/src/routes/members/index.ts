@@ -19,8 +19,8 @@ import { acceptSchema, inviteSchema } from "./schemas";
 
 const members = new Hono<{ Bindings: Env }>();
 
-// All routes require authentication (API key, session, or Clerk)
-members.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+// All routes require authentication (API key or Clerk)
+members.use("*", unifiedAuthMiddleware());
 members.use("*", projectContextMiddleware());
 
 members.get("/", requirePermissions("org:read"), listMembers);

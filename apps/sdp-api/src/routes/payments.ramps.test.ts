@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { badRequest, providerUnavailable } from "@sdp/payments/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
@@ -32,6 +33,7 @@ import {
   seedBvnkOnrampTransfer,
   TEST_BVNK_WALLET_ID,
 } from "@/test/helpers/bvnk";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import {
   getAccountInfoMock,
@@ -51,6 +53,7 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { required } from "@/test/helpers/required";
 import { seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_CONNECTION_WALLET_ID = "privy_payments_connection_wallet";
@@ -73,14 +76,14 @@ function assertMoonPaySignature(url: URL): void {
   expect(signature).toBe(expectedSignature);
 }
 
-async function seedActiveConnectionWallet(params?: {
-  walletId?: string;
-  publicKey?: string;
+async function seedActiveConnectionWallet(params: {
+  walletId: string;
+  publicKey: string;
 }): Promise<void> {
   const credentialId = "pcred_payments_connection_balance";
   const connectionId = "cconn_payments_connection_balance";
-  const walletId = params?.walletId ?? TEST_CONNECTION_WALLET_ID;
-  const publicKey = params?.publicKey ?? TEST_SOLANA_ADDRESSES.wallet2;
+  const walletId = params.walletId;
+  const publicKey = params.publicKey;
 
   await getDb(env).batch([
     getDb(env)
@@ -343,7 +346,10 @@ describe("Payments routes — ramps", () => {
     ).toEqual({ count: 0 });
   });
   it("creates a hosted quote for an exact Connection wallet row", async () => {
-    await seedActiveConnectionWallet();
+    await seedActiveConnectionWallet({
+      walletId: TEST_CONNECTION_WALLET_ID,
+      publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+    });
     const counterpartyId = await seedCounterparty({ externalId: "connection_ramp_wallet" });
 
     const response = await app.request(
@@ -375,7 +381,10 @@ describe("Payments routes — ramps", () => {
   });
 
   it("reads an active Connection wallet balance and preserves API-key wallet scope", async () => {
-    await seedActiveConnectionWallet();
+    await seedActiveConnectionWallet({
+      walletId: TEST_CONNECTION_WALLET_ID,
+      publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+    });
     await seedCachedKey({
       walletBindings: [{ walletId: TEST_CONNECTION_WALLET_ID, permissions: ["wallets:read"] }],
     });
@@ -985,7 +994,7 @@ describe("Payments routes — ramps", () => {
         .prepare("SELECT COUNT(*) AS count FROM payment_transfers WHERE counterparty_id = ?")
         .bind(counterpartyId)
         .first<{ count: number }>();
-      expect(transfer?.count).toBe(0);
+      expect(required(transfer).count).toBe(0);
     });
     it("opens the off-ramp channel on the funding wallet with an ORIGINATOR party and prebooks the transfer", async () => {
       const counterpartyId = await seedProvisionedOfframpCounterparty(
@@ -1017,12 +1026,16 @@ describe("Payments routes — ramps", () => {
       expect(body.data.quote.id).toBe("channel_offramp_test_1");
       expect(body.data.quote.deliveryMode).toBe("manual_instructions");
 
-      const input = channelSpy.mock.calls[0]?.[1];
-      expect(input?.paymentTransferId).toBe(body.data.transferId);
-      expect(input?.bvnkFundingWalletId).toBe(TEST_BVNK_WALLET_ID);
-      expect(input?.externalCustomerId).toBe(BVNK_OFFRAMP_CUSTOMER);
-      expect(input?.bvnkCompliance?.partyDetails[0]?.type).toBe("ORIGINATOR");
-      expect(input?.bvnkCompliance?.partyDetails[0]?.firstName).toBe("Ada");
+      const input = required(channelSpy.mock.calls[0])[1];
+      expect(required(input).paymentTransferId).toBe(body.data.transferId);
+      expect(required(input).bvnkFundingWalletId).toBe(TEST_BVNK_WALLET_ID);
+      expect(required(input).externalCustomerId).toBe(BVNK_OFFRAMP_CUSTOMER);
+      expect(required(required(required(input).bvnkCompliance).partyDetails[0]).type).toBe(
+        "ORIGINATOR"
+      );
+      expect(required(required(required(input).bvnkCompliance).partyDetails[0]).firstName).toBe(
+        "Ada"
+      );
 
       const transfer = await getDb(env)
         .prepare(
@@ -1034,9 +1047,9 @@ describe("Payments routes — ramps", () => {
           provider_reference: string | null;
           provider_data: Record<string, unknown>;
         }>();
-      expect(transfer?.status).toBe("awaiting_payment");
-      expect(transfer?.provider_reference).toBe("channel_offramp_test_1");
-      expect(transfer?.provider_data).toEqual({
+      expect(required(transfer).status).toBe("awaiting_payment");
+      expect(required(transfer).provider_reference).toBe("channel_offramp_test_1");
+      expect(required(transfer).provider_data).toEqual({
         cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "75.25" },
         bvnk: {
           channel: {
@@ -1082,14 +1095,14 @@ describe("Payments routes — ramps", () => {
         .prepare("SELECT COUNT(*) AS count FROM payment_transfers WHERE counterparty_id = ?")
         .bind(counterpartyId)
         .first<{ count: number }>();
-      expect(transfers?.count).toBe(0);
+      expect(required(transfers).count).toBe(0);
       const link = await getDb(env)
         .prepare(
           "SELECT metadata->>'status' AS status FROM counterparty_provider_accounts WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'"
         )
         .bind(counterpartyId)
         .first<{ status: string }>();
-      expect(link?.status).toBe("REJECTED");
+      expect(required(link).status).toBe("REJECTED");
 
       getCustomerSpy.mockRestore();
       channelSpy.mockRestore();
@@ -1134,8 +1147,8 @@ describe("Payments routes — ramps", () => {
           provider_data: Record<string, unknown>;
         }>();
       expect(transfer).toMatchObject({ status: "pending", provider_reference: null });
-      expect(transfer?.provider_data).not.toHaveProperty("cryptoDeposit");
-      expect(transfer?.provider_data).not.toHaveProperty("bvnk.channel");
+      expect(required(transfer).provider_data).not.toHaveProperty("cryptoDeposit");
+      expect(required(transfer).provider_data).not.toHaveProperty("bvnk.channel");
     });
     it("marks the prebooked transfer failed when the channel call errors", async () => {
       const counterpartyId = await seedProvisionedOfframpCounterparty(
@@ -1165,7 +1178,7 @@ describe("Payments routes — ramps", () => {
         .prepare("SELECT status FROM payment_transfers WHERE counterparty_id = ?")
         .bind(counterpartyId)
         .first<{ status: string }>();
-      expect(transfer?.status).toBe("failed");
+      expect(required(transfer).status).toBe("failed");
 
       getCustomerSpy.mockRestore();
       channelSpy.mockRestore();
@@ -1269,10 +1282,10 @@ describe("Payments routes — ramps", () => {
       expect(instruction.kind).toBe("fiat_funding");
       expect(instruction.onboardingStatus).toBe("ready");
       expect(instruction.fundingWalletId).toBe(TEST_BVNK_WALLET_ID);
-      expect(instruction.bankAccount?.paymentReference).toBe(
+      expect(required(instruction.bankAccount).paymentReference).toBe(
         bvnkOnrampRemittance(body.data.transferId)
       );
-      expect(instruction.bankAccount?.routingNumber).toBe("021000021");
+      expect(required(instruction.bankAccount).routingNumber).toBe("021000021");
       expect(walletSpy).toHaveBeenCalledTimes(1);
       expect(walletSpy).toHaveBeenCalledWith(expect.anything(), {
         walletId: TEST_BVNK_WALLET_ID,
@@ -1295,7 +1308,7 @@ describe("Payments routes — ramps", () => {
         provider_reference: body.data.transferId,
         delivery_mode: "manual_instructions",
       });
-      expect(transfer?.provider_data).toEqual({ bvnk: {} });
+      expect(required(transfer).provider_data).toEqual({ bvnk: {} });
       const persisted = await getDb(env)
         .prepare(
           "SELECT provider_status, metadata FROM counterparty_provider_accounts WHERE id = ?"
@@ -1335,8 +1348,8 @@ describe("Payments routes — ramps", () => {
         )
         .bind(counterpartyId)
         .first<{ status: string; error: string }>();
-      expect(failed?.status).toBe("failed");
-      expect(failed?.error).toContain("BVNK ledger wallet read failed");
+      expect(required(failed).status).toBe("failed");
+      expect(required(failed).error).toContain("BVNK ledger wallet read failed");
       const funding = await getDb(env)
         .prepare(
           "SELECT provider_status, metadata FROM counterparty_provider_accounts WHERE counterparty_id = ? AND kind = 'funding_wallet'"
@@ -1430,9 +1443,7 @@ describe("Payments routes — ramps", () => {
       };
 
       const before = await readTimestamps(A3_TRANSFER_ID);
-      if (before === null) {
-        throw new Error("BVNK projection transfer timestamps missing");
-      }
+      assert(!(before === null));
       const expectedBefore = {
         id: A3_TRANSFER_ID,
         organizationId: TEST_ORG.id,
@@ -1488,15 +1499,11 @@ describe("Payments routes — ramps", () => {
         environment: "sandbox",
         payoutId: A3_PAYOUT_ID,
       });
-      if (issued.counterparty_id === null) {
-        throw new Error("BVNK issued projection transfer has no counterparty");
-      }
+      assert(!(issued.counterparty_id === null));
       const settlement = issued.provider_data.settlement as Record<string, unknown>;
 
       const after = await readTimestamps(A3_ISSUED_TRANSFER_ID);
-      if (after === null) {
-        throw new Error("BVNK issued projection transfer timestamps missing");
-      }
+      assert(!(after === null));
       const fetched = await fetchTransfer(A3_ISSUED_TRANSFER_ID);
       expect(fetched.data.transfer).toEqual({
         ...expectedBefore,
@@ -1596,7 +1603,7 @@ describe("Payments routes — ramps", () => {
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind("xfr_cancel_pending")
       .first<{ status: string }>();
-    expect(row?.status).toBe("canceled");
+    expect(required(row).status).toBe("canceled");
   });
 
   it("refuses to cancel a ramp transfer that is already settling", async () => {
@@ -1628,7 +1635,7 @@ describe("Payments routes — ramps", () => {
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind("xfr_cancel_settling")
       .first<{ status: string }>();
-    expect(row?.status).toBe("settling");
+    expect(required(row).status).toBe("settling");
   });
   it("cancels an awaiting BVNK on-ramp transfer after the custody-wallet authz without touching BVNK", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "d1b_cancel_onramp" });
@@ -1731,7 +1738,7 @@ describe("Payments routes — ramps", () => {
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind("xfr_cancel_authz")
       .first<{ status: string }>();
-    expect(row?.status).toBe("awaiting_payment");
+    expect(required(row).status).toBe("awaiting_payment");
   });
   describe("sandbox pay-in simulation", () => {
     let originalMuralSandboxApiKey: string | undefined;
@@ -1895,8 +1902,8 @@ describe("Payments routes — ramps", () => {
         })
       );
       const transfer = await readSimulationTransfer(SIMULATE_TRANSFER_ID);
-      expect(transfer?.status).toBe("awaiting_payment");
-      expect(transfer?.provider_data.sandboxSimulation?.requestedAt).toBeTruthy();
+      expect(required(transfer).status).toBe("awaiting_payment");
+      expect(required(required(transfer).provider_data.sandboxSimulation).requestedAt).toBeTruthy();
 
       simulateSpy.mockRestore();
     });
@@ -1923,7 +1930,7 @@ describe("Payments routes — ramps", () => {
         currencyCode: "USD",
       });
       const transfer = await readSimulationTransfer(transferId);
-      expect(transfer?.provider_data.sandboxSimulation?.requestedAt).toBeTruthy();
+      expect(required(required(transfer).provider_data.sandboxSimulation).requestedAt).toBeTruthy();
 
       expect(second.status).toBe(409);
       const body: { error: { message: string } } = await second.json();
@@ -1959,7 +1966,7 @@ describe("Payments routes — ramps", () => {
         expect(simulateSpy).not.toHaveBeenCalled();
         const transfer = await readSimulationTransfer(transferId);
         expect(transfer).not.toBeNull();
-        expect(transfer?.provider_data).not.toHaveProperty("sandboxSimulation");
+        expect(required(transfer).provider_data).not.toHaveProperty("sandboxSimulation");
         expect(transfer).toEqual(before);
       } finally {
         env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = originalLightsparkSandboxSecret;
@@ -2013,15 +2020,19 @@ describe("Payments routes — ramps", () => {
 
           expect(first.status).toBe(firstStatus);
           const failed = await readSimulationTransfer(transferId);
-          expect(failed?.status).toBe("awaiting_payment");
-          expect(failed?.provider_data.sandboxSimulation !== undefined).toBe(claimAfterFailure);
+          expect(required(failed).status).toBe("awaiting_payment");
+          expect(required(failed).provider_data.sandboxSimulation !== undefined).toBe(
+            claimAfterFailure
+          );
 
           const second = await simulateRequest(transferId);
 
           expect(second.status).toBe(secondStatus);
           expect(simulateSpy).toHaveBeenCalledTimes(providerCalls);
           const settled = await readSimulationTransfer(transferId);
-          expect(settled?.provider_data.sandboxSimulation?.requestedAt).toBeTruthy();
+          expect(
+            required(required(settled).provider_data.sandboxSimulation).requestedAt
+          ).toBeTruthy();
         } finally {
           simulateSpy.mockRestore();
         }
@@ -2080,7 +2091,7 @@ describe("Payments routes — ramps", () => {
           providerData: { mural: { accountId: "acct_sim_1" } },
         },
         counterpartyProviderData: {
-          mural: { organization: { id: "org_sim_1", kycStatus: "approved" } },
+          mural: { organization: { id: "org_test_sim_1", kycStatus: "approved" } },
         },
         status: 400,
         message: "does not support EUR",
@@ -2109,7 +2120,7 @@ describe("Payments routes — ramps", () => {
             expect(spy).not.toHaveBeenCalled();
           }
           const after = await readSimulationTransfer(transferId);
-          expect(after?.provider_data).not.toHaveProperty("sandboxSimulation");
+          expect(required(after).provider_data).not.toHaveProperty("sandboxSimulation");
           expect(after).toEqual(before);
         } finally {
           for (const spy of spies) {
@@ -2122,7 +2133,7 @@ describe("Payments routes — ramps", () => {
     it("derives the Mural account, rail, and amount in cents from the transfer", async () => {
       const transferId = "xfr_mural_sim_1";
       const counterpartyId = await seedCounterparty({
-        providerData: { mural: { organization: { id: "org_sim_1", kycStatus: "approved" } } },
+        providerData: { mural: { organization: { id: "org_test_sim_1", kycStatus: "approved" } } },
       });
       await seedSimulatableTransfer({
         id: transferId,
@@ -2146,7 +2157,7 @@ describe("Payments routes — ramps", () => {
       expect(res.status).toBe(204);
       expect(simulateSpy).toHaveBeenCalledTimes(1);
       expect(simulateSpy).toHaveBeenCalledWith(expect.anything(), {
-        organizationId: "org_sim_1",
+        organizationId: "org_test_sim_1",
         destinationAccountId: "acct_sim_1",
         rail: "spei",
         amountValue: "150025",
@@ -2161,25 +2172,31 @@ describe("Payments routes — ramps", () => {
       const counterpartyId = await seedCounterparty({ providerData: {} });
       await getDb(env)
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind("org_other_sim", "Other Sim Tenant", "other-sim-tenant", "enterprise", "active")
+        .bind("org_test_other_sim", "Other Sim Tenant", "other-sim-tenant", "enterprise", "active")
         .run();
       await getDb(env)
         .prepare(
           `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
            VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
         )
-        .bind("proj_other_sim", "org_other_sim", "Other Sim Project", "other-sim", TEST_USER.id)
+        .bind(
+          "proj_other_sim",
+          "org_test_other_sim",
+          "Other Sim Project",
+          "other-sim",
+          TEST_USER.id
+        )
         .run();
       await getDb(env)
         .prepare("UPDATE counterparties SET organization_id = ?, project_id = ? WHERE id = ?")
-        .bind("org_other_sim", "proj_other_sim", counterpartyId)
+        .bind("org_test_other_sim", "proj_other_sim", counterpartyId)
         .run();
       await seedSimulatableTransfer({
         ...LIGHTSPARK_SIM_SEED,
         id: transferId,
         providerReference: "Quote:sim-other-tenant",
         counterpartyId,
-        organizationId: "org_other_sim",
+        organizationId: "org_test_other_sim",
         projectId: "proj_other_sim",
       });
       const before = await getDb(env)
@@ -2353,9 +2370,7 @@ describe("Payments routes — ramps", () => {
         .prepare("SELECT * FROM payment_transfers WHERE id = ?")
         .bind(id)
         .first<PaymentTransferRow>();
-      if (row === null) {
-        throw new Error(`Missing seeded transfer ${id}`);
-      }
+      assert(!(row === null));
       return row;
     }
 
@@ -2845,7 +2860,7 @@ describe("Payments routes — ramps", () => {
     });
   });
 
-  it("rejects a MoneyGram crypto leg whose amount does not match the session", async () => {
+  it("rejects a MoneyGram crypto leg whose amount does not match the Clerk", async () => {
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
       "Content-Type": "application/json",
@@ -2975,11 +2990,10 @@ describe("Payments routes — ramps", () => {
     });
   });
 
-  describe("session-caller environment resolution", () => {
-    const SESSION_ID = "ses_ramps_environment";
+  describe("Clerk-caller environment resolution", () => {
     const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
 
-    async function seedSessionAuth(): Promise<void> {
+    async function seedClerkAuth(): Promise<void> {
       await getDb(env).batch([
         getDb(env)
           .prepare(
@@ -2987,23 +3001,17 @@ describe("Payments routes — ramps", () => {
              VALUES (?, ?, ?, 'member', 'active')`
           )
           .bind("om_ramps_environment", TEST_ORG.id, TEST_USER.id),
-        getDb(env)
-          .prepare(
-            `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-             VALUES (?, ?, ?, 'session', ?)`
-          )
-          .bind(SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
       ]);
     }
 
-    function simulateAsSession(projectId: string, body: Record<string, unknown>) {
+    async function simulateAsClerk(projectId: string, body: Record<string, unknown>) {
       return app.request(
         "/v1/payments/ramps/sandbox/simulate",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Cookie: `sdp_session=${SESSION_ID}`,
+            Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id)}`,
             "x-project-id": projectId,
           },
           body: JSON.stringify(body),
@@ -3016,20 +3024,20 @@ describe("Payments routes — ramps", () => {
       transferId: "xfr_does_not_exist",
     };
 
-    it("refuses the sandbox simulator from a production-project session", async () => {
-      await seedSessionAuth();
+    it("refuses the sandbox simulator from a production-project Clerk", async () => {
+      await seedClerkAuth();
 
-      const res = await simulateAsSession(PRODUCTION_PROJECT_ID, NONEXISTENT_MURAL_SIMULATE_BODY);
+      const res = await simulateAsClerk(PRODUCTION_PROJECT_ID, NONEXISTENT_MURAL_SIMULATE_BODY);
 
       expect(res.status).toBe(403);
       const body = (await res.json()) as { error: { message: string } };
       expect(body.error.message).toContain("only available in sandbox mode");
     });
 
-    it("still lets sandbox-project sessions past the environment guard", async () => {
-      await seedSessionAuth();
+    it("still lets sandbox-project Clerks past the environment guard", async () => {
+      await seedClerkAuth();
 
-      const res = await simulateAsSession(TEST_PROJECT.id, NONEXISTENT_MURAL_SIMULATE_BODY);
+      const res = await simulateAsClerk(TEST_PROJECT.id, NONEXISTENT_MURAL_SIMULATE_BODY);
 
       expect(res.status).toBe(404);
       const body = (await res.json()) as { error: { code: string } };
@@ -3119,9 +3127,7 @@ describe("Payments routes — ramps", () => {
       expect(row).toMatchObject({
         provider_data: { rampQuote: { expiresAt: new Date(expSeconds * 1000).toISOString() } },
       });
-      if (row === null) {
-        throw new Error("Missing MoneyGram session transfer");
-      }
+      assert(!(row === null));
       expect(fetchSpy).toHaveBeenCalledWith(
         "https://playground.xramps.moneygram.com/api/v1/sessions",
         expect.objectContaining({
@@ -3174,9 +3180,7 @@ describe("Payments routes — ramps", () => {
            WHERE provider = 'moneygram' AND provider_reference = 'mg_session_offramp_bind_1'`
         )
         .first<{ id: string }>();
-      if (row === null) {
-        throw new Error("Missing MoneyGram off-ramp transfer");
-      }
+      assert(!(row === null));
       expect(fetchSpy).toHaveBeenCalledWith(
         "https://playground.xramps.moneygram.com/api/v1/sessions",
         expect.objectContaining({
@@ -3214,7 +3218,7 @@ describe("Payments routes — ramps", () => {
            WHERE provider = 'moneygram' AND provider_reference = 'mg_sess_hostile_1'`
         )
         .first<{ id: string }>();
-      expect(row ?? null).toBeNull();
+      expect(row).toBeNull();
       fetchSpy.mockRestore();
     });
 
@@ -3262,7 +3266,7 @@ describe("Payments routes — ramps", () => {
       const now = new Date().toISOString();
       await getDb(env)
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind("org_other_tenant", "Other Tenant", "other-tenant", "enterprise", "active")
+        .bind("org_test_other_tenant", "Other Tenant", "other-tenant", "enterprise", "active")
         .run();
       await getDb(env)
         .prepare(
@@ -3275,7 +3279,7 @@ describe("Payments routes — ramps", () => {
         )
         .bind(
           "xfr_moneygram_foreign_tenant",
-          "org_other_tenant",
+          "org_test_other_tenant",
           "wallet_other_tenant",
           MG_DEPOSIT_WALLET,
           "mg_sess_foreign_1",
@@ -3478,7 +3482,7 @@ describe("Payments routes — ramps", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: { quote: { id: string }; transferId: string } };
       expect(body.data.quote.id).toBe("Quote:qt_selection_test");
-      const gridBody = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as {
+      const gridBody = JSON.parse(String(required(fetchSpy.mock.calls[0][1]).body)) as {
         destination: { accountId: string };
       };
       expect(gridBody.destination.accountId).toBe("ExternalAccount:swift");
@@ -3487,11 +3491,11 @@ describe("Payments routes — ramps", () => {
         .prepare("SELECT provider_data FROM payment_transfers WHERE id = ?")
         .bind(body.data.transferId)
         .first<{ provider_data: unknown }>();
-      expect(transfer).not.toBeNull();
+      assert(transfer);
       const providerData =
-        typeof transfer?.provider_data === "string"
+        typeof transfer.provider_data === "string"
           ? (JSON.parse(transfer.provider_data) as Record<string, unknown>)
-          : (transfer?.provider_data as Record<string, unknown>);
+          : (transfer.provider_data as Record<string, unknown>);
       expect(providerData.payoutProviderAccountId).toBe("cpa_quote_swift");
       fetchSpy.mockRestore();
     });
@@ -3607,7 +3611,7 @@ describe("Payments routes — ramps", () => {
       const res = await quoteRequest({ counterpartyId });
 
       expect(res.status).toBe(200);
-      const gridBody = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as {
+      const gridBody = JSON.parse(String(required(fetchSpy.mock.calls[0][1]).body)) as {
         destination: { accountId: string };
       };
       expect(gridBody.destination.accountId).toBe("ExternalAccount:single");

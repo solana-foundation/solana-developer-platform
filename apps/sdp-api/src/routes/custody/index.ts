@@ -44,7 +44,7 @@ import {
 const wallets = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
-wallets.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+wallets.use("*", unifiedAuthMiddleware());
 wallets.use("*", projectContextMiddleware());
 
 // Initialize signing (requires admin)

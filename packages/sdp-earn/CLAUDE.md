@@ -100,7 +100,7 @@ DOPPLER_PRESERVE_ENV=DATABASE_URL,REDIS_URL,MARKETS_ENABLED,EARN_ENABLED \
   DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp \
   REDIS_URL=redis://127.0.0.1:6380 \
   MARKETS_ENABLED=true EARN_ENABLED=true \
-  pnpm dev:api:local          # API on :8787
+  pnpm dev:api          # API on :8787
 # add EARN_VAULT_FEE_SPONSORSHIP_ENABLED to BOTH the preserve list and the
 # exports above to sponsor vault movements, or put it in
 # apps/sdp-api/.env.local, which run-with-config.sh overlays on top of Doppler
