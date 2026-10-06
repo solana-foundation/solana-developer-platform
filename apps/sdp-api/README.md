@@ -146,6 +146,35 @@ event before exposing a non-production deployment. Outside Cloud Run, forwarded
 client addresses are ignored unless `TRUST_PROXY_HEADERS=true`; enable it only
 behind an ingress that replaces caller-supplied `X-Forwarded-For` values.
 
+### Release Channel (which modules run)
+
+`SDP_RELEASE_CHANNEL` sets the least mature module stage a deployment runs:
+`experimental` (every module, the default when unset), `beta` or `stable`. Each
+module's stage lives in `packages/sdp-types/src/release-channels.ts`; see
+[ADR 0005](../../docs/decisions/0005-release-channels.md). The API and the
+dashboard both read it, so set it for both or the dashboard logs
+`sdp_release_channel_mismatch`.
+
+```bash
+# One run on stable (API + dashboard), with your Doppler config
+SDP_RELEASE_CHANNEL=stable DOPPLER_CONFIG=dev_personal pnpm dev
+
+# Docker Compose (docker-compose.yml and infra/self-hosted/compose.yml)
+SDP_RELEASE_CHANNEL=stable docker compose up
+```
+
+- A shell variable only passes through when your Doppler config does not set
+  `SDP_RELEASE_CHANNEL`. If it does, Doppler wins: add
+  `DOPPLER_PRESERVE_ENV=SDP_RELEASE_CHANNEL`, or put the value in
+  `apps/sdp-api/.env.local`, which beats Doppler.
+- To keep a channel across runs, set it in `apps/sdp-api/.env.local`; the root
+  `pnpm dev` loads every `apps/*/.env.local` for both apps.
+- Check what is running: `curl -s localhost:8787/health` reports
+  `releaseChannel`. Modules outside the channel answer 403 "The <module> module
+  is not available in this release channel." and are hidden in the dashboard.
+- An unknown value fails at startup. Managed production (`ENVIRONMENT=production`
+  with `SDP_DEPLOYMENT_MODE=managed`) must set it explicitly.
+
 ### Optional: Custody Integrations
 
 To test with specific custody providers, add their credentials:
