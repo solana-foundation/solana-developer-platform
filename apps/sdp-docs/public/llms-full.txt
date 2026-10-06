@@ -5506,10 +5506,13 @@ Use this page when you need the public AI-facing entry points for Solana Develop
 
 - Wallets and custody
 - API key management
+- Wallet and API-key policy controls
 - Projects
 - Token issuance and lifecycle operations
 - Payments, transfers, and ramps
+- Counterparties and ramp requirements
 - Compliance screening
+- Asset profiles and public token metadata
 
 ---
 
@@ -5558,6 +5561,7 @@ Source: https://platform.solana.com/docs/reference/api
 - [Payments](/docs/reference/api/payments)
 - [Policies](/docs/reference/api/policies)
 - [Compliance](/docs/reference/api/compliance)
+- [Counterparties](/docs/reference/api/counterparties)
 - [Asset Profiles](/docs/reference/api/asset-profiles)
 
 ---
@@ -5757,6 +5761,29 @@ Source: https://platform.solana.com/docs/reference/api/compliance
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `POST` | `/v1/compliance/address-screenings` | Screen an address across configured compliance providers |
+
+---
+
+### Counterparties
+Source: https://platform.solana.com/docs/reference/api/counterparties
+
+> Counterparty (customer/beneficiary) identity records.
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/counterparties` | List counterparties |
+| `POST` | `/v1/counterparties` | Create counterparty |
+| `DELETE` | `/v1/counterparties/{counterpartyId}` | Archive counterparty |
+| `GET` | `/v1/counterparties/{counterpartyId}` | Get counterparty |
+| `PATCH` | `/v1/counterparties/{counterpartyId}` | Update counterparty |
+| `GET` | `/v1/counterparties/{counterpartyId}/accounts` | List counterparty accounts |
+| `POST` | `/v1/counterparties/{counterpartyId}/accounts` | Create counterparty account |
+| `DELETE` | `/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | Archive counterparty account |
+| `GET` | `/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | Get counterparty account |
+| `PATCH` | `/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | Update counterparty account |
+| `GET` | `/v1/counterparties/{counterpartyId}/provider-accounts` | List counterparty provider accounts |
+| `GET` | `/v1/counterparties/{counterpartyId}/requirements` | Get counterparty ramp requirements |
+| `GET` | `/v1/counterparties/metadata` | Get counterparty field options |
 
 ---
 

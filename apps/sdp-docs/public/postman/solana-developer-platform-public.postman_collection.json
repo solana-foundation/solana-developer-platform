@@ -1955,6 +1955,188 @@
       ]
     },
     {
+      "name": "Counterparties",
+      "item": [
+        {
+          "name": "Get counterparty field options",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/metadata",
+            "description": "Returns the enum option sets and country list needed to build a counterparty form."
+          }
+        },
+        {
+          "name": "List counterparties",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties",
+            "description": "Lists counterparties for the authenticated organization."
+          }
+        },
+        {
+          "name": "Create counterparty",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/counterparties",
+            "description": "Creates a counterparty. If externalId is provided, it must be unique within the organization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"customer_42\",\n  \"entityType\": \"individual\",\n  \"displayName\": \"Jane Doe\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get counterparty",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}",
+            "description": "Gets counterparty details by id."
+          }
+        },
+        {
+          "name": "Update counterparty",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}",
+            "description": "Updates counterparty attributes. At least one field must be provided. Use null on externalId to clear it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"customer_42\",\n  \"entityType\": \"business\",\n  \"displayName\": \"Jane Q. Doe\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Archive counterparty",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}",
+            "description": "Archives a counterparty. Archived counterparties are hidden from default lists."
+          }
+        },
+        {
+          "name": "Get counterparty ramp requirements",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/requirements",
+            "description": "Evaluates whether a counterparty is ready to create a quote with the selected ramp provider and returns any fields or provider-hosted actions still required. Lightspark off-ramp requests may include destinationCountry to reuse an active payout account for that corridor."
+          }
+        },
+        {
+          "name": "List counterparty accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/accounts",
+            "description": "Lists payment accounts for a counterparty. Crypto-wallet accounts can be used by payment flows that send funds to a counterparty wallet."
+          }
+        },
+        {
+          "name": "Create counterparty account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/accounts",
+            "description": "Creates a payment account for a counterparty. For accountKind \"crypto_wallet\", details.network must be \"solana\" and details.address must be a Solana wallet address.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountKind\": \"crypto_wallet\",\n  \"label\": \"USDC wallet\",\n  \"details\": {\n    \"network\": \"solana\",\n    \"address\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  },\n  \"providerAccountData\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List counterparty provider accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/provider-accounts",
+            "description": "Lists provider-owned fiat payout accounts for a counterparty. Provider details are fetched just in time and account numbers are returned only as last-four digits."
+          }
+        },
+        {
+          "name": "Get counterparty account",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/accounts/{{counterpartyAccountId}}",
+            "description": "Gets a counterparty payment account by id."
+          }
+        },
+        {
+          "name": "Update counterparty account",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/accounts/{{counterpartyAccountId}}",
+            "description": "Updates a counterparty payment account. At least one field must be provided.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Primary USDC wallet\",\n  \"details\": {\n    \"network\": \"solana\",\n    \"address\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  },\n  \"providerAccountData\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Archive counterparty account",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/accounts/{{counterpartyAccountId}}",
+            "description": "Archives a counterparty payment account. Archived accounts are hidden from default lists."
+          }
+        }
+      ]
+    },
+    {
       "name": "Asset Profiles",
       "item": [
         {

@@ -45,12 +45,19 @@ type Section = {
 const FEATURE_SUMMARY = [
   "Wallets and custody",
   "API key management",
+  "Wallet and API-key policy controls",
   "Projects",
   "Token issuance and lifecycle operations",
   "Payments, transfers, and ramps",
+  "Counterparties and ramp requirements",
   "Compliance screening",
   "Asset profiles and public token metadata",
 ];
+
+// Every generated API reference page is a key page too; buildKeyPages reads
+// them from the generated reference/api/meta.json so a new public family needs
+// no edit here.
+const API_REFERENCE_FOLDER = "reference/api";
 
 const KEY_PAGE_SLUGS = [
   "introduction",
@@ -68,15 +75,6 @@ const KEY_PAGE_SLUGS = [
   "reference/provider-onboarding",
   "reference/docs-for-ai",
   "reference/postman-collection",
-  "reference/api/index",
-  "reference/api/health",
-  "reference/api/api-keys",
-  "reference/api/wallets",
-  "reference/api/projects",
-  "reference/api/issuance",
-  "reference/api/payments",
-  "reference/api/compliance",
-  "reference/api/asset-profiles",
 ];
 
 function stripMarkdownFormatting(value: string): string {
@@ -245,8 +243,20 @@ function buildSections(
   return sections;
 }
 
-function buildKeyPages(pages: Map<string, DocsPage>): DocsPage[] {
-  return KEY_PAGE_SLUGS.map((slug) => {
+function buildKeyPages(
+  pages: Map<string, DocsPage>,
+  folderMetas: Map<string, DocsMeta>
+): DocsPage[] {
+  const apiReferenceSlugs = (folderMetas.get(API_REFERENCE_FOLDER)?.pages ?? []).map(
+    (entry) => `${API_REFERENCE_FOLDER}/${entry}`
+  );
+  if (apiReferenceSlugs.length === 0) {
+    throw new Error(
+      `Missing ${API_REFERENCE_FOLDER}/meta.json pages for llms.txt generation. Run "pnpm generate:api" first.`
+    );
+  }
+
+  return [...KEY_PAGE_SLUGS, ...apiReferenceSlugs].map((slug) => {
     const page = pages.get(slug);
     if (!page) {
       throw new Error(`Missing required key docs page "${slug}" for llms.txt generation`);
@@ -338,7 +348,7 @@ async function run(): Promise<void> {
     loadFolderMetas(),
   ]);
   const sections = buildSections(meta, pages, folderMetas);
-  const keyPages = buildKeyPages(pages);
+  const keyPages = buildKeyPages(pages, folderMetas);
 
   await fs.mkdir(publicDir, { recursive: true });
 

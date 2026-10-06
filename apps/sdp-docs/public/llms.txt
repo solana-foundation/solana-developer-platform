@@ -12,9 +12,11 @@
 ## Supported surfaces
 - Wallets and custody
 - API key management
+- Wallet and API-key policy controls
 - Projects
 - Token issuance and lifecycle operations
 - Payments, transfers, and ramps
+- Counterparties and ramp requirements
 - Compliance screening
 - Asset profiles and public token metadata
 
@@ -41,7 +43,9 @@
 - [Projects](https://platform.solana.com/docs/reference/api/projects): Project and project member management.
 - [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfer execution, policies, and ramps.
+- [Policies](https://platform.solana.com/docs/reference/api/policies): Wallet and API-key policy-control inventory.
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
+- [Counterparties](https://platform.solana.com/docs/reference/api/counterparties): Counterparty (customer/beneficiary) identity records.
 - [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
 
 ## AI guide
