@@ -463,7 +463,11 @@
       "reactivating": "Reactivating…",
       "deleteAria": "Delete private channel instance",
       "deleteTitle": "Delete Private Channel instance",
-      "deleteDescription": "This will permanently delete the instance record and all downstream data bound to it (channels, deposits, transfers). This cannot be undone."
+      "deleteDescription": "This will permanently delete the instance record and all downstream data bound to it (channels, deposits, transfers). This cannot be undone.",
+      "endpointsSection": "Endpoints",
+      "programsSection": "Programs",
+      "programAddressPlaceholder": "Program address",
+      "accountAddressPlaceholder": "Account address"
     }
   }
 }

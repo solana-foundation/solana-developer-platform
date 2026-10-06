@@ -45,7 +45,10 @@ export function parseUnsignedDecimal(
 
   const whole = (match[1] ?? "0").replace(/^0+(?=\d)/, "") || "0";
   const fraction = match[2] ?? "";
-  const canonicalFraction = fraction.replace(/0+$/, "");
+  // Trailing zeros trimmed by index: a /0+$/ replace backtracks on a long run of zeros.
+  let fractionEnd = fraction.length;
+  while (fractionEnd > 0 && fraction[fractionEnd - 1] === "0") fractionEnd -= 1;
+  const canonicalFraction = fraction.slice(0, fractionEnd);
   return {
     canonical: canonicalFraction ? `${whole}.${canonicalFraction}` : whole,
     whole,

@@ -6,14 +6,12 @@ import type {
   PrivateChannelInstanceInput,
   PrivateChannelProbeResult,
 } from "@sdp/types";
-import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Modal } from "@/components/ui/modal";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -27,6 +25,7 @@ import {
   testConnectionAction,
   updatePrivateChannelAction,
 } from "./actions";
+import { ReactivateConfirmationDialog } from "./private-channels-confirmation-dialogs";
 import { isProjectRpcProbeFailure } from "./probe-error";
 
 type FormValues = Omit<PrivateChannelInstanceInput, "chainRpcUrl">;
@@ -442,106 +441,5 @@ function TextField(props: {
         size={props.large ? "xl" : "lg"}
       />
     </div>
-  );
-}
-
-function ReactivateConfirmationDialog(props: {
-  prompt: { existing: PrivateChannelInstance; message: string } | null;
-  working: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const t = useTranslations();
-  const isOpen = props.prompt !== null;
-  return (
-    <Modal
-      isOpen={isOpen}
-      ariaLabel={t("DashboardPrivateChannels.instance.reactivateAria")}
-      onClose={props.working ? undefined : props.onCancel}
-      size="sm"
-    >
-      <div className="space-y-5 p-6">
-        <div className="space-y-1">
-          <h2 className="text-lg font-medium tracking-tight text-primary">
-            {t("DashboardPrivateChannels.instance.reactivateTitle")}
-          </h2>
-          <p className="text-sm text-secondary">
-            {t("DashboardPrivateChannels.instance.reactivateDescription")}
-          </p>
-          {props.prompt ? (
-            <p className="pt-2 text-sm text-secondary">
-              {t("DashboardPrivateChannels.instance.gatewayLabel")}{" "}
-              <span className="font-medium">{props.prompt.existing.gatewayUrl}</span>
-            </p>
-          ) : null}
-        </div>
-        <div className="flex items-center justify-end gap-3">
-          <Button type="button" variant="outline" onClick={props.onCancel} disabled={props.working}>
-            {t("DashboardPrivateChannels.common.cancel")}
-          </Button>
-          <Button
-            type="button"
-            onClick={props.onConfirm}
-            disabled={props.working}
-            iconLeft={props.working ? <Loader2Icon className="animate-spin" /> : undefined}
-          >
-            {props.working
-              ? t("DashboardPrivateChannels.instance.reactivating")
-              : t("DashboardPrivateChannels.instance.reactivate")}
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-export function DeleteConfirmationDialog(props: {
-  isOpen: boolean;
-  working: boolean;
-  gatewayUrl: string;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const t = useTranslations();
-  return (
-    <Modal
-      isOpen={props.isOpen}
-      ariaLabel={t("DashboardPrivateChannels.instance.deleteAria")}
-      onClose={props.working ? undefined : props.onCancel}
-      size="sm"
-    >
-      <div className="space-y-5 p-6">
-        <div className="space-y-1">
-          <h2 className="text-lg font-medium tracking-tight text-primary">
-            {t("DashboardPrivateChannels.instance.deleteTitle")}
-          </h2>
-          <p className="text-sm text-secondary">
-            {t("DashboardPrivateChannels.instance.deleteDescription")}
-          </p>
-          {props.gatewayUrl ? (
-            <p className="pt-2 text-sm text-secondary">
-              {t("DashboardPrivateChannels.instance.gatewayLabel")}{" "}
-              <span className="font-medium">{props.gatewayUrl}</span>
-            </p>
-          ) : null}
-        </div>
-        <div className="flex items-center justify-end gap-3">
-          <Button type="button" variant="outline" onClick={props.onCancel} disabled={props.working}>
-            {t("DashboardPrivateChannels.common.cancel")}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={props.onConfirm}
-            disabled={props.working}
-            iconLeft={props.working ? <Loader2Icon className="animate-spin" /> : undefined}
-          >
-            {props.working
-              ? t("DashboardPrivateChannels.instance.deleting")
-              : t("DashboardPrivateChannels.instance.delete")}
-          </Button>
-        </div>
-      </div>
-    </Modal>
   );
 }

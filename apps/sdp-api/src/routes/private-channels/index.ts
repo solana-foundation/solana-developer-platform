@@ -70,7 +70,7 @@ async function requirePrivateChannelsFeature(c: Context<{ Bindings: Env }>, next
 }
 
 privateChannels.use("*", requirePrivateChannelsFeature);
-privateChannels.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+privateChannels.use("*", unifiedAuthMiddleware());
 privateChannels.use("*", projectContextMiddleware());
 
 // --- /health --------------------------------------------------------------

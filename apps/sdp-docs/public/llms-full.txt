@@ -231,7 +231,7 @@ Every sensitive operation is recorded automatically. Each entry captures the act
 | Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and Token Access Control changes          |
 | Custody                 | Provider configuration, wallet provisioning, and credential lifecycle changes      |
 | Transactions & signing  | Signing requests, submissions, and failed submissions                              |
-| Organization & access   | Members, invitations, projects, project membership, and login sessions             |
+| Organization & access   | Members, invitations, projects, and project membership             |
 | Counterparties & assets | Counterparty and Counterparty Account changes, asset profile changes               |
 </Step>
 </Steps>
@@ -566,7 +566,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-`gracePeriodHours` accepts 0–168 (default 24). A key cannot rotate itself — authenticate the rotation with a different key or a dashboard session.
+`gracePeriodHours` accepts 0–168 (default 24). A key cannot rotate itself — authenticate the rotation with a different key or a Clerk JWT from the dashboard.
 
 </Tab>
 </Tabs>
@@ -4866,9 +4866,11 @@ docker compose up -d
 ```
 
 <Callout type="info">
-In self-hosted mode, SDP entitles every provider that is configured in the
-environment. Providers that are not configured remain unavailable, so the default
-devnet path exposes only the local signer.
+Providers that are not configured remain unavailable, so the default devnet path
+exposes only the local signer. The local signer is a manual provider: after you
+create your organization, enable it by adding
+`{"sdp": {"providerOverrides": {"custody": {"local": true}}}}` to the
+organization's private metadata in the Clerk dashboard.
 </Callout>
 
 </Step>

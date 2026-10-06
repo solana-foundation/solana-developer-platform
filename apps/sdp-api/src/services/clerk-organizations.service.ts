@@ -164,8 +164,10 @@ export class ClerkOrganizationsService {
     organizationId: string,
     privateMetadata: Record<string, unknown>
   ): Promise<ClerkOrganization> {
-    return this.request<ClerkOrganization>(`/organizations/${organizationId}`, {
-      method: "PATCH",
+    // Clerk no longer accepts `private_metadata` on PATCH /organizations/{id};
+    // PUT on the metadata endpoint replaces the field, matching the old behaviour.
+    return this.request<ClerkOrganization>(`/organizations/${organizationId}/metadata`, {
+      method: "PUT",
       body: JSON.stringify({
         private_metadata: privateMetadata,
       }),

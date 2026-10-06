@@ -26,6 +26,7 @@ import {
   KeychainUtilaAdapter,
   type SigningConfigRecord,
 } from "@/services/adapters";
+import { assertLocalSigningAllowed } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { Env } from "@/types/env";
 import {
@@ -282,6 +283,11 @@ export async function createAdapterFromEncryptedConfig(
   record: SigningConfigRecord,
   cipher: CustodyCipher = createCustodyCipher(env)
 ): Promise<SigningPort> {
+  // Checked before parsing, which can decrypt: a stored local key must never be
+  // loaded in a managed deployment, whatever row exists.
+  if (record.provider === "local") {
+    assertLocalSigningAllowed(env);
+  }
   const parsed = await parseConfigRecord(env, orgId, record, cipher);
   const factory = providerAdapterFactories[parsed.provider] as AdapterFactory;
   // `return await`, not bare `return`: factories are async and can reject before

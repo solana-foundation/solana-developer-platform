@@ -151,7 +151,9 @@
     "apiKeyInUse": "Đang dùng",
     "apiKeyNotAvailable": "Khóa đó không khả dụng cho dự án này",
     "apiKeySecretPlaceholder": "Dán khóa đầy đủ cho phiên này",
-    "apiKeySecretRequired": "Dán giá trị khóa API đầy đủ cho khóa đã chọn trước khi chạy request."
+    "apiKeySecretRequired": "Dán giá trị khóa API đầy đủ cho khóa đã chọn trước khi chạy request.",
+    "rowsCount": "{count} hàng",
+    "openCalendarFor": "Mở lịch cho {field}"
   },
   "dashboardShell": {
     "workspace": "Không gian làm việc",
@@ -236,7 +238,8 @@
     "connections": "Kết nối",
     "manageAccount": "Quản lý tài khoản",
     "signOut": "Đăng xuất",
-    "accountMenu": "Menu tài khoản"
+    "accountMenu": "Menu tài khoản",
+    "privacy": "Quyền riêng tư"
   },
   "validation": {
     "allowlistValueRequired": "Giá trị Allowlist là bắt buộc",

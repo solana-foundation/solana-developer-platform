@@ -431,7 +431,11 @@
       "update": "Salvar alterações",
       "updating": "Salvando…",
       "updateSuccess": "Conexão atualizada.",
-      "connectionTestSuccess": "A conexão funciona."
+      "connectionTestSuccess": "A conexão funciona.",
+      "endpointsSection": "Endpoints",
+      "programsSection": "Programas",
+      "programAddressPlaceholder": "Endereço do programa",
+      "accountAddressPlaceholder": "Endereço da conta"
     },
     "playground": {
       "productName": "Private Channels",
