@@ -154,29 +154,30 @@ Merging the release pull request creates a `chore(main): release X.Y.Z` commit o
 The production deploy workflow:
 
 1. Authenticates to the production GCP project.
-2. Builds the API image and pushes both `X.Y.Z` and release-SHA tags.
-3. Resolves the SHA tag to an immutable image digest.
-4. Refuses the release if its commit is behind the schema production last applied, or adds migrations production has not applied.
+2. Refuses a commit that is behind the schema production last applied, and, outside an approved-migration run, one that adds migrations production has not applied.
+3. Verifies the signed per-merge image built by `release-images.yml`, copies that digest to Artifact Registry, and resolves it to an immutable digest.
+4. Runs the migration job with that image.
 5. Captures the current service traffic and cron image for rollback.
 6. Deploys a no-traffic candidate revision and verifies its immutable digest.
 7. Polls the candidate's `/health/ready` endpoint until Postgres and Redis are ready.
 8. Sends production traffic to the candidate, verifies `https://api.solana.com/health/ready`, and updates `sdp-prod-api-public-cron` to the same digest.
+9. Runs the production canary.
+10. In `release-web`, confirms `/health/ready` still reports the promoted revision and posts the `sdp-web production gate` status for the commit.
 
 If production promotion or the cron update fails, the workflow attempts to restore the previous service traffic and cron image. Treat any incomplete automatic rollback as an incident and reconcile both resources immediately.
-
-Do not treat the GitHub release publication as proof that the Cloud Run rollout succeeded; monitor both workflows.
 
 ### 4. Verify production
 
 Check:
 
 1. The production GitHub Actions job completed successfully.
-2. The `sdp_schema_sha` label on `sdp-prod-api-public-migrate` is at or ahead of the release commit's last migration.
+2. The `sdp_schema_sha` label on `sdp-prod-api-public-migrate` is at or ahead of the deployed commit's last migration.
 3. The candidate and canonical `/health/ready` checks passed for the deployed revision, including Postgres and Redis.
-4. The cron job references the same release image as the service.
+4. The cron job references the same image as the service.
 5. `https://api.solana.com/health` succeeds.
 6. Cloud Run error rate, latency, logs, and Sentry remain healthy.
 7. At least one representative authenticated API flow succeeds.
+8. The sdp-web production deployment in Vercel is for the deployed commit, or Slack reported `web held` and the run summary says why.
 
 ## Manual Deployment
 

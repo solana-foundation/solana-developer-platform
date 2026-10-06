@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -57,24 +59,137 @@ function stepBlock(block, stepName) {
   return block.slice(start, next === -1 ? block.length : next);
 }
 
+function runBlock(step) {
+  const marker = "        run: |\n";
+  const start = step.indexOf(marker);
+  assert.notEqual(start, -1, "step has no run block");
+  return step
+    .slice(start + marker.length)
+    .split("\n")
+    .map((line) => line.slice(10))
+    .join("\n");
+}
+
+const imageSha = "a".repeat(40);
+const deployedRevision = "sdp-prod-api-public-00042-abc";
+const repository = "example-org/example-repo";
+const releaseWebScript = runBlock(
+  stepBlock(
+    jobBlock(readWorkflow(prodDeployFile), "release-web"),
+    "Post the sdp-web production gate status"
+  )
+);
+
+function servingCurl(revision) {
+  return `#!/usr/bin/env bash\nprintf '%s' '${JSON.stringify({ status: "ready", revision })}'\n`;
+}
+
+function runReleaseWeb({ curlScript, ghExitCode }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-web-"));
+  const ghLog = path.join(dir, "gh.log");
+  const summary = path.join(dir, "summary.md");
+  fs.writeFileSync(ghLog, "");
+  fs.writeFileSync(summary, "");
+  const stubs = {
+    curl: curlScript,
+    gh: `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${ghLog}'\nexit ${ghExitCode}\n`,
+    sleep: "#!/usr/bin/env bash\nexit 0\n",
+  };
+  for (const [name, script] of Object.entries(stubs)) {
+    fs.writeFileSync(path.join(dir, name), script);
+    fs.chmodSync(path.join(dir, name), 0o755);
+  }
+  const result = spawnSync("bash", ["-c", releaseWebScript], {
+    env: {
+      PATH: `${dir}:${process.env.PATH}`,
+      GITHUB_REPOSITORY: repository,
+      GITHUB_STEP_SUMMARY: summary,
+      IMAGE_SHA: imageSha,
+      DEPLOYED_REVISION: deployedRevision,
+    },
+    encoding: "utf8",
+  });
+  return {
+    code: result.status,
+    stderr: result.stderr,
+    summary: fs.readFileSync(summary, "utf8"),
+    posts: fs
+      .readFileSync(ghLog, "utf8")
+      .split("\n")
+      .filter((line) => line !== ""),
+  };
+}
+
+const gatePost = `api repos/${repository}/statuses/${imageSha} -f state=success -f context=${webGateContext} -f description=Production API serves this commit`;
+
 test("the production API deploy releases the sdp-web production gate for the deployed merge commit", () => {
   const releaseWeb = jobBlock(readWorkflow(prodDeployFile), "release-web");
 
   assertLine(releaseWeb, "    needs: deploy");
   assertLine(
     releaseWeb,
-    `    if: ${expression("!cancelled() && needs.deploy.result == 'success' && github.run_attempt == 1 && inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema)")}`
+    `    if: ${expression("!cancelled() && needs.deploy.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema)")}`
   );
-  assertLine(releaseWeb, "    timeout-minutes: 3");
+  assertLine(releaseWeb, "    timeout-minutes: 5");
   assert.deepEqual(permissionLines(releaseWeb), ["statuses: write"]);
   assertLine(releaseWeb, `          IMAGE_SHA: ${expression("inputs.image_sha")}`);
-  assert.match(
+  assertLine(
     releaseWeb,
-    /\n {10}for attempt in 1 2 3; do\n {12}if gh api "repos\/\$\{GITHUB_REPOSITORY\}\/statuses\/\$\{IMAGE_SHA\}" \\\n\s+-f state=success -f context="sdp-web production gate"[\s\S]*\n {10}done\n/
+    `          DEPLOYED_REVISION: ${expression("needs.deploy.outputs.revision")}`
   );
-  assert.ok(
-    releaseWeb.trimEnd().endsWith("\n          exit 1"),
-    "release-web does not fail after retries"
+});
+
+test("the deploy job exposes the revision it promoted once the rollout completes", () => {
+  const deploy = jobBlock(readWorkflow(prodDeployFile), "deploy");
+  assertLine(deploy, `      revision: ${expression("steps.promote.outputs.revision")}`);
+  const promote = stepBlock(deploy, "Promote service and cron with rollback");
+  assertLine(promote, "        id: promote");
+  assert.match(
+    promote,
+    /echo "ROLLOUT_COMPLETE=true" >> "\$\{GITHUB_ENV\}"\n\s+echo "revision=\$\{CANDIDATE_REVISION\}" >> "\$\{GITHUB_OUTPUT\}"\n/
+  );
+});
+
+test("release-web posts the gate once when production serves the deployed revision", () => {
+  const run = runReleaseWeb({ curlScript: servingCurl(deployedRevision), ghExitCode: 0 });
+  assert.equal(run.code, 0, run.stderr);
+  assert.deepEqual(run.posts, [gatePost]);
+});
+
+test("release-web leaves web held without failing when production serves another revision", () => {
+  const run = runReleaseWeb({
+    curlScript: servingCurl("sdp-prod-api-public-00043-def"),
+    ghExitCode: 0,
+  });
+  assert.equal(run.code, 0, run.stderr);
+  assert.deepEqual(run.posts, []);
+  assert.match(run.summary, /leaving its web held/);
+});
+
+test("release-web fails without posting when the serving revision cannot be read", () => {
+  const run = runReleaseWeb({ curlScript: "#!/usr/bin/env bash\nexit 22\n", ghExitCode: 0 });
+  assert.equal(run.code, 1);
+  assert.deepEqual(run.posts, []);
+  assert.match(run.stderr, /Could not read the serving revision/);
+});
+
+test("release-web fails after three rejected gate posts", () => {
+  const run = runReleaseWeb({ curlScript: servingCurl(deployedRevision), ghExitCode: 1 });
+  assert.equal(run.code, 1);
+  assert.deepEqual(run.posts, [gatePost, gatePost, gatePost]);
+  assert.match(run.stderr, /Could not post the sdp-web production gate/);
+});
+
+test("a deploy whose web release did not succeed reports web-held", () => {
+  const notifyResult = jobBlock(readWorkflow(prodDeployFile), "notify-result");
+  assertLine(notifyResult, "    needs: [deploy, release-web]");
+  assert.match(
+    notifyResult,
+    /needs\.deploy\.result == 'success' && \(needs\.release-web\.result == 'success' \|\| needs\.release-web\.result == 'skipped'\) && 'success' \|\|\n\s+needs\.deploy\.result == 'success' && 'web-held' \|\|\n\s+needs\.deploy\.result == 'cancelled' && 'cancelled' \|\|/
+  );
+  assert.match(
+    fs.readFileSync(path.join(here, "notify-slack.sh"), "utf8"),
+    /\n {2}web-held\) MARKER=/
   );
 });
 

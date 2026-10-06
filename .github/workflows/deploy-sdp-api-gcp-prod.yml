@@ -3,21 +3,10 @@ name: Deploy sdp-api to Cloud Run (prod)
 on:
   workflow_call:
     inputs:
-      release_sha:
-        description: "Exact release commit to build and deploy"
-        type: string
-        required: false
-        default: ""
-      release_tag:
-        description: "Version tag that must resolve to release_sha"
-        type: string
-        required: false
-        default: ""
       image_sha:
-        description: "Merge commit to build and deploy continuously (caller has already gated on the dev smoke)"
+        description: "Merge commit to build and deploy (caller has already gated on the stage smoke)"
         type: string
-        required: false
-        default: ""
+        required: true
       approved_schema:
         description: "Set by apply-prod-migrations.yml after release-production approval: deploy image_sha and run its pending migrations"
         type: boolean
@@ -48,7 +37,7 @@ jobs:
     continue-on-error: true
     if: >-
       github.repository == 'solana-foundation/solana-developer-platform' &&
-      (inputs.release_sha != '' || github.event_name == 'workflow_dispatch')
+      github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -70,8 +59,8 @@ jobs:
           SERVICE: sdp-api
           ENV: production
           STATUS: started
-          VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
-          DEPLOY_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}
+          VERSION: ${{ inputs.image_sha }}
+          DEPLOY_SHA: ${{ inputs.image_sha }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}
@@ -81,33 +70,16 @@ jobs:
           export COMMIT
           ./scripts/notify-slack.sh
 
-  smoke:
-    name: Gate on stage smoke
-    if: >-
-      github.repository == 'solana-foundation/solana-developer-platform' &&
-      github.event_name != 'workflow_dispatch' &&
-      inputs.image_sha == ''
-    uses: ./.github/workflows/sdp-stage-smoke.yml
-    permissions:
-      contents: read
-      id-token: write
-
   deploy:
     outputs:
       canary: ${{ steps.canary_outcome.outputs.result }}
       tail_clean: ${{ steps.tail_outcome.outputs.clean }}
+      revision: ${{ steps.promote.outputs.revision }}
     name: Deploy production image
-    needs: smoke
     if: >-
-      always() &&
-      (needs.smoke.result == 'success' ||
-       (github.event_name == 'workflow_dispatch' && needs.smoke.result == 'skipped') ||
-       (inputs.image_sha != '' && github.event_name != 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
-      (!inputs.approved_schema || vars.CONTINUOUS_PROD_DEPLOY == 'true') &&
-      ((inputs.release_sha != '' && inputs.release_tag != '') ||
-       (inputs.image_sha != ''))
+      (!inputs.approved_schema || vars.CONTINUOUS_PROD_DEPLOY == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 150
     environment: production
@@ -119,11 +91,11 @@ jobs:
       JOB: sdp-prod-api-public-cron
       WORKER_SERVICE: sdp-prod-worker
       MIGRATE_JOB: sdp-prod-api-public-migrate
-      BUILD_IMAGE: ${{ (inputs.release_sha != '' || (inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema))) && 'true' || 'false' }}
+      BUILD_IMAGE: ${{ (github.event_name != 'workflow_dispatch' || inputs.approved_schema) && 'true' || 'false' }}
     steps:
       - name: Validate deploy image SHA
         env:
-          DEPLOY_IMAGE_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}
+          DEPLOY_IMAGE_SHA: ${{ inputs.image_sha }}
         run: |
           set -euo pipefail
           if [[ ! "${DEPLOY_IMAGE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
@@ -136,20 +108,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.release_sha != '' && inputs.release_sha || (inputs.approved_schema && inputs.image_sha) || github.sha }}
+          ref: ${{ (inputs.approved_schema && inputs.image_sha) || github.sha }}
 
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
 
       - name: Resolve commit summary
         run: echo "COMMIT_LINE=$(git log -1 --format='%h — %s' "${DEPLOY_IMAGE_SHA}" 2>/dev/null || true)" >> "${GITHUB_ENV}"
-
-      - name: Verify release identity
-        if: ${{ inputs.release_sha != '' }}
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-          RELEASE_SHA: ${{ inputs.release_sha }}
-        run: .github/scripts/verify-release-identity.sh "${RELEASE_TAG}" "${RELEASE_SHA}"
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -224,16 +189,10 @@ jobs:
           fi
 
       - name: Refuse a non-migrating deploy that carries unapplied migrations
-        if: ${{ inputs.release_sha != '' || (github.event_name == 'workflow_dispatch' && !inputs.approved_schema) }}
-        env:
-          RELEASE_SHA: ${{ inputs.release_sha }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.approved_schema }}
         run: |
           set -euo pipefail
           if [[ -z "${APPLIED_SCHEMA_SHA}" ]]; then
-            if [[ -n "${RELEASE_SHA}" ]]; then
-              echo "Prod schema position is unknown, so this release cannot prove its migrations were applied. Seed sdp_schema_sha on ${MIGRATE_JOB} (docs/ops/release-operations.md) and rerun." >&2
-              exit 1
-            fi
             exit 0
           fi
           if git merge-base --is-ancestor "${DEPLOY_IMAGE_SHA}" "${APPLIED_SCHEMA_SHA}"; then
@@ -263,63 +222,13 @@ jobs:
         # be visible in the process table and in any error echo-back.
         run: printf '%s' "$GHCR_TOKEN" | crane auth login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      # The release image was scanned, built with SLSA provenance + SBOM
-      # attestations, and keyless-signed by release-images.yml. Verify that
-      # signature against the exact release commit and promote the SAME digest
-      # to Artifact Registry (cosign copy carries signatures and attestations),
-      # so prod runs the artifact that was scanned and signed — never a rebuild.
-      - name: Verify and promote release image
-        if: ${{ inputs.release_sha != '' }}
-        timeout-minutes: 75
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
-          # release-images.yml is triggered by the tag push and runs in
-          # parallel with this deploy: wait out the build-and-sign window
-          # before treating a missing tag or signature as a failure.
-          SRC_DIGEST=""
-          for attempt in $(seq 1 130); do
-            if SRC_DIGEST="$(crane digest "${SRC_BASE}:${RELEASE_TAG}" 2>/dev/null)"; then
-              break
-            fi
-            echo "release image tag not in GHCR yet (attempt ${attempt}/130); retrying in 30s"
-            sleep 30
-          done
-          if [[ -z "${SRC_DIGEST}" ]]; then
-            echo "release image ${SRC_BASE}:${RELEASE_TAG} never appeared in GHCR." >&2
-            exit 1
-          fi
-          verified=""
-          for attempt in $(seq 1 10); do
-            if cosign verify "${SRC_BASE}@${SRC_DIGEST}" \
-              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release-images.yml@refs/tags/${RELEASE_TAG}" \
-              --certificate-github-workflow-sha "${DEPLOY_IMAGE_SHA}"; then
-              verified=true
-              break
-            fi
-            echo "signature not verifiable yet (attempt ${attempt}/10); retrying in 30s"
-            sleep 30
-          done
-          if [[ -z "${verified}" ]]; then
-            echo "cosign verification failed for ${SRC_BASE}@${SRC_DIGEST}." >&2
-            exit 1
-          fi
-          VERSION="$(node -p "require('./package.json').version")"
-          DEST_BASE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/sdp-api-public"
-          cosign copy --force "${SRC_BASE}@${SRC_DIGEST}" "${DEST_BASE}:${DEPLOY_IMAGE_SHA}"
-          crane tag "${DEST_BASE}@${SRC_DIGEST}" "${VERSION}"
-          echo "SRC_DIGEST=${SRC_DIGEST}" >> "${GITHUB_ENV}"
-
       # The merge image was built, scanned, attested, and keyless-signed by
       # release-images.yml on the push to main. Verify that signature against
       # this exact commit and promote the SAME digest — merge deploys ship the
       # identical trust chain as releases, never a rebuild.
       # The wait covers release-images.yml's 60-minute publish timeout.
       - name: Verify and promote merge image
-        if: ${{ inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
+        if: ${{ env.BUILD_IMAGE == 'true' }}
         timeout-minutes: 75
         run: |
           set -euo pipefail
@@ -413,7 +322,7 @@ jobs:
           cosign verify "${ORIGIN_IMAGE}" "${verify_flags[@]}"
 
       - name: Run database migrations
-        if: ${{ inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
+        if: ${{ env.BUILD_IMAGE == 'true' }}
         timeout-minutes: 15
         run: |
           gcloud run jobs update "${MIGRATE_JOB}" \
@@ -547,6 +456,7 @@ jobs:
           done
 
       - name: Promote service and cron with rollback
+        id: promote
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -592,6 +502,7 @@ jobs:
             exit 1
           fi
           echo "ROLLOUT_COMPLETE=true" >> "${GITHUB_ENV}"
+          echo "revision=${CANDIDATE_REVISION}" >> "${GITHUB_OUTPUT}"
 
       - name: Record managed monitor migration gate
         if: ${{ env.ROLLOUT_COMPLETE == 'true' }}
@@ -665,17 +576,16 @@ jobs:
 
   # sdp-web requires this status as a Vercel Deployment Check, so Vercel holds
   # each commit's production web build until production serves that commit's
-  # API. Only merge and approved-migration deploys post it; a manual rollback
-  # never releases web. `smoke` is skipped on both paths, so the condition must
-  # not rely on the implicit success() over ancestors. A rerun attempt never
-  # posts: by then a newer commit may be live, and a late success could promote
-  # older web over it; a held commit is released by the next merge instead.
+  # API. Merge and approved-migration deploys post it, reruns included; a
+  # manual rollback never does. It posts only while production still serves the
+  # revision this run promoted, so a newer deploy or a rollback since then can
+  # never be followed by a late release of this commit's web.
   release-web:
     name: Release sdp-web production for the deployed commit
     needs: deploy
-    if: ${{ !cancelled() && needs.deploy.result == 'success' && github.run_attempt == 1 && inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
+    if: ${{ !cancelled() && needs.deploy.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     permissions:
       statuses: write
     steps:
@@ -683,8 +593,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           IMAGE_SHA: ${{ inputs.image_sha }}
+          DEPLOYED_REVISION: ${{ needs.deploy.outputs.revision }}
         run: |
           set -euo pipefail
+          serving=""
+          for attempt in 1 2 3; do
+            if serving="$(curl --fail --silent --show-error --max-time 10 "https://api.solana.com/health/ready" | jq -er '.revision')"; then
+              break
+            fi
+            sleep $((attempt * 10))
+          done
+          if [[ -z "${serving}" ]]; then
+            echo "Could not read the serving revision; web stays held for ${IMAGE_SHA}." >&2
+            exit 1
+          fi
+          if [[ "${serving}" != "${DEPLOYED_REVISION}" ]]; then
+            echo "Production now serves ${serving}, not ${DEPLOYED_REVISION} from ${IMAGE_SHA}; leaving its web held." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
           for attempt in 1 2 3; do
             if gh api "repos/${GITHUB_REPOSITORY}/statuses/${IMAGE_SHA}" \
               -f state=success -f context="sdp-web production gate" -f description="Production API serves this commit"; then
@@ -692,7 +618,7 @@ jobs:
             fi
             sleep $((attempt * 10))
           done
-          echo "Could not post the sdp-web production gate for ${IMAGE_SHA}; web stays held until the next merge deploys." >&2
+          echo "Could not post the sdp-web production gate for ${IMAGE_SHA}; rerun this job to release web." >&2
           exit 1
 
   notify-result:
@@ -700,11 +626,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
-    needs: [smoke, deploy]
+    needs: [deploy, release-web]
     if: >-
       always() &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
-      (inputs.release_sha != '' || github.event_name == 'workflow_dispatch')
+      github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -726,12 +652,13 @@ jobs:
           SERVICE: sdp-api
           ENV: production
           STATUS: >-
-            ${{ needs.deploy.result == 'success' && 'success' ||
-                (needs.deploy.result == 'cancelled' || needs.smoke.result == 'cancelled') && 'cancelled' ||
+            ${{ needs.deploy.result == 'success' && (needs.release-web.result == 'success' || needs.release-web.result == 'skipped') && 'success' ||
+                needs.deploy.result == 'success' && 'web-held' ||
+                needs.deploy.result == 'cancelled' && 'cancelled' ||
                 needs.deploy.outputs.canary == 'failure' && needs.deploy.outputs.tail_clean == 'true' && 'canary-failed' ||
                 'failure' }}
-          VERSION: ${{ inputs.release_tag != '' && inputs.release_tag || inputs.image_sha }}
-          DEPLOY_SHA: ${{ inputs.release_sha != '' && inputs.release_sha || inputs.image_sha }}
+          VERSION: ${{ inputs.image_sha }}
+          DEPLOY_SHA: ${{ inputs.image_sha }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}
