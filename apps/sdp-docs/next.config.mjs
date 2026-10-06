@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMDX } from "fumadocs-mdx/next";
+import { DOCS_REDIRECTS } from "./scripts/lib/redirects.mjs";
 
 // Verified with fumadocs-mdx 14.3.1: this internal opt-out keeps Fumadocs from
 // rewriting .source after our scripts patch it for Next's parser.
@@ -16,18 +17,7 @@ const nextConfig = {
   reactStrictMode: true,
   assetPrefix: "/docs",
   async redirects() {
-    return [
-      {
-        source: "/docs/payments/wallet-policies",
-        destination: "/docs/wallet-operations/policies",
-        permanent: true,
-      },
-      {
-        source: "/docs/payments/wallet-balances",
-        destination: "/docs/wallet-operations/balances",
-        permanent: true,
-      },
-    ];
+    return DOCS_REDIRECTS;
   },
   async rewrites() {
     return [
