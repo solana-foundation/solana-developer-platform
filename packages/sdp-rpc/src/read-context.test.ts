@@ -3,10 +3,15 @@ import { describe, it } from "node:test";
 import { address, createSolanaRpcFromTransport, type RpcTransport } from "@solana/kit";
 import {
   contextAwareRpcFetch,
+  currentMinimumRpcSlot,
   observeRpcRead,
   prepareRpcRead,
+  readFloor,
+  readStamp,
   withMinimumRpcSlot,
+  withReadFloor,
   withRpcReadContext,
+  withRpcReadContextFetch,
 } from "./read-context";
 
 const request = {
@@ -223,6 +228,36 @@ describe("confirmed balance read contexts", () => {
     }
   });
 
+  it("scopes reads over an injected send exactly as over the global fetch", async () => {
+    const bodies: unknown[] = [];
+    const read = withRpcReadContextFetch(async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json(answer(101));
+    });
+    const init = { method: "POST", body: JSON.stringify(request) };
+    await read("https://rpc.example", init);
+    await withMinimumRpcSlot(101, () => read("https://rpc.example", init));
+    assert.deepEqual(bodies, [
+      request,
+      {
+        ...request,
+        params: [["account"], { encoding: "base64", commitment: "confirmed", minContextSlot: 101 }],
+      },
+    ]);
+    await assert.rejects(
+      withMinimumRpcSlot(102, () => read("https://rpc.example", init)),
+      /behind/
+    );
+  });
+
+  it("exposes the current scope's minimum slot to transports below it", async () => {
+    assert.equal(currentMinimumRpcSlot(), undefined);
+    await withMinimumRpcSlot(101, async () => {
+      assert.equal(currentMinimumRpcSlot(), 101);
+      observeRpcRead(request, answer(101));
+    });
+  });
+
   it("refuses missing, malformed and unsafe context slots", async () => {
     for (const response of [
       { result: { value: [] } },
@@ -234,5 +269,42 @@ describe("confirmed balance read contexts", () => {
         /behind/
       );
     }
+  });
+});
+
+describe("read floors", () => {
+  it("stamps strictly increase", () => {
+    const first = readStamp();
+    const second = readStamp();
+    assert.ok(second > first);
+  });
+
+  it("has no floor outside a scope and the innermost floor inside nested scopes", async () => {
+    assert.equal(readFloor(), undefined);
+    await withReadFloor(5, async () => {
+      assert.equal(readFloor(), 5);
+      await withReadFloor(9, async () => assert.equal(readFloor(), 9));
+      assert.equal(readFloor(), 5);
+    });
+    assert.equal(readFloor(), undefined);
+  });
+
+  it("keeps concurrent scopes apart across awaits", async () => {
+    const seen: Array<number | undefined> = [];
+    await Promise.all([
+      withReadFloor(1, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        seen.push(readFloor());
+      }),
+      withReadFloor(2, async () => {
+        seen.push(readFloor());
+      }),
+    ]);
+    assert.deepEqual(seen.sort(), [1, 2]);
+  });
+
+  it("refuses an invalid floor", () => {
+    assert.throws(() => withReadFloor(-1, async () => undefined), /Invalid read floor/);
+    assert.throws(() => withReadFloor(1.5, async () => undefined), /Invalid read floor/);
   });
 });

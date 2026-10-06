@@ -114,7 +114,11 @@ import {
 } from "./policy-replay";
 import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import { decodeVaultPositionCursor, encodeVaultPositionCursor } from "./vault-position-cursor";
-import { closeEmptyHydratedPositions, hydrateVaultPositions } from "./vault-position-hydration";
+import {
+  closeEmptyHydratedPositions,
+  hydrateVaultPositions,
+  markVaultPositionRowsRead,
+} from "./vault-position-hydration";
 
 /**
  * POST /v1/earn/vault-deposits — open or add to a non-custodial vault position,
@@ -1125,6 +1129,7 @@ export async function listEarnVaultPositions(c: AppContext) {
     limit: query.limit,
     before,
   });
+  const rowsReadAt = markVaultPositionRowsRead();
   const hasMore = page.hasMore;
   // Normalised once, so the instrument columns are proven non-null here rather
   // than at each of the six places below that would otherwise have to coerce
@@ -1151,7 +1156,11 @@ export async function listEarnVaultPositions(c: AppContext) {
         shareMint: row.shareMint,
       };
     }),
-    { ownerKind: "custody", minimumSlotByPositionId: balanceReadContext?.minimumSlotByPositionId }
+    {
+      ownerKind: "custody",
+      minimumSlotByPositionId: balanceReadContext?.minimumSlotByPositionId,
+      rowsReadAt,
+    }
   );
   await closeEmptyHydratedPositions(
     (positionId, observedUpdatedAt) =>

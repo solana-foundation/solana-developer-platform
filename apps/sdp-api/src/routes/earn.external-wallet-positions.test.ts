@@ -282,6 +282,65 @@ describe("external-wallet position reads", () => {
     expect(body.data.positions).toHaveLength(1);
   });
 
+  it("never serves a refresh from a read that started before its rows were read", async () => {
+    const positionId = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    await settleSeededMovements(positionId);
+    const snapshots = (input: { owner: string; providerReferences: string[] }, shares: string) =>
+      input.providerReferences.map((providerReference) => ({
+        providerReference,
+        owner: input.owner,
+        cluster: "devnet",
+        shares,
+        withdrawableShares: shares,
+        tokenValue: shares,
+        tokenMint: USDC,
+        shareMint: SHARE,
+      }));
+    let releaseStaleRead: (() => void) | undefined;
+    readVaultPositions
+      .mockImplementationOnce(
+        (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+          new Promise((resolve) => {
+            releaseStaleRead = () => resolve(snapshots(input, "0"));
+          })
+      )
+      .mockImplementation(
+        async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+          snapshots(input, "1")
+      );
+    const path = `/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`;
+
+    // A's chain read is in flight and will answer the balance from before the deposit.
+    const first = get(path);
+    await vi.waitFor(() => expect(readVaultPositions).toHaveBeenCalledTimes(1), {
+      timeout: 5_000,
+    });
+    // The deposit settles, refilling the holding and bumping its updated_at.
+    await getDb(env)
+      .prepare("UPDATE earn_positions SET updated_at = ? WHERE id = ?")
+      .bind("2099-01-01T00:00:00.000Z", positionId)
+      .run();
+    // B reads the refilled row and reaches hydration while A's read is still held.
+    const second = get(path);
+    await vi.waitFor(() => expect(resolveVaultDirectClient).toHaveBeenCalledTimes(2), {
+      timeout: 5_000,
+    });
+    releaseStaleRead?.();
+    const [stale, fresh] = await Promise.all([first, second]);
+
+    expect(await closedAtOf(positionId)).toBeNull();
+    expect(readVaultPositions).toHaveBeenCalledTimes(2);
+    expect(stale.status).toBe(200);
+    await expect(fresh.json()).resolves.toMatchObject({
+      data: { positions: [{ shares: "1" }] },
+    });
+  });
+
   it("summary excludes another project's positions and owner addresses", async () => {
     await seedPosition({
       ownerAddress: OWNER_A,

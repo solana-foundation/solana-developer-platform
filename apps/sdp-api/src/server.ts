@@ -17,6 +17,7 @@ import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/back
 import { createNodeHttpApp } from "@/runtime/http-node";
 import { getLogger } from "@/runtime/logger";
 import { noopObservability } from "@/runtime/observability";
+import { installOutboundDispatcher } from "@/runtime/outbound-dispatcher";
 import { shutdown } from "@/runtime/shutdown-node";
 import { assertSigningProviderAllowed } from "@/services/adapters/signing";
 import { assertCustodyEncryptionScheme } from "@/services/custody-cipher/cipher-router";
@@ -104,6 +105,7 @@ function assertRequiredEnv(env: Env): void {
 }
 
 async function main(): Promise<void> {
+  installOutboundDispatcher();
   const env = getProcessEnv();
   assertRequiredEnv(env);
 

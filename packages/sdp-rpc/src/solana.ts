@@ -32,8 +32,12 @@ import {
   resolveSolanaRpcProviderUrls,
 } from "./config";
 import { solanaRpcError } from "./errors";
+import { withReadSocketRetry } from "./socket-retry";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
+
+export { fetchWithReadSocketRetry } from "./socket-retry";
+export { withReadSocketRetry };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -207,13 +211,17 @@ export function createFailoverTransport(
 export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
   const timeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
 
+  // The socket retry sits below caller middleware, so a read-context scope
+  // only ever observes the attempt that answered.
   const buildTransport = (url: string): RpcTransport => {
     if (options?.headers && Object.keys(options.headers).length > 0) {
       assertAllowedRpcHeaders(options.headers);
-      const transport = createDefaultRpcTransport({ headers: options.headers, url });
+      const transport = withReadSocketRetry(
+        createDefaultRpcTransport({ headers: options.headers, url })
+      );
       return options.wrapTransport?.(transport) ?? transport;
     }
-    const transport = createDefaultRpcTransport({ url });
+    const transport = withReadSocketRetry(createDefaultRpcTransport({ url }));
     return options?.wrapTransport?.(transport) ?? transport;
   };
 
