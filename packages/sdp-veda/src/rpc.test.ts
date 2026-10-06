@@ -5,6 +5,7 @@ import {
   createVedaReadRpc,
   createVedaRpc,
   VEDA_BLOCK_TIME_TTL_MS,
+  VEDA_SHARED_READ_JOIN_WINDOW_MS,
   withVedaReadDeduplication,
   withVedaRpcTimeout,
 } from "./rpc";
@@ -142,6 +143,29 @@ describe("withVedaReadDeduplication", () => {
     void withReadFloor(rowsReadAt, () => read(request("getMultipleAccounts", params)));
 
     expect(sent).toHaveLength(1);
+  });
+
+  it("never lets a caller join a request sent a join window or more ago", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+    const params = [ACCOUNTS, { encoding: "base64" }];
+    const clock = vi.spyOn(Date, "now").mockReturnValue(10_000);
+
+    const stalled = read(request("getMultipleAccounts", params));
+    clock.mockReturnValue(10_000 + VEDA_SHARED_READ_JOIN_WINDOW_MS - 1);
+    const joined = read(request("getMultipleAccounts", params));
+    expect(sent).toHaveLength(1);
+    clock.mockReturnValue(10_000 + VEDA_SHARED_READ_JOIN_WINDOW_MS);
+    const later = read(request("getMultipleAccounts", params));
+    expect(sent).toHaveLength(2);
+
+    const fresh = { jsonrpc: "2.0", result: { context: { slot: 2n }, value: [null] } };
+    sent[1]?.resolve(fresh);
+    await expect(later).resolves.toBe(fresh);
+    const old = { jsonrpc: "2.0", result: { context: { slot: 1n }, value: [null] } };
+    sent[0]?.resolve(old);
+    await expect(stalled).resolves.toBe(old);
+    await expect(joined).resolves.toBe(old);
   });
 
   it("keeps requests apart when any param differs", async () => {

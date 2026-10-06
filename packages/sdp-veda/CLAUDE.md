@@ -248,7 +248,9 @@ every read, at no RPC cost, against the share account the SDK derives from live
 vault state; a mismatch drops the cached facts and re-reads the state.
 
 That client's transport (`createVedaReadRpc`) shares identical in-flight reads
-and reuses a slot's block time. It shares only the methods a position read
+(joined only after the caller's read floor and under 2 s after the send, so a
+stalled request never captures later reads) and reuses a slot's block time. It
+shares only the methods a position read
 sends (`getMultipleAccounts`, `getAccountInfo`, `getProgramAccounts`,
 `getBlockTime`); a send, a simulation or a blockhash always goes out on its own.
 It sits BELOW `withRpcReadContext`, so a minimum-slot read never shares a
