@@ -16,9 +16,10 @@ recently used) for reads, quotes and builds. Its fetch chain, outermost first:
   `getMultipleAccounts`, `getProgramAccounts`, `getTokenAccountBalance`,
   `getTokenSupply`) share one request, keyed by the endpoint's hash (RPC URLs
   carry API keys) and any minimum slot. A caller joins only a request sent
-  after its read floor (`packages/sdp-rpc/CLAUDE.md`, "Read floors"). Nothing
-  is kept once a request settles; a request carrying a signal is never
-  shared.
+  after its read floor (`packages/sdp-rpc/CLAUDE.md`, "Read floors") and less
+  than 2 s ago (`JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS`), so a stalled request
+  never captures later reads. Nothing is kept once a request settles; a request
+  carrying a signal is never shared.
 - `fetchWithReadSocketRetry`: one re-send when a pooled socket died, which
   serves every joiner.
 
@@ -61,7 +62,8 @@ accepts what `getTokenAccountBalance` reads there: an initialized or frozen
 Tokenkeg jlUSDT account, whatever its token owner (Tokenkeg lets an ATA's owner
 be reassigned). A missing account is a confirmed zero; anything else is
 unreadable, never zero. Concurrent reads share one in-flight withdrawal
-liquidity request to lite-api, under the same read-floor rule.
+liquidity request to lite-api, under the same read-floor and 2 s join-window
+rules.
 
 ## Request budget (pinned in `sdk-coupling.test.ts`)
 

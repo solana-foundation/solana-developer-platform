@@ -7,7 +7,11 @@ import {
 import { JUPITER_LEND_EARN_PROGRAM_IDS, JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { PublicKey } from "@solana/web3.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { jupiterLendConnection, withJupiterLendReadSharing } from "./rpc";
+import {
+  JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS,
+  jupiterLendConnection,
+  withJupiterLendReadSharing,
+} from "./rpc";
 
 interface Sent {
   url: string;
@@ -98,6 +102,27 @@ describe("withJupiterLendReadSharing", () => {
     void withReadFloor(rowsReadAt, () => read(RPC, body()));
 
     expect(sent).toHaveLength(1);
+  });
+
+  it("never lets a caller join a read sent a join window or more ago", async () => {
+    const { sent, send } = fakeSend();
+    const read = withJupiterLendReadSharing(send);
+    const body = () => post("getAccountInfo", [ACCOUNT, { encoding: "base64" }]);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(10_000);
+
+    const stalled = read(RPC, body());
+    clock.mockReturnValue(10_000 + JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS - 1);
+    const joined = read(RPC, body());
+    expect(sent).toHaveLength(1);
+    clock.mockReturnValue(10_000 + JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS);
+    const later = read(RPC, body());
+    expect(sent).toHaveLength(2);
+
+    sent[1]?.resolve(answer({ context: { slot: 2 }, value: null }));
+    expect(await (await later).text()).toContain('"slot":2');
+    sent[0]?.resolve(answer({ context: { slot: 1 }, value: null }));
+    expect(await (await stalled).text()).toContain('"slot":1');
+    expect(await (await joined).text()).toContain('"slot":1');
   });
 
   it("keeps reads apart when the URL, method or params differ", async () => {
