@@ -10,6 +10,24 @@
 
 DROP TABLE rpc_connections;
 
+-- A GCP Secret Manager version outlives its row, so each one is queued for the
+-- `retire-orphaned-secrets` sweeper before the row that records it is deleted.
+-- `encrypted_db` ciphertext dies with the row.
+INSERT INTO secret_retirements
+    (id, organization_id, source_id, storage_backend, secret_ref, secret_version_ref, last_error)
+SELECT 'wf_secret_retirement_' || gen_random_uuid(),
+       organization_id,
+       id,
+       storage_backend,
+       secret_ref,
+       secret_version_ref,
+       'byok rpc removed (0123)'
+  FROM provider_credentials
+ WHERE provider IN ('alchemy', 'helius', 'nodit', 'quicknode', 'triton', 'validationcloud')
+   AND storage_backend = 'gcp_secret_manager'
+   AND secret_version_ref IS NOT NULL
+ON CONFLICT (secret_version_ref) DO NOTHING;
+
 DELETE FROM provider_credentials
  WHERE provider IN ('alchemy', 'helius', 'nodit', 'quicknode', 'triton', 'validationcloud');
 
