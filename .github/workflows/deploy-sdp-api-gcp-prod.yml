@@ -665,13 +665,16 @@ jobs:
   # sdp-web requires this status as a Vercel Deployment Check, so Vercel holds
   # each commit's production web build until production serves that commit's
   # API. Only merge and approved-migration deploys post it; a manual rollback
-  # never releases web.
+  # never releases web. `smoke` is skipped on both paths, so the condition must
+  # not rely on the implicit success() over ancestors. A rerun attempt never
+  # posts: by then a newer commit may be live, and a late success could promote
+  # older web over it; a held commit is released by the next merge instead.
   release-web:
     name: Release sdp-web production for the deployed commit
     needs: deploy
-    if: ${{ inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
+    if: ${{ !cancelled() && needs.deploy.result == 'success' && github.run_attempt == 1 && inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     permissions:
       statuses: write
     steps:
@@ -680,8 +683,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           IMAGE_SHA: ${{ inputs.image_sha }}
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/statuses/${IMAGE_SHA}" \
-            -f state=success -f context="sdp-web production gate" -f description="Production API serves this commit"
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gh api "repos/${GITHUB_REPOSITORY}/statuses/${IMAGE_SHA}" \
+              -f state=success -f context="sdp-web production gate" -f description="Production API serves this commit"; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          echo "Could not post the sdp-web production gate for ${IMAGE_SHA}; web stays held until the next merge deploys." >&2
+          exit 1
 
   notify-result:
     name: Notify Slack — release result

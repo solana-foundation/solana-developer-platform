@@ -6,35 +6,39 @@
 
 | Event | Target | Result |
 | --- | --- | --- |
-| Relevant push to `main` | Stage | Builds a SHA-tagged image, runs migrations, updates the stage service, worker, and cron job, then runs the stage smoke |
-| Relevant push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true` | Production API | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the merge deploy is held instead and dispatches `Apply pending migrations to prod`, which deploys that commit once a `release-production` reviewer approves it |
-| `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows |
-| Release publication job on `main` | Production API | Verifies the published tag and SHA, promotes the signed release image, and updates the production service, worker, and cron job. Runs no migrations: a release whose commit carries migrations production has not applied is refused until their approval run has deployed them |
+| Push to `main` | Stage | Builds a SHA-tagged image, runs migrations, updates the stage service, worker, and cron job, then runs the stage smoke |
+| Push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true` | Production API | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the merge deploy is held instead and dispatches `Apply pending migrations to prod`, which deploys that commit once a `release-production` reviewer approves it |
+| `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows. Deploys nothing itself: the commit reaches production through the per-merge pipeline like any other push |
 | Push to `main` | Production web | Vercel's git integration builds sdp-web from that commit and holds it until the `sdp-web production gate` commit status passes, which the production API deploy of that same commit posts once it serves traffic |
 | Manual dev workflow dispatch | Dev | Rebuilds and deploys the selected workflow revision |
 | Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations |
-| Vercel dashboard redeploy or instant rollback | Production web | Redeploys or restores an earlier sdp-web production deployment |
+| Vercel dashboard redeploy, instant rollback, or force promote | Production web | Redeploys, restores, or releases an sdp-web production deployment |
 
-Vercel's git integration builds previews for pull-request branches and a production build for every merge to `main`. The sdp-web project requires the `sdp-web production gate` status under Settings → Deployment Checks, so each production build waits. Merges touching `apps/sdp-web/` run the same stage and production pipeline as API changes, and the `release-web` job in [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) posts the status for the deployed commit after a per-merge or approved-migration deploy succeeds. Web and API therefore go live from the same commit, API first: a held, failed, or rolled-back API deploy posts nothing and web stays on its previous deployment. No GitHub workflow deploys sdp-web, and no Vercel token is involved.
+Vercel's git integration builds previews for pull-request branches and a production build for every merge to `main`. The sdp-web project requires the `sdp-web production gate` status under Settings → Deployment Checks, so each production build waits. Every push to `main` runs the stage and production pipeline, and the `release-web` job in [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) posts the status for the deployed commit after a per-merge or approved-migration deploy succeeds, on the run's first attempt only. Web therefore goes live only for a commit whose API production already serves, seconds after it. No GitHub workflow deploys sdp-web, and no Vercel token is involved.
 
 ```mermaid
 flowchart TD
-  M["Merge to main at SHA X"] --> WB["Vercel builds production web X<br/>held by the Deployment Check"]
-  M --> CH{"API or web paths changed?"}
-  CH -- no --> H0["No deploy: web X stays held"]
-  CH -- yes --> ST["Stage: deploy API X, run smoke"]
-  ST -- fails --> H1["Nothing reaches prod"]
-  ST -- passes --> SC{"Pending migrations?"}
+  M["Push to main at SHA X"] --> WB["Vercel builds production web X<br/>held by the Deployment Check"]
+  M --> ST["Stage: deploy API X, run smoke"]
+  ST -- fails --> H1["Nothing reaches prod: web X stays held"]
+  ST -- passes --> KS{"CONTINUOUS_PROD_DEPLOY=true?"}
+  KS -- no --> H0["No prod deploy: web X stays held"]
+  KS -- yes --> SC{"Pending migrations?"}
   SC -- yes --> AP["Apply pending migrations to prod<br/>release-production approval"]
-  SC -- no --> PD["Prod API deploy X<br/>canary, then traffic on X"]
+  SC -- no --> PD["Prod API deploy X<br/>traffic moves to X, then canary"]
   AP --> PD
-  PD -- fails or rolls back --> H2["No status: web stays on its previous deployment"]
+  PD -- "rollout fails: traffic restored" --> H2["No status: web stays on its previous deployment"]
+  PD -- "canary fails: API X stays live" --> H3["No status: web held behind API X"]
   PD -- succeeds --> RW["release-web posts<br/>sdp-web production gate = success for X"]
   RW --> VP["Vercel promotes web X"]
   WB -.-> VP
 ```
 
 **Goal: sdp-api stays backwards compatible with the web already in production.** The API for X always goes live before web X: for the seconds until Vercel promotes web X, and for as long as a web build stays held, the previous web runs against the new API. Additive, expand-then-contract API changes keep that safe; never remove or rename a field or endpoint that production web still uses.
+
+A held build stays held until a later push releases a newer one: a failed or rolled-back deploy, a failed canary, a failed status post, a GitHub-superseded pending run, or the kill switch being off. That is the safe direction, since web lags the API instead of leading it. When web must move without a deploy, a Vercel Owner or project admin force-promotes the production deployment for the commit the production API serves, never a newer one.
+
+Rollout prerequisite: configure the `sdp-web production gate` Deployment Check before the first merge that relies on it; without it, Vercel promotes every `main` build immediately. If the check picker only lists contexts GitHub has seen, post the status once on a pull-request commit, which has no production deployment to release.
 
 The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, and cron jobs.
 
@@ -145,9 +149,7 @@ Every run posts or updates one comment, so a missing comment means the job never
 
 ### 3. Deploy and publish production
 
-Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag, publishes the GitHub release, resolves the tag to the exact `main` commit, and then starts [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) with that immutable tag and SHA to deploy the production API. Release deploys do not post the `sdp-web production gate` status; web reaches production only through per-merge and approved-migration deploys.
-
-The API deployment retains the `main` event context required by the `production` environment. Before using production credentials, it verifies that the checked-out SHA matches the published tag, belongs to `origin/main`, and has the matching version in `package.json`.
+Merging the release pull request creates a `chore(main): release X.Y.Z` commit on `main`. That push runs [`release-please.yml`](../../.github/workflows/release-please.yml), which creates the `vX.Y.Z` tag, publishes the GitHub release, resolves the tag to the exact `main` commit, and stops there: it deploys nothing. The release commit reaches production through the per-merge pipeline in `deploy.yml`, like any other push, and its web through the same gate.
 
 The production deploy workflow:
 
@@ -189,12 +191,13 @@ The workflow validates the SHA, resolves its tag to an immutable digest, verifie
 ## Production Rollback
 
 1. Identify the last healthy release's full Git SHA from a successful, trusted production release workflow. Confirm its recorded digest and `sdp-api-public:<sha>` image still match in the production Artifact Registry repository.
-2. If production web depends on API behavior newer than that SHA, first use Vercel instant rollback on sdp-web to a deployment no newer than it. If the API rollback then fails to complete, promote the previous sdp-web deployment back. Instant rollback pauses automatic production promotion, so once a later deploy should release web again, click **Undo Rollback** on the sdp-web project.
+2. Pause web first: in Vercel, use Instant Rollback on sdp-web to the production deployment for that SHA, or the newest one older than it. Instant Rollback also stops later builds from being promoted, so nothing releases web against the API you are about to restore.
 3. Open `Deploy sdp-api to Cloud Run (prod)` in GitHub Actions and choose **Run workflow** from `main`.
 4. Enter the full SHA as `image_sha`.
 5. Approve the `production` environment gate if configured.
-6. Follow the run until both the service and cron job reference the resolved digest.
-7. Repeat the production verification checklist and record the SHA, digest, reason, and operator in the incident timeline.
+6. Follow the run until both the service and cron job reference the resolved digest. If it fails, run `gcloud run services describe sdp-prod-api-public --region us-central1 --project solana-developer-platform` to see which revision serves traffic before touching web.
+7. Resume web only for the commit the serving API was built from: in Vercel, promote that commit's production deployment (this also undoes the rollback). Later merges release web normally again.
+8. Repeat the production verification checklist and record the SHA, digest, reason, and operator in the incident timeline.
 
 Database schema rollback is not automated. If the selected image is incompatible with the current schema, stop and prepare a forward fix instead of improvising a destructive migration.
 

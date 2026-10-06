@@ -5,35 +5,6 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const releaseWorkflow = fs.readFileSync(
-  path.resolve(here, "../.github/workflows/release-please.yml"),
-  "utf8"
-);
-
-test("release publication passes an immutable identity to the production API deployment", () => {
-  const publishJob = releaseWorkflow.slice(
-    releaseWorkflow.indexOf("  publish-release:"),
-    releaseWorkflow.indexOf("  deploy-api-production:")
-  );
-
-  assert.match(publishJob, /ref: \$\{\{ github\.sha \}\}/);
-  assert.doesNotMatch(publishJob, /ref: main/);
-  assert.match(
-    publishJob,
-    /publish-release:[\s\S]*outputs:\n\s+release_sha: \$\{\{ steps\.release\.outputs\.release_sha \}\}\n\s+release_tag: \$\{\{ steps\.release\.outputs\.release_tag \}\}/
-  );
-  assert.match(publishJob, /- name: Resolve published release\n\s+id: release/);
-  assert.match(publishJob, /git rev-parse "\$\{release_tag\}\^\{commit\}"/);
-  assert.match(publishJob, /if \[\[ "\$\{release_sha\}" != "\$\{GITHUB_SHA\}" \]\]/);
-
-  assert.match(
-    releaseWorkflow,
-    /deploy-api-production:[\s\S]*needs: publish-release[\s\S]*uses: \.\/\.github\/workflows\/deploy-sdp-api-gcp-prod\.yml[\s\S]*release_sha: \$\{\{ needs\.publish-release\.outputs\.release_sha \}\}[\s\S]*release_tag: \$\{\{ needs\.publish-release\.outputs\.release_tag \}\}/
-  );
-
-  assert.doesNotMatch(releaseWorkflow, /secrets:\s+inherit/);
-});
-
 const workflowsDir = path.resolve(here, "../.github/workflows");
 const prodDeployFile = "deploy-sdp-api-gcp-prod.yml";
 const webGateContext = "sdp-web production gate";
@@ -79,26 +50,48 @@ function assertLine(block, line) {
   assert.ok(block.split("\n").includes(line), `missing line: ${line}`);
 }
 
+function stepBlock(block, stepName) {
+  const start = block.indexOf(`      - name: ${stepName}\n`);
+  assert.notEqual(start, -1, `missing step: ${stepName}`);
+  const next = block.indexOf("\n      - ", start + 1);
+  return block.slice(start, next === -1 ? block.length : next);
+}
+
 test("the production API deploy releases the sdp-web production gate for the deployed merge commit", () => {
   const releaseWeb = jobBlock(readWorkflow(prodDeployFile), "release-web");
 
   assertLine(releaseWeb, "    needs: deploy");
   assertLine(
     releaseWeb,
-    `    if: ${expression("inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema)")}`
+    `    if: ${expression("!cancelled() && needs.deploy.result == 'success' && github.run_attempt == 1 && inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema)")}`
   );
+  assertLine(releaseWeb, "    timeout-minutes: 3");
   assert.deepEqual(permissionLines(releaseWeb), ["statuses: write"]);
   assertLine(releaseWeb, `          IMAGE_SHA: ${expression("inputs.image_sha")}`);
   assert.match(
     releaseWeb,
-    /gh api "repos\/\$\{GITHUB_REPOSITORY\}\/statuses\/\$\{IMAGE_SHA\}" \\\n\s+-f state=success -f context="sdp-web production gate"/
+    /\n {10}for attempt in 1 2 3; do\n {12}if gh api "repos\/\$\{GITHUB_REPOSITORY\}\/statuses\/\$\{IMAGE_SHA\}" \\\n\s+-f state=success -f context="sdp-web production gate"[\s\S]*\n {10}done\n/
+  );
+  assert.ok(
+    releaseWeb.trimEnd().endsWith("\n          exit 1"),
+    "release-web does not fail after retries"
   );
 });
 
-test("every production API deploy caller grants the gate status, only that workflow posts it, and web-only merges deploy", () => {
+test("the gate's prerequisite deploy job and its canary step cannot be masked as success", () => {
+  const deploy = jobBlock(readWorkflow(prodDeployFile), "deploy");
+
+  assert.doesNotMatch(deploy, /^ {4}continue-on-error:/m);
+  assert.doesNotMatch(
+    stepBlock(deploy, "Run prod canary against the promoted revision"),
+    /continue-on-error/
+  );
+});
+
+test("every production API deploy caller grants the gate status, only that workflow posts it, and every push deploys", () => {
   const workflowFiles = fs
     .readdirSync(workflowsDir)
-    .filter((fileName) => fileName.endsWith(".yml"));
+    .filter((fileName) => fileName.endsWith(".yml") || fileName.endsWith(".yaml"));
   const callerJobs = workflowFiles.flatMap((fileName) =>
     [...jobBlocks(readWorkflow(fileName))]
       .filter(([, block]) => block.includes(`    uses: ./.github/workflows/${prodDeployFile}\n`))
@@ -108,8 +101,8 @@ test("every production API deploy caller grants the gate status, only that workf
   assert.deepEqual(callerJobs.map(({ fileName, jobName }) => `${fileName}#${jobName}`).sort(), [
     "apply-prod-migrations.yml#deploy",
     "deploy.yml#deploy-api-prod",
-    "release-please.yml#deploy-api-production",
   ]);
+  assert.ok(!readWorkflow("release-please.yml").includes(prodDeployFile));
   for (const { fileName, jobName, block } of callerJobs) {
     assert.ok(
       permissionLines(block).includes("statuses: write"),
@@ -122,9 +115,10 @@ test("every production API deploy caller grants the gate status, only that workf
   );
   assert.deepEqual(gatePosters, [prodDeployFile]);
 
-  const detectPatterns = [
-    ...jobBlock(readWorkflow("deploy.yml"), "changes").matchAll(/if match "\^\(([^"]+)\)"; then/g),
-  ];
-  assert.equal(detectPatterns.length, 1);
-  assert.ok(detectPatterns[0][1].split("|").includes("apps/sdp-web/"));
+  const deployWorkflow = readWorkflow("deploy.yml");
+  assert.match(
+    jobBlock(deployWorkflow, "changes"),
+    /\n {14}if \[ "\$EVENT_NAME" = push \] \|\| match "\^\([^"]+\)"; then\n/
+  );
+  assert.ok(!deployWorkflow.includes("chore(main): release"));
 });

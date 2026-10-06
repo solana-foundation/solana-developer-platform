@@ -39,7 +39,6 @@ jobs:
           MODE: ${{ inputs.services || 'auto' }}
           EVENT_NAME: ${{ github.event_name }}
           CONTINUOUS_PROD_DEPLOY: ${{ vars.CONTINUOUS_PROD_DEPLOY }}
-          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
           BEFORE="${{ github.event.before }}"
@@ -55,7 +54,9 @@ jobs:
             none) ;;
             api) api=true ;;
             auto|*)
-              if match "^(apps/sdp-api/|apps/sdp-web/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod|-stage)?)?\.yml|\.github/workflows/sdp-stage-smoke\.yml)"; then
+              # Every surviving push deploys: a superseded pending run would otherwise
+              # strand its changes behind a later merge that touches none of these paths.
+              if [ "$EVENT_NAME" = push ] || match "^(apps/sdp-api/|apps/sdp-web/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod|-stage)?)?\.yml|\.github/workflows/sdp-stage-smoke\.yml)"; then
                 api=true
               fi
               ;;
@@ -64,8 +65,7 @@ jobs:
           echo "Services to deploy: api=$api (api carries the worker, cron, and migrate jobs — one image)" >> "$GITHUB_STEP_SUMMARY"
 
           prod=false
-          if [ "$api" = true ] && [ "$EVENT_NAME" = push ] && [ "$CONTINUOUS_PROD_DEPLOY" = true ] \
-            && [[ "$HEAD_COMMIT_MESSAGE" != "chore(main): release"* ]]; then
+          if [ "$api" = true ] && [ "$EVENT_NAME" = push ] && [ "$CONTINUOUS_PROD_DEPLOY" = true ]; then
             prod=true
           fi
           echo "prod=$prod" >> "$GITHUB_OUTPUT"
@@ -254,8 +254,7 @@ jobs:
       needs.changes.outputs.prod == 'true' &&
       needs.schema.outputs.pending == 'false' &&
       github.event_name == 'push' &&
-      vars.CONTINUOUS_PROD_DEPLOY == 'true' &&
-      !startsWith(github.event.head_commit.message, 'chore(main): release')
+      vars.CONTINUOUS_PROD_DEPLOY == 'true'
     permissions:
       actions: read
       contents: read
