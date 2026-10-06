@@ -64,6 +64,7 @@ const MODULE_METADATA = [
       "@sdp/redaction",
       "@sdp/solana",
       "@sdp/types",
+      "@sdp/ui",
     ],
   },
   {
@@ -261,6 +262,13 @@ const MODULE_METADATA = [
     directory: "packages/sdp-types",
     purpose: "Shared runtime types, constants, and product contracts.",
     allowedDependencies: [],
+  },
+  {
+    name: "@sdp/ui",
+    directory: "packages/sdp-ui",
+    purpose: "Dashboard UI primitives built on @solana/design-system and @sdp/design-tokens.",
+    // @sdp/solana is reached only through its `amount` subpath (decimal scale for amount inputs).
+    allowedDependencies: ["@sdp/design-tokens", "@sdp/solana"],
   },
 ];
 

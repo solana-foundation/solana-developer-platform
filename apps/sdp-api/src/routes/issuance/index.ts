@@ -104,7 +104,7 @@ issuance.get("/tokens/:tokenId/metadata.json", (c) =>
   runWithSystemDatabaseIdentity("http:token-metadata", () => serveTokenMetadata(c))
 );
 
-issuance.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+issuance.use("*", unifiedAuthMiddleware());
 issuance.use("*", projectContextMiddleware());
 
 // Templates (read-only, any authenticated user can view)

@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../../..");
 
@@ -726,6 +726,50 @@ describe("value-moving authorization and replay conformance", () => {
         SIGNING_PROVIDER: "local",
       } as never)
     ).not.toThrow();
+  });
+
+  it("never loads or creates a stored local signing key in a managed deployment", async () => {
+    const { createAdapterFromEncryptedConfig } = await import(
+      "@/services/domain/signing/provider-adapter-factory"
+    );
+    const localRecord = {
+      id: "cfg_local",
+      organizationId: "org_1",
+      projectId: null,
+      provider: "local",
+      config: JSON.stringify({ provider: "local", encryptedPrivateKey: "ciphertext" }),
+      encryptionVersion: "v2",
+      defaultWalletId: null,
+      status: "active",
+      createdAt: "2026-10-02T00:00:00.000Z",
+      updatedAt: "2026-10-02T00:00:00.000Z",
+    } as const;
+    const decrypt = vi.fn().mockRejectedValue(new Error("decrypt reached"));
+    // SAFETY: the guard reads only SDP_DEPLOYMENT_MODE, and decrypt is the one
+    // cipher method these paths can reach; the fakes implement exactly that.
+    const managedEnv = {
+      SDP_DEPLOYMENT_MODE: "managed",
+      DATABASE_URL: "postgres://unused",
+    } as never;
+    const selfHostedEnv = { SDP_DEPLOYMENT_MODE: "self_hosted" } as never;
+    const cipher = { decrypt } as never;
+
+    await expect(
+      createAdapterFromEncryptedConfig(managedEnv, "org_1", localRecord, cipher)
+    ).rejects.toThrow(/Local signing/);
+    expect(decrypt).not.toHaveBeenCalled();
+
+    await expect(
+      createAdapterFromEncryptedConfig(selfHostedEnv, "org_1", localRecord, cipher)
+    ).rejects.toThrow("decrypt reached");
+
+    const { SigningService } = await import("@/services/domain/signing.service");
+    const configStore = { findActiveByProvider: vi.fn() };
+    // SAFETY: initializeLocalSigning must refuse before its first store call;
+    // the fake only records whether that call happened.
+    const service = new SigningService(configStore as never, managedEnv);
+    await expect(service.initializeLocalSigning("org_1")).rejects.toThrow(/Local signing/);
+    expect(configStore.findActiveByProvider).not.toHaveBeenCalled();
   });
 
   it("keeps the local custody provider unavailable in a managed deployment", async () => {

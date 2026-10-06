@@ -126,7 +126,8 @@
       "devnetStrategiesUnavailable": "No se pudieron cargar las estrategias de Devnet. Las estrategias de Mainnet siguen disponibles.",
       "mainnetStrategiesLoading": "Cargando estrategias de Mainnet. Las estrategias de Devnet siguen disponibles.",
       "mainnetStrategiesUnavailable": "No se pudieron cargar las estrategias de Mainnet. Las estrategias de Devnet siguen disponibles.",
-      "sandboxUnavailable": "Solo producción"
+      "sandboxUnavailable": "Solo producción",
+      "redeemIntermediate": "Canjear wYLDS"
     },
     "earnProgram": {
       "eyebrow": "Yield integrado",
@@ -909,7 +910,8 @@
       "vaultFailedBody": "La transacción de depósito falló en Solana. No se acreditó saldo de posición por este movimiento. Revisa la transacción antes de intentarlo de nuevo.",
       "vaultFailedStatus": "Falló",
       "vaultFailedNote": "El Dashboard no proyectó un saldo por este movimiento fallido.",
-      "vaultFloorUnavailable": "SDP no pudo confirmar los términos exactos con los que se envió el intento anterior de este depósito, así que no se envió nada. Revisa tu posición y vuelve a intentarlo en un momento."
+      "vaultFloorUnavailable": "SDP no pudo confirmar los términos exactos con los que se envió el intento anterior de este depósito, así que no se envió nada. Revisa tu posición y vuelve a intentarlo en un momento.",
+      "vaultBackingFigureHomeEquity": "Pool de home equity de Figure"
     },
     "vaultWithdraw": {
       "title": "Retirar de {position}",
@@ -1049,7 +1051,14 @@
       "activeSummary": "{amount} esperados a la par · esperando liquidación por operator sin tiempo de finalización garantizado",
       "activeSummaryCreating": "{amount} esperados a la par · confirmando la solicitud de canje en Solana",
       "activeSummaryCancelling": "{amount} solicitados · cancelando la solicitud al operator; el wYLDS permanece en tu Wallet",
-      "activeSummaryChecking": "{amount} solicitados · la solicitud se cerró; verificando si se pagó USDC o se conservó wYLDS"
+      "activeSummaryChecking": "{amount} solicitados · la solicitud se cerró; verificando si se pagó USDC o se conservó wYLDS",
+      "titleIntermediate": "Canjear wYLDS de {position}",
+      "detailsBodyIntermediate": "Ingresa un monto del wYLDS de esta posición para canjearlo a la par a través del operador de Hastra.",
+      "intermediateUnit": "wYLDS",
+      "operatorNoticeIntermediate": "La solicitud delega el wYLDS a la autoridad de canje de Hastra sin transferirlo ni hacer burn de él. La USDC solo llega cuando Hastra completa la liquidación. Cancelar revoca la solicitud y deja el wYLDS en tu Wallet.",
+      "reviewBodyIntermediate": "Revisa la liquidación a la par esperada antes de que algo se mueva.",
+      "reviewNoticeIntermediate": "Al enviar se crea una solicitud de canje por operator; no entrega USDC en la misma transacción. Puedes cancelarla mientras siga pendiente, y el wYLDS permanece entonces en tu Wallet.",
+      "positionIntermediate": "Incluye {amount} wYLDS"
     },
     "queuedWithdraw": {
       "title": "Solicitar retiro de {position}",

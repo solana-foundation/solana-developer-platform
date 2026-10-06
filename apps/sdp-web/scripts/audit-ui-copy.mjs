@@ -5,6 +5,8 @@ import ts from "typescript";
 const scriptDirectory = import.meta.dirname;
 const webDirectory = path.resolve(scriptDirectory, "..");
 const sourceDirectory = path.join(webDirectory, "src");
+// The @sdp/ui primitives render dashboard copy too, so their source is held to the same audit.
+const uiPackageSourceDirectory = path.resolve(webDirectory, "../../packages/sdp-ui/src");
 const baselinePath = path.join(webDirectory, "src/i18n/ui-copy-baseline.json");
 const exemptionsPath = path.join(webDirectory, "src/i18n/ui-copy-exemptions.json");
 const userFacingAttributeNames = new Set([
@@ -241,7 +243,10 @@ function collectCandidates(filePath, source) {
   return candidates;
 }
 
-const files = await collectSourceFiles(sourceDirectory);
+const files = [
+  ...(await collectSourceFiles(sourceDirectory)),
+  ...(await collectSourceFiles(uiPackageSourceDirectory)),
+];
 const candidates = new Set();
 for (const filePath of files) {
   for (const candidate of collectCandidates(filePath, await readFile(filePath, "utf8"))) {
@@ -249,22 +254,51 @@ for (const filePath of files) {
   }
 }
 
+function entryCandidate(entry) {
+  return typeof entry === "string" ? entry : entry.candidate;
+}
+
+function isReasonedExemption(entry) {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    typeof entry.candidate === "string" &&
+    typeof entry.reason === "string" &&
+    entry.reason.trim() !== ""
+  );
+}
+
+/** Matches a candidate by its exact id, or by file and text alone when its line has moved. */
+function candidateMatcher(approvedCandidates) {
+  const approved = new Set(approvedCandidates);
+  const approvedStable = new Set([...approved].map(stableCandidateId));
+  return (candidate) => approved.has(candidate) || approvedStable.has(stableCandidateId(candidate));
+}
+
 const current = [...candidates].sort();
+const exemptionEntries = JSON.parse(await readFile(exemptionsPath, "utf8"));
+// A reasoned exemption approves its copy in both modes, so the baseline only ever tracks legacy
+// copy still waiting for the catalog: regenerating it leaves exempted copy out.
+const isExempted = candidateMatcher(
+  exemptionEntries.filter(isReasonedExemption).map(entryCandidate)
+);
+
 if (process.argv.includes("--write")) {
-  await writeFile(baselinePath, `${JSON.stringify(current, null, 2)}\n`);
-  console.log(`Recorded ${current.length} existing UI copy candidates.`);
+  const legacy = current.filter((candidate) => !isExempted(candidate));
+  await writeFile(baselinePath, `${JSON.stringify(legacy, null, 2)}\n`);
+  console.log(`Recorded ${legacy.length} existing UI copy candidates.`);
   process.exit(0);
 }
 
 const strict = process.argv.includes("--strict");
-const approvedEntries = JSON.parse(await readFile(strict ? exemptionsPath : baselinePath, "utf8"));
-const approved = new Set(
-  approvedEntries.map((entry) => (typeof entry === "string" ? entry : entry.candidate))
-);
-const approvedStable = new Set([...approved].map(stableCandidateId));
-const unapprovedCandidates = current.filter(
-  (candidate) => !approved.has(candidate) && !approvedStable.has(stableCandidateId(candidate))
-);
+// Strict approves only the exemptions file; the normal check also accepts the legacy baseline.
+const isApproved = strict
+  ? candidateMatcher(exemptionEntries.map(entryCandidate))
+  : candidateMatcher([
+      ...JSON.parse(await readFile(baselinePath, "utf8")).map(entryCandidate),
+      ...exemptionEntries.filter(isReasonedExemption).map(entryCandidate),
+    ]);
+const unapprovedCandidates = current.filter((candidate) => !isApproved(candidate));
 if (unapprovedCandidates.length > 0) {
   console.error(
     strict

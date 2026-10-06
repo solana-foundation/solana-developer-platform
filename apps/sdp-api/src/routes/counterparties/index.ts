@@ -24,7 +24,7 @@ import {
 
 const counterparties = new Hono<{ Bindings: Env }>();
 
-counterparties.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+counterparties.use("*", unifiedAuthMiddleware());
 counterparties.use("*", projectContextMiddleware());
 
 counterparties.get(

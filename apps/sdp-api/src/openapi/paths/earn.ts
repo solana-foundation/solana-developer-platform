@@ -55,8 +55,8 @@ interface EarnSecurityMatrix {
 }
 
 const earnConfigurationSecurity: EarnSecurityMatrix = {
-  optional: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }, { sessionCookie: [] }, {}],
-  required: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }, { sessionCookie: [] }],
+  optional: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }, {}],
+  required: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
 };
 
 const earnPublicSecurity: EarnSecurityMatrix = {

@@ -1,31 +1,31 @@
-/**
- * Who an invitation can be redeemed by: the token travels by email and is
- * forwardable, so acceptance must be bound to the invited identity.
- */
-
+import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import { SessionService } from "@/services/session.service";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
+import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-/** The organization the caller is signed in to. */
 const HOME_ORG_ID = TEST_CACHED_API_KEY.organizationId;
-/** The organization the invitations under test belong to. */
-const INVITING_ORG_ID = "org_inviting_acceptance";
+
+const INVITING_ORG_ID = "org_test_inviting_acceptance";
+
 const HOME_PROJECT_ID = "prj_acceptance_home";
 
-const CALLER_USER_ID = "usr_acceptance_caller";
+const CALLER_USER_ID = "usr_test_acceptance_caller";
+
 const CALLER_EMAIL = "caller@example.com";
-const INVITER_USER_ID = "usr_acceptance_inviter";
+
+const INVITER_USER_ID = "usr_test_acceptance_inviter";
+
 const OTHER_EMAIL = "someone-else@example.com";
 
 const INVITATION_TOKEN = "acceptance-token";
+
 const INVITATION_ID = "inv_acceptance";
 
 function inSevenDays(): string {
@@ -43,18 +43,10 @@ async function seedOrganization(id: string, slug: string): Promise<void> {
     .run();
 }
 
-/** A user whose session authenticates and scopes to a home-org project. */
-async function seedCaller(email = CALLER_EMAIL): Promise<string> {
+async function seedCaller(email: string): Promise<string> {
   await getDb(env)
     .prepare("INSERT INTO users (id, email, status) VALUES (?, ?, 'active'), (?, ?, 'active')")
     .bind(CALLER_USER_ID, email, INVITER_USER_ID, "inviter@example.com")
-    .run();
-  await getDb(env)
-    .prepare(
-      `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES ('mem_acceptance_home', ?, ?, 'admin', 'active')`
-    )
-    .bind(HOME_ORG_ID, CALLER_USER_ID)
     .run();
   await seedDefaultProjects(getDb(env), {
     organizationId: HOME_ORG_ID,
@@ -62,51 +54,54 @@ async function seedCaller(email = CALLER_EMAIL): Promise<string> {
     members: [CALLER_USER_ID],
     ids: { sandbox: HOME_PROJECT_ID, production: `${HOME_PROJECT_ID}_production` },
   });
-
-  const session = await new SessionService(getDb(env)).createSession(
-    CALLER_USER_ID,
-    HOME_ORG_ID,
-    {}
-  );
-  return session.id;
+  const { token } = await authenticateTestClerkUser(env, getDb(env), {
+    userId: CALLER_USER_ID,
+    email,
+    clerkUserId: "clerk_user_acceptance_caller",
+    organizationId: HOME_ORG_ID,
+    clerkOrgId: "clerk_org_acceptance_home",
+    orgSlug: "acceptance-home-org",
+    role: "admin",
+  });
+  return token;
 }
 
-async function seedInvitation(
-  options: {
-    email?: string;
-    organizationId?: string;
-    role?: string;
-    status?: string;
-    expiresAt?: string;
-    id?: string;
-    token?: string;
-  } = {}
-): Promise<void> {
+function invitationFixture() {
+  return {
+    id: INVITATION_ID,
+    organizationId: INVITING_ORG_ID,
+    email: CALLER_EMAIL,
+    role: "member",
+    token: INVITATION_TOKEN,
+    expiresAt: inSevenDays(),
+    status: "pending",
+  };
+}
+
+async function seedInvitation(options: ReturnType<typeof invitationFixture>): Promise<void> {
   await getDb(env)
-    .prepare(
-      `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    )
+    .prepare(`INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(
-      options.id ?? INVITATION_ID,
-      options.organizationId ?? INVITING_ORG_ID,
-      options.email ?? CALLER_EMAIL,
-      options.role ?? "member",
+      options.id,
+      options.organizationId,
+      options.email,
+      options.role,
       INVITER_USER_ID,
-      await hashString(options.token ?? INVITATION_TOKEN),
-      options.expiresAt ?? inSevenDays(),
-      options.status ?? "pending"
+      await hashString(options.token),
+      options.expiresAt,
+      options.status
     )
     .run();
 }
 
-function accept(sessionId: string, token = INVITATION_TOKEN, name?: string) {
+function accept(clerkToken: string, token: string, name?: string) {
   return app.request(
     "/v1/members/accept",
     {
       method: "POST",
       headers: {
-        Cookie: `sdp_session=${sessionId}`,
+        Authorization: `Bearer ${clerkToken}`,
         "x-project-id": HOME_PROJECT_ID,
         "Content-Type": "application/json",
       },
@@ -122,18 +117,23 @@ async function membershipsIn(organizationId: string, userId: string) {
       "SELECT id, role, status FROM organization_members WHERE organization_id = ? AND user_id = ?"
     )
     .bind(organizationId, userId)
-    .all<{ id: string; role: string; status: string }>();
-
+    .all<{
+      id: string;
+      role: string;
+      status: string;
+    }>();
   return rows.results;
 }
 
-async function invitationStatus(id = INVITATION_ID): Promise<string | undefined> {
+async function invitationStatus(id: string): Promise<string> {
   const row = await getDb(env)
     .prepare("SELECT status FROM invitations WHERE id = ?")
     .bind(id)
-    .first<{ status: string }>();
-
-  return row?.status;
+    .first<{
+      status: string;
+    }>();
+  assert(row);
+  return row.status;
 }
 
 describe("POST /v1/members/accept", () => {
@@ -142,39 +142,38 @@ describe("POST /v1/members/accept", () => {
     await seedOrganization(HOME_ORG_ID, "acceptance-home-org");
     await seedOrganization(INVITING_ORG_ID, "acceptance-inviting-org");
   });
-
   afterEach(async () => {
     await clearKVStores(env);
   });
-
   it("refuses a caller whose address is not the one invited", async () => {
-    const sessionId = await seedCaller();
-    await seedInvitation({ email: OTHER_EMAIL });
-
-    const res = await accept(sessionId);
-
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation({ ...invitationFixture(), email: OTHER_EMAIL });
+    const res = await accept(clerkToken, INVITATION_TOKEN);
     expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { code: string } };
+    const body = (await res.json()) as {
+      error: {
+        code: string;
+      };
+    };
     expect(body.error.code).toBe("FORBIDDEN");
-
-    // The invitation is still the invitee's to spend, and nobody was enrolled.
-    expect(await invitationStatus()).toBe("pending");
+    expect(await invitationStatus(INVITATION_ID)).toBe("pending");
     expect(await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID)).toHaveLength(0);
     const anyMembers = await getDb(env)
       .prepare("SELECT COUNT(*) AS total FROM organization_members WHERE organization_id = ?")
       .bind(INVITING_ORG_ID)
-      .first<{ total: number }>();
-    expect(Number(anyMembers?.total ?? 0)).toBe(0);
+      .first<{
+        total: number;
+      }>();
+    assert(anyMembers);
+    expect(Number(anyMembers.total)).toBe(0);
   });
-
   it("refuses an API key, which has no identity to be the invitee", async () => {
-    await seedCaller();
-    await seedInvitation({ email: OTHER_EMAIL });
+    await seedCaller(CALLER_EMAIL);
+    await seedInvitation({ ...invitationFixture(), email: OTHER_EMAIL });
     await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
       ...TEST_CACHED_API_KEY,
       permissions: ["*"],
     });
-
     const res = await app.request(
       "/v1/members/accept",
       {
@@ -187,132 +186,104 @@ describe("POST /v1/members/accept", () => {
       },
       env
     );
-
     expect(res.status).toBe(403);
-    expect(await invitationStatus()).toBe("pending");
+    expect(await invitationStatus(INVITATION_ID)).toBe("pending");
   });
-
   it("grants the membership in the inviting organization, not the caller's own", async () => {
-    const sessionId = await seedCaller();
-    await seedInvitation({ role: "admin" });
-
-    const res = await accept(sessionId);
-
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation({ ...invitationFixture(), role: "admin" });
+    const res = await accept(clerkToken, INVITATION_TOKEN);
     expect(res.status).toBe(200);
-    expect(await invitationStatus()).toBe("accepted");
-
+    expect(await invitationStatus(INVITATION_ID)).toBe("accepted");
     const granted = await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID);
     expect(granted).toHaveLength(1);
-    expect(granted[0]?.role).toBe("admin");
-    expect(granted[0]?.status).toBe("active");
-
-    // The caller's signed-in org is untouched.
+    expect(granted[0].role).toBe("admin");
+    expect(granted[0].status).toBe("active");
     const home = await membershipsIn(HOME_ORG_ID, CALLER_USER_ID);
     expect(home).toHaveLength(1);
-    expect(home[0]?.role).toBe("admin");
+    expect(home[0].role).toBe("admin");
   });
-
   it("matches the invited address regardless of case", async () => {
-    const sessionId = await seedCaller();
-    await seedInvitation({ email: CALLER_EMAIL.toUpperCase() });
-
-    expect((await accept(sessionId)).status).toBe(200);
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation({ ...invitationFixture(), email: CALLER_EMAIL.toUpperCase() });
+    expect((await accept(clerkToken, INVITATION_TOKEN)).status).toBe(200);
     expect(await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID)).toHaveLength(1);
   });
-
   it("cannot be replayed once spent", async () => {
-    const sessionId = await seedCaller();
-    await seedInvitation();
-
-    expect((await accept(sessionId)).status).toBe(200);
-
-    const replay = await accept(sessionId);
-
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation(invitationFixture());
+    expect((await accept(clerkToken, INVITATION_TOKEN)).status).toBe(200);
+    const replay = await accept(clerkToken, INVITATION_TOKEN);
     expect(replay.status).toBe(400);
-    const body = (await replay.json()) as { error: { code: string } };
+    const body = (await replay.json()) as {
+      error: {
+        code: string;
+      };
+    };
     expect(body.error.code).toBe("INVALID_INVITATION");
     expect(await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID)).toHaveLength(1);
   });
-
   it("survives two simultaneous acceptances of the same token as one membership", async () => {
-    const sessionId = await seedCaller();
-    await seedInvitation();
-
-    const [first, second] = await Promise.all([accept(sessionId), accept(sessionId)]);
-
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation(invitationFixture());
+    const [first, second] = await Promise.all([
+      accept(clerkToken, INVITATION_TOKEN),
+      accept(clerkToken, INVITATION_TOKEN),
+    ]);
     expect([first.status, second.status].sort()).toEqual([200, 400]);
     expect(await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID)).toHaveLength(1);
   });
-
   it("refuses an expired invitation", async () => {
-    const sessionId = await seedCaller();
-    await seedInvitation({ expiresAt: sevenDaysAgo() });
-
-    const res = await accept(sessionId);
-
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation({ ...invitationFixture(), expiresAt: sevenDaysAgo() });
+    const res = await accept(clerkToken, INVITATION_TOKEN);
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string } };
+    const body = (await res.json()) as {
+      error: {
+        code: string;
+      };
+    };
     expect(body.error.code).toBe("EXPIRED_INVITATION");
-    expect(await invitationStatus()).toBe("pending");
+    expect(await invitationStatus(INVITATION_ID)).toBe("pending");
     expect(await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID)).toHaveLength(0);
   });
-
   it("refuses a revoked invitation", async () => {
-    const sessionId = await seedCaller();
-    await seedInvitation({ status: "revoked" });
-
-    const res = await accept(sessionId);
-
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation({ ...invitationFixture(), status: "revoked" });
+    const res = await accept(clerkToken, INVITATION_TOKEN);
     expect(res.status).toBe(400);
     expect(await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID)).toHaveLength(0);
   });
-
   it("refuses an unknown token", async () => {
-    const sessionId = await seedCaller();
-    await seedInvitation();
-
-    const res = await accept(sessionId, "not-the-token");
-
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation(invitationFixture());
+    const res = await accept(clerkToken, "not-the-token");
     expect(res.status).toBe(400);
-    expect(await invitationStatus()).toBe("pending");
+    expect(await invitationStatus(INVITATION_ID)).toBe("pending");
   });
-
   it("reinstates a removed membership from an invitation issued after the removal", async () => {
-    // The legitimate path back in: a fresh re-invite reuses the existing row.
-    const sessionId = await seedCaller();
+    const clerkToken = await seedCaller(CALLER_EMAIL);
     await getDb(env)
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES ('mem_acceptance_removed', ?, ?, 'member', 'removed')`
-      )
+      .prepare(`INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('mem_acceptance_removed', ?, ?, 'member', 'removed')`)
       .bind(INVITING_ORG_ID, CALLER_USER_ID)
       .run();
-    await seedInvitation({ role: "admin" });
-
-    expect((await accept(sessionId)).status).toBe(200);
-
+    await seedInvitation({ ...invitationFixture(), role: "admin" });
+    expect((await accept(clerkToken, INVITATION_TOKEN)).status).toBe(200);
     const memberships = await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID);
     expect(memberships).toHaveLength(1);
-    expect(memberships[0]?.id).toBe("mem_acceptance_removed");
-    expect(memberships[0]?.status).toBe("active");
-    expect(memberships[0]?.role).toBe("admin");
+    expect(memberships[0].id).toBe("mem_acceptance_removed");
+    expect(memberships[0].status).toBe("active");
+    expect(memberships[0].role).toBe("admin");
   });
-
   it("does not let a removed member self-reinstate with an invitation that predates the removal", async () => {
-    // Removal must take outstanding invitations down with it, or an unspent
-    // token flips the removed row back to active — at the invited role.
-    const sessionId = await seedCaller();
+    const clerkToken = await seedCaller(CALLER_EMAIL);
     await getDb(env)
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES ('mem_acceptance_stale', ?, ?, 'member', 'active')`
-      )
+      .prepare(`INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('mem_acceptance_stale', ?, ?, 'member', 'active')`)
       .bind(INVITING_ORG_ID, CALLER_USER_ID)
       .run();
-    // Unspent, at a higher role than they held — the escalation the attack buys.
-    await seedInvitation({ role: "admin" });
-
-    // An admin of the inviting organization removes them.
+    await seedInvitation({ ...invitationFixture(), role: "admin" });
     await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
       ...TEST_CACHED_API_KEY,
       organizationId: INVITING_ORG_ID,
@@ -324,83 +295,69 @@ describe("POST /v1/members/accept", () => {
       env
     );
     expect(removal.status).toBe(204);
-
-    // The removal revoked the outstanding invitation…
-    expect(await invitationStatus()).toBe("revoked");
-
-    // …so the old token cannot resurrect the membership.
-    const res = await accept(sessionId);
+    expect(await invitationStatus(INVITATION_ID)).toBe("revoked");
+    const res = await accept(clerkToken, INVITATION_TOKEN);
     expect(res.status).toBe(400);
-
     const memberships = await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID);
     expect(memberships).toHaveLength(1);
-    expect(memberships[0]?.status).toBe("removed");
-    expect(memberships[0]?.role).toBe("member");
+    expect(memberships[0].status).toBe("removed");
+    expect(memberships[0].role).toBe("member");
   });
-
   it("applies the invited role when a membership already exists at a lower one", async () => {
-    // A concurrent Clerk sign-in can win the membership insert at its own role;
-    // the invitation is the explicit grant being consumed and must still deliver.
-    const sessionId = await seedCaller();
+    const clerkToken = await seedCaller(CALLER_EMAIL);
     await getDb(env)
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES ('mem_acceptance_lower', ?, ?, 'member', 'active')`
-      )
+      .prepare(`INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('mem_acceptance_lower', ?, ?, 'member', 'active')`)
       .bind(INVITING_ORG_ID, CALLER_USER_ID)
       .run();
-    await seedInvitation({ role: "admin" });
-
-    expect((await accept(sessionId)).status).toBe(200);
-    expect(await invitationStatus()).toBe("accepted");
-
+    await seedInvitation({ ...invitationFixture(), role: "admin" });
+    expect((await accept(clerkToken, INVITATION_TOKEN)).status).toBe(200);
+    expect(await invitationStatus(INVITATION_ID)).toBe("accepted");
     const memberships = await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID);
     expect(memberships).toHaveLength(1);
-    expect(memberships[0]?.role).toBe("admin");
+    expect(memberships[0].role).toBe("admin");
   });
-
   it("never demotes an existing admin over a member-role invitation", async () => {
-    // The stray token case: silently reducing an admin — possibly the last
-    // one — is not what accepting an invitation means.
-    const sessionId = await seedCaller();
-    await seedInvitation({ organizationId: HOME_ORG_ID, role: "member" });
-
-    expect((await accept(sessionId)).status).toBe(200);
-    expect(await invitationStatus()).toBe("accepted");
-
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation({ ...invitationFixture(), organizationId: HOME_ORG_ID, role: "member" });
+    expect((await accept(clerkToken, INVITATION_TOKEN)).status).toBe(200);
+    expect(await invitationStatus(INVITATION_ID)).toBe("accepted");
     const memberships = await membershipsIn(HOME_ORG_ID, CALLER_USER_ID);
     expect(memberships).toHaveLength(1);
-    expect(memberships[0]?.role).toBe("admin");
+    expect(memberships[0].role).toBe("admin");
   });
-
   it("spends the invitation without duplicating an existing membership", async () => {
-    const sessionId = await seedCaller();
-    await seedInvitation({ organizationId: HOME_ORG_ID });
-
-    expect((await accept(sessionId)).status).toBe(200);
-    expect(await invitationStatus()).toBe("accepted");
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation({ ...invitationFixture(), organizationId: HOME_ORG_ID });
+    expect((await accept(clerkToken, INVITATION_TOKEN)).status).toBe(200);
+    expect(await invitationStatus(INVITATION_ID)).toBe("accepted");
     expect(await membershipsIn(HOME_ORG_ID, CALLER_USER_ID)).toHaveLength(1);
   });
-
   it("fills in a missing name without overwriting one already set", async () => {
-    const sessionId = await seedCaller();
-    await seedInvitation();
-
-    expect((await accept(sessionId, INVITATION_TOKEN, "Invited Person")).status).toBe(200);
-
+    const clerkToken = await seedCaller(CALLER_EMAIL);
+    await seedInvitation(invitationFixture());
+    expect((await accept(clerkToken, INVITATION_TOKEN, "Invited Person")).status).toBe(200);
     const named = await getDb(env)
       .prepare("SELECT name FROM users WHERE id = ?")
       .bind(CALLER_USER_ID)
-      .first<{ name: string | null }>();
-    expect(named?.name).toBe("Invited Person");
-
-    await seedInvitation({ id: "inv_acceptance_second", token: "second-token" });
-    expect((await accept(sessionId, "second-token", "Renamed")).status).toBe(200);
-
+      .first<{
+        name: string | null;
+      }>();
+    assert(named);
+    expect(named.name).toBe("Invited Person");
+    await seedInvitation({
+      ...invitationFixture(),
+      id: "inv_acceptance_second",
+      token: "second-token",
+    });
+    expect((await accept(clerkToken, "second-token", "Renamed")).status).toBe(200);
     const stillNamed = await getDb(env)
       .prepare("SELECT name FROM users WHERE id = ?")
       .bind(CALLER_USER_ID)
-      .first<{ name: string | null }>();
-    expect(stillNamed?.name).toBe("Invited Person");
+      .first<{
+        name: string | null;
+      }>();
+    assert(stillNamed);
+    expect(stillNamed.name).toBe("Invited Person");
   });
 });
