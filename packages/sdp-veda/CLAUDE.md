@@ -239,7 +239,9 @@ inside every public method and follows every `getMultipleAccounts` with a
 `getBlockTime`, so a client per read cost 22 requests per holding.
 `readVedaPosition` therefore keeps one SDK client per (cluster, endpoint,
 deployment), and the vault's share mint, share decimals and fronted asset mint
-per (cluster, endpoint, vault), for `VEDA_READ_CACHE_TTL_MS`. Failures are never
+per (cluster, endpoint, vault), for `VEDA_READ_CACHE_TTL_MS`. Each store first
+drops expired entries and caps the caches at 32 clients and 256 facts, so new
+endpoints and vaults never grow them unbounded. Failures are never
 cached, and a client whose program validation rejects is evicted at once: the
 SDK would otherwise keep that rejection for the client's lifetime. An asset
 removed from a vault is therefore noticed up to one TTL late on reads only,
