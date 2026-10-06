@@ -5,7 +5,6 @@ import type { OpenAPIObject } from "openapi3-ts/oas30";
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
 import { registerAssetProfilePaths } from "./paths/asset-profiles";
-import { registerAuthPaths } from "./paths/auth";
 import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
 import { registerCustodyPaths } from "./paths/custody";
@@ -31,7 +30,6 @@ const OPENAPI_TAG = {
   ORGANIZATIONS: { name: "Organizations", description: "Organization provisioning and settings." },
   API_KEYS: { name: "API Keys", description: "API key management endpoints." },
   MEMBERS: { name: "Members", description: "Organization membership invitations and roles." },
-  AUTH: { name: "Auth", description: "Session authentication and management." },
   WALLETS: {
     name: "Wallets",
     description: "Wallet signing provider configuration and wallet management.",
@@ -121,7 +119,6 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.ORGANIZATIONS,
   OPENAPI_TAG.API_KEYS,
   OPENAPI_TAG.MEMBERS,
-  OPENAPI_TAG.AUTH,
   OPENAPI_TAG.WALLETS,
   OPENAPI_TAG.PROJECTS,
   OPENAPI_TAG.RPC,
@@ -156,13 +153,6 @@ function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
     description: "Clerk JWT bearer token for dashboard authentication.",
   });
 
-  registry.registerComponent("securitySchemes", "sessionCookie", {
-    type: "apiKey",
-    in: "cookie",
-    name: "sdp_session",
-    description: "Session cookie for dashboard authentication.",
-  });
-
   registry.registerComponent("securitySchemes", "adminKey", {
     type: "apiKey",
     in: "header",
@@ -193,7 +183,6 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerOrganizationPaths(registry);
   registerApiKeyPaths(registry);
   registerMemberPaths(registry);
-  registerAuthPaths(registry);
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
   registerDvpPaths(registry);

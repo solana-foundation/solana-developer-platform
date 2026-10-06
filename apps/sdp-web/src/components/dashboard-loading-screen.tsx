@@ -9,6 +9,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
 import { resolveDashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
+import { isNewDesignPage } from "@/lib/design-modules";
 
 // Preparation, scope reconciliation, and client auth all paint the same destination.
 export function DashboardLoadingScreen({
@@ -25,7 +26,8 @@ export function DashboardLoadingScreen({
   const t = useTranslations();
   const path = pathname.split(/[?#]/)[0];
   const route = resolveDashboardLoadingRoute(path) ?? "home";
-  const PageLoading = resolvePageLoadingComponent(route);
+  const newDesignPage = isNewDesignPage(path, flags);
+  const PageLoading = resolvePageLoadingComponent(route, newDesignPage);
   const config = getDashboardPageConfig(
     path,
     t,
@@ -33,7 +35,9 @@ export function DashboardLoadingScreen({
     flags?.privateChannels ?? false,
     flags?.custody,
     flags?.payments,
-    flags?.policies
+    flags?.policies,
+    flags?.newDesign ?? false,
+    flags?.newDesignModules
   );
 
   return (
@@ -41,6 +45,7 @@ export function DashboardLoadingScreen({
       {...props}
       contentWidthClass={config.contentWidthClass ?? "max-w-5xl"}
       hideTitle={config.hideTitle}
+      newDesign={flags?.newDesign ?? false}
     >
       <PageLoading assetProfilesEnabled={flags?.assetProfiles} />
     </FullscreenLoadingIndicator>

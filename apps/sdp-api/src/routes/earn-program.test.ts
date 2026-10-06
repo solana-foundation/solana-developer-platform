@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn";
 import { hashString } from "@sdp/payments/hash";
 import type {
@@ -7,20 +8,9 @@ import type {
 } from "@sdp/types";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { required } from "@/test/helpers/required";
 
-/**
- * No shipped provider is portfolio-capable today and the one that was is
- * UN-SURFACED (`EARN_PROVIDER_SURFACING` in @sdp/types), so `POST /programs`
- * answers 403 for it in the shipped configuration. That is the product's
- * business state, not a property of the create machinery this file tests —
- * idempotency, replay, gate order, environment isolation and the yield-source
- * gate all have to keep working for whichever provider is offered next.
- *
- * So the suite installs a portfolio-capable test double under `upshift` — a
- * registered-but-never-implemented stub id — and forces surfacing ON; the gate
- * gets its own explicit test, which flips this flag off. Deliberately partial
- * mocks: everything else in `@sdp/types` and `@sdp/earn` is the real module.
- */
 const surfacing = vi.hoisted(() => ({ forceOn: true }));
 
 vi.mock("@sdp/types", async (importOriginal) => {
@@ -32,26 +22,12 @@ vi.mock("@sdp/types", async (importOriginal) => {
   };
 });
 
-/**
- * Portfolio-capable test double installed under `upshift`, a registered stub id
- * the API composition root never overrides. The capability guard
- * (`supportsPortfolioWallets`) is all-or-nothing on method presence, so the
- * double implements every portfolio method; tests spy per case. Route dispatch
- * resolves through this record via `@/services/earn-provider-registry`.
- *
- * Typed as the real contract (`EarnPortfolioWalletProvider`) so per-case spies
- * get the provider signatures — `mockResolvedValue`/`mock.calls` see the real
- * result and input types. The literal itself is unchecked (`unknown` cast):
- * the no-op bases below are never awaited, every interesting call is mocked.
- */
 const portfolioClient = vi.hoisted(
   () =>
     ({
       provider: "upshift",
       declaredSupport: { sourceKinds: ["defi", "rwa"], depositTokens: ["USDC"] },
-      // Plain no-ops, NOT vi.fn()s: tests spy per case with `vi.spyOn` and
-      // `restoreAllMocks` puts the no-op back, so no call history can leak
-      // between tests through the shared double.
+
       listStrategies: async () => [],
       createPortfolioWallet: async () => {},
       getPortfolioWallet: async () => {},
@@ -98,7 +74,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_ORG = {
-  id: "org_earn_program",
+  id: "org_test_earn_program",
   name: "Earn Program Org",
   slug: "earn-program",
 };
@@ -107,7 +83,7 @@ const TEST_PROJECT = {
   slug: "test-earn-program-project",
 };
 const TEST_USER = {
-  id: "usr_earn_program",
+  id: "usr_test_earn_program",
   email: "earn-program@example.com",
 };
 const TEST_API_KEY = {
@@ -133,7 +109,6 @@ const TEST_PRODUCTION_PROJECT = {
   id: "prj_test_earn_program_prod",
   slug: "test-earn-program-project-prod",
 };
-const TEST_SESSION_ID = "ses_earn_program";
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const UPSHIFT_SANDBOX_KEY = "upshift-sandbox-test-api-key";
@@ -142,7 +117,7 @@ const UPSHIFT_SOURCE = "morpho-gauntlet-usdc";
 const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const UPSHIFT_USDT_SOURCE = "morpho-gauntlet-usdt";
 const WALLET_REF = "8f14e45f-ceea-467f-9b6b-3c1a5c7f9d21";
-/** Second provider wallet — PRO-1670 lets ONE org hold both at once. */
+
 const WALLET_REF_B = "2b6e1f80-7a3c-4f0d-9b21-5c8d4e2f1a03";
 const SOLANA_DESTINATION = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -187,13 +162,7 @@ let originalEarnEnabled: string | undefined;
 let originalUpshiftSandboxApiKey: string | undefined;
 let originalUpshiftApiKey: string | undefined;
 
-/**
- * Earn provider entitlement defaults to OFF for every organization, so the
- * deposit-side availability gate needs an explicit org-settings override;
- * `entitleGround: false` seeds an organization without one (the exit-safety
- * cases assert withdrawals keep working there).
- */
-async function seedAuth({ entitleGround = true }: { entitleGround?: boolean } = {}): Promise<void> {
+async function seedAuth({ entitleGround }: { entitleGround: boolean }): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
@@ -253,33 +222,21 @@ async function seedAuth({ entitleGround = true }: { entitleGround?: boolean } = 
   ]);
 }
 
-/**
- * Dashboard (session) callers resolve their environment from the membership-
- * verified x-project-id project, so the session fixture carries both the
- * sandbox project seedAuth created and a production sibling. Call after
- * seedAuth().
- */
-async function seedSessionAuth(): Promise<void> {
+async function seedClerkAuth(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO organization_members (id, organization_id, user_id, role, status)
          VALUES (?, ?, ?, 'member', 'active')`
       )
-      .bind("om_earn_program_session", TEST_ORG.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
-         VALUES (?, ?, ?, 'session', ?)`
-      )
-      .bind(TEST_SESSION_ID, TEST_USER.id, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+      .bind("om_earn_program_Clerk", TEST_ORG.id, TEST_USER.id),
   ]);
 }
 
 async function seedUpshiftStrategy(
-  overrides: Partial<UpsertEarnStrategyInput> = {}
+  overrides: Partial<UpsertEarnStrategyInput> & { environment: "sandbox" | "production" }
 ): Promise<void> {
-  const environment = overrides.environment ?? "sandbox";
+  const environment = overrides.environment;
   const strategy = await createPostgresEarnRepository(getDb(env)).upsertStrategy({
     provider: "upshift",
     providerReference: UPSHIFT_SOURCE,
@@ -294,27 +251,15 @@ async function seedUpshiftStrategy(
     redemptionDelayDays: null,
     riskMetadata: { curator: "gauntlet" },
     status: "active",
-    // Follows the environment by default so a fixture pinned to devnet would
-    // not be un-fundable in the production-session cases and fail for the
-    // wrong reason. Tests exercising the cluster gate override it explicitly.
+
     hostCluster: CLUSTER_BY_SDP_ENVIRONMENT[environment],
-    environment,
     ...overrides,
   });
-  if (!strategy) {
-    throw new Error("Failed to seed upshift strategy");
-  }
+  assert(strategy);
 }
 
-/**
- * Seed one program link row. Overridable because PRO-1670 makes N programs per
- * (organization, environment, provider) legal, and every multi-program case
- * needs a DISTINCT `providerWalletRef` — migration 0056's global
- * UNIQUE (provider, provider_wallet_ref) rejects a repeat platform-wide.
- * Callers keep the returned row: its `id` is how every route names the program.
- */
 async function seedProgramWallet(
-  overrides: Partial<InsertEarnProviderWalletInput> = {}
+  overrides: Partial<InsertEarnProviderWalletInput>
 ): Promise<EarnProviderWalletRow> {
   const row = await createPostgresEarnRepository(getDb(env)).insertProviderWallet({
     organizationId: TEST_ORG.id,
@@ -326,17 +271,15 @@ async function seedProgramWallet(
     createdBy: TEST_USER.id,
     ...overrides,
   });
-  if (!row) {
-    throw new Error("Failed to seed earn program wallet");
-  }
+  assert(row);
   return row;
 }
 
 function requestEarn(
   method: string,
   path: string,
-  body?: Record<string, unknown>,
-  headers: Record<string, string> = {}
+  body: Record<string, unknown> | undefined,
+  headers: Record<string, string>
 ) {
   return app.request(
     path,
@@ -353,7 +296,7 @@ function requestEarn(
   );
 }
 
-function requestEarnAsSession(
+async function requestEarnAsClerk(
   method: string,
   path: string,
   projectId: string,
@@ -365,7 +308,7 @@ function requestEarnAsSession(
       method,
       headers: {
         "Content-Type": "application/json",
-        Cookie: `sdp_session=${TEST_SESSION_ID}`,
+        Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id)}`,
         "x-project-id": projectId,
       },
       ...(body !== undefined && { body: JSON.stringify(body) }),
@@ -374,18 +317,16 @@ function requestEarnAsSession(
   );
 }
 
-/** Every per-program route is `/v1/earn/programs/:programId[...]`. */
 const PROGRAMS_PATH = "/v1/earn/programs";
-const programPath = (programId: string, suffix = "") => `${PROGRAMS_PATH}/${programId}${suffix}`;
+const programPath = (programId: string, suffix: string) => `${PROGRAMS_PATH}/${programId}${suffix}`;
 
-const createProgramBody = (extra: Record<string, unknown> = {}) => ({
+const createProgramBody = (extra: Record<string, unknown>) => ({
   provider: "upshift",
   allocations: VALID_ALLOCATIONS,
   ...extra,
 });
 
-/** The derived id the provider actually dedupes a program CREATE on. */
-const derivedCreateId = (callerKey: string, environment = "sandbox") =>
+const derivedCreateId = (callerKey: string, environment: string) =>
   deriveProviderRequestId(["earn_program_create", TEST_ORG.id, environment, "upshift"], callerKey);
 
 interface ProgramEnvelope {
@@ -413,20 +354,6 @@ async function readPrograms(res: Response): Promise<{
   return body.data;
 }
 
-/**
- * Live-read stubs for anything that reaches `loadProgramState`.
- *
- * `getPortfolioWallet` is stubbed with mockIMPLEMENTATION, never
- * `mockResolvedValue`: a single shared snapshot ignores its arguments, so a
- * handler that resolved the WRONG program would still return a plausible-looking
- * body and every multi-program assertion below would pass vacuously. Echoing the
- * requested ref back is what makes "this program served its own wallet"
- * observable.
- *
- * The yield leg is best-effort in the handler, so a rejection reproduces the
- * shape of a response with no `yield` key while keeping the suite off the
- * network.
- */
 function stubProgramReads() {
   vi.spyOn(portfolioClient, "getPortfolioYield").mockRejectedValue(
     new Error("yield unavailable in tests")
@@ -439,12 +366,6 @@ function stubProgramReads() {
     }));
 }
 
-/**
- * A provider that dedupes creates on the request id it was sent — which is what
- * makes a retried create safe. The same derived id always yields the ORIGINAL
- * wallet ref, so SDP's second insert lands on 0056's global unique and the
- * handler must read that as a replay rather than a race.
- */
 function stubProviderWalletDedupe() {
   const minted = new Map<string, string>();
   return vi
@@ -464,7 +385,7 @@ async function countProviderWallets(): Promise<number> {
   const row = await getDb(env)
     .prepare("SELECT COUNT(*)::int AS total FROM earn_provider_wallets")
     .first<{ total: number }>();
-  return row?.total ?? 0;
+  return required(row).total;
 }
 
 beforeEach(async () => {
@@ -472,12 +393,10 @@ beforeEach(async () => {
   originalEarnEnabled = env.EARN_ENABLED;
   originalUpshiftSandboxApiKey = env.UPSHIFT_SANDBOX_API_KEY;
   originalUpshiftApiKey = env.UPSHIFT_API_KEY;
-  // Earn is a Markets sub-module, so both gates have to be on to reach a route.
+
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
-  // Sandbox credentials so the provider-configured gates pass; provider HTTP
-  // itself is stubbed per-test via portfolioClient spies. The production
-  // credential stays absent unless a test opts in.
+
   env.UPSHIFT_SANDBOX_API_KEY = UPSHIFT_SANDBOX_KEY;
   env.UPSHIFT_API_KEY = undefined;
   surfacing.forceOn = true;
@@ -495,8 +414,8 @@ afterEach(async () => {
 
 describe("Earn program — POST /programs (create) and PUT /programs/:id (re-target)", () => {
   it("creates a program, then re-targets that program in place", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
     const createWallet = vi
       .spyOn(portfolioClient, "createPortfolioWallet")
       .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
@@ -509,12 +428,13 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     const created = await requestEarn(
       "POST",
       PROGRAMS_PATH,
-      createProgramBody({ label: "Treasury", requestId: callerKey })
+      createProgramBody({ label: "Treasury", requestId: callerKey }),
+      {}
     );
 
     expect(created.status).toBe(201);
     const createdBody = (await created.clone().json()) as { data: Record<string, unknown> };
-    // `created: boolean` left the wire with PRO-1670 — the status code carries it.
+
     expect(createdBody.data).not.toHaveProperty("created");
     const program = await readProgram(created);
     expect(program.id).toMatch(/^earn_provider_wallet_/);
@@ -524,23 +444,25 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     expect(createWallet).toHaveBeenCalledWith(expect.objectContaining({ environment: "sandbox" }), {
       label: "Treasury",
       allocations: VALID_ALLOCATIONS,
-      requestId: derivedCreateId(callerKey),
+      requestId: derivedCreateId(callerKey, "sandbox"),
     });
     expect(updateStrategy).not.toHaveBeenCalled();
 
-    // The link row is addressable by its own id, scoped to (org, environment).
     const row = await createPostgresEarnRepository(getDb(env)).getProviderWalletById({
       organizationId: TEST_ORG.id,
       environment: "sandbox",
       walletId: program.id,
     });
-    expect(row?.provider_wallet_ref).toBe(WALLET_REF);
+    expect(required(row).provider_wallet_ref).toBe(WALLET_REF);
 
-    // Re-target is now an explicit verb on the program, not an implicit second
-    // PUT that may or may not have created something.
-    const retargeted = await requestEarn("PUT", programPath(program.id), {
-      allocations: VALID_ALLOCATIONS,
-    });
+    const retargeted = await requestEarn(
+      "PUT",
+      programPath(program.id, ""),
+      {
+        allocations: VALID_ALLOCATIONS,
+      },
+      {}
+    );
 
     expect(retargeted.status).toBe(200);
     expect((await readProgram(retargeted)).id).toBe(program.id);
@@ -552,8 +474,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
   });
 
   it("derives the provider request id on both branches — never forwards the caller's raw key", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
     const createWallet = vi
       .spyOn(portfolioClient, "createPortfolioWallet")
       .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
@@ -562,32 +484,34 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
     stubProgramReads();
 
-    // Every organization shares one provider account, so a key that reached the
-    // provider verbatim would let two tenants collide on the same pasted UUID —
-    // the second answered with a replay of the first's wallet.
     const createRequestId = "3f1d5a2e-9b64-4c7f-8a10-2d5e6f7a8b90";
     const retargetRequestId = "5c2e7b41-8d36-4a92-bf05-1e4c9a7d3b28";
 
     const created = await requestEarn(
       "POST",
       PROGRAMS_PATH,
-      createProgramBody({ requestId: createRequestId })
+      createProgramBody({ requestId: createRequestId }),
+      {}
     );
     expect(created.status).toBe(201);
     const program = await readProgram(created);
-    const sentOnCreate = createWallet.mock.calls[0]?.[1]?.requestId;
-    expect(sentOnCreate).toBe(derivedCreateId(createRequestId));
+    const sentOnCreate = required(required(createWallet.mock.calls[0])[1]).requestId;
+    expect(sentOnCreate).toBe(derivedCreateId(createRequestId, "sandbox"));
     expect(sentOnCreate).not.toBe(createRequestId);
     expect(sentOnCreate).toMatch(UUID_V4_PATTERN);
 
-    const retargeted = await requestEarn("PUT", programPath(program.id), {
-      allocations: VALID_ALLOCATIONS,
-      requestId: retargetRequestId,
-    });
+    const retargeted = await requestEarn(
+      "PUT",
+      programPath(program.id, ""),
+      {
+        allocations: VALID_ALLOCATIONS,
+        requestId: retargetRequestId,
+      },
+      {}
+    );
     expect(retargeted.status).toBe(200);
-    const sentOnRetarget = updateStrategy.mock.calls[0]?.[1]?.requestId;
-    // Scoped by the WALLET, so one caller key used against two of the org's own
-    // programs cannot collapse into a single provider mutation.
+    const sentOnRetarget = required(required(updateStrategy.mock.calls[0])[1]).requestId;
+
     expect(sentOnRetarget).toBe(
       deriveProviderRequestId(["earn_program_retarget", WALLET_REF], retargetRequestId)
     );
@@ -595,33 +519,29 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
   });
 
   it("honors an Idempotency-Key header on re-target exactly like its siblings", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
+    const program = await seedProgramWallet({});
     const updateStrategy = vi
       .spyOn(portfolioClient, "updatePortfolioStrategy")
       .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
     stubProgramReads();
 
-    // The platform middleware echoes this header on every /v1/* response, so a
-    // route that silently dropped it would look keyed while minting a fresh
-    // provider id per attempt — the exact non-idempotency the key exists to
-    // prevent. Header-only must derive; header+body must refuse.
     const headerKey = "retarget-9f2b";
     const retargeted = await requestEarn(
       "PUT",
-      programPath(program.id),
+      programPath(program.id, ""),
       { allocations: VALID_ALLOCATIONS },
       { "Idempotency-Key": headerKey }
     );
     expect(retargeted.status).toBe(200);
-    expect(updateStrategy.mock.calls[0]?.[1]?.requestId).toBe(
+    expect(required(required(updateStrategy.mock.calls[0])[1]).requestId).toBe(
       deriveProviderRequestId(["earn_program_retarget", program.provider_wallet_ref], headerKey)
     );
 
     const both = await requestEarn(
       "PUT",
-      programPath(program.id),
+      programPath(program.id, ""),
       { allocations: VALID_ALLOCATIONS, requestId: crypto.randomUUID() },
       { "Idempotency-Key": headerKey }
     );
@@ -630,42 +550,50 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
   });
 
   it("refuses re-target when the organization is not entitled or credentials are missing", async () => {
-    // Re-target is money-in (it points the balance at a different strategy), so
-    // it takes the FULL availability gate — the same asymmetry pinned for the
-    // create above and the reason a disabled provider still allows withdrawals.
     await seedAuth({ entitleGround: false });
-    await seedUpshiftStrategy();
-    const program = await seedProgramWallet();
+    await seedUpshiftStrategy({ environment: "sandbox" });
+    const program = await seedProgramWallet({});
     const updateStrategy = vi.spyOn(portfolioClient, "updatePortfolioStrategy");
 
-    const unentitled = await requestEarn("PUT", programPath(program.id), {
-      allocations: VALID_ALLOCATIONS,
-    });
+    const unentitled = await requestEarn(
+      "PUT",
+      programPath(program.id, ""),
+      {
+        allocations: VALID_ALLOCATIONS,
+      },
+      {}
+    );
     expect(unentitled.status).toBe(403);
 
     await clearKVStores(env);
     await seedTestDatabase(env);
-    await seedAuth();
-    await seedUpshiftStrategy();
-    const reseeded = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
+    const reseeded = await seedProgramWallet({});
     env.UPSHIFT_SANDBOX_API_KEY = undefined;
 
-    const noCredentials = await requestEarn("PUT", programPath(reseeded.id), {
-      allocations: VALID_ALLOCATIONS,
-    });
+    const noCredentials = await requestEarn(
+      "PUT",
+      programPath(reseeded.id, ""),
+      {
+        allocations: VALID_ALLOCATIONS,
+      },
+      {}
+    );
     expect(noCredentials.status).toBe(403);
     expect(updateStrategy).not.toHaveBeenCalled();
   });
 
   it("rejects a requestId that is not a UUIDv4", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
     const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     const res = await requestEarn(
       "POST",
       PROGRAMS_PATH,
-      createProgramBody({ requestId: "not-a-uuid" })
+      createProgramBody({ requestId: "not-a-uuid" }),
+      {}
     );
 
     expect(res.status).toBe(400);
@@ -673,8 +601,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
   });
 
   it("rejects allocations referencing yield sources outside the synced catalogue", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
     const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     const res = await requestEarn(
@@ -683,7 +611,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       createProgramBody({
         allocations: { usdc: [{ yieldSourceId: "morpho-unknown-usdc", pct: 100 }] },
         requestId: crypto.randomUUID(),
-      })
+      }),
+      {}
     );
 
     expect(res.status).toBe(400);
@@ -691,16 +620,15 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       error: { code: string; details?: { unknownYieldSourceIds?: string[] } };
     };
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.details?.unknownYieldSourceIds).toEqual(["morpho-unknown-usdc"]);
+    expect(required(body.error.details).unknownYieldSourceIds).toEqual(["morpho-unknown-usdc"]);
     expect(createWallet).not.toHaveBeenCalled();
   });
 
   it("rejects more than one allocation entry per token group (V1 single-vault cap)", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
     const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
-    // Weights deliberately sum to 100 so the cap is the only violation.
     const res = await requestEarn(
       "POST",
       PROGRAMS_PATH,
@@ -712,7 +640,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
           ],
         },
         requestId: crypto.randomUUID(),
-      })
+      }),
+      {}
     );
 
     expect(res.status).toBe(400);
@@ -723,17 +652,17 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
   });
 
   it("rejects a lone allocation entry whose weight is not 100", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
 
-    // With the group capped at one entry, the sum rule pins that entry to 100.
     const res = await requestEarn(
       "POST",
       PROGRAMS_PATH,
       createProgramBody({
         allocations: { usdc: [{ yieldSourceId: UPSHIFT_SOURCE, pct: 60 }] },
         requestId: crypto.randomUUID(),
-      })
+      }),
+      {}
     );
 
     expect(res.status).toBe(400);
@@ -743,9 +672,10 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
   });
 
   it("accepts one entry per token group across both deposit tokens", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
     await seedUpshiftStrategy({
+      environment: "sandbox",
       providerReference: UPSHIFT_USDT_SOURCE,
       name: "Gauntlet USDT",
       depositMints: [USDT_MINT],
@@ -755,7 +685,6 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
     stubProgramReads();
 
-    // The cap is per token group, not per body: usdc and usdt each carry one vault.
     const res = await requestEarn(
       "POST",
       PROGRAMS_PATH,
@@ -765,7 +694,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
           usdt: [{ yieldSourceId: UPSHIFT_USDT_SOURCE, pct: 100 }],
         },
         requestId: crypto.randomUUID(),
-      })
+      }),
+      {}
     );
 
     expect(res.status).toBe(201);
@@ -774,41 +704,45 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("blocks create when the organization is not entitled or credentials are missing", async () => {
     await seedAuth({ entitleGround: false });
-    await seedUpshiftStrategy();
+    await seedUpshiftStrategy({ environment: "sandbox" });
     const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     const unentitled = await requestEarn(
       "POST",
       PROGRAMS_PATH,
-      createProgramBody({ requestId: crypto.randomUUID() })
+      createProgramBody({ requestId: crypto.randomUUID() }),
+      {}
     );
     expect(unentitled.status).toBe(403);
 
-    // Entitlement present but the sandbox credential missing also fails closed.
     await clearKVStores(env);
     await seedTestDatabase(env);
-    await seedAuth();
-    await seedUpshiftStrategy();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
     env.UPSHIFT_SANDBOX_API_KEY = undefined;
 
     const unconfigured = await requestEarn(
       "POST",
       PROGRAMS_PATH,
-      createProgramBody({ requestId: crypto.randomUUID() })
+      createProgramBody({ requestId: crypto.randomUUID() }),
+      {}
     );
     expect(unconfigured.status).toBe(403);
     expect(createWallet).not.toHaveBeenCalled();
   });
 
   it("returns 501 for providers without the portfolio-wallet capability", async () => {
-    await seedAuth();
+    await seedAuth({ entitleGround: true });
 
-    // No idempotency key on purpose: the capability gate runs BEFORE key
-    // resolution, so the answer names the real problem instead of a generic 400.
-    const res = await requestEarn("POST", PROGRAMS_PATH, {
-      provider: "veda",
-      allocations: VALID_ALLOCATIONS,
-    });
+    const res = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      {
+        provider: "veda",
+        allocations: VALID_ALLOCATIONS,
+      },
+      {}
+    );
 
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
@@ -816,45 +750,38 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
   });
 
   it("returns 501 for a catalogue-only provider, whose vaults ARE in the catalogue", async () => {
-    // Kamino differs from the stub providers above: it lists real strategies,
-    // so its references resolve. The capability gate is the only thing between
-    // a caller and a program on a provider that moves no money through SDP —
-    // and it answers before entitlement or key resolution can muddy the reason.
-    await seedAuth();
-    await seedUpshiftStrategy({ provider: "kamino", hostCluster: "mainnet-beta" });
-
-    const res = await requestEarn("POST", PROGRAMS_PATH, {
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({
+      environment: "sandbox",
       provider: "kamino",
-      allocations: VALID_ALLOCATIONS,
+      hostCluster: "mainnet-beta",
     });
+
+    const res = await requestEarn(
+      "POST",
+      PROGRAMS_PATH,
+      {
+        provider: "kamino",
+        allocations: VALID_ALLOCATIONS,
+      },
+      {}
+    );
 
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("NOT_IMPLEMENTED");
   });
 
-  /**
-   * The devnet-money guard. `assertKnownYieldSources` must refuse a reference
-   * whose instrument does not live on this environment's cluster — being listed
-   * is not the same as being fundable. The row is seeded with a flipped cluster
-   * rather than borrowed from a provider: Kamino was the original example and
-   * now catalogues per cluster, so a real provider reference would no longer
-   * exercise this at all.
-   *
-   * Deliberately uses a seeded row with its cluster flipped rather than a
-   * Kamino row: a Kamino reference is already refused for being another
-   * provider's, which would pass this test without the cluster check existing
-   * at all. Same provider, same environment, one field different.
-   */
   it("refuses an allocation whose strategy is hosted on another cluster", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy({ hostCluster: "mainnet-beta" });
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox", hostCluster: "mainnet-beta" });
     const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     const res = await requestEarn(
       "POST",
       PROGRAMS_PATH,
-      createProgramBody({ requestId: crypto.randomUUID() })
+      createProgramBody({ requestId: crypto.randomUUID() }),
+      {}
     );
 
     expect(res.status).toBe(400);
@@ -862,15 +789,13 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       error: { code: string; details?: { unknownYieldSourceIds?: string[] } };
     };
     expect(body.error.code).toBe("BAD_REQUEST");
-    expect(body.error.details?.unknownYieldSourceIds).toEqual([UPSHIFT_SOURCE]);
+    expect(required(body.error.details).unknownYieldSourceIds).toEqual([UPSHIFT_SOURCE]);
     expect(createWallet).not.toHaveBeenCalled();
   });
 
   it("accepts the same allocation once the strategy is hosted on this cluster", async () => {
-    // The control for the case above: without it, a gate that refused
-    // everything would pass just as well.
-    await seedAuth();
-    await seedUpshiftStrategy({ hostCluster: "devnet" });
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox", hostCluster: "devnet" });
     const createWallet = vi
       .spyOn(portfolioClient, "createPortfolioWallet")
       .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
@@ -879,7 +804,8 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     const res = await requestEarn(
       "POST",
       PROGRAMS_PATH,
-      createProgramBody({ requestId: crypto.randomUUID() })
+      createProgramBody({ requestId: crypto.randomUUID() }),
+      {}
     );
 
     expect(res.status).toBe(201);
@@ -888,13 +814,10 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   it("answers an unentitled create 403 even when no idempotency key was sent", async () => {
     await seedAuth({ entitleGround: false });
-    await seedUpshiftStrategy();
+    await seedUpshiftStrategy({ environment: "sandbox" });
     const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
-    // Key resolution is deliberately LAST in createEarnProgram. If it moved
-    // earlier this would 400 "missing idempotency key", hiding the fact that
-    // the call could never have worked for this organization.
-    const res = await requestEarn("POST", PROGRAMS_PATH, createProgramBody());
+    const res = await requestEarn("POST", PROGRAMS_PATH, createProgramBody({}), {});
 
     expect(res.status).toBe(403);
     expect(createWallet).not.toHaveBeenCalled();
@@ -902,17 +825,13 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
   describe("required idempotency key (PRO-1670)", () => {
     it("refuses both key sources and neither, and accepts the header alone", async () => {
-      await seedAuth();
-      await seedUpshiftStrategy();
+      await seedAuth({ entitleGround: true });
+      await seedUpshiftStrategy({ environment: "sandbox" });
       const createWallet = vi
         .spyOn(portfolioClient, "createPortfolioWallet")
         .mockResolvedValue({ providerWalletRef: WALLET_REF, status: "creating" });
       stubProgramReads();
 
-      // The trap: a retry layer that preserves headers while the request layer
-      // mints a fresh body id per attempt keeps Idempotency-Key stable and varies
-      // requestId. Any precedence rule follows the varying one and provisions a
-      // SECOND wallet the customer's first deposit would never reach.
       const both = await requestEarn(
         "POST",
         PROGRAMS_PATH,
@@ -921,23 +840,23 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       );
       expect(both.status).toBe(400);
 
-      // Refusing beats accepting: a server-minted id is fresh per attempt, so it
-      // would guarantee the duplicate program it appears to guard against.
-      const neither = await requestEarn("POST", PROGRAMS_PATH, createProgramBody());
+      const neither = await requestEarn("POST", PROGRAMS_PATH, createProgramBody({}), {});
       expect(neither.status).toBe(400);
       expect(createWallet).not.toHaveBeenCalled();
 
-      const headerOnly = await requestEarn("POST", PROGRAMS_PATH, createProgramBody(), {
+      const headerOnly = await requestEarn("POST", PROGRAMS_PATH, createProgramBody({}), {
         "Idempotency-Key": "onboarding-9f2b",
       });
       expect(headerOnly.status).toBe(201);
       expect(createWallet).toHaveBeenCalledTimes(1);
-      expect(createWallet.mock.calls[0]?.[1]?.requestId).toBe(derivedCreateId("onboarding-9f2b"));
+      expect(required(required(createWallet.mock.calls[0])[1]).requestId).toBe(
+        derivedCreateId("onboarding-9f2b", "sandbox")
+      );
     });
 
     it("provisions exactly ONE wallet when the same caller key is retried", async () => {
-      await seedAuth();
-      await seedUpshiftStrategy();
+      await seedAuth({ entitleGround: true });
+      await seedUpshiftStrategy({ environment: "sandbox" });
       const createWallet = stubProviderWalletDedupe();
       stubProgramReads();
 
@@ -945,97 +864,93 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       const first = await requestEarn(
         "POST",
         PROGRAMS_PATH,
-        createProgramBody({ requestId: callerKey })
+        createProgramBody({ requestId: callerKey }),
+        {}
       );
       const retry = await requestEarn(
         "POST",
         PROGRAMS_PATH,
-        createProgramBody({ requestId: callerKey })
+        createProgramBody({ requestId: callerKey }),
+        {}
       );
 
       expect(first.status).toBe(201);
-      // The retry is a REPLAY, not a conflict: the provider answered the same
-      // derived key with the ORIGINAL wallet ref, so the second insert hit
-      // 0056's global unique and the handler served the existing program.
+
       expect(retry.status).toBe(200);
       expect((await readProgram(retry)).id).toBe((await readProgram(first)).id);
-      // The provider was asked twice and deduped — SDP never assumed it wouldn't be.
+
       expect(createWallet).toHaveBeenCalledTimes(2);
-      expect(createWallet.mock.calls[1]?.[1]?.requestId).toBe(
-        createWallet.mock.calls[0]?.[1]?.requestId
+      expect(required(required(createWallet.mock.calls[1])[1]).requestId).toBe(
+        required(required(createWallet.mock.calls[0])[1]).requestId
       );
       await expect(countProviderWallets()).resolves.toBe(1);
     });
 
     it("provisions exactly ONE wallet when the same caller key arrives concurrently", async () => {
-      await seedAuth();
-      await seedUpshiftStrategy();
+      await seedAuth({ entitleGround: true });
+      await seedUpshiftStrategy({ environment: "sandbox" });
       stubProviderWalletDedupe();
       stubProgramReads();
 
       const callerKey = crypto.randomUUID();
       const [a, b] = await Promise.all([
-        requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: callerKey })),
-        requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: callerKey })),
+        requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: callerKey }), {}),
+        requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: callerKey }), {}),
       ]);
 
-      // Whoever loses the insert race takes the replay path, not a 409.
       expect([a.status, b.status].sort()).toEqual([200, 201]);
       expect((await readProgram(a)).id).toBe((await readProgram(b)).id);
       await expect(countProviderWallets()).resolves.toBe(1);
     });
 
     it("provisions TWO wallets for two different caller keys", async () => {
-      await seedAuth();
-      await seedUpshiftStrategy();
+      await seedAuth({ entitleGround: true });
+      await seedUpshiftStrategy({ environment: "sandbox" });
       const createWallet = stubProviderWalletDedupe();
       stubProgramReads();
 
       const first = await requestEarn(
         "POST",
         PROGRAMS_PATH,
-        createProgramBody({ requestId: crypto.randomUUID() })
+        createProgramBody({ requestId: crypto.randomUUID() }),
+        {}
       );
       const second = await requestEarn(
         "POST",
         PROGRAMS_PATH,
-        createProgramBody({ requestId: crypto.randomUUID() })
+        createProgramBody({ requestId: crypto.randomUUID() }),
+        {}
       );
 
-      // A genuine second program is the point of PRO-1670 — only the KEY
-      // separates it from a retry.
       expect(first.status).toBe(201);
       expect(second.status).toBe(201);
       const [programA, programB] = [await readProgram(first), await readProgram(second)];
       expect(programA.id).not.toBe(programB.id);
       expect(programA.wallet.providerWalletRef).not.toBe(programB.wallet.providerWalletRef);
-      expect(createWallet.mock.calls[0]?.[1]?.requestId).not.toBe(
-        createWallet.mock.calls[1]?.[1]?.requestId
+      expect(required(required(createWallet.mock.calls[0])[1]).requestId).not.toBe(
+        required(required(createWallet.mock.calls[1])[1]).requestId
       );
       await expect(countProviderWallets()).resolves.toBe(2);
     });
 
     it("gives each unlabelled program its own default provider label", async () => {
-      await seedAuth();
-      await seedUpshiftStrategy();
+      await seedAuth({ entitleGround: true });
+      await seedUpshiftStrategy({ environment: "sandbox" });
       const createWallet = stubProviderWalletDedupe();
       stubProgramReads();
 
       const keyOne = crypto.randomUUID();
       const keyTwo = crypto.randomUUID();
-      await requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: keyOne }));
-      await requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: keyTwo }));
+      await requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: keyOne }), {});
+      await requestEarn("POST", PROGRAMS_PATH, createProgramBody({ requestId: keyTwo }), {});
 
-      // The suffix comes from the DERIVED key, so a provider replay of a retried
-      // create reproduces the same payload — but two DIFFERENT programs must
-      // never share a provider-side name.
-      const labelOne = createWallet.mock.calls[0]?.[1]?.label;
-      const labelTwo = createWallet.mock.calls[1]?.[1]?.label;
+      const labelOne = required(required(createWallet.mock.calls[0])[1]).label;
+      const labelTwo = required(required(createWallet.mock.calls[1])[1]).label;
       expect(labelOne).toBe(
-        `sdp-earn-${TEST_ORG.id}-sandbox-${derivedCreateId(keyOne).slice(0, 8)}`
+        `sdp-earn-${TEST_ORG.id}-sandbox-${derivedCreateId(keyOne, "sandbox").slice(0, 8)}`
       );
       expect(labelTwo).toBe(
-        `sdp-earn-${TEST_ORG.id}-sandbox-${derivedCreateId(keyTwo).slice(0, 8)}`
+        `sdp-earn-${TEST_ORG.id}-sandbox-${derivedCreateId(keyTwo, "sandbox").slice(0, 8)}`
       );
       expect(labelOne).not.toBe(labelTwo);
     });
@@ -1047,13 +962,13 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     a: EarnProviderWalletRow;
     b: EarnProviderWalletRow;
   }> {
-    await seedAuth();
+    await seedAuth({ entitleGround: true });
     const a = await seedProgramWallet({ providerWalletRef: WALLET_REF, label: "Program A" });
     const b = await seedProgramWallet({ providerWalletRef: WALLET_REF_B, label: "Program B" });
     return { a, b };
   }
 
-  const withdrawalBody = (extra: Record<string, unknown> = {}) => ({
+  const withdrawalBody = (extra: Record<string, unknown>) => ({
     amountUsd: "10.00",
     token: "usdc",
     destinationAddress: SOLANA_DESTINATION,
@@ -1064,24 +979,26 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     const { a, b } = await seedTwoPrograms();
     const getWallet = stubProgramReads();
 
-    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
+    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`, undefined, {});
 
     expect(res.status).toBe(200);
     const page = await readPrograms(res);
     expect(page).toMatchObject({ total: 2, page: 1, pageSize: 20 });
     expect(page.programs.map((program) => program.id).sort()).toEqual([a.id, b.id].sort());
 
-    // Each row carries the snapshot of ITS wallet — the whole reason the stub
-    // reads its arguments instead of answering with one shared object.
     const byId = new Map(page.programs.map((program) => [program.id, program]));
-    expect(byId.get(a.id)?.wallet.providerWalletRef).toBe(WALLET_REF);
-    expect(byId.get(a.id)?.label).toBe("Program A");
-    expect(byId.get(b.id)?.wallet.providerWalletRef).toBe(WALLET_REF_B);
-    expect(byId.get(b.id)?.label).toBe("Program B");
+    expect(required(byId.get(a.id)).wallet.providerWalletRef).toBe(WALLET_REF);
+    expect(required(byId.get(a.id)).label).toBe("Program A");
+    expect(required(byId.get(b.id)).wallet.providerWalletRef).toBe(WALLET_REF_B);
+    expect(required(byId.get(b.id)).label).toBe("Program B");
     expect(getWallet).toHaveBeenCalledTimes(2);
 
-    // The page window is DB-side: a 1-per-page page still reports the full total.
-    const paged = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift&page=2&pageSize=1`);
+    const paged = await requestEarn(
+      "GET",
+      `${PROGRAMS_PATH}?provider=upshift&page=2&pageSize=1`,
+      undefined,
+      {}
+    );
     expect(paged.status).toBe(200);
     const pagedBody = await readPrograms(paged);
     expect(pagedBody).toMatchObject({ total: 2, page: 2, pageSize: 1 });
@@ -1092,8 +1009,8 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     const { a, b } = await seedTwoPrograms();
     const getWallet = stubProgramReads();
 
-    const detailA = await requestEarn("GET", programPath(a.id));
-    const detailB = await requestEarn("GET", programPath(b.id));
+    const detailA = await requestEarn("GET", programPath(a.id, ""), undefined, {});
+    const detailB = await requestEarn("GET", programPath(b.id, ""), undefined, {});
 
     expect(detailA.status).toBe(200);
     expect(detailB.status).toBe(200);
@@ -1123,21 +1040,26 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     const createdA = await requestEarn(
       "POST",
       programPath(a.id, "/withdrawals"),
-      withdrawalBody({ requestId: crypto.randomUUID() })
+      withdrawalBody({ requestId: crypto.randomUUID() }),
+      {}
     );
     const createdB = await requestEarn(
       "POST",
       programPath(b.id, "/withdrawals"),
-      withdrawalBody({ requestId: crypto.randomUUID() })
+      withdrawalBody({ requestId: crypto.randomUUID() }),
+      {}
     );
 
     expect(createdA.status).toBe(201);
     expect(createdB.status).toBe(201);
-    expect(createWithdrawal.mock.calls[0]?.[1]?.providerWalletRef).toBe(WALLET_REF);
-    expect(createWithdrawal.mock.calls[1]?.[1]?.providerWalletRef).toBe(WALLET_REF_B);
+    expect(required(required(createWithdrawal.mock.calls[0])[1]).providerWalletRef).toBe(
+      WALLET_REF
+    );
+    expect(required(required(createWithdrawal.mock.calls[1])[1]).providerWalletRef).toBe(
+      WALLET_REF_B
+    );
 
-    // The ledger list is wallet-scoped, so program A's history is only A's.
-    const listA = await requestEarn("GET", programPath(a.id, "/withdrawals"));
+    const listA = await requestEarn("GET", programPath(a.id, "/withdrawals"), undefined, {});
     expect(listA.status).toBe(200);
     const bodyA = (await listA.json()) as {
       data: { withdrawals: Array<{ withdrawalRef?: string }>; total: number };
@@ -1146,7 +1068,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     expect(bodyA.data.withdrawals.map((w) => w.withdrawalRef)).toEqual(["wd_a"]);
     expect(bodyA.data.withdrawals.map((w) => w.withdrawalRef)).not.toContain("wd_b");
 
-    const listB = await requestEarn("GET", programPath(b.id, "/withdrawals"));
+    const listB = await requestEarn("GET", programPath(b.id, "/withdrawals"), undefined, {});
     const bodyB = (await listB.json()) as {
       data: { withdrawals: Array<{ withdrawalRef?: string }>; total: number };
     };
@@ -1163,24 +1085,24 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
         withdrawalRef: input.providerWalletRef === WALLET_REF ? "wd_a" : "wd_b",
       }));
 
-    // One org now holds several programs, so the wallet — not the org — is what
-    // keeps a single reused key from collapsing two payouts into one.
     const shared = "00000000-0000-4000-8000-000000000000";
     const fromA = await requestEarn(
       "POST",
       programPath(a.id, "/withdrawals"),
-      withdrawalBody({ requestId: shared })
+      withdrawalBody({ requestId: shared }),
+      {}
     );
     const fromB = await requestEarn(
       "POST",
       programPath(b.id, "/withdrawals"),
-      withdrawalBody({ requestId: shared })
+      withdrawalBody({ requestId: shared }),
+      {}
     );
 
     expect(fromA.status).toBe(201);
     expect(fromB.status).toBe(201);
-    const sentA = createWithdrawal.mock.calls[0]?.[1]?.requestId;
-    const sentB = createWithdrawal.mock.calls[1]?.[1]?.requestId;
+    const sentA = required(required(createWithdrawal.mock.calls[0])[1]).requestId;
+    const sentB = required(required(createWithdrawal.mock.calls[1])[1]).requestId;
     expect(sentA).toBe(deriveProviderRequestId(["earn_program_withdrawal", WALLET_REF], shared));
     expect(sentB).toBe(deriveProviderRequestId(["earn_program_withdrawal", WALLET_REF_B], shared));
     expect(sentA).not.toBe(sentB);
@@ -1190,7 +1112,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
         "SELECT COUNT(*)::int AS total FROM earn_movements WHERE execution_model = 'custodial'"
       )
       .first<{ total: number }>();
-    expect(count?.total).toBe(2);
+    expect(required(count).total).toBe(2);
   });
 
   it("404s program A's request for program B's withdrawal ref (intra-org BOLA guard)", async () => {
@@ -1202,28 +1124,30 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     await requestEarn(
       "POST",
       programPath(b.id, "/withdrawals"),
-      withdrawalBody({ requestId: crypto.randomUUID() })
+      withdrawalBody({ requestId: crypto.randomUUID() }),
+      {}
     );
     const getWithdrawal = vi
       .spyOn(portfolioClient, "getPortfolioWithdrawal")
       .mockResolvedValue({ ...WITHDRAWAL, withdrawalRef: "wd_b" });
 
-    // The guard compares the PROGRAM, not the organization: an org-only check
-    // was complete while an org held one program, but here it would pass and
-    // then drive the provider with A's wallet ref and B's withdrawal ref.
-    const crossRead = await requestEarn("GET", programPath(a.id, "/withdrawals/wd_b"));
+    const crossRead = await requestEarn(
+      "GET",
+      programPath(a.id, "/withdrawals/wd_b"),
+      undefined,
+      {}
+    );
 
     expect(crossRead.status).toBe(404);
     expect(getWithdrawal).not.toHaveBeenCalled();
 
-    // B's own program still reads it, so the guard is scoping and not a blanket ban.
-    const ownRead = await requestEarn("GET", programPath(b.id, "/withdrawals/wd_b"));
+    const ownRead = await requestEarn("GET", programPath(b.id, "/withdrawals/wd_b"), undefined, {});
     expect(ownRead.status).toBe(200);
     expect(getWithdrawal).toHaveBeenCalledTimes(1);
   });
 
   it("404s another organization's program id", async () => {
-    await seedAuth();
+    await seedAuth({ entitleGround: true });
     const getWallet = stubProgramReads();
 
     const db = getDb(env);
@@ -1232,10 +1156,10 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
         .prepare(
           "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
         )
-        .bind("org_earn_program_neighbour", "Neighbour Org", "earn-program-neighbour"),
+        .bind("org_test_earn_program_neighbour", "Neighbour Org", "earn-program-neighbour"),
     ]);
     await seedDefaultProjects(db, {
-      organizationId: "org_earn_program_neighbour",
+      organizationId: "org_test_earn_program_neighbour",
       createdBy: TEST_USER.id,
       members: [],
       ids: {
@@ -1244,25 +1168,23 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
       },
     });
     const foreign = await seedProgramWallet({
-      organizationId: "org_earn_program_neighbour",
+      organizationId: "org_test_earn_program_neighbour",
       projectId: "prj_earn_program_neighbour",
       providerWalletRef: "9a35f56f-deeb-478f-8c7c-4d2b6d8f0e32",
       label: null,
     });
 
-    // A program id is caller-supplied now, so getProviderWalletById carries the
-    // tenancy proof the old (org, environment, provider) lookup made structural.
-    const res = await requestEarn("GET", programPath(foreign.id));
+    const res = await requestEarn("GET", programPath(foreign.id, ""), undefined, {});
 
     expect(res.status).toBe(404);
     expect(getWallet).not.toHaveBeenCalled();
   });
 });
 
-describe("Earn program — session callers and environment isolation", () => {
-  it("creates a production program from a production-project dashboard session", async () => {
-    await seedAuth();
-    await seedSessionAuth();
+describe("Earn program — Clerk callers and environment isolation", () => {
+  it("creates a production program from a production-project dashboard Clerk", async () => {
+    await seedAuth({ entitleGround: true });
+    await seedClerkAuth();
     env.UPSHIFT_API_KEY = UPSHIFT_PRODUCTION_KEY;
     await seedUpshiftStrategy({ environment: "production" });
     const createWallet = vi
@@ -1271,7 +1193,7 @@ describe("Earn program — session callers and environment isolation", () => {
     stubProgramReads();
 
     const callerKey = crypto.randomUUID();
-    const res = await requestEarnAsSession(
+    const res = await requestEarnAsClerk(
       "POST",
       PROGRAMS_PATH,
       TEST_PRODUCTION_PROJECT.id,
@@ -1284,21 +1206,19 @@ describe("Earn program — session callers and environment isolation", () => {
       expect.objectContaining({ environment: "production" }),
       expect.objectContaining({
         allocations: VALID_ALLOCATIONS,
-        // Environment is part of the derivation scope, so the same caller key
-        // in sandbox is a different provider request.
+
         requestId: derivedCreateId(callerKey, "production"),
       })
     );
 
-    // The row lands under production with no sandbox sibling…
     const repo = createPostgresEarnRepository(getDb(env));
     const productionRow = await repo.getProviderWalletById({
       organizationId: TEST_ORG.id,
       environment: "production",
       walletId: program.id,
     });
-    expect(productionRow?.provider_wallet_ref).toBe(WALLET_REF);
-    expect(productionRow?.environment).toBe("production");
+    expect(required(productionRow).provider_wallet_ref).toBe(WALLET_REF);
+    expect(required(productionRow).environment).toBe("production");
     await expect(
       repo.listProviderWallets({
         organizationId: TEST_ORG.id,
@@ -1309,27 +1229,28 @@ describe("Earn program — session callers and environment isolation", () => {
       })
     ).resolves.toMatchObject({ rows: [], total: 0 });
 
-    // …so the org's sandbox API key sees an EMPTY collection…
-    const sandboxList = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
+    const sandboxList = await requestEarn(
+      "GET",
+      `${PROGRAMS_PATH}?provider=upshift`,
+      undefined,
+      {}
+    );
     expect(sandboxList.status).toBe(200);
     expect(await readPrograms(sandboxList)).toMatchObject({ programs: [], total: 0 });
 
-    // …and cannot reach the production program by naming its id, which an
-    // addressable program id makes a real (new) surface to defend.
-    const guessed = await requestEarn("GET", programPath(program.id));
+    const guessed = await requestEarn("GET", programPath(program.id, ""), undefined, {});
     expect(guessed.status).toBe(404);
   });
 
-  it("never serves a sandbox program to a production-project session", async () => {
-    await seedAuth();
-    await seedSessionAuth();
-    // Production is fully credentialled here on purpose: the isolation must come
-    // from the environment scope, not from a missing key.
+  it("never serves a sandbox program to a production-project Clerk", async () => {
+    await seedAuth({ entitleGround: true });
+    await seedClerkAuth();
+
     env.UPSHIFT_API_KEY = UPSHIFT_PRODUCTION_KEY;
-    const program = await seedProgramWallet();
+    const program = await seedProgramWallet({});
     const getWallet = stubProgramReads();
 
-    const productionList = await requestEarnAsSession(
+    const productionList = await requestEarnAsClerk(
       "GET",
       `${PROGRAMS_PATH}?provider=upshift`,
       TEST_PRODUCTION_PROJECT.id
@@ -1337,17 +1258,15 @@ describe("Earn program — session callers and environment isolation", () => {
     expect(productionList.status).toBe(200);
     expect(await readPrograms(productionList)).toMatchObject({ programs: [], total: 0 });
 
-    // The sandbox program's id, presented by the production session, 404s.
-    const guessed = await requestEarnAsSession(
+    const guessed = await requestEarnAsClerk(
       "GET",
-      programPath(program.id),
+      programPath(program.id, ""),
       TEST_PRODUCTION_PROJECT.id
     );
     expect(guessed.status).toBe(404);
     expect(getWallet).not.toHaveBeenCalled();
 
-    // The sandbox-project session still reads the same program, unchanged.
-    const sandbox = await requestEarnAsSession("GET", programPath(program.id), TEST_PROJECT.id);
+    const sandbox = await requestEarnAsClerk("GET", programPath(program.id, ""), TEST_PROJECT.id);
     expect(sandbox.status).toBe(200);
     expect(getWallet).toHaveBeenCalledWith(expect.objectContaining({ environment: "sandbox" }), {
       providerWalletRef: WALLET_REF,
@@ -1361,8 +1280,8 @@ describe("Earn program — live reads", () => {
     ["deposits", "GET", "/deposits", undefined],
     ["withdrawal preview", "POST", "/withdrawal-preview", { amountUsd: "25.50", token: "usdc" }],
   ])("404s another project's program on %s", async (_name, method, suffix, body) => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     const response = await requestEarn(method, programPath(program.id, suffix), body, {
       Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}`,
     });
@@ -1370,9 +1289,9 @@ describe("Earn program — live reads", () => {
   });
 
   it("returns an empty collection while the organization has no programs", async () => {
-    await seedAuth();
+    await seedAuth({ entitleGround: true });
 
-    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
+    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`, undefined, {});
 
     expect(res.status).toBe(200);
     expect(await readPrograms(res)).toMatchObject({
@@ -1384,13 +1303,10 @@ describe("Earn program — live reads", () => {
   });
 
   it("runs the credential gate on an EMPTY collection", async () => {
-    await seedAuth();
+    await seedAuth({ entitleGround: true });
     env.UPSHIFT_SANDBOX_API_KEY = undefined;
 
-    // A collection cannot 404 for emptiness, so without this assert a missing
-    // provider key would read as "this organization has no programs" and a
-    // dashboard would show onboarding instead of its provider-unconfigured notice.
-    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
+    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`, undefined, {});
 
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string } };
@@ -1398,9 +1314,14 @@ describe("Earn program — live reads", () => {
   });
 
   it("returns 404 for a program id that does not exist", async () => {
-    await seedAuth();
+    await seedAuth({ entitleGround: true });
 
-    const res = await requestEarn("GET", programPath("earn_provider_wallet_missing"));
+    const res = await requestEarn(
+      "GET",
+      programPath("earn_provider_wallet_missing", ""),
+      undefined,
+      {}
+    );
 
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
@@ -1408,11 +1329,11 @@ describe("Earn program — live reads", () => {
   });
 
   it("serves the live provider snapshot for an existing program", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     const getWallet = stubProgramReads();
 
-    const res = await requestEarn("GET", programPath(program.id));
+    const res = await requestEarn("GET", programPath(program.id, ""), undefined, {});
 
     expect(res.status).toBe(200);
     const body = await readProgram(res);
@@ -1426,8 +1347,8 @@ describe("Earn program — live reads", () => {
   });
 
   it("passes deposit pagination cursors through to the provider", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     const listDeposits = vi.spyOn(portfolioClient, "listPortfolioDeposits").mockResolvedValue({
       deposits: [
         {
@@ -1441,7 +1362,12 @@ describe("Earn program — live reads", () => {
       nextCursor: "cursor-2",
     });
 
-    const res = await requestEarn("GET", programPath(program.id, "/deposits?cursor=cursor-1"));
+    const res = await requestEarn(
+      "GET",
+      programPath(program.id, "/deposits?cursor=cursor-1"),
+      undefined,
+      {}
+    );
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -1456,89 +1382,89 @@ describe("Earn program — live reads", () => {
   });
 });
 
-/**
- * The surfacing gate — the only place `EARN_PROVIDER_SURFACING` is allowed to
- * refuse anything. These tests turn the forced-on flag OFF, so they run against
- * the real shipped map (upshift un-surfaced today).
- */
 describe("Earn program — un-surfaced provider", () => {
   beforeEach(() => {
     surfacing.forceOn = false;
   });
 
   it("refuses to open a new position, even for a fully entitled and credentialed org", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
     const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
 
     const res = await requestEarn(
       "POST",
       PROGRAMS_PATH,
-      createProgramBody({ requestId: crypto.randomUUID() })
+      createProgramBody({ requestId: crypto.randomUUID() }),
+      {}
     );
 
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { message: string } };
-    // Not the entitlement copy: no override lifts this, so pointing the caller
-    // at manual activation would send them to a door that does not exist.
+
     expect(body.error.message).toContain("not currently offered");
     expect(body.error.message).not.toContain("manual activation");
-    // Refused BEFORE the provider is touched — no orphaned wallet to reconcile.
+
     expect(createWallet).not.toHaveBeenCalled();
   });
 
-  /**
-   * ADR 0002: un-surfacing closes the door IN, never the door out. An
-   * organization holding a program taken while the provider was offered keeps
-   * every route that reads or exits it.
-   */
   it("keeps an existing program readable, re-targetable and withdrawable", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
+    const program = await seedProgramWallet({});
     stubProgramReads();
     const updateStrategy = vi
       .spyOn(portfolioClient, "updatePortfolioStrategy")
       .mockResolvedValue({ allocations: WALLET_SNAPSHOT.allocations });
     vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
-    const read = await requestEarn("GET", programPath(program.id));
+    const read = await requestEarn("GET", programPath(program.id, ""), undefined, {});
     expect(read.status).toBe(200);
 
-    const list = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
+    const list = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`, undefined, {});
     expect(list.status).toBe(200);
 
-    const retarget = await requestEarn("PUT", programPath(program.id), {
-      allocations: VALID_ALLOCATIONS,
-    });
+    const retarget = await requestEarn(
+      "PUT",
+      programPath(program.id, ""),
+      {
+        allocations: VALID_ALLOCATIONS,
+      },
+      {}
+    );
     expect(retarget.status).toBe(200);
     expect(updateStrategy).toHaveBeenCalledTimes(1);
 
-    const withdrawal = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
-      requestId: "0a1f4c2e-9b6d-4e83-8a11-5c7d2e9f4b60",
-      amountUsd: "25.50",
-      token: "usdc",
-      destinationAddress: SOLANA_DESTINATION,
-    });
+    const withdrawal = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals"),
+      {
+        requestId: "0a1f4c2e-9b6d-4e83-8a11-5c7d2e9f4b60",
+        amountUsd: "25.50",
+        token: "usdc",
+        destinationAddress: SOLANA_DESTINATION,
+      },
+      {}
+    );
     expect(withdrawal.status).toBe(201);
   });
 
-  /**
-   * The catalogue an existing program allocates into is hidden from
-   * `/strategies` reads, and `assertKnownYieldSources` must NOT inherit that:
-   * it validates against the STORED catalogue precisely so a position can keep
-   * pointing at a row the browse surface no longer shows. Covered by the
-   * re-target above; pinned here so collapsing the two filters fails loudly.
-   */
   it("still validates re-target allocations against the stored catalogue", async () => {
-    await seedAuth();
-    await seedUpshiftStrategy();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    await seedUpshiftStrategy({ environment: "sandbox" });
+    const program = await seedProgramWallet({});
     stubProgramReads();
 
-    const res = await requestEarn("PUT", programPath(program.id), {
-      allocations: [{ token: "usdc", entries: [{ yieldSourceId: "not-in-catalogue", pct: 100 }] }],
-    });
+    const res = await requestEarn(
+      "PUT",
+      programPath(program.id, ""),
+      {
+        allocations: [
+          { token: "usdc", entries: [{ yieldSourceId: "not-in-catalogue", pct: 100 }] },
+        ],
+      },
+      {}
+    );
 
     expect(res.status).toBe(400);
   });
@@ -1547,7 +1473,7 @@ describe("Earn program — un-surfaced provider", () => {
 describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
   it("keeps withdrawals and previews working when the organization loses deposit entitlement", async () => {
     await seedAuth({ entitleGround: false });
-    const program = await seedProgramWallet();
+    const program = await seedProgramWallet({});
     const preview = vi.spyOn(portfolioClient, "previewPortfolioWithdrawal").mockResolvedValue({
       amountRequestedUsd: "25.50",
       feeUsd: "0.10",
@@ -1559,10 +1485,15 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       .mockResolvedValue(WITHDRAWAL);
     vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
-    const previewRes = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
-      amountUsd: "25.50",
-      token: "usdc",
-    });
+    const previewRes = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawal-preview"),
+      {
+        amountUsd: "25.50",
+        token: "usdc",
+      },
+      {}
+    );
     expect(previewRes.status).toBe(200);
     const previewBody = (await previewRes.json()) as { data: { preview: { feeUsd: string } } };
     expect(previewBody.data.preview.feeUsd).toBe("0.10");
@@ -1572,14 +1503,17 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       token: "usdc",
     });
 
-    const withdrawalRes = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
-      // Money-out still gates on credentials alone; the key is a retry-safety
-      // requirement every caller carries, not an entitlement check.
-      requestId: "5b0e0c9a-7f3d-4a21-9c46-2f8ab1d5e740",
-      amountUsd: "25.50",
-      token: "usdc",
-      destinationAddress: SOLANA_DESTINATION,
-    });
+    const withdrawalRes = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals"),
+      {
+        requestId: "5b0e0c9a-7f3d-4a21-9c46-2f8ab1d5e740",
+        amountUsd: "25.50",
+        token: "usdc",
+        destinationAddress: SOLANA_DESTINATION,
+      },
+      {}
+    );
     expect(withdrawalRes.status).toBe(201);
     const withdrawalBody = (await withdrawalRes.json()) as {
       data: { withdrawal: { withdrawalRef: string; status: string } };
@@ -1589,21 +1523,19 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
     const statusRes = await requestEarn(
       "GET",
-      programPath(program.id, `/withdrawals/${WITHDRAWAL.withdrawalRef}`)
+      programPath(program.id, `/withdrawals/${WITHDRAWAL.withdrawalRef}`),
+      undefined,
+      {}
     );
     expect(statusRes.status).toBe(200);
     const statusBody = (await statusRes.json()) as { data: { withdrawal: { status: string } } };
     expect(statusBody.data.withdrawal.status).toBe("processing");
   });
 
-  /**
-   * PRO-1675: the preview answers the LIQUIDITY question when asked without an
-   * amount, and that optionality must not reach the payout path.
-   */
   describe("amount-less preview (the liquidity read)", () => {
     it("omits amountUsd from the provider call and answers with the lane ceiling", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       const preview = vi.spyOn(portfolioClient, "previewPortfolioWithdrawal").mockResolvedValue({
         feeUsd: "0.10",
         withdrawableUsd: "412.50",
@@ -1615,65 +1547,70 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
         },
       });
 
-      const res = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
-        token: "usdc",
-      });
+      const res = await requestEarn(
+        "POST",
+        programPath(program.id, "/withdrawal-preview"),
+        {
+          token: "usdc",
+        },
+        {}
+      );
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         data: { preview: { withdrawableUsd: string; amountRequestedUsd?: string } };
       };
       expect(body.data.preview.withdrawableUsd).toBe("412.50");
-      // Absent, not null: nothing was requested, so nothing was requested.
+
       expect(body.data.preview.amountRequestedUsd).toBeUndefined();
-      // The provider input must not carry the key at all — a provider keys the
-      // two request forms off its PRESENCE, and `undefined` is not omission
-      // once it has been spread into an object literal.
-      const [, input] = preview.mock.calls[0] ?? [];
+
+      const [, input] = required(preview.mock.calls[0]);
       expect(input).toEqual({ providerWalletRef: WALLET_REF, token: "usdc" });
       expect(input && "amountUsd" in input).toBe(false);
     });
 
     it("keeps amountUsd required on the payout path even though the preview made it optional", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       const createWithdrawal = vi.spyOn(portfolioClient, "createPortfolioWithdrawal");
 
-      // The regression this pins: the create schema used to `.extend()` the
-      // preview schema, so relaxing the preview would have silently accepted a
-      // payout with no amount. If this 400 ever becomes a 201, the two schemas
-      // have been re-coupled.
-      const res = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
-        requestId: "0b1f2c3d-4e5a-4b6c-8d9e-0f1a2b3c4d5e",
-        token: "usdc",
-        destinationAddress: SOLANA_DESTINATION,
-      });
+      const res = await requestEarn(
+        "POST",
+        programPath(program.id, "/withdrawals"),
+        {
+          requestId: "0b1f2c3d-4e5a-4b6c-8d9e-0f1a2b3c4d5e",
+          token: "usdc",
+          destinationAddress: SOLANA_DESTINATION,
+        },
+        {}
+      );
 
       expect(res.status).toBe(400);
       expect(createWithdrawal).not.toHaveBeenCalled();
     });
 
     it("still 503s without credentials rather than inventing a liquidity figure", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       const preview = vi.spyOn(portfolioClient, "previewPortfolioWithdrawal");
       env.UPSHIFT_SANDBOX_API_KEY = undefined;
 
-      const res = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
-        token: "usdc",
-      });
+      const res = await requestEarn(
+        "POST",
+        programPath(program.id, "/withdrawal-preview"),
+        {
+          token: "usdc",
+        },
+        {}
+      );
 
       expect(res.status).toBe(503);
       expect(preview).not.toHaveBeenCalled();
     });
   });
 
-  // The provider dedupes a withdrawal on its request id, and since PRO-1628
-  // that same derived id also anchors the SDP-side intent row — a two-layer
-  // defence. Every case here exists to keep the id stable across attempts and
-  // to prove a replay never reaches the provider as a second create.
   describe("withdrawal idempotency", () => {
-    const withdrawalBody = (extra: Record<string, unknown> = {}) => ({
+    const withdrawalBody = (extra: Record<string, unknown>) => ({
       amountUsd: "10.00",
       token: "usdc",
       destinationAddress: SOLANA_DESTINATION,
@@ -1681,8 +1618,8 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     });
 
     it("resolves a caller-key retry from the ledger: one provider create, replay served live", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       const createWithdrawal = vi
         .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
@@ -1690,76 +1627,67 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
         .spyOn(portfolioClient, "getPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
-      // Every org shares one provider account, so a key that reached the
-      // provider verbatim would let two tenants collide on the same pasted
-      // UUID — one of them getting the other's withdrawal replayed back.
       const callerKey = "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d";
       const first = await requestEarn(
         "POST",
         programPath(program.id, "/withdrawals"),
-        withdrawalBody({ requestId: callerKey })
+        withdrawalBody({ requestId: callerKey }),
+        {}
       );
       const retry = await requestEarn(
         "POST",
         programPath(program.id, "/withdrawals"),
-        withdrawalBody({ requestId: callerKey })
+        withdrawalBody({ requestId: callerKey }),
+        {}
       );
 
       expect(first.status).toBe(201);
-      // The retry is a REPLAY: nothing was created, so it answers 200 with
-      // live provider state and never re-sends the create.
+
       expect(retry.status).toBe(200);
       const retryBody = (await retry.json()) as { data: { withdrawal: { status: string } } };
       expect(retryBody.data.withdrawal.status).toBe("processing");
       expect(createWithdrawal).toHaveBeenCalledTimes(1);
       expect(getWithdrawal).toHaveBeenCalledTimes(1);
-      const sent = createWithdrawal.mock.calls[0]?.[1]?.requestId;
+      const sent = required(required(createWithdrawal.mock.calls[0])[1]).requestId;
       expect(sent).not.toBe(callerKey);
       expect(sent).toMatch(UUID_V4_PATTERN);
 
-      // Exactly ONE intent row anchors both attempts.
       const count = await getDb(env)
         .prepare(
           "SELECT COUNT(*)::int AS total FROM earn_movements WHERE execution_model = 'custodial'"
         )
         .first<{ total: number }>();
-      expect(count?.total).toBe(1);
+      expect(required(count).total).toBe(1);
     });
 
     it("sends a key no other organization could produce from the same input", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       const createWithdrawal = vi
         .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
-      // The boilerplate case: every tenant pastes the same placeholder UUID.
-      // One provider account serves them all, so an unscoped key would make
-      // the second tenant's withdrawal collide with the first's. (A v4-shaped
-      // placeholder — the RFC's own 123e4567… example is v1 and the schema
-      // rejects it outright.)
       const shared = "00000000-0000-4000-8000-000000000000";
       const res = await requestEarn(
         "POST",
         programPath(program.id, "/withdrawals"),
-        withdrawalBody({ requestId: shared })
+        withdrawalBody({ requestId: shared }),
+        {}
       );
 
       expect(res.status).toBe(201);
-      const sent = createWithdrawal.mock.calls[0]?.[1]?.requestId;
+      const sent = required(required(createWithdrawal.mock.calls[0])[1]).requestId;
       expect(sent).toBe(deriveProviderRequestId(["earn_program_withdrawal", WALLET_REF], shared));
-      // A different program wallet — another org, or another program of this
-      // org since PRO-1670 — cannot reach it.
+
       expect(sent).not.toBe(
         deriveProviderRequestId(["earn_program_withdrawal", "another-org-wallet"], shared)
       );
     });
 
     it("re-drives a crash-window retry with the SAME derived key from one Idempotency-Key", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
-      // First attempt: the provider call dies after the intent row was
-      // written (network blip, process crash — the ref-less window).
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
+
       const createWithdrawal = vi
         .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockRejectedValueOnce(new Error("connection reset"))
@@ -1769,11 +1697,11 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       const first = await requestEarn(
         "POST",
         programPath(program.id, "/withdrawals"),
-        withdrawalBody(),
+        withdrawalBody({}),
         headers
       );
       expect(first.status).toBe(500);
-      // The intent row survives the failure, ref-less and re-drivable.
+
       const stranded = await getDb(env)
         .prepare("SELECT status, provider_reference FROM earn_movements ORDER BY created_at DESC")
         .first<{ status: string; provider_reference: string | null }>();
@@ -1782,19 +1710,19 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       const retry = await requestEarn(
         "POST",
         programPath(program.id, "/withdrawals"),
-        withdrawalBody(),
+        withdrawalBody({}),
         headers
       );
 
       expect(retry.status).toBe(201);
       const [firstCall, retryCall] = createWithdrawal.mock.calls;
-      // Must be v4-SHAPED even though it is derived: providers reject other
-      // version outright (`400 requestId must be a valid UUID v4`).
-      expect(firstCall?.[1]?.requestId).toMatch(UUID_V4_PATTERN);
-      // The whole point: the provider sees ONE withdrawal id across the crash,
-      // so it replays rather than paying out twice.
-      expect(retryCall?.[1]?.requestId).toBe(firstCall?.[1]?.requestId);
-      // And the re-drive healed the row.
+
+      expect(required(required(firstCall)[1]).requestId).toMatch(UUID_V4_PATTERN);
+
+      expect(required(required(retryCall)[1]).requestId).toBe(
+        required(required(firstCall)[1]).requestId
+      );
+
       const healed = await getDb(env)
         .prepare("SELECT status, provider_reference FROM earn_movements ORDER BY created_at DESC")
         .first<{ status: string; provider_reference: string | null }>();
@@ -1802,34 +1730,30 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     });
 
     it("keeps two different Idempotency-Keys apart", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       const createWithdrawal = vi
         .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
-      await requestEarn("POST", programPath(program.id, "/withdrawals"), withdrawalBody(), {
+      await requestEarn("POST", programPath(program.id, "/withdrawals"), withdrawalBody({}), {
         "Idempotency-Key": "payout-a",
       });
-      await requestEarn("POST", programPath(program.id, "/withdrawals"), withdrawalBody(), {
+      await requestEarn("POST", programPath(program.id, "/withdrawals"), withdrawalBody({}), {
         "Idempotency-Key": "payout-b",
       });
 
       const [a, b] = createWithdrawal.mock.calls;
-      expect(a?.[1]?.requestId).not.toBe(b?.[1]?.requestId);
+      expect(required(required(a)[1]).requestId).not.toBe(required(required(b)[1]).requestId);
     });
 
     it("refuses a withdrawal carrying both key sources", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       const createWithdrawal = vi
         .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
-      // The trap this guards: a retry layer that preserves headers while the
-      // request layer mints a fresh body id per attempt keeps Idempotency-Key
-      // stable and varies requestId. Any precedence rule would follow the
-      // varying one and book a SECOND withdrawal, so refuse the ambiguity.
       const res = await requestEarn(
         "POST",
         programPath(program.id, "/withdrawals"),
@@ -1842,8 +1766,8 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
     });
 
     it("refuses a withdrawal carrying no idempotency key at all", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       const createWithdrawal = vi
         .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
@@ -1851,26 +1775,30 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       const res = await requestEarn(
         "POST",
         programPath(program.id, "/withdrawals"),
-        withdrawalBody()
+        withdrawalBody({}),
+        {}
       );
 
-      // Refusing beats accepting: a server-minted random id is fresh per
-      // attempt, so it would turn a retry into a second payout.
       expect(res.status).toBe(400);
       expect(createWithdrawal).not.toHaveBeenCalled();
     });
   });
 
   it("rejects destinations that are not base58 Solana addresses", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     const createWithdrawal = vi.spyOn(portfolioClient, "createPortfolioWithdrawal");
 
-    const res = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
-      amountUsd: "10.00",
-      token: "usdc",
-      destinationAddress: "0x52908400098527886E0F7030069857D2E4169EE7",
-    });
+    const res = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals"),
+      {
+        amountUsd: "10.00",
+        token: "usdc",
+        destinationAddress: "0x52908400098527886E0F7030069857D2E4169EE7",
+      },
+      {}
+    );
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
@@ -1883,7 +1811,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 describe("Earn program — withdrawal ledger (PRO-1628)", () => {
   const LEDGER_KEY = "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
 
-  const createBody = (extra: Record<string, unknown> = {}) => ({
+  const createBody = (extra: Record<string, unknown>) => ({
     requestId: LEDGER_KEY,
     amountUsd: "10.00",
     token: "usdc",
@@ -1900,54 +1828,64 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
           ORDER BY movement.created_at DESC, movement.id DESC`
       )
       .all<Record<string, unknown>>();
-    return results ?? [];
+    return results;
   }
 
   it("persists an intent row and advances it on provider acceptance", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
-    const res = await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
+    const res = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals"),
+      createBody({}),
+      {}
+    );
     expect(res.status).toBe(201);
 
     const [row] = await readLedgerRows();
-    // One id space for every movement now; only migrated history keeps a
-    // per-family prefix, which is why nothing may parse an id for its kind.
-    expect(row?.id).toMatch(/^earn_movement_/);
-    expect(row?.status).toBe("processing");
-    expect(row?.provider).toBe("upshift");
-    expect(row?.wallet_id).toBe(program.id);
-    expect(row?.provider_reference).toBe(WITHDRAWAL.withdrawalRef);
-    expect(row?.amount_requested).toBe("10.00");
-    expect(row?.destination_address).toBe(SOLANA_DESTINATION);
-    // The anchor is the DERIVED id, never the caller's raw key.
-    expect(row?.request_id).toBe(
+
+    expect(required(row).id).toMatch(/^earn_movement_/);
+    expect(required(row).status).toBe("processing");
+    expect(required(row).provider).toBe("upshift");
+    expect(required(row).wallet_id).toBe(program.id);
+    expect(required(row).provider_reference).toBe(WITHDRAWAL.withdrawalRef);
+    expect(required(row).amount_requested).toBe("10.00");
+    expect(required(row).destination_address).toBe(SOLANA_DESTINATION);
+
+    expect(required(row).request_id).toBe(
       deriveProviderRequestId(["earn_program_withdrawal", WALLET_REF], LEDGER_KEY)
     );
-    expect(row?.idempotency_fingerprint).toBeTruthy();
-    expect(row?.provider_data).toMatchObject({ lastObservation: { status: "processing" } });
-    // Money-out forensics: who and which key pulled the money.
-    expect(row?.created_by).toBe(TEST_USER.id);
-    expect(row?.initiated_by_key_id).toBe(TEST_API_KEY.id);
+    expect(required(row).idempotency_fingerprint).toBeTruthy();
+    expect(required(row).provider_data).toMatchObject({
+      lastObservation: { status: "processing" },
+    });
+
+    expect(required(row).created_by).toBe(TEST_USER.id);
+    expect(required(row).initiated_by_key_id).toBe(TEST_API_KEY.id);
   });
 
   it("refuses the same key with a different payload before any provider call", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     const createWithdrawal = vi
       .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
 
-    const first = await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
+    const first = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals"),
+      createBody({}),
+      {}
+    );
     expect(first.status).toBe(201);
 
-    // An idempotency key names ONE intent; changing the payload under it is a
-    // conflict — answered by SDP without touching the provider.
     const conflicting = await requestEarn(
       "POST",
       programPath(program.id, "/withdrawals"),
-      createBody({ amountUsd: "11.00" })
+      createBody({ amountUsd: "11.00" }),
+      {}
     );
 
     expect(conflicting.status).toBe(409);
@@ -1958,8 +1896,8 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
   });
 
   it("treats decimal-equivalent amounts as one request — never stricter than the provider", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     const createWithdrawal = vi
       .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
@@ -1968,14 +1906,15 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     const first = await requestEarn(
       "POST",
       programPath(program.id, "/withdrawals"),
-      createBody({ amountUsd: "10.00" })
+      createBody({ amountUsd: "10.00" }),
+      {}
     );
-    // The provider wire sends amountUsd as a JSON number, so '10' IS '10.00'
-    // to the provider — SDP's fingerprint must replay it, not 409 it.
+
     const retry = await requestEarn(
       "POST",
       programPath(program.id, "/withdrawals"),
-      createBody({ amountUsd: "10" })
+      createBody({ amountUsd: "10" }),
+      {}
     );
 
     expect(first.status).toBe(201);
@@ -1984,8 +1923,8 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
   });
 
   it("persists provider observations from the withdrawal detail poll", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
     vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue({
       ...WITHDRAWAL,
@@ -1995,52 +1934,56 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       completedAt: "2026-08-11T05:00:00.000Z",
     });
 
-    await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
+    await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody({}), {});
     const res = await requestEarn(
       "GET",
-      programPath(program.id, `/withdrawals/${WITHDRAWAL.withdrawalRef}`)
+      programPath(program.id, `/withdrawals/${WITHDRAWAL.withdrawalRef}`),
+      undefined,
+      {}
     );
 
     expect(res.status).toBe(200);
     const [row] = await readLedgerRows();
-    expect(row?.status).toBe("completed");
-    expect(row?.amount_settled).toBe("9.90");
-    expect(row?.fee_amount).toBe("0.10");
-    expect(row?.settled_at).toBe("2026-08-11T05:00:00.000Z");
+    expect(required(row).status).toBe("completed");
+    expect(required(row).amount_settled).toBe("9.90");
+    expect(required(row).fee_amount).toBe("0.10");
+    expect(required(row).settled_at).toBe("2026-08-11T05:00:00.000Z");
   });
 
   it("serves live state for a pre-ledger withdrawal without inventing a row", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue({
       ...WITHDRAWAL,
       withdrawalRef: "wd_pre_ledger",
     });
 
-    const res = await requestEarn("GET", programPath(program.id, "/withdrawals/wd_pre_ledger"));
+    const res = await requestEarn(
+      "GET",
+      programPath(program.id, "/withdrawals/wd_pre_ledger"),
+      undefined,
+      {}
+    );
 
     expect(res.status).toBe(200);
     await expect(readLedgerRows()).resolves.toHaveLength(0);
   });
 
   it("404s a foreign organization's withdrawal ref BEFORE any provider call (BOLA guard)", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     const getWithdrawal = vi.spyOn(portfolioClient, "getPortfolioWithdrawal");
 
-    // A sibling organization with its own program and a ledger-known
-    // withdrawal ref — the shared provider account is exactly why the ledger,
-    // not the provider, must own cross-tenant scoping.
     const db = getDb(env);
     await db.batch([
       db
         .prepare(
           "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
         )
-        .bind("org_earn_program_victim", "Victim Org", "earn-program-victim"),
+        .bind("org_test_earn_program_victim", "Victim Org", "earn-program-victim"),
     ]);
     await seedDefaultProjects(db, {
-      organizationId: "org_earn_program_victim",
+      organizationId: "org_test_earn_program_victim",
       createdBy: TEST_USER.id,
       members: [],
       ids: {
@@ -2050,7 +1993,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     });
     const repo = createPostgresEarnRepository(db);
     const victimWallet = await repo.insertProviderWallet({
-      organizationId: "org_earn_program_victim",
+      organizationId: "org_test_earn_program_victim",
       projectId: "prj_earn_program_victim",
       environment: "sandbox",
       provider: "upshift",
@@ -2061,10 +2004,10 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     const victimRow = await createPostgresEarnMovementsRepository(
       getDb(env)
     ).createCustodialMovement({
-      organizationId: "org_earn_program_victim",
+      organizationId: "org_test_earn_program_victim",
       projectId: "prj_earn_program_victim",
       environment: "sandbox",
-      providerWalletId: victimWallet?.id ?? "",
+      providerWalletId: required(victimWallet).id,
       provider: "upshift",
       amountRequestedUsd: "50.00",
       payoutToken: "usdc",
@@ -2076,13 +2019,18 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       initiatedByKeyId: null,
     });
     await createPostgresEarnMovementsRepository(getDb(env)).updateCustodialMovementGuarded({
-      selector: { movementId: victimRow?.id ?? "" },
-      organizationId: "org_earn_program_victim",
+      selector: { movementId: required(victimRow).id },
+      organizationId: "org_test_earn_program_victim",
       toStatus: "processing",
       providerReference: "wd_victim_org",
     });
 
-    const res = await requestEarn("GET", programPath(program.id, "/withdrawals/wd_victim_org"));
+    const res = await requestEarn(
+      "GET",
+      programPath(program.id, "/withdrawals/wd_victim_org"),
+      undefined,
+      {}
+    );
 
     expect(res.status).toBe(404);
     expect(getWithdrawal).not.toHaveBeenCalled();
@@ -2090,23 +2038,25 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
 
   describe("GET /programs/:programId/withdrawals — the ledger list", () => {
     it("returns the house list envelope from the ledger, newest first", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       vi.spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValueOnce({ ...WITHDRAWAL, withdrawalRef: "wd_a" })
         .mockResolvedValueOnce({ ...WITHDRAWAL, withdrawalRef: "wd_b", status: "completed" });
       await requestEarn(
         "POST",
         programPath(program.id, "/withdrawals"),
-        createBody({ requestId: crypto.randomUUID(), amountUsd: "10.00" })
+        createBody({ requestId: crypto.randomUUID(), amountUsd: "10.00" }),
+        {}
       );
       await requestEarn(
         "POST",
         programPath(program.id, "/withdrawals"),
-        createBody({ requestId: crypto.randomUUID(), amountUsd: "20.00" })
+        createBody({ requestId: crypto.randomUUID(), amountUsd: "20.00" }),
+        {}
       );
 
-      const res = await requestEarn("GET", programPath(program.id, "/withdrawals"));
+      const res = await requestEarn("GET", programPath(program.id, "/withdrawals"), undefined, {});
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
@@ -2122,18 +2072,18 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       expect(body.data.pageSize).toBe(20);
       expect(body.data.withdrawals.map((w) => w.withdrawalRef).sort()).toEqual(["wd_a", "wd_b"]);
       const [record] = body.data.withdrawals;
-      expect(record?.id).toMatch(/^earn_movement_/);
-      expect(record?.provider).toBe("upshift");
-      expect(record?.destinationAddress).toBe(SOLANA_DESTINATION);
-      // Ledger records never leak the derivation internals.
+      expect(required(record).id).toMatch(/^earn_movement_/);
+      expect(required(record).provider).toBe("upshift");
+      expect(required(record).destinationAddress).toBe(SOLANA_DESTINATION);
+
       expect(record).not.toHaveProperty("requestId");
       expect(record).not.toHaveProperty("idempotencyFingerprint");
 
-      // Pagination is DB-windowed, not in-memory: a 1-per-page second page
-      // still reports the full total and exactly one row.
       const page2 = await requestEarn(
         "GET",
-        programPath(program.id, "/withdrawals?page=2&pageSize=1")
+        programPath(program.id, "/withdrawals?page=2&pageSize=1"),
+        undefined,
+        {}
       );
       expect(page2.status).toBe(200);
       const page2Body = (await page2.json()) as {
@@ -2149,45 +2099,42 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     });
 
     it("serves the audit trail even with provider credentials absent (exit-safety-adjacent)", async () => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
-      await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
+      await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody({}), {});
 
-      // Pull the provider's credentials entirely: live reads break…
       env.UPSHIFT_SANDBOX_API_KEY = undefined;
-      const live = await requestEarn("GET", programPath(program.id));
+      const live = await requestEarn("GET", programPath(program.id, ""), undefined, {});
       expect(live.status).toBe(503);
 
-      // …but the ledger keeps answering. History must outlive credentials.
-      const list = await requestEarn("GET", programPath(program.id, "/withdrawals"));
+      const list = await requestEarn("GET", programPath(program.id, "/withdrawals"), undefined, {});
       expect(list.status).toBe(200);
       const body = (await list.json()) as { data: { total: number } };
       expect(body.data.total).toBe(1);
     });
 
     it("returns 404 for a program id that does not exist", async () => {
-      await seedAuth();
+      await seedAuth({ entitleGround: true });
 
       const res = await requestEarn(
         "GET",
-        programPath("earn_provider_wallet_missing", "/withdrawals")
+        programPath("earn_provider_wallet_missing", "/withdrawals"),
+        undefined,
+        {}
       );
 
       expect(res.status).toBe(404);
     });
 
-    it("never serves the sandbox ledger to a production-project session", async () => {
-      await seedAuth();
-      await seedSessionAuth();
-      const program = await seedProgramWallet();
+    it("never serves the sandbox ledger to a production-project Clerk", async () => {
+      await seedAuth({ entitleGround: true });
+      await seedClerkAuth();
+      const program = await seedProgramWallet({});
       vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
-      await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody());
+      await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody({}), {});
 
-      // The program id resolves through (organization, environment), so the
-      // sandbox program — and therefore its wallet-scoped ledger — is
-      // structurally unreachable from a production session.
-      const res = await requestEarnAsSession(
+      const res = await requestEarnAsClerk(
         "GET",
         programPath(program.id, "/withdrawals"),
         TEST_PRODUCTION_PROJECT.id
@@ -2198,18 +2145,6 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
   });
 });
 
-/**
- * HOO-1559. `POST /programs/:programId/withdrawals` pays a caller-supplied
- * destination out of the organization's provider account. It used to be gated
- * on `earn:write` alone: no wallet binding was asserted and no policy ran, so
- * a selected-scope key bound to one low-value wallet could drain the whole
- * program to any address, and an organization's deny rules, limits, destination
- * controls and approval requirements were never consulted.
- *
- * A program is a provider ACCOUNT, not a custody wallet, so there is nothing
- * for a binding to name — a wallet-scoped key is refused outright instead —
- * and the governing profile is the API key's own.
- */
 describe("Earn program — withdrawal authorization (HOO-1559)", () => {
   const WALLET_SCOPED_KEY = {
     id: "key_earn_program_scoped",
@@ -2217,7 +2152,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     prefix: "sk_test_eps",
   };
 
-  const withdrawBody = (extra: Record<string, unknown> = {}) => ({
+  const withdrawBody = (extra: Record<string, unknown>) => ({
     requestId: crypto.randomUUID(),
     amountUsd: "25.50",
     token: "usdc",
@@ -2225,11 +2160,6 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     ...extra,
   });
 
-  /**
-   * A key bound to ONE wallet, which is exactly the shape the old gate ignored.
-   * The binding names a custody wallet that has nothing to do with the program:
-   * that is the point — the program has no custody wallet at all.
-   */
   async function seedWalletScopedKey(): Promise<void> {
     const keyHash = await hashString(WALLET_SCOPED_KEY.raw, env.API_KEY_PEPPER);
     await seedCachedApiKey(env, keyHash, {
@@ -2275,10 +2205,9 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     );
   }
 
-  /** An ACTIVE control profile on the test key: profile + revision + activation. */
   async function seedApiKeyControlProfile(params: {
     rules: Record<string, unknown>[];
-    defaultAction?: string;
+    defaultAction: string;
   }): Promise<void> {
     await getDb(env).batch([
       getDb(env)
@@ -2298,7 +2227,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
           "akcpr_earn_program_1",
           "akcp_earn_program",
           JSON.stringify(params.rules),
-          params.defaultAction ?? "allow",
+          params.defaultAction,
           TEST_USER.id,
           "2026-09-07T00:00:00.000Z"
         ),
@@ -2335,13 +2264,13 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     const row = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS total FROM earn_movements")
       .first<{ total: number }>();
-    return row?.total ?? 0;
+    return required(row).total;
   }
 
   it("refuses a wallet-scoped key on the payout, before the provider is driven", async () => {
-    await seedAuth();
+    await seedAuth({ entitleGround: true });
     await seedWalletScopedKey();
-    const program = await seedProgramWallet();
+    const program = await seedProgramWallet({});
     const createWithdrawal = vi
       .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
@@ -2349,19 +2278,19 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     const res = await requestAsWalletScopedKey(
       "POST",
       programPath(program.id, "/withdrawals"),
-      withdrawBody()
+      withdrawBody({})
     );
 
     expect(res.status).toBe(403);
     expect(createWithdrawal).not.toHaveBeenCalled();
-    // Nothing was intended either: the refusal precedes the ledger insert.
+
     await expect(countMovements()).resolves.toBe(0);
   });
 
   it("refuses a wallet-scoped key on the liquidity preview it shares a chain with", async () => {
-    await seedAuth();
+    await seedAuth({ entitleGround: true });
     await seedWalletScopedKey();
-    const program = await seedProgramWallet();
+    const program = await seedProgramWallet({});
     const preview = vi.spyOn(portfolioClient, "previewPortfolioWithdrawal");
 
     const res = await requestAsWalletScopedKey(
@@ -2375,20 +2304,19 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
   });
 
   it("still serves an unbound key, and records the payout as a governed operation", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
     const res = await requestEarn(
       "POST",
       programPath(program.id, "/withdrawals"),
-      withdrawBody({ requestId: "1d7f9a30-4c21-4f0e-9f66-2b8a51c7e0d4" })
+      withdrawBody({ requestId: "1d7f9a30-4c21-4f0e-9f66-2b8a51c7e0d4" }),
+      {}
     );
 
     expect(res.status).toBe(201);
-    // The audit row is the proof the gate ran at all: no custody wallet (a
-    // program is a provider account) and the provider wallet as the identity a
-    // destination or amount rule is read against.
+
     expect(await readWalletOperations()).toMatchObject([
       {
         status: "evaluated",
@@ -2404,9 +2332,10 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
   });
 
   it("denies a destination the key's policy forbids, before the provider is driven", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     await seedApiKeyControlProfile({
+      defaultAction: "allow",
       rules: [
         {
           id: "destination-allowlist",
@@ -2423,7 +2352,8 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     const res = await requestEarn(
       "POST",
       programPath(program.id, "/withdrawals"),
-      withdrawBody({ requestId: "6c2d1b84-3f57-4a0d-9d2b-7e41f5a9c308" })
+      withdrawBody({ requestId: "6c2d1b84-3f57-4a0d-9d2b-7e41f5a9c308" }),
+      {}
     );
 
     expect(res.status).toBe(403);
@@ -2431,15 +2361,15 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     expect(body.error.code).toBe("FORBIDDEN");
     expect(body.error.details.decision).toBe("deny");
 
-    // The whole point: refused BEFORE the payout, and with no intent recorded.
     expect(createWithdrawal).not.toHaveBeenCalled();
     await expect(countMovements()).resolves.toBe(0);
   });
 
   it("holds a payout the policy requires approval for, and a retry re-answers the same hold", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     await seedApiKeyControlProfile({
+      defaultAction: "allow",
       rules: [{ id: "approve-everything", kind: "always", action: "approval_required" }],
     });
     const createWithdrawal = vi
@@ -2447,13 +2377,10 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
       .mockResolvedValue(WITHDRAWAL);
     const body = withdrawBody({ requestId: "b5a0c9e2-8d14-4b73-9c5f-0e6a2d8f4713" });
 
-    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
     expect(held.status).toBe(202);
 
-    // A retry of a held request must answer with the SAME hold. Opening a
-    // second approval per retry would let a caller manufacture approvals, and
-    // an approver deciding one of several duplicates could pay out twice.
-    const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
     expect(retried.status).toBe(202);
 
     expect(createWithdrawal).not.toHaveBeenCalled();
@@ -2464,14 +2391,10 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
   });
 });
 
-/**
- * The two halves of HOO-1559 that only fail once the gate exists: the
- * ownership widening it needed, and the approval path it opened.
- */
 describe("Earn program — governed payout, execution and blast radius (HOO-1559)", () => {
   it("admits the program as an operation target for its OWN type only", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     const repo = createPostgresPolicyRepository(
       getDb(env),
       createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
@@ -2501,9 +2424,6 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
       })
     ).resolves.not.toBeNull();
 
-    // Another family naming the same provider wallet must NOT inherit the
-    // admission: proving ownership through an Earn link row is a statement
-    // about Earn programs, not a second way to claim any target at all.
     await expect(
       repo.createWalletOperation({
         ...candidate,
@@ -2514,18 +2434,11 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
     ).resolves.toBeNull();
   });
 
-  /**
-   * The approval executor replays the STORED BODY — `requestId` included — and
-   * adds an `Idempotency-Key` header it minted itself when the original request
-   * carried none. This route refuses a request that sends both, so without an
-   * exemption every approved body-keyed withdrawal 400s at execution: money
-   * held by policy that could never be paid.
-   */
   it.each(["recovery", "http"])(
     "pays out a body-keyed withdrawal through %s approval execution",
     async (execution) => {
-      await seedAuth();
-      const program = await seedProgramWallet();
+      await seedAuth({ entitleGround: true });
+      const program = await seedProgramWallet({});
       await getDb(env)
         .prepare(
           `INSERT INTO api_key_control_profiles
@@ -2565,14 +2478,17 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
         .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
-      // The caller keys with body `requestId`, the form this route accepts and
-      // the vault routes reject — which is why the vault suites never caught it.
-      const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
-        requestId: "7f3c8e51-2a94-4d6b-b0e7-1c5a9f28d403",
-        amountUsd: "25.50",
-        token: "usdc",
-        destinationAddress: SOLANA_DESTINATION,
-      });
+      const held = await requestEarn(
+        "POST",
+        programPath(program.id, "/withdrawals"),
+        {
+          requestId: "7f3c8e51-2a94-4d6b-b0e7-1c5a9f28d403",
+          amountUsd: "25.50",
+          token: "usdc",
+          destinationAddress: SOLANA_DESTINATION,
+        },
+        {}
+      );
       expect(held.status).toBe(202);
       expect(createWithdrawal).not.toHaveBeenCalled();
       const heldBody = (await held.json()) as {
@@ -2599,13 +2515,13 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
         await getDb(env).batch([
           getDb(env).prepare(
             `INSERT INTO users (id, email, email_verified, status)
-           VALUES ('usr_program_approver', 'program-approver@example.com', 1, 'active')`
+           VALUES ('usr_test_program_approver', 'program-approver@example.com', 1, 'active')`
           ),
           getDb(env)
             .prepare(
               `INSERT INTO api_keys (id, organization_id, project_id, created_by, name,
              key_prefix, key_hash, role, permissions, status)
-           VALUES ('key_program_approver', ?, ?, 'usr_program_approver', 'Approver',
+           VALUES ('key_program_approver', ?, ?, 'usr_test_program_approver', 'Approver',
              'sk_test_prog', ?, 'api_admin', '["*"]', 'active')`
             )
             .bind(TEST_ORG.id, TEST_PROJECT.id, approverHash),
@@ -2629,7 +2545,6 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
         }
       }
 
-      // The payout the approval authorized actually left, exactly once.
       expect(createWithdrawal).toHaveBeenCalledTimes(1);
       const executed = await policyRepository.getWalletOperationById(
         heldBody.error.details.walletOperationId
@@ -2639,19 +2554,10 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
   );
 });
 
-/**
- * The provider account is shared platform-wide and a program read is a live
- * fan-out against it — a `GET /programs` page is two provider round trips per
- * row — so an unmetered caller spends SDP's money at whatever rate it likes.
- *
- * The exclusion matters as much as the quota: `meteredQuota` fails closed, and
- * a 5xx on the way OUT of a position is the failure ADR 0002 exit safety rules
- * out, so no money-out route and no exit quote carries one.
- */
 describe("Earn program — metered quotas", () => {
   it("429s a program read once the actor's quota is exhausted", async () => {
-    await seedAuth();
-    await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    await seedProgramWallet({});
     const getWallet = stubProgramReads();
     await seedRateLimit(
       env,
@@ -2659,19 +2565,19 @@ describe("Earn program — metered quotas", () => {
       60
     );
 
-    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`);
+    const res = await requestEarn("GET", `${PROGRAMS_PATH}?provider=upshift`, undefined, {});
 
     expect(res.status).toBe(429);
     expect((await res.json()) as { error: { code: string } }).toMatchObject({
       error: { code: "RATE_LIMITED" },
     });
-    // Refused before the money was spent, which is the whole point.
+
     expect(getWallet).not.toHaveBeenCalled();
   });
 
   it("never lets an exhausted quota stand between a caller and its money", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     const createWithdrawal = vi
       .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
@@ -2679,24 +2585,33 @@ describe("Earn program — metered quotas", () => {
       .spyOn(portfolioClient, "previewPortfolioWithdrawal")
       .mockResolvedValue({ withdrawableUsd: "100.00" } as never);
 
-    // Both Earn quotas exhausted for this actor AND the whole organization.
     for (const quota of ["earn-provider-read", "earn-chain-read"]) {
       await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`, 1000);
       await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}`, 1000);
     }
 
-    const liquidity = await requestEarn("POST", programPath(program.id, "/withdrawal-preview"), {
-      token: "usdc",
-    });
+    const liquidity = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawal-preview"),
+      {
+        token: "usdc",
+      },
+      {}
+    );
     expect(liquidity.status).toBe(200);
     expect(preview).toHaveBeenCalledTimes(1);
 
-    const withdrawal = await requestEarn("POST", programPath(program.id, "/withdrawals"), {
-      requestId: "2e8b1f47-5c93-4a2d-8e16-9d4f0a7b3c25",
-      amountUsd: "25.50",
-      token: "usdc",
-      destinationAddress: SOLANA_DESTINATION,
-    });
+    const withdrawal = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals"),
+      {
+        requestId: "2e8b1f47-5c93-4a2d-8e16-9d4f0a7b3c25",
+        amountUsd: "25.50",
+        token: "usdc",
+        destinationAddress: SOLANA_DESTINATION,
+      },
+      {}
+    );
     expect(withdrawal.status).toBe(201);
     expect(createWithdrawal).toHaveBeenCalledTimes(1);
   });
@@ -2704,8 +2619,8 @@ describe("Earn program — metered quotas", () => {
 
 describe("Earn program: withdrawal audit parity (PRO-1866)", () => {
   it("records the payout with the movement's attribution, and a replay is not re-audited", async () => {
-    await seedAuth();
-    const program = await seedProgramWallet();
+    await seedAuth({ entitleGround: true });
+    const program = await seedProgramWallet({});
     vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
     vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
     const body = {
@@ -2715,7 +2630,7 @@ describe("Earn program: withdrawal audit parity (PRO-1866)", () => {
       destinationAddress: SOLANA_DESTINATION,
     };
 
-    const res = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    const res = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
     expect(res.status).toBe(201);
 
     const movement = await getDb(env)
@@ -2727,26 +2642,23 @@ describe("Earn program: withdrawal audit parity (PRO-1866)", () => {
           "SELECT * FROM audit_logs WHERE action = 'withdraw' AND resource_type = 'earn_movement'"
         )
         .all<Record<string, unknown>>()
-        .then(({ results }) => results ?? []);
+        .then(({ results }) => results);
 
-    // Audit parity: same movement, same actor pair the ledger row carries.
     const rows = await auditRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      resource_id: movement?.id,
+      resource_id: required(movement).id,
       organization_id: TEST_ORG.id,
-      user_id: movement?.created_by,
-      api_key_id: movement?.initiated_by_key_id,
+      user_id: required(movement).created_by,
+      api_key_id: required(movement).initiated_by_key_id,
     });
 
-    // The org audit feed can surface it (PRO-1866 "done when").
     const feed = await new AuditService(getDb(env)).getForOrganization(TEST_ORG.id, {
       action: "withdraw",
     });
-    expect(feed.some((entry) => entry.resourceId === movement?.id)).toBe(true);
+    expect(feed.some((entry) => entry.resourceId === required(movement).id)).toBe(true);
 
-    // A replay of the accepted payout moves no new money: nothing new to audit.
-    const replay = await requestEarn("POST", programPath(program.id, "/withdrawals"), body);
+    const replay = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
     expect(replay.status).toBe(200);
     await expect(auditRows()).resolves.toHaveLength(1);
   });

@@ -33,6 +33,7 @@ import { AppError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { KeychainFireblocksAdapter, type SigningConfigRecord } from "@/services/adapters";
+import { assertLocalSigningAllowed } from "@/services/adapters/signing";
 import { AuditService } from "@/services/audit.service";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
@@ -599,6 +600,7 @@ export class SigningService {
     projectId?: string,
     options?: InitLocalSigningOptions
   ): Promise<InitSigningResult> {
+    assertLocalSigningAllowed(this.env);
     // Check if an active config already exists for this provider.
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "local");
     if (existing) {

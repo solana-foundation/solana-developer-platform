@@ -401,7 +401,7 @@ export function grantedPermissions(c: Context<{ Bindings: Env }>): readonly Perm
   const permissions =
     c.get("apiKey")?.permissions ??
     c.get("clerk")?.permissions ??
-    c.get("session")?.permissions ??
+    c.get("approvedOperationActor")?.permissions ??
     null;
 
   if (!permissions) {
@@ -443,7 +443,7 @@ export function requirePermissions(...required: Permission[]) {
 export function requirePermissionsWhenAuthenticated(...required: Permission[]) {
   const enforce = requirePermissions(...required);
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (!c.get("apiKey") && !c.get("clerk") && !c.get("session")) {
+    if (!c.get("apiKey") && !c.get("clerk") && !c.get("approvedOperationActor")) {
       await next();
       return;
     }
@@ -487,26 +487,22 @@ export function optionalAuth(options: { rejectInvalid?: boolean } = {}) {
 }
 
 /**
- * Unified auth middleware that supports both API key and session auth.
- * Useful for endpoints that can be accessed by both API clients and UI.
+ * Authenticates a request with either an API key or a Clerk JWT, the only two
+ * credentials the platform accepts. Approved-operation replay capabilities
+ * are honoured first and resolve to the original actor.
+ *
+ * @returns Hono middleware that sets the matching auth context or throws 401.
  */
-export function unifiedAuthMiddleware(
-  options: { allowSession?: boolean; allowClerk?: boolean } = {}
-) {
+export function unifiedAuthMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     // Replay capabilities resolve the wallet operation (and its tenant)
     // before authentication, so the lookup runs privileged and the request
     // then narrows to the operation's organization.
-    const replayAuthenticated = await runWithSystemDatabaseIdentity("http:auth", () =>
+    const replay = await runWithSystemDatabaseIdentity("http:auth", () =>
       tryApprovedOperationReplayAuth(c)
     );
-    if (replayAuthenticated) {
-      const organizationId =
-        c.get("apiKey")?.organizationId ?? c.get("session")?.organizationId ?? null;
-      if (!organizationId) {
-        throw new AppError("FORBIDDEN", "Approved wallet operation has no tenant context");
-      }
-      return runWithTenantDatabaseIdentity({ organizationId }, next);
+    if (replay) {
+      return runWithTenantDatabaseIdentity({ organizationId: replay.organizationId }, next);
     }
     // Try API key first
     const apiKey = extractApiKey(c);
@@ -525,19 +521,9 @@ export function unifiedAuthMiddleware(
         return await authMw(c, next);
       }
 
-      // JWT bearer token path (Clerk)
-      if (options.allowClerk) {
-        const { clerkAuthMiddleware } = await import("./clerk-auth");
-        const clerkMw = clerkAuthMiddleware();
-        return await clerkMw(c, next);
-      }
-    }
-
-    // Try session if allowed
-    if (options.allowSession) {
-      const { sessionAuthMiddleware } = await import("./session-auth");
-      const sessionMw = sessionAuthMiddleware();
-      return await sessionMw(c, next);
+      const { clerkAuthMiddleware } = await import("./clerk-auth");
+      const clerkMw = clerkAuthMiddleware();
+      return await clerkMw(c, next);
     }
 
     throw new AppError("UNAUTHORIZED", "API key required");

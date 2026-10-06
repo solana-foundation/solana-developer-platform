@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:local": "node scripts/dev.mjs",
     "build": "pnpm generate:api && pnpm generate:ai && pnpm generate:source && next build",
     "start": "next start --port 3001",
     "pretypecheck": "pnpm generate:source",
@@ -20,10 +19,10 @@
   "dependencies": {
     "@sdp/env-config": "workspace:*",
     "@sdp/types": "workspace:*",
-    "fumadocs-core": "16.15.8",
-    "fumadocs-mdx": "15.4.0",
-    "fumadocs-ui": "16.15.8",
-    "lucide-react": "1.43.0",
+    "fumadocs-core": "16.15.14",
+    "fumadocs-mdx": "15.4.5",
+    "fumadocs-ui": "16.15.14",
+    "lucide-react": "1.48.0",
     "next": "16.3.6",
     "react": "19.3.0",
     "react-dom": "19.3.0"
@@ -31,11 +30,11 @@
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",
     "@types/mdx": "2.0.14",
-    "@types/node": "26.5.1",
+    "@types/node": "26.6.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "tailwindcss": "4.3.3",
-    "tsx": "4.23.13",
+    "tsx": "4.23.15",
     "typescript": "6.0.3"
   }
 }

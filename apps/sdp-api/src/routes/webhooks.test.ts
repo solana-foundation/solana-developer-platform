@@ -24,7 +24,6 @@ import app from "@/index";
 import { bvnkCustomerLinkProviderStatus } from "@/routes/counterparty-provider-accounts/handlers";
 import { bvnkCustomerRequirementsFromMetadata } from "@/routes/payments/ramps/providers/bvnk";
 import { RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS } from "@/services/jobs/replay-ramp-webhook-events";
-import { SessionService } from "@/services/session.service";
 import {
   BVNK_WEBHOOK_TIMESTAMP,
   bvnkAgreementSessionStatusChangeEvent,
@@ -46,13 +45,13 @@ import {
   seedBvnkOnrampTransfer,
 } from "@/test/helpers/bvnk";
 import { env } from "@/test/helpers/env";
+import { startJsonServer } from "@/test/helpers/json-server";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString(
-  "base64"
-)}`;
+const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString("base64")}`;
 
 async function simulateClerkWebhook(event: { type: string; data: Record<string, unknown> }) {
   const payload = JSON.stringify(event);
@@ -63,7 +62,6 @@ async function simulateClerkWebhook(event: { type: string; data: Record<string, 
     .update(`${messageId}.${timestamp}.${payload}`)
     .digest("base64");
   const signature = `v1,${digest}`;
-
   return app.request(
     "/webhooks/clerk/link-orgs",
     {
@@ -79,6 +77,9 @@ async function simulateClerkWebhook(event: { type: string; data: Record<string, 
     env
   );
 }
+
+const clerkResponses = new Map<string, unknown>();
+
 function mockClerkUserLookup(
   userId: string,
   email: string,
@@ -90,60 +91,51 @@ function mockClerkUserLookup(
     }>;
   }
 ) {
-  const { verificationStatus, memberships } = options;
   env.CLERK_SECRET_KEY = "sk_test_clerk_webhook_user_lookup";
-  env.CLERK_API_URL = "https://clerk.example.test/v1";
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-
-    if (url === `${env.CLERK_API_URL}/users/${userId}`) {
-      return new Response(
-        JSON.stringify({
-          id: userId,
-          primary_email_address_id: "email_primary",
-          email_addresses: [
-            {
-              id: "email_primary",
-              email_address: email,
-              verification: { status: verificationStatus },
-            },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    expect(url).toBe(
-      `${env.CLERK_API_URL}/users/${userId}/organization_memberships?limit=500&offset=0`
-    );
-    return new Response(
-      JSON.stringify({
-        data: memberships,
-        total_count: memberships.length,
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
+  clerkResponses.set(`/users/${userId}`, {
+    id: userId,
+    primary_email_address_id: "email_primary",
+    email_addresses: [
+      {
+        id: "email_primary",
+        email_address: email,
+        verification: { status: options.verificationStatus },
+      },
+    ],
+  });
+  clerkResponses.set(`/users/${userId}/organization_memberships?limit=500&offset=0`, {
+    data: options.memberships,
+    total_count: options.memberships.length,
   });
 }
-describe("Clerk webhooks", () => {
-  let originalDeploymentMode: "managed" | "self_hosted" | undefined;
 
+describe("Clerk webhooks", () => {
+  let clerkServer: Awaited<ReturnType<typeof startJsonServer>>;
+  let originalDeploymentMode: "managed" | "self_hosted" | undefined;
   beforeEach(async () => {
     await seedTestDatabase(env);
+    clerkResponses.clear();
+    clerkServer = await startJsonServer((request) => {
+      assert(request.url);
+      if (!clerkResponses.has(request.url)) {
+        return { status: 404, body: { error: "Unknown test Clerk endpoint" } };
+      }
+      return { status: 200, body: clerkResponses.get(request.url) };
+    });
+    env.CLERK_API_URL = clerkServer.url;
     env.CLERK_WEBHOOK_SECRET = WEBHOOK_SECRET;
     originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
     env.SDP_DEPLOYMENT_MODE = undefined;
   });
-
   afterEach(async () => {
     vi.restoreAllMocks();
+    await clerkServer.close();
     env.CLERK_WEBHOOK_SECRET = undefined;
     env.CLERK_SECRET_KEY = undefined;
     env.CLERK_API_URL = undefined;
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     await clearKVStores(env);
   });
-
   it("creates and updates the SDP organization mapping from Clerk organization events", async () => {
     const created = await simulateClerkWebhook({
       type: "organization.created",
@@ -163,16 +155,12 @@ describe("Clerk webhooks", () => {
         },
       },
     });
-
     expect(created.status).toBe(200);
-
     const createdOrg = await getDb(env)
-      .prepare(
-        `SELECT o.id, o.name, o.slug, o.tier, o.settings, aoi.provider_org_id
+      .prepare(`SELECT o.id, o.name, o.slug, o.tier, o.settings, aoi.provider_org_id
          FROM organizations o
          JOIN auth_organization_identities aoi ON aoi.organization_id = o.id
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
-      )
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
       .bind("org_clerk_shared_identity")
       .first<{
         id: string;
@@ -182,21 +170,21 @@ describe("Clerk webhooks", () => {
         settings: string | null;
         provider_org_id: string;
       }>();
-
     expect(createdOrg).toMatchObject({
       name: "Bookface",
       slug: "bookface",
       tier: "enterprise",
       provider_org_id: "org_clerk_shared_identity",
     });
-    expect(createdOrg?.settings ? JSON.parse(createdOrg.settings) : null).toMatchObject({
+    expect(
+      required(createdOrg).settings ? JSON.parse(required(required(createdOrg).settings)) : null
+    ).toMatchObject({
       providerOverrides: {
         rpc: {
           helius: true,
         },
       },
     });
-
     const updated = await simulateClerkWebhook({
       type: "organization.updated",
       data: {
@@ -210,17 +198,13 @@ describe("Clerk webhooks", () => {
         },
       },
     });
-
     expect(updated.status).toBe(200);
-
     const updatedOrg = await getDb(env)
-      .prepare(
-        `SELECT o.name, o.slug, o.tier, o.settings, aoi.slug AS identity_slug
+      .prepare(`SELECT o.name, o.slug, o.tier, o.settings, aoi.slug AS identity_slug
          FROM organizations o
          JOIN auth_organization_identities aoi ON aoi.organization_id = o.id
-         WHERE o.id = ?`
-      )
-      .bind(createdOrg?.id)
+         WHERE o.id = ?`)
+      .bind(required(createdOrg).id)
       .first<{
         name: string;
         slug: string;
@@ -228,16 +212,16 @@ describe("Clerk webhooks", () => {
         settings: string | null;
         identity_slug: string;
       }>();
-
     expect(updatedOrg).toMatchObject({
       name: "Bookface Labs",
       slug: "bookface-labs",
       identity_slug: "bookface-labs",
       tier: "individual",
     });
-    expect(updatedOrg?.settings ? JSON.parse(updatedOrg.settings) : null).toBeNull();
+    expect(
+      required(updatedOrg).settings ? JSON.parse(required(required(updatedOrg).settings)) : null
+    ).toBeNull();
   });
-
   it("invalidates cached API keys when Clerk deletes an organization", async () => {
     const clerkOrgId = "org_clerk_webhook_cache_invalidation";
     const orgId = "org_webhook_cache_invalidation";
@@ -247,7 +231,6 @@ describe("Clerk webhooks", () => {
     const keyId = "key_webhook_cache_invalidation";
     const keyHash = await hashString(rawKey, env.API_KEY_PEPPER);
     const db = getDb(env);
-
     await db.batch([
       db
         .prepare(
@@ -255,10 +238,8 @@ describe("Clerk webhooks", () => {
         )
         .bind(orgId, orgId),
       db
-        .prepare(
-          `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
-           VALUES (?, 'clerk', ?, ?, ?)`
-        )
+        .prepare(`INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+           VALUES (?, 'clerk', ?, ?, ?)`)
         .bind(`aoi_${orgId}`, clerkOrgId, orgId, orgId),
       db
         .prepare(
@@ -274,14 +255,11 @@ describe("Clerk webhooks", () => {
     });
     await db.batch([
       db
-        .prepare(
-          `INSERT INTO api_keys
+        .prepare(`INSERT INTO api_keys
              (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-           VALUES (?, ?, ?, ?, 'Webhook cache key', 'sk_test_web', ?, 'api_admin', ?, 'active')`
-        )
+           VALUES (?, ?, ?, ?, 'Webhook cache key', 'sk_test_web', ?, 'api_admin', ?, 'active')`)
         .bind(keyId, orgId, projectId, userId, keyHash, JSON.stringify(["*"])),
     ]);
-
     await seedCachedApiKey(env, keyHash, {
       id: keyId,
       organizationId: orgId,
@@ -298,21 +276,16 @@ describe("Clerk webhooks", () => {
       expiresAt: null,
       rotationDeadline: null,
     });
-
     const authedRequest = () =>
       app.request("/v1/api-keys", { headers: { Authorization: `Bearer ${rawKey}` } }, env);
-
     expect((await authedRequest()).status).toBe(200);
-
     const res = await simulateClerkWebhook({
       type: "organization.deleted",
       data: { id: clerkOrgId, object: "organization", deleted: true },
     });
     expect(res.status).toBe(200);
-
     expect((await authedRequest()).status).toBe(401);
   });
-
   it("defaults new Clerk organizations to enterprise when SDP tier metadata is missing", async () => {
     const created = await simulateClerkWebhook({
       type: "organization.created",
@@ -322,23 +295,18 @@ describe("Clerk webhooks", () => {
         slug: "enterprise-by-default",
       },
     });
-
     expect(created.status).toBe(200);
-
     const createdOrg = await getDb(env)
-      .prepare(
-        `SELECT o.name, o.slug, o.tier
+      .prepare(`SELECT o.name, o.slug, o.tier
          FROM organizations o
          JOIN auth_organization_identities aoi ON aoi.organization_id = o.id
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
-      )
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
       .bind("org_clerk_enterprise_default")
       .first<{
         name: string;
         slug: string;
         tier: string;
       }>();
-
     expect(createdOrg).toEqual({
       name: "Enterprise By Default",
       slug: "enterprise-by-default",
@@ -354,17 +322,14 @@ describe("Clerk webhooks", () => {
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
         .bind("usr_email_owner", "taken@example.com"),
       getDb(env)
-        .prepare(
-          `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-           VALUES (?, 'clerk', ?, ?, ?)`
-        )
+        .prepare(`INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+           VALUES (?, 'clerk', ?, ?, ?)`)
         .bind("aui_existing", "user_clerk_existing", "usr_clerk_existing", "old@example.com"),
     ]);
     mockClerkUserLookup("user_clerk_existing", "taken@example.com", {
       verificationStatus: "verified",
       memberships: [],
     });
-
     const updated = await simulateClerkWebhook({
       type: "user.updated",
       data: {
@@ -379,19 +344,17 @@ describe("Clerk webhooks", () => {
         ],
       },
     });
-
     expect(updated.status).toBe(200);
-
     const identity = await getDb(env)
-      .prepare(
-        `SELECT u.email AS user_email, aui.email AS identity_email
+      .prepare(`SELECT u.email AS user_email, aui.email AS identity_email
          FROM auth_user_identities aui
          JOIN users u ON u.id = aui.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
-      )
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_clerk_existing")
-      .first<{ user_email: string; identity_email: string }>();
-
+      .first<{
+        user_email: string;
+        identity_email: string;
+      }>();
     expect(identity).toEqual({
       user_email: "old@example.com",
       identity_email: "old@example.com",
@@ -416,16 +379,15 @@ describe("Clerk webhooks", () => {
         ],
       },
     });
-
     expect(created.status).toBe(200);
     const identity = await getDb(env)
-      .prepare(
-        `SELECT user_id
+      .prepare(`SELECT user_id
          FROM auth_user_identities
-         WHERE provider = 'clerk' AND provider_user_id = ?`
-      )
+         WHERE provider = 'clerk' AND provider_user_id = ?`)
       .bind("user_unverified_collision")
-      .first<{ user_id: string }>();
+      .first<{
+        user_id: string;
+      }>();
     expect(identity).toBeNull();
     mockClerkUserLookup("user_unverified_collision", "victim@example.com", {
       verificationStatus: "unverified",
@@ -456,18 +418,16 @@ describe("Clerk webhooks", () => {
       },
     });
     expect(membershipCreated.status).toBe(200);
-
     const unverifiedMembership = await getDb(env)
-      .prepare(
-        `SELECT om.id
+      .prepare(`SELECT om.id
          FROM organization_members om
          JOIN auth_user_identities aui ON aui.user_id = om.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
-      )
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_unverified_collision")
-      .first<{ id: string }>();
+      .first<{
+        id: string;
+      }>();
     expect(unverifiedMembership).toBeNull();
-
     const verified = await simulateClerkWebhook({
       type: "user.updated",
       data: {
@@ -482,27 +442,26 @@ describe("Clerk webhooks", () => {
         ],
       },
     });
-
     expect(verified.status).toBe(200);
     const verifiedIdentity = await getDb(env)
-      .prepare(
-        `SELECT user_id
+      .prepare(`SELECT user_id
          FROM auth_user_identities
-         WHERE provider = 'clerk' AND provider_user_id = ?`
-      )
+         WHERE provider = 'clerk' AND provider_user_id = ?`)
       .bind("user_unverified_collision")
-      .first<{ user_id: string }>();
-    expect(verifiedIdentity?.user_id).toBe("usr_verified_email_owner");
-
+      .first<{
+        user_id: string;
+      }>();
+    expect(required(verifiedIdentity).user_id).toBe("usr_verified_email_owner");
     const reconciledMembership = await getDb(env)
-      .prepare(
-        `SELECT om.role, om.status
+      .prepare(`SELECT om.role, om.status
          FROM organization_members om
          JOIN auth_user_identities aui ON aui.user_id = om.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
-      )
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_unverified_collision")
-      .first<{ role: string; status: string }>();
+      .first<{
+        role: string;
+        status: string;
+      }>();
     expect(reconciledMembership).toEqual({ role: "admin", status: "active" });
   });
   async function syncMembershipAfterInvitation(invitationStatuses: string[]): Promise<{
@@ -512,7 +471,6 @@ describe("Clerk webhooks", () => {
     const organizationId = `org_revoked_${invitationStatuses.join("_")}`;
     const email = "withdrawn@example.com";
     const db = getDb(env);
-
     await db.batch([
       db
         .prepare(
@@ -520,10 +478,8 @@ describe("Clerk webhooks", () => {
         )
         .bind(organizationId, organizationId),
       db
-        .prepare(
-          `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
-           VALUES (?, 'clerk', ?, ?, ?)`
-        )
+        .prepare(`INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+           VALUES (?, 'clerk', ?, ?, ?)`)
         .bind(`aoi_${organizationId}`, clerkOrgId, organizationId, organizationId),
       db
         .prepare(
@@ -531,14 +487,11 @@ describe("Clerk webhooks", () => {
         )
         .bind(`usr_inviter_${organizationId}`),
     ]);
-
     for (const [index, status] of invitationStatuses.entries()) {
       await db
-        .prepare(
-          `INSERT INTO invitations
+        .prepare(`INSERT INTO invitations
              (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
-           VALUES (?, ?, ?, 'member', ?, ?, ?, ?, ?)`
-        )
+           VALUES (?, ?, ?, 'member', ?, ?, ?, ?, ?)`)
         .bind(
           `inv_${organizationId}_${index}`,
           organizationId,
@@ -564,25 +517,22 @@ describe("Clerk webhooks", () => {
       },
     });
     expect(response.status).toBe(200);
-
     return db
-      .prepare(
-        `SELECT om.status
+      .prepare(`SELECT om.status
            FROM organization_members om
            JOIN users u ON u.id = om.user_id
-          WHERE om.organization_id = ? AND u.email = ?`
-      )
+          WHERE om.organization_id = ? AND u.email = ?`)
       .bind(organizationId, email)
-      .first<{ status: string }>();
+      .first<{
+        status: string;
+      }>();
   }
-
   it("declines a Clerk membership when the invitation was revoked", async () => {
     expect(await syncMembershipAfterInvitation(["revoked"])).toBeNull();
   });
-
   it("admits a Clerk membership when a revoked invitation was superseded by a new one", async () => {
     const membership = await syncMembershipAfterInvitation(["revoked", "pending"]);
-    expect(membership?.status).toBe("active");
+    expect(required(membership).status).toBe("active");
   });
   it("syncs organization memberships without creating records on delete-only events", async () => {
     const deleteOnly = await simulateClerkWebhook({
@@ -596,18 +546,15 @@ describe("Clerk webhooks", () => {
         },
       },
     });
-
     expect(deleteOnly.status).toBe(200);
-
     const missingOrg = await getDb(env)
-      .prepare(
-        `SELECT organization_id
+      .prepare(`SELECT organization_id
          FROM auth_organization_identities
-         WHERE provider = 'clerk' AND provider_org_id = ?`
-      )
+         WHERE provider = 'clerk' AND provider_org_id = ?`)
       .bind("org_clerk_delete_only")
-      .first<{ organization_id: string }>();
-
+      .first<{
+        organization_id: string;
+      }>();
     expect(missingOrg).toBeNull();
     mockClerkUserLookup("user_clerk_member", "admin@example.com", {
       verificationStatus: "verified",
@@ -637,17 +584,13 @@ describe("Clerk webhooks", () => {
         },
       },
     });
-
     expect(created.status).toBe(200);
-
     const membership = await getDb(env)
-      .prepare(
-        `SELECT u.email, om.user_id, om.organization_id, om.role, om.status
+      .prepare(`SELECT u.email, om.user_id, om.organization_id, om.role, om.status
          FROM organization_members om
          JOIN users u ON u.id = om.user_id
          JOIN auth_user_identities aui ON aui.user_id = u.id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
-      )
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_clerk_member")
       .first<{
         email: string;
@@ -656,23 +599,12 @@ describe("Clerk webhooks", () => {
         role: string;
         status: string;
       }>();
-
     expect(membership).toMatchObject({
       email: "admin@example.com",
       role: "admin",
       status: "active",
     });
-
-    if (!membership) {
-      throw new Error("Expected the Clerk membership to exist");
-    }
-    const sessionService = new SessionService(getDb(env));
-    const elevatedSession = await sessionService.createSession(
-      membership.user_id,
-      membership.organization_id,
-      {}
-    );
-
+    assert(membership, "Expected the Clerk membership to exist");
     const roleUpdated = await simulateClerkWebhook({
       type: "organizationMembership.updated",
       data: {
@@ -688,20 +620,7 @@ describe("Clerk webhooks", () => {
         },
       },
     });
-
     expect(roleUpdated.status).toBe(200);
-    const elevatedSessionRow = await getDb(env)
-      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
-      .bind(elevatedSession.id)
-      .first<{ revoked_at: string | null }>();
-    expect(elevatedSessionRow?.revoked_at).not.toBeNull();
-
-    const memberSession = await sessionService.createSession(
-      membership.user_id,
-      membership.organization_id,
-      {}
-    );
-
     const deleted = await simulateClerkWebhook({
       type: "organizationMembership.deleted",
       data: {
@@ -713,26 +632,17 @@ describe("Clerk webhooks", () => {
         },
       },
     });
-
     expect(deleted.status).toBe(200);
-
     const removed = await getDb(env)
-      .prepare(
-        `SELECT om.status
+      .prepare(`SELECT om.status
          FROM organization_members om
          JOIN auth_user_identities aui ON aui.user_id = om.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
-      )
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_clerk_member")
-      .first<{ status: string }>();
-
-    expect(removed?.status).toBe("removed");
-    const memberSessionRow = await getDb(env)
-      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
-      .bind(memberSession.id)
-      .first<{ revoked_at: string | null }>();
-    expect(memberSessionRow?.revoked_at).not.toBeNull();
-
+      .first<{
+        status: string;
+      }>();
+    expect(required(removed).status).toBe("removed");
     const delayedUserUpdate = await simulateClerkWebhook({
       type: "user.updated",
       data: {
@@ -747,19 +657,17 @@ describe("Clerk webhooks", () => {
         ],
       },
     });
-
     expect(delayedUserUpdate.status).toBe(200);
     const stillRemoved = await getDb(env)
-      .prepare(
-        `SELECT om.status
+      .prepare(`SELECT om.status
          FROM organization_members om
          JOIN auth_user_identities aui ON aui.user_id = om.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
-      )
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_clerk_member")
-      .first<{ status: string }>();
-    expect(stillRemoved?.status).toBe("removed");
-
+      .first<{
+        status: string;
+      }>();
+    expect(required(stillRemoved).status).toBe("removed");
     const readded = await simulateClerkWebhook({
       type: "organizationMembership.created",
       data: {
@@ -775,18 +683,17 @@ describe("Clerk webhooks", () => {
         },
       },
     });
-
     expect(readded.status).toBe(200);
     const activeAgain = await getDb(env)
-      .prepare(
-        `SELECT om.status
+      .prepare(`SELECT om.status
          FROM organization_members om
          JOIN auth_user_identities aui ON aui.user_id = om.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
-      )
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_clerk_member")
-      .first<{ status: string }>();
-    expect(activeAgain?.status).toBe("active");
+      .first<{
+        status: string;
+      }>();
+    expect(required(activeAgain).status).toBe("active");
   });
   it("syncs user lifecycle and Clerk organization deletion", async () => {
     mockClerkUserLookup("user_clerk_lifecycle", "member@example.com", {
@@ -808,7 +715,6 @@ describe("Clerk webhooks", () => {
         },
       },
     });
-
     const updatedUser = await simulateClerkWebhook({
       type: "user.updated",
       data: {
@@ -825,70 +731,53 @@ describe("Clerk webhooks", () => {
         ],
       },
     });
-
     expect(updatedUser.status).toBe(200);
-
     const user = await getDb(env)
-      .prepare(
-        `SELECT u.id, u.email, u.name, u.status
+      .prepare(`SELECT u.id, u.email, u.name, u.status
          FROM users u
          JOIN auth_user_identities aui ON aui.user_id = u.id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`
-      )
+         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
       .bind("user_clerk_lifecycle")
-      .first<{ id: string; email: string; name: string | null; status: string }>();
-
+      .first<{
+        id: string;
+        email: string;
+        name: string | null;
+        status: string;
+      }>();
     expect(user).toMatchObject({
       email: "ada@example.com",
       name: "Ada Lovelace",
       status: "active",
     });
-
-    const userId = user?.id;
+    const userId = required(user).id;
     expect(userId).toBeTruthy();
-    if (!userId) {
-      throw new Error("Expected the Clerk user mapping to exist");
-    }
-
+    assert(userId, "Expected the Clerk user mapping to exist");
     const organization = await getDb(env)
-      .prepare(
-        `SELECT organization_id
+      .prepare(`SELECT organization_id
          FROM auth_organization_identities
-         WHERE provider = 'clerk' AND provider_org_id = ?`
-      )
+         WHERE provider = 'clerk' AND provider_org_id = ?`)
       .bind("org_clerk_lifecycle")
-      .first<{ organization_id: string }>();
-    if (!organization) {
-      throw new Error("Expected the Clerk organization mapping to exist");
-    }
-    const sessionService = new SessionService(getDb(env));
-    const userSession = await sessionService.createSession(
-      userId,
-      organization.organization_id,
-      {}
-    );
-
+      .first<{
+        organization_id: string;
+      }>();
+    assert(organization, "Expected the Clerk organization mapping to exist");
     const apiKeyHash = "webhook_lifecycle_key_hash";
     const lifecycleProject = await getDb(env)
-      .prepare(
-        `SELECT p.id
+      .prepare(`SELECT p.id
          FROM projects p
          JOIN auth_organization_identities aoi ON aoi.organization_id = p.organization_id
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ? AND p.environment = 'sandbox'`
-      )
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ? AND p.environment = 'sandbox'`)
       .bind("org_clerk_lifecycle")
-      .first<{ id: string }>();
-    if (!lifecycleProject) {
-      throw new Error("Expected the Clerk organization sandbox project to exist");
-    }
+      .first<{
+        id: string;
+      }>();
+    assert(lifecycleProject, "Expected the Clerk organization sandbox project to exist");
     await getDb(env)
-      .prepare(
-        `INSERT INTO api_keys
+      .prepare(`INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, status)
          SELECT ?, aoi.organization_id, ?, ?, ?, ?, ?, ?, ?
          FROM auth_organization_identities aoi
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
-      )
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
       .bind(
         "key_webhook_lifecycle",
         lifecycleProject.id,
@@ -901,49 +790,40 @@ describe("Clerk webhooks", () => {
         "org_clerk_lifecycle"
       )
       .run();
-
     const deletedUser = await simulateClerkWebhook({
       type: "user.deleted",
       data: {
         id: "user_clerk_lifecycle",
       },
     });
-
     expect(deletedUser.status).toBe(200);
-
     const removedUser = await getDb(env)
       .prepare("SELECT status FROM users WHERE id = ?")
       .bind(userId)
-      .first<{ status: string }>();
-
-    expect(removedUser?.status).toBe("deleted");
-    const userSessionRow = await getDb(env)
-      .prepare("SELECT revoked_at FROM sessions WHERE id = ?")
-      .bind(userSession.id)
-      .first<{ revoked_at: string | null }>();
-    expect(userSessionRow?.revoked_at).not.toBeNull();
-
+      .first<{
+        status: string;
+      }>();
+    expect(required(removedUser).status).toBe("deleted");
     const deletedOrg = await simulateClerkWebhook({
       type: "organization.deleted",
       data: {
         id: "org_clerk_lifecycle",
       },
     });
-
     expect(deletedOrg.status).toBe(200);
-
     const lifecycleState = await getDb(env)
-      .prepare(
-        `SELECT o.status AS org_status, om.status AS member_status, ak.status AS api_key_status
+      .prepare(`SELECT o.status AS org_status, om.status AS member_status, ak.status AS api_key_status
          FROM auth_organization_identities aoi
          JOIN organizations o ON o.id = aoi.organization_id
          JOIN organization_members om ON om.organization_id = o.id
          JOIN api_keys ak ON ak.organization_id = o.id
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`
-      )
+         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
       .bind("org_clerk_lifecycle")
-      .first<{ org_status: string; member_status: string; api_key_status: string }>();
-
+      .first<{
+        org_status: string;
+        member_status: string;
+        api_key_status: string;
+      }>();
     expect(lifecycleState).toEqual({
       org_status: "deleted",
       member_status: "removed",
@@ -951,6 +831,7 @@ describe("Clerk webhooks", () => {
     });
   });
 });
+
 describe("BVNK ramp webhook", () => {
   const BVNK_WEBHOOK_SECRET = "bvnk_webhook_secret_test";
   const ORG_ID = "org_bvnk_webhook";
@@ -978,12 +859,10 @@ describe("BVNK ramp webhook", () => {
       ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
     });
     await getDb(env)
-      .prepare(
-        `INSERT INTO counterparties (
+      .prepare(`INSERT INTO counterparties (
            id, organization_id, project_id, external_id, entity_type, display_name,
            provider_data, status, created_by
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
-      )
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`)
       .bind(COUNTERPARTY_ID, ORG_ID, PROJECT_ID, null, "individual", "Webhook Buyer", {}, null)
       .run();
     await seedBvnkCustomerLink(getDb(env), {
@@ -998,20 +877,22 @@ describe("BVNK ramp webhook", () => {
   async function sendBvnkWebhook(
     payload: Record<string, unknown>,
     options: {
-      signature?: string;
+      headers: Record<string, string>;
       environment: "sandbox" | "production";
     }
   ) {
-    const { signature, environment } = options;
+    const { environment } = options;
     const body = JSON.stringify({
       timestamp: new Date().toISOString(),
       ...payload,
     });
     const secret = environment === "production" ? env.BVNK_WEBHOOK_SECRET : BVNK_WEBHOOK_SECRET;
-    if (secret === undefined) {
-      throw new Error("BVNK webhook secret is not configured for this environment");
-    }
-    const sig = signature ?? createHmac("sha256", secret).update(body).digest("base64");
+    assert(secret !== undefined);
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Signature": createHmac("sha256", secret).update(body).digest("base64"),
+      ...options.headers,
+    };
     const background: Promise<unknown>[] = [];
     const executionCtx: ExecutionContext = {
       waitUntil(promise) {
@@ -1024,7 +905,7 @@ describe("BVNK ramp webhook", () => {
       `/webhooks/payments/ramps/${environment}/bvnk`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Signature": sig },
+        headers,
         body,
       },
       env,
@@ -1033,14 +914,11 @@ describe("BVNK ramp webhook", () => {
     await Promise.allSettled(background);
     return res;
   }
-
   async function seedAgreementSession(): Promise<void> {
     await getDb(env)
-      .prepare(
-        `UPDATE counterparty_provider_accounts
+      .prepare(`UPDATE counterparty_provider_accounts
          SET metadata = ?
-         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
-      )
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`)
       .bind(
         {
           residenceCountryCode: "US",
@@ -1054,7 +932,6 @@ describe("BVNK ramp webhook", () => {
       )
       .run();
   }
-
   beforeEach(async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(BVNK_WEBHOOK_TIMESTAMP));
@@ -1063,35 +940,33 @@ describe("BVNK ramp webhook", () => {
     env.BVNK_WEBHOOK_SECRET = BVNK_WEBHOOK_SECRET;
     await seedVerifiableCounterparty();
   });
-
   afterEach(async () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     env.BVNK_SANDBOX_WEBHOOK_SECRET = undefined;
     env.BVNK_WEBHOOK_SECRET = undefined;
   });
-
   async function readFundingWalletRow(id: string) {
     return getDb(env)
       .prepare("SELECT * FROM counterparty_provider_accounts WHERE id = ?")
       .bind(id)
-      .first<{ provider_status: string | null; updated_at: string }>();
+      .first<{
+        provider_status: string | null;
+        updated_at: string;
+      }>();
   }
-
   function readCustomerLinkMetadata() {
     return getDb(env)
-      .prepare(
-        `SELECT metadata FROM counterparty_provider_accounts
-         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`
-      )
+      .prepare(`SELECT metadata FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'`)
       .bind(COUNTERPARTY_ID)
-      .first<{ metadata: Record<string, unknown> }>();
+      .first<{
+        metadata: Record<string, unknown>;
+      }>();
   }
-
   const verifiedCustomerStatusEvent = bvnkPlatformCustomerStatusChangeEvent({
     data: { status: "VERIFIED", reference: CUSTOMER_REFERENCE },
   });
-
   function mockBvnkWalletProvisioning(
     fundingWalletId: string,
     walletName: string,
@@ -1117,18 +992,19 @@ describe("BVNK ramp webhook", () => {
             .mockRejectedValue(new Error(createError));
     return { listWallets, getProfile, createWallet };
   }
-
   async function readLastWebhookEvent(environment: "sandbox" | "production") {
     return getDb(env)
-      .prepare(
-        `SELECT status, terminal, attempts, last_error FROM ramp_webhook_events
+      .prepare(`SELECT status, terminal, attempts, last_error FROM ramp_webhook_events
          WHERE provider = 'bvnk' AND environment = ?
-         ORDER BY created_at DESC LIMIT 1`
-      )
+         ORDER BY created_at DESC LIMIT 1`)
       .bind(environment)
-      .first<{ status: string; terminal: boolean; attempts: number; last_error: string | null }>();
+      .first<{
+        status: string;
+        terminal: boolean;
+        attempts: number;
+        last_error: string | null;
+      }>();
   }
-
   async function expectTerminalWebhookEvent(
     environment: "sandbox" | "production",
     errorFragment: string
@@ -1141,12 +1017,13 @@ describe("BVNK ramp webhook", () => {
       last_error: expect.stringContaining(errorFragment),
     });
   }
-
   async function expectNoBvnkWebhookEvents() {
     const pending = await getDb(env)
       .prepare("SELECT count(*) AS count FROM ramp_webhook_events WHERE provider = 'bvnk'")
-      .first<{ count: number }>();
-    expect(Number(pending?.count)).toBe(0);
+      .first<{
+        count: number;
+      }>();
+    expect(Number(required(pending).count)).toBe(0);
   }
   async function readTransferStatus(id: string) {
     return getDb(env).prepare("SELECT status FROM payment_transfers WHERE id = ?").bind(id).first<{
@@ -1158,8 +1035,8 @@ describe("BVNK ramp webhook", () => {
     status: PaymentTransferStatus,
     counterpartyId: string,
     options: {
-      projectId?: string;
-      fiatAmount?: string;
+      projectId: string;
+      fiatAmount: string;
       providerData?: Record<string, unknown>;
     }
   ): Promise<void> {
@@ -1168,8 +1045,8 @@ describe("BVNK ramp webhook", () => {
       status,
       counterpartyId,
       organizationId: ORG_ID,
-      projectId: options.projectId ?? PROJECT_ID,
-      fiatAmount: options.fiatAmount ?? "9.9",
+      projectId: options.projectId,
+      fiatAmount: options.fiatAmount,
       destinationAddress: "dest",
       ...(options.providerData === undefined ? {} : { providerData: options.providerData }),
     });
@@ -1178,37 +1055,39 @@ describe("BVNK ramp webhook", () => {
     id: string,
     options: {
       status?: string;
-      customerId?: string;
+      customerId: string;
     }
   ) {
     return bvnkWalletStatusChangeEvent({
       name: buildBvnkFundingWalletName(`cpa_${COUNTERPARTY_ID}`),
       id,
       ...(options.status === undefined ? {} : { status: options.status }),
-      customer: { id: options.customerId ?? CUSTOMER_REFERENCE },
+      customer: { id: options.customerId },
     });
   }
-
   function seedProductionCounterparty(): Promise<string> {
     const productionCounterpartyId = "cpty_123e4567-e89b-12d3-a456-426614174999";
     return getDb(env)
-      .prepare(
-        `INSERT INTO counterparties (
+      .prepare(`INSERT INTO counterparties (
            id, organization_id, project_id, external_id, entity_type, display_name,
            provider_data, status, created_by
-         ) VALUES (?, ?, ?, ?, 'individual', 'Production Webhook Buyer', '{}', 'active', ?)`
-      )
+         ) VALUES (?, ?, ?, ?, 'individual', 'Production Webhook Buyer', '{}', 'active', ?)`)
       .bind(productionCounterpartyId, ORG_ID, `${PROJECT_ID}_production`, null, USER_ID)
       .run()
       .then(() => productionCounterpartyId);
   }
   it("claims a per-fiat funding wallet row and creates the BVNK USD wallet on VERIFIED", async () => {
     const { createWallet } = mockBvnkWalletProvisioning(FUNDING_WALLET_ID, walletName);
-    const res = await sendBvnkWebhook(verifiedCustomerStatusEvent, { environment: "sandbox" });
-    const replay = await sendBvnkWebhook(verifiedCustomerStatusEvent, { environment: "sandbox" });
+    const res = await sendBvnkWebhook(verifiedCustomerStatusEvent, {
+      headers: {},
+      environment: "sandbox",
+    });
+    const replay = await sendBvnkWebhook(verifiedCustomerStatusEvent, {
+      headers: {},
+      environment: "sandbox",
+    });
     expect(res.status).toBe(200);
     expect(replay.status).toBe(200);
-
     expect(createWallet).toHaveBeenCalledTimes(1);
     expect(createWallet).toHaveBeenCalledWith(
       expect.anything(),
@@ -1221,15 +1100,13 @@ describe("BVNK ramp webhook", () => {
       })
     );
     const account = await readCustomerLinkMetadata();
-    expect(account?.metadata.status).toBe("VERIFIED");
+    expect(required(account).metadata.status).toBe("VERIFIED");
     const row = await getDb(env)
-      .prepare(
-        `SELECT id, organization_id, project_id, counterparty_id, provider,
+      .prepare(`SELECT id, organization_id, project_id, counterparty_id, provider,
                 provider_customer_reference, kind, external_account_reference,
                 fiat_currency, provider_status, status, metadata
          FROM counterparty_provider_accounts
-         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'funding_wallet'`
-      )
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'funding_wallet'`)
       .bind(COUNTERPARTY_ID)
       .first<Record<string, unknown>>();
     expect(row).toEqual({
@@ -1247,24 +1124,24 @@ describe("BVNK ramp webhook", () => {
       metadata: {},
     });
     const auditActions = await getDb(env)
-      .prepare(
-        `SELECT metadata::jsonb ->> 'action' AS action FROM audit_logs
+      .prepare(`SELECT metadata::jsonb ->> 'action' AS action FROM audit_logs
          WHERE resource_type = 'counterparty' AND resource_id = ?
            AND metadata::jsonb ->> 'provider' = 'bvnk'
-         ORDER BY created_at ASC`
-      )
+         ORDER BY created_at ASC`)
       .bind(COUNTERPARTY_ID)
-      .all<{ action: string }>();
+      .all<{
+        action: string;
+      }>();
     expect(auditActions.results.map((row) => row.action)).toEqual(
       expect.arrayContaining(["bvnk_funding_wallet_created"])
     );
     const active = await getDb(env)
-      .prepare(
-        `SELECT id FROM counterparty_provider_accounts
-         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'funding_wallet' AND status = 'active'`
-      )
+      .prepare(`SELECT id FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'funding_wallet' AND status = 'active'`)
       .bind(COUNTERPARTY_ID)
-      .all<{ id: string }>();
+      .all<{
+        id: string;
+      }>();
     expect(active.results).toHaveLength(1);
   });
   it("parks a second VERIFIED delivery whose claim has not landed as in flight", async () => {
@@ -1278,13 +1155,15 @@ describe("BVNK ramp webhook", () => {
       stage: "claimed",
       metadata: {},
     });
-    const racing = await sendBvnkWebhook(verifiedCustomerStatusEvent, { environment: "sandbox" });
+    const racing = await sendBvnkWebhook(verifiedCustomerStatusEvent, {
+      headers: {},
+      environment: "sandbox",
+    });
     expect(racing.status).toBe(200);
     expect(createWallet).not.toHaveBeenCalled();
-
     const stored = await readLastWebhookEvent("sandbox");
-    expect(stored?.status).toBe("pending");
-    expect(stored?.last_error).toContain("in flight");
+    expect(required(stored).status).toBe("pending");
+    expect(required(stored).last_error).toContain("in flight");
   });
   it("takes over a stale claimed row and assigns the created wallet", async () => {
     const { createWallet } = mockBvnkWalletProvisioning(FUNDING_WALLET_ID, walletName);
@@ -1305,16 +1184,15 @@ describe("BVNK ramp webhook", () => {
         "cpa_bvnk_funding_stale_claim"
       )
       .run();
-    await sendBvnkWebhook(verifiedCustomerStatusEvent, { environment: "sandbox" });
-
+    await sendBvnkWebhook(verifiedCustomerStatusEvent, { headers: {}, environment: "sandbox" });
     expect(createWallet).toHaveBeenCalledTimes(1);
     const claimed = await getDb(env)
-      .prepare(
-        `SELECT external_account_reference FROM counterparty_provider_accounts
-         WHERE id = 'cpa_bvnk_funding_stale_claim'`
-      )
-      .first<{ external_account_reference: string | null }>();
-    expect(claimed?.external_account_reference).toBe(FUNDING_WALLET_ID);
+      .prepare(`SELECT external_account_reference FROM counterparty_provider_accounts
+         WHERE id = 'cpa_bvnk_funding_stale_claim'`)
+      .first<{
+        external_account_reference: string | null;
+      }>();
+    expect(required(claimed).external_account_reference).toBe(FUNDING_WALLET_ID);
   });
   it("records a rejected wallet create on the webhook row and keeps the claim unassigned", async () => {
     mockBvnkWalletProvisioning(
@@ -1322,17 +1200,14 @@ describe("BVNK ramp webhook", () => {
       "never-created",
       "BVNK funding wallet create failed"
     );
-    await sendBvnkWebhook(verifiedCustomerStatusEvent, { environment: "sandbox" });
-
+    await sendBvnkWebhook(verifiedCustomerStatusEvent, { headers: {}, environment: "sandbox" });
     const stored = await readLastWebhookEvent("sandbox");
-    expect(stored?.status).toBe("pending");
-    expect(stored?.last_error).toContain("BVNK funding wallet create failed");
+    expect(required(stored).status).toBe("pending");
+    expect(required(stored).last_error).toContain("BVNK funding wallet create failed");
     const claimed = await getDb(env)
-      .prepare(
-        `SELECT external_account_reference, provider_status, status
+      .prepare(`SELECT external_account_reference, provider_status, status
          FROM counterparty_provider_accounts
-         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'funding_wallet'`
-      )
+         WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'funding_wallet'`)
       .bind(COUNTERPARTY_ID)
       .first<Record<string, unknown>>();
     expect(claimed).toEqual({
@@ -1356,8 +1231,10 @@ describe("BVNK ramp webhook", () => {
     });
     const before = await readFundingWalletRow(FUNDING_ROW_ID);
     assert(before);
-    await sendBvnkWebhook(fundingWalletEvent(FUNDING_WALLET_ID, {}), { environment: "sandbox" });
-
+    await sendBvnkWebhook(
+      fundingWalletEvent(FUNDING_WALLET_ID, { customerId: CUSTOMER_REFERENCE }),
+      { headers: {}, environment: "sandbox" }
+    );
     const after = await readFundingWalletRow(FUNDING_ROW_ID);
     assert(after);
     expect(after.provider_status).toBe(BVNK_FUNDING_WALLET_STATUS.provisioned);
@@ -1382,8 +1259,8 @@ describe("BVNK ramp webhook", () => {
     });
     const before = await readFundingWalletRow(FUNDING_ROW_ID);
     const res = await sendBvnkWebhook(
-      fundingWalletEvent(FUNDING_WALLET_ID, { status: "INACTIVE" }),
-      { environment: "sandbox" }
+      fundingWalletEvent(FUNDING_WALLET_ID, { customerId: CUSTOMER_REFERENCE, status: "INACTIVE" }),
+      { headers: {}, environment: "sandbox" }
     );
     expect(res.status).toBe(200);
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
@@ -1404,9 +1281,8 @@ describe("BVNK ramp webhook", () => {
     const before = await readFundingWalletRow(FUNDING_ROW_ID);
     await sendBvnkWebhook(
       fundingWalletEvent(FUNDING_WALLET_ID, { customerId: "another-customer" }),
-      { environment: "sandbox" }
+      { headers: {}, environment: "sandbox" }
     );
-
     await expectNoBvnkWebhookEvents();
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
@@ -1424,10 +1300,13 @@ describe("BVNK ramp webhook", () => {
       stage: "assigned",
     });
     const before = await readFundingWalletRow(FUNDING_ROW_ID);
-    await sendBvnkWebhook(fundingWalletEvent("a:funding:wallet:other:1", {}), {
-      environment: "sandbox",
-    });
-
+    await sendBvnkWebhook(
+      fundingWalletEvent("a:funding:wallet:other:1", { customerId: CUSTOMER_REFERENCE }),
+      {
+        headers: {},
+        environment: "sandbox",
+      }
+    );
     await expectNoBvnkWebhookEvents();
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
@@ -1444,13 +1323,16 @@ describe("BVNK ramp webhook", () => {
       metadata: {},
     });
     const before = await readFundingWalletRow(FUNDING_ROW_ID);
-    await sendBvnkWebhook(fundingWalletEvent("a:funding:wallet:status:6", {}), {
-      environment: "sandbox",
-    });
-
+    await sendBvnkWebhook(
+      fundingWalletEvent("a:funding:wallet:status:6", { customerId: CUSTOMER_REFERENCE }),
+      {
+        headers: {},
+        environment: "sandbox",
+      }
+    );
     const stored = await readLastWebhookEvent("sandbox");
-    expect(stored?.status).toBe("pending");
-    expect(stored?.last_error).toContain("reference is not assigned yet");
+    expect(required(stored).status).toBe("pending");
+    expect(required(stored).last_error).toContain("reference is not assigned yet");
     expect(await readFundingWalletRow(FUNDING_ROW_ID)).toEqual(before);
   });
   it("acknowledges a legacy wallet create event for a funding name without writing rows", async () => {
@@ -1463,14 +1345,15 @@ describe("BVNK ramp webhook", () => {
           ledgers: [{ accountNumber: "900368997705", code: "101019644" }],
         },
       },
-      { environment: "sandbox" }
+      { headers: {}, environment: "sandbox" }
     );
     expect(res.status).toBe(200);
     const fundingRows = await getDb(env)
       .prepare("SELECT id FROM counterparty_provider_accounts WHERE kind = 'funding_wallet'")
-      .all<{ id: string }>();
+      .all<{
+        id: string;
+      }>();
     expect(fundingRows.results).toEqual([]);
-
     await expectNoBvnkWebhookEvents();
   });
   it("parks a legacy 6-part on-ramp wallet event as terminal without writing rows", async () => {
@@ -1478,15 +1361,16 @@ describe("BVNK ramp webhook", () => {
       bvnkWalletStatusChangeEvent({
         name: `sdp:onramp:${COUNTERPARTY_ID}:USD:USDC_SOLANA:dest`,
       }),
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
-
     await expectTerminalWebhookEvent("production", "SDP no longer manages");
     const row = await getDb(env)
       .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
       .bind(COUNTERPARTY_ID)
-      .first<{ provider_data: Record<string, unknown> }>();
-    expect(row?.provider_data).toEqual({});
+      .first<{
+        provider_data: Record<string, unknown>;
+      }>();
+    expect(required(row).provider_data).toEqual({});
   });
   it("refreshes the customer status when a status-change reports an unverified status", async () => {
     const getCustomer = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer").mockResolvedValue(
@@ -1500,19 +1384,24 @@ describe("BVNK ramp webhook", () => {
       bvnkPlatformCustomerStatusChangeEvent({
         data: { status: "ACTIONS_REQUIRED", reference: CUSTOMER_REFERENCE },
       }),
-      { environment: "sandbox" }
+      { headers: {}, environment: "sandbox" }
     );
-
     expect(getCustomer).toHaveBeenCalledWith(expect.anything(), { reference: CUSTOMER_REFERENCE });
     const account = await readCustomerLinkMetadata();
-    expect(account?.metadata.status).toBe("INFO_REQUIRED");
-    expect(account?.metadata.verificationStatus).toBe("init");
-    const bvnk = (
+    expect(required(account).metadata.status).toBe("INFO_REQUIRED");
+    expect(required(account).metadata.verificationStatus).toBe("init");
+    const bvnk = required(
       await getDb(env)
         .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
         .bind(COUNTERPARTY_ID)
-        .first<{ provider_data: { bvnk?: { customer?: unknown } } }>()
-    )?.provider_data.bvnk;
+        .first<{
+          provider_data: {
+            bvnk?: {
+              customer?: unknown;
+            };
+          };
+        }>()
+    ).provider_data.bvnk;
     expect(bvnk?.customer).toBeUndefined();
   });
   it("resolves a platform:customer:update by external reference and refreshes via the stored reference", async () => {
@@ -1523,11 +1412,13 @@ describe("BVNK ramp webhook", () => {
         verification: { status: "pending" },
       })
     );
-    await sendBvnkWebhook(bvnkPlatformCustomerUpdateEvent(), { environment: "sandbox" });
-
+    await sendBvnkWebhook(bvnkPlatformCustomerUpdateEvent(), {
+      headers: {},
+      environment: "sandbox",
+    });
     expect(getCustomer).toHaveBeenCalledWith(expect.anything(), { reference: CUSTOMER_REFERENCE });
     const account = await readCustomerLinkMetadata();
-    expect(account?.metadata.status).toBe("PENDING");
+    expect(required(account).metadata.status).toBe("PENDING");
   });
   it("parks a legacy merchant off-ramp wallet event as terminal without writing rows", async () => {
     const OFFRAMP_WALLET_ID = "a:offramp:wallet:1";
@@ -1540,15 +1431,16 @@ describe("BVNK ramp webhook", () => {
       bvnkWalletStatusChangeEvent({
         name: `sdp:offramp:USD:${COUNTERPARTY_ID}`,
       }),
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
-
     await expectTerminalWebhookEvent("production", "SDP no longer manages");
     const row = await getDb(env)
       .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
       .bind(COUNTERPARTY_ID)
-      .first<{ provider_data: Record<string, unknown> }>();
-    expect(row?.provider_data).toEqual(before);
+      .first<{
+        provider_data: Record<string, unknown>;
+      }>();
+    expect(required(row).provider_data).toEqual(before);
   });
   it("settles an awaiting BVNK on-ramp transfer from a v1 COMPLETED pay-in matched by its remittance", async () => {
     const transferId = "xfr_123e4567-e89b-12d3-a456-426614174000";
@@ -1560,6 +1452,7 @@ describe("BVNK ramp webhook", () => {
       fundingWalletReference: WALLET_ID,
     });
     await seedOnrampTransfer(transferId, "awaiting_payment", counterpartyId, {
+      projectId: PROJECT_ID,
       fiatAmount: "100",
     });
     await sendBvnkWebhook(
@@ -1570,9 +1463,8 @@ describe("BVNK ramp webhook", () => {
         amount: 149.5,
         customerReference: bvnkSeedCustomerReference("payin_settles"),
       }),
-      { environment: "sandbox" }
+      { headers: {}, environment: "sandbox" }
     );
-
     const transfer = await getDb(env)
       .prepare(
         "SELECT status, fiat_amount, fiat_currency, provider_data FROM payment_transfers WHERE id = ?"
@@ -1582,19 +1474,22 @@ describe("BVNK ramp webhook", () => {
         status: string;
         fiat_amount: string | null;
         fiat_currency: string | null;
-        provider_data: { bvnk?: { payin?: Record<string, unknown> } };
+        provider_data: {
+          bvnk?: {
+            payin?: Record<string, unknown>;
+          };
+        };
       }>();
-    expect(transfer?.status).toBe("settling");
-    expect(transfer?.fiat_amount).toBe("149.5");
-    expect(transfer?.fiat_currency).toBe("USD");
-    expect(transfer?.provider_data.bvnk?.payin).toEqual({
+    expect(required(transfer).status).toBe("settling");
+    expect(required(transfer).fiat_amount).toBe("149.5");
+    expect(required(transfer).fiat_currency).toBe("USD");
+    expect(required(required(transfer).provider_data.bvnk).payin).toEqual({
       id: "payin_settles_1",
       receivedAmount: "149.5",
       receivedCurrency: "USD",
       walletId: WALLET_ID,
       customerId: bvnkSeedCustomerReference("payin_settles"),
     });
-
     await expectNoBvnkWebhookEvents();
   });
   it("acknowledges a replayed pay-in id with identical immutable facts whatever the transfer status", async () => {
@@ -1606,7 +1501,12 @@ describe("BVNK ramp webhook", () => {
       walletId: WALLET_ID,
       customerId: bvnkSeedCustomerReference("payin_replay"),
     };
-    await seedPayinApplied({ name: "payin_replay", transferId, payin: payinFacts });
+    await seedPayinApplied({
+      projectId: PROJECT_ID,
+      name: "payin_replay",
+      transferId,
+      payin: payinFacts,
+    });
     const payload = bvnkV1PayinEvent({
       transactionReference: payinFacts.id,
       amount: 149.5,
@@ -1615,7 +1515,7 @@ describe("BVNK ramp webhook", () => {
       paymentReference: "SDP-ONRAMP",
       additionalRemittanceInformation: `xfr_${transferId.slice(4)}`,
     });
-    const res = await sendBvnkWebhook(payload, { environment: "sandbox" });
+    const res = await sendBvnkWebhook(payload, { headers: {}, environment: "sandbox" });
     expect(res.status).toBe(200);
     const transfer = await getDb(env)
       .prepare("SELECT status, fiat_amount, provider_data FROM payment_transfers WHERE id = ?")
@@ -1623,12 +1523,15 @@ describe("BVNK ramp webhook", () => {
       .first<{
         status: string;
         fiat_amount: string | null;
-        provider_data: { bvnk?: { payin?: Record<string, unknown> } };
+        provider_data: {
+          bvnk?: {
+            payin?: Record<string, unknown>;
+          };
+        };
       }>();
-    expect(transfer?.status).toBe("settling");
-    expect(transfer?.fiat_amount).toBe("149.5");
-    expect(transfer?.provider_data.bvnk?.payin).toEqual(payinFacts);
-
+    expect(required(transfer).status).toBe("settling");
+    expect(required(transfer).fiat_amount).toBe("149.5");
+    expect(required(required(transfer).provider_data.bvnk).payin).toEqual(payinFacts);
     await expectNoBvnkWebhookEvents();
   });
   it("parks a v1 pay-in for an unknown transfer id as terminal", async () => {
@@ -1637,9 +1540,8 @@ describe("BVNK ramp webhook", () => {
         transactionReference: "payin_unknown_transfer_1",
         paymentReference: "SDP-ONRAMP xfr_99999999-9999-4999-9999-999999999999",
       }),
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
-
     await expectTerminalWebhookEvent(
       "production",
       "stray pay-in: unknown transfer or environment mismatch"
@@ -1666,10 +1568,10 @@ describe("BVNK ramp webhook", () => {
         walletId: WALLET_ID,
         customerReference: bvnkSeedCustomerReference("payin_conflict"),
       }),
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
     await expectTerminalWebhookEvent("production", "conflicting pay-in observation");
-    expect((await readTransferStatus(transferId))?.status).toBe("settling");
+    expect(required(await readTransferStatus(transferId)).status).toBe("settling");
   });
   it("parks a pay-in whose funding wallet binding mismatches as terminal", async () => {
     const productionCounterpartyId = await seedProductionCounterparty();
@@ -1696,16 +1598,16 @@ describe("BVNK ramp webhook", () => {
         paymentReference: "SDP-ONRAMP",
         additionalRemittanceInformation: `xfr_${transferId.slice(4)}`,
       }),
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
-
     await expectTerminalWebhookEvent("production", "funding wallet binding mismatch");
     const transfer = await readTransferStatus(transferId);
-    expect(transfer?.status).toBe("awaiting_payment");
+    expect(required(transfer).status).toBe("awaiting_payment");
   });
   it("parks a pay-in whose transfer lives in another environment as terminal", async () => {
     const transferId = "xfr_123e4567-e89b-12d3-a456-426614174005";
     await seedOnrampTransfer(transferId, "awaiting_payment", COUNTERPARTY_ID, {
+      projectId: PROJECT_ID,
       fiatAmount: "100",
     });
     await seedBvnkFundingWallet(getDb(env), {
@@ -1724,17 +1626,18 @@ describe("BVNK ramp webhook", () => {
         paymentReference: "SDP-ONRAMP",
         additionalRemittanceInformation: `xfr_${transferId.slice(4)}`,
       }),
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
-
     await expectTerminalWebhookEvent("production", "unknown transfer or environment mismatch");
     const transfer = await readTransferStatus(transferId);
-    expect(transfer?.status).toBe("awaiting_payment");
+    expect(required(transfer).status).toBe("awaiting_payment");
   });
   it("acknowledges a v2 pay-in delivery without writing rows", async () => {
-    const res = await sendBvnkWebhook(bvnkV2PayinStatusChangeEvent(), { environment: "sandbox" });
+    const res = await sendBvnkWebhook(bvnkV2PayinStatusChangeEvent(), {
+      headers: {},
+      environment: "sandbox",
+    });
     expect(res.status).toBe(200);
-
     await expectNoBvnkWebhookEvents();
   });
   it("payin_unique_conflict_resolves_original_owner", async () => {
@@ -1756,7 +1659,6 @@ describe("BVNK ramp webhook", () => {
       stage: "assigned",
       metadata: {},
     });
-
     const ownerSeed = {
       name: "race_owner",
       transferId: ownerTransferId,
@@ -1786,7 +1688,6 @@ describe("BVNK ramp webhook", () => {
         },
       };
     });
-
     const raceEvent = (amount: number) =>
       bvnkV1PayinEvent({
         transactionReference: payinId,
@@ -1794,27 +1695,28 @@ describe("BVNK ramp webhook", () => {
         customerReference: CUSTOMER_REFERENCE,
         paymentReference: `SDP-ONRAMP ${rivalTransferId}`,
       });
-    const raced = await sendBvnkWebhook(raceEvent(100), { environment: "production" });
+    const raced = await sendBvnkWebhook(raceEvent(100), { headers: {}, environment: "production" });
     expect(raced.status).toBe(200);
     expect(payinOwnerLookups).toBe(2);
-
     await expectNoBvnkWebhookEvents();
     const owner = await readTransferStatus(ownerTransferId);
     assert(owner !== null);
     expect(owner.status).toBe("settling");
-    expect((await readTransferStatus(rivalTransferId))?.status).toBe("awaiting_payment");
-    const conflicting = await sendBvnkWebhook(raceEvent(200), { environment: "production" });
+    expect(required(await readTransferStatus(rivalTransferId)).status).toBe("awaiting_payment");
+    const conflicting = await sendBvnkWebhook(raceEvent(200), {
+      headers: {},
+      environment: "production",
+    });
     expect(conflicting.status).toBe(200);
     await expectTerminalWebhookEvent("production", "conflicting pay-in observation");
-    expect((await readTransferStatus(ownerTransferId))?.status).toBe("settling");
-    expect((await readTransferStatus(rivalTransferId))?.status).toBe("awaiting_payment");
+    expect(required(await readTransferStatus(ownerTransferId)).status).toBe("settling");
+    expect(required(await readTransferStatus(rivalTransferId)).status).toBe("awaiting_payment");
     expect(factorySpy).toHaveBeenCalled();
   });
-
   function seedPayinApplied(input: {
     name: string;
     transferId: string;
-    projectId?: string;
+    projectId: string;
     payin: {
       id: string;
       receivedAmount: string;
@@ -1825,7 +1727,7 @@ describe("BVNK ramp webhook", () => {
   }) {
     return seedBvnkOnrampPayinApplied(getDb(env), {
       organizationId: ORG_ID,
-      projectId: input.projectId ?? PROJECT_ID,
+      projectId: input.projectId,
       name: input.name,
       createdBy: USER_ID,
       fundingWalletReference: WALLET_ID,
@@ -1834,7 +1736,6 @@ describe("BVNK ramp webhook", () => {
       payin: input.payin,
     });
   }
-
   const PAYOUT_INTENT = {
     amount: "9.9",
     currency: "USD",
@@ -1842,17 +1743,16 @@ describe("BVNK ramp webhook", () => {
     network: "SOLANA",
     address: "dest",
   } as const;
-
   function seedPayoutState(input: {
     name: string;
     transferId: string;
-    projectId?: string;
-    environment?: "sandbox" | "production";
+    projectId: string;
+    environment: "sandbox" | "production";
     payoutId?: string;
   }) {
     const scope = {
       organizationId: ORG_ID,
-      projectId: input.projectId ?? PROJECT_ID,
+      projectId: input.projectId,
       name: input.name,
       createdBy: USER_ID,
       fundingWalletReference: WALLET_ID,
@@ -1873,7 +1773,7 @@ describe("BVNK ramp webhook", () => {
     }
     return seedBvnkOnrampPayoutIssued(getDb(env), {
       ...scope,
-      environment: input.environment ?? "sandbox",
+      environment: input.environment,
       payoutId: input.payoutId,
     });
   }
@@ -1898,13 +1798,15 @@ describe("BVNK ramp webhook", () => {
   it("acknowledges a PROCESSING payout once the settlement is stored", async () => {
     const transferId = "xfr_bvnk_payout_processing";
     const seeded = await seedPayoutState({
+      projectId: PROJECT_ID,
+      environment: "sandbox",
       name: "payout_processing",
       transferId,
       payoutId: "payout_1",
     });
     const res = await sendBvnkWebhook(
       bvnkCryptoPayoutStatusChangeEvent({ reference: transferId, uuid: "payout_1" }),
-      { environment: "sandbox" }
+      { headers: {}, environment: "sandbox" }
     );
     expect(res.status).toBe(200);
     const transfer = await getDb(env)
@@ -1915,37 +1817,46 @@ describe("BVNK ramp webhook", () => {
         signature: string | null;
         provider_data: Record<string, unknown>;
       }>();
-    expect(transfer?.status).toBe("settling");
-    expect(transfer?.signature).toBeNull();
-    expect(transfer?.provider_data.settlement).toEqual(seeded.provider_data.settlement);
+    expect(required(transfer).status).toBe("settling");
+    expect(required(transfer).signature).toBeNull();
+    expect(required(transfer).provider_data.settlement).toEqual(seeded.provider_data.settlement);
   });
   it("throws a non-terminal error when a COMPLETE payout arrives before the payout id is stored", async () => {
     const transferId = "xfr_bvnk_payout_unrecorded";
     const hash =
       "TestDepos1tS1gnature11111111111111111111111111111111111111111111111111111111111111111111";
-    await seedPayoutState({ name: "payout_unrecorded", transferId });
+    await seedPayoutState({
+      projectId: PROJECT_ID,
+      environment: "sandbox",
+      name: "payout_unrecorded",
+      transferId,
+    });
     await sendBvnkWebhook(bvnkCompletePayoutEvent(transferId, hash, { uuid: "payout_1" }), {
+      headers: {},
       environment: "sandbox",
     });
-
     const stored = await readLastWebhookEvent("sandbox");
-    expect(stored?.status).toBe("pending");
-    expect(stored?.last_error).toContain("payout id was recorded; the inbox replay will retry");
-    expect((await readTransferStatus(transferId))?.status).toBe("settling");
+    expect(required(stored).status).toBe("pending");
+    expect(required(stored).last_error).toContain(
+      "payout id was recorded; the inbox replay will retry"
+    );
+    expect(required(await readTransferStatus(transferId)).status).toBe("settling");
   });
   it("settles the transfer from a COMPLETE payout with the conversion economics written", async () => {
     const transferId = "xfr_bvnk_payout_complete";
     const hash =
       "TestDepos1tS1gnature11111111111111111111111111111111111111111111111111111111111111111111";
     const seeded = await seedPayoutState({
+      projectId: PROJECT_ID,
+      environment: "sandbox",
       name: "payout_complete",
       transferId,
       payoutId: "payout_1",
     });
     await sendBvnkWebhook(bvnkCompletePayoutEvent(transferId, hash, { uuid: "payout_1" }), {
+      headers: {},
       environment: "sandbox",
     });
-
     const transfer = await getDb(env)
       .prepare(
         "SELECT status, fiat_amount, amount, signature, destination_address, provider_data FROM payment_transfers WHERE id = ?"
@@ -1957,14 +1868,16 @@ describe("BVNK ramp webhook", () => {
         amount: string | null;
         signature: string | null;
         destination_address: string | null;
-        provider_data: { settlement?: unknown };
+        provider_data: {
+          settlement?: unknown;
+        };
       }>();
-    expect(transfer?.status).toBe("completed");
-    expect(transfer?.fiat_amount).toBe("9.9");
-    expect(transfer?.amount).toBe("9.8802");
-    expect(transfer?.signature).toBe(hash);
-    expect(transfer?.destination_address).toBe("dest");
-    expect(transfer?.provider_data.settlement).toEqual({
+    expect(required(transfer).status).toBe("completed");
+    expect(required(transfer).fiat_amount).toBe("9.9");
+    expect(required(transfer).amount).toBe("9.8802");
+    expect(required(transfer).signature).toBe(hash);
+    expect(required(transfer).destination_address).toBe("dest");
+    expect(required(transfer).provider_data.settlement).toEqual({
       ...(seeded.provider_data.settlement as Record<string, unknown>),
       status: "COMPLETE",
       txHash: hash,
@@ -1979,7 +1892,13 @@ describe("BVNK ramp webhook", () => {
   });
   it("fails the transfer from a FAILED payout without refunding anything", async () => {
     const transferId = "xfr_bvnk_payout_failed";
-    await seedPayoutState({ name: "payout_failed", transferId, payoutId: "payout_1" });
+    await seedPayoutState({
+      projectId: PROJECT_ID,
+      environment: "sandbox",
+      name: "payout_failed",
+      transferId,
+      payoutId: "payout_1",
+    });
     await sendBvnkWebhook(
       bvnkCryptoPayoutStatusChangeEvent({
         status: "FAILED",
@@ -1987,21 +1906,31 @@ describe("BVNK ramp webhook", () => {
         uuid: "payout_1",
         transactions: [],
       }),
-      { environment: "sandbox" }
+      { headers: {}, environment: "sandbox" }
     );
-
     const transfer = await getDb(env)
       .prepare("SELECT status, error, provider_data FROM payment_transfers WHERE id = ?")
       .bind(transferId)
       .first<{
         status: string;
         error: string | null;
-        provider_data: { bvnk?: { payout?: { payoutId?: string; lastError?: string } } };
+        provider_data: {
+          bvnk?: {
+            payout?: {
+              payoutId?: string;
+              lastError?: string;
+            };
+          };
+        };
       }>();
-    expect(transfer?.status).toBe("failed");
-    expect(transfer?.error).toBe("FAILED");
-    expect(transfer?.provider_data.bvnk?.payout?.payoutId).toBe("payout_1");
-    expect(transfer?.provider_data.bvnk?.payout?.lastError).toBe("FAILED");
+    expect(required(transfer).status).toBe("failed");
+    expect(required(transfer).error).toBe("FAILED");
+    expect(required(required(required(transfer).provider_data.bvnk).payout).payoutId).toBe(
+      "payout_1"
+    );
+    expect(required(required(required(transfer).provider_data.bvnk).payout).lastError).toBe(
+      "FAILED"
+    );
   });
   it("parks a payout whose payout id differs from the stored one as terminal", async () => {
     const transferId = "xfr_bvnk_payout_other_uuid";
@@ -2015,30 +1944,35 @@ describe("BVNK ramp webhook", () => {
       payoutId: "payout_1",
     });
     await sendBvnkWebhook(bvnkCompletePayoutEvent(transferId, hash, { uuid: "payout_other" }), {
+      headers: {},
       environment: "production",
     });
-
     await expectTerminalWebhookEvent("production", "stray payout: payout id mismatch");
-    expect((await readTransferStatus(transferId))?.status).toBe("settling");
+    expect(required(await readTransferStatus(transferId)).status).toBe("settling");
   });
   it("parks a payout whose transfer lives in another environment as terminal", async () => {
     const transferId = "xfr_bvnk_payout_env_mismatch";
-    await seedPayoutState({ name: "payout_env_mismatch", transferId, payoutId: "payout_1" });
+    await seedPayoutState({
+      projectId: PROJECT_ID,
+      environment: "sandbox",
+      name: "payout_env_mismatch",
+      transferId,
+      payoutId: "payout_1",
+    });
     await sendBvnkWebhook(
       bvnkCryptoPayoutStatusChangeEvent({ reference: transferId, uuid: "payout_1" }),
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
-
     await expectTerminalWebhookEvent(
       "production",
       "stray payout: unknown transfer or environment mismatch"
     );
-    expect((await readTransferStatus(transferId))?.status).toBe("settling");
+    expect(required(await readTransferStatus(transferId)).status).toBe("settling");
   });
   it("ignores pay-in and payout statuses outside the acted-on vocabulary", async () => {
     const payin = await sendBvnkWebhook(
       bvnkV1PayinEvent({ transactionReference: "payin_dispatch_1", status: "REFUNDED" }),
-      { environment: "sandbox" }
+      { headers: {}, environment: "sandbox" }
     );
     const payout = await sendBvnkWebhook(
       bvnkCryptoPayoutStatusChangeEvent({
@@ -2046,12 +1980,10 @@ describe("BVNK ramp webhook", () => {
         reference: "xfr_bvnk_dispatch_payout",
         uuid: "payout_1",
       }),
-      { environment: "sandbox" }
+      { headers: {}, environment: "sandbox" }
     );
-
     expect(payin.status).toBe(200);
     expect(payout.status).toBe(200);
-
     await expectNoBvnkWebhookEvents();
   });
   const offrampFacts = {
@@ -2099,7 +2031,7 @@ describe("BVNK ramp webhook", () => {
     );
     const response = await sendBvnkWebhook(
       bvnkChannelTransactionEvent("transaction-detected", offrampFacts),
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
     expect(response.status).toBe(200);
     expect(getChannel).toHaveBeenCalledWith(expect.anything(), {
@@ -2121,9 +2053,9 @@ describe("BVNK ramp webhook", () => {
     const before = await readOfframpTransfer();
     const getChannel = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2");
     await sendBvnkWebhook(bvnkChannelTransactionEvent("transaction-detected", offrampFacts), {
+      headers: {},
       environment: "production",
     });
-
     await expectTerminalWebhookEvent("production", "unknown transfer or environment mismatch");
     expect(getChannel).not.toHaveBeenCalled();
     expect(await readOfframpTransfer()).toEqual(before);
@@ -2141,12 +2073,14 @@ describe("BVNK ramp webhook", () => {
     const event = bvnkConfirmedChannelEvent(offrampFacts);
     const response = await sendBvnkWebhook(
       { ...event, timestamp: BVNK_WEBHOOK_TIMESTAMP },
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
     expect(response.status).toBe(200);
     const transfer = await readOfframpTransfer();
     expect(transfer).toMatchObject({ status: "completed", fiat_amount: "9.9" });
-    expect(transfer?.provider_data.settlement).toEqual(BVNK_OFFRAMP_CHANNEL_SETTLEMENT_EXPECTED);
+    expect(required(transfer).provider_data.settlement).toEqual(
+      BVNK_OFFRAMP_CHANNEL_SETTLEMENT_EXPECTED
+    );
   });
   it("ACKs a duplicate confirmed delivery without changing the completed transfer", async () => {
     await seedOfframpProof({ stage: "recorded" });
@@ -2159,12 +2093,15 @@ describe("BVNK ramp webhook", () => {
       })
     );
     const event = { ...bvnkConfirmedChannelEvent(offrampFacts), timestamp: BVNK_WEBHOOK_TIMESTAMP };
-    expect((await sendBvnkWebhook(event, { environment: "production" })).status).toBe(200);
+    expect((await sendBvnkWebhook(event, { headers: {}, environment: "production" })).status).toBe(
+      200
+    );
     const before = await readOfframpTransfer();
     vi.setSystemTime(new Date("2026-09-18T00:32:17.014Z"));
-    expect((await sendBvnkWebhook(event, { environment: "production" })).status).toBe(200);
+    expect((await sendBvnkWebhook(event, { headers: {}, environment: "production" })).status).toBe(
+      200
+    );
     expect(await readOfframpTransfer()).toEqual(before);
-
     await expectNoBvnkWebhookEvents();
   });
   it.each([
@@ -2204,7 +2141,7 @@ describe("BVNK ramp webhook", () => {
       );
       await sendBvnkWebhook(
         { ...bvnkConfirmedChannelEvent(offrampFacts), timestamp: BVNK_WEBHOOK_TIMESTAMP },
-        { environment: "production" }
+        { headers: {}, environment: "production" }
       );
       await expectTerminalWebhookEvent("production", error);
       expect(await readOfframpTransfer()).toEqual(before);
@@ -2244,7 +2181,7 @@ describe("BVNK ramp webhook", () => {
           ...bvnkConfirmedChannelEvent({ ...offrampFacts, ...overrides }),
           timestamp: BVNK_WEBHOOK_TIMESTAMP,
         },
-        { environment: "production" }
+        { headers: {}, environment: "production" }
       );
       await expectTerminalWebhookEvent("production", error);
       expect(await readOfframpTransfer()).toEqual(before);
@@ -2258,7 +2195,7 @@ describe("BVNK ramp webhook", () => {
     );
     await sendBvnkWebhook(
       { ...bvnkConfirmedChannelEvent(offrampFacts), timestamp: BVNK_WEBHOOK_TIMESTAMP },
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
     expect(await readLastWebhookEvent("production")).toMatchObject({
       status: "pending",
@@ -2274,9 +2211,8 @@ describe("BVNK ramp webhook", () => {
     const getChannel = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2");
     await sendBvnkWebhook(
       { ...bvnkConfirmedChannelEvent(offrampFacts), timestamp: BVNK_WEBHOOK_TIMESTAMP },
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
-
     await expectTerminalWebhookEvent("production", "transfer has no recorded channel");
     expect(getChannel).not.toHaveBeenCalled();
     expect(await readOfframpTransfer()).toEqual(before);
@@ -2287,9 +2223,8 @@ describe("BVNK ramp webhook", () => {
     const getChannel = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2");
     await sendBvnkWebhook(
       { ...bvnkConfirmedChannelEvent(offrampFacts), timestamp: BVNK_WEBHOOK_TIMESTAMP },
-      { environment: "production" }
+      { headers: {}, environment: "production" }
     );
-
     await expectTerminalWebhookEvent("production", "transfer has no recorded channel");
     expect(getChannel).not.toHaveBeenCalled();
     expect(await readOfframpTransfer()).toEqual(before);
@@ -2297,19 +2232,18 @@ describe("BVNK ramp webhook", () => {
   it("rejects a webhook with an invalid signature", async () => {
     const res = await sendBvnkWebhook(
       { event: "customer.updated", data: { reference: CUSTOMER_REFERENCE, status: "VERIFIED" } },
-      { signature: "not-a-valid-signature", environment: "sandbox" }
+      { headers: { "X-Signature": "not-a-valid-signature" }, environment: "sandbox" }
     );
     expect(res.status).toBe(401);
   });
   it("records a SIGNED agreement session and advances its stored requirements", async () => {
     await seedAgreementSession();
     const event = bvnkAgreementSessionStatusChangeEvent();
-    await sendBvnkWebhook(event, { environment: "sandbox" });
+    await sendBvnkWebhook(event, { headers: {}, environment: "sandbox" });
     const row = await readCustomerLinkMetadata();
-    const metadata = row?.metadata as BvnkCustomerProviderAccountMetadata | undefined;
-    if (metadata === undefined || metadata.session === undefined) {
-      throw new Error("Expected BVNK agreement-session metadata");
-    }
+    const metadata = required(row).metadata as BvnkCustomerProviderAccountMetadata | undefined;
+    assert(metadata);
+    assert(metadata.session);
     expect(metadata.session.signedAt).toBe(new Date(event.timestamp).toISOString());
     expect(bvnkCustomerLinkProviderStatus(metadata)).toBe("AGREEMENT_SIGNED");
     expect(bvnkCustomerRequirementsFromMetadata("onramp", metadata)).toMatchObject({
@@ -2320,8 +2254,7 @@ describe("BVNK ramp webhook", () => {
     const event = bvnkAgreementSessionStatusChangeEvent({
       data: { status: "SIGNED", reference: "unknown-agreement-session" },
     });
-    await sendBvnkWebhook(event, { environment: "sandbox" });
-
+    await sendBvnkWebhook(event, { headers: {}, environment: "sandbox" });
     await expectNoBvnkWebhookEvents();
   });
   it("acknowledges a non-SIGNED agreement session without changing the row", async () => {
@@ -2330,17 +2263,15 @@ describe("BVNK ramp webhook", () => {
       bvnkAgreementSessionStatusChangeEvent({
         data: { status: "PENDING", reference: AGREEMENT_SESSION_REFERENCE },
       }),
-      { environment: "sandbox" }
+      { headers: {}, environment: "sandbox" }
     );
     expect(res.status).toBe(200);
     const row = await readCustomerLinkMetadata();
-    const metadata = row?.metadata as BvnkCustomerProviderAccountMetadata | undefined;
-    if (metadata === undefined || metadata.session === undefined) {
-      throw new Error("Expected BVNK agreement-session metadata");
-    }
+    const metadata = required(row).metadata as BvnkCustomerProviderAccountMetadata | undefined;
+    assert(metadata);
+    assert(metadata.session);
     expect(metadata.session.signedAt).toBeUndefined();
   });
-
   it("rejects a bvnk webhook that omits the envelope timestamp", async () => {
     const body = JSON.stringify({ ...verifiedCustomerStatusEvent, timestamp: undefined });
     const sig = createHmac("sha256", BVNK_WEBHOOK_SECRET).update(body).digest("base64");
@@ -2364,12 +2295,10 @@ describe("Lightspark ramp webhook", () => {
   const TRANSFER_ID = "pt_lightspark_webhook";
   const QUOTE_ID = "Quote:019e979c-f660-5246-0000-c0588496b9ce";
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-
   type LightsparkOnrampWebhookBase = {
     id: string;
     timestamp?: string;
   };
-
   type LightsparkOnrampPaymentDataBase = {
     id: string;
     type: "OUTGOING";
@@ -2418,21 +2347,26 @@ describe("Lightspark ramp webhook", () => {
       };
     }[];
   };
-
   type LightsparkOnrampWebhookPayload =
     | (LightsparkOnrampWebhookBase & {
         type: "OUTGOING_PAYMENT.PENDING";
-        data: LightsparkOnrampPaymentDataBase & { status: "PENDING" };
+        data: LightsparkOnrampPaymentDataBase & {
+          status: "PENDING";
+        };
       })
     | (LightsparkOnrampWebhookBase & {
         type: "OUTGOING_PAYMENT.PROCESSING";
-        data: LightsparkOnrampPaymentDataBase & { status: "PROCESSING" };
+        data: LightsparkOnrampPaymentDataBase & {
+          status: "PROCESSING";
+        };
       })
     | (LightsparkOnrampWebhookBase & {
         type: "OUTGOING_PAYMENT.COMPLETED";
-        data: LightsparkOnrampPaymentDataBase & { status: "COMPLETED"; settledAt: string };
+        data: LightsparkOnrampPaymentDataBase & {
+          status: "COMPLETED";
+          settledAt: string;
+        };
       });
-
   const LIGHTSPARK_ONRAMP_PAYMENT_DATA = {
     id: "Transaction:019e979c-f671-b78f-0000-2154aedf309b",
     type: "OUTGOING",
@@ -2482,7 +2416,6 @@ describe("Lightspark ramp webhook", () => {
       },
     ],
   } as const satisfies Omit<LightsparkOnrampPaymentDataBase, "updatedAt">;
-
   async function seedLightsparkTransfer() {
     await getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -2499,14 +2432,12 @@ describe("Lightspark ramp webhook", () => {
       ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
     });
     await getDb(env)
-      .prepare(
-        `INSERT INTO payment_transfers (
+      .prepare(`INSERT INTO payment_transfers (
            id, organization_id, project_id, wallet_id, source_address, destination_address,
            token, amount, memo, type, direction, status, provider, provider_reference,
            delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
            initiated_by_key_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         TRANSFER_ID,
         ORG_ID,
@@ -2534,7 +2465,6 @@ describe("Lightspark ramp webhook", () => {
       )
       .run();
   }
-
   async function sendLightsparkWebhook(payload: LightsparkOnrampWebhookPayload) {
     const body = JSON.stringify({ ...payload, timestamp: new Date().toISOString() });
     const signature = createSign("SHA256").update(body).sign(privateKey).toString("base64");
@@ -2562,7 +2492,6 @@ describe("Lightspark ramp webhook", () => {
     await Promise.allSettled(background);
     return res;
   }
-
   beforeEach(async () => {
     await seedTestDatabase(env);
     env.LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY = publicKey
@@ -2570,11 +2499,9 @@ describe("Lightspark ramp webhook", () => {
       .toString();
     await seedLightsparkTransfer();
   });
-
   afterEach(async () => {
     env.LIGHTSPARK_GRID_SANDBOX_WEBHOOK_PUBLIC_KEY = undefined;
   });
-
   it("marks a lightspark onramp transfer awaiting payment from the quote-time PENDING webhook", async () => {
     const res = await sendLightsparkWebhook({
       id: "Webhook:019e979c-f68e-52c1-0000-3acafedca6e8",
@@ -2585,16 +2512,15 @@ describe("Lightspark ramp webhook", () => {
         updatedAt: "2026-06-05T11:48:26.865811Z",
       },
     });
-
     expect(res.status).toBe(200);
-
     const transfer = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind(TRANSFER_ID)
-      .first<{ status: string }>();
+      .first<{
+        status: string;
+      }>();
     expect(transfer).toEqual({ status: "awaiting_payment" });
   });
-
   it("marks a lightspark onramp transfer settling from an OUTGOING_PAYMENT.PROCESSING webhook", async () => {
     const res = await sendLightsparkWebhook({
       id: "Webhook:019e979f-89d8-52c1-0000-2b4e2eaa4a8e",
@@ -2605,16 +2531,15 @@ describe("Lightspark ramp webhook", () => {
         updatedAt: "2026-06-05T11:51:15.639479Z",
       },
     });
-
     expect(res.status).toBe(200);
-
     const transfer = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind(TRANSFER_ID)
-      .first<{ status: string }>();
+      .first<{
+        status: string;
+      }>();
     expect(transfer).toEqual({ status: "settling" });
   });
-
   it("marks a lightspark onramp transfer completed from an OUTGOING_PAYMENT.COMPLETED webhook", async () => {
     const res = await sendLightsparkWebhook({
       id: "Webhook:019e979f-8bf4-52c1-0000-eca039904606",
@@ -2626,29 +2551,25 @@ describe("Lightspark ramp webhook", () => {
         settledAt: "2026-06-05T11:51:16.175534Z",
       },
     });
-
     expect(res.status).toBe(200);
-
     const transfer = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind(TRANSFER_ID)
-      .first<{ status: string }>();
+      .first<{
+        status: string;
+      }>();
     expect(transfer).toEqual({ status: "completed" });
   });
-
   const OFFRAMP_TRANSFER_ID = "pt_lightspark_offramp_webhook";
   const OFFRAMP_QUOTE_ID = "Quote:019eb56d-f06c-5246-0000-c18574f65f2a";
-
   async function seedLightsparkOfframpTransfer() {
     await getDb(env)
-      .prepare(
-        `INSERT INTO payment_transfers (
+      .prepare(`INSERT INTO payment_transfers (
            id, organization_id, project_id, wallet_id, source_address, destination_address,
            token, amount, memo, type, direction, status, provider, provider_reference,
            delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
            initiated_by_key_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         OFFRAMP_TRANSFER_ID,
         ORG_ID,
@@ -2676,7 +2597,6 @@ describe("Lightspark ramp webhook", () => {
       )
       .run();
   }
-
   function offrampCompletedWebhook(): LightsparkOnrampWebhookPayload {
     return {
       id: "Webhook:019eb56e-ea4e-52c1-0000-36fa5542e7e6",
@@ -2704,26 +2624,23 @@ describe("Lightspark ramp webhook", () => {
       },
     };
   }
-
   it("persists the settled fiat amount on a lightspark offramp COMPLETED webhook", async () => {
     await seedLightsparkOfframpTransfer();
-
     const res = await sendLightsparkWebhook(offrampCompletedWebhook());
     expect(res.status).toBe(200);
-
     const transfer = await getDb(env)
       .prepare("SELECT status, fiat_amount FROM payment_transfers WHERE id = ?")
       .bind(OFFRAMP_TRANSFER_ID)
-      .first<{ status: string; fiat_amount: string }>();
+      .first<{
+        status: string;
+        fiat_amount: string;
+      }>();
     expect(transfer).toEqual({ status: "completed", fiat_amount: "9.99" });
   });
-
   it("does not regress a settled transfer when a stale webhook is redelivered", async () => {
     await seedLightsparkOfframpTransfer();
-
     const completed = await sendLightsparkWebhook(offrampCompletedWebhook());
     expect(completed.status).toBe(200);
-
     const stale = await sendLightsparkWebhook({
       id: "Webhook:019eb56d-f08b-52c1-0000-90f1e68dc8f8",
       type: "OUTGOING_PAYMENT.PENDING",
@@ -2735,17 +2652,17 @@ describe("Lightspark ramp webhook", () => {
       },
     });
     expect(stale.status).toBe(200);
-
     const transfer = await getDb(env)
       .prepare("SELECT status, fiat_amount FROM payment_transfers WHERE id = ?")
       .bind(OFFRAMP_TRANSFER_ID)
-      .first<{ status: string; fiat_amount: string }>();
+      .first<{
+        status: string;
+        fiat_amount: string;
+      }>();
     expect(transfer).toEqual({ status: "completed", fiat_amount: "9.99" });
   });
-
   it("rejects a lightspark webhook whose signed timestamp is outside the replay window", async () => {
     await seedLightsparkOfframpTransfer();
-
     const stalePayload = {
       ...offrampCompletedWebhook(),
       timestamp: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
@@ -2765,14 +2682,14 @@ describe("Lightspark ramp webhook", () => {
       env
     );
     expect(res.status).toBe(401);
-
     const transfer = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind(OFFRAMP_TRANSFER_ID)
-      .first<{ status: string }>();
-    expect(transfer?.status).toBe("awaiting_payment");
+      .first<{
+        status: string;
+      }>();
+    expect(required(transfer).status).toBe("awaiting_payment");
   });
-
   it("rejects a lightspark webhook that omits the envelope timestamp", async () => {
     const body = JSON.stringify(offrampCompletedWebhook());
     const signature = createSign("SHA256").update(body).sign(privateKey).toString("base64");
@@ -2791,6 +2708,7 @@ describe("Lightspark ramp webhook", () => {
     expect(res.status).toBe(401);
   });
 });
+
 describe("MoonPay ramp webhook", () => {
   const ORG_ID = "org_moonpay_webhook";
   const PROJECT_ID = "prj_moonpay_webhook";
@@ -2837,7 +2755,6 @@ describe("MoonPay ramp webhook", () => {
     await Promise.allSettled(background);
     return res;
   }
-
   async function seedMoonpayOnrampTransfer() {
     await getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -2854,22 +2771,18 @@ describe("MoonPay ramp webhook", () => {
       ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
     });
     await getDb(env)
-      .prepare(
-        `INSERT INTO counterparties (
+      .prepare(`INSERT INTO counterparties (
            id, organization_id, project_id, entity_type, display_name, status, created_by
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .bind(COUNTERPARTY_ID, ORG_ID, PROJECT_ID, "individual", "MoonPay Buyer", "active", USER_ID)
       .run();
     await getDb(env)
-      .prepare(
-        `INSERT INTO payment_transfers (
+      .prepare(`INSERT INTO payment_transfers (
            id, organization_id, project_id, wallet_id, counterparty_id, source_address,
            destination_address, token, amount, memo, type, direction, status, provider,
            provider_reference, delivery_mode, fiat_currency, fiat_amount, provider_data,
            signature, serialized_tx, initiated_by_key_id, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         TRANSFER_ID,
         ORG_ID,
@@ -2898,17 +2811,14 @@ describe("MoonPay ramp webhook", () => {
       )
       .run();
   }
-
   beforeEach(async () => {
     await seedTestDatabase(env);
     env.MOONPAY_SANDBOX_WEBHOOK_KEY = MOONPAY_WEBHOOK_KEY;
     await seedMoonpayOnrampTransfer();
   });
-
   afterEach(async () => {
     env.MOONPAY_SANDBOX_WEBHOOK_KEY = undefined;
   });
-
   const completedPayload = {
     type: "transaction_updated",
     externalCustomerId: "MOONPAY-ONRAMP-0001",
@@ -2931,16 +2841,12 @@ describe("MoonPay ramp webhook", () => {
       currency: { code: "sol" },
     },
   };
-
   it("records the delivered crypto amount and per-provider economics on a completed webhook", async () => {
     const res = await sendMoonpayWebhook(completedPayload);
     expect(res.status).toBe(200);
-
     const transfer = await getDb(env)
-      .prepare(
-        `SELECT status, amount, destination_address, signature, provider_reference, provider_data
-         FROM payment_transfers WHERE id = ?`
-      )
+      .prepare(`SELECT status, amount, destination_address, signature, provider_reference, provider_data
+         FROM payment_transfers WHERE id = ?`)
       .bind(TRANSFER_ID)
       .first<{
         status: string;
@@ -2948,14 +2854,20 @@ describe("MoonPay ramp webhook", () => {
         destination_address: string | null;
         signature: string | null;
         provider_reference: string | null;
-        provider_data: { settlement?: Record<string, unknown> };
+        provider_data: {
+          settlement?: Record<string, unknown>;
+        };
       }>();
-    expect(transfer?.status).toBe("completed");
-    expect(transfer?.amount).toBe("0.649");
-    expect(transfer?.provider_reference).toBe(MOONPAY_TRANSACTION_ID);
-    expect(transfer?.destination_address).toBe("WebhookDestinationSolanaWallet111111111111111111");
-    expect(transfer?.signature).toBe("t11paHKpm79qTHVgSQ4rr9PAqE7ZT87MWpi1f5Nim8XzPyc7aPux");
-    expect(transfer?.provider_data.settlement).toMatchObject({
+    expect(required(transfer).status).toBe("completed");
+    expect(required(transfer).amount).toBe("0.649");
+    expect(required(transfer).provider_reference).toBe(MOONPAY_TRANSACTION_ID);
+    expect(required(transfer).destination_address).toBe(
+      "WebhookDestinationSolanaWallet111111111111111111"
+    );
+    expect(required(transfer).signature).toBe(
+      "t11paHKpm79qTHVgSQ4rr9PAqE7ZT87MWpi1f5Nim8XzPyc7aPux"
+    );
+    expect(required(transfer).provider_data.settlement).toMatchObject({
       provider: "moonpay",
       status: "completed",
       baseCurrencyCode: "USD",
@@ -2975,15 +2887,12 @@ describe("MoonPay ramp webhook", () => {
       "TestDepos1tS1gnature11111111111111111111111111111111111111111111111111111111111111111111";
     const moonpayTransactionId = "cca8ef45-4aac-4a91-851a-02ff991eeef9";
     await getDb(env)
-      .prepare(
-        `UPDATE payment_transfers
+      .prepare(`UPDATE payment_transfers
          SET type = 'offramp', direction = 'outbound', source_address = ?,
              destination_address = NULL, amount = '0.2', fiat_amount = NULL, signature = ?
-         WHERE id = ?`
-      )
+         WHERE id = ?`)
       .bind(sourceAddress, submittedSignature, TRANSFER_ID)
       .run();
-
     const res = await sendMoonpayWebhook({
       type: "sell_transaction_updated",
       data: {
@@ -2999,13 +2908,10 @@ describe("MoonPay ramp webhook", () => {
       },
     });
     expect(res.status).toBe(200);
-
     const transfer = await getDb(env)
-      .prepare(
-        `SELECT status, amount, fiat_amount, source_address, destination_address,
+      .prepare(`SELECT status, amount, fiat_amount, source_address, destination_address,
                 signature, provider_reference
-         FROM payment_transfers WHERE id = ?`
-      )
+         FROM payment_transfers WHERE id = ?`)
       .bind(TRANSFER_ID)
       .first<{
         status: string;
@@ -3026,17 +2932,13 @@ describe("MoonPay ramp webhook", () => {
       provider_reference: moonpayTransactionId,
     });
   });
-
   it("links the MoonPay customer to the counterparty and keeps the link stable on redelivery", async () => {
     const first = await sendMoonpayWebhook(completedPayload);
     expect(first.status).toBe(200);
-
     const link = await getDb(env)
-      .prepare(
-        `SELECT id, counterparty_id, provider, provider_customer_reference, status
+      .prepare(`SELECT id, counterparty_id, provider, provider_customer_reference, status
          FROM counterparty_provider_accounts
-         WHERE counterparty_id = ? AND provider = 'moonpay'`
-      )
+         WHERE counterparty_id = ? AND provider = 'moonpay'`)
       .bind(COUNTERPARTY_ID)
       .first<{
         id: string;
@@ -3051,21 +2953,18 @@ describe("MoonPay ramp webhook", () => {
       provider_customer_reference: MOONPAY_CUSTOMER_ID,
       status: "active",
     });
-
     const second = await sendMoonpayWebhook(completedPayload);
     expect(second.status).toBe(200);
-
     const rows = await getDb(env)
-      .prepare(
-        `SELECT id FROM counterparty_provider_accounts
-         WHERE counterparty_id = ? AND provider = 'moonpay'`
-      )
+      .prepare(`SELECT id FROM counterparty_provider_accounts
+         WHERE counterparty_id = ? AND provider = 'moonpay'`)
       .bind(COUNTERPARTY_ID)
-      .all<{ id: string }>();
+      .all<{
+        id: string;
+      }>();
     expect(rows.results).toHaveLength(1);
-    expect(rows.results[0].id).toBe(link?.id);
+    expect(rows.results[0].id).toBe(required(link).id);
   });
-
   it("still marks a transfer failed when an early-stage failure omits economics", async () => {
     const res = await sendMoonpayWebhook({
       type: "transaction_failed",
@@ -3078,14 +2977,19 @@ describe("MoonPay ramp webhook", () => {
       },
     });
     expect(res.status).toBe(200);
-
     const transfer = await getDb(env)
       .prepare("SELECT status, error, provider_data FROM payment_transfers WHERE id = ?")
       .bind(TRANSFER_ID)
-      .first<{ status: string; error: string | null; provider_data: { settlement?: unknown } }>();
-    expect(transfer?.status).toBe("failed");
-    expect(transfer?.error).toBe("kyc_rejected");
-    expect(transfer?.provider_data.settlement).toBeUndefined();
+      .first<{
+        status: string;
+        error: string | null;
+        provider_data: {
+          settlement?: unknown;
+        };
+      }>();
+    expect(required(transfer).status).toBe("failed");
+    expect(required(transfer).error).toBe("kyc_rejected");
+    expect(required(transfer).provider_data.settlement).toBeUndefined();
   });
   it("rejects a moonpay webhook whose signed timestamp is outside the replay window", async () => {
     const body = JSON.stringify(completedPayload);
@@ -3102,12 +3006,13 @@ describe("MoonPay ramp webhook", () => {
       env
     );
     expect(res.status).toBe(401);
-
     const transfer = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind(TRANSFER_ID)
-      .first<{ status: string }>();
-    expect(transfer?.status).toBe("awaiting_payment");
+      .first<{
+        status: string;
+      }>();
+    expect(required(transfer).status).toBe("awaiting_payment");
   });
   it("rejects a moonpay webhook with an invalid signature", async () => {
     const body = JSON.stringify(completedPayload);
@@ -3125,7 +3030,6 @@ describe("MoonPay ramp webhook", () => {
     );
     expect(res.status).toBe(401);
   });
-
   it("refuses an oversized body before verifying its signature", async () => {
     const res = await app.request(
       "/webhooks/payments/ramps/sandbox/moonpay",

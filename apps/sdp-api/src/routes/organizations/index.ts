@@ -17,7 +17,7 @@ import { updateOrgSchema } from "./schemas";
 const organizations = new Hono<{ Bindings: Env }>();
 
 // Protected routes below require authentication
-organizations.use("/:orgId/*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
+organizations.use("/:orgId/*", unifiedAuthMiddleware());
 
 organizations.get("/:orgId", requirePermissions("org:read"), getOrganization);
 organizations.get(

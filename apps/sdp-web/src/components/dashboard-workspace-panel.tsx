@@ -9,14 +9,26 @@ import { cn } from "@/lib/utils";
 // space, so there's no width jump to compensate for. The `html` rule in
 // globals.css is inert here because the shell locks the viewport and this inner
 // panel is what actually scrolls.
+//
+// A refresh surface already sets the page in its own column, so the panel's content shares the
+// title's left and right edges. The panel itself spans the whole work area (the shell's section
+// is its size container, `100cqw`) and pads back in to the column: the scrollbar sits at the
+// window's edge as the design's page scroll does, not in the middle of the screen, and a table
+// row's hover tint can bleed past its text without this scroll container clipping it. The 36px
+// top is the design's distance from the title row (or the tabs) to the first content block
+// (28px on a phone); 64px closes the page.
 export const dashboardWorkspaceOverviewPanelClassName =
-  "h-full min-h-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-3 pt-6 pb-5 md:px-6 md:pb-6";
+  "sdp-quiet-scroll h-full min-h-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-3 pt-6 pb-5 md:px-6 md:pb-6 refresh:mx-[calc((100%-100cqw)/2)] refresh:w-auto refresh:px-[calc((100cqw-100%)/2)] refresh:pt-7 refresh:pb-16 refresh:[scrollbar-gutter:auto] md:refresh:px-[calc((100cqw-100%)/2)] md:refresh:pt-9 md:refresh:pb-16";
 
 /**
  * The standard playground/chrome panel: absolutely positioned to fill the
- * shell, column flex, with no padding of its own.
+ * shell, column flex, with no padding of its own. A refresh surface keeps the same 36px
+ * between the tabs and the playground as the overview keeps between the tabs and its content,
+ * and scrolls the playground the way the overview panel scrolls: edge to edge of the work area,
+ * padded back to the column (its layout has no scroll region of its own).
  */
-export const dashboardWorkspacePlaygroundPanelClassName = "absolute inset-0 flex min-h-0 flex-col";
+export const dashboardWorkspacePlaygroundPanelClassName =
+  "sdp-quiet-scroll absolute inset-0 flex min-h-0 flex-col refresh:mx-[calc((100%-100cqw)/2)] refresh:overflow-y-auto refresh:px-[calc((100cqw-100%)/2)] refresh:pt-9";
 
 export function DashboardWorkspaceOverviewPanel({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn(dashboardWorkspaceOverviewPanelClassName, className)} {...props} />;

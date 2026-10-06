@@ -1187,7 +1187,7 @@ fork a keyed and anonymous route with duplicate behavior.
   `earn:read` or `earn:write` scope.
 - **No credential downgrade:** a presented credential must resolve completely
   or return 401. That includes an unknown, revoked, or expired API key, a Clerk
-  token without organization context, and an invalid or expired session cookie.
+  token without organization context.
   Only a request that presents no supported credential may continue anonymously.
 - **Keyed control plane:** submits, queued request/cancellation builds,
   movements, positions, earnings, custody vault routes, programs, and the
