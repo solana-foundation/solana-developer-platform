@@ -662,6 +662,26 @@ jobs:
         if: ${{ always() }}
         run: echo "clean=${{ (steps.rollback_guard.outcome == 'success' || steps.rollback_guard.outcome == 'skipped') && (steps.remove_tag.outcome == 'success' || steps.remove_tag.outcome == 'skipped') }}" >> "$GITHUB_OUTPUT"
 
+  # sdp-web requires this status as a Vercel Deployment Check, so Vercel holds
+  # each commit's production web build until production serves that commit's
+  # API. Only merge and approved-migration deploys post it; a manual rollback
+  # never releases web.
+  release-web:
+    name: Release sdp-web production for the deployed commit
+    needs: deploy
+    if: ${{ inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      statuses: write
+    steps:
+      - name: Post the sdp-web production gate status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_SHA: ${{ inputs.image_sha }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${IMAGE_SHA}" \
+            -f state=success -f context="sdp-web production gate" -f description="Production API serves this commit"
 
   notify-result:
     name: Notify Slack — release result

@@ -183,6 +183,7 @@ jobs:
       contents: read
       id-token: write
       packages: read
+      statuses: write
     uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
     with:
       release_sha: ${{ needs.publish-release.outputs.release_sha }}

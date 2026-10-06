@@ -55,7 +55,7 @@ jobs:
             none) ;;
             api) api=true ;;
             auto|*)
-              if match "^(apps/sdp-api/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod|-stage)?)?\.yml|\.github/workflows/sdp-stage-smoke\.yml)"; then
+              if match "^(apps/sdp-api/|apps/sdp-web/|packages/|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.github/workflows/deploy(-sdp-api-gcp(-prod|-stage)?)?\.yml|\.github/workflows/sdp-stage-smoke\.yml)"; then
                 api=true
               fi
               ;;
@@ -261,6 +261,7 @@ jobs:
       contents: read
       id-token: write
       packages: read
+      statuses: write
     uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
     with:
       image_sha: ${{ github.sha }}
