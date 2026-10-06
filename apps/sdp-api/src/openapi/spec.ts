@@ -110,7 +110,7 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.ASSET_PROFILES,
 ];
 
-function publicOpenApiTags(publishEarn: boolean) {
+export function publicOpenApiTags(publishEarn: boolean = EARN_PUBLIC_SURFACE_PUBLISHED) {
   return publishEarn ? [...PUBLIC_OPENAPI_TAGS, OPENAPI_TAG.PUBLIC_EARN] : PUBLIC_OPENAPI_TAGS;
 }
 
