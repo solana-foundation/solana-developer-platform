@@ -30,7 +30,8 @@ export const projectSettingsSchema = z
       example: "https://rpc.example.com",
     }),
     webhookUrl: z.string().url().optional().openapi({
-      description: "Webhook URL for event notifications.",
+      description:
+        "Stored with the project settings. SDP does not deliver webhooks to this URL; poll the resource endpoints for status.",
       example: "https://example.com/webhook",
     }),
     metadata: z

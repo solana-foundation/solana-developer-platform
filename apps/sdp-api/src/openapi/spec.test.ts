@@ -752,6 +752,8 @@ describe("OpenAPI spec", () => {
     expect(doc.components?.securitySchemes?.adminKey).toBeUndefined();
     expect(updateProject).toContain('"rpcProvider"');
     expect(updateProject).toContain('"nodit"');
+    // webhookUrl is stored but nothing delivers to it; the schema must not promise events.
+    expect(updateProject).toContain("SDP does not deliver webhooks to this URL");
 
     expect(doc.paths?.["/health"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
