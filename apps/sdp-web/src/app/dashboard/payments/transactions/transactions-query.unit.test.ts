@@ -70,6 +70,24 @@ describe("transaction filter query", () => {
     expect(parseTransactionFilters({ tab: "payments" }, ["payments"]).module).toBe("payments");
   });
 
+  it("opens All from its first page when a saved link names a hidden module", () => {
+    expect(
+      parseTransactionFilters(
+        { tab: "earn", cursor: "third", cursors: "first,second", status: "succeeded" },
+        ["payments"]
+      )
+    ).toEqual({ status: "succeeded", cursors: [] });
+  });
+
+  it("keeps pagination on an All link", () => {
+    expect(
+      parseTransactionFilters({ cursor: "third", cursors: "first,second" }, ["payments"])
+    ).toEqual({ cursor: "third", cursors: ["first", "second"] });
+    expect(
+      parseTransactionFilters({ tab: "all", cursor: "third", cursors: "first" }, ["payments"])
+    ).toEqual({ cursor: "third", cursors: ["first"] });
+  });
+
   it("drops a saved kind with its hidden module, since the API refuses kind without module", () => {
     expect(parseTransactionFilters({ tab: "earn", kind: "deposit" }, ["payments"])).toEqual({
       cursors: [],

@@ -53,10 +53,13 @@ export function parseTransactionFilters(
   const { tab, kind, cursors: rawCursors, ...rest } = parsed;
   const cursors = rawCursors === undefined || rawCursors === "" ? [] : rawCursors.split(",");
   const module = parseTransactionModule(tab, modules);
-  // A kind belongs to its module (the API refuses one without it), so a link whose module
-  // tab is hidden or unknown opens the default tab with no kind.
-  if (module === undefined) return { ...rest, cursors };
-  return { ...rest, module, kind, cursors };
+  if (module !== undefined) return { ...rest, module, kind, cursors };
+  // A kind belongs to its module (the API refuses one without it), so All never carries one.
+  if (tab === undefined || tab === "all") return { ...rest, cursors };
+  // The link named a module tab that is hidden or unknown: open All from its first page,
+  // since that tab's cursor would skip newer transactions on All.
+  const { cursor: _discardedCursor, ...unpaged } = rest;
+  return { ...unpaged, cursors: [] };
 }
 
 const TRANSACTION_URL_PARAM_KEYS = [
