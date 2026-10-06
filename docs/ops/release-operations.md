@@ -17,6 +17,25 @@
 
 Vercel's git integration builds previews for pull-request branches and a production build for every merge to `main`. The sdp-web project requires the `sdp-web production gate` status under Settings → Deployment Checks, so each production build waits. Merges touching `apps/sdp-web/` run the same stage and production pipeline as API changes, and the `release-web` job in [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) posts the status for the deployed commit after a per-merge or approved-migration deploy succeeds. Web and API therefore go live from the same commit, API first: a held, failed, or rolled-back API deploy posts nothing and web stays on its previous deployment. No GitHub workflow deploys sdp-web, and no Vercel token is involved.
 
+```mermaid
+flowchart TD
+  M["Merge to main at SHA X"] --> WB["Vercel builds production web X<br/>held by the Deployment Check"]
+  M --> CH{"API or web paths changed?"}
+  CH -- no --> H0["No deploy: web X stays held"]
+  CH -- yes --> ST["Stage: deploy API X, run smoke"]
+  ST -- fails --> H1["Nothing reaches prod"]
+  ST -- passes --> SC{"Pending migrations?"}
+  SC -- yes --> AP["Apply pending migrations to prod<br/>release-production approval"]
+  SC -- no --> PD["Prod API deploy X<br/>canary, then traffic on X"]
+  AP --> PD
+  PD -- fails or rolls back --> H2["No status: web stays on its previous deployment"]
+  PD -- succeeds --> RW["release-web posts<br/>sdp-web production gate = success for X"]
+  RW --> VP["Vercel promotes web X"]
+  WB -.-> VP
+```
+
+**Goal: sdp-api stays backwards compatible with the web already in production.** The API for X always goes live before web X: for the seconds until Vercel promotes web X, and for as long as a web build stays held, the previous web runs against the new API. Additive, expand-then-contract API changes keep that safe; never remove or rename a field or endpoint that production web still uses.
+
 The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, and cron jobs.
 
 ## GitHub and GCP Setup
