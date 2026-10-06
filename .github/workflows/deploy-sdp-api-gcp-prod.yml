@@ -317,18 +317,19 @@ jobs:
       # release-images.yml on the push to main. Verify that signature against
       # this exact commit and promote the SAME digest — merge deploys ship the
       # identical trust chain as releases, never a rebuild.
+      # The wait covers release-images.yml's 60-minute publish timeout.
       - name: Verify and promote merge image
         if: ${{ inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
-        timeout-minutes: 45
+        timeout-minutes: 75
         run: |
           set -euo pipefail
           SRC_BASE="ghcr.io/${{ github.repository_owner }}/sdp/sdp-api"
           SRC_DIGEST=""
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 130); do
             if SRC_DIGEST="$(crane digest "${SRC_BASE}:${DEPLOY_IMAGE_SHA}" 2>/dev/null)"; then
               break
             fi
-            echo "merge image not in GHCR yet (attempt ${attempt}/60); retrying in 30s"
+            echo "merge image not in GHCR yet (attempt ${attempt}/130); retrying in 30s"
             sleep 30
           done
           if [[ -z "${SRC_DIGEST}" ]]; then
