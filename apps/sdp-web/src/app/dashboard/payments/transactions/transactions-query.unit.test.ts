@@ -70,6 +70,16 @@ describe("transaction filter query", () => {
     expect(parseTransactionFilters({ tab: "payments" }, ["payments"]).module).toBe("payments");
   });
 
+  it("drops a saved kind with its hidden module, since the API refuses kind without module", () => {
+    expect(parseTransactionFilters({ tab: "earn", kind: "deposit" }, ["payments"])).toEqual({
+      cursors: [],
+    });
+    expect(parseAll({ tab: "earn", kind: "deposit" })).toMatchObject({
+      module: "earn",
+      kind: "deposit",
+    });
+  });
+
   it("serializes filters to tab and translates date boundaries for the API", () => {
     const filters = parseAll({
       tab: "earn",

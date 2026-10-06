@@ -50,9 +50,13 @@ export function parseTransactionFilters(
   const parsed = rawFiltersSchema.parse(
     Object.fromEntries(Object.entries(searchParams).map(([key, value]) => [key, scalar(value)]))
   );
-  const { tab, cursors: rawCursors, ...rest } = parsed;
+  const { tab, kind, cursors: rawCursors, ...rest } = parsed;
   const cursors = rawCursors === undefined || rawCursors === "" ? [] : rawCursors.split(",");
-  return { ...rest, module: parseTransactionModule(tab, modules), cursors };
+  const module = parseTransactionModule(tab, modules);
+  // A kind belongs to its module (the API refuses one without it), so a link whose module
+  // tab is hidden or unknown opens the default tab with no kind.
+  if (module === undefined) return { ...rest, cursors };
+  return { ...rest, module, kind, cursors };
 }
 
 const TRANSACTION_URL_PARAM_KEYS = [
