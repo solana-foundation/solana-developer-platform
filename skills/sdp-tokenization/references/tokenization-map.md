@@ -4,18 +4,22 @@ Use this file as the quick reference for answering tokenization questions on top
 
 ## Public source of truth
 
-- Product overview: `apps/sdp-docs/content/docs/what-is-solana-developer-platform.mdx`
-- Getting started: `apps/sdp-docs/content/docs/getting-started.mdx`
+- Product overview: `apps/sdp-docs/content/docs/introduction.mdx`
+- Environments, response conventions, execution model: `apps/sdp-docs/content/docs/developing-with-sdp/index.mdx`
+- Authentication and roles: `apps/sdp-docs/content/docs/developing-with-sdp/authentication.mdx`
 - Organization setup: `apps/sdp-docs/content/docs/guides/setup-organization.mdx`
 - Wallet setup: `apps/sdp-docs/content/docs/guides/setup-wallets.mdx`
-- API keys: `apps/sdp-docs/content/docs/guides/manage-api-keys.mdx`
-- Create token: `apps/sdp-docs/content/docs/guides/create-a-token.mdx`
-- Deploy token: `apps/sdp-docs/content/docs/guides/deploy-a-token.mdx`
-- Mint and burn: `apps/sdp-docs/content/docs/guides/mint-and-burn.mdx`
-- Allowlists: `apps/sdp-docs/content/docs/guides/manage-allowlists.mdx`
-- Freeze and compliance: `apps/sdp-docs/content/docs/guides/freeze-and-compliance.mdx`
-- Transfers: `apps/sdp-docs/content/docs/guides/transfer-tokens.mdx`
-- Prepare vs execute: `apps/sdp-docs/content/docs/guides/prepare-vs-execute.mdx`
+- API keys: `apps/sdp-docs/content/docs/developing-with-sdp/manage-api-keys.mdx`
+- Tokenization overview: `apps/sdp-docs/content/docs/tokens/tokenize-an-asset.mdx`
+- Create token: `apps/sdp-docs/content/docs/tokens/create-a-token.mdx`
+- Deploy token: `apps/sdp-docs/content/docs/tokens/deploy-a-token.mdx`
+- Mint and burn: `apps/sdp-docs/content/docs/tokens/mint-and-burn.mdx`
+- Allowlists: `apps/sdp-docs/content/docs/tokens/allowlists.mdx`
+- Freeze and compliance: `apps/sdp-docs/content/docs/tokens/freeze-and-compliance.mdx`
+- Token settings: `apps/sdp-docs/content/docs/tokens/manage-token-settings.mdx`
+- Template reference: `apps/sdp-docs/content/docs/reference/issuance-token-types.mdx`
+- Transfers: `apps/sdp-docs/content/docs/payments/send-basic-payment.mdx`
+- End-to-end walkthrough: `apps/sdp-docs/content/docs/tutorials/issue-a-regulated-stablecoin.mdx`
 - Issuance OpenAPI paths: `apps/sdp-api/src/openapi/paths/issuance.ts`
 - Payments OpenAPI paths: `apps/sdp-api/src/openapi/paths/payments.ts`
 - Wallets OpenAPI paths: `apps/sdp-api/src/openapi/paths/custody.ts`
@@ -58,8 +62,8 @@ Use this file as the quick reference for answering tokenization questions on top
 
 ### Loyalty, rewards, or game currency
 
-- Template: `arcade`
-- Typical controls:
+- Template: `custom` (SDP offers exactly `stablecoin`, `tokenized-security`, and `custom`)
+- Typical controls to set explicitly:
   - mintable supply
   - optional pause support
   - optional allowlist if distribution is gated
@@ -81,12 +85,12 @@ Use this file as the quick reference for answering tokenization questions on top
 
 1. Organization: `apps/sdp-docs/content/docs/guides/setup-organization.mdx`
 2. Wallets: `apps/sdp-docs/content/docs/guides/setup-wallets.mdx`
-3. API keys: `apps/sdp-docs/content/docs/guides/manage-api-keys.mdx`
-4. Token creation: `apps/sdp-docs/content/docs/guides/create-a-token.mdx`
-5. Deployment: `apps/sdp-docs/content/docs/guides/deploy-a-token.mdx`
-6. Supply operations: `apps/sdp-docs/content/docs/guides/mint-and-burn.mdx`
-7. Distribution and movement: `apps/sdp-docs/content/docs/guides/transfer-tokens.mdx`
-8. Compliance controls: `apps/sdp-docs/content/docs/guides/manage-allowlists.mdx` and `apps/sdp-docs/content/docs/guides/freeze-and-compliance.mdx`
+3. API keys: `apps/sdp-docs/content/docs/developing-with-sdp/manage-api-keys.mdx`
+4. Token creation: `apps/sdp-docs/content/docs/tokens/create-a-token.mdx`
+5. Deployment: `apps/sdp-docs/content/docs/tokens/deploy-a-token.mdx`
+6. Supply operations: `apps/sdp-docs/content/docs/tokens/mint-and-burn.mdx`
+7. Distribution and movement: `apps/sdp-docs/content/docs/payments/send-basic-payment.mdx`
+8. Compliance controls: `apps/sdp-docs/content/docs/tokens/allowlists.mdx` and `apps/sdp-docs/content/docs/tokens/freeze-and-compliance.mdx`
 
 ## Endpoint families to cite
 
@@ -121,6 +125,6 @@ Use this file as the quick reference for answering tokenization questions on top
 ## Common caveats
 
 - Authorities should default to SDP-controlled wallets when execute flows are expected to work without external signing.
-- Token operations that mention an account often need a token account address, not the owner wallet address.
+- Standard burn takes the SDP wallet `id` (`cwlt_*`) holding the tokens; freeze and unfreeze accept the holder wallet or its token account.
 - The token must be `active` after deploy before minting or operational movement makes sense.
 - Burn, freeze, seize, and related actions depend on the relevant authority actually being controlled by the selected signer.

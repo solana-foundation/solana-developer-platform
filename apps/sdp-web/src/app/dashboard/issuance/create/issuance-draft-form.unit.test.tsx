@@ -8,10 +8,11 @@ import { I18nProvider } from "@/i18n/provider";
 import { IssuanceDraftForm } from "./issuance-draft-form";
 
 const router = vi.hoisted(() => ({ refresh: vi.fn(), replace: vi.fn(), push: vi.fn() }));
+const search = vi.hoisted(() => ({ value: "step=3" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => router,
   usePathname: () => "/dashboard/issuance/create",
-  useSearchParams: () => new URLSearchParams("step=3"),
+  useSearchParams: () => new URLSearchParams(search.value),
 }));
 vi.mock("./actions", () => ({ saveIssuanceDraft: vi.fn() }));
 
@@ -26,9 +27,25 @@ function renderPermissions(
   );
 }
 
+const originalDocsUrl = process.env.NEXT_PUBLIC_SDP_DOCS_URL;
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  search.value = "step=3";
+  if (originalDocsUrl === undefined) {
+    delete process.env.NEXT_PUBLIC_SDP_DOCS_URL;
+  } else {
+    process.env.NEXT_PUBLIC_SDP_DOCS_URL = originalDocsUrl;
+  }
+});
+
+it("links the approved-recipients guide through the configured docs origin", () => {
+  search.value = "step=2";
+  process.env.NEXT_PUBLIC_SDP_DOCS_URL = "https://docs.example.com";
+  renderPermissions();
+  const link = screen.getByRole("link", { name: /How approved recipients work/ });
+  expect(link.getAttribute("href")).toBe("https://docs.example.com/tokens/allowlists");
 });
 
 it("links to the wallet page separately and refreshes the inventory on return", () => {

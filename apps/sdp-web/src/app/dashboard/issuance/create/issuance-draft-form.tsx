@@ -25,6 +25,7 @@ import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { resolveDocsUrl } from "@/lib/docs-url";
 import { shortenAddress } from "../wallet-identity";
 import { saveIssuanceDraft } from "./actions";
 import { type AuthorityKey, buildDraftPayload, type DraftState } from "./draft-model";
@@ -586,7 +587,7 @@ function ControlsStep({
         />
       )}
       <a
-        href="https://sdp-docs-solana-foundation.vercel.app/docs/tokens/allowlists"
+        href={resolveDocsUrl("tokens/allowlists")}
         target="_blank"
         rel="noreferrer"
         className={styles.docsLink}
