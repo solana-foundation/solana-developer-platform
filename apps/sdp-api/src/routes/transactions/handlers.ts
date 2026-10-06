@@ -1,11 +1,15 @@
-import { UNIFIED_TRANSACTION_SDP_MODULES } from "@sdp/types";
+import { RAMP_PROVIDERS, UNIFIED_TRANSACTION_SDP_MODULES } from "@sdp/types";
 import { getDb } from "@/db";
 import { createPostgresUnifiedTransactionsRepository } from "@/db/repositories/unified-transactions.repository.postgres";
 import { getAuth } from "@/lib/auth";
 import { forbidden, insufficientPermissions } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { grantedPermissions } from "@/middleware/auth";
-import { assertModuleInChannel, isModuleInChannel } from "@/middleware/require-module";
+import {
+  assertModuleInChannel,
+  isModuleInChannel,
+  isRampProviderInChannel,
+} from "@/middleware/require-module";
 import type { ValidatedContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import {
@@ -58,6 +62,10 @@ export async function listUnifiedTransactions(
   const result = await repository.list({
     ...query,
     modules: permittedModules,
+    // Ramp transfers are Payments rows, so an excluded provider is filtered by its stored provider.
+    excludedRampProviders: RAMP_PROVIDERS.filter(
+      (provider) => !isRampProviderInChannel(c, provider)
+    ),
     organizationId: auth.organizationId,
     projectId: auth.projectId,
     moduleWalletScopes: walletScoped ? moduleWalletScopes : undefined,

@@ -16,7 +16,8 @@ import {
 
 // `/v1/transactions` belongs to Payments, so it is served in every release channel,
 // but it must not list rows of a module the release channel leaves out (ADR 0005).
-// Issuance is `experimental` today: listed on `experimental`, hidden on `stable`.
+// Issuance and every ramp provider are `experimental` today: listed on `experimental`,
+// hidden on `stable`. Ramp transfers are Payments rows, filtered by their stored provider.
 
 const listResponseSchema = z.object({
   data: z.object({ transactions: z.array(z.object({ id: z.string(), module: z.string() })) }),
@@ -76,6 +77,24 @@ async function seedPaymentAndIssuanceRows(): Promise<void> {
     )
     .bind(TEST_ORG.id, createdAt, createdAt)
     .run();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO payment_transfers
+         (id, organization_id, project_id, wallet_id, custody_wallet_id, token, amount, type,
+          direction, status, provider, created_at, updated_at)
+       VALUES ('xfr_channel_onramp', ?, ?, ?, ?, ?, '10', 'onramp', 'inbound', 'pending',
+               'moonpay', ?, ?)`
+    )
+    .bind(
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_WALLET_ID,
+      TEST_CUSTODY_WALLET_ID,
+      wellKnownMint("USDC", "devnet"),
+      createdAt,
+      createdAt
+    )
+    .run();
 }
 
 describe("GET /v1/transactions release channel", () => {
@@ -83,7 +102,11 @@ describe("GET /v1/transactions release channel", () => {
   beforeEach(seedPaymentAndIssuanceRows);
 
   it("experimental: lists rows of every module", async () => {
-    expect(await listedIds("experimental")).toEqual(["itx_channel", "xfr_channel_listed"]);
+    expect(await listedIds("experimental")).toEqual([
+      "itx_channel",
+      "xfr_channel_listed",
+      "xfr_channel_onramp",
+    ]);
   });
 
   it("stable: leaves out rows of modules outside the release channel", async () => {
@@ -99,7 +122,7 @@ describe("GET /v1/transactions release channel", () => {
     });
   });
 
-  it("stable: still serves a module filter inside the release channel", async () => {
+  it("stable: serves Payments, without ramp rows of providers outside the release channel", async () => {
     expect(await listedIds("stable", "?module=payments")).toEqual(["xfr_channel_listed"]);
   });
 
