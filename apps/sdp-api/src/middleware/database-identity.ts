@@ -5,9 +5,8 @@
  * this middleware handles everything before/without authentication:
  *
  *  - A small registry of public surfaces that legitimately reach the database
- *    without a tenant (provider webhooks, the public payment page, the
- *    pre-auth login/session flows, credential-gated admin routes) runs under
- *    a named system identity.
+ *    without a tenant (provider webhooks, the public payment page,
+ *    credential-gated admin routes) runs under a named system identity.
  *  - Every other path is explicitly marked identity-less, so any database
  *    access that happens before an auth middleware narrows the request is
  *    denied by row-level security (migration 0079) instead of silently
@@ -31,8 +30,6 @@ export const PUBLIC_SYSTEM_PATH_PREFIXES: ReadonlyArray<{
   { prefix: "/webhooks", component: "http:webhooks" },
   // Public payment page: resolves payment requests by public token.
   { prefix: "/pay", component: "http:pay" },
-  // Login/magic-link/session issuance runs before any session exists.
-  { prefix: "/v1/auth", component: "http:auth-routes" },
 ];
 
 function matchPublicComponent(path: string): string | null {

@@ -59,8 +59,8 @@ function anonymousRequestLimit(c: Context<{ Bindings: Env }>): {
 }
 
 /**
- * Per-user-per-org ceiling for dashboard traffic (Clerk JWT or cookie
- * session). Dashboard pages fan out many BFF calls in parallel, so this sits
+ * Per-user-per-org ceiling for dashboard traffic (Clerk JWT). Dashboard
+ * pages fan out many BFF calls in parallel, so this sits
  * well above interactive use while still bounding a scripted session; costly
  * endpoints layer tighter metered quotas on top (see metered-quota.ts).
  */

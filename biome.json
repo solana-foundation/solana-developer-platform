@@ -80,7 +80,12 @@
       }
     },
     {
-      "includes": ["**/apps/sdp-web/src/**/*.ts", "**/apps/sdp-web/src/**/*.tsx"],
+      "includes": [
+        "**/apps/sdp-web/src/**/*.ts",
+        "**/apps/sdp-web/src/**/*.tsx",
+        "**/packages/sdp-ui/src/**/*.ts",
+        "**/packages/sdp-ui/src/**/*.tsx"
+      ],
       "linter": {
         "rules": {
           "security": {
