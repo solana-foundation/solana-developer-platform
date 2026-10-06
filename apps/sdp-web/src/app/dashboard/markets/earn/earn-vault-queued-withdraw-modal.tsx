@@ -10,7 +10,7 @@ import {
   type SdpEnvironment,
 } from "@sdp/types";
 import { ChevronDownIcon, Loader2Icon } from "lucide-react";
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,7 @@ import {
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
 } from "./earn-vault-async-withdrawal-tracking";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import {
   earnVaultQueuedWithdrawalStatusPresentation,
   isEarnVaultQueuedWithdrawalTerminal,
@@ -58,6 +59,7 @@ interface QueuedWithdrawalModalProps {
   environment: SdpEnvironment;
   onClose: () => void;
   onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  onSubmissionStart?: VaultSubmissionObserver;
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
   position: EarnVaultPosition;
   projectId: string | null;
@@ -215,10 +217,13 @@ function useQueuedWithdrawalPreview(
  * retry key.
  */
 function useQueuedWithdrawalSubmission(options: {
+  onSubmissionStart?: VaultSubmissionObserver;
+  custodyWalletId: string;
   onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
   projectId: string | null;
   setError: (error: string | null) => void;
 }) {
+  const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
 
@@ -228,6 +233,7 @@ function useQueuedWithdrawalSubmission(options: {
   ) {
     if (!previewInput || !preview || preview.blockingIssues.length > 0) return;
     setSubmitting(true);
+    const finishSubmission = options.onSubmissionStart?.(options.custodyWalletId);
     options.setError(null);
     try {
       const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
@@ -240,11 +246,19 @@ function useQueuedWithdrawalSubmission(options: {
           deadlineSeconds: previewInput.deadlineSeconds,
         },
       });
-      const result = await createEarnVaultWithdrawalRequest(
-        previewInput,
-        vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint)
+      const key = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
+      const submission = vaultAsyncWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
+      if (!submission) {
+        options.setError(t("DashboardEarn.intentStorageUnavailable"));
+        return;
+      }
+      const result = await createEarnVaultWithdrawalRequest(previewInput, key);
+      applyIdempotencyKeyOutcome(
+        vaultAsyncWithdrawalIdempotencyKeyStore,
+        fingerprint,
+        result,
+        submission.wasUncertain
       );
-      applyIdempotencyKeyOutcome(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, result);
       if (result.ok) {
         setOutcome(result.data);
         if (result.data.kind === "submitted") {
@@ -254,6 +268,7 @@ function useQueuedWithdrawalSubmission(options: {
         options.setError(result.error);
       }
     } finally {
+      finishSubmission?.();
       setSubmitting(false);
     }
   }
@@ -273,7 +288,7 @@ function useQueuedWithdrawalRequestView(
   const [cancelResult, setCancelResult] = useState<EarnVaultWithdrawalRequestRecord | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
-  const cancelKey = useRef<string | null>(null);
+  const t = useTranslations();
   // Compare freshness as instants, not raw strings: the record schema only
   // types `updatedAt` as a string, so mixed fractional-seconds formatting
   // could order two ISO strings lexicographically against their true order
@@ -288,24 +303,25 @@ function useQueuedWithdrawalRequestView(
     if (cancelling || request.status !== "expiredCancelable") return;
     setCancelling(true);
     setCancelError(null);
-    cancelKey.current ??= crypto.randomUUID();
+    const fingerprint = `cancel:${request.withdrawalRequestId}`;
+    const key = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
     try {
-      const result = await cancelEarnVaultWithdrawalRequest(
-        request.withdrawalRequestId,
-        cancelKey.current
-      );
+      const submission = vaultAsyncWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
+      if (!submission) {
+        setCancelError(t("DashboardEarn.intentStorageUnavailable"));
+        return;
+      }
+      const result = await cancelEarnVaultWithdrawalRequest(request.withdrawalRequestId, key);
       if (result.ok) {
-        // A parsed 2xx definitively consumed this action key. Render its returned
-        // `cancelling` state until polling advances; if reconciliation later
-        // reopens recovery, the next attempt must use a fresh key and transaction.
-        cancelKey.current = null;
+        vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint);
         setCancelResult(result.data);
       } else {
-        // A 4xx definitively wrote no new action under this key. Preserve keys
-        // only for transport/5xx ambiguity, where the API may have recorded it.
-        if (result.status !== null && result.status >= 400 && result.status < 500) {
-          cancelKey.current = null;
-        }
+        applyIdempotencyKeyOutcome(
+          vaultAsyncWithdrawalIdempotencyKeyStore,
+          fingerprint,
+          result,
+          submission.wasUncertain
+        );
         setCancelError(result.error);
       }
     } finally {
@@ -750,6 +766,7 @@ export function EarnVaultQueuedWithdrawModal({
   environment,
   onClose,
   onRequested,
+  onSubmissionStart,
   onSettled,
   position,
   projectId,
@@ -788,6 +805,8 @@ export function EarnVaultQueuedWithdrawModal({
     step === "review"
   );
   const { submitting, outcome, submit } = useQueuedWithdrawalSubmission({
+    onSubmissionStart,
+    custodyWalletId: position.custodyWalletId,
     onRequested,
     projectId,
     setError,

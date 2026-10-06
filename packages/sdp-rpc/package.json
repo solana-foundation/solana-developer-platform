@@ -38,6 +38,11 @@
       "types": "./src/verified-confirmation.ts",
       "import": "./src/verified-confirmation.ts",
       "default": "./src/verified-confirmation.ts"
+    },
+    "./read-context": {
+      "types": "./src/read-context.ts",
+      "import": "./src/read-context.ts",
+      "default": "./src/read-context.ts"
     }
   },
   "scripts": {

@@ -1,4 +1,6 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { z } from "zod";
+import { walletBalancesQuerySchema } from "../../routes/payments/wallet-policies/schemas";
 
 import {
   createOnrampQuoteRequestSchema,
@@ -80,18 +82,29 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet balances",
     operationId: "getPaymentWalletBalances",
     description:
-      "Retrieves balances for a custody wallet. Wallet lifecycle and provisioning are managed through /v1/wallets.",
+      "Retrieves balances for a custody wallet. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: paymentWalletIdParamsSchema,
+      query: walletBalancesQuerySchema,
     },
     responses: {
       200: {
         description: "Wallet balances",
-        content: jsonContent(walletBalancesResponse),
+        content: jsonContent(
+          walletBalancesResponse.extend({
+            data: walletBalancesResponse.shape.data.extend({
+              balanceReadContext: z
+                .object({
+                  minimumSlot: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+                })
+                .optional(),
+            }),
+          })
+        ),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 

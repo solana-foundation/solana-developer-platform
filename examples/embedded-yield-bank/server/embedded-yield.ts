@@ -1,14 +1,14 @@
+import { isPendingMovement, isSettledMovement } from "../src/lib/movements";
 import "server-only";
 
 import type { KeyPairSigner } from "@solana/kit";
 import { floorForTolerance, isPositiveDecimal } from "../src/lib/decimal";
+import type { PreparedIntent } from "../src/lib/prepared-intent";
 import type {
   DashboardData,
   WithdrawalIntent,
-  WithdrawalResult,
   YieldMovement,
   YieldStrategy,
-  YieldWithdrawalRequest,
 } from "../src/types";
 import { getConfig, getDemoSigner, getFeePayerSigner } from "./env";
 import {
@@ -63,13 +63,7 @@ export async function loadDashboard(
   );
   const tokenMint = requireDepositMint(strategy);
 
-  let [positions, allMovements, allWithdrawalRequests, checking] =
-    await Promise.all([
-      client.listPositions(owner.address),
-      client.listMovements(owner.address),
-      client.listPendingWithdrawalRequests(owner.address),
-      readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
-    ]);
+  const allMovements = await client.listMovements(owner.address);
 
   // Scope by strategy, never by open-position ids: SDP drops a position from
   // the list once it closes, but its movements (and their payouts) remain.
@@ -80,15 +74,13 @@ export async function loadDashboard(
   );
   const movements = confirmation.movements;
 
-  // The first balance reads can race the detail read that discovers Solana
-  // confirmation. Re-read them after that handoff so the response uses balance
-  // snapshots requested after confirmation instead of the earlier reads.
-  if (confirmation.reachedConfirmation) {
-    [positions, checking] = await Promise.all([
-      client.listPositions(owner.address),
-      readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
-    ]);
-  }
+  // Start balances after the ledger/detail observations. This also covers a
+  // movement already confirmed in the list, not only a detail-read transition.
+  const [positions, checking, allWithdrawalRequests] = await Promise.all([
+    client.listPositions(owner.address),
+    readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
+    client.listPendingWithdrawalRequests(owner.address),
+  ]);
 
   const position =
     positions
@@ -142,10 +134,7 @@ export async function refreshConfirmingMovements(
   const active = new Set(activeMovementIds);
   const refreshed = await Promise.all(
     movements.map(async (movement) => {
-      if (
-        !active.has(movement.movementId) ||
-        (movement.status !== "requested" && movement.status !== "submitted")
-      ) {
+      if (!active.has(movement.movementId) || !isPendingMovement(movement)) {
         return movement;
       }
       try {
@@ -163,15 +152,15 @@ export async function refreshConfirmingMovements(
       const previous = movements[index];
       return (
         previous !== undefined &&
-        (previous.status === "requested" || previous.status === "submitted") &&
-        (movement.status === "confirmed" || movement.status === "finalized")
+        isPendingMovement(previous) &&
+        isSettledMovement(movement)
       );
     }),
   };
 }
 
 /** Move money from checking into savings. */
-export async function deposit(amount: string): Promise<YieldMovement> {
+export async function prepareDeposit(amount: string): Promise<PreparedIntent> {
   assertAmount(amount);
   const config = getConfig();
   const { owner, feePayer, all } = await getTransactionSigners();
@@ -218,19 +207,18 @@ export async function deposit(amount: string): Promise<YieldMovement> {
     feePayer?.address ?? owner.address
   );
 
-  // 4. Submit with a unique key. An uncertain retry must reuse this exact key.
-  const idempotencyKey = `northstar-deposit-${crypto.randomUUID()}`;
-  return retryUncertainSubmit(() =>
-    client.submitDeposit(built.transactionId, signedTransaction, idempotencyKey)
-  );
-  // Settlement is polled by the browser through the dashboard route, which
-  // keeps this handler short enough for serverless functions.
+  return {
+    kind: "deposit",
+    transactionId: built.transactionId,
+    signedTransaction,
+    idempotencyKey: `northstar-deposit-${crypto.randomUUID()}`,
+  };
 }
 
 /** Move money from savings back into checking. */
-export async function withdraw(
+export async function prepareWithdrawal(
   input: WithdrawalIntent
-): Promise<WithdrawalResult> {
+): Promise<PreparedIntent> {
   assertAmount(input.amount);
   const config = getConfig();
   const { owner, feePayer, all } = await getTransactionSigners();
@@ -281,15 +269,12 @@ export async function withdraw(
       all,
       feePayer?.address ?? owner.address
     );
-    const idempotencyKey = `northstar-queued-withdrawal-${crypto.randomUUID()}`;
-    const withdrawalRequest = await retryUncertainSubmit(() =>
-      client.submitQueuedWithdrawalRequest(
-        built.transactionId,
-        signedTransaction,
-        idempotencyKey
-      )
-    );
-    return { kind: "queued", withdrawalRequest };
+    return {
+      kind: "queued",
+      transactionId: built.transactionId,
+      signedTransaction,
+      idempotencyKey: `northstar-queued-withdrawal-${crypto.randomUUID()}`,
+    };
   }
 
   if (!options.instant && !options.providerOrder) {
@@ -313,21 +298,18 @@ export async function withdraw(
     all,
     feePayer?.address ?? owner.address
   );
-  const idempotencyKey = `northstar-withdrawal-${crypto.randomUUID()}`;
-  const movement = await retryUncertainSubmit(() =>
-    client.submitWithdrawal(
-      built.transactionId,
-      signedTransaction,
-      idempotencyKey
-    )
-  );
-  return { kind: "movement", movement };
+  return {
+    kind: "withdrawal",
+    transactionId: built.transactionId,
+    signedTransaction,
+    idempotencyKey: `northstar-withdrawal-${crypto.randomUUID()}`,
+  };
 }
 
 /** Recover escrowed shares after SDP reports that the queue deadline passed. */
-export async function cancelQueuedWithdrawal(
+export async function prepareQueuedWithdrawalCancellation(
   withdrawalRequestId: string
-): Promise<YieldWithdrawalRequest> {
+): Promise<PreparedIntent> {
   const config = getConfig();
   const { owner, feePayer, all } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
@@ -342,14 +324,52 @@ export async function cancelQueuedWithdrawal(
     all,
     feePayer?.address ?? owner.address
   );
-  const idempotencyKey = `northstar-withdrawal-cancel-${crypto.randomUUID()}`;
-  return retryUncertainSubmit(() =>
-    client.submitQueuedWithdrawalCancellation(
-      built.transactionId,
-      signedTransaction,
-      idempotencyKey
-    )
-  );
+  return {
+    kind: "cancel",
+    transactionId: built.transactionId,
+    signedTransaction,
+    idempotencyKey: `northstar-withdrawal-cancel-${crypto.randomUUID()}`,
+  };
+}
+
+/** Submit only the exact signed intent saved by the browser. Never rebuild here. */
+export async function submitPreparedIntent(intent: PreparedIntent) {
+  const client = new EmbeddedYieldClient(getConfig());
+  const args = [
+    intent.transactionId,
+    intent.signedTransaction,
+    intent.idempotencyKey,
+  ] as const;
+  switch (intent.kind) {
+    case "deposit":
+      return {
+        kind: "movement" as const,
+        movement: await retryUncertainSubmit(() =>
+          client.submitDeposit(...args)
+        ),
+      };
+    case "withdrawal":
+      return {
+        kind: "movement" as const,
+        movement: await retryUncertainSubmit(() =>
+          client.submitWithdrawal(...args)
+        ),
+      };
+    case "queued":
+      return {
+        kind: "queued" as const,
+        withdrawalRequest: await retryUncertainSubmit(() =>
+          client.submitQueuedWithdrawalRequest(...args)
+        ),
+      };
+    case "cancel":
+      return {
+        kind: "cancel" as const,
+        withdrawalRequest: await retryUncertainSubmit(() =>
+          client.submitQueuedWithdrawalCancellation(...args)
+        ),
+      };
+  }
 }
 
 export async function deriveWithdrawalFloor(

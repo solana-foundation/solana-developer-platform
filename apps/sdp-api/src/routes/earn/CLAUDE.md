@@ -133,6 +133,12 @@ balance with a live one.
   read, queued request/cancellation build, and signed-transaction submit remains
   authenticated.
 
+  Internal route parity is checked by `../../openapi/earn-contracts.test.ts`
+  against the mounted router. Treasury registrations live in
+  `../../openapi/paths/earn-treasury.ts` and reuse runtime request schemas.
+  Deposit, deposit-history and direct-withdrawal response schemas come from
+  `@sdp/types/earn-wire`, shared with the dashboard parsers.
+
 ### Asynchronous vault withdrawals (Veda queue and Hastra par redemption)
 
 Asynchronous exits are a separate durable resource, not a slow
@@ -223,8 +229,8 @@ widen the surface just to make a test pass.
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
-  Published in BOTH OpenAPI documents (public included) since the embedded
-  guide shipped: partners need the `strategyId` every deposit build takes and
+  Registered in the internal and opt-in public documents; default public
+  publication remains held under PRO-2038. Partners need the `strategyId` every deposit build takes and
   the live APY their own UI shows (`openapi/paths/earn.ts`,
   `registerEarnStrategyPaths`).
   - **The list is ranked by deposit size** (PRO-1732): TVL descending, read from
@@ -891,8 +897,7 @@ transaction signed by the organization custody wallet or external owner.
     always asks for that. It is not a convenience: a client filtering an
     unbounded history locally has to page it all, and a workspace busy enough to
     push an in-flight deposit past the first page would silently stop tracking
-    it. The reconciliation sweep drives every row terminal within ~90 seconds,
-    so the in-flight set is small by construction.
+    it. Reconciliation retains ambiguous outcomes; blockhash expiry and nonfinal errors alone are not terminal evidence.
   - 0062's `idx_earn_movements_direction_created` (`(organization_id,
     environment, direction, created_at DESC, id DESC)`) is what orders this
     page; the sweep, replay, chain and per-position lookups each have their own
@@ -937,6 +942,9 @@ transaction signed by the organization custody wallet or external owner.
   matches nothing and silently returns an empty page.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
   zero is a claim about someone's money that a failed RPC call cannot support.
+  The "live hydration unavailable" warning carries `causeChain`, the flattened
+  `.cause`/`AggregateError` tree with URLs, query strings and external-wallet
+  owners scrubbed: the top-level message never names the transport failure.
   Every owner/provider job shares one request-wide `VaultDeadline` and runs in
   bounded waves of eight. Giving each queued owner a new deadline makes the
   route's latency ceiling grow with portfolio size. Empty-position close-out
@@ -1274,12 +1282,12 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   fingerprint includes the build id, so a key reused against a REBUILT
   transaction conflicts rather than silently replaying (and a rebuilt
   transaction is also how a different `feePayer` conflicts).
-  - **Expired builds are refused before anything is recorded**: after the
-    replay short-circuit and before signature verification, the submit reads
-    the confirmed block height and answers `409 TRANSACTION_EXPIRED` when it is
-    past the build's `last_valid_block_height` (no movement row, build left
-    unconsumed; a consumed build still answers its consumption conflict, and a
-    failed height read falls through rather than refusing).
+  - **Expiry does not reject authenticated signed intent.** An owner may have
+    already broadcast the transaction. Verify the exact stored message and
+    every signature, then consume the build and record the original bytes even
+    past `last_valid_block_height`. Direct and queued submits follow this rule;
+    replay and consumed-build conflicts still apply. Reconciliation resolves
+    the recorded signature without asking for a replacement transaction.
   - **A preflight `BlockhashNotFound` leaves the movement reconcilable**, even
     past its window. `broadcastRecordedVaultMovement` shares this behavior
     with custody: a refusal describes this attempt, while an external wallet
@@ -1472,14 +1480,33 @@ approved-and-executed. Wiring the dashboard to it is deliberately not done
 here. `EARN_PROVIDER_DEPLOYED_CLUSTERS` scopes new deposits to the clusters
 each provider is deployed on; withdrawals remain open independently.
 
-**Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
-`SOLANA_MAINNET_RPC_URL` (set both on every deployment, PRO-2009; the
-canonical-default fallback for the `SOLANA_NETWORK` cluster is legacy), and
-`assertClusterEndpoint` proves the endpoint by GENESIS HASH before anything is
-built against it (cached per endpoint). One process serves both environments, so
-the old cluster-agnostic read silently built against whichever chain the single
-URL happened to serve — and a mismatch does not error, because Kamino's mainnet
-kvault program id also resolves on devnet with no accounts under it.
+**Per-cluster RPC.** Explicit `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL`
+pins remain isolated. Otherwise, executing provider read/build operations use
+the ordered managed-provider pool only for `SOLANA_NETWORK`. Each candidate
+must prove its genesis hash before SDK work. Transient nested transport errors
+may retry the unsigned read/build within the same workflow deadline; deterministic
+refusals and cluster mismatches do not. A per-vault fan-out (Veda and Kamino
+`readVaultPositions` throw an `AggregateError` cause) retries only when every
+member failure is transient, since the all-or-nothing read would fail again. Concurrent operations have independent
+endpoint cursors, and each later operation starts at the primary. Missing history
+remains unknown, never proof of payout or failure. Signing and broadcast are outside
+this retry runner. Infrastructure failures may still occur at those boundaries;
+the durable intent/reconciliation rules apply unchanged.
+
+**Policy retry recovery.** A custody deposit/direct-withdrawal/queued-request
+handler that throws may clear only its own direct-allow `evaluated` operation's
+key, with no execution fence, approval request, movement, or queued intent. The
+row is retained as `failed`, excluded from policy velocity, with the original key
+in its raw execution request. The same client key then receives a fresh policy
+evaluation. Never use this cleanup for provider-managed program withdrawals or
+approval executors. A still-running handler retains its key. Terminal prior
+policy denial carries `intentOutcome: denied` and the request key so clients can
+distinguish it from an authorization error.
+
+**External signed submits.** Verify the exact stored message and signatures,
+then record intent even if the build's blockhash expired. The owner may have
+broadcast independently. A send error retains the signed bytes and original
+signature for reconciliation; do not instruct the client to sign a new intent.
 
 ## Metered quotas
 
@@ -1674,3 +1701,23 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   `../../db/repositories/earn.repository.test.ts` run against a stub id on
   purpose — the ledger consumes only the canonical contract, and that suite is
   the pluggability proof.
+
+
+### Treasury balance confirmation context
+
+Authenticated `GET /vault-positions?afterMovementIds=id1,id2` accepts at most 100
+movement ids. Resolve organization, project, environment and readable custody
+wallet scope before looking up their confirmed/finalized signature slots. The
+response's `balanceReadContext` acknowledges the ids and maximum slot.
+Only affected positions receive their own maximum confirmation slot. Hydration
+batches separate differing bounds even within the same provider and owner.
+`@sdp/rpc/read-context` scopes provider RPC reads to confirmed state, requests
+`minContextSlot` where supported, and rejects missing or older response contexts.
+For `getProgramAccounts`, validate the contextual response before restoring the
+array shape when the SDK requested `withContext: false` (or omitted it). Never
+change the SDK result contract to collect freshness evidence. Both kit transports
+and direct JSON/web3 fetches use this rule across all providers.
+Unscoped execution/reconciliation commitment is unchanged. A failed hydration
+omits value fields. Request timing and unchanged/changed balances prove nothing.
+Treasury forwards the slot to the Payments wallet-balance endpoint; that endpoint
+returns 503 on any SOL/SPL read failure, including stale or unverifiable context.

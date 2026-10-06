@@ -204,6 +204,31 @@ afterEach(() => {
 });
 
 describe("depositIntoVault — idempotency", () => {
+  it("records three back-to-back same-amount deposits as separate intents", async () => {
+    const memos: string[] = [];
+    signVaultPlan.mockImplementation(async (_env, execution) => {
+      memos.push(
+        Buffer.from(execution.plan.instructions.at(-1)?.data ?? "", "base64").toString("utf8")
+      );
+      return {
+        bytes: new Uint8Array([memos.length]),
+        signature: `back_to_back_${memos.length}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+    const ids = new Set<string>();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const request = depositInput({ requestId: `same-terms-${attempt}` });
+      const result = await depositIntoVault(env, request);
+      expect(result.replayed).toBe(false);
+      ids.add(result.movement.id);
+      expect((await depositIntoVault(env, request)).replayed).toBe(true);
+    }
+    expect(ids.size).toBe(3);
+    expect(new Set(memos).size).toBe(3);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(3);
+  });
+
   it("replays the original vault deposit for the same requestId and payload", async () => {
     const first = await depositIntoVault(env, depositInput());
     const second = await depositIntoVault(env, depositInput());

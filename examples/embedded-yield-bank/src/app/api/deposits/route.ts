@@ -1,4 +1,4 @@
-import { deposit } from "@server/embedded-yield";
+import { prepareDeposit } from "@server/embedded-yield";
 import { apiErrorResponse, apiSuccessResponse } from "@server/http";
 import { assertTrustedJsonRequest } from "@server/request-security";
 import { z } from "zod";
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   try {
     assertTrustedJsonRequest(request);
     const input = inputSchema.parse(await request.json());
-    return apiSuccessResponse({ movement: await deposit(input.amount) });
+    return apiSuccessResponse({ intent: await prepareDeposit(input.amount) });
   } catch (error) {
     return apiErrorResponse(error);
   }

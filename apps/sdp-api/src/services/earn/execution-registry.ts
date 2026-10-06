@@ -6,7 +6,6 @@ import {
 } from "@sdp/earn/capabilities";
 import { providerNotConfigured } from "@sdp/earn/errors";
 import type {
-  EarnRuntimeContext,
   EarnVaultDirectProvider,
   EarnVaultParRedemptionProvider,
   EarnVaultProvider,
@@ -45,6 +44,7 @@ import type { Env } from "@/types/env";
 import { createHastraSwapPort } from "./hastra-swap-port";
 import { createOndoSwapPort } from "./ondo-swap-port";
 import type { VaultDeadline } from "./vault-deadline";
+import { createVaultRpcFailover } from "./vault-rpc-failover";
 
 /**
  * Which providers this deployment can EXECUTE for, as opposed to merely
@@ -183,13 +183,11 @@ export function resolveEarnExecutionClient(
   // Construction stays synchronous and I/O-free for every branch. The clients
   // await this resolver only when a chain method is invoked, so an idempotent
   // replay can return from durable state during an RPC outage.
-  const provenRpcUrl = async (_ctx: EarnRuntimeContext, cluster: SolanaCluster) => {
-    const rpcUrl = resolveClusterRpcUrl(env, cluster);
-    await assertClusterEndpoint(env, cluster, rpcUrl);
-    return rpcUrl;
-  };
-  const runOperation = <T>(label: string, operation: (assertActive: () => void) => Promise<T>) =>
-    deadline.run(label, () => operation(() => deadline.assertActive(label)));
+  const { resolve: provenRpcUrl, run: runOperation } = createVaultRpcFailover(
+    env,
+    deadline,
+    assertClusterEndpoint
+  );
 
   if (provider === "kamino") {
     const client = new KaminoVaultDirectClient(provenRpcUrl, runOperation);

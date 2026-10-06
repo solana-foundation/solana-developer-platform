@@ -131,7 +131,7 @@ describe("savings summary", () => {
     });
   });
 
-  it("keeps queued escrow in savings value without calling it withdrawable", () => {
+  it("keeps a queued payout quote out of current value and earnings", () => {
     expect(
       summarizeSavings(
         { amount: "10" },
@@ -140,10 +140,10 @@ describe("savings summary", () => {
         [withdrawalRequest("pending", "4.95")]
       )
     ).toEqual({
-      balance: "9.95",
+      balance: undefined,
       withdrawable: "5",
-      earned: "0",
-      total: "19.95",
+      earned: undefined,
+      total: undefined,
     });
   });
 

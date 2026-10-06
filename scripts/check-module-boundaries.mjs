@@ -131,7 +131,7 @@ const MODULE_METADATA = [
     // Same inward-only execution-package edge as @sdp/ondo. Jupiter remains an
     // injected API-owned port, while provider identities live in @sdp/types so
     // the lightweight @sdp/earn catalogue never imports this execution code.
-    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/issuance",
@@ -149,13 +149,13 @@ const MODULE_METADATA = [
     // then load klend-sdk (13MB, built against a different @solana/kit major).
     // That one-way edge is also why the Kamino program-id table lives in
     // @sdp/types, which both reach without a cycle.
-    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/jupiter-lend",
     directory: "packages/sdp-jupiter-lend",
     purpose: "Jupiter Lend Earn USDT deposit/withdraw plans over the official SDK.",
-    allowedDependencies: ["@sdp/earn", "@sdp/types"],
+    allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/types"],
   },
   {
     name: "@sdp/ondo",
@@ -168,7 +168,7 @@ const MODULE_METADATA = [
     // Jupiter instruction trust boundary stays single-owner in the API's
     // jupiter-swap.service. The Ondo deployment registry lives in @sdp/types,
     // which @sdp/earn's catalogue client reaches without a cycle.
-    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/veda",
@@ -181,7 +181,7 @@ const MODULE_METADATA = [
     // then load a chain SDK built against a different @solana/kit major that it
     // never calls. That one-way edge is also why the Veda deployment registry lives in
     // @sdp/types, which both reach without a cycle.
-    allowedDependencies: ["@sdp/earn", "@sdp/solana", "@sdp/types"],
+    allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/payments",
@@ -255,7 +255,7 @@ const MODULE_METADATA = [
     // @sdp/earn must never depend back — the hourly catalogue cron would then
     // load @solana/kit. The fund registry lives in @sdp/types for the same
     // no-cycle reason as the Kamino program tables.
-    allowedDependencies: ["@sdp/earn", "@sdp/types"],
+    allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/types"],
   },
   {
     name: "@sdp/types",

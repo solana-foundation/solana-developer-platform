@@ -156,7 +156,6 @@ describe("EarnVaultWithdrawModal", () => {
     expect(mocks.fetchEarnVaultWithdrawalPreview).not.toHaveBeenCalled();
     expect(onWithdrawn).toHaveBeenCalledWith(submitted, {
       amount: exactShares,
-      projectBalance: false,
       submittedAt: expect.any(Number),
     });
   });
@@ -259,7 +258,6 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.queryByRole("link")).toBeNull();
     expect(onWithdrawn).toHaveBeenCalledWith(recorded, {
       amount: "6",
-      projectBalance: true,
       submittedAt: expect.any(Number),
     });
   });

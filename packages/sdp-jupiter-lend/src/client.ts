@@ -24,6 +24,7 @@ import type {
   EarnVaultWithdrawQuoteInput,
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
+import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
 import type { SolanaCluster } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
@@ -141,7 +142,10 @@ export class JupiterLendVaultDirectClient
       }
       const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
       assertActive();
-      return operation(new Connection(rpcUrl, "confirmed"), assertActive);
+      return operation(
+        new Connection(rpcUrl, { commitment: "confirmed", fetch: contextAwareRpcFetch }),
+        assertActive
+      );
     });
   }
 

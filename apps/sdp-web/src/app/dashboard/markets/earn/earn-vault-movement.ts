@@ -150,3 +150,6 @@ export function vaultApprovalPending(handled: {
     ...(handled.walletOperationId ? { walletOperationId: handled.walletOperationId } : {}),
   };
 }
+
+/** Observe a submission from before its POST until the outcome is recorded. */
+export type VaultSubmissionObserver = (custodyWalletId: string) => () => void;

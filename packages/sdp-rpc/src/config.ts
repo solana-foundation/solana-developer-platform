@@ -183,6 +183,16 @@ export function resolveClusterRpcUrl(env: RpcEnv, cluster: "devnet" | "mainnet-b
   return resolveDefaultSolanaRpcUrl(env)?.trim() ?? "";
 }
 
+/** Ordered alternatives for a cluster, respecting an operator's explicit pin. */
+export function resolveClusterRpcUrls(env: RpcEnv, cluster: "devnet" | "mainnet-beta"): string[] {
+  const explicit = explicitClusterRpcUrl(env, cluster);
+  if (explicit) return [explicit];
+  if (resolveDefaultCluster(env) !== cluster) return [];
+  return resolveSolanaRpcProviderUrls(env)
+    .map((url) => url.trim())
+    .filter(Boolean);
+}
+
 /**
  * The operator's explicit endpoint for `cluster` (`SOLANA_DEVNET_RPC_URL` /
  * `SOLANA_MAINNET_RPC_URL`), or undefined. It wins for the default cluster too:

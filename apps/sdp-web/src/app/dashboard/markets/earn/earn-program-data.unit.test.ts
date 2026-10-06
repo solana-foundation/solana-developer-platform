@@ -11,8 +11,10 @@ import type {
 } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  appendVaultPositionsRead,
   createEarnVaultDeposit,
   createEarnVaultWithdrawalRequest,
+  type EarnVaultPositionsRead,
   earnExternalWalletSummaryRefreshInterval,
   earnProgramsRefreshInterval,
   earnVaultMovementRefreshInterval,
@@ -26,10 +28,51 @@ import {
   fetchEarnVaultWithdrawalRequests,
   isEarnVaultDepositInFlight,
   isEarnVaultWithdrawalInFlight,
+  readEarnVaultPositions,
 } from "./earn-program-data";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+describe("last verified vault values", () => {
+  it("retains a value through repeated partial reads without retaining unbounded history", () => {
+    const position: EarnVaultPosition = {
+      id: "position",
+      provider: "veda",
+      providerReference: "vault",
+      custodyWalletId: "wallet",
+      tokenMint: USDC,
+      shareMint: "share",
+      label: "Veda",
+      createdAt: TIMESTAMP,
+      closedAt: null,
+      shares: "10",
+      tokenValue: "9.98",
+      feeSponsored: false,
+    };
+    let history: readonly EarnVaultPositionsRead[] = [
+      { positions: [position], startedAt: 1, landedAt: 2 },
+    ];
+    for (let at = 3; at < 100; at += 1) {
+      history = appendVaultPositionsRead(history, {
+        positions: [{ ...position, tokenValue: undefined }],
+        startedAt: at,
+        landedAt: at + 1,
+      });
+      expect(history).toHaveLength(2);
+      expect(history[0]?.positions[0]?.tokenValue).toBe("9.98");
+      expect(history[1]?.positions[0]?.tokenValue).toBeUndefined();
+    }
+    const recovered = {
+      positions: [{ ...position, tokenValue: "10.01" }],
+      startedAt: 101,
+      landedAt: 102,
+    };
+    expect(appendVaultPositionsRead(history, recovered)).toEqual([recovered]);
+    const closed = { positions: [], startedAt: 103, landedAt: 104 };
+    expect(appendVaultPositionsRead(history, closed)).toEqual([closed]);
+  });
+});
 
 function strategy(id: string): EarnStrategy {
   return {
@@ -261,6 +304,30 @@ function vaultPosition(id: string, provider = "kamino"): EarnVaultPosition {
 }
 
 describe("fetchEarnVaultPositions", () => {
+  it("requires the API to acknowledge every confirmed movement on the balance read", async () => {
+    const data = { positions: [vaultPosition("vault_1")], hasMore: false, nextCursor: null };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data }))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { ...data, balanceReadContext: { afterMovementIds: ["one"], minimumSlot: 10 } },
+        })
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            ...data,
+            balanceReadContext: { afterMovementIds: ["one", "two"], minimumSlot: 12 },
+          },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchEarnVaultPositions(["one", "two"])).rejects.toThrow(/confirmation freshness/);
+    await expect(fetchEarnVaultPositions(["one", "two"])).rejects.toThrow(/confirmation freshness/);
+    await expect(fetchEarnVaultPositions(["one", "two"])).resolves.toEqual(data.positions);
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain("afterMovementIds=one%2Ctwo");
+  });
   it("follows every live keyset page without filtering un-surfaced providers", async () => {
     // Pages that report more must be full, so the first page carries a whole
     // page of rows and only the final one is short.
@@ -1167,4 +1234,121 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
       error: "Invalid queued withdrawal response",
     });
   });
+});
+
+describe("batched confirmation reads", () => {
+  it("keeps each position's verified snapshot and uses its greatest slot across batches", async () => {
+    const ids = Array.from({ length: 120 }, (_, i) => `a-${i}`).concat("b-0");
+    const positions = new Map(ids.map((id) => [id, id.startsWith("a-") ? "a" : "b"]));
+    const slots = [200, 100, 300];
+    const amounts = ["2", "1", "999"];
+    const fetchMock = vi.fn(async (input: string) => {
+      const batch =
+        new URL(input, "https://example.test").searchParams.get("afterMovementIds")?.split(",") ??
+        [];
+      expect(batch.length).toBeLessThanOrEqual(100);
+      return Response.json({
+        data: {
+          positions: [
+            { ...vaultPosition("a"), tokenValue: amounts.shift() },
+            { ...vaultPosition("b"), tokenValue: "3" },
+          ],
+          hasMore: false,
+          nextCursor: null,
+          balanceReadContext: { afterMovementIds: batch, minimumSlot: slots.shift() },
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const read = await readEarnVaultPositions(ids, positions);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(read.afterMovementIds).toEqual(ids);
+    expect(read.minimumSlot).toBe(300);
+    expect(read.positions.map(({ id, tokenValue }) => [id, tokenValue])).toEqual([
+      ["a", "2"],
+      ["b", "3"],
+    ]);
+  });
+
+  it("rejects the entire refresh if a later batch lacks confirmation evidence", async () => {
+    const ids = Array.from({ length: 101 }, (_, i) => `movement-${i}`);
+    const positions = new Map(ids.map((id) => [id, "a"]));
+    const fetchMock = vi.fn(async (input: string) => {
+      const batch =
+        new URL(input, "https://example.test").searchParams.get("afterMovementIds")?.split(",") ??
+        [];
+      return Response.json({
+        data: {
+          positions: [vaultPosition("a")],
+          hasMore: false,
+          nextCursor: null,
+          ...(batch.length === 100
+            ? { balanceReadContext: { afterMovementIds: batch, minimumSlot: 200 } }
+            : {}),
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(readEarnVaultPositions(ids, positions)).rejects.toThrow(/confirmation freshness/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not resurrect a closed holding from another position's unbounded read", async () => {
+    const ids = Array.from({ length: 100 }, (_, i) => `closed-${i}`).concat("open-0");
+    const positions = new Map(ids.map((id) => [id, id.startsWith("closed") ? "closed" : "open"]));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        const batch =
+          new URL(input, "https://example.test").searchParams.get("afterMovementIds")?.split(",") ??
+          [];
+        return Response.json({
+          data: {
+            positions:
+              batch.length === 100
+                ? [vaultPosition("open")]
+                : [vaultPosition("closed"), vaultPosition("open")],
+            hasMore: false,
+            nextCursor: null,
+            balanceReadContext: { afterMovementIds: batch, minimumSlot: 200 },
+          },
+        });
+      })
+    );
+    const read = await readEarnVaultPositions(ids, positions);
+    expect(read.positions.map(({ id }) => id)).toEqual(["open"]);
+  });
+});
+
+it("limits concurrent confirmation batches to two while draining a large backlog", async () => {
+  const ids = Array.from({ length: 350 }, (_, i) => `movement-${i}`);
+  const positions = new Map(ids.map((id) => [id, "a"]));
+  let active = 0;
+  let maximumActive = 0;
+  const finish: (() => void)[] = [];
+  const fetchMock = vi.fn(async (input: string) => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    const batch =
+      new URL(input, "https://example.test").searchParams.get("afterMovementIds")?.split(",") ?? [];
+    await new Promise<void>((resolve) => finish.push(resolve));
+    active -= 1;
+    return Response.json({
+      data: {
+        positions: [vaultPosition("a")],
+        hasMore: false,
+        nextCursor: null,
+        balanceReadContext: { afterMovementIds: batch, minimumSlot: 200 },
+      },
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const read = readEarnVaultPositions(ids, positions);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  for (const resolve of finish.splice(0)) resolve();
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+  expect(maximumActive).toBe(2);
+  for (const resolve of finish.splice(0)) resolve();
+  await expect(read).resolves.toMatchObject({ afterMovementIds: ids, minimumSlot: 200 });
+  expect(active).toBe(0);
 });

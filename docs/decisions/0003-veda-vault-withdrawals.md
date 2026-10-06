@@ -110,15 +110,14 @@ Validation on the patched tree:
   configured Kora or Private Channels suite. Neither run executes integration
   tests. Migration 0119 does apply successfully to an isolated local Postgres.
 
-**Open Medium finding: idempotency namespaces.** Reusing a caller key across
-direct and queued withdrawals can admit two intents but later fail the queued
-payout insert on `idx_earn_movements_vault_request`. The new repository
-regression proves the failure rolls back without falsely marking the request
-fulfilled, but the real payout then stays unresolved in SDP. Use distinct
-idempotency keys per intent. A full fix needs coordinated request-key
-namespacing and compatibility with the old writer's explicit `ON CONFLICT`
-target; replacing that index in this migration would break running older API
-instances. This finding needs an assigned owner and remediation before launch.
+**Idempotency namespaces, addressed by 0123 (2026-10-01).** Observed payout
+inserts now carry `withdrawal_request_id` and no command `request_id`. The
+existing initiated-movement indexes and conflict targets remain intact. A
+compatibility trigger also clears the old writer's supplied key on observed
+payout inserts/updates, so a direct withdrawal's key cannot block fulfillment.
+Historical settled rows are retained without an economic backfill. The
+repository regression now requires successful fulfillment, an independently
+identified payout, and the exact observed asset amount when keys overlap.
 
 Apply migration 0119 before deploying the new payout writer. Older binaries can
 still run on the expanded schema, but retain the corrected bugs; rollback must

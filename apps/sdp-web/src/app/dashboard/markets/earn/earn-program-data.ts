@@ -1,11 +1,9 @@
 "use client";
 
 import {
-  EARN_MOVEMENT_STATUSES,
   EARN_TERMINAL_MOVEMENT_STATUSES,
   EARN_TERMINAL_VAULT_MOVEMENT_STATUSES,
   EARN_TERMINAL_WITHDRAWAL_STATUSES,
-  EARN_VAULT_MOVEMENT_STATUSES,
   type EarnExternalWalletPosition,
   type EarnExternalWalletPositionSummary,
   type EarnExternalWalletTokenTotal,
@@ -18,7 +16,6 @@ import {
   type EarnProgramWithdrawalResponse,
   type EarnStrategy,
   type EarnVaultAsyncWithdrawalTermsRequest,
-  type EarnVaultDeposit,
   type EarnVaultDepositRecord,
   type EarnVaultDepositRequest,
   type EarnVaultDirectMovementStatus,
@@ -37,9 +34,14 @@ import {
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
-  SOLANA_CLUSTERS,
   type SolanaCluster,
 } from "@sdp/types";
+import {
+  earnBalanceReadContextSchema,
+  earnVaultDepositRecordSchema,
+  earnVaultDepositSchema,
+  earnVaultWithdrawalSchema,
+} from "@sdp/types/earn-wire";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -49,6 +51,7 @@ import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { earnQueryKeys } from "./earn-query-key";
+import { earnVaultHoldingValue } from "./earn-vault-holding";
 import { isEarnVaultQueuedWithdrawalTerminal } from "./earn-vault-queued-withdrawal-presentation";
 
 export type {
@@ -374,7 +377,9 @@ async function fetchAllCursorPages<T>(input: {
  */
 async function fetchAllPositionPages<Position>(
   path: (query: URLSearchParams) => string,
-  subject: string
+  subject: string,
+  afterMovementIds: readonly string[] = [],
+  observeMinimumSlot?: (slot: number) => void
 ): Promise<Position[]> {
   return fetchAllCursorPages<Position>({
     subject,
@@ -382,8 +387,19 @@ async function fetchAllPositionPages<Position>(
     async fetchPage(before) {
       const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
       if (before) query.set("before", before);
+      if (afterMovementIds.length > 0) query.set("afterMovementIds", afterMovementIds.join(","));
 
-      const body = await requestJsonOk<{ data: PositionPage<Position> }>(path(query));
+      const body = await requestJsonOk<{
+        data: PositionPage<Position> & { balanceReadContext?: unknown };
+      }>(path(query));
+      if (afterMovementIds.length > 0) {
+        const context = earnBalanceReadContextSchema.safeParse(body.data.balanceReadContext);
+        const acknowledgedMovements = new Set(context.success ? context.data.afterMovementIds : []);
+        if (!context.success || afterMovementIds.some((id) => !acknowledgedMovements.has(id))) {
+          throw new Error("Vault position read did not establish confirmation freshness");
+        }
+        observeMinimumSlot?.(context.data.minimumSlot);
+      }
       return {
         items: body.data.positions,
         hasMore: body.data.hasMore,
@@ -398,47 +414,156 @@ async function fetchAllPositionPages<Position>(
  * opaque keyset cursor and hydrates balances live from chain, so cursor
  * progression — not row count — decides when the read is complete.
  */
-export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
+export async function fetchEarnVaultPositions(
+  afterMovementIds: readonly string[] = [],
+  observeMinimumSlot?: (slot: number) => void
+): Promise<EarnVaultPosition[]> {
   return fetchAllPositionPages<EarnVaultPosition>(
     (query) => `/api/dashboard/markets/earn/vault-positions?${query}`,
-    "Vault positions"
+    "Vault positions",
+    afterMovementIds,
+    observeMinimumSlot
   );
 }
 
-/**
- * One landed positions read with the client clock at both ends. Treasury's
- * optimistic balances judge a movement against reads: one that landed before
- * the POST began cannot contain it, one that started after the commit was
- * seen should. The balance a read carries never decides that on its own.
- */
+/** A positions snapshot and client read times, used to refresh after confirmation. */
 export interface EarnVaultPositionsRead {
   positions: EarnVaultPosition[];
   startedAt: number;
   landedAt: number;
+  afterMovementIds?: readonly string[];
+  minimumSlot?: number;
 }
 
-async function readEarnVaultPositions(): Promise<EarnVaultPositionsRead> {
+/**
+ * Keep each position's evidence together. A position with more than 100
+ * movements gets its own batches, so their minimum slots can be compared
+ * without borrowing the slot of an unrelated position.
+ */
+function vaultBalanceReadBatches(
+  movementIds: readonly string[],
+  positionIds?: ReadonlyMap<string, string>
+): string[][] {
+  if (movementIds.length <= 100) return [[...movementIds]];
+  const byPosition = new Map<string, string[]>();
+  for (const id of movementIds) {
+    const positionId = positionIds?.get(id);
+    if (!positionId) throw new Error("Missing position for batched balance verification");
+    const group = byPosition.get(positionId) ?? [];
+    group.push(id);
+    byPosition.set(positionId, group);
+  }
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  for (const group of byPosition.values()) {
+    if (batch.length + group.length > 100) {
+      if (batch.length > 0) batches.push(batch);
+      batch = [];
+    }
+    if (group.length > 100) {
+      for (let index = 0; index < group.length; index += 100)
+        batches.push(group.slice(index, index + 100));
+    } else batch.push(...group);
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+/** At most two portfolio reads at once, even after a prolonged outage. */
+async function readVaultBalanceBatches(batches: readonly string[][]) {
+  const results: { batch: string[]; positions: EarnVaultPosition[]; minimumSlot?: number }[] = [];
+  let next = 0;
+  let stopped = false;
+  async function readNext(): Promise<void> {
+    if (stopped) return;
+    const index = next++;
+    const batch = batches[index];
+    if (!batch) return;
+    try {
+      let minimumSlot: number | undefined;
+      const positions = await fetchEarnVaultPositions(batch, (slot) => {
+        minimumSlot = Math.max(minimumSlot ?? 0, slot);
+      });
+      results[index] = { batch, positions, minimumSlot };
+      return readNext();
+    } catch (error) {
+      stopped = true;
+      throw error;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(2, batches.length) }, () => readNext()));
+  return results;
+}
+
+export async function readEarnVaultPositions(
+  afterMovementIds: readonly string[] = [],
+  positionIds?: ReadonlyMap<string, string>
+): Promise<EarnVaultPositionsRead> {
   const startedAt = Date.now();
-  const positions = await fetchEarnVaultPositions();
-  return { positions, startedAt, landedAt: Date.now() };
+  const batches = vaultBalanceReadBatches(afterMovementIds, positionIds);
+  const verified = new Map<string, { position: EarnVaultPosition | undefined; slot: number }>();
+  let positions: EarnVaultPosition[] = [];
+  let minimumSlot: number | undefined;
+  const reads = await readVaultBalanceBatches(batches);
+  for (const { batch, positions: batchPositions, minimumSlot: batchSlot } of reads) {
+    positions = batchPositions;
+    if (batchSlot !== undefined) minimumSlot = Math.max(minimumSlot ?? 0, batchSlot);
+    if (batches.length > 1) {
+      const byId = new Map(positions.map((position) => [position.id, position]));
+      for (const id of batch) {
+        const positionId = positionIds?.get(id);
+        if (!positionId || batchSlot === undefined)
+          throw new Error("Missing position balance verification");
+        // Multiple batches for one position must use the greatest proven slot,
+        // even when confirmation arrival order differs from chain slot order.
+        if ((verified.get(positionId)?.slot ?? -1) <= batchSlot)
+          verified.set(positionId, { position: byId.get(positionId), slot: batchSlot });
+      }
+    }
+  }
+  if (batches.length > 1) {
+    const combined = new Map(positions.map((position) => [position.id, position]));
+    for (const [id, { position }] of verified) {
+      if (position) combined.set(id, position);
+      else combined.delete(id);
+    }
+    positions = [...combined.values()];
+  }
+  return { positions, startedAt, landedAt: Date.now(), afterMovementIds, minimumSlot };
 }
 
-/** Three minutes at the live cadence: enough to hold a read that predates any movement still projected. */
-const RECENT_VAULT_POSITIONS_READS = 12;
-
-function appendVaultPositionsRead(
+/** Retain one last verified value per current position, plus the newest raw read. */
+export function appendVaultPositionsRead(
   reads: readonly EarnVaultPositionsRead[],
   read: EarnVaultPositionsRead
 ): readonly EarnVaultPositionsRead[] {
-  if (reads[reads.length - 1]?.startedAt === read.startedAt) return reads;
-  return [...reads, read].slice(-RECENT_VAULT_POSITIONS_READS);
+  if (reads[reads.length - 1] === read) return reads;
+  const missing = new Set(
+    read.positions
+      .filter((position) => earnVaultHoldingValue(position) === undefined)
+      .map(({ id }) => id)
+  );
+  const retained: EarnVaultPositionsRead[] = [];
+  for (let index = reads.length - 1; index >= 0 && missing.size > 0; index -= 1) {
+    const previous = reads[index];
+    if (!previous) continue;
+    const positions = previous.positions.filter((position) => {
+      if (!missing.has(position.id) || earnVaultHoldingValue(position) === undefined) return false;
+      missing.delete(position.id);
+      return true;
+    });
+    if (positions.length > 0) retained.unshift({ ...previous, positions });
+  }
+  return [...retained, read];
 }
 
 /** Live position values refresh while the surface is mounted; `reads` keeps the recent history, newest last. */
 export function useEarnVaultPositions() {
+  const afterMovementIds = useRef<readonly string[]>([]);
+  const movementPositionIds = useRef<ReadonlyMap<string, string> | undefined>(undefined);
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultPositions(),
-    readEarnVaultPositions,
+    () => readEarnVaultPositions(afterMovementIds.current, movementPositionIds.current),
     { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
   const [history, setHistory] = useState<readonly EarnVaultPositionsRead[]>([]);
@@ -450,7 +575,21 @@ export function useEarnVaultPositions() {
     () => (data ? appendVaultPositionsRead(history, data) : history),
     [data, history]
   );
-  const refresh = useCallback(() => void mutate(), [mutate]);
+  const refresh = useCallback(
+    (movementIds?: readonly string[], positionIds?: ReadonlyMap<string, string>) => {
+      if (movementIds) {
+        afterMovementIds.current = [...movementIds];
+        movementPositionIds.current = positionIds;
+      }
+      // Explicit mutation propagates failures; a bare SWR revalidation can
+      // resolve with cached data after its fetcher failed.
+      return mutate(readEarnVaultPositions(afterMovementIds.current, movementPositionIds.current), {
+        revalidate: false,
+        throwOnError: true,
+      });
+    },
+    [mutate]
+  );
   return { positions: data?.positions, reads, error, isLoading, refresh };
 }
 
@@ -595,21 +734,6 @@ export function useEarnExternalWalletPositionSummary({
  * to inference, so a field added or renamed in `@sdp/types` fails typecheck
  * here instead of being silently stripped from a parsed deposit.
  */
-const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
-  positionId: z.string(),
-  movementId: z.string(),
-  status: z.enum(EARN_VAULT_MOVEMENT_STATUSES),
-  signature: z.string(),
-  failureReason: z.string().nullable(),
-  replayed: z.boolean(),
-  strategy: z.object({
-    id: z.string(),
-    name: z.string(),
-    provider: z.string(),
-    providerReference: z.string(),
-    hostCluster: z.enum(SOLANA_CLUSTERS),
-  }),
-});
 
 /**
  * The API's 202 approval hold, identical for deposits and withdrawals: the
@@ -698,18 +822,6 @@ export async function createEarnVaultDeposit(
  * envelope is: a field added or renamed in `@sdp/types` must fail typecheck
  * here rather than be silently stripped from a parsed deposit.
  */
-const earnVaultDepositRecordSchema: z.ZodType<EarnVaultDepositRecord> = z.object({
-  movementId: z.string(),
-  positionId: z.string(),
-  provider: z.string(),
-  providerReference: z.string(),
-  status: z.enum(EARN_VAULT_MOVEMENT_STATUSES),
-  signature: z.string(),
-  amount: z.string(),
-  failureReason: z.string().nullable(),
-  createdAt: z.string(),
-  confirmedAt: z.string().nullable(),
-});
 
 const earnVaultDepositResponseSchema = z.object({
   data: z.object({ deposit: earnVaultDepositRecordSchema }),
@@ -784,8 +896,7 @@ async function fetchAllVaultMovementPages<T>(input: {
  *
  * `settled: false` is what makes that affordable. Asking the server for only
  * the movements that can still change keeps the result small by construction —
- * the reconciliation sweep drives every row terminal within about ninety
- * seconds — instead of paging an unbounded history to filter it locally. A
+ * ambiguous outcomes remain in reconciliation until enough evidence arrives — instead of paging an unbounded history to filter it locally. A
  * workspace busy enough to push an in-flight deposit past the first page is
  * exactly the case a single request got wrong.
  */
@@ -1128,21 +1239,6 @@ export function useEarnVaultDepositOutcome(
  * schemas are: a field added or renamed in `@sdp/types` must fail typecheck
  * here rather than be silently stripped from a parsed leg.
  */
-const earnVaultWithdrawalSchema: z.ZodType<EarnVaultWithdrawal> = z.object({
-  movementId: z.string(),
-  positionId: z.string(),
-  provider: z.string(),
-  providerReference: z.string(),
-  status: z.enum(EARN_MOVEMENT_STATUSES.vault_direct),
-  signature: z.string(),
-  shares: z.string(),
-  shareMint: z.string(),
-  failureReason: z.string().nullable(),
-  createdAt: z.string(),
-  confirmedAt: z.string().nullable(),
-  settledAt: z.string().nullable(),
-  replayed: z.boolean().optional(),
-});
 
 const earnVaultWithdrawalOutcomeSchema = z.union([
   z

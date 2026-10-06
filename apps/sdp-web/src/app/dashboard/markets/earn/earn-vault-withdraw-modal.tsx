@@ -30,6 +30,7 @@ import {
   fetchEarnVaultWithdrawalsByRequestId,
   useEarnVaultWithdrawalOutcome,
 } from "./earn-program-data";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
 
 export { EarnVaultWithdrawalOutcomeTracker } from "./earn-outcome-trackers";
 
@@ -137,13 +138,6 @@ type WithdrawalOutcome =
 type WithdrawalSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: WithdrawalOutcome; withdrawn?: EarnVaultWithdrawal };
-
-function shouldProjectWithdrawalBalance(
-  outcome: WithdrawalOutcome,
-  settlement: EarnVaultWithdrawalSettlement
-): boolean {
-  return settlement === "atomic" && observableVaultMovement(outcome) !== undefined;
-}
 
 function resolveWithdrawalSubmission(
   result: Awaited<ReturnType<typeof createEarnVaultWithdrawal>>,
@@ -498,6 +492,7 @@ function WithdrawalResult({
 }
 
 export interface EarnVaultWithdrawModalProps {
+  onSubmissionStart?: VaultSubmissionObserver;
   position: EarnVaultPosition;
   environment: SdpEnvironment;
   /** Part of the request fingerprint — see `vaultWithdrawalRequestFingerprint`. */
@@ -507,8 +502,6 @@ export interface EarnVaultWithdrawModalProps {
     withdrawal: EarnVaultWithdrawal,
     intent: {
       amount: string;
-      /** False when an approval already executed this replayed intent. */
-      projectBalance: boolean;
       /** Client clock when the POST began; a positions read that landed earlier cannot contain this exit. */
       submittedAt: number;
     }
@@ -850,6 +843,7 @@ export function EarnVaultWithdrawModal({
   projectId,
   onClose,
   onWithdrawn,
+  onSubmissionStart,
   onMovementUpdated,
   settlement = "atomic",
 }: EarnVaultWithdrawModalProps) {
@@ -994,6 +988,11 @@ export function EarnVaultWithdrawModal({
 
     // No abort signal on the value-moving POST — see the deposit modal.
     const submittedAt = Date.now();
+    const submission = vaultWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
+    if (!submission) {
+      setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
+      return;
+    }
     const result = await createEarnVaultWithdrawal(
       {
         positionId: position.id,
@@ -1007,7 +1006,8 @@ export function EarnVaultWithdrawModal({
     const disposition = applyIdempotencyKeyOutcome(
       vaultWithdrawalIdempotencyKeyStore,
       fingerprint,
-      result
+      result,
+      submission.wasUncertain
     );
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
@@ -1035,9 +1035,6 @@ export function EarnVaultWithdrawModal({
     if (resolution.withdrawn) {
       onWithdrawn?.(resolution.withdrawn, {
         amount,
-        // A share-denominated provider order has no honest dollar projection
-        // until NAV is struck. The caller still refreshes live holdings.
-        projectBalance: shouldProjectWithdrawalBalance(resolution.outcome, settlement),
         submittedAt,
       });
     }
@@ -1058,6 +1055,7 @@ export function EarnVaultWithdrawModal({
     requestControllerRef.current = controller;
     submittingRef.current = true;
     setSubmitting(true);
+    const finishSubmission = onSubmissionStart?.(position.custodyWalletId);
     setSubmitError(null);
 
     try {
@@ -1072,6 +1070,7 @@ export function EarnVaultWithdrawModal({
       }
     } finally {
       if (requestControllerRef.current === controller) requestControllerRef.current = null;
+      finishSubmission?.();
       submittingRef.current = false;
       setSubmitting(false);
     }
