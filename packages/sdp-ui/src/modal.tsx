@@ -1,0 +1,103 @@
+"use client";
+
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { cn } from "./cn";
+import { useUiTranslations } from "./i18n";
+import { ModalCloseButton } from "./modal-close-button";
+import { PortalContainerProvider } from "./portal-container";
+import { useThemeScopeAttributes } from "./theme-scope";
+import { useEscapeKey } from "./use-escape-key";
+
+type ModalSize = "sm" | "md" | "lg" | "xl";
+
+interface ModalProps {
+  isOpen: boolean;
+  ariaLabel: string;
+  children: ReactNode;
+  onClose?: () => void;
+  closeDisabled?: boolean;
+  closeLabel?: string;
+  contentClassName?: string;
+  showCloseButton?: boolean;
+  size?: ModalSize;
+}
+
+const sizeClassNames: Record<ModalSize, string> = {
+  sm: "max-w-md",
+  md: "max-w-lg",
+  lg: "max-w-xl",
+  xl: "max-w-2xl",
+};
+
+export function Modal({
+  isOpen,
+  ariaLabel,
+  children,
+  onClose,
+  closeDisabled = false,
+  closeLabel,
+  contentClassName,
+  showCloseButton = true,
+  size = "md",
+}: ModalProps) {
+  const t = useUiTranslations();
+  const resolvedCloseLabel = closeLabel ?? t("Shared.SharedComponents.closeModal");
+  const [mounted, setMounted] = useState(false);
+  const [dialogNode, setDialogNode] = useState<HTMLElement | null>(null);
+  const canClose = Boolean(onClose) && !closeDisabled;
+  const themeScopeAttributes = useThemeScopeAttributes();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEscapeKey(isOpen && canClose, () => {
+    onClose?.();
+  });
+
+  if (!mounted || !isOpen) {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      {...themeScopeAttributes}
+      className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-[rgba(18,18,19,0.44)]"
+    >
+      {onClose ? (
+        <button
+          type="button"
+          aria-label={resolvedCloseLabel}
+          className="absolute inset-0 cursor-default"
+          onClick={onClose}
+          disabled={!canClose}
+          tabIndex={-1}
+        />
+      ) : (
+        <div className="absolute inset-0" />
+      )}
+
+      <div className="pointer-events-none relative flex min-h-full items-center justify-center px-4 py-8">
+        <div
+          ref={setDialogNode}
+          role="dialog"
+          aria-modal="true"
+          aria-label={ariaLabel}
+          className={cn(
+            "pointer-events-auto relative z-10 w-full rounded-2xl border border-border-default bg-surface-raised text-primary shadow-lg",
+            sizeClassNames[size],
+            contentClassName
+          )}
+        >
+          {showCloseButton && onClose ? (
+            <ModalCloseButton onClick={onClose} disabled={!canClose} label={resolvedCloseLabel} />
+          ) : null}
+          <PortalContainerProvider container={dialogNode}>{children}</PortalContainerProvider>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}

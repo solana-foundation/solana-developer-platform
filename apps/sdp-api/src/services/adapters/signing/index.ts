@@ -23,8 +23,14 @@ export interface SigningConfigRecord {
 }
 
 export function assertSigningProviderAllowed(env: Env): void {
-  const provider = env.SIGNING_PROVIDER ?? "local";
-  if (provider === "local" && !isSelfHostedDeployment(env)) {
+  if ((env.SIGNING_PROVIDER ?? "local") === "local") {
+    assertLocalSigningAllowed(env);
+  }
+}
+
+/** Platform-held signing keys exist only in self-hosted deployments. */
+export function assertLocalSigningAllowed(env: Pick<Env, "SDP_DEPLOYMENT_MODE">): void {
+  if (!isSelfHostedDeployment(env)) {
     throw new SigningError(
       "Local signing is not available in a managed deployment; configure an external custody provider",
       "PROVIDER_NOT_CONFIGURED"

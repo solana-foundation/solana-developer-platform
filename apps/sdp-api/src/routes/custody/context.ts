@@ -15,9 +15,9 @@ export function resolveActor(c: AppContext): { organizationId: string; projectId
     return { organizationId: clerk.organizationId };
   }
 
-  const session = c.get("session");
-  if (session) {
-    return { organizationId: session.organizationId };
+  const replayActor = c.get("approvedOperationActor");
+  if (replayActor) {
+    return { organizationId: replayActor.organizationId };
   }
 
   throw new AppError("UNAUTHORIZED", "Authentication required");

@@ -10,10 +10,8 @@ import {
   ChevronDownIcon,
   EllipsisIcon,
   KeyRoundIcon,
-  SearchIcon,
   ShieldCheckIcon,
   WalletIcon,
-  XIcon,
 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
@@ -31,9 +29,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
+import { SearchInput } from "@/components/ui/search-input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
@@ -525,6 +523,101 @@ function MobileInventory({
   );
 }
 
+const noop = () => undefined;
+
+interface PoliciesToolbarProps {
+  searchValue: string;
+  status: PoliciesUrlState["status"];
+  showConfigure: boolean;
+  custodyEnabled: boolean;
+  onSearchChange: (value: string) => void;
+  onStateChange: (changes: Partial<PoliciesUrlState>) => void;
+}
+
+function PoliciesToolbar({
+  searchValue,
+  status,
+  showConfigure,
+  custodyEnabled,
+  onSearchChange,
+  onStateChange,
+}: PoliciesToolbarProps) {
+  const t = useTranslations();
+
+  return (
+    <div className="border-b border-border-default px-4 py-3">
+      <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_170px_auto]">
+        <SearchInput
+          value={searchValue}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={t("DashboardPolicies.searchPlaceholder")}
+          clear={{
+            label: t("DashboardPolicies.clearSearch"),
+            onClear: () => onSearchChange(""),
+          }}
+        />
+        <Select
+          textSize="body"
+          value={status || "all"}
+          onValueChange={(value) =>
+            onStateChange({
+              status: value === "all" ? "" : (value as PolicyControlInventoryStatus),
+              page: 1,
+            })
+          }
+        >
+          {STATUS_OPTIONS.map((option) => (
+            <SelectItem key={option.id} value={option.id}>
+              {t(option.labelKey)}
+            </SelectItem>
+          ))}
+        </Select>
+        {showConfigure ? <ConfigureMenu custodyEnabled={custodyEnabled} /> : null}
+      </div>
+    </div>
+  );
+}
+
+interface InventoryPaginationProps {
+  inventory: PolicyControlInventoryResponse | null;
+  loading: boolean;
+  state: PoliciesUrlState;
+  onStateChange: (changes: Partial<PoliciesUrlState>) => void;
+}
+
+function InventoryPagination({
+  inventory,
+  loading,
+  state,
+  onStateChange,
+}: InventoryPaginationProps) {
+  const t = useTranslations();
+  if (loading || !inventory || inventory.controls.length === 0) {
+    return null;
+  }
+  const pageCount = Math.max(1, Math.ceil(inventory.total / state.pageSize));
+  const rangeStart = inventory.total ? (state.page - 1) * state.pageSize + 1 : 0;
+  const rangeEnd = Math.min(state.page * state.pageSize, inventory.total);
+
+  return (
+    <PaginatedFooter
+      className="mt-auto"
+      page={state.page}
+      pageCount={pageCount}
+      onPageChange={(page) => onStateChange({ page })}
+      summary={t("DashboardPolicies.range", {
+        start: rangeStart,
+        end: rangeEnd,
+        total: inventory.total,
+      })}
+      pageSizeControl={{
+        pageSize: state.pageSize,
+        onPageSizeChange: (pageSize) => onStateChange({ pageSize, page: 1 }),
+      }}
+    />
+  );
+}
+
 export function PoliciesOverviewSurface({
   inventory,
   error,
@@ -532,9 +625,9 @@ export function PoliciesOverviewSurface({
   custodyEnabled = true,
   loading = false,
   searchValue,
-  onSearchChange = () => undefined,
-  onStateChange = () => undefined,
-  onRetry = () => undefined,
+  onSearchChange = noop,
+  onStateChange = noop,
+  onRetry = noop,
 }: PoliciesOverviewSurfaceProps) {
   const t = useTranslations();
   const reducedMotion = useReducedMotion();
@@ -546,52 +639,26 @@ export function PoliciesOverviewSurface({
     onSearchChange("");
     onStateChange({ query: "", status: "", page: 1 });
   };
-  const pageCount = Math.max(1, Math.ceil((inventory?.total ?? 0) / state.pageSize));
-  const rangeStart = inventory?.total ? (state.page - 1) * state.pageSize + 1 : 0;
-  const rangeEnd = Math.min(state.page * state.pageSize, inventory?.total ?? 0);
+  const listProps = {
+    custodyEnabled,
+    inventory,
+    loading,
+    emptyLabelKey,
+    filtered,
+    onClear: clearFilters,
+  };
 
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col">
       <DashboardWorkspaceCard>
-        <div className="border-b border-border-default px-4 py-3">
-          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_170px_auto]">
-            <Input
-              value={searchValue}
-              onChange={(event) => onSearchChange(event.target.value)}
-              placeholder={t("DashboardPolicies.searchPlaceholder")}
-              aria-label={t("DashboardPolicies.searchPlaceholder")}
-              iconLeft={<SearchIcon />}
-              action={
-                searchValue ? (
-                  <button
-                    type="button"
-                    aria-label={t("DashboardPolicies.clearSearch")}
-                    onClick={() => onSearchChange("")}
-                    className="rounded text-tertiary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
-                  >
-                    <XIcon className="size-5" />
-                  </button>
-                ) : undefined
-              }
-            />
-            <Select
-              value={state.status || "all"}
-              onValueChange={(value) =>
-                onStateChange({
-                  status: value === "all" ? "" : (value as PolicyControlInventoryStatus),
-                  page: 1,
-                })
-              }
-            >
-              {STATUS_OPTIONS.map((option) => (
-                <SelectItem key={option.id} value={option.id}>
-                  {t(option.labelKey)}
-                </SelectItem>
-              ))}
-            </Select>
-            {emptyProject ? null : <ConfigureMenu custodyEnabled={custodyEnabled} />}
-          </div>
-        </div>
+        <PoliciesToolbar
+          searchValue={searchValue}
+          status={state.status}
+          showConfigure={!emptyProject}
+          custodyEnabled={custodyEnabled}
+          onSearchChange={onSearchChange}
+          onStateChange={onStateChange}
+        />
 
         <motion.div
           key={state.tab}
@@ -612,39 +679,14 @@ export function PoliciesOverviewSurface({
             />
           ) : (
             <>
-              <InventoryTable
-                custodyEnabled={custodyEnabled}
+              <InventoryTable {...listProps} />
+              <MobileInventory {...listProps} />
+              <InventoryPagination
                 inventory={inventory}
                 loading={loading}
-                emptyLabelKey={emptyLabelKey}
-                filtered={filtered}
-                onClear={clearFilters}
+                state={state}
+                onStateChange={onStateChange}
               />
-              <MobileInventory
-                custodyEnabled={custodyEnabled}
-                inventory={inventory}
-                loading={loading}
-                emptyLabelKey={emptyLabelKey}
-                filtered={filtered}
-                onClear={clearFilters}
-              />
-              {!loading && inventory && inventory.controls.length > 0 ? (
-                <PaginatedFooter
-                  className="mt-auto"
-                  page={state.page}
-                  pageCount={pageCount}
-                  onPageChange={(page) => onStateChange({ page })}
-                  summary={t("DashboardPolicies.range", {
-                    start: rangeStart,
-                    end: rangeEnd,
-                    total: inventory.total,
-                  })}
-                  pageSizeControl={{
-                    pageSize: state.pageSize,
-                    onPageSizeChange: (pageSize) => onStateChange({ pageSize, page: 1 }),
-                  }}
-                />
-              ) : null}
             </>
           )}
         </motion.div>

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import type { Permission, PolicyDefaultAction, PolicyRule } from "@sdp/types";
 import type { z } from "zod";
 import { getDb } from "@/db";
@@ -25,7 +26,15 @@ import {
 
 export interface PostTransferOptions {
   idempotencyKey?: string;
-  auth?: { kind: "api_key"; raw: string } | { kind: "session"; cookie: string };
+  auth?:
+    | {
+        kind: "api_key";
+        raw: string;
+      }
+    | {
+        kind: "clerk";
+        token: string;
+      };
   dryRun?: boolean;
 }
 
@@ -42,14 +51,15 @@ export async function postRawTransfer(
 ): Promise<Response> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    Authorization: `Bearer ${TEST_API_KEY.raw}`,
   };
-  if (options.auth?.kind === "session") {
-    headers.Cookie = options.auth.cookie;
-    headers["x-project-id"] = TEST_PROJECT.id;
-  } else if (options.auth?.kind === "api_key") {
-    headers.Authorization = `Bearer ${options.auth.raw}`;
-  } else {
-    headers.Authorization = `Bearer ${TEST_API_KEY.raw}`;
+  if (options.auth !== undefined) {
+    if (options.auth.kind === "clerk") {
+      headers.Authorization = `Bearer ${options.auth.token}`;
+      headers["x-project-id"] = TEST_PROJECT.id;
+    } else {
+      headers.Authorization = `Bearer ${options.auth.raw}`;
+    }
   }
   if (options.idempotencyKey !== undefined) {
     headers["Idempotency-Key"] = options.idempotencyKey;
@@ -92,9 +102,7 @@ export async function findTransferRow(id: string): Promise<PaymentTransferRow | 
 
 export async function readTransferRow(id: string): Promise<PaymentTransferRow> {
   const row = await findTransferRow(id);
-  if (row === null) {
-    throw new Error(`Transfer ${id} was not found`);
-  }
+  assert(row);
   return row;
 }
 
@@ -132,18 +140,14 @@ export async function seedWalletControlProfile(params: {
     name: "Payment controls",
     createdBy: TEST_USER.id,
   });
-  if (profile === null) {
-    throw new Error("Failed to create wallet control profile");
-  }
+  assert(profile);
   const revision = await repo.createWalletControlProfileRevision({
     profileId: profile.id,
     rules: params.rules,
     defaultAction: params.defaultAction,
     createdBy: TEST_USER.id,
   });
-  if (revision === null) {
-    throw new Error("Failed to create wallet control profile revision");
-  }
+  assert(revision);
   await repo.activateWalletControlProfileRevision({
     profileId: profile.id,
     revisionId: revision.id,
@@ -157,11 +161,9 @@ export async function seedCustodyWalletFixture(params: {
   label: string;
 }): Promise<void> {
   await getDb(env)
-    .prepare(
-      `INSERT INTO custody_wallets
+    .prepare(`INSERT INTO custody_wallets
          (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-       VALUES (?, ?, ?, ?, ?, 'transfer', 'active')`
-    )
+       VALUES (?, ?, ?, ?, ?, 'transfer', 'active')`)
     .bind(params.id, TEST_CONFIG_ID, params.walletId, params.publicKey, params.label)
     .run();
 }
@@ -170,19 +172,15 @@ export async function seedConfigOwnedDuplicateProviderWallet(): Promise<void> {
   const configId = "cust_cfg_payments_exact_duplicate_test";
   await getDb(env).batch([
     getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
+      .prepare(`INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted,
             encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', ?, 'active')`
-      )
+         VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', ?, 'active')`)
       .bind(configId, TEST_ORG.id, TEST_PROJECT.id, TEST_WALLET_ID),
     getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
+      .prepare(`INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES ('cwlt_payments_duplicate_test', ?, ?, ?, 'Config duplicate', 'transfer', 'active')`
-      )
+         VALUES ('cwlt_payments_duplicate_test', ?, ?, ?, 'Config duplicate', 'transfer', 'active')`)
       .bind(configId, TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet3),
   ]);
 }
@@ -227,7 +225,11 @@ export async function seedConnectionOwnedDuplicateProviderWallet(): Promise<void
 }
 
 export async function seedSelectedApiKeyWalletBindings(
-  bindings: Array<{ walletId: string; custodyWalletId: string; permissions: Permission[] }>
+  bindings: Array<{
+    walletId: string;
+    custodyWalletId: string;
+    permissions: Permission[];
+  }>
 ): Promise<void> {
   await replaceApiKeyWalletBindings(
     getDb(env),

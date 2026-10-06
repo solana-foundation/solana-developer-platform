@@ -430,7 +430,11 @@
       "update": "Guardar cambios",
       "updating": "Guardando…",
       "updateSuccess": "Conexión actualizada.",
-      "connectionTestSuccess": "La conexión funciona."
+      "connectionTestSuccess": "La conexión funciona.",
+      "endpointsSection": "Endpoints",
+      "programsSection": "Programas",
+      "programAddressPlaceholder": "Dirección del programa",
+      "accountAddressPlaceholder": "Dirección de la cuenta"
     },
     "playground": {
       "productName": "Private Channels",
