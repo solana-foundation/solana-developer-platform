@@ -12,8 +12,30 @@ import type {
   ProjectRole,
   ProjectSettings,
 } from "@sdp/types";
+import { z } from "zod";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { badRequest, internalError, notFound } from "@/lib/errors";
+
+/**
+ * Stored project settings as the API exposes them. Unknown keys are stripped,
+ * so keys written before a field was removed are neither returned nor merged
+ * back on the next update.
+ */
+const storedProjectSettingsSchema = z.object({
+  webhookUrl: z.string().optional(),
+  metadata: z.record(z.string(), z.string()).optional(),
+}) satisfies z.ZodType<ProjectSettings>;
+
+/**
+ * Parse a project's stored settings column.
+ *
+ * @param raw - The `settings` column as read from Postgres.
+ * @returns The settings with unknown keys stripped, or null when never set.
+ */
+function parseStoredProjectSettings(raw: string | null): ProjectSettings | null {
+  const stored = parseOptionalPostgresJson<unknown>(raw);
+  return stored === null ? null : storedProjectSettingsSchema.parse(stored);
+}
 
 export interface UpdateProjectInput {
   name?: string;
@@ -406,7 +428,7 @@ export class ProjectService {
       slug: row.slug,
       description: row.description,
       environment: row.environment as ProjectEnvironment,
-      settings: parseOptionalPostgresJson<ProjectSettings>(row.settings),
+      settings: parseStoredProjectSettings(row.settings),
       status: row.status as "active" | "archived",
       createdBy: row.created_by,
       createdAt: row.created_at,

@@ -25,7 +25,7 @@ const organizationAllowedIpSchema = z.string().transform((value, ctx) => {
 export const updateOrgSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   settings: z
-    .object({
+    .strictObject({
       defaultEnvironment: z.enum(["sandbox", "production"]).optional(),
       allowedIpAddresses: z
         .array(organizationAllowedIpSchema)

@@ -42,7 +42,6 @@
   },
   "dependencies": {
     "@sdp/types": "workspace:*",
-    "@solana/addresses": "catalog:",
     "@solana/kit": "catalog:"
   },
   "devDependencies": {
