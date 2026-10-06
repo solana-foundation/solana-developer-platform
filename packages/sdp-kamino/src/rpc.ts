@@ -57,9 +57,28 @@ export function createKaminoRpc(rpcUrl: string, timeoutMs = KAMINO_RPC_REQUEST_T
 interface InFlightRead {
   /** `readStamp()` taken before the request was sent. */
   stamp: number;
+  /** `Date.now()` when the request was sent. */
+  sentAt: number;
   response: Promise<unknown>;
   consumers: number;
   controller: AbortController;
+}
+
+/**
+ * How long after its send a shared read may still be joined. Identical reads in
+ * one burst arrive within milliseconds; an older request may have stalled, so a
+ * later caller sends its own.
+ */
+export const KAMINO_SHARED_READ_JOIN_WINDOW_MS = 2_000;
+
+/**
+ * Whether the current caller may join an in-flight shared read: never one sent
+ * before the caller's read floor, never one sent a join window or more ago.
+ */
+function canJoinKaminoRead(sent: { stamp: number; sentAt: number }): boolean {
+  const floor = readFloor();
+  if (floor !== undefined && sent.stamp <= floor) return false;
+  return Date.now() - sent.sentAt < KAMINO_SHARED_READ_JOIN_WINDOW_MS;
 }
 
 /** The reads a position page sends. Every other method is never shared. */
@@ -79,9 +98,11 @@ const SHARED_READ_METHODS: ReadonlySet<string> = new Set([
  * Applied BELOW `withRpcReadContext`: the key carries any `minContextSlot` a
  * scoped read adds, and every consumer still validates the returned context
  * itself. A consumer whose signal aborts rejects with its own reason; the
- * shared request aborts only once every consumer has left. A caller under a
- * read floor (`withReadFloor`) joins only a request sent after the floor was
- * stamped; an older entry is replaced, and its joiners keep their response.
+ * shared request aborts only once every consumer has left. A caller joins only
+ * a request `canJoinKaminoRead` admits, so a stalled request never captures
+ * later callers: an older entry is replaced, and its joiners keep their
+ * response. Nobody joins it after the window, so it aborts once its last
+ * joiner's own deadline has passed.
  */
 export function withKaminoReadDeduplication(transport: RpcTransport): RpcTransport {
   const inFlight = new Map<string, InFlightRead>();
@@ -89,13 +110,13 @@ export function withKaminoReadDeduplication(transport: RpcTransport): RpcTranspo
     const request = jsonRpcRequest(config.payload);
     if (!request || !SHARED_READ_METHODS.has(request.method)) return transport<TResponse>(config);
     const key = stableKey([request.method, request.params]);
-    const floor = readFloor();
     let entry = inFlight.get(key);
-    if (entry && floor !== undefined && entry.stamp <= floor) entry = undefined;
+    if (entry && !canJoinKaminoRead(entry)) entry = undefined;
     if (!entry) {
       const controller = new AbortController();
       const created: InFlightRead = {
         stamp: readStamp(),
+        sentAt: Date.now(),
         response: transport<unknown>({ ...config, signal: controller.signal }),
         consumers: 0,
         controller,
