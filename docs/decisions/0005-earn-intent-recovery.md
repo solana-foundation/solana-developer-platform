@@ -19,6 +19,11 @@ at these boundaries can duplicate transfers, strand tracking, or misstate balanc
   acknowledgment releases the key; the next intentional transfer may have the
   same terms. An uncertain or approval-held attempt survives later 4xx responses.
   Explicit same-key terminal policy denial permits a new intent.
+- If session storage refuses that pin (blocked or full), the dashboard does not
+  send the Earn request and asks the user to enable browser storage. A memory-only
+  key dies on reload, so a retry after a lost response would mint a fresh key and
+  could move the funds twice. This fail-closed rule replaces the previous fail-soft
+  contract; Private Channels still fail soft.
 - If a direct-allow custody handler throws before durable intent exists, a
   conditional database update marks only its own evaluated wallet operation
   failed and clears its reserved key. The failed operation remains auditable
