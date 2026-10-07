@@ -3,8 +3,7 @@ import { organizationSchema } from "./organizations";
 
 export const organizationOnboardingSetupSchema = z.object({
   status: z.enum(["not_started", "in_progress", "complete"]),
-  currentStep: z.enum(["rpc", "custody", "complete"]),
-  rpcProvider: z.string().nullable(),
+  currentStep: z.enum(["custody", "complete"]),
   custodyProvider: z.string().nullable(),
   completedAt: z.string().nullable(),
   version: z.number().int().positive(),

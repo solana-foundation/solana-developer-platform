@@ -149,11 +149,49 @@ const readClients = new Map<string, { veda: Kit7; expiresAt: number }>();
 const vaultShareFacts = new Map<string, CachedRead<VaultShareFacts>>();
 const vaultAssetMints = new Map<string, CachedRead<Address>>();
 
+/** Most position-read clients kept at once, one per (cluster, endpoint, deployment). */
+const VEDA_READ_CLIENT_CAPACITY = 32;
+/** Most entries kept in each vault-facts cache, one per (cluster, endpoint, vault). */
+const VEDA_READ_FACTS_CAPACITY = 256;
+
 /** Test seam: forget the shared position-read client and memoised vault facts. */
 export function resetVedaReadCaches(): void {
   readClients.clear();
   vaultShareFacts.clear();
   vaultAssetMints.clear();
+}
+
+/** Test seam: how many entries each position-read cache holds. */
+export function vedaReadCacheSizes(): { clients: number; shareFacts: number; assetMints: number } {
+  return {
+    clients: readClients.size,
+    shareFacts: vaultShareFacts.size,
+    assetMints: vaultAssetMints.size,
+  };
+}
+
+/**
+ * Store `value` as the newest entry for `key`, after dropping every expired
+ * entry and then the oldest past `capacity`, so distinct endpoints and vaults
+ * cannot grow a cache for the process's lifetime.
+ */
+function storeBounded<V extends { expiresAt: number | null }>(
+  cache: Map<string, V>,
+  key: string,
+  value: V,
+  capacity: number
+): void {
+  const now = Date.now();
+  for (const [stored, entry] of cache) {
+    if (entry.expiresAt !== null && entry.expiresAt <= now) cache.delete(stored);
+  }
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > capacity) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
 }
 
 /**
@@ -184,7 +222,7 @@ function readClient(runtime: VedaRuntime, config: VedaClusterConfig): Kit7 {
     ),
     expiresAt: Date.now() + VEDA_READ_CACHE_TTL_MS,
   };
-  readClients.set(key, entry);
+  storeBounded(readClients, key, entry, VEDA_READ_CLIENT_CAPACITY);
   void Promise.resolve()
     .then(() => entry.veda.validateDeployment())
     .catch(() => {
@@ -210,7 +248,7 @@ async function cachedRead<T>(
   }
   if (!entry) {
     entry = { promise: outsideCallerScopes(load), expiresAt: null };
-    cache.set(key, entry);
+    storeBounded(cache, key, entry, VEDA_READ_FACTS_CAPACITY);
   }
   const current = entry;
   try {

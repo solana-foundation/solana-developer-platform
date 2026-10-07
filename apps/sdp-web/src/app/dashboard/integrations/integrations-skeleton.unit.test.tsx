@@ -1,4 +1,4 @@
-import { COMPLIANCE_PROVIDERS, ORGANIZATION_RPC_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/custody/provider-catalog";
@@ -22,9 +22,6 @@ describe("integration detail skeleton", () => {
 
   it("carries a block for every section the detail page renders", () => {
     const markup = renderToStaticMarkup(<IntegrationDetailSkeleton />);
-    // Header, Connection, credentials, About, How it connects, Resources —
-    // the RPC family renders the most sections, and the skeleton is sized
-    // close to it.
     expect(markup.match(/rounded-2xl/g)).toHaveLength(5);
   });
 
@@ -61,7 +58,6 @@ describe("integration detail skeleton", () => {
     const privacyCards = 1;
     const expected =
       CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length +
-      (ORGANIZATION_RPC_PROVIDERS.length - 1) +
       RAMP_PROVIDERS.length +
       COMPLIANCE_PROVIDERS.length +
       privacyCards;

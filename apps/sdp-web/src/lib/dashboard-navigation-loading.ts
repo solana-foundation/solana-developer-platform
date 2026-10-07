@@ -29,7 +29,6 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
 
 export const DASHBOARD_INTEGRATIONS_SUBNAV_HREFS = {
   custody: "/dashboard/integrations?tab=custody",
-  rpc: "/dashboard/integrations?tab=rpc",
   ramps: "/dashboard/integrations?tab=ramps",
   compliance: "/dashboard/integrations?tab=compliance",
   privacy: "/dashboard/integrations?tab=privacy",

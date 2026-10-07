@@ -44,14 +44,6 @@ beforeEach(async () => {
   signedBeforeSend = [];
   projectRpc = {
     cluster: "devnet",
-    target: {
-      providerId: "custom",
-      projectId: scope.projectId,
-      endpoint: "https://rpc.pc-execution.test",
-      endpointLabel: "PC execution test",
-      headers: {},
-      selectionMode: "project_custom_provider",
-    },
     probe: async () => ({ ok: true, latencyMs: 0, version: "test" }),
     rpc: solanaRpc.createRpcFromTransport(
       vi.fn().mockResolvedValue({

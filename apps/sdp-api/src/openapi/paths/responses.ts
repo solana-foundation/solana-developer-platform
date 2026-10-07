@@ -81,7 +81,6 @@ import {
   projectResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
-  rpcProvidersResponseSchema,
   rpcRelayResponseSchema,
   signerCheckResponseSchema,
   successResponseSchema,
@@ -167,7 +166,6 @@ export const listProjectsResponse = successResponseSchema(listProjectsResponseSc
 export const listProjectMembersResponse = successResponseSchema(listProjectMembersResponseSchema);
 export const projectMemberResponse = successResponseSchema(projectMemberResponseSchema);
 export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKeysResponseSchema);
-export const rpcProvidersResponse = successResponseSchema(rpcProvidersResponseSchema);
 export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);

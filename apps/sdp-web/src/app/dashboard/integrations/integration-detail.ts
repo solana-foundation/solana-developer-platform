@@ -1,5 +1,5 @@
-import type { ComplianceProviderId, OrganizationRpcProvider, RampProviderId } from "@sdp/types";
-import { COMPLIANCE_PROVIDERS, ORGANIZATION_RPC_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
+import type { ComplianceProviderId, RampProviderId } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
 import {
   CUSTODY_PROVIDER_CATALOG,
   type CustodyProviderCatalogEntry,
@@ -34,7 +34,6 @@ export interface IntegrationDetail {
  * click, because nothing typed the literals against the provider unions.
  */
 const KNOWN_NON_CUSTODY_PROVIDERS: ReadonlySet<string> = new Set<string>([
-  ...ORGANIZATION_RPC_PROVIDERS.filter((provider) => provider !== "default"),
   ...RAMP_PROVIDERS,
   ...COMPLIANCE_PROVIDERS,
 ]);
@@ -45,10 +44,19 @@ export function isKnownIntegrationProvider(id: string): boolean {
   );
 }
 
+/**
+ * Finds the provider in the family inputs the catalog renders from.
+ *
+ * @param input - The provider and the resolved family entries.
+ * @param input.provider - The provider id from the route.
+ * @param input.custody - Custody availability, or `null` when the connection lookup failed.
+ * @param input.ramps - Ramp integration entries.
+ * @param input.compliance - Compliance integration entries.
+ * @returns The provider's detail, or `null` when no family lists it.
+ */
 export function resolveIntegrationDetail(input: {
   provider: string;
   custody: CustodyProviderAvailability[] | null;
-  rpc: IntegrationEntry<OrganizationRpcProvider>[];
   ramps: IntegrationEntry<RampProviderId>[];
   compliance: IntegrationEntry<ComplianceProviderId>[];
 }): IntegrationDetail | null {
@@ -89,7 +97,6 @@ export function resolveIntegrationDetail(input: {
   }
 
   for (const [family, entries] of [
-    ["rpc", input.rpc],
     ["ramps", input.ramps],
     ["compliance", input.compliance],
   ] as const) {

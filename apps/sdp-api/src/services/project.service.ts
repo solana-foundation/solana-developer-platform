@@ -12,8 +12,30 @@ import type {
   ProjectRole,
   ProjectSettings,
 } from "@sdp/types";
-import { parsePostgresJsonOr } from "@/db/postgres-utils";
+import { z } from "zod";
+import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { badRequest, internalError, notFound } from "@/lib/errors";
+
+/**
+ * Stored project settings as the API exposes them. Unknown keys are stripped,
+ * so keys written before a field was removed are neither returned nor merged
+ * back on the next update.
+ */
+const storedProjectSettingsSchema = z.object({
+  webhookUrl: z.string().optional(),
+  metadata: z.record(z.string(), z.string()).optional(),
+}) satisfies z.ZodType<ProjectSettings>;
+
+/**
+ * Parse a project's stored settings column.
+ *
+ * @param raw - The `settings` column as read from Postgres.
+ * @returns The settings with unknown keys stripped, or null when never set.
+ */
+function parseStoredProjectSettings(raw: string | null): ProjectSettings | null {
+  const stored = parseOptionalPostgresJson<unknown>(raw);
+  return stored === null ? null : storedProjectSettingsSchema.parse(stored);
+}
 
 export interface UpdateProjectInput {
   name?: string;
@@ -181,17 +203,9 @@ export class ProjectService {
 
     if (input.settings !== undefined) {
       updates.push("settings = ?");
-      const normalizedSettings =
-        input.settings === null
-          ? this.resolveProjectSettings(undefined)
-          : this.resolveProjectSettings(
-              {
-                ...(existing.settings ?? {}),
-                ...input.settings,
-              },
-              existing.settings
-            );
-      values.push(JSON.stringify(normalizedSettings));
+      values.push(
+        input.settings === null ? null : JSON.stringify({ ...existing.settings, ...input.settings })
+      );
     }
 
     updates.push("updated_at = ?");
@@ -407,11 +421,6 @@ export class ProjectService {
     created_at: string;
     updated_at: string;
   }): Project {
-    let settings: ProjectSettings | undefined;
-    if (row.settings) {
-      settings = parsePostgresJsonOr<ProjectSettings | undefined>(row.settings, undefined);
-    }
-
     return {
       id: row.id,
       organizationId: row.organization_id,
@@ -419,39 +428,11 @@ export class ProjectService {
       slug: row.slug,
       description: row.description,
       environment: row.environment as ProjectEnvironment,
-      settings: this.resolveProjectSettings(settings),
+      settings: parseStoredProjectSettings(row.settings),
       status: row.status as "active" | "archived",
       createdBy: row.created_by,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
-  }
-
-  private resolveProjectSettings(
-    settings?: ProjectSettings | null,
-    fallbackSettings?: ProjectSettings | null
-  ): ProjectSettings {
-    const resolved: ProjectSettings = {
-      ...(settings ?? {}),
-    };
-
-    if (resolved.rpcProvider === undefined) {
-      resolved.rpcProvider =
-        fallbackSettings?.rpcProvider ?? (resolved.rpcEndpoint ? "custom" : "default");
-    }
-
-    if (
-      resolved.rpcProvider === "custom" &&
-      resolved.rpcEndpoint === undefined &&
-      fallbackSettings?.rpcEndpoint
-    ) {
-      resolved.rpcEndpoint = fallbackSettings.rpcEndpoint;
-    }
-
-    if (resolved.rpcProvider !== "custom") {
-      resolved.rpcEndpoint = undefined;
-    }
-
-    return resolved;
   }
 }

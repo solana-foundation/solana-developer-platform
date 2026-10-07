@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createKaminoReadRpc,
   createKaminoRpc,
+  KAMINO_SHARED_READ_JOIN_WINDOW_MS,
   withKaminoReadDeduplication,
   withKaminoRpcTimeout,
 } from "./rpc";
@@ -218,6 +219,59 @@ describe("withKaminoReadDeduplication", () => {
     void withReadFloor(rowsReadAt, () => shared(read("getMultipleAccounts", params)));
 
     expect(sent).toHaveLength(1);
+  });
+
+  it("never lets a caller join a read sent a join window or more ago", async () => {
+    vi.useFakeTimers();
+    const { sent, transport } = fakeTransport();
+    const shared = withKaminoReadDeduplication(transport);
+    const params = [ACCOUNTS, { encoding: "base64" }];
+
+    const stalled = shared(read("getMultipleAccounts", params));
+    vi.advanceTimersByTime(KAMINO_SHARED_READ_JOIN_WINDOW_MS - 1);
+    const joined = shared(read("getMultipleAccounts", params));
+    expect(sent).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    const later = shared(read("getMultipleAccounts", params));
+    expect(sent).toHaveLength(2);
+    // The replacement opens its own window.
+    const alsoLater = shared(read("getMultipleAccounts", params));
+    expect(sent).toHaveLength(2);
+
+    const stale = accountsResponse(1n);
+    const fresh = accountsResponse(2n);
+    sent[1]?.resolve(fresh);
+    sent[0]?.resolve(stale);
+    await expect(later).resolves.toBe(fresh);
+    await expect(alsoLater).resolves.toBe(fresh);
+    await expect(stalled).resolves.toBe(stale);
+    await expect(joined).resolves.toBe(stale);
+  });
+
+  it("frees a stalled read at its joiners' deadline although callers keep arriving", async () => {
+    vi.useFakeTimers();
+    const { sent, transport } = fakeTransport();
+    const client = withKaminoRpcTimeout(withKaminoReadDeduplication(transport), 30_000);
+    const callers: Array<Promise<unknown>> = [];
+
+    // A caller every 10 s, each inside the previous caller's 30 s deadline.
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 10_000) {
+      const caller = client<unknown>(read("getSlot", []));
+      caller.catch(() => undefined);
+      callers.push(caller);
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+
+    // No later caller joined the first request, so its only joiner's deadline
+    // aborted it; every other caller sent its own.
+    expect(sent).toHaveLength(6);
+    expect(sent.slice(0, 4).map((entry) => entry.signal?.aborted)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    await expect(callers[0]).rejects.toThrow("Kamino RPC request timed out after 30000ms");
   });
 
   it.each([

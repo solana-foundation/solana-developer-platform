@@ -40,7 +40,6 @@ const { loadProjectRpcClient, PROJECT_RPC } = vi.hoisted(() => {
     loadProjectRpcClient: vi.fn(async () => ({
       cluster: "devnet",
       rpc: PROJECT_RPC,
-      target: { endpoint: "https://project-rpc.example" },
     })),
   };
 });

@@ -99,6 +99,7 @@ import {
   resetVedaCompatibilityCache,
   resetVedaReadCaches,
   VEDA_READ_CACHE_TTL_MS,
+  vedaReadCacheSizes,
 } from "./sdk";
 
 const USDC_DEVNET = wellKnownMint("USDC", "devnet") as string;
@@ -291,6 +292,27 @@ describe("position reads reuse the client and the vault's static facts", () => {
     expect(mocks.clientOptions).toHaveBeenCalledTimes(2);
     expect(mocks.vault.getState).toHaveBeenCalledTimes(2);
     expect(mocks.vault.listAssets).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops expired entries and caps the clients as new endpoints fill the caches", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    const read = (rpcUrl: string) =>
+      readVedaPosition({ ...runtime, rpcUrl }, config, { vault: VAULT, owner: OWNER });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    try {
+      await read("https://first.test.invalid");
+      expect(vedaReadCacheSizes()).toEqual({ clients: 1, shareFacts: 1, assetMints: 1 });
+      clock.mockReturnValue(now + VEDA_READ_CACHE_TTL_MS + 1);
+      await read("https://second.test.invalid");
+      expect(vedaReadCacheSizes()).toEqual({ clients: 1, shareFacts: 1, assetMints: 1 });
+      for (let index = 0; index < 40; index += 1) {
+        await read(`https://rpc-${index}.test.invalid`);
+      }
+    } finally {
+      clock.mockRestore();
+    }
+    expect(vedaReadCacheSizes()).toEqual({ clients: 32, shareFacts: 41, assetMints: 41 });
   });
 
   it("never reuses a client whose program validation rejected", async () => {

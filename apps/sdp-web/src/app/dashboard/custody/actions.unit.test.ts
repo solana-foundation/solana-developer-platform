@@ -96,7 +96,7 @@ describe("requestDevnetSolanaFaucetAction", () => {
 
   function relay(response: unknown) {
     return {
-      provider: { id: "helius", selectionMode: "default", endpoint: "https://rpc.example" },
+      provider: { id: "helius", endpoint: "https://rpc.example" },
       upstream: { ok: true, status: 200, statusText: "OK" },
       response,
     };
