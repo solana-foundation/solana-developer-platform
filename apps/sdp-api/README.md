@@ -148,32 +148,28 @@ behind an ingress that replaces caller-supplied `X-Forwarded-For` values.
 
 ### Release Channel (which modules run)
 
-`SDP_RELEASE_CHANNEL` sets the least mature module stage a deployment runs:
-`experimental` (every module, the default when unset), `beta` or `stable`. Each
+`SDP_RELEASE_CHANNEL` is required. It sets the least mature module stage a
+deployment runs: `experimental` (every module), `beta` or `stable`. Each
 module's stage lives in `packages/sdp-types/src/release-channels.ts`; see
-[ADR 0005](../../docs/decisions/0005-release-channels.md). The API and the
-dashboard both read it, so set it for both or the dashboard logs
-`sdp_release_channel_mismatch`.
+[ADR 0005](../../docs/decisions/0005-release-channels.md). The API, its jobs and
+the dashboard all read it and refuse to start without it.
 
-```bash
-# One run on stable (API + dashboard), with your Doppler config
-SDP_RELEASE_CHANNEL=stable DOPPLER_CONFIG=dev_personal pnpm dev
+**Run locally on stable:** set `SDP_RELEASE_CHANNEL=stable` in
+`apps/sdp-api/.env.local` (the example file has the line) and restart `pnpm dev`.
+The root `pnpm dev` loads that file for both the API and the dashboard, and it
+beats Doppler. Check with `curl -s localhost:8787/health`, which reports
+`releaseChannel`.
 
-# Docker Compose (docker-compose.yml and infra/self-hosted/compose.yml)
-SDP_RELEASE_CHANNEL=stable docker compose up
-```
-
-- A shell variable only passes through when your Doppler config does not set
-  `SDP_RELEASE_CHANNEL`. If it does, Doppler wins: add
-  `DOPPLER_PRESERVE_ENV=SDP_RELEASE_CHANNEL`, or put the value in
-  `apps/sdp-api/.env.local`, which beats Doppler.
-- To keep a channel across runs, set it in `apps/sdp-api/.env.local`; the root
-  `pnpm dev` loads every `apps/*/.env.local` for both apps.
-- Check what is running: `curl -s localhost:8787/health` reports
-  `releaseChannel`. Modules outside the channel answer 403 "The <module> module
-  is not available in this release channel." and are hidden in the dashboard.
-- An unknown value fails at startup. Managed production (`ENVIRONMENT=production`
-  with `SDP_DEPLOYMENT_MODE=managed`) must set it explicitly.
+- Without the line, Doppler `dev` (and the personal and CI configs that inherit
+  from it) supplies `experimental`; `pnpm -C apps/sdp-api dev` alone defaults to
+  `experimental` too.
+- One run without editing the file, when the file does not set it:
+  `DOPPLER_PRESERVE_ENV=SDP_RELEASE_CHANNEL SDP_RELEASE_CHANNEL=stable pnpm dev`.
+  A plain shell value is ignored, because Doppler sets the key.
+- Docker Compose: `SDP_RELEASE_CHANNEL=stable docker compose up` (both compose
+  files default to `experimental`).
+- Modules outside the channel answer 403 "The <module> module is not available
+  in this release channel." and are hidden in the dashboard.
 
 ### Optional: Custody Integrations
 
