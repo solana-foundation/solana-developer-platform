@@ -49,6 +49,7 @@ import {
   fetchEarnVaultDepositPreview,
   useEarnVaultDepositOutcome,
 } from "./earn-program-data";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
 
 export { EarnVaultDepositOutcomeTracker } from "./earn-outcome-trackers";
 
@@ -218,17 +219,6 @@ type DepositOutcome =
 type DepositSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: DepositOutcome; deposited?: EarnVaultDeposit };
-
-function shouldProjectDepositBalance(outcome: DepositOutcome): boolean {
-  const deposit = observableVaultMovement(outcome);
-  return (
-    deposit !== undefined && earnProviderDepositSettlement(deposit.strategy.provider) === "atomic"
-  );
-}
-
-function shouldProjectDepositIntent(outcome: DepositOutcome, swapActive: boolean): boolean {
-  return !swapActive && shouldProjectDepositBalance(outcome);
-}
 
 function depositProgressStep(outcome: DepositOutcome | null, step: "details" | "review"): number {
   if (
@@ -712,6 +702,7 @@ function DepositResult({
 }
 
 export interface EarnVaultDepositModalProps {
+  onSubmissionStart?: VaultSubmissionObserver;
   strategy: EarnStrategy;
   /**
    * The project this deposit belongs to, which is part of what makes two
@@ -726,8 +717,6 @@ export interface EarnVaultDepositModalProps {
     intent: {
       amount: string;
       custodyWalletId: string;
-      /** False when an approval already executed this replayed intent. */
-      projectBalance: boolean;
       /** Client clock when the POST began; a positions read that landed earlier cannot contain this deposit. */
       submittedAt: number;
     }
@@ -1225,6 +1214,7 @@ export function EarnVaultDepositModal({
   projectId,
   onClose,
   onDeposited,
+  onSubmissionStart,
   onMovementUpdated,
 }: EarnVaultDepositModalProps) {
   const t = useTranslations();
@@ -1451,6 +1441,11 @@ export function EarnVaultDepositModal({
     // The controller still exists, but it gates the UI below, never the
     // request or the key bookkeeping.
     const submittedAt = Date.now();
+    const submission = vaultDepositIdempotencyKeyStore.beginSubmission(fingerprint);
+    if (!submission) {
+      setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
+      return;
+    }
     const result = await createEarnVaultDeposit(
       {
         strategyId: strategy.id,
@@ -1472,7 +1467,8 @@ export function EarnVaultDepositModal({
     const disposition = applyIdempotencyKeyOutcome(
       vaultDepositIdempotencyKeyStore,
       fingerprint,
-      result
+      result,
+      submission.wasUncertain
     );
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
@@ -1503,10 +1499,6 @@ export function EarnVaultDepositModal({
       onDeposited?.(resolution.deposited, {
         amount,
         custodyWalletId: wallet.id,
-        // A swap request is denominated in the funding token while the
-        // position is denominated in the vault token. Wait for the provider
-        // value instead of presenting those unlike amounts as one balance.
-        projectBalance: shouldProjectDepositIntent(resolution.outcome, swapActive),
         submittedAt,
       });
     }
@@ -1529,6 +1521,7 @@ export function EarnVaultDepositModal({
     // raced by a second press.
     submittingRef.current = true;
     setSubmitting(true);
+    const finishSubmission = onSubmissionStart?.(selectedWallet.id);
     setSubmitError(null);
 
     try {
@@ -1543,6 +1536,7 @@ export function EarnVaultDepositModal({
       }
     } finally {
       if (requestControllerRef.current === controller) requestControllerRef.current = null;
+      finishSubmission?.();
       submittingRef.current = false;
       if (!controller.signal.aborted) setSubmitting(false);
     }

@@ -284,7 +284,7 @@ fundable address.
 Money moves through provider-specific execution packages. SDP builds the plan,
 signs it with one of the organization's own custody wallets, and submits it.
 The current packages are `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`,
-`@sdp/ondo`, and pre-launch `@sdp/wisdomtree`; the API signs and submits
+`@sdp/ondo`, `@sdp/hastra`, and pre-launch `@sdp/wisdomtree`; the API signs and submits
 (`POST /v1/earn/vault-deposits`). Since PRO-1722 the same builders also serve
 the EXTERNAL-WALLET flow (`/v1/earn/external-wallet/*`), where the plan's
 `owner` is a wallet SDP does not custody and the OWNER signs instead of SDP.
@@ -533,6 +533,35 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
 - Missing required provider configuration ⇒ throw `PROVIDER_NOT_CONFIGURED`
   **before** any network call.
 
+## RPC budget (hard rule)
+
+Every Treasury refresh re-reads every position live, so each call a provider
+makes is paid per holding per refresh, against provider rate limits and the
+Cloud NAT's 64 ports per instance per destination. Every provider path (reads,
+quotes, builds, reconciliation) stays as lean as it can without losing
+accuracy:
+
+- **Live stays live.** Balances, shares, exchange rates, reserves, vesting and
+  clock inputs, prices and quotes are read on every call. Never cache one.
+- **Static is read once.** Program validation, PDAs, mint decimals and
+  admin-set config are cached per (cluster, endpoint, account) with a TTL.
+  Never cache a failure, and evict a cached client whose validation rejects.
+- **No per-call construction cost.** Reuse a validated client instead of
+  building one, and paying its validation, on every read.
+- **One fetch per account per operation.** Never re-read an account the
+  operation already holds; batch independent accounts into one
+  `getMultipleAccounts`.
+- **Share identical concurrent reads** in flight only: process-wide, keyed by
+  endpoint and any `minContextSlot`, and joined only after the caller's read
+  floor (`packages/sdp-rpc/CLAUDE.md`, "Read floors").
+- **No unfiltered `getProgramAccounts`.** Derive the PDA, or filter server-side
+  with `memcmp`/`dataSize`.
+- **No unused round trips.** No `getBlockTime` or `getSlot` whose answer is
+  discarded or already in a returned context slot.
+- **Prove it.** A change to any of these paths states its before/after request
+  count and sequential round trips, and a test pins the count by counting
+  requests through a fake transport.
+
 ## Conventions
 
 - New provider = subclass `providers/stub.ts` (`StubEarnClient`), register in
@@ -608,6 +637,10 @@ checklist.
 ## Cross-package coupling
 
 - Wire DTOs shared with API/web live in `packages/sdp-types/src/earn.ts`.
+  Runtime deposit, deposit-history and direct-withdrawal response schemas live
+  in `@sdp/types/earn-wire`; internal OpenAPI and Treasury reuse those parsers.
+  External movement responses declare atomic or provider-order `settlement`.
+  Consumers must not interpret a missing settlement kind as atomic completion.
 - Curators/categories are open-string registries in `@sdp/types` — adding one
   is a data change; do not introduce closed curator unions anywhere.
 - Env credential names follow `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY`;

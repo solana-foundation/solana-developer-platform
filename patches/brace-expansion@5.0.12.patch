@@ -1,0 +1,15 @@
+diff --git a/dist/commonjs/index.js b/dist/commonjs/index.js
+index 48cf0d3da..a7eeb5422 100644
+--- a/dist/commonjs/index.js
++++ b/dist/commonjs/index.js
+@@ -330,4 +330,9 @@ function expand_(str, max, maxLength, maxDepth, depth, maxRewrites, isTop) {
+     }
+     return acc;
+ }
++
++// Support both legacy callable CommonJS and current named-export consumers.
++Object.assign(expand, exports);
++Object.defineProperty(expand, "__esModule", { value: true });
++module.exports = expand;
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file

@@ -1,3 +1,4 @@
+import { withRpcReadContext } from "@sdp/rpc/read-context";
 import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
@@ -15,11 +16,12 @@ import {
  */
 export const VEDA_RPC_REQUEST_TIMEOUT_MS = 30_000;
 
-/** Package-local so the SDK gets a deadline without a new workspace dependency edge. */
+/** Provider deadline combined with the shared confirmation context. */
 export function withVedaRpcTimeout(
   transport: RpcTransport,
   timeoutMs = VEDA_RPC_REQUEST_TIMEOUT_MS
 ): RpcTransport {
+  const scopedTransport = withRpcReadContext(transport);
   return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
     const controller = new AbortController();
     // A distinct reason lets the catch path tell our deadline from a caller
@@ -30,7 +32,7 @@ export function withVedaRpcTimeout(
       ? AbortSignal.any([config.signal, controller.signal])
       : controller.signal;
     try {
-      return await transport<TResponse>({ ...config, signal });
+      return await scopedTransport<TResponse>({ ...config, signal });
     } catch (cause) {
       if (signal.aborted && signal.reason === deadlineReason) {
         // "timed out" deliberately matches the API's transient-error

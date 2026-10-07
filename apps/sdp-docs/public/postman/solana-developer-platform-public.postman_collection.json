@@ -1324,7 +1324,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/balances",
-            "description": "Retrieves balances for a custody wallet. Wallet lifecycle and provisioning are managed through /v1/wallets."
+            "description": "Retrieves balances for a custody wallet. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets."
           }
         },
         {

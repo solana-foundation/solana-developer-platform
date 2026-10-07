@@ -255,6 +255,12 @@ over vaults for which the SDK found a share-token account or farm position — n
 the whole raw registry and not the curated catalogue. Census failures propagate
 rather than becoming a false empty portfolio.
 
+The API injects a read/build runner that retries transient nested RPC failures
+against genesis-verified alternatives within one shared workflow deadline.
+Explicit cluster pins stay pinned. This runner never signs or broadcasts, and
+a stalled primary can exhaust the deadline before fallback. `VAULT_UNREADABLE`
+preserves its cause; an unreadable account alone does not prove a wrong cluster.
+
 ## Tests
 
 `vitest run`, and **offline by default** — the repo rule is that package tests

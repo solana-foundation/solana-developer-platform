@@ -30,28 +30,15 @@ import { z } from "zod";
  * transaction in flight should die with the tab rather than resurface days
  * later in a different context.
  *
- * Every read fails soft — storage throws outright in some privacy modes, and a
- * money movement must never be blocked because a browser refused to remember
- * it — but failing soft must not mean failing OPEN. A refusing store falls
- * back to the module-scope map below, which keeps the key stable for as long
- * as the page lives; what is lost there is durability across a reload, never
- * the answer to "is this the same request".
+ * Reads retain a memory fallback, but Earn must successfully persist a pending
+ * marker with beginSubmission before sending. A refused write cannot authorize
+ * a POST whose identity would disappear on reload.
  */
 
 /**
- * How long a minted key stays claimable for the same request, by DEFAULT.
- *
- * It has to comfortably outlast a retry — a customer re-pressing submit after
- * a timeout, or reloading a tab that hung — and it has to expire well before
- * the key could be mistaken for a NEW intent. A BROADCAST transaction is
- * terminal within ~90 seconds either way (a Solana blockhash expires, and the
- * reconciliation sweep fails the movement), so fifteen minutes is far past any
- * live ambiguity while still guaranteeing that moving the same amount from the
- * same wallet again tomorrow is a second movement rather than a replay of the
- * first.
- *
- * That clock is WRONG for an approval hold, which is why `hold` exists — see it
- * for the reasoning.
+ * Expiry applies only to drafts that have never been submitted. A POST pins
+ * the key before transport begins; elapsed time and blockhash expiry do not
+ * prove that an earlier broadcast failed. Only a parsed outcome can retire it.
  */
 const IDEMPOTENCY_TTL_MS = 15 * 60_000;
 
@@ -67,7 +54,7 @@ const MAX_STORED_ENTRIES = 20;
  * A store is written by an older build of this same page as often as by the
  * current one, so its contents are untrusted JSON. `expiresAt` is OPTIONAL so
  * an entry from a build that predates the field keeps working under the
- * default TTL instead of being dropped as unrecognized; dropping it would mint
+ * conservative pending state instead of being dropped as unrecognized; dropping it would mint
  * a fresh key for a request already in flight, which is the one outcome this
  * module must never produce.
  *
@@ -81,11 +68,13 @@ const storedEntrySchema = z.object({
   value: z.string().min(1),
   createdAt: z.number().finite(),
   expiresAt: z.union([z.number().finite(), z.null()]).optional(),
+  /** A POST may have executed; only its own durable answer can retire it. */
+  uncertain: z.boolean().optional(),
 });
 
 type StoredEntry = z.infer<typeof storedEntrySchema>;
 
-/** A held entry is one an approval is still waiting on; it has no expiry. */
+/** Pending submissions and approval holds are both exempt from eviction. */
 function isHeldEntry(entry: StoredEntry): boolean {
   return entry.expiresAt === null;
 }
@@ -222,28 +211,35 @@ function readEntries(storeKey: string, ttlMs: number): StoredEntry[] {
   return parsed.flatMap((entry) => {
     const candidate = storedEntrySchema.safeParse(entry);
     if (!candidate.success) return [];
+    // Older clients did not distinguish an unused key from an unanswered POST.
+    // Preserve those entries on upgrade instead of expiring a possible intent.
+    if (candidate.data.uncertain === undefined && candidate.data.expiresAt !== null) {
+      return [{ ...candidate.data, uncertain: true, expiresAt: null }];
+    }
     return isLiveEntry(candidate.data, now, ttlMs) ? [candidate.data] : [];
   });
 }
 
-function writeEntries(storeKey: string, entries: readonly StoredEntry[]): void {
+function writeEntries(storeKey: string, entries: readonly StoredEntry[]): boolean {
   const bounded = withinStorageBound(entries);
   // Memory first and unconditionally: it is the tier that cannot fail, and it
   // has to already hold the value if the store refuses the very next write.
   memoryEntries.set(storeKey, bounded);
 
   const store = storage();
-  if (!store) return;
+  if (!store) return false;
   try {
     store.setItem(storeKey, JSON.stringify(bounded));
     // Storage has caught up with memory; it is the authority again.
     storageDivergedKeys.delete(storeKey);
+    return true;
   } catch {
     // Quota or a refusing store. Losing the durability is strictly better than
     // losing the movement — but a still-READABLE storage is now behind memory,
     // and serving it would un-write the entry we just wrote. Flip this key to
     // memory-preferred until a write lands.
     storageDivergedKeys.add(storeKey);
+    return false;
   }
 }
 
@@ -289,6 +285,10 @@ export interface IdempotencyKeyStore {
   hold(fingerprint: string): void;
   /** Whether this request's key is pinned by a live approval hold. */
   isHeld(fingerprint: string): boolean;
+  /** Persist before sending a POST. False means the caller must not send. */
+  markUncertain(fingerprint: string): boolean;
+  isUncertain(fingerprint: string): boolean;
+  beginSubmission(fingerprint: string): { wasUncertain: boolean } | null;
   /**
    * Retire a key once the API has ANSWERED for it. Only call this on a
    * definitive answer: a key released while its request may still have been
@@ -352,9 +352,15 @@ export async function resolveHeldIdempotencyKey(
   return { kind: "key", key: fresh.key, wasHeld: false, wasReused: fresh.wasReused };
 }
 
+const definitivePolicyRefusalSchema = z.object({
+  error: z.object({
+    details: z.object({ intentOutcome: z.literal("denied"), idempotencyKey: z.string() }),
+  }),
+});
+
 type IdempotencyKeyOutcome =
   | { ok: true; status: number; data: { kind: string } }
-  | { ok: false; status: number | null };
+  | { ok: false; status: number | null; body?: unknown };
 
 /**
  * Whether the API has ANSWERED for an idempotency key, which is the only
@@ -369,8 +375,9 @@ type IdempotencyKeyOutcome =
  *   and is still keyed by this value — resubmitting under a fresh key would
  *   open a second approval request for the same intent. Not retiring; the
  *   caller pins it instead.
- * - Only a 4xx proves nothing was written; in the idempotency-conflict case
- *   releasing is also the escape hatch, or a collided key collides forever.
+ * - A first-attempt 4xx may retire a fresh key. Once any earlier attempt is
+ *   uncertain or awaiting approval, only a durable result or an explicit
+ *   same-key terminal policy refusal resolves it. Later HTTP classes do not.
  * - Everything else might have written: `status === null` is a transport
  *   failure, a 2xx whose body did not parse is an answer nobody could read,
  *   and a 5xx is the dangerous one — a gateway timing out downstream of an API
@@ -393,9 +400,16 @@ function answerRetiresIdempotencyKey(result: IdempotencyKeyOutcome): boolean {
 export function applyIdempotencyKeyOutcome(
   store: IdempotencyKeyStore,
   fingerprint: string,
-  result: IdempotencyKeyOutcome
+  result: IdempotencyKeyOutcome,
+  wasUncertain = store.isUncertain(fingerprint) || store.isHeld(fingerprint)
 ): "retired" | "held" | "kept" {
-  if (answerRetiresIdempotencyKey(result)) {
+  const refused =
+    !result.ok && result.status === 403
+      ? definitivePolicyRefusalSchema.safeParse(result.body)
+      : null;
+  const intentDenied =
+    refused?.success && refused.data.error.details.idempotencyKey === store.claim(fingerprint);
+  if (answerRetiresIdempotencyKey(result) && (result.ok || !wasUncertain || intentDenied)) {
     store.release(fingerprint);
     return "retired";
   }
@@ -403,6 +417,7 @@ export function applyIdempotencyKeyOutcome(
     store.hold(fingerprint);
     return "held";
   }
+  store.markUncertain(fingerprint);
   return "kept";
 }
 
@@ -531,7 +546,7 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
     const key = crypto.randomUUID();
     writeEntries(storeKey, [
       ...entries.filter((entry) => entry.id !== fingerprint),
-      { id: fingerprint, value: key, createdAt: Date.now() },
+      { id: fingerprint, value: key, createdAt: Date.now(), uncertain: false },
     ]);
     return { key, wasReused: false };
   }
@@ -551,7 +566,7 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
       if (!held) return;
       writeEntries(storeKey, [
         ...entries.filter((entry) => entry.id !== fingerprint),
-        { ...held, expiresAt: null },
+        { ...held, expiresAt: null, uncertain: false },
       ]);
     },
 
@@ -559,7 +574,28 @@ export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore
       const entry = readEntries(storeKey, IDEMPOTENCY_TTL_MS).find(
         (candidate) => candidate.id === fingerprint
       );
-      return entry?.expiresAt === null;
+      return entry?.expiresAt === null && entry.uncertain !== true;
+    },
+
+    markUncertain(fingerprint) {
+      const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
+      const entry = entries.find((candidate) => candidate.id === fingerprint);
+      if (!entry) return false;
+      return writeEntries(storeKey, [
+        ...entries.filter((candidate) => candidate.id !== fingerprint),
+        { ...entry, expiresAt: null, uncertain: true },
+      ]);
+    },
+
+    isUncertain(fingerprint) {
+      return readEntries(storeKey, IDEMPOTENCY_TTL_MS).some(
+        (entry) => entry.id === fingerprint && entry.uncertain === true
+      );
+    },
+
+    beginSubmission(fingerprint) {
+      const wasUncertain = this.isUncertain(fingerprint) || this.isHeld(fingerprint);
+      return this.markUncertain(fingerprint) ? { wasUncertain } : null;
     },
 
     release(fingerprint) {

@@ -63,8 +63,11 @@ Things that will bite:
   Migration 0119 adds `withdrawal_request_id` to observed payout rows; a solver
   transaction may fulfill several requests. Initiated movements retain their
   signature uniqueness. Apply the migration before deploying the writer and
-  retain it on rollback. Caller-key uniqueness is unchanged; the unresolved
-  direct/queued key collision is documented in ADR 0003's withdrawal audit.
+  retain it on rollback. Migration 0123 clears `request_id` on new or updated
+  observed payouts, including writes from the previous API revision, so they
+  cannot reserve an initiated command's key. Initiated movements still require
+  a caller key and keep the existing unique indexes. Historical settled rows
+  and amounts are not rewritten; see ADR 0005 for rollout and recovery rules.
 - **Provider reads cannot reopen an active cancellation.** Normal request
   advancement to an eligible state excludes active cancel actions. Only atomic
   action-failure recovery may reopen it. A failed create cannot discard a

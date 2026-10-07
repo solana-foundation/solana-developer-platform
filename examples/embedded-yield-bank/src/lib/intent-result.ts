@@ -1,0 +1,78 @@
+import { z } from "zod";
+import type { YieldMovement, YieldWithdrawalRequest } from "@/types";
+
+const decimal = z.string().regex(/^\d+(?:\.\d+)?$/);
+export const movementSchema = z.object({
+  movementId: z.string().min(1),
+  positionId: z.string().min(1),
+  provider: z.string(),
+  providerReference: z.string(),
+  direction: z.enum(["deposit", "withdrawal"]),
+  status: z.enum([
+    "requested",
+    "submitted",
+    "confirmed",
+    "finalized",
+    "failed",
+  ]),
+  settlement: z.enum(["atomic", "provider_order"]).optional(),
+  signature: z.string().min(1),
+  amount: decimal,
+  denomination: z.string(),
+  tokenMint: z.string(),
+  tokenAmount: decimal.nullable(),
+  failureReason: z.string().nullable(),
+  createdAt: z.string(),
+  settledAt: z.string().nullable(),
+}) satisfies z.ZodType<YieldMovement>;
+export const withdrawalRequestSchema = z.object({
+  withdrawalRequestId: z.string().min(1),
+  positionId: z.string().min(1),
+  provider: z.string(),
+  providerReference: z.string(),
+  ownerAddress: z.string(),
+  requestAddress: z.string(),
+  status: z.enum([
+    "creating",
+    "pending",
+    "fulfillable",
+    "expiredCancelable",
+    "cancelling",
+    "fulfilled",
+    "cancelled",
+    "closedOrUnknown",
+    "failed",
+  ]),
+  assetMint: z.string(),
+  shareMint: z.string(),
+  shares: decimal,
+  quotedAssets: decimal,
+  shareDecimals: z.number().int().nonnegative(),
+  assetDecimals: z.number().int().nonnegative(),
+  discountBps: z.number().int(),
+  nonce: z.string().nullable(),
+  creationTimestamp: z.string().nullable(),
+  maturityTimestamp: z.string(),
+  deadlineTimestamp: z.string(),
+  creationSignature: z.string().nullable(),
+  cancelSignature: z.string().nullable(),
+  closingSignature: z.string().nullable(),
+  assetsPaid: decimal.nullable(),
+  failureReason: z.string().nullable(),
+  fulfilledAt: z.string().nullable(),
+  cancelledAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  replayed: z.boolean().optional(),
+}) satisfies z.ZodType<YieldWithdrawalRequest>;
+export const intentResultSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("movement"), movement: movementSchema }),
+  z.object({
+    kind: z.literal("queued"),
+    withdrawalRequest: withdrawalRequestSchema,
+  }),
+  z.object({
+    kind: z.literal("cancel"),
+    withdrawalRequest: withdrawalRequestSchema,
+  }),
+]);

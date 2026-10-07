@@ -251,6 +251,10 @@ approval-carrying plan is not rejected by the guard for the wrong reason.
 SDK, so vault, asset, oracle, mint and position reads cannot hold an API worker
 forever. A deposit build fans out over several of those. The API additionally
 injects its own absolute vault deadline through the client's operation runner.
+That runner retries transient nested RPC failures on genesis-verified endpoints
+within the same deadline, while explicit cluster pins stay isolated. Signing,
+broadcast and reconciliation retain their separate recovery rules. An unreadable
+vault preserves its cause and does not by itself establish a cluster mismatch.
 
 ## Tests
 

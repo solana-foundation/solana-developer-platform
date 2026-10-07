@@ -124,6 +124,9 @@ export interface YieldMovement {
   providerReference: string;
   direction: "deposit" | "withdrawal";
   status: MovementStatus;
+  settlement?: "atomic" | "provider_order";
+  /** UI-only requested token amount. Never an observed payout or a balance. */
+  requestedTokenAmount?: string;
   signature: string;
   /** On-chain quantity: deposit tokens for a deposit, shares for a withdrawal. */
   amount: string;

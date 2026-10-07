@@ -9,7 +9,7 @@ import {
 } from "@/db/repositories";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
-import { badRequest, transactionExpired } from "@/lib/errors";
+import { badRequest, conflict } from "@/lib/errors";
 import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -1020,27 +1020,6 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
     expect(res.status).toBe(400);
   });
 
-  it("answers an expired build as 409 TRANSACTION_EXPIRED", async () => {
-    await seedAuth();
-    submitExternalWalletDeposit.mockRejectedValue(
-      transactionExpired(
-        "This transaction's blockhash expired before it was submitted. " +
-          "Build a new transaction and have the customer sign it again."
-      )
-    );
-
-    const res = await post(
-      "deposits",
-      { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
-      { idempotencyKey: crypto.randomUUID() }
-    );
-
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("TRANSACTION_EXPIRED");
-    expect(body.error.message).toContain("Build a new transaction");
-  });
-
   it("records the submit and answers the movement in ledger vocabulary", async () => {
     await seedAuth();
     const key = crypto.randomUUID();
@@ -1053,6 +1032,7 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { deposit: Record<string, unknown> } };
     expect(body.data.deposit.status).toBe("submitted");
+    expect(body.data.deposit.settlement).toBe("atomic");
     expect(body.data.deposit.ownerAddress).toBe(OWNER);
     expect(body.data.deposit.replayed).toBe(false);
     expect(submitExternalWalletDeposit).toHaveBeenCalledWith(
@@ -1343,6 +1323,7 @@ describe("exit safety (ADR 0002): the exit outlives every money-in gate", () => 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { withdrawal: Record<string, unknown> } };
     expect(body.data.withdrawal.status).toBe("submitted");
+    expect(body.data.withdrawal.settlement).toBe("atomic");
     expect(body.data.withdrawal.denomination).toBe(SHARE_MINT);
   });
 });
@@ -1585,9 +1566,11 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     expect(String(rows[0]?.metadata)).toContain("signature verification failed");
   });
 
-  it("closes the deposit intent as a failure when the build expired (409)", async () => {
+  it("closes the deposit audit when a mismatched replay is refused (409)", async () => {
     await seedAuth();
-    submitExternalWalletDeposit.mockRejectedValue(transactionExpired());
+    submitExternalWalletDeposit.mockRejectedValue(
+      conflict("Idempotency key already used with different request payload")
+    );
 
     const res = await post(
       "deposits",
@@ -1596,16 +1579,17 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     );
     expect(res.status).toBe(409);
 
-    // The expiry refusal is pre-record, so it takes the same 4xx gate as a
-    // verification failure: closed, never paged.
+    // The refused replay did not create a second movement.
     const rows = await auditRows("deposit");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: "failure" });
   });
 
-  it("writes no withdrawal audit row when the exit build expired (409)", async () => {
+  it("writes no withdrawal audit row for a mismatched replay (409)", async () => {
     await seedAuth();
-    submitExternalWalletWithdrawal.mockRejectedValue(transactionExpired());
+    submitExternalWalletWithdrawal.mockRejectedValue(
+      conflict("Idempotency key already used with different request payload")
+    );
 
     const res = await post(
       "withdrawals",
@@ -1614,7 +1598,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     );
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("TRANSACTION_EXPIRED");
+    expect(body.error.code).toBe("CONFLICT");
     await expect(auditRows("withdraw")).resolves.toHaveLength(0);
   });
 

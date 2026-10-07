@@ -197,7 +197,7 @@ Statuses are `requested` (SDP recorded the signed transaction but has not yet se
 
 ## 3. Who pays fees and rent
 
-**By default, the customer's wallet pays everything**: the network fee, plus about 0.002 SOL of rent when a first deposit creates their share token account (refunded when the position fully exits). A customer holding only stablecoins cannot complete that transaction.
+**By default, the customer's wallet pays everything**: the network fee, plus about 0.002 SOL of rent when a first deposit creates their share token account (account rent is returned only when an authorized close instruction is executed; Kamino exits retain the share account and its rent). A customer holding only stablecoins cannot complete that transaction.
 
 **To pay on your customers' behalf, name a `feePayer` on the build.** The named wallet, one you control, becomes the transaction's fee payer and funds the account rent, and the build echoes it back. The transaction then needs its signature alongside the customer's: co-sign server-side after the customer signs, then submit.
 
@@ -498,3 +498,16 @@ Work through this in sandbox before you go live. Each item is something SDP cann
 - If you sponsor fees, the sponsor key meets every point in [Protect the sponsor key](#protect-the-sponsor-key), and the spend alerts have fired at least once in a drill.
 
 Full request and response shapes: [Earn API reference](/docs/reference/api/earn).
+
+### Confirmation and displayed amounts
+
+For external-wallet movement responses, `settlement: "atomic"` allows an instant
+transfer to show Done at `confirmed`, while SDP continues reconciliation to
+`finalized`. With `settlement: "provider_order"`, confirmation only records the
+provider order; keep fulfillment pending. Older responses without `settlement`
+should be treated as unknown rather than assumed atomic.
+
+Refresh position and wallet balances after confirmation and display the observed
+values. Do not add a requested amount to a stale balance, or replace a null
+`tokenAmount` with a requested withdrawal amount. Request amounts and queue
+`quotedAssets` may be shown separately with requested or expected labels.

@@ -175,15 +175,3 @@ jobs:
 
           echo "release_sha=${release_sha}" >> "${GITHUB_OUTPUT}"
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
-
-  deploy-api-production:
-    needs: publish-release
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-      packages: read
-    uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
-    with:
-      release_sha: ${{ needs.publish-release.outputs.release_sha }}
-      release_tag: ${{ needs.publish-release.outputs.release_tag }}

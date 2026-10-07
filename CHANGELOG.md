@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.83.1](https://github.com/solana-foundation/solana-developer-platform/compare/v0.83.0...v0.83.1) (2026-10-05)
+
+### Refactors
+
+* **ui:** move dashboard primitives into @sdp/ui ([9d0c88c](https://github.com/solana-foundation/solana-developer-platform/commit/9d0c88cf2d0dd3ea2f307ff60de626e376fee891))
+
 ## [0.83.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.82.0...v0.83.0) (2026-10-05)
 
 ### Features

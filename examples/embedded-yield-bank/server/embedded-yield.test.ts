@@ -89,6 +89,21 @@ describe("Embedded Yield orchestration", () => {
     expect(getMovement).toHaveBeenCalledWith(submitted.movementId);
   });
 
+  it("keeps a confirmed provider order under observation without announcing payout", async () => {
+    const order = {
+      ...movement("confirmed", "order"),
+      settlement: "provider_order" as const,
+    };
+    const getMovement = vi.fn().mockResolvedValue(order);
+    const result = await refreshConfirmingMovements(
+      { getMovement },
+      [order],
+      [order.movementId]
+    );
+    expect(getMovement).toHaveBeenCalledWith(order.movementId);
+    expect(result.reachedConfirmation).toBe(false);
+  });
+
   it("keeps the durable status when a confirmation read is unavailable", async () => {
     const submitted = movement("submitted", "submitted");
     const getMovement = vi.fn().mockRejectedValue(new Error("RPC unavailable"));
@@ -138,6 +153,7 @@ function movement(
     providerReference: "vault",
     direction: "deposit",
     status,
+    settlement: "atomic",
     signature: "signature",
     amount: "1",
     denomination: "usdc",

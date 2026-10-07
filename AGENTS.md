@@ -58,6 +58,12 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Consume Solana Earn packages only through exact registry-backed versions or the exact-version pnpm
   catalog. Do not commit cross-repository workspace, link, file, Git, or URL dependencies; see
   `docs/architecture/solana-earn-consumption.md`.
+- **RPC is a budget (hard rule).** Every provider read, quote and build makes the fewest RPC calls
+  that still read every value-bearing input live: no per-call client construction or re-validation,
+  no account fetched twice in one operation, static facts cached with a TTL that never stores a
+  failure, independent accounts batched, identical concurrent reads shared, no unfiltered
+  `getProgramAccounts`, no round trip whose answer is unused. A change to one of those paths states
+  its before/after request count. Full checklist: `packages/sdp-earn/CLAUDE.md`, "RPC budget".
 
 ## Repo-local skills
 

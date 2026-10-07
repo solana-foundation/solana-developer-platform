@@ -1,3 +1,4 @@
+import { withRpcReadContext } from "@sdp/rpc/read-context";
 import type { Address } from "@solana/kit";
 import {
   createDefaultRpcTransport,
@@ -20,6 +21,7 @@ export const WISDOMTREE_RPC_REQUEST_TIMEOUT_MS = 30_000;
 
 /** Same transport-boundary deadline pattern as `@sdp/kamino`'s rpc.ts. */
 function withTimeout(transport: RpcTransport, timeoutMs: number): RpcTransport {
+  const scopedTransport = withRpcReadContext(transport);
   return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
     const controller = new AbortController();
     const deadlineReason = new Error("WisdomTree RPC deadline elapsed");
@@ -28,7 +30,7 @@ function withTimeout(transport: RpcTransport, timeoutMs: number): RpcTransport {
       ? AbortSignal.any([config.signal, controller.signal])
       : controller.signal;
     try {
-      return await transport<TResponse>({ ...config, signal });
+      return await scopedTransport<TResponse>({ ...config, signal });
     } catch (cause) {
       if (signal.aborted && signal.reason === deadlineReason) {
         throw new Error(`WisdomTree RPC request timed out after ${timeoutMs}ms`, { cause });
