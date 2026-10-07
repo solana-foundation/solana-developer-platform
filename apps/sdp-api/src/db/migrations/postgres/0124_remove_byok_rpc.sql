@@ -21,7 +21,7 @@ SELECT 'wf_secret_retirement_' || gen_random_uuid(),
        storage_backend,
        secret_ref,
        secret_version_ref,
-       'byok rpc removed (0123)'
+       'byok rpc removed (0124)'
   FROM provider_credentials
  WHERE provider IN ('alchemy', 'helius', 'nodit', 'quicknode', 'triton', 'validationcloud')
    AND storage_backend = 'gcp_secret_manager'
