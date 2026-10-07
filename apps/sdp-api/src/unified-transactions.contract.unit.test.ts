@@ -1,46 +1,66 @@
 import {
-  DVP_TRADE_STATUSES,
-  EARN_TRANSACTION_MODULE_STATUSES,
-  HELIUS_RINGS_OPERATION_STATUSES,
-  PAYMENT_TRANSFER_STATUSES,
-  PRIVATE_CHANNEL_TRANSACTION_STATUSES,
-  TOKEN_TRANSACTION_STATUSES,
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_MODULES,
+  UNIFIED_TRANSACTION_STATUSES,
+  type UnifiedTransactionStatus,
 } from "@sdp/types";
 import { unifiedTransactionSchema } from "./routes/transactions/schemas";
 
 describe("unified transaction contract", () => {
-  it("references every canonical status vocabulary", () => {
-    expect(UNIFIED_TRANSACTION_MODULE_CONTRACTS.payments.moduleStatuses).toBe(
-      PAYMENT_TRANSFER_STATUSES
-    );
-    expect(UNIFIED_TRANSACTION_MODULE_CONTRACTS.earn.moduleStatuses).toBe(
-      EARN_TRANSACTION_MODULE_STATUSES
-    );
-    expect(UNIFIED_TRANSACTION_MODULE_CONTRACTS.dvp.moduleStatuses).toBe(DVP_TRADE_STATUSES);
-    expect(UNIFIED_TRANSACTION_MODULE_CONTRACTS.private_channels.moduleStatuses).toBe(
-      PRIVATE_CHANNEL_TRANSACTION_STATUSES
-    );
-    expect(UNIFIED_TRANSACTION_MODULE_CONTRACTS.issuance.moduleStatuses).toBe(
-      TOKEN_TRANSACTION_STATUSES
-    );
-    expect(UNIFIED_TRANSACTION_MODULE_CONTRACTS.rings.moduleStatuses).toBe(
-      HELIUS_RINGS_OPERATION_STATUSES
-    );
-  });
-
-  it("parses one row per module", () => {
+  it("maps every module status onto a canonical unified status", () => {
     for (const module of UNIFIED_TRANSACTION_MODULES) {
       const contract = UNIFIED_TRANSACTION_MODULE_CONTRACTS[module];
-      expect(
-        unifiedTransactionSchema.parse({
+
+      expect(contract.moduleStatuses.length, `${module}: declares statuses`).toBeGreaterThan(0);
+      expect(new Set(contract.moduleStatuses).size, `${module}: statuses are unique`).toBe(
+        contract.moduleStatuses.length
+      );
+      // The status map must cover exactly the declared module statuses: the SQL
+      // view generator CASEs on these keys, so a missing entry yields NULL and
+      // an extra one is dead.
+      expect(Object.keys(contract.status).sort(), `${module}: status map coverage`).toEqual(
+        [...contract.moduleStatuses].sort()
+      );
+      for (const [moduleStatus, status] of Object.entries(contract.status)) {
+        expect(
+          UNIFIED_TRANSACTION_STATUSES,
+          `${module}: ${moduleStatus} maps to a canonical unified status`
+        ).toContain(status);
+      }
+    }
+  });
+
+  it("parses one row per module status", () => {
+    for (const module of UNIFIED_TRANSACTION_MODULES) {
+      const contract = UNIFIED_TRANSACTION_MODULE_CONTRACTS[module];
+      const statusOf: Readonly<Record<string, UnifiedTransactionStatus>> = contract.status;
+      for (const moduleStatus of contract.moduleStatuses) {
+        const status = statusOf[moduleStatus];
+        expect(
+          unifiedTransactionSchema.parse({
+            id: `${module}:row`,
+            module,
+            kind: contract.kinds[0],
+            moduleId: `${module}:module-row`,
+            moduleStatus,
+            status,
+            organizationId: "org_test",
+            projectId: "project_test",
+            custodyWalletId: null,
+            custodyWalletLabel: null,
+            token: null,
+            amount: null,
+            counterpartyId: null,
+            signature: null,
+            createdAt: "2026-09-15T00:00:00.000Z",
+          })
+        ).toEqual({
           id: `${module}:row`,
           module,
           kind: contract.kinds[0],
           moduleId: `${module}:module-row`,
-          moduleStatus: contract.moduleStatuses[0],
-          status: Object.values(contract.status)[0],
+          moduleStatus,
+          status,
           organizationId: "org_test",
           projectId: "project_test",
           custodyWalletId: null,
@@ -50,8 +70,8 @@ describe("unified transaction contract", () => {
           counterpartyId: null,
           signature: null,
           createdAt: "2026-09-15T00:00:00.000Z",
-        }).module
-      ).toBe(module);
+        });
+      }
     }
   });
 });
