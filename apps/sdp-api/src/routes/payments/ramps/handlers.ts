@@ -22,6 +22,10 @@ import {
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
+import {
+  assertRampProviderInChannel,
+  assertTransferRampProviderInChannel,
+} from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { sendOnceUnderTransferClaim } from "@/services/payments/transfer-claim";
@@ -49,6 +53,8 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
   if (!isRampTransferType(transfer.type)) {
     throw badRequest("Only ramp transfers can be canceled through this endpoint.");
   }
+  // A provider the release channel leaves out is off completely, its transfers included.
+  assertTransferRampProviderInChannel(c, transfer);
   if (!isCancelableRampTransferStatus(transfer.status)) {
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
   }
@@ -108,6 +114,7 @@ export async function simulateSandboxTransfer(
   if (transfer.provider === null) {
     throw internalError("On-ramp transfer has no provider.");
   }
+  assertRampProviderInChannel(c, transfer.provider);
   await assertRampProviderAvailable(c, transfer.provider, scope.auth.organizationId);
   if (transfer.counterparty_id === null) {
     throw internalError("On-ramp transfer has no counterparty.");

@@ -2,6 +2,7 @@
  * Health Check Route
  */
 
+import { resolveSdpReleaseChannel } from "@sdp/types";
 import { Hono } from "hono";
 import { getDb } from "@/db";
 import { pingRedis } from "@/runtime/kv-redis";
@@ -18,6 +19,8 @@ health.get("/", async (c) => {
     timestamp,
     version: c.env.API_VERSION,
     environment: c.env.ENVIRONMENT,
+    // Lets the dashboard confirm it runs the same release channel as this API.
+    releaseChannel: resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL),
   };
 
   return c.json(health);

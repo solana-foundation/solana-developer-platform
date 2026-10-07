@@ -367,6 +367,78 @@ describe("Payments routes — on-chain transfers", () => {
     expect(await countTransferRows()).toBe(1);
   });
 
+  it("refuses to fund an off-ramp deposit at a provider outside the release channel", async () => {
+    const transferId = generatePaymentTransferId();
+    const repository = createPostgresPaymentsRepository(
+      getDb(env),
+      createTenantScope({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      })
+    );
+    await repository.createTransfer({
+      id: transferId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      destinationAddress: null,
+      token: SOL_MINT,
+      amount: "1",
+      memo: null,
+      type: "offramp",
+      direction: "outbound",
+      status: "awaiting_payment",
+      provider: "moonpay",
+      providerReference: "moonpay-excluded-deposit",
+      deliveryMode: "hosted",
+      fiatCurrency: "USD",
+      fiatAmount: "100",
+      providerData: {
+        cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "1.0" },
+      },
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: TEST_API_KEY.id,
+      idempotencyKey: null,
+      idempotencyFingerprint: null,
+    });
+
+    // Every ramp provider is `experimental` today, so `stable` leaves MoonPay out.
+    const res = await postTransfer(
+      {
+        transferId,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      },
+      { releaseChannel: "stable" }
+    );
+
+    expect(res.status).toBe(403);
+    const rows = await listTransferRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: transferId, status: "awaiting_payment" });
+    expect(rows[0]?.signature).toBeFalsy();
+
+    // A dry run refuses it too, instead of predicting an allowed deposit.
+    const dryRun = await postTransfer(
+      {
+        transferId,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      },
+      { releaseChannel: "stable", dryRun: true }
+    );
+    expect(dryRun.status).toBe(403);
+  });
+
   it("persists a signed outbox for an SPL transfer", async () => {
     mockRecurringActivationRpc({});
 

@@ -1,4 +1,4 @@
-import { PERMISSIONS } from "@sdp/types";
+import { PERMISSIONS, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { Context } from "hono";
 import { z } from "zod";
 import { asTransactionalClient, type DatabaseClient, getDb } from "@/db";
@@ -348,7 +348,10 @@ export async function executeApprovedWalletOperation(
     if (operation.project_id) {
       headers.set("x-project-id", operation.project_id);
     }
-    response = await createApp({ observability: noopObservability }).fetch(
+    response = await createApp({
+      observability: noopObservability,
+      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    }).fetch(
       new Request(`http://approved-operation.internal${request.path}`, {
         method: request.method,
         headers,

@@ -17,11 +17,13 @@ describe("Health routes", () => {
         status: string;
         version: string;
         environment: string;
+        releaseChannel: string;
         timestamp: string;
       };
       expect(body.status).toBe("ok");
       expect(body.version).toBe("v1");
       expect(body.environment).toBe("development");
+      expect(body.releaseChannel).toBe("experimental");
       expect(body.timestamp).toBeDefined();
     });
   });

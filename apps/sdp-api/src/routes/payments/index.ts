@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireModule } from "@/middleware/require-module";
 import type { Env } from "@/types/env";
 import paymentRequests from "./payment-requests";
 import ramps from "./ramps";
@@ -13,6 +14,11 @@ import walletPolicies from "./wallet-policies";
 
 const payments = new Hono<{ Bindings: Env }>();
 
+payments.use("/ramps/*", requireModule("ramps"));
+// Refuses policy configuration. Evaluation is skipped in enforcement.service under the
+// same release channel; policyGate (idempotency, operation ledger) and approval requests
+// created earlier keep running.
+payments.use("/wallets/:walletId/policies/*", requireModule("policies"));
 payments.use("*", unifiedAuthMiddleware());
 payments.use("*", projectContextMiddleware());
 

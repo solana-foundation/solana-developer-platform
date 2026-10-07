@@ -113,7 +113,7 @@ describe("counterparty provider wallet card", () => {
     vi.unstubAllGlobals();
     await environment.teardown(globalThis);
   });
-  async function renderWallet(account: CounterpartyProviderAccount) {
+  async function renderWorkspace(account: CounterpartyProviderAccount, rampsEnabled: boolean) {
     accountState.accounts = [account];
     container = document.createElement("div");
     document.body.append(container);
@@ -136,9 +136,13 @@ describe("counterparty provider wallet card", () => {
           }}
           initialAccounts={[]}
           initialTransfers={[]}
+          rampsEnabled={rampsEnabled}
         />
       )
     );
+  }
+  async function renderWallet(account: CounterpartyProviderAccount) {
+    await renderWorkspace(account, true);
     const toggle = Array.from(
       container.querySelectorAll<HTMLButtonElement>('button[aria-expanded="false"]')
     ).find((button) => button.textContent?.includes("BVNK"));
@@ -173,6 +177,12 @@ describe("counterparty provider wallet card", () => {
       ...overrides,
     });
   }
+
+  it("leaves provider accounts out when ramps are off", async () => {
+    await renderWorkspace(walletAccount({}), false);
+
+    expect(container.textContent).not.toContain("DashboardPayments.counterparty.providerAccounts");
+  });
   it.each([
     {
       name: "available balance",

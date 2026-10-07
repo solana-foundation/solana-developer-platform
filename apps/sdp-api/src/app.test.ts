@@ -1,6 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
@@ -52,7 +53,7 @@ function makeObservability(): {
 }
 
 function buildApp(observability: Observability) {
-  const app = createApp({ observability });
+  const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES, observability });
   // Mount a route that throws after createApp returns, so we exercise the
   // onError path without modifying the production createApp surface.
   app.all(THROW_PATH, () => {
@@ -168,7 +169,11 @@ describe("createApp plugin registration", () => {
         v1.get("/test-plugin", (c) => c.json({ ok: true }));
       },
     };
-    const app = createApp({ observability: obs, plugins: [plugin] });
+    const app = createApp({
+      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      observability: obs,
+      plugins: [plugin],
+    });
 
     const res = await app.request("/v1/test-plugin", {}, baseEnv);
 
@@ -185,7 +190,11 @@ describe("createApp plugin registration", () => {
         v1.post("/body-limit-test", (c) => c.json({ ok: true }));
       },
     };
-    const app = createApp({ observability: obs, plugins: [plugin] });
+    const app = createApp({
+      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      observability: obs,
+      plugins: [plugin],
+    });
 
     const res = await app.request(
       "/v1/body-limit-test",
@@ -204,7 +213,7 @@ describe("createApp plugin registration", () => {
 
   it("returns 404 for an unregistered route when no plugins are passed", async () => {
     const { obs } = makeObservability();
-    const app = createApp({ observability: obs });
+    const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES, observability: obs });
 
     const res = await app.request("/v1/test-plugin", {}, baseEnv);
 
@@ -215,9 +224,13 @@ describe("createApp plugin registration", () => {
     const { obs } = makeObservability();
     const make = (name: string): SdpPlugin => ({ name, register: () => {} });
 
-    expect(() => createApp({ observability: obs, plugins: [make("dup"), make("dup")] })).toThrow(
-      /dup/
-    );
+    expect(() =>
+      createApp({
+        rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+        observability: obs,
+        plugins: [make("dup"), make("dup")],
+      })
+    ).toThrow(/dup/);
   });
 });
 

@@ -13,9 +13,12 @@ import {
 } from "@/flags";
 import { getDesignModuleFlags } from "@/flags/new-design";
 import type { DesignModuleFlags } from "@/lib/design-modules";
+import { isRampsEnabled } from "./ramps";
 
 export type DashboardFlags = {
   assetProfiles: boolean;
+  /** Compliance integrations follow the `policies` flag until Compliance gets its own visibility rule. */
+  compliance: boolean;
   custody: boolean;
   dvp: boolean;
   earn: boolean;
@@ -29,6 +32,7 @@ export type DashboardFlags = {
   payments: boolean;
   policies: boolean;
   privateChannels: boolean;
+  ramps: boolean;
 };
 
 /**
@@ -55,6 +59,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     paymentsEnabled,
     policiesEnabled,
     privateChannelsEnabled,
+    rampsEnabled,
   ] = await Promise.all([
     assetProfiles(),
     custody(),
@@ -68,10 +73,12 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     payments(),
     policies(),
     privateChannels(),
+    isRampsEnabled(),
   ]);
 
   return {
     assetProfiles: assetProfilesEnabled,
+    compliance: policiesEnabled,
     custody: custodyEnabled,
     dvp: dvpEnabled,
     earn: earnEnabled,
@@ -83,5 +90,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     payments: paymentsEnabled,
     policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
+    ramps: rampsEnabled,
   };
 }

@@ -1,3 +1,4 @@
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { isRampProviderSurfaced, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
@@ -23,6 +24,8 @@ function buildApp(environment: "sandbox" | "production" = "sandbox") {
   const app = new Hono<{ Bindings: Env }>();
 
   app.use("*", async (c, next) => {
+    // createApp sets these stages on every request; this app mounts handlers directly.
+    c.set("rampProviderStages", SDP_RAMP_PROVIDER_STAGES);
     c.set("apiKey", {
       id: "key_ramp_currency_test",
       organizationId: "org_ramp_currency_test",

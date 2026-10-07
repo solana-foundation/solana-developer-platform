@@ -62,6 +62,8 @@ Useful local URLs:
 - API docs: http://localhost:8787/docs
 - Dashboard: http://localhost:3000
 
+Local runs every module (`SDP_RELEASE_CHANNEL=experimental` in `apps/sdp-api/.env.local`). To see what production runs, set it to `stable` and restart; see [Release Channel](apps/sdp-api/README.md#release-channel-which-modules-run).
+
 Some provider-backed features require separate vendor credentials, such as custody providers, compliance providers, fiat ramps, dashboard auth, and integration tests.
 
 ## Checks

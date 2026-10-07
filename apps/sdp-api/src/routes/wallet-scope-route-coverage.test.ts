@@ -42,6 +42,8 @@ describe("wallet-scoped route coverage inventory", () => {
   it("tracks every wallet-scoped payments route", () => {
     const allRoutes = extractRoutes(paymentsRoutes);
     const nonWalletScopedRoutes = new Set([
+      "ALL /ramps/*",
+      "ALL /wallets/:walletId/policies/*",
       "ALL /recurring-payments",
       "ALL /recurring-payments/*",
       "ALL /subscription-plans",
