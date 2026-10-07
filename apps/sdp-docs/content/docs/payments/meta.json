@@ -11,6 +11,8 @@
     "accept-overview",
     "accept-verification",
     "accept-indexing",
+    "---Counterparties---",
+    "counterparties",
     "---Ramps---",
     "ramps",
     "ramps-providers"

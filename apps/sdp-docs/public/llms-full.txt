@@ -3449,6 +3449,438 @@ Notes:
 
 ---
 
+## Payments — Counterparties
+
+### Counterparties
+Source: https://platform.solana.com/docs/payments/counterparties
+
+> Create and manage the customer and beneficiary records that payouts and ramps use, their payment accounts, and their readiness for each ramp provider.
+
+A **counterparty** is an identity record for a customer or beneficiary: someone you pay, bill, or move funds on- and off-ramp for. The counterparty is the *who*. Its **accounts** are the *where*: the Solana wallets that payments go to.
+
+Several payment flows take a counterparty instead of a raw address:
+
+- **Transfer batches and recurring payments** take a `counterpartyId` plus a `counterpartyAccountId` for each recipient, and pay that account's Solana address. See [Payouts and disbursements](/docs/payments/send-payouts).
+- **Onramp quotes** (`POST /v1/payments/ramps/onramp/quote`) require a `counterpartyId`. The ramp provider's own customer record may be resolved or created from that counterparty. See [Ramps](/docs/payments/ramps).
+- **Subscriptions** (`POST /v1/payments/subscriptions`) take the `counterpartyId` of the counterparty being billed.
+
+The Counterparties API has 13 operations, covering field options, the counterparty records, their payment accounts, the provider accounts ramp providers hold for them, and ramp requirements.
+
+## Permissions and project scope
+
+| Operation | Permission |
+| --- | --- |
+| `GET` on any counterparty path | `counterparties:read` |
+| `POST`, `PATCH`, `DELETE` on any counterparty path | `counterparties:write` |
+
+The `api_admin` and `api_developer` key roles include both permissions. `api_readonly` includes only `counterparties:read`. See [Authentication](/docs/developing-with-sdp/authentication).
+
+Counterparties belong to a project. A counterparty created with an API key belongs to that key's project, and every counterparty call is limited to it: an ID from another project returns `404`. With an API key, the `x-project-id` header is ignored.
+
+## Field options
+
+`GET /v1/counterparties/metadata` returns the option sets for building a counterparty form:
+
+- `fields.entityTypes`: the allowed `entityType` values, `individual` and `business`.
+- `fields.countries`: the supported countries, each with an ISO 3166-1 alpha-2 `code` and an English `name`.
+
+```bash title="Terminal"
+curl https://api.solana.com/v1/counterparties/metadata \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+## Create a counterparty
+
+`POST /v1/counterparties` creates an active counterparty and returns `201` with the record under `data.counterparty`.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `entityType` | yes | `individual` or `business`. |
+| `displayName` | yes | 1–512 characters. A searchable, human-readable name. It is indexed and not application-encrypted, so keep it minimal. |
+| `externalId` | no | 1–256 characters. Your own opaque reference for the counterparty. It is indexed: do not put personal data in it. |
+
+`externalId` must be unique across your organization's active counterparties. If another active counterparty in the project already uses the `externalId`, the request returns `409 Conflict`.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/counterparties \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entityType": "individual",
+    "displayName": "Jane Doe",
+    "externalId": "customer_42"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-counterparty.ts"
+const response = await fetch("https://api.solana.com/v1/counterparties", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    entityType: "individual",
+    displayName: "Jane Doe",
+    externalId: "customer_42",
+  }),
+});
+const { data } = await response.json();
+// data.counterparty.id     — "cpty_…", use it in payment and ramp requests
+// data.counterparty.status — "active"
+```
+</Tab>
+<Tab value="Java">
+```java title="CreateCounterparty.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/counterparties"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "entityType": "individual",
+          "displayName": "Jane Doe",
+          "externalId": "customer_42"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The counterparty record contains:
+
+| Field | Notes |
+| --- | --- |
+| `id` | Counterparty ID, `cpty_…`. |
+| `organizationId`, `projectId` | The organization and project the counterparty belongs to. |
+| `externalId` | Your reference, or `null`. |
+| `entityType` | `individual` or `business`. |
+| `displayName` | The display name. |
+| `status` | `active` or `archived`. |
+| `createdBy` | The user ID recorded as the creator, or `null`. |
+| `createdAt`, `updatedAt` | ISO 8601 timestamps. |
+
+## List, get, update, and archive
+
+| Operation | Endpoint | Notes |
+| --- | --- | --- |
+| List | `GET /v1/counterparties` | Newest first. `page` (1-based, default `1`) and `pageSize` (default `20`, max `100`). The response carries `counterparties`, `total`, `page`, and `pageSize`. |
+| Get | `GET /v1/counterparties/{counterpartyId}` | Returns active counterparties only. |
+| Update | `PATCH /v1/counterparties/{counterpartyId}` | Send at least one of `externalId`, `entityType`, `displayName`. Set `externalId` to `null` to clear it. The same `externalId` uniqueness rule and `409` apply. |
+| Archive | `DELETE /v1/counterparties/{counterpartyId}` | Returns `204`. |
+
+`DELETE` archives the counterparty rather than deleting it:
+
+- Its `status` becomes `archived`, and it disappears from the default list. Pass `includeArchived=true` to `GET /v1/counterparties` to include archived records. The parameter accepts exactly `true` or `false`.
+- The counterparty's provider accounts are archived with it.
+- An archived counterparty no longer resolves. `GET`, `PATCH`, and `DELETE` on it return `404`, as do its requirements, its provider accounts, and listing or creating its accounts.
+- It no longer holds its `externalId`, so a new counterparty can use that value.
+- The API has no endpoint to restore an archived counterparty.
+
+## Payment accounts
+
+A counterparty account is a payment destination stored under a counterparty. The only account kind is `crypto_wallet`, a Solana wallet address. A counterparty can have several accounts, and each one has its own ID. Transfer batches and recurring payments use the account's address as the destination.
+
+Fiat bank accounts are not counterparty accounts. Ramp providers hold those, and you read them through [provider accounts](#provider-accounts).
+
+`POST /v1/counterparties/{counterpartyId}/accounts` creates an account and returns `201` with the record under `data.account`.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `accountKind` | yes | `crypto_wallet`. |
+| `details` | yes | `network` must be `"solana"`, and `address` must be a base58 Solana wallet address. |
+| `label` | no | 1–256 characters. |
+| `providerAccountData` | no | A JSON object that SDP stores with the account and returns as is. |
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/counterparties/cpty_123/accounts \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accountKind": "crypto_wallet",
+    "label": "USDC wallet",
+    "details": {
+      "network": "solana",
+      "address": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+    }
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-counterparty-account.ts"
+const counterpartyId = "cpty_123";
+const response = await fetch(
+  `https://api.solana.com/v1/counterparties/${counterpartyId}/accounts`,
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      accountKind: "crypto_wallet",
+      label: "USDC wallet",
+      details: {
+        network: "solana",
+        address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      },
+    }),
+  }
+);
+const { data } = await response.json();
+// data.account.id — pass it as counterpartyAccountId in transfer batches and recurring payments
+```
+</Tab>
+<Tab value="Java">
+```java title="CreateCounterpartyAccount.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/counterparties/cpty_123/accounts"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "accountKind": "crypto_wallet",
+          "label": "USDC wallet",
+          "details": {
+            "network": "solana",
+            "address": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+          }
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The account record contains `id`, `organizationId`, `projectId`, `counterpartyId`, `accountKind`, `label`, `details`, `providerAccountData`, `status` (`active` or `archived`), `createdAt`, and `updatedAt`.
+
+| Operation | Endpoint | Notes |
+| --- | --- | --- |
+| List | `GET /v1/counterparties/{counterpartyId}/accounts` | Newest first. Filters: `accountKind`, `includeArchived` (default `false`), `page`, `pageSize` (max `100`). The response carries `accounts`, `total`, `page`, and `pageSize`. |
+| Get | `GET /v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | Returns active accounts only. |
+| Update | `PATCH /v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | Send at least one of `label`, `details`, `providerAccountData`. Set `label` to `null` to clear it. New `details` must still contain `network: "solana"` and a valid address. `accountKind` can't be changed. |
+| Archive | `DELETE /v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | Returns `204`. The account disappears from the default list, and `GET` or `PATCH` on it returns `404`. |
+
+## Provider accounts
+
+`GET /v1/counterparties/{counterpartyId}/provider-accounts` lists the records that ramp providers hold for the counterparty. Each row has one of three `kind` values:
+
+| `kind` | What it is |
+| --- | --- |
+| `customer_link` | The link between the counterparty and the provider's own customer record. |
+| `payout_account` | A fiat payout account held by the provider, for one corridor: a `fiatCurrency` and a `destinationCountry`. |
+| `funding_wallet` | A wallet the provider holds for the counterparty. |
+
+Each row carries `id`, `provider`, `kind`, `fiatCurrency`, `destinationCountry`, `paymentRail`, `status` (`active` or `archived`), `providerStatus`, and `createdAt`. `fiatCurrency` and `destinationCountry` are `null` on customer-link rows. Depending on the kind, a row can also include:
+
+- **Payout accounts:** `bankName`, `accountNumberLast4`, and `paymentRails`. SDP fetches these from the provider when you call the endpoint, and `providerStatus` then reflects the provider's current status. Account numbers come back only as their last four digits. If the provider can't be reached, the request returns `503`.
+- **Funding wallets:** `providerAccountReference`, the provider's wallet ID, and `balance`, a live balance read from the provider. `balance.state` is `available` (with `amount` as a decimal string and `currency`) or `unavailable` when the provider read fails. Both fields appear only after the provider has assigned a wallet.
+- **Every row:** `customerLink`, the provider's customer link, once onboarding with that provider has started. It carries `providerCustomerReference`, `status`, and `providerStatus`. For BVNK it also carries `residenceCountryCode` and the `agreements` with their `signedAt` times.
+
+When a provider has a customer link but no payout accounts or funding wallets, the customer link is returned as its own row.
+
+Optional filters: `provider`, `fiatCurrency`, and `destinationCountry`. Customer-link rows always pass the currency and country filters. Rows of both statuses are returned, oldest first.
+
+A counterparty can have more than one payout account in the same corridor. Each row records its own `paymentRail`, such as `ACH`.
+
+## Ramp requirements
+
+Before you request a ramp quote, check whether the counterparty is ready for the provider. `GET /v1/counterparties/{counterpartyId}/requirements` evaluates the counterparty against one provider, direction, and asset pair. It returns the current state and any fields or provider-hosted actions the provider still needs.
+
+| Query param | Required | Notes |
+| --- | --- | --- |
+| `provider` | yes | Onramp: `moonpay`, `lightspark`, `bvnk`, `moneygram`, `coinbase`, `mural`, `stripe`. Offramp: `lightspark`, `moonpay`, `bvnk`, `moneygram`, `mural`. |
+| `direction` | yes | `onramp` or `offramp`. |
+| `assetRail` | yes | Canonical SDP crypto asset rail, such as `usdc.solana`. |
+| `fiatCurrency` | yes | ISO currency code, such as `USD`. |
+| `destinationCustodyWalletId` | onramp only | The custody wallet `id` (`cwlt_…`, from `GET /v1/wallets`) that receives the crypto. Required for onramp. Your API key must be allowed to use the wallet. |
+| `destinationCountry` | no | ISO 3166-1 alpha-2 payout country. Valid only for Lightspark offramp. See [Lightspark offramp corridors](#lightspark-offramp-corridors). |
+
+A parameter that doesn't apply to the provider and direction returns `400`, for example `destinationCountry` with any provider other than Lightspark offramp. A provider that isn't offered in the current environment returns `403`.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl "https://api.solana.com/v1/counterparties/cpty_123/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_123" \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="read-requirements.ts"
+const url = new URL(
+  "https://api.solana.com/v1/counterparties/cpty_123/requirements"
+);
+url.searchParams.set("provider", "moonpay");
+url.searchParams.set("direction", "onramp");
+url.searchParams.set("assetRail", "usdc.solana");
+url.searchParams.set("fiatCurrency", "USD");
+url.searchParams.set("destinationCustodyWalletId", "cwlt_123");
+
+const response = await fetch(url, {
+  headers: { Authorization: "Bearer sk_test_..." },
+});
+const { data } = await response.json();
+// data.status — "ready" means you can request a quote with this provider
+```
+</Tab>
+<Tab value="Java">
+```java title="ReadRequirements.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create(
+        "https://api.solana.com/v1/counterparties/cpty_123/requirements"
+            + "?provider=moonpay&direction=onramp&assetRail=usdc.solana"
+            + "&fiatCurrency=USD&destinationCustodyWalletId=cwlt_123"))
+    .header("Authorization", "Bearer sk_test_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+A counterparty that is ready for the provider returns:
+
+```json title="Response"
+{
+  "data": {
+    "direction": "onramp",
+    "provider": "moonpay",
+    "status": "ready"
+  }
+}
+```
+
+### Reading the response
+
+Every response carries `provider`, `direction`, and `status`. The other fields depend on `status`:
+
+| `status` | Providers | Extra fields | Meaning |
+| --- | --- | --- | --- |
+| `ready` | all | Lightspark offramp: `providerAccountId`, `payout` | The counterparty is ready for a quote with this provider. |
+| `collect` | all | `fields` | The provider needs the data described in `fields`. |
+| `collect_counterparty` | `lightspark`, `bvnk` | `fields` | The provider needs details about the counterparty, described in `fields`. |
+| `collect_counterparty_residence` | `bvnk` | `fields` | The provider needs the counterparty's tax-residence country before anything else. |
+| `collect_account` | `lightspark` | `payout` | Lightspark offramp needs a payout account for the corridor. See [Lightspark offramp corridors](#lightspark-offramp-corridors). |
+| `counterparty_collect_agreement` | `bvnk` | `agreements` | The counterparty must accept the listed provider agreements. Each has `name`, `displayName`, `description`, `url`, and `privacyPolicyUrl`. |
+| `counterparty_agreement_signing` | `bvnk` | none | Agreement acceptance is being confirmed with the provider. |
+| `terms_of_service_required` | `mural` | `termsOfServiceUrl` | The counterparty must accept the provider's terms of service. |
+| `onboarding_not_started` | `lightspark`, `mural` | none | Onboarding with the provider hasn't started. |
+| `customer_verification_required` | `bvnk`, `mural` | `verificationUrl` | The provider needs the counterparty to complete verification on a provider-hosted page. BVNK generates a new link for each response. |
+| `customer_verifying` | `bvnk`, `mural` | none | The provider is reviewing the counterparty. |
+| `customer_verification_failed` | `bvnk`, `mural` | none | Verification failed at the provider. |
+| `customer_funding_account_provisioning` | `bvnk` | none | The provider is setting up a funding account for the counterparty. |
+| `funding_account_provisioning` | `mural` | none | The provider is setting up a funding account for the counterparty. |
+| `customer_funding_account_provisioning_failed` | `bvnk` | none | Funding-account setup failed at the provider. |
+| `unsupported` | all | `reason` | The provider doesn't support this request for the counterparty, for example because of the fiat currency. `reason` explains why. |
+
+The in-progress states `counterparty_agreement_signing`, `customer_verifying`, `customer_funding_account_provisioning`, and `funding_account_provisioning` change on the provider's side. Read the requirements again to see the current state.
+
+Each entry in `fields` describes one value the provider needs:
+
+| Property | Notes |
+| --- | --- |
+| `kind` | `text`, `select`, `country`, `currency`, `date`, or `address`. |
+| `key` | Field identifier. Nested values use dotted keys, such as `customer.address.line1`. |
+| `label` | Human-readable label. |
+| `required` | Whether the provider requires the value. |
+| `pattern`, `minLength`, `maxLength`, `placeholder`, `mask` | Optional constraints on `text` fields. |
+| `options` | `select`: the allowed `value`/`label` pairs. `country` and `currency`: an optional subset of codes; when absent, every supported code is allowed. |
+| `before` | `date`: an ISO date the value must fall before. |
+| `fields` | `address`: the nested parts of the address, each described the same way. |
+
+### Lightspark offramp corridors
+
+For Lightspark offramp, a corridor is the requested `fiatCurrency` plus a destination country. The `payout` object describes it:
+
+- `countryRails` maps each supported destination country to the payment rails available there, as `value`/`label` pairs.
+- `railFields` maps each rail to the bank-account fields it needs, in the same format as `fields`.
+- `accounts` lists the counterparty's active Lightspark payout accounts for the currency. Each has `id`, `destinationCountry`, `paymentRail`, the provider-reported `status`, and, when the provider returns them, `bankName` and `accountNumberLast4`.
+
+Because a counterparty can hold several payout accounts, `destinationCountry` controls the result once the earlier Lightspark requirements are met:
+
+- Without `destinationCountry`, the status is `collect_account`, and existing accounts appear in `payout.accounts`.
+- With `destinationCountry`, if exactly one account in `accounts` for that country has the provider status `ACTIVE`, the status is `ready` and `providerAccountId` is that account's `id`.
+- With `destinationCountry`, if more than one such account matches, the request returns `400`.
+- With `destinationCountry`, if none matches, the status is `collect_account`.
+
+An abbreviated `collect_account` response for `usdc.solana` to `USD`, trimmed to the US rails and the two required ACH fields. The full response lists every supported country in `countryRails` and every rail's fields in `railFields`:
+
+```json title="Response"
+{
+  "data": {
+    "direction": "offramp",
+    "provider": "lightspark",
+    "status": "collect_account",
+    "payout": {
+      "countryRails": {
+        "US": [
+          { "value": "ACH", "label": "ACH" },
+          { "value": "FEDNOW", "label": "FedNow" },
+          { "value": "RTP", "label": "RTP" },
+          { "value": "WIRE", "label": "Wire" },
+          { "value": "SWIFT", "label": "SWIFT" }
+        ]
+      },
+      "railFields": {
+        "ACH": [
+          {
+            "kind": "text",
+            "key": "bankAccount.accountNumber",
+            "label": "Account number",
+            "required": true,
+            "minLength": 1,
+            "maxLength": 34,
+            "placeholder": "12345678"
+          },
+          {
+            "kind": "text",
+            "key": "bankAccount.routingNumber",
+            "label": "Routing number",
+            "required": true,
+            "pattern": "^[0-9]{9}$",
+            "minLength": 9,
+            "maxLength": 9,
+            "placeholder": "021000021"
+          }
+        ]
+      },
+      "accounts": []
+    }
+  }
+}
+```
+
+## Data handling
+
+- **The counterparty record holds no identity data.** It has no fields for email, address, date of birth, or tax ID. It stores `displayName`, `entityType`, and your optional `externalId`, plus IDs, status, and timestamps.
+- **`displayName` and `externalId` are indexed and not application-encrypted.** Keep `displayName` minimal, and don't put personal data in `externalId`.
+- **Provider-collected data isn't stored.** Identity and bank details that a provider needs, as described by `fields` or `payout` in the requirements response, belong to the provider; SDP doesn't persist them. SDP keeps only the provider-side references and onboarding state it needs for later requests, such as provider customer IDs, statuses, BVNK's tax-residence country and agreement signing times, and Lightspark's purpose-of-payment code.
+- **Bank details are read from the provider on request.** Provider accounts and Lightspark offramp requirements fetch payout-account details from the provider when you call them. Responses carry the bank name and the last four digits of the account number, never the full number.
+
+## Errors
+
+| Status | When |
+| --- | --- |
+| `400` | Invalid body or query, or a `PATCH` with no fields. On requirements: a parameter that doesn't apply, a missing `destinationCustodyWalletId` on onramp, or more than one matching Lightspark payout account for `destinationCountry`. |
+| `403` | The key lacks the required permission, the requirements provider isn't offered in this environment, or the key can't use `destinationCustodyWalletId`. |
+| `404` | The counterparty or account doesn't exist, is archived, or belongs to another project. |
+| `409` | Another active counterparty in the project already uses the `externalId`. |
+| `503` | Provider accounts: the provider couldn't be reached for payout-account details. |
+
+For exact request and response schemas, use the [OpenAPI JSON](https://api.solana.com/openapi.json), where these operations carry the `Counterparties` tag. The [API reference](/docs/reference/api) pages cover the other API families.
+
+## Related
+
+- [Ramps](/docs/payments/ramps): onramp quotes that take a `counterpartyId`.
+- [Ramp providers](/docs/payments/ramps-providers): per-provider capabilities.
+- [Payouts and disbursements](/docs/payments/send-payouts): transfer batches that pay counterparty accounts.
+- [Authentication](/docs/developing-with-sdp/authentication): key roles and permissions.
+
+---
+
 ## Payments — Ramps
 
 ### Ramps
