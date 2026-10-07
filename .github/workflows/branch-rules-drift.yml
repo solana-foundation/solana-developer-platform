@@ -40,7 +40,7 @@ jobs:
             cat /tmp/drift.diff
             {
               echo "diff<<__EOF__"
-              head -c 3000 /tmp/drift.diff
+              head -c 2500 /tmp/drift.diff
               echo
               echo "__EOF__"
             } >> "$GITHUB_OUTPUT"
