@@ -30,21 +30,53 @@ your cloud, for provider-specific co-signer runtimes.
 - Alert on failed signing attempts, container restarts, authentication failures,
   and stale or expired key material.
 
-## Utila readiness
+## Utila
 
-Utila is the motivating future provider for this pattern. When Utila signer
-support lands, the co-signer should be hosted as an external operator service,
-for example on Cloud Run, while SDP keeps its API, web, docs, database, and cache
-inside the normal self-hosted stack.
+Utila is a supported SDP signing provider. The SDP API signs through your Utila
+vault directly, using a Utila service account. Anything else your Utila setup
+needs to approve or sign a transaction, such as a co-signer, runs outside the
+SDP stack using the production pattern above.
 
-This page does not make Utila a live SDP signing provider. Do not set
-`SIGNING_PROVIDER=utila` until the Utila signer integration explicitly adds that
-provider option and the required runtime configuration.
+### Configure the SDP API
 
-Operator scaffolding for a Utila Cloud Run deployment lives in
-`infra/utila/cloud-run/`.
+In the [configurator](/docs/self-hosting/configurator), add **Utila** to the
+deployment signing providers. `utila` is also an accepted `SIGNING_PROVIDER`
+value. The configurator then asks for these variables:
 
-That scaffold is intended to host the co-signer endpoint before Utila becomes a
-default self-hosted service. Operators can deploy their own co-signer image,
-protect the endpoint with Cloud Run IAM or runtime-level request verification,
-and pass the resulting service URL and token into a custom SDP Utila integration.
+| Variable | Required | Description |
+|---|---|---|
+| `UTILA_SERVICE_ACCOUNT_EMAIL` | Yes | Service account email, in the form `…@vault.….utilaserviceaccount.io`. |
+| `UTILA_SERVICE_ACCOUNT_PRIVATE_KEY` | Yes | PKCS#8 private key PEM for the service account. Use escaped newlines in `.env`. |
+| `UTILA_VAULT_ID` | Yes | The Utila vault SDP creates and signs wallets in. |
+| `UTILA_WALLET_ID` | Yes | Utila wallet ID. |
+| `UTILA_NETWORK` | Yes | `networks/solana-devnet` (default) or `networks/solana-mainnet`. |
+| `UTILA_API_BASE_URL` | No | Defaults to `https://api.utila.io`. |
+| `UTILA_POLL_INTERVAL_MS` | No | How often SDP polls a pending signature, in milliseconds. Defaults to `1000`. |
+| `UTILA_MAX_POLL_ATTEMPTS` | No | How many times SDP polls before giving up. Defaults to `60`. |
+| `UTILA_DESIGNATED_SIGNERS` | No | Comma-separated Utila user resources that sign SDP's requests. Defaults to `users/$UTILA_SERVICE_ACCOUNT_EMAIL`. |
+
+SDP treats Utila as configured on the deployment once
+`UTILA_SERVICE_ACCOUNT_EMAIL`, `UTILA_SERVICE_ACCOUNT_PRIVATE_KEY`, and
+`UTILA_VAULT_ID` are set. Utila is a manual provider, so each organization also
+needs it enabled: add
+`{"sdp": {"providerOverrides": {"custody": {"utila": true}}}}` to the
+organization's private metadata in the Clerk dashboard, the same way
+[First Devnet Deployment](/docs/self-hosting/first-devnet-deployment) enables
+the local signer. Merge it with any overrides already there.
+
+When an organization sets up Utila, SDP creates a new Solana wallet inside the
+configured vault. Additional wallets are created in the same vault.
+
+### How signing works
+
+For each transaction, SDP submits a signing request to Utila naming the
+designated signers, without publishing it, then polls until Utila returns the
+signed transaction. With the defaults, SDP waits for 60 polls one second apart,
+about a minute, before the signing request fails. The designated signers must
+approve or sign within that window.
+
+If your Utila vault needs an operator-run co-signer to sign as a designated
+signer, host it outside the SDP stack as described in
+[Production pattern](#production-pattern). Operator scaffolding for running a
+co-signer on Cloud Run lives in `infra/utila/cloud-run/`. Protect the endpoint
+with Cloud Run IAM or runtime-level request verification.

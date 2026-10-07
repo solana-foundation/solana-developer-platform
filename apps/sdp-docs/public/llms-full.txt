@@ -672,15 +672,38 @@ A **custody wallet** is a Solana keypair whose key is held and signed for by a c
 
 ## Supported providers
 
-| Provider | Description |
+Use the `provider` value when you initialize a provider through the API.
+
+| Provider | `provider` value | Signs transactions | Access |
+| --- | --- | --- | --- |
+| **Privy** | `privy` | Yes | Every organization |
+| **Coinbase CDP** | `coinbase_cdp` | Yes | Every organization |
+| **Para** | `para` | Yes | Every organization |
+| **Turnkey** | `turnkey` | Yes | Every organization |
+| **Fireblocks** | `fireblocks` | Yes | By arrangement |
+| **DFNS** | `dfns` | Yes | By arrangement |
+| **IBM Digital Asset Haven** | `ibm_haven` | Yes | By arrangement |
+| **Utila** | `utila` | Yes | By arrangement |
+| **Anchorage** | `anchorage` | No | By arrangement |
+| **Local Signer** | `local` | Yes | Self-hosted deployments only |
+
+- **Every organization**: the provider is available as soon as the deployment holds its credentials.
+- **By arrangement**: the SDP team also has to grant your organization access.
+- **Anchorage**: SDP can create and delete Anchorage wallets, but it does not sign transactions with them.
+- **Local Signer**: signs with the single key in the deployment's `CUSTODY_PRIVATE_KEY` and cannot create additional wallets. Managed deployments refuse it; it only runs on a [self-hosted](/docs/self-hosting) deployment.
+
+### Provider status
+
+The dashboard shows each provider's status for your organization, both on the Wallets setup screen and under **Integrations** → **Custody**:
+
+| Status | Meaning |
 | --- | --- |
-| **Privy** | Embedded wallet infrastructure platform |
-| **Fireblocks** | Digital asset infrastructure company |
-| **Coinbase CDP** | Embedded wallets for developers |
-| **Para** | Wallet and authentication suite |
-| **Turnkey** | Non-custodial wallet infrastructure platform |
-| **DFNS** | Digital asset wallet infrastructure |
-| **Anchorage** | Regulated institutional crypto custody |
+| **Connected** | The provider is set up for this project. The Wallets setup screen labels it **Active**. |
+| **Ready to connect** | Your organization has access and the deployment holds the provider's credentials, so you can set it up now. The Wallets setup screen shows no label for this state. |
+| **Request access** | The SDP team grants access per organization. The provider card links to the request form. |
+| **Not configured** | The provider isn't available to your organization on this deployment. Either the deployment doesn't hold its credentials, or the provider is by arrangement and your organization doesn't have access yet. |
+
+Only **Connected** and **Ready to connect** providers can be selected when you create a wallet. Local Signer appears only on a self-hosted deployment that has a `CUSTODY_PRIVATE_KEY`. For more on custody connections and other providers, see [Integrations](/docs/guides/integrations).
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
@@ -691,15 +714,15 @@ Open the sidebar and click **Wallets**. If you haven't linked your organization 
 
 ### 2. Choose a custody provider
 
-The Wallets page shows all supported providers, each with a **New wallet** button. Pick the provider that fits your setup.
+If the project has no wallets yet, the Wallets page shows **Create your first wallet** with a card for each provider and its status. Click the card of a provider you can select. If the project already has wallets, click **Create wallet**, pick a provider under **Choose provider**, and click **Next**. Only admins can create wallets.
 
 ![Wallets page showing custody provider cards](/images/getting-started/wallet-providers.png)
 
 ### 3. Create the wallet
 
-Click **New wallet** on your chosen provider. In the modal, enter a label for the wallet and click **Create wallet**.
+Under **Wallet details**, enter a **Wallet label**. If you picked Privy and the project has Privy custody connections, also choose the **Connection** the wallet is created in; the wallet signs with that connection's credentials. Click **Create wallet**.
 
-<img src="/docs/images/getting-started/wallet-create-modal.png" alt="New wallet modal" width="696" style={{ display: "block", maxWidth: "100%" }} />
+If Privy isn't set up for the project yet and stored Privy credentials are enabled for your deployment, this step asks for **Provider details** instead. See [Privy with your own credentials](/docs/guides/integrations#privy-with-your-own-credentials).
 
 ### 4. View your wallet
 
@@ -707,7 +730,7 @@ After provisioning, the wallet card appears on the Wallets page with its address
 
 ![Wallets page after wallet creation](/images/getting-started/wallet-created.png)
 
-To create additional wallets, click **Create Wallet** in the top right and repeat the process.
+To create additional wallets, click **Create wallet** and repeat the process.
 
 ### 5. Provider capabilities
 
@@ -886,6 +909,206 @@ HttpRequest request = HttpRequest.newBuilder()
 
 </Tab>
 </Tabs>
+
+## Create a wallet on a custody connection
+
+A **custody connection** links a project to a provider account using credentials your team stores in SDP. Connections are available for Privy; see [Privy with your own credentials](/docs/guides/integrations#privy-with-your-own-credentials) to add one. A project can have several connections, and each one creates and signs for its own wallets.
+
+Without a target, `POST /v1/wallets` creates the wallet on the project's default signing target, or on the provider you name in `provider`. To create it on one specific connection, pass that connection's `connectionId`:
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connectionId": "cconn_example",
+    "label": "Payouts wallet"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-connection-wallet.ts"
+const response = await fetch("https://api.solana.com/v1/wallets", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    connectionId: "cconn_example",
+    label: "Payouts wallet",
+  }),
+});
+const { data } = await response.json();
+// data.wallet.custodyConnectionId === "cconn_example"
+```
+</Tab>
+<Tab value="Java">
+```java title="CreateConnectionWallet.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "connectionId": "cconn_example",
+          "label": "Payouts wallet"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+- `connectionId` decides where the wallet is created. If you also send `provider`, it must match the connection's provider, or the request fails with `400`.
+- The connection must belong to the API key's project. An unknown connection returns `404`. A connection that isn't active, for example one that is still being verified or has been deactivated, returns `409`.
+- The created wallet carries `custodyConnectionId` instead of `custodyConfigId`. `GET /v1/wallets` returns the same field, so you can see which connection owns each wallet.
+- To find a connection's ID, open **Integrations** → **Custody** → **Privy** in the dashboard, open the connection, and copy its **Connection ID**.
+- API keys scoped to selected wallets (`"walletScope": "selected"`) can't create wallets.
+- When you create an API key, `"provisionWallet": { "connectionId": "..." }` on `POST /v1/api-keys` provisions the key's wallet on that connection. See the [API keys reference](/docs/reference/api/api-keys).
+
+When stored Privy credentials are enabled for your deployment, new Privy setups go through the dashboard. For a project that doesn't already have a Privy configuration, `POST /v1/wallets/initialize` with `"provider": "privy"` is refused.
+
+## Check signer readiness
+
+`POST /v1/wallets/signer-check` confirms that SDP can sign with a wallet before you rely on it. SDP builds a memo transaction with server-generated text, asks the custody provider to sign it with the wallet, verifies the signature, and simulates the transaction. Nothing is broadcast and no fees are spent.
+
+Pass the provider wallet ID, which is the `walletId` field from `GET /v1/wallets`, not the record `id`. You can leave `walletId` out only when the API key is bound to a signing wallet; SDP then checks the key's signing wallet.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/wallets/signer-check \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "walletId": "privy_wallet_123" }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="signer-check.ts"
+const response = await fetch("https://api.solana.com/v1/wallets/signer-check", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer sk_test_...",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({ walletId: "privy_wallet_123" }),
+});
+const { data } = await response.json();
+// data: { walletId, walletAddress, feePayer, memo, signature, simulated, checkedAt }
+```
+</Tab>
+<Tab value="Java">
+```java title="SignerCheck.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets/signer-check"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        { "walletId": "privy_wallet_123" }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+A `200` response means the provider returned a valid signature and the transaction passed simulation. `simulated` is always `true`, and the returned `signature` never appears on chain. If the provider can't sign, returns an invalid signature, or simulation fails, the request returns an error instead.
+
+- The API key needs the `wallets:write` permission.
+- Signer checks have a small quota: 2 per minute per API key or user, and 10 per minute per organization. Requests over the quota return `429`.
+
+See the [Wallets API reference](/docs/reference/api/wallets) for every wallet endpoint.
+
+---
+
+### Integrations
+Source: https://platform.solana.com/docs/guides/integrations
+
+> Connect custody, compliance screening, and ramp providers to your organization and projects.
+
+SDP works with outside providers for custody, compliance screening, and fiat ramps. This guide covers what your team can connect, where you manage each one, and which parts you can also use through the API.
+
+## Where integrations live
+
+In the dashboard sidebar, open **Integrations**. It has a tab for each provider family, including **Custody**, **Ramps**, and **Compliance**, which appear when the matching dashboard module is enabled for your organization.
+
+Each provider card shows a status. Click a card to open the provider's page, which explains how the provider connects and offers the next action available to you, such as **Configure**, **Manage**, or **Request access**.
+
+| Status | Meaning |
+| --- | --- |
+| **Connected** | Set up and in use. |
+| **Ready to connect** | You can set it up now. |
+| **Enabled** | Turned on for your organization. Used for ramp and compliance providers, which your team doesn't install itself. |
+| **Request access** | The SDP team grants access per organization. |
+| **Not configured** | Not available to your organization on this deployment. |
+
+## Custody
+
+Custody providers hold your wallets' keys and sign for them. You install them from **Wallets**; the **Custody** tab shows the same providers with their status. For the provider list, which providers sign transactions, and what each status means, see [Set Up Wallets](/docs/guides/setup-wallets#supported-providers).
+
+A provider's page says how it connects:
+
+- **Self-serve**: you connect it with credentials from your own provider account. Today this applies to Privy.
+- **By arrangement**: the SDP team grants access and sets up the connection with your organization.
+- **Provisioned per deployment**: the deployment holds the provider's credentials, and you install it from **Wallets**.
+
+### Privy with your own credentials
+
+When stored Privy credentials are enabled for your deployment, your team connects its own Privy app instead of using credentials held by the deployment. Each Privy app you connect becomes a **custody connection**. Connections belong to the current project, and a project can have several. Managing connections requires custody admin access, which organization admins have.
+
+To connect a Privy app:
+
+1. Open **Integrations** → **Custody** → **Privy** and click **Configure**. You can also go to **Wallets**, click **Create wallet**, and choose Privy.
+2. Under **Provider details**, enter:
+   - **Credential label**: a name for this credential.
+   - **Privy app ID**: from your Privy dashboard. After you save, SDP shows only redacted details.
+   - **Privy app secret**: from your Privy dashboard. You can't view it again after saving.
+   - **Initial wallet label** (optional): a name for the wallet SDP creates when the check succeeds.
+3. Click **Connect and verify**. SDP stores the credential, checks it with Privy, and creates the connection's first wallet once the check succeeds.
+
+If the check doesn't succeed, the dashboard says why:
+
+- Privy rejected the credentials: correct the app ID and secret, then connect again.
+- The Privy app is already connected to a custody setup: use a different Privy app.
+- SDP couldn't confirm whether verification finished: click **Check again**. Your credentials are stored, and checking again never creates a duplicate connection.
+
+To connect another Privy app to the same project, open the **Privy** page, find the **Connections** section, and click **Add connection**.
+
+Open a connection from that list to manage it:
+
+- **Connection ID**: copy it to [create wallets on this connection](/docs/guides/setup-wallets#create-a-wallet-on-a-custody-connection) through the API.
+- **Add wallet**: creates a wallet in this connection's Privy account.
+- **Make default**: requests that don't name a wallet use this connection from then on. A project has one default connection at a time, and operations already pinned to a wallet don't move.
+- **Rotate credentials**: replaces the Privy app secret. The current credentials stay in use until the new secret is verified, and you can roll back to the previous version for a limited time afterwards.
+- **Cancel setup**: for a connection whose verification never finished. The connection is deactivated and stays listed as **Deactivated**; to try again, add a new connection.
+- **Deactivate connection**: stops the connection permanently and keeps its history. It doesn't revoke the app secret at Privy, and it isn't available while the connection has active wallets.
+
+On a self-hosted deployment, `PRIVY_BYOK_ENABLED` turns on Privy connections. They use the deployment's own Privy credentials unless `SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED` is also on. Connections that use the deployment's credentials can't be rotated or rolled back from the dashboard.
+
+## Compliance screening
+
+SDP screens addresses through these providers:
+
+| Provider | `provider` value in results |
+| --- | --- |
+| **Range** | `range` |
+| **Elliptic** | `elliptic` |
+| **TRM Labs** | `trm` |
+| **Chainalysis** | `chainalysis` |
+
+The SDP team activates compliance providers per organization. On the **Compliance** tab, each provider shows **Enabled**, **Request access** if it isn't activated for your organization, or **Not configured** if it is activated but the deployment doesn't hold the provider's credentials.
+
+Screening runs when you ask for it. `POST /v1/compliance/address-screenings` checks one address against every provider enabled for your organization and returns a result per provider, with a normalized `status` (`ok`, `pending`, `unavailable`, or `error`), a `riskScore`, and the provider's own `riskLevel` label. The optional `intent` field says why you are screening: `transfer_destination`, `wallet_address_addition`, or `unknown`. Use the results in your own approval steps, for example before you approve a transfer destination or add an address to a token's allowlist.
+
+- The API key needs the `payments:read` permission.
+- If no compliance provider is enabled for your organization, the request returns `403`.
+- Screening has a quota: 30 requests per minute per API key or user, and 120 per minute per organization. Requests over the quota return `429`.
+
+For a walkthrough, see [Freeze and Compliance](/docs/tokens/freeze-and-compliance). For the full request and response schema, see the [Compliance API reference](/docs/reference/api/compliance).
+
+## Ramps
+
+Ramp providers move money between fiat and stablecoins for deposits and payouts. They are configured on the deployment, so the **Ramps** tab shows each one as **Enabled** or **Not configured** rather than offering a setup flow. For the provider list, what each one supports, and how they are configured, see [Ramp providers](/docs/payments/ramps-providers).
 
 ---
 
@@ -5294,24 +5517,56 @@ your cloud, for provider-specific co-signer runtimes.
 - Alert on failed signing attempts, container restarts, authentication failures,
   and stale or expired key material.
 
-## Utila readiness
+## Utila
 
-Utila is the motivating future provider for this pattern. When Utila signer
-support lands, the co-signer should be hosted as an external operator service,
-for example on Cloud Run, while SDP keeps its API, web, docs, database, and cache
-inside the normal self-hosted stack.
+Utila is a supported SDP signing provider. The SDP API signs through your Utila
+vault directly, using a Utila service account. Anything else your Utila setup
+needs to approve or sign a transaction, such as a co-signer, runs outside the
+SDP stack using the production pattern above.
 
-This page does not make Utila a live SDP signing provider. Do not set
-`SIGNING_PROVIDER=utila` until the Utila signer integration explicitly adds that
-provider option and the required runtime configuration.
+### Configure the SDP API
 
-Operator scaffolding for a Utila Cloud Run deployment lives in
-`infra/utila/cloud-run/`.
+In the [configurator](/docs/self-hosting/configurator), add **Utila** to the
+deployment signing providers. `utila` is also an accepted `SIGNING_PROVIDER`
+value. The configurator then asks for these variables:
 
-That scaffold is intended to host the co-signer endpoint before Utila becomes a
-default self-hosted service. Operators can deploy their own co-signer image,
-protect the endpoint with Cloud Run IAM or runtime-level request verification,
-and pass the resulting service URL and token into a custom SDP Utila integration.
+| Variable | Required | Description |
+|---|---|---|
+| `UTILA_SERVICE_ACCOUNT_EMAIL` | Yes | Service account email, in the form `…@vault.….utilaserviceaccount.io`. |
+| `UTILA_SERVICE_ACCOUNT_PRIVATE_KEY` | Yes | PKCS#8 private key PEM for the service account. Use escaped newlines in `.env`. |
+| `UTILA_VAULT_ID` | Yes | The Utila vault SDP creates and signs wallets in. |
+| `UTILA_WALLET_ID` | Yes | Utila wallet ID. |
+| `UTILA_NETWORK` | Yes | `networks/solana-devnet` (default) or `networks/solana-mainnet`. |
+| `UTILA_API_BASE_URL` | No | Defaults to `https://api.utila.io`. |
+| `UTILA_POLL_INTERVAL_MS` | No | How often SDP polls a pending signature, in milliseconds. Defaults to `1000`. |
+| `UTILA_MAX_POLL_ATTEMPTS` | No | How many times SDP polls before giving up. Defaults to `60`. |
+| `UTILA_DESIGNATED_SIGNERS` | No | Comma-separated Utila user resources that sign SDP's requests. Defaults to `users/$UTILA_SERVICE_ACCOUNT_EMAIL`. |
+
+SDP treats Utila as configured on the deployment once
+`UTILA_SERVICE_ACCOUNT_EMAIL`, `UTILA_SERVICE_ACCOUNT_PRIVATE_KEY`, and
+`UTILA_VAULT_ID` are set. Utila is a manual provider, so each organization also
+needs it enabled: add
+`{"sdp": {"providerOverrides": {"custody": {"utila": true}}}}` to the
+organization's private metadata in the Clerk dashboard, the same way
+[First Devnet Deployment](/docs/self-hosting/first-devnet-deployment) enables
+the local signer. Merge it with any overrides already there.
+
+When an organization sets up Utila, SDP creates a new Solana wallet inside the
+configured vault. Additional wallets are created in the same vault.
+
+### How signing works
+
+For each transaction, SDP submits a signing request to Utila naming the
+designated signers, without publishing it, then polls until Utila returns the
+signed transaction. With the defaults, SDP waits for 60 polls one second apart,
+about a minute, before the signing request fails. The designated signers must
+approve or sign within that window.
+
+If your Utila vault needs an operator-run co-signer to sign as a designated
+signer, host it outside the SDP stack as described in
+[Production pattern](#production-pattern). Operator scaffolding for running a
+co-signer on Cloud Run lives in `infra/utila/cloud-run/`. Protect the endpoint
+with Cloud Run IAM or runtime-level request verification.
 
 ---
 
