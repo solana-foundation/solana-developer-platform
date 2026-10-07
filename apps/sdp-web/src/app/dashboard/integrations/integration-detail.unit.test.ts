@@ -4,7 +4,6 @@ import {
   resolveComplianceIntegrations,
   resolveCustodyIntegrations,
   resolveRampIntegrations,
-  resolveRpcIntegrations,
 } from "./integrations-status";
 
 const on = { entitled: true, configured: true, enabled: true };
@@ -14,7 +13,6 @@ const INPUTS = {
     connectedProviders: ["privy"],
     enabledProviders: ["privy", "para"],
   }),
-  rpc: resolveRpcIntegrations({ selectedProvider: "helius", entries: { helius: on } }),
   ramps: resolveRampIntegrations({ moonpay: on }),
   compliance: resolveComplianceIntegrations({}),
 };
@@ -42,7 +40,6 @@ describe("integration detail", () => {
   });
 
   it("resolves every non-custody family", () => {
-    expect(resolveIntegrationDetail({ provider: "helius", ...INPUTS })?.family).toBe("rpc");
     expect(resolveIntegrationDetail({ provider: "moonpay", ...INPUTS })?.status).toBe("enabled");
     expect(resolveIntegrationDetail({ provider: "range", ...INPUTS })?.family).toBe("compliance");
   });
@@ -57,7 +54,7 @@ describe("integration detail", () => {
   it("recognises every provider the catalog can render, without a hand-written list", () => {
     // Guards the drift Opeyemi flagged: a newly added ramp used to get a card
     // that 404'd on click, because the id lists here were literals.
-    for (const family of [INPUTS.rpc, INPUTS.ramps, INPUTS.compliance]) {
+    for (const family of [INPUTS.ramps, INPUTS.compliance]) {
       for (const row of family) {
         expect(isKnownIntegrationProvider(row.provider)).toBe(true);
       }
@@ -70,10 +67,5 @@ describe("integration detail", () => {
   it("rejects unknown providers before any data fetch", () => {
     expect(isKnownIntegrationProvider("not-a-provider")).toBe(false);
     expect(resolveIntegrationDetail({ provider: "nope", ...INPUTS })).toBeNull();
-  });
-
-  it("rejects SDP's round-robin routing mode as an integration provider", () => {
-    expect(isKnownIntegrationProvider("default")).toBe(false);
-    expect(resolveIntegrationDetail({ provider: "default", ...INPUTS })).toBeNull();
   });
 });

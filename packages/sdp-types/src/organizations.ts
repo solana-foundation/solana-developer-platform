@@ -37,7 +37,6 @@ export interface Organization {
 }
 
 export interface OrganizationSettings {
-  rpcProvider?: OrganizationRpcProvider;
   defaultEnvironment?: "sandbox" | "production";
   webhookSecret?: string;
   allowedIpAddresses?: string[];

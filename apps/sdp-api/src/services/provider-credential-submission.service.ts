@@ -65,7 +65,7 @@ type SubmissionSource = "stored" | "runtime";
 
 export interface SafeProviderCredential {
   id: string;
-  /** Widened alongside ProviderCredentialRow: RPC connections store credentials here too. */
+  /** Widened alongside ProviderCredentialRow: Helius Rings connections store credentials here too. */
   provider: string;
   label: string;
   scope: "organization" | "project";

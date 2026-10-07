@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { badRequest, badRequestParams } from "@/lib/errors";
 import { created, success } from "@/lib/response";
-import { rpcAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
+import { organizationCredentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import {
   createRingsConnection,
@@ -24,7 +24,7 @@ const connectionInputSchema = z.strictObject({
 const connectionParamsSchema = z.strictObject({ connectionId: z.string().trim().min(1) });
 
 const routes = new Hono<{ Bindings: Env }>();
-routes.use("*", rpcAdminAuthMiddleware());
+routes.use("*", organizationCredentialAdminAuthMiddleware());
 routes.use("*", projectContextMiddleware());
 
 routes.get("/connections", async (c) => success(c, await listRingsConnections(c)));

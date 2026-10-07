@@ -5,8 +5,7 @@ export type OnboardingStatusResponse = {
   } | null;
   setup?: {
     status: "not_started" | "in_progress" | "complete";
-    currentStep: "rpc" | "custody" | "complete";
-    rpcProvider: import("@sdp/types").OrganizationRpcProvider | null;
+    currentStep: "custody" | "complete";
     custodyProvider: import("@sdp/types").CustodyProvider | null;
     completedAt: string | null;
     version: number;

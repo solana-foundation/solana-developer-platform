@@ -207,32 +207,6 @@ describe("Organizations routes", () => {
       );
       expect(res.status).toBe(200);
     });
-    it("allows Helius for individual-tier organizations when configured", async () => {
-      const originalHeliusUrl = env.SOLANA_RPC_HELIUS_URL;
-      env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test";
-      const res = await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            settings: {
-              rpcProvider: "helius",
-            },
-          }),
-        },
-        env
-      );
-      env.SOLANA_RPC_HELIUS_URL = originalHeliusUrl;
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Organization;
-      };
-      expect(required(body.data.settings).rpcProvider).toBe("helius");
-    });
     it("rejects empty update", async () => {
       const res = await app.request(
         `/v1/organizations/${TEST_ORG.id}`,

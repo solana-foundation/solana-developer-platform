@@ -14,13 +14,18 @@ const ALL_DISABLED = {
 };
 
 describe("integration feature gates", () => {
-  it("keeps only the general RPC family when every product module is disabled", () => {
-    const families: IntegrationFamily[] = ["custody", "rpc", "ramps", "compliance", "privacy"];
-
-    expect(families.filter((family) => isIntegrationFamilyEnabled(family, ALL_DISABLED))).toEqual([
-      "rpc",
-    ]);
-  });
+  it.each([
+    ["custody", "custody"],
+    ["ramps", "payments"],
+    ["compliance", "policies"],
+    ["privacy", "privateChannels"],
+  ] as const satisfies ReadonlyArray<readonly [IntegrationFamily, keyof typeof ALL_DISABLED]>)(
+    "shows the %s family only with the %s module",
+    (family, flag) => {
+      expect(isIntegrationFamilyEnabled(family, ALL_DISABLED)).toBe(false);
+      expect(isIntegrationFamilyEnabled(family, { ...ALL_DISABLED, [flag]: true })).toBe(true);
+    }
+  );
 
   it.each([
     ["privy", "custody"],
@@ -29,9 +34,5 @@ describe("integration feature gates", () => {
   ] as const)("gates %s with the %s module", (provider, flag) => {
     expect(isIntegrationProviderEnabled(provider, ALL_DISABLED)).toBe(false);
     expect(isIntegrationProviderEnabled(provider, { ...ALL_DISABLED, [flag]: true })).toBe(true);
-  });
-
-  it("keeps general RPC provider routes available", () => {
-    expect(isIntegrationProviderEnabled("helius", ALL_DISABLED)).toBe(true);
   });
 });

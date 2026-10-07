@@ -1,15 +1,7 @@
-export type SdpRpcErrorCode =
-  | "BAD_REQUEST"
-  | "FORBIDDEN"
-  | "NOT_FOUND"
-  | "INTERNAL_ERROR"
-  | "SOLANA_RPC_ERROR";
+export type SdpRpcErrorCode = "BAD_REQUEST" | "SOLANA_RPC_ERROR";
 
 const ERROR_STATUS_CODES: Record<SdpRpcErrorCode, number> = {
   BAD_REQUEST: 400,
-  FORBIDDEN: 403,
-  NOT_FOUND: 404,
-  INTERNAL_ERROR: 500,
   SOLANA_RPC_ERROR: 502,
 };
 

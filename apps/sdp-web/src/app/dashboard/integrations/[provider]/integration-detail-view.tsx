@@ -1,4 +1,4 @@
-import type { CustodyWalletSummary, OrganizationRpcProvider, SafeRpcConnection } from "@sdp/types";
+import type { CustodyWalletSummary } from "@sdp/types";
 import { VenetianMaskIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -9,7 +9,6 @@ import type {
 } from "@/app/dashboard/custody/connections/connections.data";
 import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
-import { RpcProviderMark } from "@/app/dashboard/integrations/rpc-provider-mark";
 import { docsHref } from "@/components/dashboard-nav";
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
@@ -17,48 +16,6 @@ import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { CustodyConnectionCount, CustodyConnectionsSection } from "../custody-connections-section";
 import type { IntegrationDetail } from "../integration-detail";
-import { RpcByokSection } from "../rpc-byok-section";
-import { RpcConnectionPanel } from "../rpc-connection-panel";
-
-/**
- * What the RPC family needs beyond the shared detail shape. Absent for every
- * other family, and absent for RPC only if the organization could not be
- * resolved — in which case the page falls back to the Settings link.
- */
-export interface RpcConnectionContext {
-  activeProvider: OrganizationRpcProvider;
-  canManage: boolean;
-  /** Whether this deployment holds an endpoint for the provider on the page. */
-  isEnabledInDeployment: boolean;
-  organizationId: string;
-  /**
-   * Tenant-owned connections for this provider; absent for SDP's own rail,
-   * `null` when the read failed and we must not claim there are none.
-   */
-  byokConnections?: SafeRpcConnection[] | null | "restricted";
-  /** `null` when it could not be read, or the viewer may not manage it. */
-  credentialMode?: "managed" | "byok" | null;
-  /** Live connections across the whole organization, for the fail-closed warning. */
-  liveConnectionCount?: number;
-  /**
-   * Live connections this project holds across every provider, not just the one
-   * on this page. A project may hold a proven key per provider, so "is this the
-   * last one" cannot be answered from the narrowed list the section renders.
-   */
-  liveProjectConnections?: number;
-  /**
-   * Providers this project holds its own key for. Read by the header status,
-   * which must not call a provider the tenant configured themselves "Not
-   * configured" just because this deployment carries no URL for it.
-   */
-  providersWithOwnKey?: readonly string[];
-  /**
-   * The provider whose connection the relay would actually route this project
-   * through, whichever provider that is. `null` when nothing of the tenant's
-   * own serves it and the platform selection still decides.
-   */
-  servingProvider?: string | null;
-}
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 
@@ -79,11 +36,16 @@ function statusKey(status: IntegrationDetail["status"]): Parameters<Translate>[0
   }
 }
 
+/**
+ * The family title key shown under the provider name.
+ *
+ * @param family - The provider's integration family.
+ * @returns The message key for the family title.
+ */
 function familyKey(family: IntegrationDetail["family"]): Parameters<Translate>[0] {
   return (
     {
       custody: "Shared.integrations.custodyTitle",
-      rpc: "Shared.integrations.rpcTitle",
       ramps: "Shared.integrations.rampsTitle",
       compliance: "Shared.integrations.complianceTitle",
       privacy: "Shared.integrations.privacyTitle",
@@ -91,12 +53,16 @@ function familyKey(family: IntegrationDetail["family"]): Parameters<Translate>[0
   )[family];
 }
 
+/**
+ * The provider's logo mark for the detail header.
+ *
+ * @param props - The component props.
+ * @param props.detail - The resolved provider detail.
+ * @returns The family-specific mark.
+ */
 function DetailMark({ detail }: { detail: IntegrationDetail }) {
   if (detail.family === "custody" && detail.custodyEntry) {
     return <WalletProviderMark provider={detail.custodyEntry.id} size="sm" />;
-  }
-  if (detail.family === "rpc") {
-    return <RpcProviderMark provider={detail.provider as OrganizationRpcProvider} />;
   }
   if (detail.family === "privacy") {
     return <VenetianMaskIcon aria-hidden className="size-5 text-secondary" strokeWidth={1.8} />;
@@ -126,6 +92,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/**
+ * The header's state-correct action, if the provider's state offers one.
+ *
+ * @param detail - The resolved provider detail.
+ * @param t - The translator.
+ * @returns The action button, or `null` when no action applies.
+ */
 function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
   // With the connection state unreadable, no state-dependent action is honest.
   if (detail.status === "unknown") {
@@ -156,9 +129,6 @@ function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
       </Button>
     );
   }
-  // RPC acts through the connection panel below. When the organization could
-  // not be resolved the panel does not render either, and there is no honest
-  // action left to offer -- Settings no longer holds RPC (HOO-787).
   return null;
 }
 
@@ -230,9 +200,15 @@ function DetailHeader({
 /**
  * The project's connections, or the reason there are none on screen.
  *
- * Placed above everything but the header for the same reason as the RPC panel:
- * on an integration you can act on, what this project has connected outranks
- * what the provider is.
+ * Placed above everything but the header: on an integration you can act on,
+ * what this project has connected outranks what the provider is.
+ *
+ * @param props - The block's inputs.
+ * @param props.detail - The integration being shown.
+ * @param props.custodyConnections - The project's custody connections for this provider.
+ * @param props.canManageCustody - Whether the caller may manage custody connections.
+ * @param props.t - The translator.
+ * @returns The connections block.
  */
 function CustodyConnectionsBlock({
   detail,
@@ -268,55 +244,6 @@ function CustodyConnectionsBlock({
       canManageCustody={canManageCustody}
       provider={detail.custodyEntry.id}
     />
-  );
-}
-
-function RpcSections({
-  detail,
-  rpc,
-  t,
-}: {
-  detail: IntegrationDetail;
-  rpc?: RpcConnectionContext;
-  t: Translate;
-}) {
-  if (detail.family !== "rpc" || !rpc) {
-    return null;
-  }
-  return (
-    <>
-      <Section title={t("Shared.integrations.rpcConnectionTitle")}>
-        <RpcConnectionPanel
-          activeProvider={rpc.activeProvider}
-          canManage={rpc.canManage}
-          isEnabledInDeployment={rpc.isEnabledInDeployment}
-          organizationId={rpc.organizationId}
-          hasOwnKey={
-            Array.isArray(rpc.byokConnections) &&
-            rpc.byokConnections.some(
-              (connection) => connection.scope === "project" && connection.status !== "deactivated"
-            )
-          }
-          provider={detail.provider as OrganizationRpcProvider}
-          servingProvider={rpc.servingProvider ?? null}
-          status={detail.status}
-        />
-      </Section>
-
-      {rpc.byokConnections !== undefined ? (
-        <Section title={t("Shared.integrations.rpcByokTitle")}>
-          <RpcByokSection
-            canManage={rpc.canManage}
-            connections={rpc.byokConnections}
-            credentialMode={rpc.credentialMode ?? null}
-            liveConnectionCount={rpc.liveConnectionCount ?? 0}
-            liveProjectConnections={rpc.liveProjectConnections ?? 0}
-            servingProvider={rpc.servingProvider ?? null}
-            provider={detail.provider}
-          />
-        </Section>
-      ) : null}
-    </>
   );
 }
 
@@ -404,14 +331,22 @@ function HowItConnectsBody({ detail, t }: { detail: IntegrationDetail; t: Transl
   );
 }
 
+/**
+ * One provider's detail page: header, custody connections, and the shared
+ * about, capabilities, connection and resources sections.
+ *
+ * @param props - The component props.
+ * @param props.detail - The resolved provider detail.
+ * @param props.custodyConnections - The project's custody connections, or why there are none.
+ * @param props.canManageCustody - Whether the viewer may manage custody connections.
+ * @returns The rendered detail page.
+ */
 export async function IntegrationDetailView({
   detail,
-  rpc,
   custodyConnections = null,
   canManageCustody = false,
 }: {
   detail: IntegrationDetail;
-  rpc?: RpcConnectionContext;
   custodyConnections?: CustodyConnectionsContext;
   canManageCustody?: boolean;
 }) {
@@ -432,8 +367,6 @@ export async function IntegrationDetailView({
         canManageCustody={canManageCustody}
         t={t}
       />
-
-      <RpcSections detail={detail} rpc={rpc} t={t} />
 
       {detail.descriptionKey ? (
         <Section title={t("Shared.integrations.detailAbout")}>

@@ -85,7 +85,7 @@ describe("integrations route", () => {
     expect(
       isDashboardNavItemActive(
         "/dashboard/integrations?tab=custody",
-        "/dashboard/integrations?tab=rpc"
+        "/dashboard/integrations?tab=ramps"
       )
     ).toBe(false);
   });

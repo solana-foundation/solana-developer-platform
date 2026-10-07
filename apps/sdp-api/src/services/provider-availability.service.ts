@@ -9,11 +9,9 @@ import {
   isEarnProviderSurfaced,
   isRampProviderSurfaced,
   normalizeOrganizationTier,
-  ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
   type OrganizationProviderFamily,
   type OrganizationProviderOverrides,
-  type OrganizationRpcProvider,
   type OrganizationSettings,
   type OrganizationTier,
   type ProviderAvailabilityEntry,
@@ -56,7 +54,6 @@ type ProviderAvailabilityDefinition = {
 
 type ProviderAvailabilityDefinitions = {
   custody: Record<CustodyProvider, ProviderAvailabilityDefinition>;
-  rpc: Record<OrganizationRpcProvider, ProviderAvailabilityDefinition>;
   compliance: Record<ComplianceProviderId, ProviderAvailabilityDefinition>;
   ramps: Record<RampProviderId, ProviderAvailabilityDefinition>;
   earn: Record<EarnProviderId, ProviderAvailabilityDefinition>;
@@ -64,7 +61,6 @@ type ProviderAvailabilityDefinitions = {
 
 type ProviderIdByFamily = {
   custody: CustodyProvider;
-  rpc: OrganizationRpcProvider;
   compliance: ComplianceProviderId;
   ramps: RampProviderId;
   earn: EarnProviderId;
@@ -199,36 +195,6 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
           "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY",
           "UTILA_VAULT_ID",
         ]),
-    },
-  },
-  rpc: {
-    default: {
-      label: "SDP/default",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_URL"),
-    },
-    alchemy: {
-      label: "Alchemy",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_ALCHEMY_URL"),
-    },
-    helius: {
-      label: "Helius",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_HELIUS_URL"),
-    },
-    nodit: {
-      label: "Nodit",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_NODIT_URL"),
-    },
-    quicknode: {
-      label: "QuickNode",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_QUICKNODE_URL"),
-    },
-    triton: {
-      label: "Triton",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_TRITON_URL"),
-    },
-    validationcloud: {
-      label: "Validation Cloud",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_VALIDATIONCLOUD_URL"),
     },
   },
   compliance: {
@@ -487,11 +453,6 @@ export function parseProviderOverridesFromClerkMetadata(
     next.custody = custody;
   }
 
-  const rpc = parseBooleanOverrides(record.rpc, ORGANIZATION_RPC_PROVIDERS);
-  if (rpc) {
-    next.rpc = rpc;
-  }
-
   const compliance = parseBooleanOverrides(record.compliance, COMPLIANCE_PROVIDERS);
   if (compliance) {
     next.compliance = compliance;
@@ -563,7 +524,6 @@ function buildConfiguredProviderEntries<T extends string>(
 function getConfiguredProviders(env: Env) {
   return {
     custody: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.custody, env),
-    rpc: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.rpc, env),
     compliance: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.compliance, env),
     ramps: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.ramps, env),
     earn: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.earn, env),
@@ -615,7 +575,6 @@ export async function getProviderAvailability(
     tier: resolved.tier,
     providers: {
       custody: buildAvailabilityEntries(resolved.providers.custody, configured.custody),
-      rpc: buildAvailabilityEntries(resolved.providers.rpc, configured.rpc),
       compliance: buildAvailabilityEntries(resolved.providers.compliance, configured.compliance),
       ramps: buildAvailabilityEntries(resolved.providers.ramps, configured.ramps),
       earn: buildAvailabilityEntries(resolved.providers.earn, configured.earn),
@@ -713,13 +672,6 @@ export async function assertProviderAvailable(
   organizationId: string,
   family: "custody",
   providerId: CustodyProvider
-): Promise<void>;
-export async function assertProviderAvailable(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  family: "rpc",
-  providerId: OrganizationRpcProvider
 ): Promise<void>;
 export async function assertProviderAvailable(
   env: Env,
@@ -858,7 +810,6 @@ export async function getEnabledProviders(env: Env, db: DatabaseClient, organiza
   return {
     tier: access.tier,
     custody: CUSTODY_PROVIDERS.filter((provider) => access.providers.custody[provider]?.enabled),
-    rpc: ORGANIZATION_RPC_PROVIDERS.filter((provider) => access.providers.rpc[provider]?.enabled),
     compliance: COMPLIANCE_PROVIDERS.filter(
       (provider) => access.providers.compliance[provider]?.enabled
     ),

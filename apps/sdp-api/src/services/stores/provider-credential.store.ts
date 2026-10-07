@@ -21,7 +21,7 @@ export interface ProviderCredentialRow {
   id: string;
   organization_id: string;
   project_id: string | null;
-  /** Widened from the privy-only literal: RPC connections store credentials here too. */
+  /** Widened from the privy-only literal: Helius Rings connections store credentials here too. */
   provider: string;
   label: string;
   scope: "organization" | "project";
@@ -1175,7 +1175,7 @@ export class ProviderCredentialStore {
     id: string;
     organizationId: string;
     projectId: string | null;
-    /** Provider family this credential belongs to; RPC connections reuse this insert. */
+    /** Provider family this credential belongs to; Helius Rings connections reuse this insert. */
     provider: string;
     label: string;
     scope: "organization" | "project";
