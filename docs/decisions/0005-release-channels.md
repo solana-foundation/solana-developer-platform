@@ -21,18 +21,20 @@ deployment can run.
   and dashboard, regardless of its flag. Inside it, module flags apply as before.
 - Each module has a maturity stage in code (`SDP_MODULE_STAGES`). A release
   channel runs every module at or above its own level, so each channel contains
-  the more mature ones. A test pins the `stable` module list.
+  the more mature ones. A test pins each channel's module list.
 - Ramps has no stage of its own. Each ramp provider has one
   (`SDP_RAMP_PROVIDER_STAGES`), and Ramps is in a release channel when at least
   one provider is, so providers launch one at a time.
-- An unknown release channel fails at startup. Names are lowercase and
-  case-sensitive. Managed production must set it explicitly.
+- Markets has no stage of its own either: it is in a release channel when Earn
+  or DvP is, so promoting one sub-module always takes effect.
+- Every deployment must set it: a missing or unknown release channel fails at
+  startup in the API and its jobs. Names are lowercase and case-sensitive.
 
 | Release channel | Modules                                           | Target deployment                            |
 | --------------- | ------------------------------------------------- | -------------------------------------------- |
 | `stable`        | Custody, Payments, Recurring payments, Compliance | Production                                   |
 | `beta`          | `stable` plus modules in final validation         | Stage                                        |
-| `experimental`  | All modules                                       | Development, previews, self-hosted (default) |
+| `experimental`  | All modules                                       | Development, previews, self-hosted           |
 
 Every deployment starts on `experimental`, which matches the behavior before
 release channels. Stage and production move to `beta` and `stable` in a later

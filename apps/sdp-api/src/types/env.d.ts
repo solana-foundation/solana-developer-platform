@@ -62,7 +62,7 @@ export interface Env {
   SDP_DEPLOYMENT_MODE?: "managed" | "self_hosted";
 
   // Release channel: which modules this deployment can run at all (`@sdp/types`
-  // release channels). Unset means "experimental". An unknown name fails at boot.
+  // release channels). Required: a missing or unknown name fails at boot.
   SDP_RELEASE_CHANNEL?: string;
 
   // Credential secret store selection for BYO custody credentials.

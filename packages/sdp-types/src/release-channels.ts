@@ -6,7 +6,8 @@
  * feature flag says; a module inside it behaves exactly as its flags decide.
  * Bringing a module back is a reviewed change to this file, never an env var.
  *
- * `SDP_RELEASE_CHANNEL` selects the release channel. Unset means `experimental`, today's behavior.
+ * `SDP_RELEASE_CHANNEL` selects the release channel. It is required: a missing value
+ * fails at boot rather than running every module.
  */
 
 import { z } from "zod";
@@ -39,8 +40,11 @@ export type SdpReleaseChannel = (typeof SDP_RELEASE_CHANNEL_NAMES)[number];
  * own level, so each channel contains the more mature ones by construction.
  * Promoting a module is a one-line change here.
  *
- * Ramps has no stage of its own: it is in a release channel when at least one
- * ramp provider is (`SDP_RAMP_PROVIDER_STAGES`), so providers launch one at a time.
+ * Two modules have no stage of their own:
+ * - Ramps is in a release channel when at least one ramp provider is
+ *   (`SDP_RAMP_PROVIDER_STAGES`), so providers launch one at a time.
+ * - Markets is in a release channel when Earn or DvP is, so promoting one
+ *   sub-module always takes effect.
  */
 export const SDP_MODULE_STAGES = {
   custody: "stable",
@@ -49,12 +53,13 @@ export const SDP_MODULE_STAGES = {
   compliance: "stable",
   policies: "experimental",
   issuance: "experimental",
-  markets: "experimental",
   earn: "experimental",
   dvp: "experimental",
   private_channels: "experimental",
   helius_rings: "experimental",
-} as const satisfies Record<Exclude<SdpModule, "ramps">, SdpReleaseChannel>;
+} as const satisfies Record<Exclude<SdpModule, "ramps" | "markets">, SdpReleaseChannel>;
+
+export type SdpRampProviderStages = Record<RampProviderId, SdpReleaseChannel>;
 
 /** Each ramp provider's maturity. Promoting a provider is a one-line change here. */
 export const SDP_RAMP_PROVIDER_STAGES = {
@@ -65,21 +70,20 @@ export const SDP_RAMP_PROVIDER_STAGES = {
   coinbase: "experimental",
   mural: "experimental",
   stripe: "experimental",
-} as const satisfies Record<RampProviderId, SdpReleaseChannel>;
-
-export const DEFAULT_SDP_RELEASE_CHANNEL: SdpReleaseChannel = "experimental";
+} as const satisfies SdpRampProviderStages;
 
 const sdpReleaseChannelSchema = z.enum(SDP_RELEASE_CHANNEL_NAMES);
 
 /**
- * Resolves `SDP_RELEASE_CHANNEL`. Unset or blank is the documented `experimental` default.
- * Throws on an unknown name so a typo fails at boot instead of silently
- * running every module.
+ * Resolves `SDP_RELEASE_CHANNEL`. Throws when it is missing or unknown, so a forgotten
+ * variable or a typo fails at boot instead of silently running every module.
  */
 export function resolveSdpReleaseChannel(value: string | undefined): SdpReleaseChannel {
   const name = value?.trim();
   if (!name) {
-    return DEFAULT_SDP_RELEASE_CHANNEL;
+    throw new Error(
+      `SDP_RELEASE_CHANNEL is required (one of ${SDP_RELEASE_CHANNEL_NAMES.join(", ")})`
+    );
   }
   const parsed = sdpReleaseChannelSchema.safeParse(name);
   if (!parsed.success) {
@@ -98,29 +102,43 @@ function isStageInReleaseChannel(stage: SdpReleaseChannel, releaseChannel: SdpRe
   return maturity(stage) >= maturity(releaseChannel);
 }
 
+/**
+ * @param rampProviderStages - `SDP_RAMP_PROVIDER_STAGES`; tests pass their own table.
+ */
 export function isRampProviderInReleaseChannel(
   releaseChannel: SdpReleaseChannel,
   provider: RampProviderId,
-  stages: Record<RampProviderId, SdpReleaseChannel> = SDP_RAMP_PROVIDER_STAGES
+  rampProviderStages: SdpRampProviderStages
 ): boolean {
-  return isStageInReleaseChannel(stages[provider], releaseChannel);
+  return isStageInReleaseChannel(rampProviderStages[provider], releaseChannel);
 }
 
+/**
+ * @param rampProviderStages - `SDP_RAMP_PROVIDER_STAGES`; tests pass their own table.
+ */
 export function isModuleInReleaseChannel(
   releaseChannel: SdpReleaseChannel,
   module: SdpModule,
-  rampProviderStages: Record<RampProviderId, SdpReleaseChannel> = SDP_RAMP_PROVIDER_STAGES
+  rampProviderStages: SdpRampProviderStages
 ): boolean {
   if (module === "ramps") {
     return RAMP_PROVIDERS.some((provider) =>
       isRampProviderInReleaseChannel(releaseChannel, provider, rampProviderStages)
     );
   }
+  if (module === "markets") {
+    return (
+      isModuleInReleaseChannel(releaseChannel, "earn", rampProviderStages) ||
+      isModuleInReleaseChannel(releaseChannel, "dvp", rampProviderStages)
+    );
+  }
   return isStageInReleaseChannel(SDP_MODULE_STAGES[module], releaseChannel);
 }
 
 function modulesInReleaseChannel(releaseChannel: SdpReleaseChannel): readonly SdpModule[] {
-  return SDP_MODULES.filter((module) => isModuleInReleaseChannel(releaseChannel, module));
+  return SDP_MODULES.filter((module) =>
+    isModuleInReleaseChannel(releaseChannel, module, SDP_RAMP_PROVIDER_STAGES)
+  );
 }
 
 /** Each release channel's modules, derived from `SDP_MODULE_STAGES`. */

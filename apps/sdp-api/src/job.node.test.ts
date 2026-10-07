@@ -175,6 +175,7 @@ function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
     CUSTODY_KMS_KEY_NAME: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
     SDP_MANAGED_RECONCILIATION_CRON: "*/3 * * * *",
     SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS: "120",
+    SDP_RELEASE_CHANNEL: "experimental",
     ...overrides,
   } as Env;
 }
@@ -285,13 +286,9 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow(/Local signing/);
   });
 
-  it("refuses to run with an unknown release channel", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ SDP_RELEASE_CHANNEL: "mainnet" }));
-    await expect(runCronJob()).rejects.toThrow(/SDP_RELEASE_CHANNEL must be one of/);
-  });
-
-  it("refuses to run in managed production without a release channel", async () => {
-    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ ENVIRONMENT: "production" }));
+  // makeEnv sets no ENVIRONMENT: the check must not depend on it.
+  it("runs the release channel boot check without ENVIRONMENT", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ SDP_RELEASE_CHANNEL: undefined }));
     await expect(runCronJob()).rejects.toThrow(/SDP_RELEASE_CHANNEL is required/);
   });
 

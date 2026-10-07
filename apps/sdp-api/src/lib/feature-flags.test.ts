@@ -1,12 +1,9 @@
 import {
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
-  RAMP_PROVIDERS,
-  type RampProviderId,
   resolveSdpReleaseChannel,
-  SDP_MODULES,
   SDP_RELEASE_CHANNELS,
-  type SdpReleaseChannel,
+  type SdpRampProviderStages,
 } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
@@ -21,12 +18,13 @@ import {
   isEarnVaultSponsorshipEnabled,
   isHeliusRingsEnabled,
   isMarketsEnabled,
-  isModuleAvailable,
   isPrivateChannelsEnabled,
   isPrivyByokEnabled,
-  isRampProviderAvailable,
   resolveNewCustodySetupMethod,
 } from "./feature-flags";
+
+// The channel with every module, so these cases exercise each flag on its own.
+const EXPERIMENTAL = { SDP_RELEASE_CHANNEL: "experimental" } as const;
 
 describe("isAssetProfilesEnabled", () => {
   it.each([undefined, "managed"] as const)(
@@ -34,6 +32,7 @@ describe("isAssetProfilesEnabled", () => {
     (deploymentMode) => {
       expect(
         isAssetProfilesEnabled({
+          ...EXPERIMENTAL,
           ENVIRONMENT: "production",
           SDP_DEPLOYMENT_MODE: deploymentMode,
         })
@@ -46,6 +45,7 @@ describe("isAssetProfilesEnabled", () => {
     (flag) => {
       expect(
         isAssetProfilesEnabled({
+          ...EXPERIMENTAL,
           ENVIRONMENT: "development",
           SDP_FLAG_ASSET_PROFILES: flag,
           SDP_DEPLOYMENT_MODE: "self_hosted",
@@ -59,6 +59,7 @@ describe("isAssetProfilesEnabled", () => {
     (flag) => {
       expect(
         isAssetProfilesEnabled({
+          ...EXPERIMENTAL,
           ENVIRONMENT: "production",
           SDP_FLAG_ASSET_PROFILES: flag,
           SDP_DEPLOYMENT_MODE: "self_hosted",
@@ -70,6 +71,7 @@ describe("isAssetProfilesEnabled", () => {
   it.each(["1", "true", " TRUE ", "yes", "on"])("honors the production opt-in value %s", (flag) => {
     expect(
       isAssetProfilesEnabled({
+        ...EXPERIMENTAL,
         ENVIRONMENT: "production",
         SDP_FLAG_ASSET_PROFILES: flag,
         SDP_DEPLOYMENT_MODE: "self_hosted",
@@ -80,11 +82,15 @@ describe("isAssetProfilesEnabled", () => {
 
 describe("isPrivateChannelsEnabled", () => {
   it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
-    expect(isPrivateChannelsEnabled({ PRIVATE_CHANNELS_ENABLED: flag })).toBe(false);
+    expect(isPrivateChannelsEnabled({ ...EXPERIMENTAL, PRIVATE_CHANNELS_ENABLED: flag })).toBe(
+      false
+    );
   });
 
   it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
-    expect(isPrivateChannelsEnabled({ PRIVATE_CHANNELS_ENABLED: flag })).toBe(true);
+    expect(isPrivateChannelsEnabled({ ...EXPERIMENTAL, PRIVATE_CHANNELS_ENABLED: flag })).toBe(
+      true
+    );
   });
 });
 
@@ -146,21 +152,25 @@ describe("resolveNewCustodySetupMethod", () => {
 
 describe("isMarketsEnabled", () => {
   it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
-    expect(isMarketsEnabled({ MARKETS_ENABLED: flag })).toBe(false);
+    expect(isMarketsEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: flag })).toBe(false);
   });
 
   it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
-    expect(isMarketsEnabled({ MARKETS_ENABLED: flag })).toBe(true);
+    expect(isMarketsEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: flag })).toBe(true);
   });
 });
 
 describe("isEarnEnabled", () => {
   it("is disabled when both flags are unset", () => {
-    expect(isEarnEnabled({ MARKETS_ENABLED: undefined, EARN_ENABLED: undefined })).toBe(false);
+    expect(
+      isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: undefined, EARN_ENABLED: undefined })
+    ).toBe(false);
   });
 
   it("is disabled when Markets is on but Earn is unset", () => {
-    expect(isEarnEnabled({ MARKETS_ENABLED: "true", EARN_ENABLED: undefined })).toBe(false);
+    expect(
+      isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: "true", EARN_ENABLED: undefined })
+    ).toBe(false);
   });
 
   // The parent gate has to win: Earn is a Markets sub-module, so disabling
@@ -168,14 +178,18 @@ describe("isEarnEnabled", () => {
   it.each([undefined, "", "false", "0", "off"])(
     "stays disabled when Earn is on but Markets is %s",
     (markets) => {
-      expect(isEarnEnabled({ MARKETS_ENABLED: markets, EARN_ENABLED: "true" })).toBe(false);
+      expect(
+        isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: markets, EARN_ENABLED: "true" })
+      ).toBe(false);
     }
   );
 
   it.each(["1", "true", " TRUE ", "yes", "on"])(
     "honors the opt-in value %s on both flags",
     (flag) => {
-      expect(isEarnEnabled({ MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(true);
+      expect(isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(
+        true
+      );
     }
   );
 });
@@ -240,96 +254,58 @@ describe("isEarnVaultSponsorshipEnabled", () => {
 });
 
 describe("release channels", () => {
-  it.each([undefined, "", "  "])(
-    "defaults to the experimental release channel when SDP_RELEASE_CHANNEL is %j",
-    (value) => {
-      expect(resolveSdpReleaseChannel(value)).toBe("experimental");
-    }
-  );
+  it.each([undefined, "", "  "])("refuses a missing SDP_RELEASE_CHANNEL (%j)", (value) => {
+    expect(() => resolveSdpReleaseChannel(value)).toThrow(/SDP_RELEASE_CHANNEL is required/);
+  });
 
-  it("fails loudly on an unknown release channel instead of running every module", () => {
+  it("refuses an unknown release channel instead of running every module", () => {
     expect(() => resolveSdpReleaseChannel("mainnet")).toThrow(/SDP_RELEASE_CHANNEL must be one of/);
   });
 
-  it("requires an explicit release channel in managed production only", () => {
-    const managedProduction = {
-      ENVIRONMENT: "production",
-      SDP_DEPLOYMENT_MODE: "managed",
-    } as const;
-    expect(() => assertSdpReleaseChannelConfigured(managedProduction)).toThrow(
-      /SDP_RELEASE_CHANNEL is required/
-    );
+  it("requires a release channel at boot whatever ENVIRONMENT says", () => {
+    expect(() => assertSdpReleaseChannelConfigured({})).toThrow(/SDP_RELEASE_CHANNEL is required/);
     expect(() =>
-      assertSdpReleaseChannelConfigured({ ...managedProduction, SDP_RELEASE_CHANNEL: "stable" })
+      assertSdpReleaseChannelConfigured({ SDP_RELEASE_CHANNEL: "stable" })
     ).not.toThrow();
-    expect(() =>
-      assertSdpReleaseChannelConfigured({
-        ...managedProduction,
-        SDP_DEPLOYMENT_MODE: "self_hosted",
-      })
-    ).not.toThrow();
-    expect(() =>
-      assertSdpReleaseChannelConfigured({
-        ENVIRONMENT: "development",
-        SDP_DEPLOYMENT_MODE: "managed",
-      })
-    ).not.toThrow();
-    expect(() =>
-      assertSdpReleaseChannelConfigured({
-        ENVIRONMENT: "development",
-        SDP_RELEASE_CHANNEL: "mainnet",
-      })
-    ).toThrow(/SDP_RELEASE_CHANNEL must be one of/);
   });
 
-  it("keeps every module available in the experimental release channel", () => {
-    for (const module of SDP_MODULES) {
-      expect(isModuleAvailable({ SDP_RELEASE_CHANNEL: "experimental" }, module)).toBe(true);
-    }
-  });
-
-  // Pinned on purpose: changing what stable ships must show up in review
-  // as an edit to this list, not only to the manifest.
-  // A module runs in every release channel at or below its own maturity.
-  it.each([
-    ["experimental", "ramps", true],
-    ["beta", "ramps", false],
-    ["stable", "ramps", false],
-    ["experimental", "custody", true],
-    ["beta", "custody", true],
-    ["stable", "custody", true],
-  ] as const)("a %s deployment runs %s: %s", (releaseChannel, module, expected) => {
-    expect(isModuleInReleaseChannel(releaseChannel, module)).toBe(expected);
+  // Pinned on purpose: changing what a release channel ships must show up in review
+  // as an edit to this table, not only to the manifest.
+  it("pins each release channel's modules", () => {
+    expect(SDP_RELEASE_CHANNELS).toEqual({
+      experimental: [
+        "custody",
+        "payments",
+        "recurring_payments",
+        "ramps",
+        "compliance",
+        "policies",
+        "issuance",
+        "markets",
+        "earn",
+        "dvp",
+        "private_channels",
+        "helius_rings",
+      ],
+      beta: ["custody", "payments", "recurring_payments", "compliance"],
+      stable: ["custody", "payments", "recurring_payments", "compliance"],
+    });
   });
 
   it("runs ramps only where at least one ramp provider is in the release channel", () => {
-    const allExperimental = Object.fromEntries(
-      RAMP_PROVIDERS.map((p) => [p, "experimental"])
-    ) as Record<RampProviderId, SdpReleaseChannel>;
-    expect(isModuleInReleaseChannel("stable", "ramps", allExperimental)).toBe(false);
-    expect(isModuleInReleaseChannel("experimental", "ramps", allExperimental)).toBe(true);
-
-    const bvnkInBeta = { ...allExperimental, bvnk: "beta" } as const;
+    const bvnkInBeta: SdpRampProviderStages = {
+      moonpay: "experimental",
+      lightspark: "experimental",
+      bvnk: "beta",
+      moneygram: "experimental",
+      coinbase: "experimental",
+      mural: "experimental",
+      stripe: "experimental",
+    };
     expect(isModuleInReleaseChannel("beta", "ramps", bvnkInBeta)).toBe(true);
     expect(isModuleInReleaseChannel("stable", "ramps", bvnkInBeta)).toBe(false);
     expect(isRampProviderInReleaseChannel("beta", "bvnk", bvnkInBeta)).toBe(true);
     expect(isRampProviderInReleaseChannel("beta", "moonpay", bvnkInBeta)).toBe(false);
-  });
-
-  it("keeps every ramp provider out of stable until it is promoted", () => {
-    for (const provider of RAMP_PROVIDERS) {
-      expect(isRampProviderAvailable({ SDP_RELEASE_CHANNEL: "stable" }, provider)).toBe(false);
-      expect(isRampProviderAvailable({ SDP_RELEASE_CHANNEL: "experimental" }, provider)).toBe(true);
-    }
-  });
-
-  it("pins the stable modules", () => {
-    expect(SDP_RELEASE_CHANNELS.stable).toEqual([
-      "custody",
-      "payments",
-      "recurring_payments",
-      "compliance",
-    ]);
   });
 
   it("keeps release-channel-excluded modules off in stable even with every flag on", () => {

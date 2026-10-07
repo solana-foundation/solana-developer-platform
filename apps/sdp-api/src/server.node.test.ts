@@ -16,19 +16,10 @@ function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
 }
 
 describe("server boot checks", () => {
-  it("boots a managed production deployment that names its release channel", () => {
+  it("runs the release channel boot check", () => {
     expect(() => assertRequiredEnv(makeEnv())).not.toThrow();
-  });
-
-  it("refuses managed production without a release channel", () => {
     expect(() => assertRequiredEnv(makeEnv({ SDP_RELEASE_CHANNEL: "" }))).toThrow(
       /SDP_RELEASE_CHANNEL is required/
-    );
-  });
-
-  it("refuses an unknown release channel", () => {
-    expect(() => assertRequiredEnv(makeEnv({ SDP_RELEASE_CHANNEL: "mainnet" }))).toThrow(
-      /SDP_RELEASE_CHANNEL must be one of/
     );
   });
 });

@@ -5,6 +5,7 @@ import {
   isRampProviderInReleaseChannel,
   type RampProviderId,
   resolveSdpReleaseChannel,
+  SDP_RAMP_PROVIDER_STAGES,
   type SdpModule,
   type SolanaCluster,
 } from "@sdp/types";
@@ -25,7 +26,11 @@ export function isModuleAvailable(
   env: Pick<Env, "SDP_RELEASE_CHANNEL">,
   module: SdpModule
 ): boolean {
-  return isModuleInReleaseChannel(resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL), module);
+  return isModuleInReleaseChannel(
+    resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
+    module,
+    SDP_RAMP_PROVIDER_STAGES
+  );
 }
 
 /** Whether the deployment's release channel includes ramp `provider` (see `SDP_RAMP_PROVIDER_STAGES`). */
@@ -35,26 +40,18 @@ export function isRampProviderAvailable(
 ): boolean {
   return isRampProviderInReleaseChannel(
     resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
-    provider
+    provider,
+    SDP_RAMP_PROVIDER_STAGES
   );
 }
 
 /**
- * Boot check. An unknown release channel always fails; a managed production deployment
- * must also name its release channel, so a forgotten variable cannot ship every module.
- * (Managed stage runs as production too.) Development and self-hosted keep `experimental`.
+ * Boot check: every deployment names a known release channel, so a forgotten variable
+ * or a typo fails at startup instead of shipping every module. It does not read
+ * `ENVIRONMENT`, so a job with a missing or wrong `ENVIRONMENT` is checked too.
  */
-export function assertSdpReleaseChannelConfigured(
-  env: Pick<Env, "SDP_RELEASE_CHANNEL" | "SDP_DEPLOYMENT_MODE" | "ENVIRONMENT">
-): void {
+export function assertSdpReleaseChannelConfigured(env: Pick<Env, "SDP_RELEASE_CHANNEL">): void {
   resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL);
-  if (
-    !env.SDP_RELEASE_CHANNEL?.trim() &&
-    env.ENVIRONMENT === "production" &&
-    !isSelfHostedDeployment(env)
-  ) {
-    throw new Error("SDP_RELEASE_CHANNEL is required in managed production (for example stable)");
-  }
 }
 
 export function isAssetProfilesEnabled(
