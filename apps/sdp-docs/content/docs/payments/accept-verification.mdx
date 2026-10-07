@@ -28,7 +28,7 @@ Outbound wallet transfers move `processing → confirmed → finalized`. Inbound
 | `awaiting_payment` | The quote's delivery mode is `manual_instructions` — SDP is waiting for the payer to fund the account described in the quote. |
 | `settling` | The provider has detected or started processing the payment. |
 | `completed` | The provider reports the ramp settled. |
-| `canceled` | Canceled via `POST /v1/payments/ramps/transfers/cancel` before funding. |
+| `canceled` | The ramp was canceled from the SDP dashboard before it was funded. |
 | `expired` | The funding window elapsed without payment. |
 | `failed` | The provider rejected or reversed the ramp. The `error` field describes why, when set. |
 
