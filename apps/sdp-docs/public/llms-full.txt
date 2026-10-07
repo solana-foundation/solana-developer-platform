@@ -254,14 +254,16 @@ Everything the dashboard does is available through the API. Build against the AP
 
 ## Environments
 
-Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment.
+The environment is a property of the **project**, not of individual requests. Every organization has exactly two projects, one sandbox and one production. Every tenant resource and API key belongs to one of them and inherits that project's environment.
 
-| Environment  | Network      | API key prefix |
+| Project      | Network      | API key prefix |
 | ------------ | ------------ | -------------- |
 | `sandbox`    | devnet       | `sk_test_`     |
 | `production` | mainnet-beta | `sk_live_`     |
 
-Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key.
+Both environments use the same base URL, `https://api.solana.com`, and the same route shapes. The API key you send decides the project, and with it the environment. Develop and test against the sandbox project, then move to production with a production key.
+
+Resources don't carry over between projects: the production project has its own wallets, tokens, and API keys, so set those up there before you go live. Production access is enabled per organization; see [Set Up Your Organization & Projects](/docs/guides/setup-organization).
 
 ## Response conventions
 
@@ -310,29 +312,37 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 SDP's model differs from response-cache designs: the idempotency key is claimed by the **business record itself**, not by a snapshot of the original response.
 
 1. The first request creates the record — a transfer, a batch, an issuance transaction — carrying your key and a fingerprint of the normalized request payload.
-2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in the normal success envelope. Because it is the live record and not a cached response, a replay reflects current state — a transfer that has since finalized comes back `finalized`, not the `processing` you would have seen on the first attempt.
-3. A request with the same key but a **different payload** is rejected with **409 `CONFLICT`** ("Idempotency key already used with different request payload"). The fingerprint comparison is field-normalized, so formatting differences don't cause false conflicts.
+2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in the normal success envelope. Because it is the live record and not a cached response, a replay reflects current state — a transfer that has since finalized comes back `finalized`, not the `processing` you would have seen on the first attempt. Freeze and unfreeze differ in one case: replaying one whose original attempt failed returns **400** with the original error.
+3. A request with the same key but a **different payload** is rejected with **409 `CONFLICT`** ("Idempotency key already used with different request payload"). For transfers and batches, a different source wallet also counts as a different payload. The fingerprint comparison is field-normalized, so formatting differences don't cause false conflicts.
 
-Keys are retained for the lifetime of the record they claimed — there is no TTL, and a replay works for as long as the record exists.
+Keys are retained for the lifetime of the record they claimed — there is no TTL, and a replay works for as long as the record exists. If a mint fails before anything is submitted on-chain, though, SDP releases the key, so a retry with the same key runs as a new request.
 
-The header itself is validated on every `/v1` route (1–255 printable ASCII characters), but only the endpoints below consume it. Elsewhere it is accepted and ignored.
+The header is optional. Every `/v1` route validates it when present (1–255 printable ASCII characters, otherwise `400 BAD_REQUEST`) and echoes it back on the response, but among the public endpoints only the operations below consume it. Elsewhere it is accepted and ignored.
 
 ## Where it applies
 
-Each domain claims keys in its own namespace, and the namespaces are scoped differently:
+These twelve operations accept an `Idempotency-Key`. Each domain claims keys in its own namespace, and the namespaces are scoped differently:
 
-| Domain | Operations | Key namespace |
+| Operation | Endpoint | Key namespace |
 | --- | --- | --- |
-| Payments — transfers | `POST /v1/payments/transfers` | Per project |
-| Payments — batches | `POST /v1/payments/transfer-batches` | Per project |
-| Issuance | Execute-mode deploy, mint, burn, force-burn, freeze, thaw, pause, unpause, seize, and authority transfer | Per organization, shared across **all** issuance operations and tokens |
-| Custody | Provider credential submission (dashboard flow) | Required on every submission |
+| Create a transfer | `POST /v1/payments/transfers` | Per project |
+| Create a transfer batch | `POST /v1/payments/transfer-batches` | Per project |
+| Deploy a token | `POST /v1/issuance/tokens/{tokenId}/deploy` | Issuance, per organization |
+| Mint | `POST /v1/issuance/tokens/{tokenId}/mint` | Issuance, per organization |
+| Burn | `POST /v1/issuance/tokens/{tokenId}/burn` | Issuance, per organization |
+| Force-burn | `POST /v1/issuance/tokens/{tokenId}/force-burn` | Issuance, per organization |
+| Seize | `POST /v1/issuance/tokens/{tokenId}/seize` | Issuance, per organization |
+| Freeze an account | `POST /v1/issuance/tokens/{tokenId}/freeze` | Issuance, per organization |
+| Unfreeze an account | `POST /v1/issuance/tokens/{tokenId}/unfreeze` | Issuance, per organization |
+| Pause token transfers | `POST /v1/issuance/tokens/{tokenId}/pause` | Issuance, per organization |
+| Unpause token transfers | `POST /v1/issuance/tokens/{tokenId}/unpause` | Issuance, per organization |
+| Update an authority | `POST /v1/issuance/tokens/{tokenId}/authority` | Issuance, per organization |
 
-Namespaces are independent across domains — the same key value used on a transfer and on a mint are two separate claims that never collide. Within issuance, however, the namespace is organization-wide: reusing a key for a different issuance operation, even on a different token, returns 409.
+Namespaces are independent across domains — the same key value used on a transfer and on a mint are two separate claims that never collide. Within issuance, however, the namespace is organization-wide: reusing a key for a different issuance operation, even on a different token, returns 409. Issuance keys aren't separated by project either, so never reuse one between your sandbox and production projects.
 
 ## This model is open to change
 
-The per-domain differences above reflect the order in which these surfaces shipped, not a finished design, and we expect them to converge. Treat the core contract as stable — one key per logical operation, replay returns the record, payload mismatch returns 409 — and treat the scoping details (per-project vs per-organization namespaces, which endpoints consume the header) as subject to change. We are considering extending consumption to more mutation endpoints and unifying namespace scoping across domains.
+The per-domain differences above reflect the order in which these surfaces shipped, not a finished design. Treat the core contract as stable — one key per logical operation, replay returns the record, payload mismatch returns 409 — and treat the scoping details (per-project vs per-organization namespaces, which endpoints consume the header) as subject to change.
 
 ---
 
@@ -354,7 +364,7 @@ The `Bearer` prefix is optional — a raw key in the `Authorization` header is a
 
 ## Key scope
 
-Keys are issued per **project** and inherit that project's environment: `sk_test_` keys belong to sandbox projects (devnet), `sk_live_` keys to production projects (mainnet-beta). A key can only reach the wallets, tokens, and payments of the project it was issued for; there is no cross-project or organization-wide key.
+Every key is scoped to exactly one **project** and inherits that project's environment: `sk_test_` keys belong to the sandbox project (devnet), `sk_live_` keys to the production project (mainnet-beta). A key can only reach the wallets, tokens, and payments of its own project; there is no cross-project or organization-wide key. Requests for another project's resources return `404`, and `GET /v1/projects` returns only the key's own project. See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys#choose-the-project) for how a key ends up in the sandbox or production project.
 
 ## Authorization layers
 
@@ -363,16 +373,22 @@ A request must clear every layer that is configured on its key:
 | Layer | What it controls |
 | --- | --- |
 | **Role** | Baseline permission set — see the table below |
-| **Per-key permissions** | Optional fine-grained overrides of the role's defaults. A key can only grant permissions its creator holds |
+| **Per-key permissions** | Optional fine-grained overrides of the role's defaults. A creator can only grant permissions it holds, unless it has `org:admin` (organization admins and `api_admin` keys do) |
 | **Wallet bindings** | Restrict which custody wallets the key can operate, each binding with its own permission list |
 | **Policy profiles** | Rule sets (destination controls, amount limits, approval requirements) evaluated before a bound wallet moves funds |
 | **IP allowlist** | Optional IPv4/IPv6/CIDR ranges the key may be used from |
 
 | Role | Description |
 | --- | --- |
-| `api_admin` | Full access including custody and platform operations |
-| `api_developer` | Read/write access to tokens, payments, counterparties, wallets, and webhooks; excludes custody administration |
-| `api_readonly` | Read-only access to all resources, including audit records |
+| `api_admin` | All permissions, including custody administration, token admin operations, API-key and project management, and policy authoring |
+| `api_developer` | Read and write access to tokens, payments, counterparties, and wallets, plus read access to compliance. Excludes token admin operations (pause, freeze, seize, force-burn, authority transfer), custody administration, and API-key and project management |
+| `api_readonly` | Read-only access to tokens, payments, counterparties, wallets, and compliance. No access to API keys or projects |
+
+Only an `api_admin` key can create or rotate another `api_admin` key.
+
+### Policy authoring
+
+Policies constrain what keys can do, so only administrators can write them. Updating a wallet's policy (`PUT /v1/payments/wallets/{walletId}/policies`) and creating, revising, activating, or binding API-key policy profiles (`/v1/api-keys/{keyId}/policy-profiles`, `PUT /v1/api-keys/{keyId}/policy-bindings`) require an `api_admin` key. A key with any other role gets `403`, even if its custom permissions include the write permissions those routes check. In the dashboard, only organization admins can author policies.
 
 ## Errors
 
@@ -385,7 +401,9 @@ Authentication and authorization failures are always machine-distinguishable:
 | Key has been revoked | 401 | `REVOKED_API_KEY` |
 | Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |
 | Request origin not in the key's IP allowlist | 403 | `FORBIDDEN` |
+| Policy authoring with a non-`api_admin` key that holds the route's permissions | 403 | `FORBIDDEN` |
 | Key lacks a required permission | 403 | `INSUFFICIENT_PERMISSIONS` |
+| Resource belongs to another project | 404 | `NOT_FOUND` |
 | Per-key rate limit exceeded | 429 | `RATE_LIMITED` |
 
 Requests are rate limited per key; the standard tier allows 100 requests per minute.
@@ -399,9 +417,9 @@ Source: https://platform.solana.com/docs/developing-with-sdp/manage-api-keys
 
 > Create, rotate, and revoke API keys with role-based access, wallet bindings, and zero-downtime rotation.
 
-Create, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to a project, inherits its environment, and carries a role plus optional fine-grained controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
+Create, list, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to one project, inherits its environment, and carries a role plus optional fine-grained controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
 
-The full secret is returned exactly once — at creation and at rotation. SDP stores only a salted hash and a display prefix; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
+The full secret is returned exactly once — at creation and at rotation. SDP stores only a hash and a display prefix; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
 
 ## Key format
 
@@ -410,42 +428,51 @@ The full secret is returned exactly once — at creation and at rotation. SDP st
 | Sandbox | `sk_test_` | devnet |
 | Production | `sk_live_` | mainnet-beta |
 
+## Choose the project
+
+Every organization has a sandbox project and a production project, and a key's environment comes from the project it is created in. No request field sets the environment, and a key can't be moved to another project later.
+
+- **Dashboard:** the key is created in the project selected in the workspace switcher. Switch to the production project before creating a production key.
+- **API:** `POST /v1/api-keys` creates the key in the same project as the key that authenticates the request. `POST /v1/projects/{projectId}/api-keys` does the same, and `{projectId}` must be the authenticating key's own project.
+
+An API key can't create keys in the other project, so your first production key has to come from the dashboard. See [Set Up Your Organization & Projects](/docs/guides/setup-organization) for the workspace switcher and production access.
+
 ## Roles
 
 | Role | Description |
 | --- | --- |
-| `api_admin` | Full access including custody and platform operations |
-| `api_developer` | Read/write access, excludes custody actions |
-| `api_readonly` | Read-only access to all resources |
+| `api_admin` | All permissions, including custody administration, API-key management, and policy authoring |
+| `api_developer` | Read and write access to tokens, payments, counterparties, and wallets; no token admin operations, custody administration, or API-key management |
+| `api_readonly` | Read-only access to tokens, payments, counterparties, wallets, and compliance |
 
-A key can also carry explicit `permissions` that override the role's defaults. A key can only be granted permissions its creator holds.
+Managing keys through the API takes the `api-keys:read` and `api-keys:write` permissions. `api_admin` keys have them; `api_developer` and `api_readonly` keys don't. Only an `api_admin` key can create or rotate another `api_admin` key.
+
+A key can also carry explicit `permissions` that override the role's defaults. A creator can only grant permissions it holds, unless it has `org:admin`, as organization admins and `api_admin` keys do.
 
 ## Create a key
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-1. Navigate to **API keys** in the sidebar. You start with an empty list.
+Only organization admins can create, rotate, and delete keys in the dashboard; members can view them.
+
+1. In the workspace switcher at the top of the sidebar, select the project the key is for.
+
+2. Navigate to **API keys** in the sidebar. You start with an empty list.
 
    ![API keys page with no keys yet](/images/getting-started/api-keys-empty.png)
 
-2. Click **New API key** in the top right, then fill in the key details:
-   - **Name** — a descriptive label (e.g., "CI deploy key")
-   - **Role** — Admin, Developer, or Read only
-   - **Wallet access** — All wallets or Selected wallets
-   - **Expiration (optional)** — date/time picker
-
-   ![Create API key modal](/images/getting-started/api-key-create.png)
-
-3. Click **Continue**, review the summary, and click **Create key**.
-
-   ![Review API key modal](/images/getting-started/api-key-review.png)
+3. Click **Create new API key** (or **New API key** once the project has keys) and work through the four steps:
+   - **Details** — a descriptive **Name** (e.g., "CI deploy key") and an optional **Expiration**. The **Environment** is read-only and comes from the selected project.
+   - **Permissions** — the role: Admin, Developer, or Read only.
+   - **Wallet access** — **All wallets**, or **Selected wallets** with a default signing wallet.
+   - **Review** — check the summary and click **Create key**.
 
 4. Click **Copy** on the **API key generated** modal and save the key — it will not be shown again.
 
    ![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
 
-5. Dismiss the modal. The key now appears in the table with its prefix, role, environment, and status.
+5. Dismiss the modal. The key now appears in the table with its prefix, environment, access, and status.
 
    ![API keys list with one active key](/images/getting-started/api-keys-list.png)
 
@@ -503,16 +530,49 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The new key belongs to the project of the key that created it and inherits that project's environment — there is no environment field on the request. The response includes the full `key` value — **save it, it is only returned once**.
+The new key belongs to the project of the key that created it and inherits that project's environment — there is no environment field on the request. `POST /v1/projects/{projectId}/api-keys` accepts the same body. The response includes the full `key` value — **save it, it is only returned once**.
 
-Optional fields: `description`, `permissions` (fine-grained overrides), `allowedIps` (IPv4/IPv6/CIDR ranges), `signingWalletId` / `signingWalletIds`, `walletBindings` (per-wallet permission lists).
+`name` and `walletScope` are required; `role` defaults to `api_developer`. Optional fields: `description`, `permissions` (fine-grained overrides), `allowedIps` (IPv4/IPv6/CIDR ranges), `expiresAt`, `signingWalletId` / `signingWalletIds`, `walletBindings` (per-wallet permission lists), and `provisionWallet` with `walletLabel` and `walletPurpose` to create and bind a new custody wallet (requires `custody:admin`).
 
+Keys can also carry policy profiles that limit which operations they can perform, managed through `/v1/api-keys/{keyId}/policy-profiles` and `PUT /v1/api-keys/{keyId}/policy-bindings` (see the [API Keys API reference](/docs/reference/api/api-keys)); a key created by another key starts with a copy of that key's profiles and bindings.
+
+</Tab>
+</Tabs>
+
+## List keys
+
+`GET /v1/api-keys` lists the keys in the authenticating key's project, newest first; `GET /v1/projects/{projectId}/api-keys` returns the same list for that project. Revoked keys are left out. Each entry carries the `keyPrefix`, `role`, `environment`, `status`, wallet access, `lastUsedAt`, and `expiresAt` — never the secret. `GET /v1/api-keys/{keyId}` returns one key in full, including its `permissions`, `allowedIps`, and rotation details.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl https://api.solana.com/v1/api-keys \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="list-api-keys.ts"
+const response = await fetch("https://api.solana.com/v1/api-keys", {
+  headers: { "Authorization": "Bearer sk_test_..." },
+});
+const { data } = await response.json();
+// data.apiKeys — keys in this project, newest first
+```
+</Tab>
+<Tab value="Java">
+```java title="ListApiKeys.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/api-keys"))
+    .header("Authorization", "Bearer sk_test_...")
+    .GET()
+    .build();
+```
 </Tab>
 </Tabs>
 
 ## Rotate a key
 
-Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's role, permissions, IP allowlist, wallet bindings, and policy profiles, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
+Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's name, role, permissions, IP allowlist, expiry, wallet bindings, and policy profiles, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`. A key can be rotated once: rotating it again while its replacement is active returns `409 CONFLICT` naming the replacement.
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
@@ -566,7 +626,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-`gracePeriodHours` accepts 0–168 (default 24). A key cannot rotate itself — authenticate the rotation with a different key or a Clerk JWT from the dashboard.
+`gracePeriodHours` accepts 0–168 (default 24). A key cannot rotate itself — authenticate the rotation with a different key in the same project, or rotate from the dashboard.
 
 </Tab>
 </Tabs>
@@ -576,7 +636,7 @@ HttpRequest request = HttpRequest.newBuilder()
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-Open the **Actions** dropdown next to the key and click **Delete key**. The key stops working immediately and cannot be restored.
+Open the **Actions** dropdown next to the key and click **Delete key**, then type the key's name to confirm. The key stops working immediately and cannot be restored.
 
 </Tab>
 <Tab value="API">
@@ -627,9 +687,11 @@ The `confirmation` field must match the key's **name**. Revocation takes effect 
 ### Set Up Your Organization & Projects
 Source: https://platform.solana.com/docs/guides/setup-organization
 
-> Set up your SDP organization and see how projects scope work within it.
+> Create your SDP organization, work in its sandbox and production projects, and invite your team.
 
-Every SDP user works through an **organization** — a team workspace containing one or more **projects**, each a provisioned environment with its own API keys, wallets, and members. This guide creates your organization and covers how projects scope your resources.
+Every SDP user works through an **organization**, your team's shared account. Each organization has exactly two **projects**: a sandbox project and a production project. A project has its own API keys, wallets, tokens, and payments, so testing in sandbox never touches production. This guide creates your organization, explains the two projects, and shows how to bring in your team.
+
+## Create your organization
 
 ### 1. Sign up
 
@@ -641,21 +703,122 @@ Enter your email address and a password to create your account.
 
 ![Create your account screen](/images/getting-started/create-account.png)
 
-### 2. Create or select an organization
+### 2. Create the organization
 
 After signing in you'll be prompted to set up your organization. Upload a logo and enter your organization name, then click **Continue**.
 
 ![Setup your organization screen](/images/getting-started/setup-organization.png)
 
-If you already have an organization, the **Organization Switcher** in the top-left of the sidebar lets you switch between them or create a new one.
+If a teammate has already invited you, accept their invitation to join their organization instead of creating a new one.
 
-<img src="/docs/images/getting-started/org-switcher.png" alt="Organization Switcher dropdown" width="436" style={{ display: "block", maxWidth: "100%" }} />
+SDP creates the organization's sandbox and production projects the first time you open the dashboard. Every member of the organization has access to both.
 
-### 3. Organize with projects
+## Sandbox and production projects
 
-A **project** is a provisioned environment within your organization — sandbox or production-style — with its own API keys, wallets, tokens, and members, so teams don't share the same wallet and token surface. See the [Projects API reference](/docs/reference/api/projects) for managing them programmatically.
+| Project | `environment` | Solana network | API key prefix | Use it for |
+| --- | --- | --- | --- | --- |
+| Sandbox | `sandbox` | devnet | `sk_test_` | Building and testing your integration |
+| Production | `production` | mainnet-beta | `sk_live_` | Live operations on mainnet |
 
-### 4. Next steps
+You can't create, delete, or archive projects; every organization has exactly these two. You can rename a project or change its description.
+
+The production project is available once production access is enabled for your organization. Until then, the dashboard lists only the sandbox project and `GET /v1/projects` leaves production out. Contact the SDP team to enable production.
+
+## Switch between projects
+
+The workspace switcher at the top of the dashboard sidebar shows your organization's name above the active project's name. Open it to:
+
+- switch to another organization you belong to
+- select the project to work in, listed under **Projects**
+- copy your organization ID
+
+Wallets, tokens, payments, and API keys in the dashboard always belong to the selected project. The dashboard opens in the sandbox project unless you last selected production.
+
+## Invite your team
+
+Organization admins manage members on the **Settings** page, which opens from the account menu at the bottom of the sidebar.
+
+1. Click your name at the bottom of the sidebar and choose **Settings**.
+2. Under **Members**, enter your teammate's email address, choose a role, and click **Send invite**.
+3. The invitation is listed as **Pending** until it's accepted. Its actions menu lets you **Copy invite link** or **Revoke invite**.
+
+| Role | Access |
+| --- | --- |
+| **Admin** | Full organization control: create, rotate, and delete API keys, invite and remove members, manage custody, and author policies |
+| **Member** | Works with tokens, payments, counterparties, and wallets, and can view API keys, but can't create or change keys, invite members, or author policies |
+
+Members you invite get access to both projects. To remove someone, open the actions menu on their row and click **Remove member**; they lose access to the organization immediately. You can't remove yourself or the organization's last admin.
+
+## API keys belong to one project
+
+Every API key belongs to exactly one project and inherits its environment. There is no organization-wide key.
+
+- **In the dashboard**, a new key is created in the project selected in the workspace switcher. Switch to the production project before creating a production key.
+- **Through the API**, a new key lands in the same project as the key that creates it. A key can't create keys in, or read data from, the other project.
+
+That means your first production key comes from the dashboard. See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys) for the full flow.
+
+## Projects API
+
+Use the Projects endpoints to read project details and manage the keys in a project:
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /v1/projects` | Lists the organization's projects. With an API key, it returns only that key's project |
+| `GET /v1/projects/{projectId}` | Returns one project |
+| `PATCH /v1/projects/{projectId}` | Updates the project's name, description, or settings |
+| `GET /v1/projects/{projectId}/members` | Lists the project's members |
+| `GET /v1/projects/{projectId}/api-keys` | Lists the project's API keys, excluding revoked ones |
+| `POST /v1/projects/{projectId}/api-keys` | Creates an API key in the project |
+
+With an API key, `{projectId}` must be the key's own project; any other ID returns 404. These endpoints need project and API-key permissions that `api_admin` keys have and `api_developer` and `api_readonly` keys don't.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl https://api.solana.com/v1/projects \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="list-projects.ts"
+const response = await fetch("https://api.solana.com/v1/projects", {
+  headers: { "Authorization": "Bearer sk_test_..." },
+});
+const { data } = await response.json();
+// data.projects — with an API key, only the key's own project
+```
+</Tab>
+<Tab value="Java">
+```java title="ListProjects.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/projects"))
+    .header("Authorization", "Bearer sk_test_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+```json title="response.json"
+{
+  "data": {
+    "projects": [
+      {
+        "id": "prj_3bc13bcb-...",
+        "name": "Default Sandbox Project",
+        "slug": "default-sandbox",
+        "environment": "sandbox",
+        "status": "active"
+      }
+    ]
+  }
+}
+```
+
+See the [Projects API reference](/docs/reference/api/projects) for every field and endpoint.
+
+## Next steps
 
 - [Set up wallets](/docs/guides/setup-wallets) for signing transactions
 - [Create API keys](/docs/developing-with-sdp/manage-api-keys) for programmatic access

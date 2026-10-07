@@ -1,9 +1,11 @@
 ---
 title: Set Up Your Organization & Projects
-description: Set up your SDP organization and see how projects scope work within it.
+description: Create your SDP organization, work in its sandbox and production projects, and invite your team.
 ---
 
-Every SDP user works through an **organization** — a team workspace containing one or more **projects**, each a provisioned environment with its own API keys, wallets, and members. This guide creates your organization and covers how projects scope your resources.
+Every SDP user works through an **organization**, your team's shared account. Each organization has exactly two **projects**: a sandbox project and a production project. A project has its own API keys, wallets, tokens, and payments, so testing in sandbox never touches production. This guide creates your organization, explains the two projects, and shows how to bring in your team.
+
+## Create your organization
 
 ### 1. Sign up
 
@@ -15,21 +17,122 @@ Enter your email address and a password to create your account.
 
 ![Create your account screen](/images/getting-started/create-account.png)
 
-### 2. Create or select an organization
+### 2. Create the organization
 
 After signing in you'll be prompted to set up your organization. Upload a logo and enter your organization name, then click **Continue**.
 
 ![Setup your organization screen](/images/getting-started/setup-organization.png)
 
-If you already have an organization, the **Organization Switcher** in the top-left of the sidebar lets you switch between them or create a new one.
+If a teammate has already invited you, accept their invitation to join their organization instead of creating a new one.
 
-<img src="/docs/images/getting-started/org-switcher.png" alt="Organization Switcher dropdown" width="436" style={{ display: "block", maxWidth: "100%" }} />
+SDP creates the organization's sandbox and production projects the first time you open the dashboard. Every member of the organization has access to both.
 
-### 3. Organize with projects
+## Sandbox and production projects
 
-A **project** is a provisioned environment within your organization — sandbox or production-style — with its own API keys, wallets, tokens, and members, so teams don't share the same wallet and token surface. See the [Projects API reference](/docs/reference/api/projects) for managing them programmatically.
+| Project | `environment` | Solana network | API key prefix | Use it for |
+| --- | --- | --- | --- | --- |
+| Sandbox | `sandbox` | devnet | `sk_test_` | Building and testing your integration |
+| Production | `production` | mainnet-beta | `sk_live_` | Live operations on mainnet |
 
-### 4. Next steps
+You can't create, delete, or archive projects; every organization has exactly these two. You can rename a project or change its description.
+
+The production project is available once production access is enabled for your organization. Until then, the dashboard lists only the sandbox project and `GET /v1/projects` leaves production out. Contact the SDP team to enable production.
+
+## Switch between projects
+
+The workspace switcher at the top of the dashboard sidebar shows your organization's name above the active project's name. Open it to:
+
+- switch to another organization you belong to
+- select the project to work in, listed under **Projects**
+- copy your organization ID
+
+Wallets, tokens, payments, and API keys in the dashboard always belong to the selected project. The dashboard opens in the sandbox project unless you last selected production.
+
+## Invite your team
+
+Organization admins manage members on the **Settings** page, which opens from the account menu at the bottom of the sidebar.
+
+1. Click your name at the bottom of the sidebar and choose **Settings**.
+2. Under **Members**, enter your teammate's email address, choose a role, and click **Send invite**.
+3. The invitation is listed as **Pending** until it's accepted. Its actions menu lets you **Copy invite link** or **Revoke invite**.
+
+| Role | Access |
+| --- | --- |
+| **Admin** | Full organization control: create, rotate, and delete API keys, invite and remove members, manage custody, and author policies |
+| **Member** | Works with tokens, payments, counterparties, and wallets, and can view API keys, but can't create or change keys, invite members, or author policies |
+
+Members you invite get access to both projects. To remove someone, open the actions menu on their row and click **Remove member**; they lose access to the organization immediately. You can't remove yourself or the organization's last admin.
+
+## API keys belong to one project
+
+Every API key belongs to exactly one project and inherits its environment. There is no organization-wide key.
+
+- **In the dashboard**, a new key is created in the project selected in the workspace switcher. Switch to the production project before creating a production key.
+- **Through the API**, a new key lands in the same project as the key that creates it. A key can't create keys in, or read data from, the other project.
+
+That means your first production key comes from the dashboard. See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys) for the full flow.
+
+## Projects API
+
+Use the Projects endpoints to read project details and manage the keys in a project:
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /v1/projects` | Lists the organization's projects. With an API key, it returns only that key's project |
+| `GET /v1/projects/{projectId}` | Returns one project |
+| `PATCH /v1/projects/{projectId}` | Updates the project's name, description, or settings |
+| `GET /v1/projects/{projectId}/members` | Lists the project's members |
+| `GET /v1/projects/{projectId}/api-keys` | Lists the project's API keys, excluding revoked ones |
+| `POST /v1/projects/{projectId}/api-keys` | Creates an API key in the project |
+
+With an API key, `{projectId}` must be the key's own project; any other ID returns 404. These endpoints need project and API-key permissions that `api_admin` keys have and `api_developer` and `api_readonly` keys don't.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl https://api.solana.com/v1/projects \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="list-projects.ts"
+const response = await fetch("https://api.solana.com/v1/projects", {
+  headers: { "Authorization": "Bearer sk_test_..." },
+});
+const { data } = await response.json();
+// data.projects — with an API key, only the key's own project
+```
+</Tab>
+<Tab value="Java">
+```java title="ListProjects.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/projects"))
+    .header("Authorization", "Bearer sk_test_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+```json title="response.json"
+{
+  "data": {
+    "projects": [
+      {
+        "id": "prj_3bc13bcb-...",
+        "name": "Default Sandbox Project",
+        "slug": "default-sandbox",
+        "environment": "sandbox",
+        "status": "active"
+      }
+    ]
+  }
+}
+```
+
+See the [Projects API reference](/docs/reference/api/projects) for every field and endpoint.
+
+## Next steps
 
 - [Set up wallets](/docs/guides/setup-wallets) for signing transactions
 - [Create API keys](/docs/developing-with-sdp/manage-api-keys) for programmatic access

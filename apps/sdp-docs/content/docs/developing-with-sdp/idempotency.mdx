@@ -18,26 +18,34 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 SDP's model differs from response-cache designs: the idempotency key is claimed by the **business record itself**, not by a snapshot of the original response.
 
 1. The first request creates the record — a transfer, a batch, an issuance transaction — carrying your key and a fingerprint of the normalized request payload.
-2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in the normal success envelope. Because it is the live record and not a cached response, a replay reflects current state — a transfer that has since finalized comes back `finalized`, not the `processing` you would have seen on the first attempt.
-3. A request with the same key but a **different payload** is rejected with **409 `CONFLICT`** ("Idempotency key already used with different request payload"). The fingerprint comparison is field-normalized, so formatting differences don't cause false conflicts.
+2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in the normal success envelope. Because it is the live record and not a cached response, a replay reflects current state — a transfer that has since finalized comes back `finalized`, not the `processing` you would have seen on the first attempt. Freeze and unfreeze differ in one case: replaying one whose original attempt failed returns **400** with the original error.
+3. A request with the same key but a **different payload** is rejected with **409 `CONFLICT`** ("Idempotency key already used with different request payload"). For transfers and batches, a different source wallet also counts as a different payload. The fingerprint comparison is field-normalized, so formatting differences don't cause false conflicts.
 
-Keys are retained for the lifetime of the record they claimed — there is no TTL, and a replay works for as long as the record exists.
+Keys are retained for the lifetime of the record they claimed — there is no TTL, and a replay works for as long as the record exists. If a mint fails before anything is submitted on-chain, though, SDP releases the key, so a retry with the same key runs as a new request.
 
-The header itself is validated on every `/v1` route (1–255 printable ASCII characters), but only the endpoints below consume it. Elsewhere it is accepted and ignored.
+The header is optional. Every `/v1` route validates it when present (1–255 printable ASCII characters, otherwise `400 BAD_REQUEST`) and echoes it back on the response, but among the public endpoints only the operations below consume it. Elsewhere it is accepted and ignored.
 
 ## Where it applies
 
-Each domain claims keys in its own namespace, and the namespaces are scoped differently:
+These twelve operations accept an `Idempotency-Key`. Each domain claims keys in its own namespace, and the namespaces are scoped differently:
 
-| Domain | Operations | Key namespace |
+| Operation | Endpoint | Key namespace |
 | --- | --- | --- |
-| Payments — transfers | `POST /v1/payments/transfers` | Per project |
-| Payments — batches | `POST /v1/payments/transfer-batches` | Per project |
-| Issuance | Execute-mode deploy, mint, burn, force-burn, freeze, thaw, pause, unpause, seize, and authority transfer | Per organization, shared across **all** issuance operations and tokens |
-| Custody | Provider credential submission (dashboard flow) | Required on every submission |
+| Create a transfer | `POST /v1/payments/transfers` | Per project |
+| Create a transfer batch | `POST /v1/payments/transfer-batches` | Per project |
+| Deploy a token | `POST /v1/issuance/tokens/{tokenId}/deploy` | Issuance, per organization |
+| Mint | `POST /v1/issuance/tokens/{tokenId}/mint` | Issuance, per organization |
+| Burn | `POST /v1/issuance/tokens/{tokenId}/burn` | Issuance, per organization |
+| Force-burn | `POST /v1/issuance/tokens/{tokenId}/force-burn` | Issuance, per organization |
+| Seize | `POST /v1/issuance/tokens/{tokenId}/seize` | Issuance, per organization |
+| Freeze an account | `POST /v1/issuance/tokens/{tokenId}/freeze` | Issuance, per organization |
+| Unfreeze an account | `POST /v1/issuance/tokens/{tokenId}/unfreeze` | Issuance, per organization |
+| Pause token transfers | `POST /v1/issuance/tokens/{tokenId}/pause` | Issuance, per organization |
+| Unpause token transfers | `POST /v1/issuance/tokens/{tokenId}/unpause` | Issuance, per organization |
+| Update an authority | `POST /v1/issuance/tokens/{tokenId}/authority` | Issuance, per organization |
 
-Namespaces are independent across domains — the same key value used on a transfer and on a mint are two separate claims that never collide. Within issuance, however, the namespace is organization-wide: reusing a key for a different issuance operation, even on a different token, returns 409.
+Namespaces are independent across domains — the same key value used on a transfer and on a mint are two separate claims that never collide. Within issuance, however, the namespace is organization-wide: reusing a key for a different issuance operation, even on a different token, returns 409. Issuance keys aren't separated by project either, so never reuse one between your sandbox and production projects.
 
 ## This model is open to change
 
-The per-domain differences above reflect the order in which these surfaces shipped, not a finished design, and we expect them to converge. Treat the core contract as stable — one key per logical operation, replay returns the record, payload mismatch returns 409 — and treat the scoping details (per-project vs per-organization namespaces, which endpoints consume the header) as subject to change. We are considering extending consumption to more mutation endpoints and unifying namespace scoping across domains.
+The per-domain differences above reflect the order in which these surfaces shipped, not a finished design. Treat the core contract as stable — one key per logical operation, replay returns the record, payload mismatch returns 409 — and treat the scoping details (per-project vs per-organization namespaces, which endpoints consume the header) as subject to change.

@@ -20,7 +20,7 @@
 
 ## Start here
 - [What is SDP?](https://platform.solana.com/docs/introduction): One API for tokenization, custody, payments, and compliance on Solana.
-- [Set Up Your Organization & Projects](https://platform.solana.com/docs/guides/setup-organization): Set up your SDP organization and see how projects scope work within it.
+- [Set Up Your Organization & Projects](https://platform.solana.com/docs/guides/setup-organization): Create your SDP organization, work in its sandbox and production projects, and invite your team.
 - [Set Up Wallets](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
 - [Manage API Keys](https://platform.solana.com/docs/developing-with-sdp/manage-api-keys): Create, rotate, and revoke API keys with role-based access, wallet bindings, and zero-downtime rotation.
 - [Tokenize an Asset](https://platform.solana.com/docs/tokens/tokenize-an-asset): Map a real-world asset to the right SDP token model, authorities, and implementation flow.
