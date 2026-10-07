@@ -3835,94 +3835,60 @@ This tutorial walks you through issuing a regulated stablecoin on Solana. The pr
 
 **4. The reader is institutional.** This tutorial assumes you are a developer at a financial institution or fintech, building under a compliance officer's oversight. The decisions you make are decisions she will see in product review. Section 2 walks through the prerequisites in that light.
 
-Every code sample in this tutorial was exercised against SDP's sandbox during writing; the request and response shapes shown here are what the live API actually returned.
+Response examples are trimmed to the fields this tutorial uses. The [API reference](/docs/reference/api) has the full request and response shapes.
 
 ## 2. Prerequisites
 
-You need an SDP account, a custody provider, two project-scoped API keys (one for routine operations, one for compliance operations), and a funded devnet wallet. About thirty minutes end-to-end if you have nothing today.
+You need an SDP account, a custody wallet in your sandbox project, and two API keys in that project: one for routine operations and one for compliance operations. About thirty minutes end-to-end if you have nothing today.
 
 ### 1. Account and organization
 
-Sign up at [platform.solana.com](https://platform.solana.com) using email, Google, or GitHub. Create your organization when the dashboard prompts you. SDP provisions a matching organization on its side via a [Clerk](https://clerk.com) webhook; the dashboard's onboarding cards clear once the sync lands.
+Sign up at [platform.solana.com](https://platform.solana.com) and create or join an organization; see [Set up your organization](/docs/guides/setup-organization). Every organization has exactly two projects, sandbox and production. Each project has its own API keys, wallets, and tokens. Build everything in this tutorial in the sandbox project, which runs on devnet. Section 8 moves it to production.
 
 ### 2. Custody provider
 
-An institutional issuer in the US pipeline configures [Anchorage Digital Bank](https://www.anchorage.com/platform/stablecoin-issuance) as the custodian. The Anchorage onboarding team provisions the signing wallets and binds them to your SDP organization. If you're working on the self-serve sandbox without an Anchorage relationship yet, SDP auto-provisions Privy wallets for development access instead. The API surface is identical; only the wallet record's `provider` field differs.
+An institutional issuer in the US pipeline configures [Anchorage Digital Bank](https://www.anchorage.com/platform/stablecoin-issuance) as the custodian. The Anchorage onboarding team provisions the signing wallets and binds them to your SDP organization. If you don't have an Anchorage relationship yet, create a sandbox wallet with another supported provider, such as Privy; see [Set up wallets](/docs/guides/setup-wallets). The API surface is identical; only the wallet record's `provider` field differs.
 
 ### 3. API keys: the two-key institutional pattern
 
-The hardest cliff in setup is that the dashboard's "Create API key" dialog only mints **org-scoped** keys. The issuance API requires **project-scoped** keys. Project management in the dashboard is on the SDP roadmap; until it lands, the workaround is a short sequence of API calls.
-
-The bootstrap path:
+API keys belong to a project. A key reaches only the wallets, tokens, and payments of its own project; there are no organization-wide keys. Create two keys in the sandbox project: a **Developer** key for routine create, deploy, mint, and transfer calls, and an **Admin** key for compliance actions (freeze, unfreeze, seize, force-burn, and authority changes).
 
 <Steps>
 
 <Step>
 
-From the dashboard, mint an org-scoped API key with **Role: Admin**, **Environment: Sandbox**. This is your bootstrap credential.
-
-![Create API key dialog in the SDP dashboard, with Role set to Admin and Environment set to Sandbox.](/issue-a-regulated-stablecoin/01-create-api-key-dialog.png)
+In the dashboard, select the sandbox project in the workspace switcher. The dashboard creates keys in whichever project is selected.
 
 </Step>
 
 <Step>
 
-With the Admin key, call `GET /v1/projects` and pick the project with slug `default-sandbox`. Every organization is provisioned with exactly one sandbox and one production project automatically — isolation between workloads comes from separate organizations, not additional projects. The project ID is what you'll need in the next step:
+Go to **API keys** and click **New API key**. The page has four steps:
 
-```json title="response.json"
-{
-  "data": {
-    "projects": [
-      {
-        "id": "prj_3bc13bcb-...",
-        "slug": "default-sandbox",
-        "environment": "sandbox",
-        "status": "active"
-      },
-      {
-        "id": "prj_8a201d47-...",
-        "slug": "default-production",
-        "environment": "production",
-        "status": "active"
-      }
-    ]
-  }
-}
-```
+- **Details**: name the key and set an optional expiry. The environment shows the selected project's environment and can't be changed here.
+- **Permissions**: choose **Developer** for the first key.
+- **Wallet access**: choose **All wallets**, or **Selected wallets** with the custody wallet that will sign for the token. A key limited to selected wallets can't use any other wallet.
+- **Review**: confirm and create the key.
 
 </Step>
 
 <Step>
 
-Call `POST /v1/projects/{projectId}/api-keys` twice to mint two project-scoped keys: one with `role: "api_developer"` for routine create, mint, and burn calls, and one with `role: "api_admin"` for compliance operations (screening, freeze, seize, force-burn). Each response includes the full key value exactly once:
-
-```json title="response.json"
-{
-  "data": {
-    "apiKey": {
-      "id": "key_375fe1e1-...",
-      "keyPrefix": "sk_test__b3",
-      "key": "sk_test_<full key, shown once>",
-      "role": "api_developer",
-      "environment": "sandbox"
-    }
-  }
-}
-```
+Copy the key from the **API key generated** dialog. Sandbox keys start with `sk_test_`. Then repeat the steps with **Admin** on the **Permissions** step to create the second key.
 
 <Callout type="warn">
-The `key` field appears only on this response. Capture it into your secrets manager immediately; SDP does not surface it again.
+The full key is shown only once. Capture it into your secrets manager immediately; SDP does not surface it again.
 </Callout>
 
 </Step>
 
 </Steps>
 
-Store the two project-scoped keys with your other production secrets. Keep the org-scoped Admin key cold; you only touch it when you provision additional keys or rotate.
+Only organization admins can create keys in the dashboard. An Admin key can also create keys through the API, but only in its own project. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys).
 
 ### 4. Sandbox readers: fund your custody wallet
 
-On devnet, the custody wallet starts at zero lamports, which means SDP cannot pay transaction fees from it. Fund it via the browser faucet:
+SDP pays network fees through fee sponsorship when it is available; deploy uses it by default (`feePayment: "sponsored"`). If the fees fall to the custody wallet instead, because sponsorship isn't available or because you deploy with `feePayment: "wallet"`, the wallet needs SOL. On devnet a new custody wallet starts at zero lamports. Fund it via the browser faucet:
 
 <Steps>
 
@@ -3948,11 +3914,11 @@ The browser faucet is more reliable than the RPC `requestAirdrop` method, which 
 
 ### 5. API base URL
 
-The canonical SDP API URL is `https://api.solana.com`. Use this hostname for every production request.
+The canonical SDP API URL is `https://api.solana.com`. Sandbox and production requests use the same hostname; the API key decides which project a request reaches.
 
 ### 6. Wire up your client and verify
 
-Wire two HTTP clients (one per project-scoped key) using a thin wrapper around `fetch`:
+Wire two HTTP clients (one per API key) using a thin wrapper around `fetch`. The wrapper throws on any response that carries an `error` object. That includes 202 `SIGNING_PENDING`, which is a 2xx status (see Section 4):
 
 ```javascript title="sdp-client.js"
 const BASE = "https://api.solana.com";
@@ -3973,7 +3939,11 @@ class SdpClient {
       body: body ? JSON.stringify(body) : undefined,
     });
     const payload = await res.json();
-    if (!res.ok) throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    if (!res.ok || payload.error) {
+      const error = new Error(`${payload.error.code}: ${payload.error.message}`);
+      Object.assign(error, { status: res.status, code: payload.error.code, details: payload.error.details });
+      throw error;
+    }
     return payload;
   }
 
@@ -3985,7 +3955,7 @@ const sdp = new SdpClient(process.env.SDP_API_KEY);
 const sdpAdmin = new SdpClient(process.env.SDP_ADMIN_API_KEY);
 ```
 
-Use `sdp` for routine operations (create, mint, burn) and `sdpAdmin` for compliance operations (screening, freeze, seize, force-burn). Section 4 extends this client with `Idempotency-Key` header support when state-mutating execute endpoints come into play.
+Use `sdp` for routine operations (create, deploy, mint, burn, transfers, and address screening) and `sdpAdmin` for compliance actions (freeze, unfreeze, seize, force-burn, and authority changes). Section 4 extends this client with `Idempotency-Key` header support when state-mutating execute endpoints come into play.
 
 Now confirm the setup by listing the wallets bound to your project:
 
@@ -4009,7 +3979,7 @@ Custody wallets configured: 2
 Deployment wallet: cwlt_123
 ```
 
-If the response includes an active wallet with `isRuntimeExecutionAllowed: true`, your custody is bound and you are ready to deploy a token. If it returns no wallets, your custody provider has not finished provisioning. For the Anchorage pipeline, contact your onboarding lead. For the self-serve sandbox, wait a minute and re-run; Privy's initial wallet provision can lag the SDP organization creation by a few seconds.
+If the response includes an active wallet with `isRuntimeExecutionAllowed: true`, your custody is bound and you are ready to deploy a token. The list holds only the sandbox project's wallets that this key's **Wallet access** allows. If it returns no wallets, create one in the sandbox project ([Set up wallets](/docs/guides/setup-wallets)) or check the key's wallet access. For the Anchorage pipeline, contact your onboarding lead.
 
 Keep both values. `signingCustodyWalletId` is the exact SDP Wallet record `id` (`cwlt_*`) used by issuance requests. It is not the provider-specific `walletId` or the Solana `publicKey`; `custodyAddress` is that public key and is used only where an on-chain address is required.
 
@@ -4022,7 +3992,7 @@ Before any API call, you decide three things: which template to start from, what
 SDP ships three public **Tokenization Templates**, each prescribing a fixed set of [Token-2022](https://solana.com/docs/tokens/extensions) extensions tuned to an institutional product shape:
 
 - **`stablecoin`**. 6 decimals by default. Required extensions: `permanentDelegate` and `pausable`. **Token Access Control** allowlist off. The right template for a regulated dollar.
-- **`tokenized-security`**. 8 decimals. Required extensions: `permanentDelegate`, `pausable`, and `scaledUiAmount`. Token Access Control allowlist on; accounts open frozen. The right template for a regulated security.
+- **`tokenized-security`**. 8 decimals. Required extensions: `permanentDelegate` and `pausable`; `scaledUiAmount` is available as an opt-in. Token Access Control allowlist on; accounts open frozen. The right template for a regulated security.
 - **`custom`**. 9 decimals. No required extensions. Use only when neither template above fits.
 
 This tutorial uses `stablecoin`. The required extensions are what a US permitted payment stablecoin issuer needs to satisfy the GENIUS Act's technological-capability mandate covered in Section 5.
@@ -4047,7 +4017,7 @@ A regulated stablecoin has four on-chain authorities, each a distinct role on th
 
 A fifth, the **pause authority**, lives on the `pausable` extension configuration. SDP defaults it to the `mint` authority if you don't set it explicitly.
 
-You can delegate or revoke any of these later via `POST /v1/issuance/tokens/{id}/authority`. Default-everything-to-custody is the institutional baseline.
+To start with separate wallets, pass `authorityCustodyWalletIds` on the deploy call, with SDP Wallet `id` values for `metadata`, `freeze`, or `permanentDelegate`; the deployment wallet always holds mint authority. You can delegate or revoke any of the four later via `POST /v1/issuance/tokens/{tokenId}/authority`, which requires `tokens:admin`. Default-everything-to-custody is the institutional baseline.
 
 ### 4. Capture the design as a config
 
@@ -4075,7 +4045,7 @@ Two API calls take a design from object literal to a deployed regulated stableco
 
 ### 1. Extend the client for Idempotency-Key
 
-Every state-mutating execute endpoint in SDP (deploy, mint, burn, seize, force-burn, authority) supports an `Idempotency-Key` HTTP header. A retry with the same key replays the original response. A retry with a different key is a new request. The header is how you make network-level retries safe under partial failure. Replace the `SdpClient` definition from Section 2 with this version:
+The issuance execute endpoints this tutorial uses (deploy, mint, freeze, unfreeze, seize, force-burn) and `POST /v1/payments/transfers` accept an `Idempotency-Key` HTTP header, as do burn, pause, unpause, and authority changes. A retry with the same key and the same body returns the stored record instead of running the operation again. The same key with a different body returns 409 `CONFLICT`. A retry with a different key is a new request. Issuance keys share one namespace across your organization, so never reuse a key for a different operation. See [Idempotency](/docs/developing-with-sdp/idempotency). The header is how you make network-level retries safe under partial failure. Replace the `SdpClient` definition from Section 2 with this version:
 
 ```javascript title="sdp-client.js"
 class SdpClient {
@@ -4097,7 +4067,11 @@ class SdpClient {
       body: body ? JSON.stringify(body) : undefined,
     });
     const payload = await res.json();
-    if (!res.ok) throw new Error(`${payload.error.code}: ${payload.error.message}`);
+    if (!res.ok || payload.error) {
+      const error = new Error(`${payload.error.code}: ${payload.error.message}`);
+      Object.assign(error, { status: res.status, code: payload.error.code, details: payload.error.details });
+      throw error;
+    }
     return payload;
   }
 
@@ -4171,7 +4145,6 @@ A successful response carries the deployed token record with `status: "active"` 
       "mintAddress": "6V5bTuMsmXyhdY2Hj6VWQZsuacugACBmPqNtQgGtar8L",
       "mintAuthority": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
       "freezeAuthority": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
-      "metadataAuthority": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
       "extensions": {
         "defaultAccountState": "initialized",
         "permanentDelegate": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X"
@@ -4182,10 +4155,14 @@ A successful response carries the deployed token record with `status: "active"` 
 }
 ```
 
-The `mintAuthority`, `freezeAuthority`, and `metadataAuthority` all resolve to the public key of the exact `signingCustodyWalletId` supplied above. The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority. After deployment, the token's `signingCustodyWalletId` is historical attribution, not a preferred signer or fallback; authority-gated operations are checked against their live on-chain authority, and a standard burn uses its exact source wallet.
+The `mintAuthority` and `freezeAuthority` resolve to the public key of the exact `signingCustodyWalletId` supplied above. The `permanentDelegate` is set at the same time and appears on the token record's `extensions.permanentDelegate` field rather than as a top-level authority. The metadata authority isn't on the token record; read it with `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true`. After deployment, the token's `signingCustodyWalletId` is historical attribution, not a preferred signer or fallback; authority-gated operations are checked against their live on-chain authority, and a standard burn uses its exact source wallet.
+
+<Callout type="info">
+Every issuance action a custody wallet signs (deploy, mint, burn, freeze, unfreeze, seize, force-burn, pause, unpause, and authority changes) is checked against the wallet's policies, and any restrictions on the API key, before SDP signs it. Payment transfers are checked the same way. A deny returns 403 `FORBIDDEN`. An operation held for approval returns 202 `SIGNING_PENDING` with the approval request ID in `error.details.approvalRequestId`, and nothing is signed. See [Wallet policies](/docs/wallet-operations/policies).
+</Callout>
 
 <Callout type="warn">
-Deploy can return a bare `500 INTERNAL_ERROR` with no `details` field. The most common cause on devnet is an unfunded custody wallet (Section 2 covered the airdrop fix), but any downstream Solana RPC failure surfaces this way. Fund the custody wallet via the faucet and re-run `/deploy` with the same `Idempotency-Key` to replay, or a fresh key for a new attempt. SDP treats different keys as different requests; the same key with the same params replays the prior result.
+If a deploy fails before the mint lands, SDP returns the token to `pending` so you can deploy it again. On-chain failures return 400 `TRANSACTION_FAILED`. With `feePayment: "wallet"`, SDP first checks that the custody wallet holds enough SOL for rent and fees and returns 400 `BAD_REQUEST` if it doesn't; fund it as in Section 2. Retry with a fresh `Idempotency-Key`: the key from the failed attempt is already recorded, so reusing it returns the pending token without submitting a new deploy.
 </Callout>
 
 ### 4. Confirm the deploy
@@ -4221,23 +4198,23 @@ The issuance selectors below reuse the exact `signingCustodyWalletId` from Secti
 
 ### Screen before you move
 
-Every transfer destination and every allowlist entry gets screened before your application acts on it. One API call, one response.
+Every transfer destination and every allowlist entry gets screened before your application acts on it. One API call, one response. Screening requires `payments:read`, so the Developer key (`sdp`) can run it.
 
 ```javascript title="screen-address.js"
-const response = await sdpAdmin.post("/v1/compliance/address-screenings", {
+const response = await sdp.post("/v1/compliance/address-screenings", {
   address: destinationAddress,
   network: "solana",
   intent: "transfer_destination",
 });
 
 for (const provider of response.data.screening.providers) {
-  if (provider.status === "error" || provider.riskScore > THRESHOLD) {
+  if (provider.status !== "ok" || provider.riskScore > THRESHOLD) {
     throw new TransferBlocked(provider);
   }
 }
 ```
 
-SDP integrates with four screening providers: Range, Elliptic, TRM, and Chainalysis. One call fans out to all configured providers and returns a per-provider array. The pattern to write against is provider-agnostic: iterate over `providers[]`, fail closed on any `status: "error"` or threshold breach. The institutional reality is that a single provider can be unavailable for credential or rate-limit reasons; a fail-closed policy keeps you defensible even when one feed degrades.
+SDP integrates with four screening providers: Range, Elliptic, TRM, and Chainalysis. One call fans out to every provider enabled for your organization and returns a per-provider array. If none is enabled, the call returns 403 `FORBIDDEN`. The pattern to write against is provider-agnostic: iterate over `providers[]`, fail closed on any status other than `ok` (`pending`, `unavailable`, or `error`) or a threshold breach. The institutional reality is that a single provider can be unavailable for credential or rate-limit reasons; a fail-closed policy keeps you defensible even when one feed degrades.
 
 On the sandbox response this tutorial cites, Range and Elliptic return numeric scores, TRM returns a healthy status without scoring a fresh address, and Chainalysis returns an upstream credential error. Treat each provider's verdict as one signal; your policy should not depend on any single provider's availability.
 
@@ -4261,7 +4238,7 @@ await sdpAdmin.post(
 You pass the holder's wallet address; SDP derives the [Associated Token Account](https://solana.com/docs/tokens/basics/create-token-account) (the on-chain account that holds that holder's TPUSD balance) and freezes it. Once frozen, transfers to or from that account fail at the program level, not at SDP's gateway.
 
 <Callout type="info">
-Section 7 demonstrates the resulting error: an HTTP 502 `SOLANA_RPC_ERROR` from SDP that wraps the Token-2022 program error `custom program error: 0x11`, which is the program's `AccountFrozen` signal. The compliance verdict is in the wrapped message; the outer SDP code is upstream-call diagnostic.
+Section 7 demonstrates the resulting error: an HTTP 400 `ACCOUNT_FROZEN` from SDP. SDP returns that code when the Token-2022 program rejects the transfer with `custom program error: 0x11`, the program's `AccountFrozen` signal, and the error `message` carries the underlying Solana error.
 </Callout>
 
 ### Seize for compliance recovery
@@ -4309,12 +4286,12 @@ await sdpAdmin.post(
 
 ### The institutional pattern that holds this together
 
-Every endpoint in this section requires the `tokens:admin` permission. That is by design. Keep two project-scoped API keys:
+Freeze, unfreeze, seize, and force-burn require the `tokens:admin` permission, as do pause, unpause, and authority changes. The Developer role (`api_developer`) doesn't include it; the Admin role (`api_admin`) carries every permission. That is by design. Keep two API keys in the project:
 
-- **Developer key**: routine create, mint, and burn calls.
-- **Admin key**: screen, freeze, seize, and force-burn.
+- **Developer key**: routine create, deploy, mint, burn, and transfer calls, plus address screening.
+- **Admin key**: freeze, unfreeze, seize, and force-burn.
 
-The compliance officer reviewing this design sees a clean separation: routine issuance cannot escalate into compliance actions without a deliberate credential change. Every call writes an entry through SDP's audit service. That trail is the artifact a regulator will eventually ask for, and it is not opt-in.
+The compliance officer reviewing this design sees a clean separation: routine issuance cannot escalate into compliance actions without a deliberate credential change. Each freeze, seize, and force-burn writes an entry through SDP's audit service; read a token's trail with `GET /v1/issuance/tokens/{tokenId}/audit`. That trail is the artifact a regulator will eventually ask for, and it is not opt-in.
 
 ## 6. Mint the first tokens
 
@@ -4412,14 +4389,14 @@ Transfers run on the `/v1/payments/transfers` endpoint family, separate from the
 ```javascript title="transfer-tokens.js"
 const sourceCustodyWalletId = signingCustodyWalletId;
 
-const screening = await sdpAdmin.post("/v1/compliance/address-screenings", {
+const screening = await sdp.post("/v1/compliance/address-screenings", {
   address: destinationAddress,
   network: "solana",
   intent: "transfer_destination",
 });
 
 for (const provider of screening.data.screening.providers) {
-  if (provider.status === "error" || provider.riskScore > THRESHOLD) {
+  if (provider.status !== "ok" || provider.riskScore > THRESHOLD) {
     throw new TransferBlocked(provider);
   }
 }
@@ -4443,7 +4420,7 @@ Three field rules to keep clear:
 - **`token`** is the on-chain mint address you got from Section 4's deploy response. It is not the SDP token ID (`tok_*`).
 - **`destination`** is any valid Solana base58 address. It does not have to be a wallet SDP knows about.
 
-A successful response includes the on-chain signature once the transaction confirms:
+A successful response includes the on-chain signature. A 200 can also return a `processing` transfer with its signature while SDP is still confirming it; don't create a replacement transfer for that payment. A confirmed transfer looks like this:
 
 ```json title="response.json"
 {
@@ -4509,28 +4486,28 @@ try {
 }
 ```
 
-The error envelope SDP returns:
+SDP returns HTTP 400 with this error envelope:
 
 ```json title="response.json"
 {
   "error": {
-    "code": "SOLANA_RPC_ERROR",
-    "message": "Failed to sign and send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 1: custom program error: 0x11"
+    "code": "ACCOUNT_FROZEN",
+    "message": "… custom program error: 0x11"
   }
 }
 ```
 
-The outer error code is `SOLANA_RPC_ERROR`, but it is upstream-call diagnostic, not the compliance verdict. The actual reason lives in the wrapped message: `custom program error: 0x11`. That is Token-2022's `AccountFrozen` signal. The block was enforced on-chain by the program, not by SDP's gateway.
+The `message` carries the underlying Solana error text, which varies with the signing path. It contains `custom program error: 0x11`, Token-2022's `AccountFrozen` signal. The program rejected the transaction during simulation, and SDP maps that program error to `ACCOUNT_FROZEN` and marks the transfer `failed`. The block was enforced by the Token-2022 program, not by SDP's gateway.
 
-### 4. Parse the wrapped error
+### 4. Handle the error
 
 <Callout type="warn">
-The institutional pattern is to write your error handler against the wrapped on-chain code rather than the outer SDP code. The outer code tells you something went wrong upstream; the wrapped code tells you what.
+The institutional pattern is to branch on `error.code`, not on the message text. `ACCOUNT_FROZEN` is the compliance verdict; the message is diagnostic detail for your logs.
 </Callout>
 
 ```javascript title="parse-error.js"
 function isOnChainCompliance(error) {
-  return error.message?.includes("custom program error: 0x11");
+  return error.code === "ACCOUNT_FROZEN";
 }
 
 try {
@@ -4540,12 +4517,12 @@ try {
     // log to the compliance system, do not retry
     return reportToCompliance(error);
   }
-  // anything else: treat as a transient RPC failure and apply your retry policy
+  // anything else, such as a 502 SOLANA_RPC_ERROR: apply your retry policy
   throw error;
 }
 ```
 
-Token-2022's `0x11` is `AccountFrozen` (decimal 17). Treat it as a compliance verdict, not a retry-able failure. The same pattern (outer code is the family of failure, wrapped code is the actual reason) applies whenever SDP wraps a downstream Solana RPC error.
+Token-2022's `0x11` is `AccountFrozen` (decimal 17). Treat it as a compliance verdict, not a retry-able failure. Other Solana RPC failures that SDP can't classify return 502 `SOLANA_RPC_ERROR` with the Solana error in the message.
 
 ### 5. Cleanup
 
@@ -4562,16 +4539,18 @@ With the freeze cleared, the destination can receive transfers again. Section 8 
 
 ## 8. Production transition checklist
 
-The work between `sk_test_` and `sk_live_` is not a flag flip. It is the moment your compliance officer signs against the runbook your engineering team has been building since Section 2. Going to production means three things change mechanically and a longer list of things your institution attests to.
+The work between `sk_test_` and `sk_live_` is not a flag flip. It is the moment your compliance officer signs against the runbook your engineering team has been building since Section 2. Going live means moving to your organization's production project, which changes a few things mechanically, plus a longer list of things your institution attests to.
 
 ### 1. What changes mechanically
 
-Your sandbox setup is built around six artifacts that all swap for production equivalents:
+The production project is separate from the sandbox project. Nothing you built in sandbox carries over:
 
-- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys minted from your production project. Use the Section 2 bootstrap pattern with a fresh Admin key, selecting the `default-production` project from `GET /v1/projects` instead of `default-sandbox`, and fresh project-scoped keys minted under it.
-- **Custody provider**. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow. The Privy sandbox wallets do not carry over.
-- **Solana network**. Mainnet-beta replaces devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
-- **API base URL**. `https://api.solana.com` is the canonical production base.
+- **Production access**. Production access is enabled per organization. Until it is enabled for yours, the production project doesn't appear in the workspace switcher or in `GET /v1/projects`.
+- **API keys**. Sandbox keys can't reach production. Create new Developer and Admin keys in the production project from the dashboard, as in Section 2. An API key can only create keys in its own project, so your first production key has to come from the dashboard. Production keys start with `sk_live_`.
+- **Custody wallets**. Wallets belong to a project, so set up custody in the production project. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow.
+- **Token**. Tokens belong to a project too. Create and deploy the token again in the production project (Section 4); you get a new `tok_*` ID and a new mint address. The sandbox token stays on devnet.
+- **Solana network**. Production projects run on mainnet-beta instead of devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
+- **API base URL**. Unchanged: `https://api.solana.com` serves both projects, and the key decides which one a request reaches.
 - **Screening providers**. Confirm the production provider mix matches your compliance team's policy. Run a `POST /v1/compliance/address-screenings` against a known address to verify each provider returns `status: "ok"` before live traffic.
 - **Idempotency-Key strategy**. In production, generate idempotency keys deterministically per operation (for example, `mint-${reserveDepositReference}`) rather than purely random per attempt. This lets your runbook resend safely without minting twice.
 
@@ -4588,18 +4567,24 @@ Before any `sk_live_` key sees real traffic, the compliance officer needs eviden
 
 ### 3. The cutover
 
-When the sign-off is in, the cutover itself is small. Repeat the Section 2 bootstrap with `environment: "production"`, mint your production keys, store them with your other live secrets, and update your runtime environment. Run the Section 2 wallet verification call against the production API base to confirm the wallets are bound. The first production mint corresponds to a real fiat reserve event at your custody bank.
+When the sign-off is in, the cutover itself is small. Confirm production access is enabled for your organization, then select the production project in the workspace switcher. Create your production keys there, store them with your other live secrets, and update your runtime environment. Run the Section 2 wallet verification call with the production Developer key to confirm the production wallets are bound. Then repeat Section 4 to create and deploy the production token, and point your runtime at its new token ID and mint address. The first production mint corresponds to a real fiat reserve event at your custody bank.
 
 ## 9. What's next
 
-You have a deployed regulated stablecoin, the compliance controls configured, and a production transition checklist your compliance officer can sign against. What you have built is the issuance side of the institutional product. Two adjacent tutorials carry forward from here.
+You have a deployed regulated stablecoin, the compliance controls configured, and a production transition checklist your compliance officer can sign against. What you have built is the issuance side of the institutional product. These pages carry forward from here.
 
 <Cards>
-  <Card title="Tokenize a Treasury Fund">
-    The design and issuance pattern for a tokenized money market fund or treasury bond product under the `tokenized-security` template. Compliance posture differs from the stablecoin pattern in three ways: allowlist on by default, accounts open frozen, and an additional `scaledUiAmount` extension for accrued yield. Most of the Section 5 controls work identically; the differences sit in Sections 3 and 4.
+  <Card title="Allowlists" href="/docs/tokens/allowlists">
+    Gate who may hold or receive a token with Token Access Control in allowlist mode, which the `tokenized-security` template turns on by default.
   </Card>
-  <Card title="Run Enterprise Stablecoin Payments">
-    Picks up after Section 7. Covers transfer rails for institutional payment flows: bulk transfers, scheduled payments, on-ramp and off-ramp integration with custody bank settlement, and the policy-engine patterns that gate transfers at scale.
+  <Card title="Freeze and Compliance" href="/docs/tokens/freeze-and-compliance">
+    Screen addresses, freeze and unfreeze accounts, pause the token, and seize tokens, from the dashboard or the API.
+  </Card>
+  <Card title="Wallet policies" href="/docs/wallet-operations/policies">
+    Deny custody-signed operations, or hold them for approval, before SDP signs them.
+  </Card>
+  <Card title="Basic payment" href="/docs/payments/send-basic-payment">
+    Send the stablecoin between wallets with `POST /v1/payments/transfers`.
   </Card>
 </Cards>
 
@@ -4607,8 +4592,8 @@ You have a deployed regulated stablecoin, the compliance controls configured, an
 
 For deeper API surface beyond what this tutorial covers:
 
-- [SDP API reference](https://platform.solana.com/docs/reference/api). The generated endpoint inventory across all public API families.
-- [SDP Postman collection](https://platform.solana.com/docs/reference/postman-collection). Importable request bundle for the full API.
+- [SDP API reference](/docs/reference/api). The generated endpoint inventory across all public API families.
+- [SDP Postman collection](/docs/reference/postman-collection). Importable request bundle for the full API.
 - [Token-2022 program documentation](https://solana.com/docs/tokens/extensions). The on-chain program SDP wraps.
 - [GENIUS Act analysis](https://www.gibsondunn.com/the-genius-act-a-new-era-of-stablecoin-regulation/). Statutory interpretation covering each subsection of the Act.
 - [FinCEN/OFAC implementing rules NPRM](https://www.federalregister.gov/documents/2026/04/10/2026-06963/permitted-payment-stablecoin-issuer-anti-money-launderingcountering-the-financing-of-terrorism). The current implementing-rule source for the BSA designation in GENIUS Section 4(a)(5).
