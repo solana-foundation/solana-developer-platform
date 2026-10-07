@@ -44,4 +44,4 @@ Include the `requestId` when reporting an issue — it links your request to our
 
 ## Execution model
 
-SDP executes custody operations by building, signing, and submitting with the configured custody wallet.
+Most operations are server-executed: SDP builds the transaction, signs it with a custody wallet in your project, submits it, and records the result. A smaller set of issuance routes, marked by `prepare` in the path, return an unsigned transaction instead, which you sign and submit yourself. See [Signing modes](/docs/developing-with-sdp/signing-modes) for which operations support each mode and how they differ.

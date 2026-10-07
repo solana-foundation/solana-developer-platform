@@ -1,4 +1,11 @@
 {
   "title": "Developing with SDP",
-  "pages": ["index", "idempotency", "authentication", "manage-api-keys"]
+  "pages": [
+    "index",
+    "idempotency",
+    "authentication",
+    "manage-api-keys",
+    "signing-modes",
+    "api-playground"
+  ]
 }

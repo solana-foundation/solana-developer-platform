@@ -1,0 +1,50 @@
+---
+title: API playground
+description: Send live API requests from the dashboard with one of your project's API keys.
+---
+
+The dashboard has an API playground on several module pages. You pick an endpoint, fill in its parameters and request body, and run it against the SDP API with one of your project's API keys. The playground doesn't simulate anything: every request it sends is a real API call.
+
+## Where to find it
+
+Open one of the pages below and select the **API Playground** tab next to **Overview**. A page appears only when its module is enabled for your organization. The tab is hidden on screens narrower than 768 pixels.
+
+| Dashboard page | Endpoints in the playground |
+| --- | --- |
+| **Wallets** | Wallet endpoints under `/v1/wallets` |
+| **Issuance** | Issuance endpoints under `/v1/issuance`, including the prepare routes next to their execute routes |
+| **Payments** | Payments endpoints under `/v1/payments`, such as transfers, transfer batches, and recurring payments |
+| **Counterparty** (in Payments) | Counterparty endpoints under `/v1/counterparties` |
+
+Choose an endpoint from the list, edit the path parameters and the JSON body, and click **Run request**. The playground shows the HTTP status and the response body. The selected endpoint is kept in the page URL, so you can share a link to it.
+
+On **Issuance** and **Payments**, the endpoint selected when you open the tab is a write endpoint: `POST /v1/issuance/tokens/{tokenId}/mint` and `POST /v1/payments/transfers`. Nothing is sent until you click **Run request**.
+
+## What a request runs as
+
+**Your API key, not your dashboard sign-in.** Paste the full secret of an API key (`sk_test_…` or `sk_live_…`) into the key field. When you leave the field, the dashboard checks that the key belongs to the project you have selected and is active and unexpired, then shows which key it is. A key from another project is rejected. Each request then runs with that key's role, permissions, and wallet access, as if your own code had sent it.
+
+If the project has no API keys, the field is replaced by a **Create API key** link for users who can manage keys. When you create a key in the dashboard, the playground picks it up without pasting, under the same clearing rules as a pasted key.
+
+**The key's environment.** The key decides where a request runs: an `sk_test_` key belongs to a sandbox project on devnet, and an `sk_live_` key to a production project on mainnet-beta. The playground doesn't show the environment separately, so check the key prefix before you run a write request.
+
+**Real execution.** Requests go from the dashboard's server to the SDP API. Only `/v1/` paths are allowed. Write requests change your data, and execute endpoints sign and submit transactions with your custody wallets. The playground has no confirmation step before a write request and doesn't send an `Idempotency-Key` header. Prepare endpoints return an unsigned transaction, which the playground doesn't sign or submit. They still have the side effects described in [Signing modes](/docs/developing-with-sdp/signing-modes).
+
+**Where the key is kept.** The pasted key stays in your browser tab's memory and isn't written to browser storage. It's cleared after 15 minutes of inactivity, when you switch organization or project, and when you sign out.
+
+## Copying a request
+
+- **Copy Code** copies the current request as a JavaScript `fetch` snippet, with a placeholder where your API key goes.
+- **AI instructions** copies a prompt that describes the endpoint, its parameters, and the request body.
+
+## Playground, API reference, and Postman collection
+
+The playground's endpoint lists are generated from the same public OpenAPI document as the [API reference](/docs/reference/api) and the [Postman collection](/docs/reference/postman-collection), and some dashboard pages add hand-written entries on top. Each tool suits a different job:
+
+| Tool | Use it to |
+| --- | --- |
+| API playground | Try an endpoint in the dashboard against the project you have selected, with one of its keys |
+| API reference | Browse every public endpoint by family, with the full schemas in the [OpenAPI document](https://api.solana.com/openapi.json) |
+| Postman collection | Run and save requests outside the dashboard, against any environment you set in `baseUrl` with the key you set in `sdpApiKey` |
+
+The playground covers fewer endpoint groups than the API reference: it has no tab for health, API keys, projects, policies, compliance, or asset profiles, and it lists only endpoints that accept API key authentication.
