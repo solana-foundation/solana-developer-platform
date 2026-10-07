@@ -5,11 +5,10 @@ import {
   supportsVaultWithdraw,
   supportsVaultWithdrawQuote,
 } from "@sdp/earn/capabilities";
-import { type Address, address } from "@solana/kit";
+import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertNotPortfolioProvider,
-  KAMINO_POSITION_READ_CONCURRENCY,
   KaminoVaultDirectClient,
   type KaminoVaultOperationRunner,
   toEarnVaultTransactionPlan,
@@ -22,22 +21,43 @@ const SHARE_MINT = "So11111111111111111111111111111111111111112";
 const mocks = vi.hoisted(() => ({
   buildKaminoDepositPlan: vi.fn(),
   buildKaminoWithdrawPlan: vi.fn(),
+  createKaminoReadRpc: vi.fn(),
   createKaminoRpc: vi.fn(),
   discoverKaminoPositionVaults: vi.fn(),
   quoteKaminoDeposit: vi.fn(),
   quoteKaminoWithdraw: vi.fn(),
-  readKaminoPosition: vi.fn(),
+  readKaminoPositions: vi.fn(),
 }));
 
-vi.mock("./rpc", () => ({ createKaminoRpc: mocks.createKaminoRpc }));
+vi.mock("./rpc", () => ({
+  createKaminoReadRpc: mocks.createKaminoReadRpc,
+  createKaminoRpc: mocks.createKaminoRpc,
+}));
 vi.mock("./sdk", () => ({
   buildKaminoDepositPlan: mocks.buildKaminoDepositPlan,
   buildKaminoWithdrawPlan: mocks.buildKaminoWithdrawPlan,
   discoverKaminoPositionVaults: mocks.discoverKaminoPositionVaults,
   quoteKaminoDeposit: mocks.quoteKaminoDeposit,
   quoteKaminoWithdraw: mocks.quoteKaminoWithdraw,
-  readKaminoPosition: mocks.readKaminoPosition,
+  readKaminoPositions: mocks.readKaminoPositions,
 }));
+
+function position(
+  runtime: KaminoRuntime,
+  vault: string,
+  owner: string,
+  shares: string
+): KaminoPosition {
+  return {
+    vault: address(vault),
+    owner: address(owner),
+    cluster: runtime.cluster,
+    shares,
+    withdrawableShares: shares,
+    tokenMint: address(DEPOSIT_TOKEN_MINT),
+    sharesMint: address(SHARE_MINT),
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -270,7 +290,8 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(mocks.buildKaminoDepositPlan).not.toHaveBeenCalled();
     expect(mocks.discoverKaminoPositionVaults).not.toHaveBeenCalled();
     expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
-    expect(mocks.readKaminoPosition).not.toHaveBeenCalled();
+    expect(mocks.createKaminoReadRpc).not.toHaveBeenCalled();
+    expect(mocks.readKaminoPositions).not.toHaveBeenCalled();
   });
 
   it("does not start provider work when endpoint proof finishes after expiry", async () => {
@@ -310,25 +331,18 @@ describe("KaminoVaultDirectClient capabilities", () => {
     const probe = new KaminoVaultDirectClient(resolveRpcUrl, runOperation);
     const slot = 123n;
     const getSlotSend = vi.fn().mockResolvedValue(slot);
-    mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+    mocks.createKaminoReadRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
 
     const providerReferences = ["7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx", SHARE_MINT];
     const owner = "11111111111111111111111111111112";
     mocks.discoverKaminoPositionVaults.mockResolvedValue(providerReferences.map(address));
     const listStrategies = vi.spyOn(probe, "listStrategies");
-    mocks.readKaminoPosition.mockImplementation(
-      async (
-        runtime: KaminoRuntime,
-        input: { vault: Address; owner: Address; slot: bigint }
-      ): Promise<KaminoPosition> => ({
-        vault: input.vault,
-        owner: input.owner,
-        cluster: runtime.cluster,
-        shares: String(input.vault) === providerReferences[1] ? "0" : "1",
-        withdrawableShares: String(input.vault) === providerReferences[1] ? "0" : "1",
-        tokenMint: address(DEPOSIT_TOKEN_MINT),
-        sharesMint: address(SHARE_MINT),
-      })
+    mocks.readKaminoPositions.mockImplementation(
+      async (runtime: KaminoRuntime, input: { vaults: string[]; owner: string }) =>
+        input.vaults.map((vault) => ({
+          status: "fulfilled",
+          value: position(runtime, vault, input.owner, vault === providerReferences[1] ? "0" : "1"),
+        }))
     );
     const processEnv = {
       SOLANA_RPC_URL: "https://process-mainnet.example.invalid",
@@ -359,25 +373,14 @@ describe("KaminoVaultDirectClient capabilities", () => {
       expect.any(Function)
     );
     expect(listStrategies).not.toHaveBeenCalled();
-    expect(mocks.createKaminoRpc).toHaveBeenCalledWith(resolvedRpcUrl);
+    expect(mocks.createKaminoReadRpc).toHaveBeenCalledWith(resolvedRpcUrl);
     expect(getSlotSend).toHaveBeenCalledOnce();
-    expect(positions.map((position) => position.providerReference)).toEqual([
-      providerReferences[0],
-    ]);
-    expect(
-      mocks.readKaminoPosition.mock.calls.map(([runtime, input]) => ({
-        cluster: runtime.cluster,
-        rpcUrl: runtime.rpcUrl,
-        vault: String(input.vault),
-        slot: input.slot,
-      }))
-    ).toEqual(
-      providerReferences.map((vault) => ({
-        cluster: "devnet",
-        rpcUrl: resolvedRpcUrl,
-        vault,
-        slot,
-      }))
+    expect(positions.map((entry) => entry.providerReference)).toEqual([providerReferences[0]]);
+    expect(mocks.readKaminoPositions).toHaveBeenCalledOnce();
+    expect(mocks.readKaminoPositions).toHaveBeenCalledWith(
+      { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+      { vaults: providerReferences, owner: address(owner), slot },
+      expect.any(Function)
     );
   });
 
@@ -399,8 +402,8 @@ describe("KaminoVaultDirectClient capabilities", () => {
     ).resolves.toEqual([]);
 
     expect(mocks.discoverKaminoPositionVaults).toHaveBeenCalledOnce();
-    expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
-    expect(mocks.readKaminoPosition).not.toHaveBeenCalled();
+    expect(mocks.createKaminoReadRpc).not.toHaveBeenCalled();
+    expect(mocks.readKaminoPositions).not.toHaveBeenCalled();
   });
 
   it("propagates on-chain discovery failures instead of reporting no holdings", async () => {
@@ -421,35 +424,26 @@ describe("KaminoVaultDirectClient capabilities", () => {
       )
     ).rejects.toBe(discoveryError);
 
-    expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
-    expect(mocks.readKaminoPosition).not.toHaveBeenCalled();
+    expect(mocks.createKaminoReadRpc).not.toHaveBeenCalled();
+    expect(mocks.readKaminoPositions).not.toHaveBeenCalled();
   });
 
   it("fails the whole snapshot when any discovered vault cannot be hydrated", async () => {
     const slot = 123n;
-    mocks.createKaminoRpc.mockReturnValue({
+    mocks.createKaminoReadRpc.mockReturnValue({
       getSlot: () => ({ send: vi.fn().mockResolvedValue(slot) }),
     });
 
     const owner = "11111111111111111111111111111112";
     const providerReferences = ["7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx", SHARE_MINT];
     mocks.discoverKaminoPositionVaults.mockResolvedValue(providerReferences.map(address));
-    mocks.readKaminoPosition.mockImplementation(
-      async (
-        runtime: KaminoRuntime,
-        input: { vault: Address; owner: Address }
-      ): Promise<KaminoPosition> => {
-        if (String(input.vault) === SHARE_MINT) throw new Error("RPC unavailable");
-        return {
-          vault: input.vault,
-          owner: input.owner,
-          cluster: runtime.cluster,
-          shares: "1",
-          withdrawableShares: "1",
-          tokenMint: address(DEPOSIT_TOKEN_MINT),
-          sharesMint: address(SHARE_MINT),
-        };
-      }
+    mocks.readKaminoPositions.mockImplementation(
+      async (runtime: KaminoRuntime, input: { vaults: string[]; owner: string }) =>
+        input.vaults.map((vault) =>
+          vault === SHARE_MINT
+            ? { status: "rejected", reason: new Error("RPC unavailable") }
+            : { status: "fulfilled", value: position(runtime, vault, input.owner, "1") }
+        )
     );
 
     await expect(
@@ -460,72 +454,43 @@ describe("KaminoVaultDirectClient capabilities", () => {
     ).rejects.toMatchObject({
       code: "VAULT_UNREADABLE",
       message: expect.stringMatching(/refusing to return a partial portfolio/),
+      cause: expect.objectContaining({ errors: [expect.any(Error)] }),
     });
-    expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(2);
+    expect(mocks.readKaminoPositions).toHaveBeenCalledOnce();
   });
 
-  it("reads vaults with bounded concurrency against one shared slot", async () => {
+  it("reads every requested vault in one page read against one shared slot", async () => {
     const slot = 123n;
     const getSlotSend = vi.fn().mockResolvedValue(slot);
-    mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
-
-    let active = 0;
-    let maxActive = 0;
-    const releases: Array<() => void> = [];
-    mocks.readKaminoPosition.mockImplementation(
-      async (
-        runtime: KaminoRuntime,
-        input: { vault: Address; owner: Address; slot: bigint }
-      ): Promise<KaminoPosition> => {
-        active += 1;
-        maxActive = Math.max(maxActive, active);
-        await new Promise<void>((resolve) => releases.push(resolve));
-        active -= 1;
-        return {
-          vault: input.vault,
-          owner: input.owner,
-          cluster: runtime.cluster,
-          shares: "1",
-          withdrawableShares: "1",
-          tokenMint: input.vault,
-          sharesMint: input.vault,
-        };
-      }
+    mocks.createKaminoReadRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+    mocks.readKaminoPositions.mockImplementation(
+      async (runtime: KaminoRuntime, input: { vaults: string[]; owner: string }) =>
+        input.vaults.map((vault) => ({
+          status: "fulfilled",
+          value: position(runtime, vault, input.owner, "1"),
+        }))
     );
 
     const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
     const providerReferences = Array.from({ length: 9 }, () => vault);
-    const pending = client.readVaultPositions(
-      { env: {}, environment: "sandbox" },
-      {
-        owner: "11111111111111111111111111111112",
-        providerReferences,
-      }
-    );
+    await expect(
+      client.readVaultPositions(
+        { env: {}, environment: "sandbox" },
+        { owner: "11111111111111111111111111111112", providerReferences }
+      )
+    ).resolves.toHaveLength(9);
 
-    await vi.waitFor(() =>
-      expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(KAMINO_POSITION_READ_CONCURRENCY)
-    );
-    for (const release of releases.splice(0)) release();
-
-    await vi.waitFor(() =>
-      expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(KAMINO_POSITION_READ_CONCURRENCY * 2)
-    );
-    for (const release of releases.splice(0)) release();
-
-    await vi.waitFor(() => expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(9));
-    for (const release of releases.splice(0)) release();
-
-    await expect(pending).resolves.toHaveLength(9);
-    expect(maxActive).toBe(KAMINO_POSITION_READ_CONCURRENCY);
     expect(getSlotSend).toHaveBeenCalledOnce();
+    expect(mocks.createKaminoRpc).not.toHaveBeenCalled();
     expect(mocks.discoverKaminoPositionVaults).not.toHaveBeenCalled();
-    expect(mocks.readKaminoPosition.mock.calls.every(([, input]) => input.slot === slot)).toBe(
-      true
-    );
+    expect(mocks.readKaminoPositions).toHaveBeenCalledOnce();
+    expect(mocks.readKaminoPositions.mock.calls[0]?.[1]).toMatchObject({
+      vaults: providerReferences,
+      slot,
+    });
   });
 
-  it("does not dequeue more position reads after the operation expires", async () => {
+  it("does not start the page read after the operation expires", async () => {
     let expired = false;
     const probe = new KaminoVaultDirectClient(
       async () => "https://devnet.example.invalid",
@@ -534,31 +499,25 @@ describe("KaminoVaultDirectClient capabilities", () => {
           if (expired) throw new Error("vault operation expired");
         })
     );
-    mocks.createKaminoRpc.mockReturnValue({
-      getSlot: () => ({ send: vi.fn().mockResolvedValue(123n) }),
+    mocks.createKaminoReadRpc.mockReturnValue({
+      getSlot: () => ({
+        send: vi.fn(async () => {
+          expired = true;
+          return 123n;
+        }),
+      }),
     });
-    const releases: Array<() => void> = [];
-    mocks.readKaminoPosition.mockImplementation(
-      () => new Promise<KaminoPosition>((resolve) => releases.push(() => resolve({} as never)))
-    );
-    const providerReference = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 
-    const pending = probe.readVaultPositions(
-      { env: {}, environment: "sandbox" },
-      {
-        owner: "11111111111111111111111111111112",
-        providerReferences: Array.from({ length: 9 }, () => providerReference),
-      }
-    );
-    await vi.waitFor(() =>
-      expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(KAMINO_POSITION_READ_CONCURRENCY)
-    );
-
-    expired = true;
-    for (const release of releases.splice(0)) release();
-
-    await expect(pending).rejects.toThrow("vault operation expired");
-    expect(mocks.readKaminoPosition).toHaveBeenCalledTimes(KAMINO_POSITION_READ_CONCURRENCY);
+    await expect(
+      probe.readVaultPositions(
+        { env: {}, environment: "sandbox" },
+        {
+          owner: "11111111111111111111111111111112",
+          providerReferences: ["7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx"],
+        }
+      )
+    ).rejects.toThrow("vault operation expired");
+    expect(mocks.readKaminoPositions).not.toHaveBeenCalled();
   });
 });
 
