@@ -724,6 +724,25 @@ describe("OpenAPI spec", () => {
     }
   });
 
+  it("describes every public error response by what the status means", () => {
+    const generic: string[] = [];
+    for (const [path, item] of Object.entries(createPublicOpenApiDocument().paths ?? {})) {
+      for (const [method, operation] of Object.entries(item ?? {})) {
+        const responses = (operation as { responses?: Record<string, { description?: string }> })
+          .responses;
+        for (const [status, response] of Object.entries(responses ?? {})) {
+          if (
+            Number(status) >= 400 &&
+            (!response.description || response.description === "Error")
+          ) {
+            generic.push(`${method.toUpperCase()} ${path} ${status}`);
+          }
+        }
+      }
+    }
+    expect(generic).toEqual([]);
+  });
+
   it("limits the public document to supported public API families", () => {
     const doc = createPublicOpenApiDocument();
     const updateProject = JSON.stringify(doc.paths?.["/v1/projects/{projectId}"]?.patch);
