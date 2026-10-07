@@ -121,10 +121,12 @@ describe("probeProjectRpcDeployment", () => {
   });
 });
 
+const actualCreateClusterRpc = solanaRpc.createClusterRpc;
+
 describe("loadProjectRpcClient", () => {
   let projects: SeededDefaultProjects;
   let managedRpc: SolanaRpc;
-  let createRpcMock: MockInstance<typeof solanaRpc.createRpc>;
+  let createClusterRpcMock: MockInstance<typeof solanaRpc.createClusterRpc>;
 
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -144,10 +146,11 @@ describe("loadProjectRpcClient", () => {
       ids: { sandbox: "prj_project_rpc_sandbox", production: "prj_project_rpc_production" },
     });
     managedRpc = rpcWithAccounts({ program: null });
-    createRpcMock = vi.spyOn(solanaRpc, "createRpc").mockReturnValue(managedRpc);
+    createClusterRpcMock = vi.spyOn(solanaRpc, "createClusterRpc").mockReturnValue(managedRpc);
   });
 
   afterEach(() => {
+    env.SOLANA_MAINNET_RPC_URL = undefined;
     vi.restoreAllMocks();
   });
 
@@ -176,18 +179,59 @@ describe("loadProjectRpcClient", () => {
     }
   );
 
-  it("builds the client on the managed pool from env and binds the probe to it and the cluster", async () => {
+  it("builds the client for the project's cluster and binds the probe to it and the cluster", async () => {
     const client = await loadProjectRpcClient({
       env,
       organizationId: TEST_ORG.id,
       projectId: projects.production.id,
     });
 
-    expect(createRpcMock).toHaveBeenCalledExactlyOnceWith(env);
+    expect(createClusterRpcMock).toHaveBeenCalledExactlyOnceWith(env, "mainnet-beta");
     await expect(client.probe(deployment)).resolves.toMatchObject({
       ok: false,
       error: `Escrow program is not deployed on ${CLUSTER_BY_SDP_ENVIRONMENT.production}.`,
     });
+  });
+
+  it("fails closed for a production project when the devnet deployment has no mainnet endpoint", async () => {
+    createClusterRpcMock.mockImplementation(actualCreateClusterRpc);
+
+    await expect(
+      loadProjectRpcClient({
+        env,
+        organizationId: TEST_ORG.id,
+        projectId: projects.production.id,
+      })
+    ).rejects.toThrow("No RPC endpoint is configured for mainnet-beta: set SOLANA_MAINNET_RPC_URL");
+    expect(createClusterRpcMock).toHaveBeenCalledExactlyOnceWith(env, "mainnet-beta");
+  });
+
+  it("dials the configured mainnet endpoint for a production project", async () => {
+    createClusterRpcMock.mockImplementation(actualCreateClusterRpc);
+    env.SOLANA_MAINNET_RPC_URL = "https://mainnet-rpc.mock.invalid";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ jsonrpc: "2.0", id: "0", result: { "solana-core": "2.0.0" } }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    );
+
+    const client = await loadProjectRpcClient({
+      env,
+      organizationId: TEST_ORG.id,
+      projectId: projects.production.id,
+    });
+    await client.rpc.getVersion().send();
+
+    expect(client.cluster).toBe("mainnet-beta");
+    expect(createClusterRpcMock).toHaveBeenCalledExactlyOnceWith(env, "mainnet-beta");
+    expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(
+      "https://mainnet-rpc.mock.invalid",
+      expect.any(Object)
+    );
   });
 
   it("throws for a project that does not exist", async () => {
@@ -200,7 +244,7 @@ describe("loadProjectRpcClient", () => {
     ).rejects.toThrow(
       "Active project prj_project_rpc_missing was not found while resolving its RPC"
     );
-    expect(createRpcMock).not.toHaveBeenCalled();
+    expect(createClusterRpcMock).not.toHaveBeenCalled();
   });
 
   it("throws for a project owned by another organization", async () => {
@@ -230,6 +274,6 @@ describe("loadProjectRpcClient", () => {
     ).rejects.toThrow(
       `Active project ${projects.sandbox.id} was not found while resolving its RPC`
     );
-    expect(createRpcMock).not.toHaveBeenCalled();
+    expect(createClusterRpcMock).not.toHaveBeenCalled();
   });
 });

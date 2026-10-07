@@ -13,7 +13,14 @@ import {
   DEFAULT_PROJECT_SLUG,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
+
+const STORED_SETTINGS_WITH_REMOVED_KEYS = JSON.stringify({
+  webhookUrl: "https://hooks.example.com/x",
+  rpcProvider: "helius",
+  rpcEndpoint: "https://rpc.example.com",
+});
 
 describe("ProjectService", () => {
   let projectService: ProjectService;
@@ -79,6 +86,17 @@ describe("ProjectService", () => {
       const project = await projectService.getProject("prj_nonexistent");
 
       expect(project).toBeNull();
+    });
+
+    it("strips removed keys from the stored settings", async () => {
+      await db
+        .prepare("UPDATE projects SET settings = ? WHERE id = ?")
+        .bind(STORED_SETTINGS_WITH_REMOVED_KEYS, TEST_PROJECT.id)
+        .run();
+
+      const project = await projectService.getProject(TEST_PROJECT.id);
+
+      expect(required(project).settings).toEqual({ webhookUrl: "https://hooks.example.com/x" });
     });
   });
 
@@ -174,6 +192,27 @@ describe("ProjectService", () => {
 
       expect(updated.settings).toEqual({
         webhookUrl: "https://updated.example.com/webhook",
+        metadata: { team: "payments" },
+      });
+    });
+
+    it("does not write removed stored keys back when merging a settings update", async () => {
+      await db
+        .prepare("UPDATE projects SET settings = ? WHERE id = ?")
+        .bind(STORED_SETTINGS_WITH_REMOVED_KEYS, TEST_PROJECT.id)
+        .run();
+
+      await projectService.updateProject(TEST_PROJECT.id, {
+        settings: { metadata: { team: "payments" } },
+      });
+
+      const row = await db
+        .prepare("SELECT settings FROM projects WHERE id = ?")
+        .bind(TEST_PROJECT.id)
+        .first<{ settings: string }>();
+      const persisted: unknown = JSON.parse(required(row).settings);
+      expect(persisted).toEqual({
+        webhookUrl: "https://hooks.example.com/x",
         metadata: { team: "payments" },
       });
     });
