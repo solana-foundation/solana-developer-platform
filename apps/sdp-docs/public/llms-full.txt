@@ -3190,6 +3190,7 @@ There are two ways customers can land a payment on the address you control:
 
 - **Indexed inbound transfers** — `GET /v1/payments/transfers?direction=inbound` returns persisted transfers across your custody wallets. Filter by exact `custodyWalletId`; add `includeObserved=true` to include recent chain observations for that wallet. See [Indexing and reconciliation](/docs/payments/accept-indexing).
 - **Per-transfer status reads** — `GET /v1/payments/transfers/{id}` for a single payment's lifecycle. See [Verifying a payment](/docs/payments/accept-verification).
+- **Transaction history** — `GET /v1/transactions` lists past payments and issuance transactions in one feed, with cursor pagination and search by ID or signature. It covers persisted records only, not observed on-chain activity. See [Transaction history](/docs/payments/transactions).
 - **Wallet balances** — `GET /v1/payments/wallets/{walletId}/balances` for the current per-token balance on a receiving wallet. See [Wallet balances](/docs/wallet-operations/balances).
 - **Address-based correlation** — the inbound transfer's `destination` is the on-record correlation key for accept flows. Pair with per-order receiving addresses (see above) to map inbound transfers to orders without depending on memo. `Transfer.memo` is populated only for SDP-initiated transfers (outbound or internal); for customer-initiated inbound transfers the field is **omitted** from the response (it's optional in the schema, not nullable). Read the on-chain transaction via Solana RPC if you need memo or Solana Pay reference correlation.
 
@@ -3314,6 +3315,8 @@ Source: https://platform.solana.com/docs/payments/accept-indexing
 > List inbound transfers, paginate, dedupe, and reconcile against your product ledger.
 
 `GET /v1/payments/transfers` is the workhorse for reconciliation. By default, it returns paginated persisted transfer records across your organization's custody wallets, with filters for direction, status, token, exact `custodyWalletId`, and date range. Use it to mirror SDP transfers locally, match inbound payments to orders, and drive a delta-polling worker. To include recent on-chain observations for one exact wallet, set `custodyWalletId` and `includeObserved=true`.
+
+For one feed of past payments and issuance transactions, with cursor pagination and search by ID or signature, use [Transaction history](/docs/payments/transactions). It lists persisted records only, so keep using this endpoint with `includeObserved=true` for observed on-chain activity.
 
 ## Listing inbound transfers
 
@@ -3445,6 +3448,7 @@ Notes:
 - [Verifying a payment](/docs/payments/accept-verification) — single-transfer status reads.
 - [Accept overview](/docs/payments/accept-overview) — the broader inbound flow.
 - [Payouts and disbursements](/docs/payments/send-payouts) — the same list endpoint used outbound.
+- [Transaction history](/docs/payments/transactions) — one cursor-paginated feed across payments and issuance.
 - [Payments API reference](/docs/reference/api/payments) — full endpoint reference.
 
 ---
@@ -3813,6 +3817,341 @@ For self-hosted deployments where only a subset of providers will ever be config
 
 - [Ramps](/docs/payments/ramps) — onramp and offramp endpoints and request shape.
 - [Provider onboarding](/docs/reference/provider-onboarding) — activation flow.
+
+---
+
+## Payments — Activity
+
+### Transaction history
+Source: https://platform.solana.com/docs/payments/transactions
+
+> List a project's payments and issuance transactions in one feed, with filters, cursor pagination, and prefix search.
+
+`GET /v1/transactions` returns one list of your project's transactions across SDP modules, newest first. Every row has the same fields, including a `module`, a `kind`, a normalized `status`, and the module's own `moduleStatus`. Use it for an activity feed, to find a transaction from an ID or signature, or as the input to a reconciliation job. For the full record behind a row, call that module's own endpoint with the row's `moduleId`.
+
+## What the list contains
+
+| `module` | One row per | Full record |
+| --- | --- | --- |
+| `payments` | Payment transfer record: the persisted records that `GET /v1/payments/transfers` returns by default | `GET /v1/payments/transfers/{transferId}` |
+| `issuance` | Token transaction (deploy, mint, burn, freeze, and the other token operations) | `GET /v1/issuance/transactions`, or `GET /v1/issuance/tokens/{tokenId}/transactions` for one token |
+
+Keep these points in mind:
+
+- **Persisted records only.** On-chain activity that `GET /v1/payments/transfers` adds with `includeObserved=true` is not in this list. If you rely on observed inbound payments, keep reading them from the transfers endpoint (see [Indexing and reconciliation](/docs/payments/accept-indexing)).
+- **Batches appear per transaction.** SDP splits a transfer batch into Solana transactions, and each one is a `batch_pay` row. There is no row per recipient and no single row for the whole batch. Use `GET /v1/payments/transfer-batches/{batchId}` for recipient outcomes.
+- **`moduleId` points at the record.** For payments it is the transfer ID (`xfr_…`). For issuance it is the token transaction ID (`ttx_…`).
+
+The schema also lists `module` values for features that are not generally available. Requests for them go through the same [permission check](#permissions) and return only rows your project has for that module. If you list without a `module` filter, skip rows whose `module` you don't handle.
+
+## List transactions
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl "https://api.solana.com/v1/transactions?module=payments&status=succeeded&limit=50" \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="list-transactions.ts"
+const url = new URL("https://api.solana.com/v1/transactions");
+url.searchParams.set("module", "payments");
+url.searchParams.set("status", "succeeded");
+url.searchParams.set("limit", "50");
+
+const res = await fetch(url, {
+  headers: { Authorization: "Bearer sk_test_..." },
+});
+const { data } = await res.json();
+// data.transactions: Transaction[]
+// data.nextCursor: string | null
+```
+</Tab>
+</Tabs>
+
+### Query parameters
+
+All filters are optional, and a row must match every filter you send.
+
+| Parameter | Type | Notes |
+| --- | --- | --- |
+| `module` | `payments` \| `issuance` | Return one module. Omit it to get every module your credential can read. |
+| `kind` | string | One `kind` from the module's list (see [Row fields](#row-fields)). Requires `module`. |
+| `status` | `pending` \| `succeeded` \| `failed` \| `canceled` | Filters on the normalized `status`, not on `moduleStatus`. |
+| `custodyWalletId` | string | Exact SDP Wallet ID (`cwlt_…`). Up to 128 characters. |
+| `counterpartyId` | string | Exact counterparty ID. Up to 128 characters. |
+| `token` | string | A mint address or a well-known symbol such as `USDC`. For a well-known token, rows stored under either its symbol or its mint match. Up to 128 characters. |
+| `search` | string | Prefix match on `id`, `moduleId`, or `signature`. 3 to 200 characters. See [Search by ID or signature](#search-by-id-or-signature). |
+| `createdAtFrom`, `createdAtTo` | ISO 8601 datetime | Inclusive bounds on `createdAt`. Write the time in UTC with a `Z` suffix (`2026-09-01T00:00:00Z`); offsets such as `+02:00` are rejected. |
+| `cursor` | string | The `nextCursor` value from the previous page. |
+| `limit` | integer | Rows per page. Default `50`, minimum `1`, maximum `100`. |
+
+An invalid query returns `400` with `BAD_REQUEST`. Common causes: `kind` without `module`, a `kind` that belongs to a different module, a datetime with an offset, a `search` shorter than 3 characters, or a `limit` above 100.
+
+### Response
+
+```json title="Response"
+{
+  "data": {
+    "transactions": [
+      {
+        "id": "xfr_abc123",
+        "moduleId": "xfr_abc123",
+        "module": "payments",
+        "kind": "pay",
+        "status": "succeeded",
+        "moduleStatus": "finalized",
+        "organizationId": "org_123",
+        "projectId": "prj_123",
+        "custodyWalletId": "cwlt_123",
+        "custodyWalletLabel": "Treasury",
+        "token": "9aBCd...4eEf",
+        "amount": "100.00",
+        "counterpartyId": null,
+        "signature": "5Kd3...Qe7z",
+        "createdAt": "2026-09-15T10:00:00.000Z"
+      },
+      {
+        "id": "ttx_def456",
+        "moduleId": "ttx_def456",
+        "module": "issuance",
+        "kind": "mint",
+        "status": "pending",
+        "moduleStatus": "processing",
+        "organizationId": "org_123",
+        "projectId": "prj_123",
+        "custodyWalletId": "cwlt_456",
+        "custodyWalletLabel": null,
+        "token": "7fGhJ...2kLm",
+        "amount": null,
+        "counterpartyId": null,
+        "signature": null,
+        "createdAt": "2026-09-15T09:58:12.000Z"
+      }
+    ],
+    "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI2LTA5LTE1VDA5OjU4OjEyLjAwMFoi..."
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-09-15T10:00:05.000Z" }
+}
+```
+
+`nextCursor` is `null` on the last page. The response has no total count.
+
+## Row fields
+
+### Fields on every row
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | string | Row identifier. Use it as your key for the row. |
+| `module` | string | The module the row belongs to: `payments` or `issuance`. |
+| `moduleId` | string | ID of the underlying record. Pass it to the module's own endpoints. |
+| `kind` | string | What the transaction did. The values depend on `module`. |
+| `status` | `pending` \| `succeeded` \| `failed` \| `canceled` | Normalized status, with the same four values for every module. |
+| `moduleStatus` | string | The underlying record's own status. The values depend on `module`. |
+| `organizationId` | string | Your organization ID. |
+| `projectId` | string \| null | The project the record belongs to. |
+| `custodyWalletId` | string \| null | SDP Wallet ID on the record. |
+| `custodyWalletLabel` | string \| null | That wallet's label. `null` when the wallet has no label or the row has no wallet. |
+| `token` | string \| null | The token the row moved or acted on. The format depends on `module`. |
+| `amount` | string \| null | Exact decimal string in token units: `"100.00"` is 100 tokens. `null` when there is no amount to show. |
+| `counterpartyId` | string \| null | The counterparty tied to the record, if any. |
+| `signature` | string \| null | Solana transaction signature, once there is one. |
+| `createdAt` | string | ISO 8601 time the underlying record was created. The list is sorted on it. |
+
+### Payments rows
+
+| `kind` | Row |
+| --- | --- |
+| `pay` | An outbound transfer, for example from `POST /v1/payments/transfers`. |
+| `batch_pay` | One Solana transaction of a [transfer batch](/docs/payments/send-payouts). |
+| `recurring_pay` | A transfer that collected a recurring payment. |
+| `deposit` | An inbound transfer. |
+| `onramp` | An on-ramp transfer. |
+| `offramp` | An off-ramp transfer. |
+| `confidential_pay`, `request_deposit` | Produced by payment features that are not generally available. Accept these values instead of failing on them. |
+
+`moduleStatus` holds the transfer status described in [Verifying a payment](/docs/payments/accept-verification#status-lifecycle). It maps to `status` like this:
+
+| `moduleStatus` | `status` |
+| --- | --- |
+| `pending`, `processing`, `awaiting_payment`, `settling` | `pending` |
+| `confirmed`, `finalized`, `completed` | `succeeded` |
+| `failed` | `failed` |
+| `canceled`, `expired` | `canceled` |
+
+Check `moduleStatus` before you act on a payment:
+
+- For a wallet transfer, `succeeded` covers `confirmed` as well as `finalized`. Wait for `finalized` before irreversible side effects, as [Finality on Solana](/docs/payments/accept-verification#finality-on-solana) recommends.
+- An `onramp` or `offramp` row has finished only when `moduleStatus` is `completed`, `failed`, `canceled`, or `expired`.
+
+Other fields on payments rows:
+
+- `token` holds the transfer's `token` value as stored, which is a symbol on some rows and a mint address on others. Filter with `token` to match both forms of a well-known token.
+- On a `batch_pay` row, `amount` is the total paid in that one transaction, and `counterpartyId` is set only when the transaction paid a single recipient.
+
+### Issuance rows
+
+| `kind` | Operation | Guide |
+| --- | --- | --- |
+| `deploy` | Token deployment | [Deploy a Token](/docs/tokens/deploy-a-token) |
+| `mint`, `burn`, `force_burn` | Supply changes | [Mint and Burn](/docs/tokens/mint-and-burn) |
+| `freeze`, `unfreeze`, `seize`, `pause`, `unpause` | Compliance controls | [Freeze and Compliance](/docs/tokens/freeze-and-compliance) |
+| `update_authority` | Authority change | [Manage Token Settings](/docs/tokens/manage-token-settings) |
+
+`moduleStatus` holds the token transaction status:
+
+| `moduleStatus` | `status` |
+| --- | --- |
+| `pending`, `processing` | `pending` |
+| `confirmed`, `finalized` | `succeeded` |
+| `failed` | `failed` |
+
+Issuance rows are never `canceled`.
+
+Other fields on issuance rows:
+
+- `token` is the token's mint address, or `null` if the token has no mint address yet.
+- `amount` and `counterpartyId` are always `null`. For operation details such as `params`, `slot`, `fee`, and `error`, find the record by its `moduleId` in `GET /v1/issuance/transactions`.
+- `custodyWalletId` is the SDP wallet that signed the operation, when SDP recorded one. The `custodyWalletId` filter on this list matches that wallet only. On `GET /v1/issuance/transactions`, the same filter matches every transaction the wallet's address took part in.
+
+## Pagination
+
+Rows are sorted by `createdAt`, newest first. Rows with the same `createdAt` are ordered by `module` and then `id`, so the order is the same on every request.
+
+1. Make the first request without `cursor`.
+2. If `nextCursor` is not `null`, repeat the request with `cursor` set to that value.
+3. Stop when `nextCursor` is `null`.
+
+The cursor records where the last page ended. It does not record your filters, so send the same filters with every page. Rows created after your first request don't shift the pages that follow; they appear at the top of the list the next time you start from the first page. Treat the cursor as an opaque string. A cursor the API can't read returns `400` with `BAD_REQUEST`.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl "https://api.solana.com/v1/transactions?module=payments&limit=100&cursor=eyJjcmVhdGVkQXQiOiIyMDI2LTA5LTE1VDA5OjU4OjEyLjAwMFoi..." \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="list-transactions.ts"
+async function* listTransactions(filters: Record<string, string>) {
+  let cursor: string | null = null;
+  while (true) {
+    const url = new URL("https://api.solana.com/v1/transactions");
+    for (const [key, value] of Object.entries(filters)) {
+      url.searchParams.set(key, value);
+    }
+    url.searchParams.set("limit", "100");
+    if (cursor) url.searchParams.set("cursor", cursor);
+
+    const res = await fetch(url, {
+      headers: { Authorization: "Bearer sk_test_..." },
+    });
+    if (res.status === 429) {
+      // Over the metered quota: wait, then request the same page again.
+      const seconds = Number(res.headers.get("Retry-After") ?? "1");
+      await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+      continue;
+    }
+    if (!res.ok) {
+      const { error } = await res.json();
+      throw new Error(`${res.status} ${error.code}: ${error.message}`);
+    }
+
+    const { data } = await res.json();
+    yield* data.transactions;
+    if (data.nextCursor === null) return;
+    cursor = data.nextCursor;
+  }
+}
+```
+</Tab>
+</Tabs>
+
+## Search by ID or signature
+
+`search` matches the start of a row's `id`, `moduleId`, or `signature`, ignoring case. It is not a substring search: `search=xfr_3f9a` finds the transfer `xfr_3f9a…`, but `search=3f9a` does not, because the ID doesn't start with it.
+
+- The term must be 3 to 200 characters long after surrounding whitespace is trimmed.
+- `%` and `_` are matched as literal characters.
+- A full ID returns that one row. Paste full IDs or signatures when you have them.
+- `search` combines with the other filters.
+
+## Permissions
+
+Each module needs its own read permission:
+
+| `module` | Permission |
+| --- | --- |
+| `payments` | `payments:read` |
+| `issuance` | `tokens:read` |
+
+- With `module` set, a credential without that module's permission gets `403` with `INSUFFICIENT_PERMISSIONS`.
+- Without `module`, the list contains rows only from the modules your credential can read, and the others are left out without an error. If the credential can read none of the list's modules, the request returns `403` with `INSUFFICIENT_PERMISSIONS`.
+- The `api_admin`, `api_developer`, and `api_readonly` [roles](/docs/developing-with-sdp/manage-api-keys#roles) all include both permissions.
+
+If a key is limited to selected wallets through [wallet bindings](/docs/developing-with-sdp/authentication#authorization-layers), the list only returns rows for bound wallets whose binding includes the module's read permission. Rows without a `custodyWalletId` are left out. Setting `custodyWalletId` to a wallet outside the key's bindings returns `403` with `FORBIDDEN`.
+
+## Rate limits
+
+`GET /v1/transactions` has its own metered quota, which applies in addition to the [standard per-key rate limit](/docs/developing-with-sdp/authentication#errors).
+
+| Scope | Limit |
+| --- | --- |
+| Per credential: one API key, or one dashboard user | 60 requests per minute |
+| Per organization: all keys and dashboard users, across every project | 240 requests per minute |
+
+- Over either limit, the API returns `429` with `RATE_LIMITED` and a `Retry-After` header that gives the number of seconds to wait.
+- If SDP can't check the quota, it refuses the request with `503` and `SERVICE_UNAVAILABLE` instead of serving it unmetered. Retry with backoff.
+- Use `limit=100` for bulk reads. Walking 1,000 rows then takes 10 requests.
+
+## Reconciliation
+
+A polling worker that keeps a local copy of the list:
+
+1. **Pull new rows.** On each tick, list with `createdAtFrom` set to the newest `createdAt` you have stored, minus a short overlap, and walk every page. Upsert each row by `id`. The overlap returns some rows you already have, and the upsert absorbs them.
+2. **Refresh open rows.** A row's `status` changes after the row is created, but its `createdAt` stays the same, so a window that only moves forward misses those changes. If you have rows that are still `pending`, start the window at the oldest one's `createdAt` instead.
+3. **Re-read long-running rows on their own.** If a row stays `pending` for a long time, such as a ramp transfer waiting for the payer, widening the window gets expensive. Read it with `GET /v1/payments/transfers/{transferId}` using its `moduleId`, or with `GET /v1/transactions?search=<id>`, which returns that one row.
+4. **Act on the right status.** Use `status` to group rows, and check `moduleStatus` before irreversible side effects (see [Payments rows](#payments-rows)).
+
+<Tabs items={["TypeScript"]}>
+<Tab value="TypeScript">
+```typescript title="reconcile-transactions.ts"
+const OVERLAP_MS = 5_000; // re-read the last 5s on each tick to catch boundary arrivals
+const FIRST_RUN_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+
+async function reconcileTick(store: LedgerStore) {
+  const newest = await store.newestCreatedAt(); // ISO string, or null on the first run
+  const oldestPending = await store.oldestPendingCreatedAt(); // ISO string, or null
+  const starts = [newest, oldestPending]
+    .filter((value): value is string => value !== null)
+    .map((value) => Date.parse(value));
+  const startMs = starts.length > 0 ? Math.min(...starts) : Date.now() - FIRST_RUN_LOOKBACK_MS;
+  const createdAtFrom = new Date(startMs - OVERLAP_MS).toISOString();
+
+  // listTransactions is the paginator from the Pagination section.
+  for await (const row of listTransactions({ createdAtFrom })) {
+    if (row.module !== "payments" && row.module !== "issuance") continue;
+    await store.upsert(row); // keyed by row.id; the latest status wins
+  }
+}
+```
+</Tab>
+</Tabs>
+
+Notes:
+
+- Every 15 to 30 seconds is a reasonable tick for background reconciliation (see [Polling cadence](/docs/payments/accept-verification#polling-cadence)). With 60 requests per minute per key, a 15-second tick has about 15 requests to spend, shared with anything else that uses the same key.
+- The `createdAt` bounds are inclusive, so a row exactly on the boundary comes back on the next tick too. The upsert by `id` handles it.
+
+## Related
+
+- [Indexing and reconciliation](/docs/payments/accept-indexing) — inbound transfers, including observed on-chain activity.
+- [Verifying a payment](/docs/payments/accept-verification) — transfer statuses and finality.
+- [Payouts and disbursements](/docs/payments/send-payouts) — transfer batches and the transactions they produce.
+- [Mint and Burn](/docs/tokens/mint-and-burn) — issuance operations that appear as `issuance` rows.
+- [Payments API reference](/docs/reference/api/payments) — full endpoint reference.
 
 ---
 

@@ -13,6 +13,8 @@
     "accept-indexing",
     "---Ramps---",
     "ramps",
-    "ramps-providers"
+    "ramps-providers",
+    "---Activity---",
+    "transactions"
   ]
 }
