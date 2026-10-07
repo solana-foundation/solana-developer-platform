@@ -29,6 +29,7 @@ const t = ((key: string) => key) as Translate;
 function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]> = {}) {
   return {
     canReadApprovals: false,
+    complianceEnabled: true,
     custodyEnabled: true,
     dvpEnabled: false,
     earnEnabled: false,
@@ -39,6 +40,7 @@ function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]> = {
     pendingApprovalCount: null,
     policiesEnabled: true,
     privateChannelsEnabled: false,
+    rampsEnabled: true,
     ...overrides,
   };
 }
@@ -245,10 +247,12 @@ describe("Integrations dashboard navigation", () => {
   it("groups every enabled family under the Integrations submenu", () => {
     const item = findIntegrationsItem(
       navOptions({
+        complianceEnabled: true,
         custodyEnabled: true,
         paymentsEnabled: true,
         policiesEnabled: true,
         privateChannelsEnabled: true,
+        rampsEnabled: true,
       })
     );
 
@@ -265,14 +269,25 @@ describe("Integrations dashboard navigation", () => {
   it("lists no family when every owning module is disabled", () => {
     const item = findIntegrationsItem(
       navOptions({
+        complianceEnabled: false,
         custodyEnabled: false,
         paymentsEnabled: false,
         policiesEnabled: false,
         privateChannelsEnabled: false,
+        rampsEnabled: false,
       })
     );
 
     expect(item?.children).toEqual([]);
+  });
+
+  // The release channel caps every ramp provider flag, so ramps can be off while Payments is on.
+  it("drops Ramps when no ramp provider is enabled, even with Payments on", () => {
+    const item = findIntegrationsItem(navOptions({ paymentsEnabled: true, rampsEnabled: false }));
+
+    expect(item?.children?.map((child) => child.href)).not.toContain(
+      "/dashboard/integrations?tab=ramps"
+    );
   });
 });
 

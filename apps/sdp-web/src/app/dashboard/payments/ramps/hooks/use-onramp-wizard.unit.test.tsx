@@ -125,6 +125,7 @@ function wrapper({ children }: { children: ReactNode }) {
         dashboardAccess={resolveDashboardAccess("org:admin")}
         flags={{
           assetProfiles: false,
+          compliance: false,
           custody: true,
           dvp: false,
           earn: false,
@@ -134,6 +135,7 @@ function wrapper({ children }: { children: ReactNode }) {
           payments: true,
           policies: false,
           privateChannels: false,
+          ramps: true,
         }}
         serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
         projects={[]}

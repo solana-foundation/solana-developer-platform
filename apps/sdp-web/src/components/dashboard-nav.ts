@@ -187,7 +187,7 @@ export function getIntegrationActions(
   t: ReturnType<typeof useTranslations>,
   options: Pick<
     Parameters<typeof getNavSections>[1],
-    "custodyEnabled" | "paymentsEnabled" | "policiesEnabled" | "privateChannelsEnabled"
+    "complianceEnabled" | "custodyEnabled" | "privateChannelsEnabled" | "rampsEnabled"
   >
 ): SubNavItem[] {
   return [
@@ -200,7 +200,7 @@ export function getIntegrationActions(
           },
         ]
       : []),
-    ...(options.paymentsEnabled
+    ...(options.rampsEnabled
       ? [
           {
             label: t("Shared.integrations.rampsTitle"),
@@ -209,7 +209,7 @@ export function getIntegrationActions(
           },
         ]
       : []),
-    ...(options.policiesEnabled
+    ...(options.complianceEnabled
       ? [
           {
             label: t("Shared.integrations.complianceTitle"),
@@ -234,6 +234,7 @@ export function getNavSections(
   t: ReturnType<typeof useTranslations>,
   options: {
     canReadApprovals: boolean;
+    complianceEnabled: boolean;
     custodyEnabled: boolean;
     dvpEnabled: boolean;
     earnEnabled: boolean;
@@ -244,6 +245,7 @@ export function getNavSections(
     pendingApprovalCount: number | null;
     policiesEnabled: boolean;
     privateChannelsEnabled: boolean;
+    rampsEnabled: boolean;
   }
 ): NavSection[] {
   const marketsActions = getMarketsActions(t, options.earnEnabled, options.dvpEnabled);

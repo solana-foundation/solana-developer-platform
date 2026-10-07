@@ -1,3 +1,4 @@
+import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { getDashboardPageConfig } from "./dashboard-header";
 
@@ -5,7 +6,17 @@ type Translate = Parameters<typeof getDashboardPageConfig>[1];
 const t = ((key: string) => key) as Translate;
 
 function legacyConfig(pathname: string) {
-  return getDashboardPageConfig(pathname, t, false, false, true, true, true, false);
+  return getDashboardPageConfig(
+    pathname,
+    t,
+    false,
+    false,
+    UNIFIED_TRANSACTION_MODULES,
+    true,
+    true,
+    true,
+    false
+  );
 }
 
 describe("dashboard headers with NEW DESIGN off", () => {
@@ -17,6 +28,21 @@ describe("dashboard headers with NEW DESIGN off", () => {
     ]) {
       expect(legacyConfig(pathname).headerTabs?.tabs.map((tab) => tab.id)).toContain("playground");
     }
+  });
+
+  it("lists only the transaction modules it is given after All", () => {
+    const config = getDashboardPageConfig(
+      "/dashboard/payments/transactions",
+      t,
+      false,
+      false,
+      ["payments", "earn"],
+      true,
+      true,
+      true,
+      false
+    );
+    expect(config.headerTabs?.tabs.map((tab) => tab.id)).toEqual(["all", "payments", "earn"]);
   });
 
   it("keeps the transaction module tabs and no page action", () => {
@@ -44,7 +70,7 @@ describe("dashboard headers with NEW DESIGN off", () => {
 
   it("leaves other routes as they are", () => {
     expect(legacyConfig("/dashboard/policies")).toEqual(
-      getDashboardPageConfig("/dashboard/policies", t, false, false, true, true, true, true)
+      getDashboardPageConfig("/dashboard/policies", t, false, false, [], true, true, true, true)
     );
   });
 });

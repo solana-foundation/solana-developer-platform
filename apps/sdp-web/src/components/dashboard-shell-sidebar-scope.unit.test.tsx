@@ -53,6 +53,7 @@ function shell(newDesign: boolean) {
     <DashboardShell
       flags={{
         assetProfiles: false,
+        compliance: false,
         custody: false,
         dvp: false,
         earn: false,
@@ -62,6 +63,7 @@ function shell(newDesign: boolean) {
         payments: true,
         policies: false,
         privateChannels: false,
+        ramps: false,
         newDesign,
       }}
     >
@@ -155,6 +157,18 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
     for (const toggle of toggles) {
       expect(toggle.className.split(" ")).toContain("hidden");
       expect(toggle.className).not.toContain("md:hidden");
+    }
+  });
+});
+
+describe("dashboard shell transactions tabs", () => {
+  it("shows a tab only for transaction modules whose area is on", () => {
+    const text = renderShell("/dashboard/payments/transactions", false).textContent ?? "";
+
+    expect(text).toContain("DashboardPayments.transactions.modules.payments");
+    expect(text).toContain("DashboardPayments.transactions.modules.issuance");
+    for (const hidden of ["earn", "dvp", "private_channels", "rings"]) {
+      expect(text).not.toContain(`DashboardPayments.transactions.modules.${hidden}`);
     }
   });
 });

@@ -7,8 +7,8 @@ import type { IntegrationFamily } from "./integrations-filter";
 
 const ALL_DISABLED = {
   custody: false,
-  payments: false,
-  policies: false,
+  ramps: false,
+  compliance: false,
   privateChannels: false,
   newDesign: true,
 };
@@ -16,8 +16,8 @@ const ALL_DISABLED = {
 describe("integration feature gates", () => {
   it.each([
     ["custody", "custody"],
-    ["ramps", "payments"],
-    ["compliance", "policies"],
+    ["ramps", "ramps"],
+    ["compliance", "compliance"],
     ["privacy", "privateChannels"],
   ] as const satisfies ReadonlyArray<readonly [IntegrationFamily, keyof typeof ALL_DISABLED]>)(
     "shows the %s family only with the %s module",
@@ -29,8 +29,8 @@ describe("integration feature gates", () => {
 
   it.each([
     ["privy", "custody"],
-    ["moonpay", "payments"],
-    ["range", "policies"],
+    ["moonpay", "ramps"],
+    ["range", "compliance"],
   ] as const)("gates %s with the %s module", (provider, flag) => {
     expect(isIntegrationProviderEnabled(provider, ALL_DISABLED)).toBe(false);
     expect(isIntegrationProviderEnabled(provider, { ...ALL_DISABLED, [flag]: true })).toBe(true);

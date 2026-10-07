@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
-import { getPermissionsForApiKeyRole } from "@sdp/types";
+import { getPermissionsForApiKeyRole, type PaymentsDashboardWallet } from "@sdp/types";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import type { ApiKeyAuthoringExistingKey } from "./api-key-authoring";
+import type { ApiKeyAuthoringWallets } from "./api-key-authoring.data";
 import { ApiKeyAuthoringWorkspace } from "./api-key-authoring-workspace";
 
 vi.mock("next/navigation", () => ({
@@ -41,12 +43,14 @@ function permissionChips(): string[] {
     .map((item) => item.textContent ?? "");
 }
 
+const WITH_POLICIES: ApiKeyAuthoringWallets = { policiesInReleaseChannel: true, wallets: [] };
+
 /** Fills the details step and lands on the permissions step, where the role cards live. */
-async function openPermissionsStep() {
+async function openPermissionsStep(authoringWallets: ApiKeyAuthoringWallets = WITH_POLICIES) {
   const user = userEvent.setup();
   render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <ApiKeyAuthoringWorkspace mode="create" wallets={[]} />
+      <ApiKeyAuthoringWorkspace mode="create" authoringWallets={authoringWallets} />
     </I18nProvider>
   );
   await user.type(screen.getByLabelText("Name"), "Partner backend");
@@ -112,5 +116,125 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     const chips = permissionChips();
     expect(chips).toEqual([...getPermissionsForApiKeyRole("api_developer")]);
     expect(chips).toContain("earn:write");
+  });
+});
+
+const WALLET_A: PaymentsDashboardWallet = {
+  id: "wallet_a",
+  walletId: "wallet_a",
+  publicKey: "So11111111111111111111111111111111111111112",
+  label: "Treasury",
+  isRuntimeExecutionAllowed: true,
+};
+const WALLET_B: PaymentsDashboardWallet = {
+  ...WALLET_A,
+  id: "wallet_b",
+  walletId: "wallet_b",
+  label: "Ops",
+};
+
+const RESTRICTED_KEY: ApiKeyAuthoringExistingKey = {
+  id: "key_1",
+  name: "Partner backend",
+  role: "api_developer",
+  environment: "sandbox",
+  permissions: null,
+  expiresAt: null,
+  walletScope: "selected",
+  signingWalletId: "wallet_a",
+  signingWalletIds: ["wallet_a"],
+  policyBindings: [
+    {
+      id: "binding_1",
+      bindingScope: "selected",
+      walletId: "wallet_a",
+      custodyWalletId: null,
+      walletControlProfileId: null,
+      walletControlProfileRevisionId: null,
+      apiKeyControlProfileId: "profile_1",
+      apiKeyControlProfileRevisionId: "revision_1",
+      createdAt: "2026-07-15T00:00:00.000Z",
+      updatedAt: "2026-07-15T00:00:00.000Z",
+    },
+  ],
+};
+
+function policiesOn(): ApiKeyAuthoringWallets {
+  return {
+    policiesInReleaseChannel: true,
+    wallets: [WALLET_A, WALLET_B].map((wallet) => ({
+      ...wallet,
+      controlStatus: "default_allow",
+      activeRevisionNumber: null,
+    })),
+  };
+}
+
+function policiesOut(): ApiKeyAuthoringWallets {
+  return { policiesInReleaseChannel: false, wallets: [WALLET_A, WALLET_B] };
+}
+
+/** Opens a restricted key's edit flow on the wallets step. */
+async function openRestrictedKeyWalletsStep(authoringWallets: ApiKeyAuthoringWallets) {
+  const user = userEvent.setup();
+  render(
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      <ApiKeyAuthoringWorkspace
+        mode="edit"
+        authoringWallets={authoringWallets}
+        initialKey={RESTRICTED_KEY}
+      />
+    </I18nProvider>
+  );
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  return user;
+}
+
+const SCOPE_LOCKED =
+  "This key has restrictions, so its wallet access can't change while Policies is unavailable. Create a new key instead.";
+const RESTRICTIONS_INACTIVE =
+  "This key's restrictions are kept but don't apply while Policies is unavailable.";
+
+describe("ApiKeyAuthoringWorkspace without the Policies module", () => {
+  it.each([
+    ["in", policiesOn(), true],
+    ["out of", policiesOut(), false],
+  ])(
+    "with Policies %s the release channel, wallet controls show: %s",
+    async (_, wallets, shown) => {
+      const user = await openPermissionsStep(wallets);
+      await user.click(screen.getByRole("button", { name: "Continue" }));
+      expect(screen.queryByText("Add API-key restrictions") !== null).toBe(shown);
+
+      await user.click(screen.getByRole("button", { name: "Continue" }));
+      // Review and summary: no wallet-control baseline is invented when Policies is out.
+      expect(screen.queryByText("Wallet-control baseline") !== null).toBe(shown);
+      expect(screen.queryByText("Wallet control baseline") !== null).toBe(shown);
+      expect(screen.queryByText(/Wallet controls always apply/) !== null).toBe(shown);
+      expect(screen.queryAllByText(/default allow/i).length > 0).toBe(shown);
+    }
+  );
+
+  it("says a restricted key's wallet scope is locked and keeps Continue disabled", async () => {
+    const user = await openRestrictedKeyWalletsStep(policiesOut());
+    expect(screen.getByText(RESTRICTIONS_INACTIVE)).toBeTruthy();
+    expect(screen.queryByText(SCOPE_LOCKED)).toBeNull();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Ops" }));
+
+    expect(screen.getByText(SCOPE_LOCKED)).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Continue" }).disabled).toBe(true);
+  });
+
+  it("lets the same scope change through when Policies is in the release channel", async () => {
+    const user = await openRestrictedKeyWalletsStep(policiesOn());
+    await user.click(screen.getByRole("checkbox", { name: "Select Ops" }));
+
+    expect(screen.queryByText(SCOPE_LOCKED)).toBeNull();
+    expect(screen.queryByText(RESTRICTIONS_INACTIVE)).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Continue" }).disabled).toBe(
+      false
+    );
   });
 });

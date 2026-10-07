@@ -1,8 +1,4 @@
-import {
-  UNIFIED_TRANSACTION_MODULES,
-  UNIFIED_TRANSACTION_STATUSES,
-  type UnifiedTransactionModule,
-} from "@sdp/types";
+import { UNIFIED_TRANSACTION_STATUSES, type UnifiedTransactionModule } from "@sdp/types";
 import { z } from "zod";
 
 const rawFiltersSchema = z.object({
@@ -37,21 +33,33 @@ function scalar(value: string | string[] | undefined): string | undefined {
  * param identically.
  *
  * @param value - The raw tab value, if any.
- * @returns The matching module, or undefined for "all", an absent tab, or an unknown value.
+ * @param modules - The modules the dashboard shows (`enabledTransactionModules`).
+ * @returns The matching module, or undefined for "all", an absent tab, or a module not shown.
  */
 export function parseTransactionModule(
-  value: string | null | undefined
+  value: string | null | undefined,
+  modules: readonly UnifiedTransactionModule[]
 ): UnifiedTransactionModule | undefined {
-  return UNIFIED_TRANSACTION_MODULES.find((candidate) => candidate === value);
+  return modules.find((candidate) => candidate === value);
 }
 
-export function parseTransactionFilters(searchParams: RawSearchParams): TransactionFilters {
+export function parseTransactionFilters(
+  searchParams: RawSearchParams,
+  modules: readonly UnifiedTransactionModule[]
+): TransactionFilters {
   const parsed = rawFiltersSchema.parse(
     Object.fromEntries(Object.entries(searchParams).map(([key, value]) => [key, scalar(value)]))
   );
-  const { tab, cursors: rawCursors, ...rest } = parsed;
+  const { tab, kind, cursors: rawCursors, ...rest } = parsed;
   const cursors = rawCursors === undefined || rawCursors === "" ? [] : rawCursors.split(",");
-  return { ...rest, module: parseTransactionModule(tab), cursors };
+  const module = parseTransactionModule(tab, modules);
+  if (module !== undefined) return { ...rest, module, kind, cursors };
+  // A kind belongs to its module (the API refuses one without it), so All never carries one.
+  if (tab === undefined || tab === "all") return { ...rest, cursors };
+  // The link named a module tab that is hidden or unknown: open All from its first page,
+  // since that tab's cursor would skip newer transactions on All.
+  const { cursor: _discardedCursor, ...unpaged } = rest;
+  return { ...unpaged, cursors: [] };
 }
 
 const TRANSACTION_URL_PARAM_KEYS = [

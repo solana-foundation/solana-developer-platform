@@ -3,6 +3,7 @@
 import {
   type ApiKeyRole,
   getPermissionsForApiKeyRole,
+  type PaymentsDashboardWallet,
   type PolicyDefaultAction,
   WALLET_OPERATION_FAMILIES,
   WALLET_OPERATION_TYPES,
@@ -58,10 +59,15 @@ import {
   createApiKeyAuthoringDraft,
   getPolicyBindingIntent,
   isPositiveDecimal,
+  type PolicyBindingIntent,
   requiredBindingConfirmation,
   splitPolicyValues,
 } from "./api-key-authoring";
-import type { ApiKeyAuthoringWallet, WalletControlStatus } from "./api-key-authoring.data";
+import type {
+  ApiKeyAuthoringWallet,
+  ApiKeyAuthoringWallets,
+  WalletControlStatus,
+} from "./api-key-authoring.data";
 
 const API_KEYS_PATH = "/dashboard/api-keys";
 
@@ -71,7 +77,8 @@ const DEFAULT_ACTIONS: PolicyDefaultAction[] = ["allow", "deny", "approval_requi
 
 interface ApiKeyAuthoringWorkspaceProps {
   mode: ApiKeyAuthoringMode;
-  wallets: ApiKeyAuthoringWallet[];
+  /** Carries wallet controls only when the deployment runs Policies. */
+  authoringWallets: ApiKeyAuthoringWallets;
   initialKey?: ApiKeyAuthoringExistingKey;
 }
 
@@ -102,8 +109,18 @@ function draftFromInitialKey(initialKey?: ApiKeyAuthoringExistingKey): ApiKeyAut
   };
 }
 
-function walletLabel(wallet: ApiKeyAuthoringWallet): string {
+function walletLabel(wallet: PaymentsDashboardWallet): string {
   return wallet.label?.trim() || wallet.walletId;
+}
+
+/** The wallets the key's scope reaches: every wallet, or the selected ones. */
+function scopedWallets<W extends PaymentsDashboardWallet>(
+  draft: ApiKeyAuthoringDraft,
+  wallets: W[]
+): W[] {
+  if (draft.walletScope === "all") return wallets;
+  const selected = new Set(draft.selectedWalletIds);
+  return wallets.filter((wallet) => selected.has(wallet.walletId));
 }
 
 function shortAddress(value: string): string {
@@ -394,7 +411,7 @@ function WalletRow({
   onToggle,
   onMakeDefault,
 }: {
-  wallet: ApiKeyAuthoringWallet;
+  wallet: PaymentsDashboardWallet;
   checked: boolean;
   isDefault: boolean;
   onToggle: () => void;
@@ -709,16 +726,28 @@ function RestrictionEditor({
   );
 }
 
+/** Shown in place of restrictions when Policies is out: they are kept but not enforced. */
+function RestrictionsInactiveNote() {
+  const t = useTranslations();
+  return (
+    <Callout variant="neutral">
+      <p className="text-sm">{t("DashboardCustody.apiKeyRestrictionsInactiveWithoutPolicies")}</p>
+    </Callout>
+  );
+}
+
 function WalletPolicyStep({
   draft,
-  wallets,
+  authoringWallets,
+  bindingIntent,
   hadExistingRestrictions,
   walletSelectionTouched,
   onWalletSelectionTouched,
   update,
 }: {
   draft: ApiKeyAuthoringDraft;
-  wallets: ApiKeyAuthoringWallet[];
+  authoringWallets: ApiKeyAuthoringWallets;
+  bindingIntent: PolicyBindingIntent;
   hadExistingRestrictions: boolean;
   walletSelectionTouched: boolean;
   onWalletSelectionTouched: () => void;
@@ -726,10 +755,10 @@ function WalletPolicyStep({
 }) {
   const t = useTranslations();
   const [search, setSearch] = useState("");
+  const wallets: PaymentsDashboardWallet[] = authoringWallets.wallets;
   const selectedWallets = wallets.filter((wallet) =>
     draft.selectedWalletIds.includes(wallet.walletId)
   );
-  const baselineWallets = draft.walletScope === "all" ? wallets : selectedWallets;
   const filteredWallets = wallets.filter((wallet) => {
     const query = search.trim().toLowerCase();
     if (!query) return true;
@@ -844,48 +873,59 @@ function WalletPolicyStep({
               ) : null}
             </div>
           ) : null}
-        </WorkSection>
-
-        <WorkSection
-          title={t("DashboardCustody.apiKeyWalletControlsEnforced")}
-          description={t("DashboardCustody.apiKeyWalletControlsDescription")}
-        >
-          <WalletBaseline wallets={baselineWallets} />
-        </WorkSection>
-
-        <WorkSection title={t("DashboardCustody.apiKeyRestrictionsTitle")}>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-primary">
-                {t("DashboardCustody.apiKeyAddRestrictions")}
-              </p>
-              {!draft.restrictionsEnabled ? (
-                <p className="mt-1 text-xs text-secondary">
-                  {t("DashboardCustody.apiKeyNoAdditionalRestrictions")}
-                </p>
-              ) : null}
-            </div>
-            <ToggleSwitch
-              checked={draft.restrictionsEnabled}
-              aria-label={t("DashboardCustody.apiKeyAddRestrictions")}
-              onChange={(restrictionsEnabled) =>
-                update({
-                  restrictionsEnabled,
-                  restrictionsEdited: restrictionsEnabled ? !hadExistingRestrictions : false,
-                })
-              }
-            />
-          </div>
-          {draft.restrictionsEnabled ? (
-            <div className="mt-4">
-              <RestrictionEditor
-                draft={draft}
-                preservingExisting={preservingExisting}
-                update={update}
-              />
-            </div>
+          {bindingIntent.mode === "blocked" && bindingIntent.reason === "policies_unavailable" ? (
+            <Callout className="mt-4" variant="warning" live>
+              <p className="text-sm">{t("DashboardCustody.apiKeyScopeLockedWithoutPolicies")}</p>
+            </Callout>
           ) : null}
         </WorkSection>
+
+        {authoringWallets.policiesInReleaseChannel ? (
+          <>
+            <WorkSection
+              title={t("DashboardCustody.apiKeyWalletControlsEnforced")}
+              description={t("DashboardCustody.apiKeyWalletControlsDescription")}
+            >
+              <WalletBaseline wallets={scopedWallets(draft, authoringWallets.wallets)} />
+            </WorkSection>
+
+            <WorkSection title={t("DashboardCustody.apiKeyRestrictionsTitle")}>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-primary">
+                    {t("DashboardCustody.apiKeyAddRestrictions")}
+                  </p>
+                  {!draft.restrictionsEnabled ? (
+                    <p className="mt-1 text-xs text-secondary">
+                      {t("DashboardCustody.apiKeyNoAdditionalRestrictions")}
+                    </p>
+                  ) : null}
+                </div>
+                <ToggleSwitch
+                  checked={draft.restrictionsEnabled}
+                  aria-label={t("DashboardCustody.apiKeyAddRestrictions")}
+                  onChange={(restrictionsEnabled) =>
+                    update({
+                      restrictionsEnabled,
+                      restrictionsEdited: restrictionsEnabled ? !hadExistingRestrictions : false,
+                    })
+                  }
+                />
+              </div>
+              {draft.restrictionsEnabled ? (
+                <div className="mt-4">
+                  <RestrictionEditor
+                    draft={draft}
+                    preservingExisting={preservingExisting}
+                    update={update}
+                  />
+                </div>
+              ) : null}
+            </WorkSection>
+          </>
+        ) : hadExistingRestrictions ? (
+          <RestrictionsInactiveNote />
+        ) : null}
       </div>
     </div>
   );
@@ -900,7 +940,8 @@ function ReviewLine({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function ReviewStep({
+/** The review's wallet-control and restriction sections; they exist only with Policies. */
+function ReviewWalletControls({
   draft,
   wallets,
   bindingSummary,
@@ -910,14 +951,77 @@ function ReviewStep({
   bindingSummary: string;
 }) {
   const t = useTranslations();
-  const selectedWallets = wallets.filter((wallet) =>
-    draft.selectedWalletIds.includes(wallet.walletId)
-  );
-  const baselineWallets = draft.walletScope === "all" ? wallets : selectedWallets;
+  const baselineWallets = scopedWallets(draft, wallets);
   const defaultAllowWallets = baselineWallets.filter(
     (wallet) => wallet.controlStatus === "default_allow"
   );
   const rules = buildApiKeyPolicyRules(draft);
+
+  return (
+    <>
+      <WorkSection title={t("DashboardCustody.apiKeyReviewWalletBaseline")}>
+        <WalletBaseline wallets={baselineWallets} />
+      </WorkSection>
+      <WorkSection title={t("DashboardCustody.apiKeyReviewRestrictions")}>
+        <ReviewLine
+          label={t("DashboardCustody.apiKeyRestrictionsTitle")}
+          value={
+            draft.restrictionsEnabled
+              ? draft.restrictionsEdited
+                ? t("DashboardCustody.apiKeyRestrictionRuleCount", { count: rules.length })
+                : t("DashboardCustody.apiKeyExistingRestrictionsPreservedShort")
+              : t("DashboardCustody.apiKeyNoAdditionalRestrictions")
+          }
+        />
+        {draft.restrictionsEnabled ? (
+          <ReviewLine
+            label={t("DashboardCustody.apiKeyAdditionalDefaultAction")}
+            value={defaultActionLabel(draft.defaultAction, t)}
+          />
+        ) : null}
+      </WorkSection>
+      <WorkSection title={t("DashboardCustody.apiKeyReviewBindingChanges")}>
+        <p className="text-sm text-secondary">{bindingSummary}</p>
+      </WorkSection>
+      {defaultAllowWallets.length > 0 ? (
+        <Callout className="flex items-start gap-3" variant="warning">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+          <p className="text-sm text-primary">
+            {t("DashboardCustody.apiKeyDefaultAllowWarning", {
+              wallets: defaultAllowWallets.map(walletLabel).join(", "),
+            })}
+          </p>
+        </Callout>
+      ) : null}
+      {draft.restrictionsEnabled &&
+      draft.walletScope === "selected" &&
+      baselineWallets.length === 0 ? (
+        <div className="flex items-start gap-3 rounded-lg border border-destructive-border bg-destructive-bg p-4">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <p className="text-sm text-primary">
+            {t("DashboardCustody.apiKeyRestrictionNoReachableWalletWarning")}
+          </p>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function ReviewStep({
+  draft,
+  authoringWallets,
+  hadExistingRestrictions,
+  bindingSummary,
+}: {
+  draft: ApiKeyAuthoringDraft;
+  authoringWallets: ApiKeyAuthoringWallets;
+  hadExistingRestrictions: boolean;
+  bindingSummary: string;
+}) {
+  const t = useTranslations();
+  const selectedWallets = authoringWallets.wallets.filter((wallet) =>
+    draft.selectedWalletIds.includes(wallet.walletId)
+  );
 
   return (
     <div>
@@ -964,49 +1068,14 @@ function ReviewStep({
             />
           ) : null}
         </WorkSection>
-        <WorkSection title={t("DashboardCustody.apiKeyReviewWalletBaseline")}>
-          <WalletBaseline wallets={baselineWallets} />
-        </WorkSection>
-        <WorkSection title={t("DashboardCustody.apiKeyReviewRestrictions")}>
-          <ReviewLine
-            label={t("DashboardCustody.apiKeyRestrictionsTitle")}
-            value={
-              draft.restrictionsEnabled
-                ? draft.restrictionsEdited
-                  ? t("DashboardCustody.apiKeyRestrictionRuleCount", { count: rules.length })
-                  : t("DashboardCustody.apiKeyExistingRestrictionsPreservedShort")
-                : t("DashboardCustody.apiKeyNoAdditionalRestrictions")
-            }
+        {authoringWallets.policiesInReleaseChannel ? (
+          <ReviewWalletControls
+            draft={draft}
+            wallets={authoringWallets.wallets}
+            bindingSummary={bindingSummary}
           />
-          {draft.restrictionsEnabled ? (
-            <ReviewLine
-              label={t("DashboardCustody.apiKeyAdditionalDefaultAction")}
-              value={defaultActionLabel(draft.defaultAction, t)}
-            />
-          ) : null}
-        </WorkSection>
-        <WorkSection title={t("DashboardCustody.apiKeyReviewBindingChanges")}>
-          <p className="text-sm text-secondary">{bindingSummary}</p>
-        </WorkSection>
-        {defaultAllowWallets.length > 0 ? (
-          <Callout className="flex items-start gap-3" variant="warning">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
-            <p className="text-sm text-primary">
-              {t("DashboardCustody.apiKeyDefaultAllowWarning", {
-                wallets: defaultAllowWallets.map(walletLabel).join(", "),
-              })}
-            </p>
-          </Callout>
-        ) : null}
-        {draft.restrictionsEnabled &&
-        draft.walletScope === "selected" &&
-        selectedWallets.length === 0 ? (
-          <div className="flex items-start gap-3 rounded-lg border border-destructive-border bg-destructive-bg p-4">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
-            <p className="text-sm text-primary">
-              {t("DashboardCustody.apiKeyRestrictionNoReachableWalletWarning")}
-            </p>
-          </div>
+        ) : hadExistingRestrictions ? (
+          <RestrictionsInactiveNote />
         ) : null}
       </div>
     </div>
@@ -1025,22 +1094,18 @@ function SummaryRow({ icon, label, value }: { icon: ReactNode; label: string; va
   );
 }
 
-function KeySummary({
+/** The summary's wallet-control and restriction rows; they exist only with Policies. */
+function KeySummaryWalletControls({
   draft,
   wallets,
-  environment,
   bindingSummary,
 }: {
   draft: ApiKeyAuthoringDraft;
   wallets: ApiKeyAuthoringWallet[];
-  environment: string;
   bindingSummary: string;
 }) {
   const t = useTranslations();
-  const selectedWallets = wallets.filter((wallet) =>
-    draft.selectedWalletIds.includes(wallet.walletId)
-  );
-  const baselineWallets = draft.walletScope === "all" ? wallets : selectedWallets;
+  const baselineWallets = scopedWallets(draft, wallets);
   const restrictions = draft.restrictionsEnabled
     ? draft.restrictionsEdited
       ? t("DashboardCustody.apiKeyRestrictionRuleCount", {
@@ -1053,6 +1118,43 @@ function KeySummary({
         .map((wallet) => `${walletLabel(wallet)}: ${controlStatusLabel(wallet.controlStatus, t)}`)
         .join(", ")
     : t("DashboardCustody.none");
+
+  return (
+    <>
+      <SummaryRow
+        icon={<ShieldCheck className="size-4" />}
+        label={t("DashboardCustody.apiKeySummaryWalletBaseline")}
+        value={baseline}
+      />
+      <SummaryRow
+        icon={<LockKeyhole className="size-4" />}
+        label={t("DashboardCustody.apiKeySummaryRestrictions")}
+        value={restrictions}
+      />
+      <SummaryRow
+        icon={<Check className="size-4" />}
+        label={t("DashboardCustody.apiKeySummaryBindingScope")}
+        value={bindingSummary}
+      />
+    </>
+  );
+}
+
+function KeySummary({
+  draft,
+  authoringWallets,
+  environment,
+  bindingSummary,
+}: {
+  draft: ApiKeyAuthoringDraft;
+  authoringWallets: ApiKeyAuthoringWallets;
+  environment: string;
+  bindingSummary: string;
+}) {
+  const t = useTranslations();
+  const selectedWallets = authoringWallets.wallets.filter((wallet) =>
+    draft.selectedWalletIds.includes(wallet.walletId)
+  );
 
   return (
     <aside className="lg:sticky lg:top-4">
@@ -1094,28 +1196,22 @@ function KeySummary({
                 : t("DashboardCustody.selected", { count: selectedWallets.length })
             }
           />
-          <SummaryRow
-            icon={<ShieldCheck className="size-4" />}
-            label={t("DashboardCustody.apiKeySummaryWalletBaseline")}
-            value={baseline}
-          />
-          <SummaryRow
-            icon={<LockKeyhole className="size-4" />}
-            label={t("DashboardCustody.apiKeySummaryRestrictions")}
-            value={restrictions}
-          />
-          <SummaryRow
-            icon={<Check className="size-4" />}
-            label={t("DashboardCustody.apiKeySummaryBindingScope")}
-            value={bindingSummary}
-          />
+          {authoringWallets.policiesInReleaseChannel ? (
+            <KeySummaryWalletControls
+              draft={draft}
+              wallets={authoringWallets.wallets}
+              bindingSummary={bindingSummary}
+            />
+          ) : null}
         </div>
-        <div className="mt-4 flex items-start gap-2 rounded-lg bg-fill-subtle p-3">
-          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-tertiary" />
-          <p className="text-xs text-secondary">
-            {t("DashboardCustody.apiKeyWalletControlsAlwaysApply")}
-          </p>
-        </div>
+        {authoringWallets.policiesInReleaseChannel ? (
+          <div className="mt-4 flex items-start gap-2 rounded-lg bg-fill-subtle p-3">
+            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-tertiary" />
+            <p className="text-xs text-secondary">
+              {t("DashboardCustody.apiKeyWalletControlsAlwaysApply")}
+            </p>
+          </div>
+        ) : null}
       </div>
     </aside>
   );
@@ -1210,7 +1306,7 @@ function bindingSummaryLabel(
 
 export function ApiKeyAuthoringWorkspace({
   mode,
-  wallets,
+  authoringWallets,
   initialKey,
 }: ApiKeyAuthoringWorkspaceProps) {
   const t = useTranslations();
@@ -1228,7 +1324,10 @@ export function ApiKeyAuthoringWorkspace({
         policyBindings: initialKey.policyBindings,
       }
     : null;
-  const bindingIntent = getPolicyBindingIntent(mode, initialState, draft);
+  const bindingIntent = getPolicyBindingIntent(mode, initialState, draft, {
+    policiesInReleaseChannel: authoringWallets.policiesInReleaseChannel,
+  });
+  const wallets: PaymentsDashboardWallet[] = authoringWallets.wallets;
   const bindingConfirmation = requiredBindingConfirmation(bindingIntent);
   const hadExistingRestrictions = Boolean(
     initialKey?.policyBindings.some((binding) => binding.apiKeyControlProfileId)
@@ -1325,7 +1424,8 @@ export function ApiKeyAuthoringWorkspace({
             {currentStep === "wallets" ? (
               <WalletPolicyStep
                 draft={draft}
-                wallets={wallets}
+                authoringWallets={authoringWallets}
+                bindingIntent={bindingIntent}
                 hadExistingRestrictions={hadExistingRestrictions}
                 walletSelectionTouched={walletSelectionTouched}
                 onWalletSelectionTouched={() => setWalletSelectionTouched(true)}
@@ -1333,12 +1433,17 @@ export function ApiKeyAuthoringWorkspace({
               />
             ) : null}
             {currentStep === "review" ? (
-              <ReviewStep draft={draft} wallets={wallets} bindingSummary={bindingSummary} />
+              <ReviewStep
+                draft={draft}
+                authoringWallets={authoringWallets}
+                hadExistingRestrictions={hadExistingRestrictions}
+                bindingSummary={bindingSummary}
+              />
             ) : null}
           </div>
           <KeySummary
             draft={draft}
-            wallets={wallets}
+            authoringWallets={authoringWallets}
             environment={environment}
             bindingSummary={bindingSummary}
           />

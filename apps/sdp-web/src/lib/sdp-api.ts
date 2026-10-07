@@ -13,18 +13,18 @@ import {
   TRACE_SOURCE_HEADER,
   type TraceContext,
 } from "./request-tracing";
+import { findSdpApiBaseUrl } from "./sdp-api-base-url";
 
 function getApiBaseUrl(): string {
-  const base =
-    process.env.SDP_API_BASE_URL ||
-    process.env.NEXT_PUBLIC_SDP_API_BASE_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL;
-
+  const base = findSdpApiBaseUrl({
+    SDP_API_BASE_URL: process.env.SDP_API_BASE_URL,
+    NEXT_PUBLIC_SDP_API_BASE_URL: process.env.NEXT_PUBLIC_SDP_API_BASE_URL,
+    NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
+  });
   if (!base) {
     throw new Error("SDP_API_BASE_URL is not configured");
   }
-
-  return base.replace(/\/$/, "");
+  return base;
 }
 
 type ClerkGetToken = () => Promise<string | null>;

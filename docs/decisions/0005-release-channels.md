@@ -28,7 +28,8 @@ deployment can run.
 - Markets has no stage of its own either: it is in a release channel when Earn
   or DvP is, so promoting one sub-module always takes effect.
 - Every deployment must set it: a missing or unknown release channel fails at
-  startup in the API and its jobs. Names are lowercase and case-sensitive.
+  startup in the API, its jobs and the dashboard server. Builds do not read it.
+  Names are lowercase and case-sensitive.
 
 | Release channel | Modules                                           | Target deployment                            |
 | --------------- | ------------------------------------------------- | -------------------------------------------- |
@@ -78,5 +79,9 @@ already names the Private Channels module.
 - Compliance integrations in the dashboard still follow the `policies` flag, so
   they are hidden under `stable` until Compliance gets its own visibility rule.
   The screening API is available in every channel.
+- The Transactions tabs follow each module's dashboard flag, but `GET
+  /v1/transactions` filters only by permission and release channel. So a module
+  inside the channel with its flag off has no tab, yet its rows still appear
+  under "All" (HOO-1951).
 - The dashboard hides excluded modules, but a Vercel Toolbar flag override can
   still show their UI to team members. The API refuses their routes either way.

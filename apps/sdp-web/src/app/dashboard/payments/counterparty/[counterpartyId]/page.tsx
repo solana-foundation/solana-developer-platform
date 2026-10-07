@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { isRampsEnabled } from "@/flags/ramps";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterpartyDetail } from "../counterparty-detail.data";
@@ -25,9 +26,12 @@ export default async function CounterpartyDetailRoute({
   return withDashboardPageTrace(
     "dashboard.counterparty.detail.page",
     async ({ trace, apiClient }) => {
-      const detail = await trace.step("fetch_counterparty_detail", () =>
-        fetchCounterpartyDetail(apiClient.request, counterpartyId)
-      );
+      const [detail, rampsEnabled] = await Promise.all([
+        trace.step("fetch_counterparty_detail", () =>
+          fetchCounterpartyDetail(apiClient.request, counterpartyId)
+        ),
+        isRampsEnabled(),
+      ]);
 
       trace.log({
         ok: detail.counterparty !== null,
@@ -45,6 +49,7 @@ export default async function CounterpartyDetailRoute({
             counterparty={detail.counterparty}
             initialAccounts={detail.accounts}
             initialTransfers={detail.transfers}
+            rampsEnabled={rampsEnabled}
           />
         </div>
       );
