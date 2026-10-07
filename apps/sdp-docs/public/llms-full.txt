@@ -2981,15 +2981,92 @@ Memos are returned by `GET /v1/payments/transfers` and `GET /v1/payments/transfe
 ### Payouts and disbursements
 Source: https://platform.solana.com/docs/payments/send-payouts
 
-> Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
+> Pay many counterparties from one custody wallet with a transfer batch, track each recipient, and fall back to single transfers when a batch doesn't fit.
 
-A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. Use `POST /v1/payments/transfer-batches` when recipients are registered counterparty accounts. For arbitrary Solana addresses, call `POST /v1/payments/transfers` once per recipient and reconcile the returned transfer IDs.
+A payout run sends one token from one custody wallet to many recipients: marketplace seller payouts, payroll, affiliate or royalty disbursements. In SDP you run it as a **transfer batch**. One request validates every recipient, packs the recipients into Solana transactions, submits them, and gives you a status for each recipient.
 
-## Native transfer batches
+Batches pay **counterparty accounts**, not raw addresses. If a recipient isn't a registered counterparty account, or you need something a batch doesn't support, send single transfers instead. See [When to use single transfers](#when-to-use-single-transfers).
 
-One request creates a durable batch, chunks its recipients into Solana transactions, and returns the batch, recipient, and transfer records:
+To pay the same counterparty a fixed amount on a schedule, use [Recurring payments](/docs/payments/recurring-payments).
 
-```bash
+## Prerequisites
+
+- A custody wallet to pay from, with a custody signer configured so SDP can sign and submit. You pass its SDP Wallet `id` (`cwlt_…`, from `GET /v1/wallets`) as `sourceCustodyWalletId`.
+- Enough of the token in that wallet. To check, call `GET /v1/payments/wallets/{walletId}/balances` with the wallet's provider `walletId` (for example `privy_wallet_123`), not its `cwlt_…` id. See [Wallet balances](/docs/wallet-operations/balances).
+- One counterparty account per recipient, with `accountKind: "crypto_wallet"` and `details.network: "solana"`. Create accounts with `POST /v1/counterparties/{counterpartyId}/accounts`.
+- An API key with `payments:write`, `wallets:read` and `counterparties:read`, whose `payments:write` wallet scope includes the source wallet. The estimate endpoint needs `payments:read` in place of `payments:write`.
+
+## How a batch runs
+
+1. SDP checks the request: your key's access to the source wallet, the token, every counterparty account, and every amount.
+2. SDP evaluates the batch against the source wallet's policy. See [Wallet policy](#wallet-policy).
+3. SDP packs the recipients into Solana transactions, called chunks. Each chunk holds up to `options.maxRecipientsPerTransaction` recipients (default 20, maximum 64), and fewer if the transaction would exceed Solana's size limit.
+4. Unless you set `options.preflight` to `false`, SDP simulates each chunk first. A chunk that fails simulation isn't sent, and its recipients are marked `failed`.
+5. SDP signs every chunk with the source wallet and submits them concurrently. SDP's fee payer pays the network fees and the rent for any recipient token account that has to be created.
+6. SDP responds without waiting for confirmation. Its background reconciliation settles each chunk, and the batch status follows.
+
+Each chunk is one Solana transaction, so the recipients in a chunk succeed or fail together. Chunks are independent: one failed chunk doesn't stop the others. If every recipient must succeed or fail on its own, set `options.maxRecipientsPerTransaction` to `1`.
+
+## Limits and validation
+
+| Field | Rule | When it's broken |
+| --- | --- | --- |
+| `recipients` | 1 to 500 per batch | `400` |
+| `recipients[].counterpartyAccountId` | Must belong to the project, be a `crypto_wallet` account on `solana`, and hold a valid address | `404` if not found, `400` otherwise |
+| `recipients[].counterpartyId` | Optional. If you send it, it must own the account | `404` |
+| `recipients[].amount` | Positive decimal string in UI units, with no more decimal places than the token has | `400` |
+| `token` | `SOL`, a well-known symbol such as `USDC`, or an SPL mint address. One token per batch | `400` |
+| `externalId`, `recipients[].externalId` | Up to 256 characters. A correlation field, not an idempotency key | `400` |
+| `options.maxRecipientsPerTransaction` | Integer from 1 to 64. Default 20 | `400` |
+| Request body | Unknown fields are rejected | `400` |
+
+A single recipient that can't fit in one Solana transaction also returns `400`.
+
+## Estimate a batch
+
+`POST /v1/payments/transfer-batches/estimate` takes the same body as a real batch. It runs the same validation and chunking without signing or submitting anything, and returns how many transactions the batch needs and what it costs:
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/transfer-batches/estimate \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceCustodyWalletId": "cwlt_123",
+    "token": "USDC",
+    "recipients": [
+      { "counterpartyAccountId": "cpa_4837", "amount": "150.00" },
+      { "counterpartyAccountId": "cpa_4838", "amount": "75.50" }
+    ]
+  }'
+```
+
+```json title="response.json"
+{
+  "data": {
+    "estimate": {
+      "recipientCount": 2,
+      "transactionCount": 1,
+      "estimatedFees": {
+        "networkFeeLamports": "5000",
+        "priorityFeeLamports": "0",
+        "tokenAccountRentLamports": "2039280",
+        "sponsored": true
+      }
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-14T09:00:00.000Z" }
+}
+```
+
+`tokenAccountRentLamports` covers recipient token accounts that don't exist yet. `sponsored` tells you whether SDP pays these fees. The estimate doesn't evaluate wallet policy, so a batch that estimates cleanly can still be denied or held.
+
+## Create a batch
+
+Send `POST /v1/payments/transfer-batches` with an `Idempotency-Key`:
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -2997,44 +3074,260 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   -d '{
     "externalId": "payroll_2026-05-14",
     "sourceCustodyWalletId": "cwlt_123",
-    "token": "9aBCd...4eEf",
+    "token": "USDC",
     "recipients": [
       {
         "externalId": "row_4837",
-        "counterpartyId": "cp_4837",
+        "counterpartyId": "cpty_4837",
         "counterpartyAccountId": "cpa_4837",
         "amount": "150.00"
+      },
+      {
+        "externalId": "row_4838",
+        "counterpartyId": "cpty_4838",
+        "counterpartyAccountId": "cpa_4838",
+        "amount": "75.50"
       }
-    ]
+    ],
+    "options": { "maxRecipientsPerTransaction": 20, "preflight": true }
   }'
 ```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-batch.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/payments/transfer-batches",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "payroll-2026-05-14",
+    },
+    body: JSON.stringify({
+      externalId: "payroll_2026-05-14",
+      sourceCustodyWalletId: "cwlt_123",
+      token: "USDC",
+      recipients: [
+        { externalId: "row_4837", counterpartyId: "cpty_4837", counterpartyAccountId: "cpa_4837", amount: "150.00" },
+        { externalId: "row_4838", counterpartyId: "cpty_4838", counterpartyAccountId: "cpa_4838", amount: "75.50" },
+      ],
+      options: { maxRecipientsPerTransaction: 20, preflight: true },
+    }),
+  }
+);
 
-Reuse the same `Idempotency-Key` for retries of that exact request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes. `externalId` is a correlation field, not an idempotency key.
+if (response.status === 202) {
+  // Held for approval; no batch exists yet. See "Wallet policy" below.
+  const { error } = await response.json();
+  console.log(error.code, error.details.approvalRequestId); // "SIGNING_PENDING", "appr_..."
+} else {
+  const { data } = await response.json();
+  // data.batch.id, data.batch.status, data.recipients[], data.transfers[]
+}
+```
+</Tab>
+<Tab value="Java">
+```java title="CreateBatch.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/payments/transfer-batches"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .header("Idempotency-Key", "payroll-2026-05-14")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "externalId": "payroll_2026-05-14",
+          "sourceCustodyWalletId": "cwlt_123",
+          "token": "USDC",
+          "recipients": [
+            { "externalId": "row_4837", "counterpartyId": "cpty_4837", "counterpartyAccountId": "cpa_4837", "amount": "150.00" },
+            { "externalId": "row_4838", "counterpartyId": "cpty_4838", "counterpartyAccountId": "cpa_4838", "amount": "75.50" }
+          ],
+          "options": { "maxRecipientsPerTransaction": 20, "preflight": true }
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
 
-The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
+A `200` returns the batch, one row per recipient, and the transfer record of each chunk SDP created:
 
-## Designing a payout run
+```json title="response.json"
+{
+  "data": {
+    "batch": {
+      "id": "xbatch_...",
+      "externalId": "payroll_2026-05-14",
+      "sourceCustodyWalletId": "cwlt_123",
+      "sourceProviderWalletId": "privy_wallet_123",
+      "token": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "status": "processing",
+      "totalAmount": "225.50",
+      "recipientCount": 2,
+      "transactionCount": 1
+    },
+    "recipients": [
+      {
+        "id": "xrec_...",
+        "transferId": "xfr_...",
+        "externalId": "row_4837",
+        "counterpartyAccountId": "cpa_4837",
+        "destination": "7xKXz...9fGh",
+        "amount": "150.00",
+        "status": "processing",
+        "error": null
+      }
+    ],
+    "transfers": [
+      { "id": "xfr_...", "type": "transfer_batch", "kind": "batch_pay", "status": "processing", "amount": "225.50", "signature": "5Kd3..." }
+    ]
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-14T09:00:01.000Z" }
+}
+```
 
-A typical pattern:
+The example is trimmed; see the [Payments API reference](/docs/reference/api/payments) for every field. `token` comes back as the mint address. `sourceCustodyWalletId` is the SDP Wallet `id`; `sourceProviderWalletId` is the provider `walletId`, kept as a record of which provider wallet signed.
 
-1. **Resolve recipients** in your application — list (or stream) the rows to be paid, with destination address and amount per row.
-2. **Pick a batch identifier** you control (`payout_2026-05-14_marketplace_sellers`).
-3. **Iterate** — for each recipient, call `POST /v1/payments/transfers` with the destination, amount, token, and a memo that encodes the batch ID and a per-row identifier (`payout_2026-05-14_marketplace_sellers/row_4837`).
-4. **Capture** the returned `Transfer.id` and `Transfer.status`. Persist the SDP transfer ID alongside the recipient row so you can re-poll status later.
-5. **Reconcile** — once the batch is fully submitted, run `GET /v1/payments/transfers?direction=outbound&from=…&to=…` and confirm every row in your application has a matching `finalized` transfer.
+The batch status is usually `processing` in this response, because SDP doesn't wait for confirmation. It's `failed` or `partially_failed` straight away only when chunks failed before they were sent.
 
-Send transfers sequentially or in modest concurrency (4–8 in flight); high concurrency increases the chance of priority-fee contention and blockhash expiry without much throughput gain.
+### Retries and idempotency
+
+Mint one `Idempotency-Key` per payout run and reuse it on every retry of that exact request. An identical request with the same key returns the original batch with its current state and doesn't submit anything again. The same key with a different request returns `409`. A new key, or no key, creates a new batch even if the body is identical.
+
+Keys are scoped to the project. `externalId` is for your own correlation and doesn't deduplicate anything. See [Idempotency](/docs/developing-with-sdp/idempotency).
+
+## Wallet policy
+
+SDP evaluates every batch against the source wallet's policy before it signs anything. The batch is one wallet operation of type `payment_transfer_batch_execute`:
+
+- The operation's amount is the batch total, so amount rules apply to the total.
+- Each recipient is also evaluated as a leg with its own amount and destination, so destination and amount rules check every recipient.
+
+If the decision isn't `allow`, SDP creates no batch and submits nothing:
+
+| Status | `error.code` | Meaning |
+| --- | --- | --- |
+| `403` | `FORBIDDEN` | The policy denied the batch. |
+| `202` | `SIGNING_PENDING` | The policy requires approval. |
+
+A policy `403` or `202` carries `error.details` with `walletOperationId`, `policyEvaluationId`, `decision`, `reasonCode`, `reason`, `requiresApproval` and `approvalRequestId`:
+
+```json title="response.json"
+{
+  "error": {
+    "code": "SIGNING_PENDING",
+    "message": "Wallet operation requires policy approval",
+    "details": {
+      "walletOperationId": "wop_...",
+      "policyEvaluationId": "peval_...",
+      "decision": "approval_required",
+      "reasonCode": "wallet_policy_match",
+      "reason": "Payment matched approval policy.",
+      "requiresApproval": true,
+      "approvalRequestId": "appr_..."
+    }
+  }
+}
+```
+
+A held batch waits on its approval request. Someone other than the requester approves or rejects it with `POST /v1/wallets/approval-requests/{approvalRequestId}/approve` or `/reject`. On approval, SDP runs the stored request itself, so don't resubmit while it's pending. Track it with `GET /v1/wallets/approval-requests/{approvalRequestId}`: `operation.status` moves to `executing`, then `completed` or `failed`, and `operation.executionError` explains a failure.
+
+If you sent an `Idempotency-Key`, the approved batch carries it. Once it has run, repeating the original request with the same key returns the batch. You can also find it with `GET /v1/payments/transfer-batches?externalId=…`.
+
+See [Wallet policies](/docs/wallet-operations/policies) for rule kinds and operation types.
+
+## Track recipients
+
+Poll `GET /v1/payments/transfer-batches/{batchId}` until `batch.status` is no longer `processing`. The response has the same shape as the create response.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl https://api.solana.com/v1/payments/transfer-batches/xbatch_abc123 \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="wait-for-batch.ts"
+async function waitForBatch(batchId: string) {
+  while (true) {
+    const res = await fetch(
+      `https://api.solana.com/v1/payments/transfer-batches/${batchId}`,
+      { headers: { Authorization: "Bearer sk_test_..." } }
+    );
+    const { data } = await res.json();
+    if (data.batch.status !== "processing") return data;
+    await new Promise((resolve) => setTimeout(resolve, 15_000));
+  }
+}
+
+const { batch, recipients } = await waitForBatch("xbatch_abc123");
+const failed = recipients.filter((r) => r.status === "failed");
+// Resubmit `failed` rows; leave everything else alone.
+```
+</Tab>
+</Tabs>
+
+See [Polling cadence](/docs/payments/accept-verification#polling-cadence) for how often to poll.
+
+### Recipient statuses
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | Not yet assigned to a chunk. |
+| `processing` | Assigned to a chunk that SDP is sending or has sent, and waiting for settlement. `transferId` points to the chunk's transfer. |
+| `confirmed` | Its chunk settled on-chain. The recipient was paid. |
+| `failed` | Its chunk failed simulation, couldn't be sent, or failed on-chain. `error` gives the reason. The recipient wasn't paid. |
+
+### Batch statuses
+
+| Status | Meaning |
+| --- | --- |
+| `processing` | At least one recipient is still `pending` or `processing`. |
+| `confirmed` | Every recipient is `confirmed`. |
+| `partially_failed` | Nothing is in flight; some recipients are `confirmed` and some `failed`. |
+| `failed` | Nothing is in flight and no recipient was paid. |
+
+If SDP can't tell whether a chunk reached the network, the chunk and its recipients stay `processing` while reconciliation finds out. Don't pay those recipients again.
+
+### Chunk transfers
+
+Each chunk is a payment transfer with `type: "transfer_batch"` and `kind: "batch_pay"`. Several recipients can share one `transferId`, and the transfer's `amount` is the chunk total, so use the recipient rows for per-recipient amounts and destinations. To list chunk transfers across batches, call `GET /v1/payments/transfers?type=transfer_batch`. A transfer's `signature` identifies the chunk's on-chain transaction.
+
+To find past batches, use `GET /v1/payments/transfer-batches`, filtered by `sourceCustodyWalletId`, `token`, `status` or `externalId`, with `page` and `pageSize` (up to 100). It returns batch summaries without recipient rows and only covers wallets your key can read.
+
+### Paying failed recipients again
+
+A batch can't be retried in place. To pay the recipients that ended `failed`, send them in a new batch with a new `Idempotency-Key`, or as single transfers. Never resend recipients that are `pending`, `processing` or `confirmed`.
+
+## When to use single transfers
+
+Use `POST /v1/payments/transfers`, one call per recipient, when:
+
+- **The recipient isn't a counterparty account.** Batches only pay `crypto_wallet` counterparty accounts. Single transfers take any Solana wallet address as `destination`. Alternatively, register the recipient as a counterparty account first.
+- **You need a memo on each payment.** Single transfers accept `memo`. Batch requests have no memo field.
+- **You're retrying a few failed recipients** and a second batch isn't worth it.
+
+Batches also need one source wallet and one token. Split a run that mixes either into several batches, or one batch per 500 recipients.
+
+The rest of this page covers running payouts as single transfers.
+
+### Designing a run of single transfers
+
+1. **Resolve recipients** in your application: the rows to pay, each with destination address and amount.
+2. **Pick a run identifier** you control, for example `payout_2026-05-14_marketplace_sellers`.
+3. **Send one transfer per row** with `POST /v1/payments/transfers`. Put the run ID and a row ID in `memo`, for example `payout_2026-05-14_marketplace_sellers/row_4837`.
+4. **Store** the returned `transfer.id` and `transfer.status` against the row before moving on, so you can poll it later.
+5. **Reconcile** once every row is sent, by listing outbound transfers for the window. See [Reconciling a run](#reconciling-a-run).
 
 ## Dedup and retries
 
-Two layers protect you against double-spends if a worker dies mid-run:
+Two layers protect you against paying a row twice if a worker dies mid-run:
 
-1. **Idempotency keys** — generate one stable `Idempotency-Key` per recipient row and reuse it for retries. An identical request for the same exact source wallet returns the original transfer; reusing the key for a different request returns `409`.
-2. **Application mapping** — persist the SDP transfer ID for each recipient row before moving to the next row. On restart, replay with the same idempotency key or skip rows that already have an associated `Transfer.id`.
+1. **Idempotency keys.** Generate one stable `Idempotency-Key` per recipient row and reuse it on retries. An identical request for the same source wallet returns the original transfer. Reusing the key for a different request returns `409`.
+2. **Your own mapping.** Store the SDP transfer ID for each row before moving to the next. On restart, resend with the same key, or skip rows that already have a transfer ID.
 
-The on-chain `signature` is unique across SDP transfers once populated. Use it as a cross-indexer integrity check, not as the retry mechanism.
-
-Using a fresh idempotency key creates a new transfer intent, even if the payload is otherwise identical.
+A fresh idempotency key creates a new transfer, even if the payload is identical. Once a transfer has an on-chain `signature`, that signature is unique across SDP transfers. Use it to cross-check against another indexer, not as the retry mechanism.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -3105,7 +3398,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 ## Reconciling a run
 
-After the loop finishes, list all outbound transfers in the run's time window and tally against your recipient table:
+After the loop finishes, list outbound transfers in the run's time window and tally them against your recipient table:
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
@@ -3139,23 +3432,337 @@ async function* listOutboundTransfers(from: string, to: string) {
 </Tab>
 </Tabs>
 
-Filter the returned transfers on `memo.startsWith(batchId)` (or whatever convention you chose) to scope to the batch. Cross-reference each recipient row by SDP `Transfer.id`.
+Filter the results on `memo.startsWith(runId)`, or whatever convention you chose, to scope them to the run. Match each recipient row by SDP transfer ID, and treat `confirmed` or `finalized` as paid.
 
-## Failure modes
+### Failure modes
 
-Per-transfer outcomes you should expect to handle:
-
-- **`failed`** — the transaction was built and submitted but the network rejected it (insufficient funds, frozen account, expired blockhash). The `error` field on the transfer record explains what reached the chain. The recipient was not paid; you can retry by submitting a new transfer.
-- **`pending` past the expected confirmation window** — usually a backend or RPC hiccup. Re-poll with `GET /v1/payments/transfers/{id}` rather than re-submitting; you only want a new transfer if `status` settles to `failed`.
-- **Mid-run worker crash** — resume with each row's original `Idempotency-Key`; persist the returned `Transfer.id` before advancing.
-- **Source wallet runs out of SOL for fees** — submissions start failing with fee-related errors. If SDP is configured to sponsor fees this won't happen; otherwise top up the source wallet's SOL balance before continuing.
+- **`failed`**: the transfer didn't go through, and `error` says why. The recipient wasn't paid. To retry, submit a new transfer with a new idempotency key.
+- **`processing` for longer than you expect**: a `200` can return a `processing` transfer that already has a signature while SDP is still reconciling it. Poll `GET /v1/payments/transfers/{transferId}` instead of resubmitting. Only send a new transfer once the status is `failed`.
+- **The worker crashes mid-run**: resume with each row's original `Idempotency-Key`, and store the returned transfer ID before moving on.
 
 ## Related
 
-- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint.
-- [Payment with memo](/docs/payments/send-payment-with-memo) — the memo field used above to tag a batch.
-- [Indexing and reconciliation](/docs/payments/accept-indexing) — the same list endpoint, used inbound.
-- [Wallet policies](/docs/wallet-operations/policies) — destination allowlist and daily-limit guardrails for payout wallets.
+- [Recurring payments](/docs/payments/recurring-payments): pay a counterparty on a schedule from a custody wallet.
+- [Basic payment](/docs/payments/send-basic-payment): the single-transfer endpoint.
+- [Payment with memo](/docs/payments/send-payment-with-memo): the memo field used above to tag a run.
+- [Indexing and reconciliation](/docs/payments/accept-indexing): the same list endpoint, used for inbound transfers.
+- [Wallet policies](/docs/wallet-operations/policies): rules and approvals for payout wallets.
+- [Idempotency](/docs/developing-with-sdp/idempotency): how replays resolve.
+
+---
+
+### Recurring payments
+Source: https://platform.solana.com/docs/payments/recurring-payments
+
+> Pay a counterparty a fixed amount on a schedule from an SDP custody wallet, with SDP signing and collecting each payment.
+
+A **recurring payment** sends a fixed amount of one token from one of your custody wallets to one counterparty account, once per period. Your SDP custody wallet is the payer. SDP signs every transaction with it and collects each payment when it falls due. Use it for payroll, retainers, vendor payments, or any other outgoing schedule you control.
+
+Recurring payments are built on the Solana Subscriptions program. When you activate one, SDP creates a plan owned by your source wallet and authorizes a subscription to it from that same wallet. Each collection is a pull under that subscription, signed by the source wallet. That's why a recurring payment record carries `planId`, `subscriptionId`, `planPda` and `subscriptionPda`.
+
+## Prerequisites
+
+- A custody wallet to pay from, with a custody signer configured, holding the token. You pass its SDP Wallet `id` (`cwlt_…`, from `GET /v1/wallets`) as `sourceCustodyWalletId`. The provider `walletId`, the wallet address and the legacy `sourceWalletId` selector are not accepted.
+- An `active` counterparty with an `active` counterparty account of kind `crypto_wallet` on `solana`. See `POST /v1/counterparties/{counterpartyId}/accounts`.
+- A supported token: a USD stablecoin that SDP recognizes on your project's network, such as `USDC`, or a token issued in this project whose status is `active`. Native SOL is not supported.
+- An API key with the permissions listed under [Permissions](#permissions), whose `payments:write` wallet scope includes the source wallet.
+
+## Lifecycle
+
+1. **Create** the schedule. SDP stores it as `pending_activation`; nothing happens on-chain yet.
+2. **Activate** it. SDP creates the on-chain plan and subscription, signed by your source wallet, and the schedule becomes `active` with a `nextCollectionDueAt`.
+3. **Collect.** SDP's background job collects each payment once it's due. You can also start a due collection yourself with `collect`.
+4. **Update, cancel or resume** the schedule as needed.
+
+## Create a schedule
+
+`POST /v1/payments/recurring-payments` takes:
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `sourceCustodyWalletId` | Yes | SDP Wallet `id` (`cwlt_…`) that funds every payment. |
+| `counterpartyId` | Yes | The counterparty being paid. Must be `active`. |
+| `counterpartyAccountId` | Yes | That counterparty's `crypto_wallet` account. Must be `active`. Payments go to its Solana wallet address. |
+| `token` | Yes | A supported stablecoin symbol or mint, or the mint of a token issued in this project. Stored as the mint address. |
+| `amount` | Yes | Amount per payment, as a positive decimal string in UI units. |
+| `periodHours` | Yes | Whole hours between payments, from 1 to 8760. For example `24` (daily), `168` (weekly) or `720` (every 30 days). Periods are fixed lengths, not calendar months. |
+| `firstCollectionAt` | No | ISO 8601 timestamp, which must be in the future. If you leave it out, the first payment is due one period after activation. |
+| `metadataUri` | No | `http` or `https` URL, up to 128 characters, stored with the on-chain plan. |
+
+Unknown fields are rejected with `400`.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/recurring-payments \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceCustodyWalletId": "cwlt_123",
+    "counterpartyId": "cpty_4837",
+    "counterpartyAccountId": "cpa_4837",
+    "token": "USDC",
+    "amount": "2500.00",
+    "periodHours": 720,
+    "firstCollectionAt": "2026-06-01T09:00:00Z"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-recurring-payment.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/payments/recurring-payments",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sourceCustodyWalletId: "cwlt_123",
+      counterpartyId: "cpty_4837",
+      counterpartyAccountId: "cpa_4837",
+      token: "USDC",
+      amount: "2500.00",
+      periodHours: 720,
+      firstCollectionAt: "2026-06-01T09:00:00Z",
+    }),
+  }
+);
+const { data } = await response.json();
+// data.recurringPayment.id      — "prp_..."
+// data.recurringPayment.status  — "pending_activation"
+```
+</Tab>
+<Tab value="Java">
+```java title="CreateRecurringPayment.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/payments/recurring-payments"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "sourceCustodyWalletId": "cwlt_123",
+          "counterpartyId": "cpty_4837",
+          "counterpartyAccountId": "cpa_4837",
+          "token": "USDC",
+          "amount": "2500.00",
+          "periodHours": 720,
+          "firstCollectionAt": "2026-06-01T09:00:00Z"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+A `201` returns the stored schedule. The on-chain fields stay `null` until activation:
+
+```json title="response.json"
+{
+  "data": {
+    "recurringPayment": {
+      "id": "prp_...",
+      "sourceCustodyWalletId": "cwlt_123",
+      "sourceProviderWalletId": "privy_wallet_123",
+      "sourceAddress": "5aBCd...2eFg",
+      "counterpartyId": "cpty_4837",
+      "counterpartyAccountId": "cpa_4837",
+      "destinationAddress": "7xKXz...9fGh",
+      "destinationTokenAccount": null,
+      "token": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "amount": "2500.00",
+      "periodHours": 720,
+      "firstCollectionAt": "2026-06-01T09:00:00.000Z",
+      "nextCollectionDueAt": null,
+      "planId": null,
+      "subscriptionId": null,
+      "status": "pending_activation"
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-14T09:00:00.000Z" }
+}
+```
+
+The example is trimmed; see the [Payments API reference](/docs/reference/api/payments) for every field.
+
+Create doesn't use the `Idempotency-Key` header, so retrying a create that timed out can leave you with two schedules. Before you retry, check with `GET /v1/payments/recurring-payments?counterpartyId=…`.
+
+SDP evaluates the create against the source wallet's policy. See [Wallet policy](#wallet-policy).
+
+## Activate
+
+Activation takes no body:
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/recurring-payments/prp_abc123/activate \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+SDP signs two steps with the source wallet: creating the on-chain plan, then authorizing the subscription. When the call returns `200`, both exist on-chain and the response shows `status: "active"` with `nextCollectionDueAt`, `planPda`, `planCreationSignature`, `subscriptionPda` and `authorizationSignature` filled in.
+
+The first payment is due at `firstCollectionAt` if you set one, or one period after activation if you didn't. Always read the due date from `nextCollectionDueAt`.
+
+- If activation fails, the schedule goes back to `pending_activation` and you can call `activate` again.
+- Calling `activate` on a schedule that's already `active` returns it unchanged.
+- While an activation is in progress, a second call returns `409`. If an activation stays in `activating` for 15 minutes, SDP's background job picks it up again, and you can call `activate` again yourself.
+
+## Collection
+
+### Automatic collection
+
+SDP's background job collects every `active` schedule whose `nextCollectionDueAt` has passed. You don't need to call anything. The payment goes from the source wallet to the counterparty's associated token account for the token. SDP creates that account if it doesn't exist, and SDP's fee payer covers the network fee and the account rent.
+
+Once SDP confirms the payment on-chain, `nextCollectionDueAt` moves forward by `periodHours` from the previous due date, not from the time of collection, so the schedule doesn't drift.
+
+If an automatic collection fails, the job tries that due date again on a later run, no sooner than 30 minutes after the failure.
+
+### Collect manually
+
+`POST /v1/payments/recurring-payments/{id}/collect` starts the collection for the current due date straight away, for example to retry after you've topped up the source wallet:
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/recurring-payments/prp_abc123/collect \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+```json title="response.json"
+{
+  "data": {
+    "recurringPayment": { "id": "prp_...", "status": "active", "nextCollectionDueAt": "2026-07-01T09:00:00.000Z" },
+    "collectionAttempt": {
+      "id": "psca_...",
+      "subscriptionId": "psub_...",
+      "transferId": "xfr_...",
+      "amount": "2500.00",
+      "dueAt": "2026-06-01T09:00:00.000Z",
+      "status": "confirmed",
+      "signature": "3vZq...",
+      "error": null,
+      "metadata": { "source": "linked_transfer", "initialSource": "manual", "recurringPaymentId": "prp_...", "transferId": "xfr_...", "initiatedByKeyId": "key_..." }
+    },
+    "transfer": { "id": "xfr_...", "kind": "recurring_pay", "status": "confirmed", "amount": "2500.00", "signature": "3vZq..." }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-06-01T09:00:04.000Z" }
+}
+```
+
+- Before `nextCollectionDueAt`, `collect` returns `400`.
+- If the schedule isn't `active`, or a collection for this due date is already in progress, it returns `409`.
+- Manual collection doesn't wait out the 30-minute retry delay that applies to automatic retries.
+- If SDP can't confirm the submission straight away, the `200` returns the transfer as `processing` with its signature. Reconciliation settles it, and `nextCollectionDueAt` only moves forward after exact on-chain confirmation. Don't collect that due date again.
+
+SDP keeps at most one in-flight or confirmed collection attempt per due date, so repeated `collect` calls for the same cycle don't pay twice.
+
+### Collection attempts and transfers
+
+Each collection creates a **collection attempt** for its due date and a payment transfer with `kind: "recurring_pay"`. To see the attempts for a schedule, pass its `subscriptionId` to the subscriptions endpoint:
+
+```bash title="Terminal"
+curl "https://api.solana.com/v1/payments/subscriptions/psub_abc123/collection-attempts?status=failed" \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+The response lists `collectionAttempts` with `total`, `page` and `pageSize`. Each attempt has:
+
+- `status`: `processing`, `confirmed` or `failed` (the enum also has `pending` and `skipped`).
+- `dueAt`: the due date it collects.
+- `transferId` and `signature`: the linked transfer and on-chain transaction.
+- `error`: the reason a failed attempt failed.
+- `metadata.source`: `manual` or `automated` while it runs, `linked_transfer` once it's confirmed, or `retry` after a failure, with `metadata.retryAfterAt` and `metadata.initialSource`.
+
+The transfers also appear in `GET /v1/payments/transfers`, for example filtered by `counterpartyId`.
+
+## Update a schedule
+
+`PATCH /v1/payments/recurring-payments/{id}` changes a schedule in `pending_activation` or `active`. Send only the fields you're changing; at least one is required. If you change `counterpartyId`, also send `counterpartyAccountId`.
+
+- **Pending schedules** are updated directly. `firstCollectionAt` can only be changed here; send `null` to clear it.
+- **Active schedules**: `metadataUri` and `nextCollectionDueAt` are updated in place. Changing `amount`, `periodHours`, `token`, `sourceCustodyWalletId`, `counterpartyId` or `counterpartyAccountId` makes SDP create and authorize a replacement on-chain subscription, cancel the old one, and switch the schedule over.
+- `nextCollectionDueAt` can only be changed after activation. It can't be earlier than the next eligible collection (`400`); send `null` to reset it to the earliest eligible time.
+- To change the source wallet, your key needs `payments:write` on both the old and the new wallet. It returns `409` while a collection approval for the current due date is pending.
+
+While the update runs, the schedule is `updating` and isn't collected, and another `PATCH` returns `409`. If an update is interrupted, the schedule stays `updating`. After 15 minutes, send the same `PATCH` again to finish it; a different body returns `409`.
+
+SDP evaluates every update against the wallet's policy, using the token, amount and destination the schedule will have afterwards.
+
+## Cancel and resume
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/recurring-payments/prp_abc123/cancel \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+- **Cancel** stops future collections. For an `active` schedule, SDP submits the on-chain cancellation (`canceling`, then `canceled`). A collection that's already processing may still settle. A schedule that was never activated is marked `canceled` without any on-chain step.
+- **Resume** (`POST /v1/payments/recurring-payments/{id}/resume`) submits the on-chain resume for a `canceled` schedule that was activated before, and returns it to `active` (through `resuming`). Check `nextCollectionDueAt` in the response.
+
+Both calls take no body. Calling either on a schedule already in the target state returns it unchanged. While one is in progress, a second call returns `409`. If a schedule stays in `canceling` or `resuming` for 15 minutes, SDP's background job finishes the operation.
+
+## List and read
+
+- `GET /v1/payments/recurring-payments` lists schedules, filtered by `counterpartyId` and `status`, with `page` and `pageSize` (up to 100). The response has `recurringPayments`, `total`, `page` and `pageSize`. It only includes schedules whose source wallet your key can read.
+- `GET /v1/payments/recurring-payments/{id}` returns one schedule.
+
+## Statuses
+
+| Status | Meaning |
+| --- | --- |
+| `pending_activation` | Created; nothing on-chain yet. Can be updated, activated or canceled. |
+| `activating` | Activation is in progress. |
+| `active` | Collected when due. Can be updated, collected manually or canceled. |
+| `updating` | An update is in progress. Not collected until it finishes. |
+| `canceling` | Cancellation is in progress. |
+| `canceled` | No further collections. Can be resumed if it was activated. |
+| `resuming` | Resume is in progress. |
+| `paused`, `expired` | Not collected. Update, cancel and resume return `409`. |
+
+Only `active` schedules are collected.
+
+## Wallet policy
+
+SDP evaluates three recurring operation types against the source wallet's policy:
+
+| Operation type | Evaluated on | Values checked |
+| --- | --- | --- |
+| `recurring_payment_create` | `POST /v1/payments/recurring-payments` | Token, amount per payment, and the counterparty wallet as destination. |
+| `recurring_payment_update` | `PATCH /v1/payments/recurring-payments/{id}` | The token, amount and destination after the update. |
+| `recurring_payment_collection` | Every collection, automatic or manual | Token, amount and destination of the payment. |
+
+Activation, cancellation and resume aren't evaluated separately.
+
+If the decision isn't `allow`, the operation doesn't go ahead: create stores no schedule, update changes nothing, and a collection attempt is recorded as `failed`. A request you made returns `403` with `error.code: "FORBIDDEN"` for a denial, or `202` with `error.code: "SIGNING_PENDING"` when approval is required. Both carry `error.details`, including `walletOperationId`, `decision`, `reason` and `approvalRequestId`.
+
+While a collection's approval is outstanding, retrying the same due date returns that same approval instead of filing a new one. A later due date gets its own approval.
+
+SDP doesn't run a held recurring-payment operation when its approval request is approved. For the `recurring_payment_create`, `recurring_payment_update` and `recurring_payment_collection` operation types, write `allow` or `deny` rules rather than approval rules.
+
+Use rules on these operation types to cap or block schedules. See [Wallet policies](/docs/wallet-operations/policies#exact-operation-types).
+
+## Errors
+
+| Status | Typical causes |
+| --- | --- |
+| `400` | Invalid body: unknown field, unsupported token, `firstCollectionAt` not in the future, `periodHours` out of range. Counterparty or account not `active`, or account not `crypto_wallet`. `collect` before the due date. `nextCollectionDueAt` too early, `firstCollectionAt` after activation, or `nextCollectionDueAt` before activation. |
+| `202` | `SIGNING_PENDING`: the wallet policy requires approval. |
+| `403` | The key lacks a permission or wallet scope, or the wallet policy denied the operation. |
+| `404` | Schedule, counterparty or counterparty account not found. |
+| `409` | The operation isn't allowed from the current status, another operation on the schedule is in progress, or a collection for this due date is already processing. |
+
+## Permissions
+
+| Endpoint | Permissions |
+| --- | --- |
+| `POST /v1/payments/recurring-payments` | `payments:write`, `wallets:read`, `counterparties:read` |
+| `PATCH /v1/payments/recurring-payments/{id}` | `payments:write`, `wallets:read`, `counterparties:read` |
+| `POST /v1/payments/recurring-payments/{id}/activate`, `/cancel`, `/resume`, `/collect` | `payments:write`, `wallets:read` |
+| `GET /v1/payments/recurring-payments`, `GET /v1/payments/recurring-payments/{id}` | `payments:read` |
+
+Every write also needs the key's `payments:write` wallet scope to include the source wallet. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys).
+
+## Related
+
+- [Payouts and disbursements](/docs/payments/send-payouts): one-off payments to many counterparties.
+- [Wallet policies](/docs/wallet-operations/policies): rules and approvals for wallet operations.
+- [Wallet balances](/docs/wallet-operations/balances): keep the source wallet funded.
 
 ---
 

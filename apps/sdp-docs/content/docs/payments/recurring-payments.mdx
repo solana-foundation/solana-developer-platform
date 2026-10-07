@@ -1,0 +1,312 @@
+---
+title: Recurring payments
+description: Pay a counterparty a fixed amount on a schedule from an SDP custody wallet, with SDP signing and collecting each payment.
+---
+
+A **recurring payment** sends a fixed amount of one token from one of your custody wallets to one counterparty account, once per period. Your SDP custody wallet is the payer. SDP signs every transaction with it and collects each payment when it falls due. Use it for payroll, retainers, vendor payments, or any other outgoing schedule you control.
+
+Recurring payments are built on the Solana Subscriptions program. When you activate one, SDP creates a plan owned by your source wallet and authorizes a subscription to it from that same wallet. Each collection is a pull under that subscription, signed by the source wallet. That's why a recurring payment record carries `planId`, `subscriptionId`, `planPda` and `subscriptionPda`.
+
+## Prerequisites
+
+- A custody wallet to pay from, with a custody signer configured, holding the token. You pass its SDP Wallet `id` (`cwlt_…`, from `GET /v1/wallets`) as `sourceCustodyWalletId`. The provider `walletId`, the wallet address and the legacy `sourceWalletId` selector are not accepted.
+- An `active` counterparty with an `active` counterparty account of kind `crypto_wallet` on `solana`. See `POST /v1/counterparties/{counterpartyId}/accounts`.
+- A supported token: a USD stablecoin that SDP recognizes on your project's network, such as `USDC`, or a token issued in this project whose status is `active`. Native SOL is not supported.
+- An API key with the permissions listed under [Permissions](#permissions), whose `payments:write` wallet scope includes the source wallet.
+
+## Lifecycle
+
+1. **Create** the schedule. SDP stores it as `pending_activation`; nothing happens on-chain yet.
+2. **Activate** it. SDP creates the on-chain plan and subscription, signed by your source wallet, and the schedule becomes `active` with a `nextCollectionDueAt`.
+3. **Collect.** SDP's background job collects each payment once it's due. You can also start a due collection yourself with `collect`.
+4. **Update, cancel or resume** the schedule as needed.
+
+## Create a schedule
+
+`POST /v1/payments/recurring-payments` takes:
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `sourceCustodyWalletId` | Yes | SDP Wallet `id` (`cwlt_…`) that funds every payment. |
+| `counterpartyId` | Yes | The counterparty being paid. Must be `active`. |
+| `counterpartyAccountId` | Yes | That counterparty's `crypto_wallet` account. Must be `active`. Payments go to its Solana wallet address. |
+| `token` | Yes | A supported stablecoin symbol or mint, or the mint of a token issued in this project. Stored as the mint address. |
+| `amount` | Yes | Amount per payment, as a positive decimal string in UI units. |
+| `periodHours` | Yes | Whole hours between payments, from 1 to 8760. For example `24` (daily), `168` (weekly) or `720` (every 30 days). Periods are fixed lengths, not calendar months. |
+| `firstCollectionAt` | No | ISO 8601 timestamp, which must be in the future. If you leave it out, the first payment is due one period after activation. |
+| `metadataUri` | No | `http` or `https` URL, up to 128 characters, stored with the on-chain plan. |
+
+Unknown fields are rejected with `400`.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/recurring-payments \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceCustodyWalletId": "cwlt_123",
+    "counterpartyId": "cpty_4837",
+    "counterpartyAccountId": "cpa_4837",
+    "token": "USDC",
+    "amount": "2500.00",
+    "periodHours": 720,
+    "firstCollectionAt": "2026-06-01T09:00:00Z"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-recurring-payment.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/payments/recurring-payments",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sourceCustodyWalletId: "cwlt_123",
+      counterpartyId: "cpty_4837",
+      counterpartyAccountId: "cpa_4837",
+      token: "USDC",
+      amount: "2500.00",
+      periodHours: 720,
+      firstCollectionAt: "2026-06-01T09:00:00Z",
+    }),
+  }
+);
+const { data } = await response.json();
+// data.recurringPayment.id      — "prp_..."
+// data.recurringPayment.status  — "pending_activation"
+```
+</Tab>
+<Tab value="Java">
+```java title="CreateRecurringPayment.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/payments/recurring-payments"))
+    .header("Authorization", "Bearer sk_test_...")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "sourceCustodyWalletId": "cwlt_123",
+          "counterpartyId": "cpty_4837",
+          "counterpartyAccountId": "cpa_4837",
+          "token": "USDC",
+          "amount": "2500.00",
+          "periodHours": 720,
+          "firstCollectionAt": "2026-06-01T09:00:00Z"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+A `201` returns the stored schedule. The on-chain fields stay `null` until activation:
+
+```json title="response.json"
+{
+  "data": {
+    "recurringPayment": {
+      "id": "prp_...",
+      "sourceCustodyWalletId": "cwlt_123",
+      "sourceProviderWalletId": "privy_wallet_123",
+      "sourceAddress": "5aBCd...2eFg",
+      "counterpartyId": "cpty_4837",
+      "counterpartyAccountId": "cpa_4837",
+      "destinationAddress": "7xKXz...9fGh",
+      "destinationTokenAccount": null,
+      "token": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "amount": "2500.00",
+      "periodHours": 720,
+      "firstCollectionAt": "2026-06-01T09:00:00.000Z",
+      "nextCollectionDueAt": null,
+      "planId": null,
+      "subscriptionId": null,
+      "status": "pending_activation"
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-14T09:00:00.000Z" }
+}
+```
+
+The example is trimmed; see the [Payments API reference](/docs/reference/api/payments) for every field.
+
+Create doesn't use the `Idempotency-Key` header, so retrying a create that timed out can leave you with two schedules. Before you retry, check with `GET /v1/payments/recurring-payments?counterpartyId=…`.
+
+SDP evaluates the create against the source wallet's policy. See [Wallet policy](#wallet-policy).
+
+## Activate
+
+Activation takes no body:
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/recurring-payments/prp_abc123/activate \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+SDP signs two steps with the source wallet: creating the on-chain plan, then authorizing the subscription. When the call returns `200`, both exist on-chain and the response shows `status: "active"` with `nextCollectionDueAt`, `planPda`, `planCreationSignature`, `subscriptionPda` and `authorizationSignature` filled in.
+
+The first payment is due at `firstCollectionAt` if you set one, or one period after activation if you didn't. Always read the due date from `nextCollectionDueAt`.
+
+- If activation fails, the schedule goes back to `pending_activation` and you can call `activate` again.
+- Calling `activate` on a schedule that's already `active` returns it unchanged.
+- While an activation is in progress, a second call returns `409`. If an activation stays in `activating` for 15 minutes, SDP's background job picks it up again, and you can call `activate` again yourself.
+
+## Collection
+
+### Automatic collection
+
+SDP's background job collects every `active` schedule whose `nextCollectionDueAt` has passed. You don't need to call anything. The payment goes from the source wallet to the counterparty's associated token account for the token. SDP creates that account if it doesn't exist, and SDP's fee payer covers the network fee and the account rent.
+
+Once SDP confirms the payment on-chain, `nextCollectionDueAt` moves forward by `periodHours` from the previous due date, not from the time of collection, so the schedule doesn't drift.
+
+If an automatic collection fails, the job tries that due date again on a later run, no sooner than 30 minutes after the failure.
+
+### Collect manually
+
+`POST /v1/payments/recurring-payments/{id}/collect` starts the collection for the current due date straight away, for example to retry after you've topped up the source wallet:
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/recurring-payments/prp_abc123/collect \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+```json title="response.json"
+{
+  "data": {
+    "recurringPayment": { "id": "prp_...", "status": "active", "nextCollectionDueAt": "2026-07-01T09:00:00.000Z" },
+    "collectionAttempt": {
+      "id": "psca_...",
+      "subscriptionId": "psub_...",
+      "transferId": "xfr_...",
+      "amount": "2500.00",
+      "dueAt": "2026-06-01T09:00:00.000Z",
+      "status": "confirmed",
+      "signature": "3vZq...",
+      "error": null,
+      "metadata": { "source": "linked_transfer", "initialSource": "manual", "recurringPaymentId": "prp_...", "transferId": "xfr_...", "initiatedByKeyId": "key_..." }
+    },
+    "transfer": { "id": "xfr_...", "kind": "recurring_pay", "status": "confirmed", "amount": "2500.00", "signature": "3vZq..." }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-06-01T09:00:04.000Z" }
+}
+```
+
+- Before `nextCollectionDueAt`, `collect` returns `400`.
+- If the schedule isn't `active`, or a collection for this due date is already in progress, it returns `409`.
+- Manual collection doesn't wait out the 30-minute retry delay that applies to automatic retries.
+- If SDP can't confirm the submission straight away, the `200` returns the transfer as `processing` with its signature. Reconciliation settles it, and `nextCollectionDueAt` only moves forward after exact on-chain confirmation. Don't collect that due date again.
+
+SDP keeps at most one in-flight or confirmed collection attempt per due date, so repeated `collect` calls for the same cycle don't pay twice.
+
+### Collection attempts and transfers
+
+Each collection creates a **collection attempt** for its due date and a payment transfer with `kind: "recurring_pay"`. To see the attempts for a schedule, pass its `subscriptionId` to the subscriptions endpoint:
+
+```bash title="Terminal"
+curl "https://api.solana.com/v1/payments/subscriptions/psub_abc123/collection-attempts?status=failed" \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+The response lists `collectionAttempts` with `total`, `page` and `pageSize`. Each attempt has:
+
+- `status`: `processing`, `confirmed` or `failed` (the enum also has `pending` and `skipped`).
+- `dueAt`: the due date it collects.
+- `transferId` and `signature`: the linked transfer and on-chain transaction.
+- `error`: the reason a failed attempt failed.
+- `metadata.source`: `manual` or `automated` while it runs, `linked_transfer` once it's confirmed, or `retry` after a failure, with `metadata.retryAfterAt` and `metadata.initialSource`.
+
+The transfers also appear in `GET /v1/payments/transfers`, for example filtered by `counterpartyId`.
+
+## Update a schedule
+
+`PATCH /v1/payments/recurring-payments/{id}` changes a schedule in `pending_activation` or `active`. Send only the fields you're changing; at least one is required. If you change `counterpartyId`, also send `counterpartyAccountId`.
+
+- **Pending schedules** are updated directly. `firstCollectionAt` can only be changed here; send `null` to clear it.
+- **Active schedules**: `metadataUri` and `nextCollectionDueAt` are updated in place. Changing `amount`, `periodHours`, `token`, `sourceCustodyWalletId`, `counterpartyId` or `counterpartyAccountId` makes SDP create and authorize a replacement on-chain subscription, cancel the old one, and switch the schedule over.
+- `nextCollectionDueAt` can only be changed after activation. It can't be earlier than the next eligible collection (`400`); send `null` to reset it to the earliest eligible time.
+- To change the source wallet, your key needs `payments:write` on both the old and the new wallet. It returns `409` while a collection approval for the current due date is pending.
+
+While the update runs, the schedule is `updating` and isn't collected, and another `PATCH` returns `409`. If an update is interrupted, the schedule stays `updating`. After 15 minutes, send the same `PATCH` again to finish it; a different body returns `409`.
+
+SDP evaluates every update against the wallet's policy, using the token, amount and destination the schedule will have afterwards.
+
+## Cancel and resume
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/recurring-payments/prp_abc123/cancel \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+- **Cancel** stops future collections. For an `active` schedule, SDP submits the on-chain cancellation (`canceling`, then `canceled`). A collection that's already processing may still settle. A schedule that was never activated is marked `canceled` without any on-chain step.
+- **Resume** (`POST /v1/payments/recurring-payments/{id}/resume`) submits the on-chain resume for a `canceled` schedule that was activated before, and returns it to `active` (through `resuming`). Check `nextCollectionDueAt` in the response.
+
+Both calls take no body. Calling either on a schedule already in the target state returns it unchanged. While one is in progress, a second call returns `409`. If a schedule stays in `canceling` or `resuming` for 15 minutes, SDP's background job finishes the operation.
+
+## List and read
+
+- `GET /v1/payments/recurring-payments` lists schedules, filtered by `counterpartyId` and `status`, with `page` and `pageSize` (up to 100). The response has `recurringPayments`, `total`, `page` and `pageSize`. It only includes schedules whose source wallet your key can read.
+- `GET /v1/payments/recurring-payments/{id}` returns one schedule.
+
+## Statuses
+
+| Status | Meaning |
+| --- | --- |
+| `pending_activation` | Created; nothing on-chain yet. Can be updated, activated or canceled. |
+| `activating` | Activation is in progress. |
+| `active` | Collected when due. Can be updated, collected manually or canceled. |
+| `updating` | An update is in progress. Not collected until it finishes. |
+| `canceling` | Cancellation is in progress. |
+| `canceled` | No further collections. Can be resumed if it was activated. |
+| `resuming` | Resume is in progress. |
+| `paused`, `expired` | Not collected. Update, cancel and resume return `409`. |
+
+Only `active` schedules are collected.
+
+## Wallet policy
+
+SDP evaluates three recurring operation types against the source wallet's policy:
+
+| Operation type | Evaluated on | Values checked |
+| --- | --- | --- |
+| `recurring_payment_create` | `POST /v1/payments/recurring-payments` | Token, amount per payment, and the counterparty wallet as destination. |
+| `recurring_payment_update` | `PATCH /v1/payments/recurring-payments/{id}` | The token, amount and destination after the update. |
+| `recurring_payment_collection` | Every collection, automatic or manual | Token, amount and destination of the payment. |
+
+Activation, cancellation and resume aren't evaluated separately.
+
+If the decision isn't `allow`, the operation doesn't go ahead: create stores no schedule, update changes nothing, and a collection attempt is recorded as `failed`. A request you made returns `403` with `error.code: "FORBIDDEN"` for a denial, or `202` with `error.code: "SIGNING_PENDING"` when approval is required. Both carry `error.details`, including `walletOperationId`, `decision`, `reason` and `approvalRequestId`.
+
+While a collection's approval is outstanding, retrying the same due date returns that same approval instead of filing a new one. A later due date gets its own approval.
+
+SDP doesn't run a held recurring-payment operation when its approval request is approved. For the `recurring_payment_create`, `recurring_payment_update` and `recurring_payment_collection` operation types, write `allow` or `deny` rules rather than approval rules.
+
+Use rules on these operation types to cap or block schedules. See [Wallet policies](/docs/wallet-operations/policies#exact-operation-types).
+
+## Errors
+
+| Status | Typical causes |
+| --- | --- |
+| `400` | Invalid body: unknown field, unsupported token, `firstCollectionAt` not in the future, `periodHours` out of range. Counterparty or account not `active`, or account not `crypto_wallet`. `collect` before the due date. `nextCollectionDueAt` too early, `firstCollectionAt` after activation, or `nextCollectionDueAt` before activation. |
+| `202` | `SIGNING_PENDING`: the wallet policy requires approval. |
+| `403` | The key lacks a permission or wallet scope, or the wallet policy denied the operation. |
+| `404` | Schedule, counterparty or counterparty account not found. |
+| `409` | The operation isn't allowed from the current status, another operation on the schedule is in progress, or a collection for this due date is already processing. |
+
+## Permissions
+
+| Endpoint | Permissions |
+| --- | --- |
+| `POST /v1/payments/recurring-payments` | `payments:write`, `wallets:read`, `counterparties:read` |
+| `PATCH /v1/payments/recurring-payments/{id}` | `payments:write`, `wallets:read`, `counterparties:read` |
+| `POST /v1/payments/recurring-payments/{id}/activate`, `/cancel`, `/resume`, `/collect` | `payments:write`, `wallets:read` |
+| `GET /v1/payments/recurring-payments`, `GET /v1/payments/recurring-payments/{id}` | `payments:read` |
+
+Every write also needs the key's `payments:write` wallet scope to include the source wallet. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys).
+
+## Related
+
+- [Payouts and disbursements](/docs/payments/send-payouts): one-off payments to many counterparties.
+- [Wallet policies](/docs/wallet-operations/policies): rules and approvals for wallet operations.
+- [Wallet balances](/docs/wallet-operations/balances): keep the source wallet funded.

@@ -1,0 +1,295 @@
+---
+title: Subscriptions
+description: Model subscriber-authorized recurring pulls with subscription plans and subscriptions, using unsigned Solana Subscriptions transactions that SDP builds.
+---
+
+A **subscription** is a subscriber's authorization for your plan to pull a fixed amount of one token from the subscriber's own wallet, once per period. The subscriber's wallet isn't an SDP custody wallet, so SDP can't sign for it. Instead, SDP stores the plan and subscription records and builds unsigned Solana Subscriptions transactions. Whoever the transaction names as a signer signs it, and you submit it.
+
+**Subscription or recurring payment?**
+
+- **Subscription** (this page): the subscriber authorizes pulls from their own wallet. The subscriber signs that authorization, and SDP doesn't sign, submit or collect.
+- **[Recurring payment](/docs/payments/recurring-payments)**: your SDP custody wallet pays a counterparty on a schedule. SDP signs every transaction and collects each payment.
+
+Read [What SDP doesn't do for subscriptions](#what-sdp-doesnt-do-for-subscriptions) before you build on these endpoints.
+
+## Who signs what
+
+| Step | Endpoint | Signer named in `requiredSigners` |
+| --- | --- | --- |
+| Create the on-chain plan | `POST /v1/payments/subscription-plans/{planId}/prepare-create` | The plan's owner wallet |
+| Authorize the subscription | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | The subscriber |
+| Cancel the subscription | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | The subscriber |
+| Resume the subscription | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-resume` | The subscriber |
+| Pull one payment | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-collection` | The plan's puller wallet, or the owner wallet if the plan has no puller |
+
+Each of these endpoints returns a `preparedTransaction`:
+
+| Field | Meaning |
+| --- | --- |
+| `serialized` | The unsigned transaction, base64-encoded. |
+| `blockhash`, `lastValidBlockHeight` | The transaction's lifetime. Once the network passes `lastValidBlockHeight`, the transaction can't land; prepare it again. |
+| `requiredSigners` | Every address that must sign. Besides the signer in the table above, it lists SDP's sponsored fee payer. |
+
+SDP doesn't sign or submit these transactions. See [Execution model](/docs/developing-with-sdp#execution-model).
+
+## Prerequisites
+
+- A custody wallet to own the plan. Plan endpoints take its provider `walletId` from `GET /v1/wallets` (for example `privy_wallet_123`), not its SDP Wallet `id` (`cwlt_…`). Your key needs `payments:write` on it.
+- Optionally, a second custody wallet allowed to pull payments, also identified by its provider `walletId`.
+- An `active` counterparty for each subscriber.
+- An SPL token mint. Native SOL is rejected when SDP builds a plan's transactions.
+
+## Create a plan
+
+`POST /v1/payments/subscription-plans` stores a plan record. It doesn't create anything on-chain.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `ownerWalletId` | Yes | Provider `walletId` of the custody wallet that owns the plan. |
+| `token` | Yes | SPL token mint, or a well-known symbol such as `USDC`. |
+| `amount` | Yes | Amount pulled each period, as a positive decimal string in UI units. |
+| `periodHours` | Yes | Whole hours per period, from 1 to 8760. |
+| `destinationAddress` | No | Owner address allowed to receive pulls. Used as the default destination when you prepare the on-chain plan. |
+| `pullerWalletId` | No | Provider `walletId` of a custody wallet allowed to pull payments. |
+| `programPlanId` | No | Unsigned 64-bit decimal string used to derive the plan's on-chain address. SDP generates one if you leave it out. Reusing one returns `409`. |
+| `planPda` | No | The on-chain plan address, if the plan already exists on-chain. |
+| `metadataUri` | No | `http` or `https` URL, up to 128 characters. |
+| `status` | No | `draft` (default), `active` or `archived`. |
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/subscription-plans \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownerWalletId": "privy_wallet_123",
+    "token": "USDC",
+    "amount": "25.00",
+    "periodHours": 720,
+    "destinationAddress": "7xKXz...9fGh",
+    "metadataUri": "https://example.com/plans/monthly-usdc.json"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-plan.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/payments/subscription-plans",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ownerWalletId: "privy_wallet_123",
+      token: "USDC",
+      amount: "25.00",
+      periodHours: 720,
+      destinationAddress: "7xKXz...9fGh",
+      metadataUri: "https://example.com/plans/monthly-usdc.json",
+    }),
+  }
+);
+const { data } = await response.json();
+// data.subscriptionPlan.id          — "psp_..."
+// data.subscriptionPlan.status      — "draft"
+// data.subscriptionPlan.ownerAddress, programPlanId, planPda (null until prepared)
+```
+</Tab>
+</Tabs>
+
+### Prepare the on-chain plan
+
+`POST /v1/payments/subscription-plans/{planId}/prepare-create` builds the transaction that creates the plan on-chain:
+
+| Field | Notes |
+| --- | --- |
+| `destinations` | Up to 4 addresses allowed to receive pulls. Defaults to the plan's `destinationAddress`. At least one is required. |
+| `pullers` | Up to 4 addresses allowed to pull. Defaults to the plan's puller wallet address, or the owner address if there's no puller. |
+| `endTs` | Optional unsigned 64-bit Unix timestamp at which the on-chain plan ends. |
+| `metadataUri` | Optional metadata URI for the on-chain plan. Defaults to the plan's `metadataUri`. |
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/subscription-plans/psp_abc123/prepare-create \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "destinations": ["7xKXz...9fGh"] }'
+```
+
+The response has the plan, the derived `planPda` (which SDP also stores on the plan), and the `preparedTransaction` for the owner wallet to sign. An `archived` plan returns `400`.
+
+### Activate the plan
+
+SDP doesn't change a plan's `status` when you prepare or submit its transaction. Set it yourself, because subscribers can only authorize against an `active` plan:
+
+```bash title="Terminal"
+curl -X PATCH https://api.solana.com/v1/payments/subscription-plans/psp_abc123 \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "status": "active" }'
+```
+
+`PATCH` can also set or clear (`null`) `planPda`, `destinationAddress`, `pullerWalletId` and `metadataUri`. Token, amount and period can't be changed. To stop new subscriptions, set `status` to `archived`.
+
+## Create a subscription
+
+`POST /v1/payments/subscriptions` records which counterparty subscribes, and from which wallet:
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `planId` | Yes | The plan (`psp_…`). It can't be `archived`. |
+| `counterpartyId` | Yes | The counterparty being billed. Must be `active`. |
+| `subscriberAddress` | Yes | The subscriber's own wallet address, which will sign the authorization. |
+
+Each counterparty can have one subscription per plan; a second returns `409`. The new subscription has status `pending_authorization`.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/subscriptions \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "planId": "psp_abc123",
+    "counterpartyId": "cpty_4837",
+    "subscriberAddress": "9wFFy...3kLm"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-subscription.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/payments/subscriptions",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      planId: "psp_abc123",
+      counterpartyId: "cpty_4837",
+      subscriberAddress: "9wFFy...3kLm",
+    }),
+  }
+);
+const { data } = await response.json();
+// data.subscription.id      — "psub_..."
+// data.subscription.status  — "pending_authorization"
+```
+</Tab>
+</Tabs>
+
+### Prepare the subscriber's authorization
+
+`POST /v1/payments/subscriptions/{subscriptionId}/prepare-authorization` builds the transaction the subscriber signs. It initializes the subscriber's subscription authority for the token and subscribes to the plan. The plan must be `active` and the subscription `pending_authorization`; otherwise it returns `400`.
+
+| Field | Notes |
+| --- | --- |
+| `subscriberTokenAccount` | The subscriber's token account for the plan's token. The subscription authority is delegated over it. |
+| `expectedPlanCreatedAt` | Unsigned 64-bit created-at value from the on-chain plan terms the subscriber consents to. |
+| `expectedSubscriptionAuthorityInitId` | Signed 64-bit init id from the subscriber's on-chain subscription authority. |
+
+The transaction also carries the plan's amount and period as the terms the subscriber expects.
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/subscriptions/psub_abc123/prepare-authorization \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subscriberTokenAccount": "4uQeV...8rTy",
+    "expectedPlanCreatedAt": "1770000000",
+    "expectedSubscriptionAuthorityInitId": "0"
+  }'
+```
+
+```json title="response.json"
+{
+  "data": {
+    "subscription": {
+      "id": "psub_...",
+      "status": "pending_authorization",
+      "subscriberAddress": "9wFFy...3kLm",
+      "subscriberTokenAccount": "4uQeV...8rTy",
+      "subscriptionPda": "Hn2s...",
+      "subscriptionAuthorityAddress": "Bq7d..."
+    },
+    "subscriptionPda": "Hn2s...",
+    "subscriptionAuthorityAddress": "Bq7d...",
+    "preparedTransaction": {
+      "serialized": "AQID...",
+      "blockhash": "...",
+      "lastValidBlockHeight": "123456",
+      "requiredSigners": ["9wFFy...3kLm", "<sponsored fee payer>"]
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-14T09:00:00.000Z" }
+}
+```
+
+SDP stores `subscriberTokenAccount`, `subscriptionPda` and `subscriptionAuthorityAddress` on the subscription when it prepares the authorization.
+
+### Cancel and resume
+
+`prepare-cancel` and `prepare-resume` take no body and build a transaction for the subscriber to sign. Resume applies to a canceled subscription before revocation.
+
+### Pull a payment
+
+`POST /v1/payments/subscriptions/{subscriptionId}/prepare-collection` builds the pull for one period, for the plan's puller wallet (or owner wallet) to sign. It takes only `receiverTokenAccount`, which must be allowed by the on-chain plan; the amount always comes from the plan, and an `amount` field is rejected. The subscription and the plan must both be `active`; otherwise it returns `400`.
+
+## Reading plans, subscriptions and attempts
+
+- `GET /v1/payments/subscription-plans`, filtered by `status`, and `GET /v1/payments/subscription-plans/{planId}`.
+- `GET /v1/payments/subscriptions`, filtered by `planId`, `counterpartyId`, `status` or `dueBefore`, and `GET /v1/payments/subscriptions/{subscriptionId}`.
+- `GET /v1/payments/subscriptions/{subscriptionId}/collection-attempts`, filtered by `status`.
+
+List responses wrap the items (`subscriptionPlans`, `subscriptions` or `collectionAttempts`) with `total`, `page` and `pageSize`, and accept `page` and `pageSize` (up to 100).
+
+These lists also include the plans and subscriptions SDP creates for your [recurring payments](/docs/payments/recurring-payments). A recurring payment's `planId` and `subscriptionId` point to them, and its collection attempts are listed under its `subscriptionId`.
+
+### Statuses
+
+| Record | Statuses |
+| --- | --- |
+| Plan | `draft`, `active`, `archived`. For plans you create, you set these. |
+| Subscription | `pending_authorization`, `active`, `paused`, `canceling`, `canceled`, `expired` |
+| Collection attempt | `pending`, `processing`, `confirmed`, `failed`, `skipped` |
+
+## What SDP doesn't do for subscriptions
+
+- **SDP doesn't sign, submit or watch these transactions.** Submitting a prepared transaction doesn't update the SDP records. A subscription created with `POST /v1/payments/subscriptions` keeps the status `pending_authorization`, and its `authorizationSignature`, `currentPeriodStartAt` and `nextCollectionDueAt` stay empty. No public endpoint records a subscriber's authorization.
+- **`prepare-collection` needs an `active` subscription**, so it returns `400` for subscriptions created with `POST /v1/payments/subscriptions`.
+- **SDP doesn't collect or retry these subscriptions.** It doesn't pull payments on a schedule, and it doesn't create collection attempts for them. Collection attempts come from recurring payments.
+- **SDP-held signatures aren't available through the API.** Every prepared transaction lists SDP's sponsored fee payer in `requiredSigners`, and the plan and collection transactions also need a custody wallet's signature. No public endpoint adds either signature to a prepared transaction.
+- **No wallet policy runs.** These endpoints only build transactions, so wallet policies aren't evaluated.
+
+If you need SDP to sign and collect on a schedule, use [Recurring payments](/docs/payments/recurring-payments).
+
+## Errors
+
+| Status | Typical causes |
+| --- | --- |
+| `400` | Invalid body. Archived plan. Plan not `active` when preparing an authorization. Subscription not `pending_authorization` when preparing an authorization, or not `active` when preparing a collection. No destination when preparing the plan. Counterparty not `active`. Native SOL as the plan token. |
+| `403` | The key lacks a permission, or lacks `payments:write` on the owner or puller wallet. |
+| `404` | Plan, subscription or counterparty not found, or the wallet isn't one of yours. |
+| `409` | The counterparty already has a subscription to this plan, or a plan with this `programPlanId` exists. |
+
+## Permissions
+
+| Endpoint | Permissions |
+| --- | --- |
+| `POST /v1/payments/subscription-plans`, `PATCH /v1/payments/subscription-plans/{planId}`, `POST …/prepare-create` | `payments:write`, `wallets:read`, plus `payments:write` on the owner wallet (and on the puller wallet when you set one) |
+| `POST /v1/payments/subscriptions`, `POST …/prepare-authorization` | `payments:write`, `counterparties:read` |
+| `POST …/prepare-cancel`, `POST …/prepare-resume` | `payments:write` |
+| `POST …/prepare-collection` | `payments:write`, `wallets:read`, plus `payments:write` on the puller wallet, or the owner wallet if there's no puller |
+| All `GET` endpoints | `payments:read` |
+
+See [Manage API keys](/docs/developing-with-sdp/manage-api-keys).
+
+## Related
+
+- [Recurring payments](/docs/payments/recurring-payments): SDP-signed schedules from your custody wallet.
+- [Accept payments](/docs/payments/accept-overview): receive one-off inbound payments.
+- [Execution model](/docs/developing-with-sdp#execution-model): how SDP builds, signs and submits transactions.
