@@ -16,10 +16,10 @@ import {
 } from "../../../scripts/lib/run-postgres-migrations.mjs";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
-const migrationFile = "0123_remove_byok_rpc.sql";
-const quicknodeSecretRef = "projects/p/secrets/pcred_0123_quicknode";
+const migrationFile = "0124_remove_byok_rpc.sql";
+const quicknodeSecretRef = "projects/p/secrets/pcred_0124_quicknode";
 const quicknodeSecretVersionRef = `${quicknodeSecretRef}/versions/1`;
-const privySecretRef = "projects/p/secrets/pcred_0123_privy";
+const privySecretRef = "projects/p/secrets/pcred_0124_privy";
 const privySecretVersionRef = `${privySecretRef}/versions/1`;
 let client: Client;
 
@@ -64,7 +64,7 @@ async function settingsOf(table: "projects" | "organizations", id: string): Prom
   return settings === null ? null : JSON.parse(settings);
 }
 
-describe("0123 BYOK RPC removal", () => {
+describe("0124 BYOK RPC removal", () => {
   beforeAll(async () => {
     client = new Client({ connectionString: databaseUrl });
     await client.connect();
@@ -88,13 +88,13 @@ describe("0123 BYOK RPC removal", () => {
 
   it("drops the BYOK RPC schema, every tenant's RPC credentials and the RPC settings keys through the real runner", async () => {
     await restorePreRemovalSchema();
-    const tenant = await seedOrgProject(client, "0123");
-    const otherTenant = await seedOrgProject(client, "0123_other");
-    const rpcOnlyTenant = await seedOrgProject(client, "0123_rpc_only");
+    const tenant = await seedOrgProject(client, "0124");
+    const otherTenant = await seedOrgProject(client, "0124_other");
+    const rpcOnlyTenant = await seedOrgProject(client, "0124_rpc_only");
 
     for (const provider of ["helius", "nodit", "triton", "validationcloud"]) {
       await seedStoredProviderCredential(client, {
-        id: `pcred_0123_${provider}`,
+        id: `pcred_0124_${provider}`,
         label: provider,
         organizationId: tenant.organizationId,
         projectId: tenant.projectId,
@@ -106,7 +106,7 @@ describe("0123 BYOK RPC removal", () => {
       `INSERT INTO provider_credentials (
          id, organization_id, project_id, provider, label, scope, source,
          storage_backend, encrypted_secret_payload, status, created_by
-       ) VALUES ('pcred_0123_alchemy', $1, NULL, 'alchemy', 'alchemy', 'organization', 'stored',
+       ) VALUES ('pcred_0124_alchemy', $1, NULL, 'alchemy', 'alchemy', 'organization', 'stored',
                  'encrypted_db', 'test-only', 'active', $2)`,
       [tenant.organizationId, tenant.userId]
     );
@@ -114,7 +114,7 @@ describe("0123 BYOK RPC removal", () => {
       `INSERT INTO provider_credentials (
          id, organization_id, project_id, provider, label, scope, source,
          storage_backend, secret_ref, secret_version_ref, status, created_by
-       ) VALUES ('pcred_0123_quicknode', $1, $2, 'quicknode', 'quicknode', 'project', 'stored',
+       ) VALUES ('pcred_0124_quicknode', $1, $2, 'quicknode', 'quicknode', 'project', 'stored',
                  'gcp_secret_manager', $3, $4, 'active', $5)`,
       [
         tenant.organizationId,
@@ -128,7 +128,7 @@ describe("0123 BYOK RPC removal", () => {
       `INSERT INTO provider_credentials (
          id, organization_id, project_id, provider, label, scope, source,
          storage_backend, secret_ref, secret_version_ref, status, created_by
-       ) VALUES ('pcred_0123_privy', $1, $2, 'privy', 'privy', 'project', 'stored',
+       ) VALUES ('pcred_0124_privy', $1, $2, 'privy', 'privy', 'project', 'stored',
                  'gcp_secret_manager', $3, $4, 'active', $5)`,
       [
         tenant.organizationId,
@@ -142,10 +142,10 @@ describe("0123 BYOK RPC removal", () => {
       organizationId: tenant.organizationId,
       projectId: tenant.projectId,
       userId: tenant.userId,
-      tag: "0123",
+      tag: "0124",
     });
     await seedStoredProviderCredential(client, {
-      id: "pcred_0123_other_helius",
+      id: "pcred_0124_other_helius",
       label: "helius",
       organizationId: otherTenant.organizationId,
       projectId: otherTenant.projectId,
@@ -156,7 +156,7 @@ describe("0123 BYOK RPC removal", () => {
       `INSERT INTO rpc_connections (
          id, organization_id, project_id, provider, scope, provider_credential_id,
          provider_credential_scope_key, network, status, is_default, activated_at, created_by
-       ) VALUES ('rpcconn_0123', $1, $2, 'helius', 'project', 'pcred_0123_helius',
+       ) VALUES ('rpcconn_0124', $1, $2, 'helius', 'project', 'pcred_0124_helius',
                  $2, 'devnet', 'active', TRUE, sdp_iso_now(), $3)`,
       [tenant.organizationId, tenant.projectId, tenant.userId]
     );
@@ -194,8 +194,8 @@ describe("0123 BYOK RPC removal", () => {
       [[tenant.organizationId, otherTenant.organizationId]]
     );
     expect(credentials.rows).toEqual([
-      { id: "pcred_0123_privy", provider: "privy" },
-      { id: "pcred_hr_0123", provider: "helius_rings" },
+      { id: "pcred_0124_privy", provider: "privy" },
+      { id: "pcred_hr_0124", provider: "helius_rings" },
     ]);
     const retirements = await client.query<{
       source_id: string;
@@ -212,27 +212,27 @@ describe("0123 BYOK RPC removal", () => {
       [
         [tenant.organizationId, otherTenant.organizationId, rpcOnlyTenant.organizationId],
         [
-          "pcred_0123_alchemy",
-          "pcred_0123_helius",
-          "pcred_0123_nodit",
-          "pcred_0123_other_helius",
-          "pcred_0123_privy",
-          "pcred_0123_quicknode",
-          "pcred_0123_triton",
-          "pcred_0123_validationcloud",
-          "pcred_hr_0123",
+          "pcred_0124_alchemy",
+          "pcred_0124_helius",
+          "pcred_0124_nodit",
+          "pcred_0124_other_helius",
+          "pcred_0124_privy",
+          "pcred_0124_quicknode",
+          "pcred_0124_triton",
+          "pcred_0124_validationcloud",
+          "pcred_hr_0124",
         ],
         [quicknodeSecretVersionRef, privySecretVersionRef],
       ]
     );
     expect(retirements.rows).toEqual([
       {
-        source_id: "pcred_0123_quicknode",
+        source_id: "pcred_0124_quicknode",
         organization_id: tenant.organizationId,
         storage_backend: "gcp_secret_manager",
         secret_ref: quicknodeSecretRef,
         secret_version_ref: quicknodeSecretVersionRef,
-        last_error: "byok rpc removed (0123)",
+        last_error: "byok rpc removed (0124)",
       },
     ]);
     const rpcConnectionsTable = await client.query(
