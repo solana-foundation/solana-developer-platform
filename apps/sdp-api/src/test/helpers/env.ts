@@ -71,6 +71,8 @@ function runtimeDatabaseUrl(adminUrl: string): string {
 const providedEnv: Env = {
   ENVIRONMENT: "development",
   API_VERSION: "v1",
+  // Every module, so a test opts out of one by naming a stricter channel.
+  SDP_RELEASE_CHANNEL: "experimental",
   // Unit requests supply deterministic proxy headers rather than a socket.
   TRUST_PROXY_HEADERS: "true",
   DATABASE_URL: runtimeDatabaseUrl(adminDatabaseUrl),

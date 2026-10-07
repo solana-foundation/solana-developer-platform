@@ -61,6 +61,10 @@ export interface Env {
   // a disable-only mechanism.
   SDP_DEPLOYMENT_MODE?: "managed" | "self_hosted";
 
+  // Release channel: which modules this deployment can run at all (`@sdp/types`
+  // release channels). Required: a missing or unknown name fails at boot.
+  SDP_RELEASE_CHANNEL?: string;
+
   // Credential secret store selection for BYO custody credentials.
   // Managed SDP should use GCP Secret Manager. Self-hosted deployments default
   // to encrypted DB storage and can also resolve provider credentials directly
