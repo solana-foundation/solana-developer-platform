@@ -77,9 +77,18 @@ const VEDA_SHARED_READ_METHODS: ReadonlySet<string> = new Set([
   "getProgramAccounts",
 ]);
 
+/**
+ * How long after its send a shared read may still be joined. Identical reads in
+ * one burst arrive within milliseconds; an older request may have stalled, so a
+ * later caller sends its own.
+ */
+export const VEDA_SHARED_READ_JOIN_WINDOW_MS = 2_000;
+
 interface InFlightRead {
   /** `readStamp()` taken before the request was sent. */
   stamp: number;
+  /** `Date.now()` when the request was sent. */
+  sentAt: number;
   response: Promise<unknown>;
   consumers: number;
   controller: AbortController;
@@ -103,9 +112,10 @@ interface InFlightRead {
  * `minContextSlot` a scoped read adds, and every consumer still validates the
  * returned context itself. A consumer whose signal aborts rejects with its own
  * reason; the shared request aborts only once every consumer has left. A caller
- * under a read floor (`withReadFloor`) joins only a request sent after the
- * floor was stamped; an older entry is replaced, and its joiners keep their
- * response.
+ * joins only a request sent after its read floor (`withReadFloor`) and less
+ * than `VEDA_SHARED_READ_JOIN_WINDOW_MS` ago, so a stalled request never
+ * captures later callers; an older entry is replaced, and its joiners keep
+ * their response.
  */
 export function withVedaReadDeduplication(transport: RpcTransport): RpcTransport {
   const inFlight = new Map<string, InFlightRead>();
@@ -134,11 +144,18 @@ export function withVedaReadDeduplication(transport: RpcTransport): RpcTransport
 
     const floor = readFloor();
     let entry = inFlight.get(key);
-    if (entry && floor !== undefined && entry.stamp <= floor) entry = undefined;
+    if (
+      entry &&
+      ((floor !== undefined && entry.stamp <= floor) ||
+        Date.now() - entry.sentAt >= VEDA_SHARED_READ_JOIN_WINDOW_MS)
+    ) {
+      entry = undefined;
+    }
     if (!entry) {
       const controller = new AbortController();
       const created: InFlightRead = {
         stamp: readStamp(),
+        sentAt: Date.now(),
         response: transport<unknown>({ ...config, signal: controller.signal }),
         consumers: 0,
         controller,
