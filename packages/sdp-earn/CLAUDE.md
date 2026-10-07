@@ -562,6 +562,9 @@ accuracy:
   count and sequential round trips, and a test pins the count by counting
   requests through a fake transport.
 
+Reference point: Veda position reads went from 22 requests per holding to 10
+cold and 5-6 warm under these rules, with identical values.
+
 ## Conventions
 
 - New provider = subclass `providers/stub.ts` (`StubEarnClient`), register in

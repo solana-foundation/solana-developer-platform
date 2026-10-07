@@ -232,6 +232,38 @@ publishes no vault discovery and there is nothing to discover: unlike Kamino's
 permissionless registry, a Veda vault reaches SDP only by being named in
 `VEDA_DEPLOYMENTS`.
 
+## Position reads reuse what does not change
+
+The SDK validates all three programs in its constructor, re-reads vault state
+inside every public method and follows every `getMultipleAccounts` with a
+`getBlockTime`, so a client per read cost 22 requests per holding.
+`readVedaPosition` therefore keeps one SDK client per (cluster, endpoint,
+deployment), and the vault's share mint, share decimals and fronted asset mint
+per (cluster, endpoint, vault), for `VEDA_READ_CACHE_TTL_MS`. Each store first
+drops expired entries and caps the caches at 32 clients and 256 facts, so new
+endpoints and vaults never grow them unbounded. Failures are never
+cached, and a client whose program validation rejects is evicted at once: the
+SDK would otherwise keep that rejection for the client's lifetime. An asset
+removed from a vault is therefore noticed up to one TTL late on reads only,
+with the value unavailable meanwhile. The cached share mint is re-checked on
+every read, at no RPC cost, against the share account the SDK derives from live
+vault state; a mismatch drops the cached facts and re-reads the state.
+
+That client's transport (`createVedaReadRpc`) shares identical in-flight reads
+(joined only after the caller's read floor and under 2 s after the send, so a
+stalled request never captures later reads) and reuses a slot's block time. It
+shares only the methods a position read
+sends (`getMultipleAccounts`, `getAccountInfo`, `getProgramAccounts`,
+`getBlockTime`); a send, a simulation or a blockhash always goes out on its own.
+It sits BELOW `withRpcReadContext`, so a minimum-slot read never shares a
+request with an unscoped one. The shared fills (client construction, static
+facts) run outside every caller's `withMinimumRpcSlot` scope: they are static,
+and one scoped caller's slot lag must not fail an unscoped caller that joined
+the same fill. The holding and its value stay live, in the caller's scope, on
+every read (devnet: 22 requests became 10 cold and 5 warm, 6 when the read
+straddles a slot). Builds, quotes and
+queue reads keep a fresh `client()` per call.
+
 ## Compliance approvals are not implemented
 
 A Veda vault may run in compliance mode, where a deposit needs an Ed25519-signed
@@ -256,6 +288,11 @@ within the same deadline, while explicit cluster pins stay isolated. Signing,
 broadcast and reconciliation retain their separate recovery rules. An unreadable
 vault preserves its cause and does not by itself establish a cluster mismatch.
 
+Both clients re-send a read once, to the same URL, when its pooled socket died
+before any response (`withReadSocketRetry`; never a send). It sits below the
+de-duplication and the read context, so one re-send serves every consumer of a
+shared read and keeps a scoped read's `minContextSlot`.
+
 ## Tests
 
 `vitest run`, and **offline by default** — the repo rule is that package tests
@@ -267,6 +304,12 @@ the committed IDLs against the SDK's shipped copies AND their recorded SHA-256s.
 `@sdp/earn` cannot do this itself — it may not depend on the SDK — so a silent
 Veda ABI change would otherwise become a silently wrong share mint on a
 customer's row. If Veda changes the ABI, this fails on the next `pnpm install`.
+
+`sdk-rpc-budget.test.ts` pins a position read's requests and round trips
+through the real SDK, over devnet accounts recorded in
+`src/fixtures/devnet-position-read.json`: one holder 10 cold and 5 warm, two
+concurrent holders 11 and 6, each phase at one slot. A change that adds a
+request fails it; change the pinned counts only with the before/after stated.
 
 `sdk.smoke.test.ts` is an env-gated live-RPC diagnostic, skipped when unset. It takes its deployment from the environment
 (rather than `VEDA_DEPLOYMENTS`) so it can exercise a candidate deployment
