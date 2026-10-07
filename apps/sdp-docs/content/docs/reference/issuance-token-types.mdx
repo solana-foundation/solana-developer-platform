@@ -7,18 +7,18 @@ The public issuance surface currently exposes three **Tokenization Templates**:
 
 | Template | Defaults | Notes |
 | --- | --- | --- |
-| `stablecoin` | 6 decimals, permanent delegate + pausable extensions, default account state initialized | Intended for fiat-backed token patterns with compliance controls. |
-| `tokenized-security` | 8 decimals, allowlist required, permanent delegate + pausable + scaled UI amount extensions, default account state frozen | Regulated asset flows with stronger defaults. |
+| `stablecoin` | 6 decimals, permanent delegate + pausable extensions, default account state initialized (frozen if you turn on the allowlist) | Intended for fiat-backed token patterns with compliance controls. |
+| `tokenized-security` | 8 decimals, allowlist on by default, permanent delegate + pausable extensions, scaled UI amount available as an option, default account state frozen while the allowlist is on | Regulated asset flows with stronger defaults. |
 | `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match the stablecoin or tokenized-security templates. |
 
-These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
+These defaults are sourced from `packages/sdp-issuance/src/templates/definitions.ts`.
 
-Each template also sets the token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — enforced on-chain over who may hold or receive the token. This is distinct from a wallet's own destination allowlist, which is a wallet-policy concern.
+A token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — is enforced on-chain over who may hold or receive the token. It follows from the template and `requiresAllowlist`: with `requiresAllowlist: true` the mode is `allowlist`; otherwise `stablecoin` and `tokenized-security` tokens use `blocklist`, and `custom` tokens have it `disabled`. This is distinct from a wallet's own destination allowlist, which is a wallet-policy concern.
 
 ## Selecting a template
 
-Each template is a vetted, fixed composition of Token-2022 extensions for a specific class of
-asset, rather than an à-la-carte menu. The appropriate template is determined by the nature of
+The `stablecoin` and `tokenized-security` templates are vetted, fixed compositions of Token-2022
+extensions for a specific class of asset, rather than an à-la-carte menu. The appropriate template is determined by the nature of
 the instrument being issued. The `custom` template applies to assets that do not fit the
 stablecoin or tokenized-security models.
 
@@ -37,9 +37,11 @@ funds) rather than stablecoins.
 ### Tokenized security
 
 Intended for regulated instruments — equity, debt, or fund shares. The template applies the
-stablecoin controls together with stronger defaults: an **allowlist is required**, new accounts
-are **frozen by default** (holders must be approved before transacting), and the **scaled UI
-amount** extension is added for corporate actions such as splits or share-class rebasing.
+stablecoin controls together with stronger defaults: the **allowlist is on by default**, and while
+it is on, new accounts are **frozen by default** (holders must be approved before transacting).
+You can turn the allowlist off with `requiresAllowlist: false`, in which case a blocklist applies.
+The **scaled UI amount** extension is available as an option for corporate actions such as splits
+or share-class rebasing.
 Interest- and yield-bearing instruments (for example debt or fund tokens) also fall under this
 template.
 
@@ -47,9 +49,10 @@ template.
 
 Corresponds to the **Non-Security Digital Asset** classification in the issuance interface —
 assets that are neither fiat stablecoins nor regulated securities, such as commodities, real
-estate, or collectibles. The template exposes the full Token-2022 extension set (transfer fees,
-transfer hooks, non-transferable behaviour, interest, and others) and applies where the stablecoin
-and tokenized-security templates do not match the instrument.
+estate, or collectibles. The template lets you choose from the extensions SDP supports — transfer
+fee, interest-bearing, permanent delegate, pausable, non-transferable, default account state,
+scaled UI amount, and transfer hook — and applies where the stablecoin and tokenized-security
+templates do not match the instrument.
 
 ### Summary
 

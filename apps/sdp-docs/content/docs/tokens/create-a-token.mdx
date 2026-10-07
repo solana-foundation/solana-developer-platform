@@ -10,15 +10,17 @@ steps:
 
 Token creation defines your token's metadata, extensions, and operational rules. The token is saved in SDP but **not yet deployed** onchain — see [Deploy a Token](/docs/tokens/deploy-a-token) for the next step.
 
-![Empty Issuance page with a create card](/images/tokens/token-list-empty.png)
+Creating a token requires the `tokens:write` permission.
 
 ## Templates
 
-| Template | Decimals | Key extensions | Use case |
+| Template | Default decimals | Key extensions | Use case |
 | --- | --- | --- | --- |
 | `stablecoin` | 6 | Permanent delegate, pausable | USD-backed tokens |
-| `tokenized-security` | 8 | Permanent delegate, pausable, scaled UI amount, allowlist required | Regulated assets |
+| `tokenized-security` | 8 | Permanent delegate, pausable; scaled UI amount available as an option; allowlist on by default | Regulated assets |
 | `custom` | 9 | None — you choose | Full control |
+
+The default decimals apply when you omit `decimals`. The `stablecoin` and `tokenized-security` templates also add the default account state extension: new accounts start frozen when the allowlist is on and initialized otherwise. See [Tokenization Templates](/docs/reference/issuance-token-types) for how to choose.
 
 ## How it works
 
@@ -32,17 +34,16 @@ Select the **Tokenization Template** that matches your asset model. Templates pr
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Navigate to **Issuance** in the sidebar and click **Create token** in the top right corner.
+Navigate to **Issuance** in the sidebar and click **New**.
 
-The first screen shows three template cards:
+The **Classification** step offers two options:
 
-- **Stablecoin** — USD-backed tokens with compliance controls
-- **Tokenized Security** — regulated assets with allowlist requirement
-- **Custom** — fully configurable Token-2022 setup
+- **Stablecoin** — creates a `stablecoin` token
+- **Non-Security Digital Asset** — creates a `custom` token
 
-Select a template and click **Continue**.
+The dashboard does not create `tokenized-security` tokens. Use the API for that template.
 
-![Template selection modal showing Stablecoin, Tokenized Security, and Custom cards](/images/tokens/token-create-templates.png)
+Click **Continue**.
 
 </Tab>
 <Tab value="API">
@@ -70,27 +71,27 @@ const { data } = await res.json();
 
 <Step number={2} title="Configure token identity">
 
-Set the core metadata: name, symbol, decimals, and a URI pointing to your token metadata JSON.
+Set the core metadata: name, symbol, decimals, and optionally a URI pointing to your own token metadata JSON. If you leave out the URI, SDP hosts the metadata JSON for you (see [Asset profile and hosted metadata](#asset-profile-and-hosted-metadata)).
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In step 2 of 3, fill in the identity fields:
+In the **Token details** step, fill in:
 
-- **Metadata URI** — HTTPS URL for the token metadata JSON
 - **Token name** — e.g., "Acme Dollar"
-- **Symbol** — 1–10 uppercase alphanumeric characters, e.g., `ACME`
-- **Decimals** — options depend on the selected template
+- **Symbol** — e.g., `ACME`
+- **Description** — optional
+- **Maximum supply** — leave empty for an uncapped Non-Security Digital Asset
+- **Decimals** — stablecoins use 6; digital assets default to 9
+- **Website** — optional link stored in the token's asset profile
 
 Click **Continue** when ready.
-
-![Identity configuration form with Metadata URI, Token Name, Symbol, and Decimals fields](/images/tokens/token-create-identity.png)
 
 </Tab>
 <Tab value="API">
 
-Pass identity fields in the `POST /v1/issuance/tokens` body:
+Pass identity fields in the `POST /v1/issuance/tokens` body. `symbol` takes 1–10 letters and digits, with single dots allowed between them.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens \
@@ -119,14 +120,13 @@ Choose the exact SDP Wallet that will deploy the token, and configure Token Acce
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In step 3 of 3, configure:
+In the **Controls** step:
 
-- **Main signer** — the exact SDP-controlled wallet selected for deployment
-- **Allowlist** — Token Access Control's allowlist mode; toggle on or off, required and locked for `tokenized-security`
+- **Approved recipients** — turns on Token Access Control's allowlist mode, so only approved addresses can receive the token
+- For a stablecoin, pause, freeze, and recovery controls are included
+- For a Non-Security Digital Asset, choose **Emergency pause capability**, and under **Advanced controls**, interest-bearing balances or a transfer fee
 
-Click **Create token** to save the draft.
-
-![Operational settings form showing Main Signer and Transfer Controls with Allowlist and Denylist toggles](/images/tokens/token-create-settings.png)
+In the **Permissions** step, choose an SDP wallet for each permission, such as **Who can mint tokens?** The wallet chosen for minting deploys the token.
 
 </Tab>
 <Tab value="API">
@@ -188,13 +188,9 @@ The token is saved in SDP with status `pending`. Nothing has been written to Sol
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-A success toast confirms creation. The token appears in the **Issuance** list with a `Draft` badge.
+The **Review** step summarizes the token and shows the API request the dashboard will send. Click **Save draft**.
 
-![Issuance list showing the newly created token with a Draft badge](/images/tokens/token-list-draft.png)
-
-Open the token to see its detail page. The status shows **Not deployed** and a **Deploy** button is available to move to the next step.
-
-![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
+The draft appears in the **Issuance** list. Open it to review its settings and deploy it.
 
 </Tab>
 <Tab value="API">
@@ -217,3 +213,43 @@ The token is not yet onchain. Pass `data.token.id` to [Deploy a Token](/docs/tok
 </Step>
 
 </HowItWorks>
+
+## Asset profile and hosted metadata
+
+An **asset profile** is SDP's record of what a token represents. A token has at most one active profile, holding an `assetCategory` (`generic`, `stablecoin`, or `tokenized_security`), an `assetType` within that category, and `issuanceMetadata`.
+
+`POST /v1/issuance/tokens` creates a default profile with the token: the category follows the template (`custom` maps to `generic`), the type is `generic`, and the metadata holds the token's name, description, and decimals. To set the profile yourself, create the token through `POST /v1/issuance/asset-profiles` instead. It takes the same body as `POST /v1/issuance/tokens` plus `assetCategory`, `assetType`, and `issuanceMetadata`, and creates the token and its profile together; if either write fails, neither is saved. The dashboard creates drafts this way.
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/issuance/asset-profiles \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Dollar",
+    "symbol": "ACME",
+    "template": "stablecoin",
+    "assetCategory": "stablecoin",
+    "assetType": "fiat_backed",
+    "issuanceMetadata": {
+      "asset": { "name": "Acme Dollar", "issuerName": "Acme Financial Inc." },
+      "chain": { "decimals": 6 }
+    }
+  }'
+```
+
+The response holds `data.token` and `data.assetProfile`. `GET /v1/issuance/asset-profiles/field-options` lists the valid categories and the types in each.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | Get a token's active profile |
+| `GET` | `/v1/issuance/asset-profiles` | List profiles in the project |
+| `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | Update the category, type, or metadata |
+| `DELETE` | `/v1/issuance/asset-profiles/{profileId}` | Archive a profile |
+
+Reads need `tokens:read`; creating, updating, and archiving need `tokens:write`.
+
+`issuanceMetadata` is private by default. Its `visibility.public` array lists the fields to publish; when you omit it, the asset type's default list applies. Only `asset.*` fields and `chain.decimals` can be published. `compliance` and `custom` fields are never published, even if you list them. The published subset is returned as `publicMetadata`.
+
+If you create a token without a `uri`, deployment writes SDP's hosted metadata URL into the token's onchain metadata: `GET /v1/issuance/tokens/{tokenId}/metadata.json` on the SDP API. Anyone can fetch it without credentials. It returns `name` and `symbol`, plus `description` and `image` when set, merged with the profile's `publicMetadata`; the token's own fields win where they overlap. Tokens that are not yet deployed return `404`.
+
+On a self-hosted deployment, set `PUBLIC_API_ORIGIN` to the API's public origin, or deploying a token without a `uri` fails. The profile fields in `metadata.json` also need `SDP_FLAG_ASSET_PROFILES` turned on. See the [Asset Profiles API reference](/docs/reference/api/asset-profiles) for the full schema.

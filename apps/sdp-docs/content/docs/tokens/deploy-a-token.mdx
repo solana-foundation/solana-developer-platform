@@ -12,6 +12,7 @@ After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deploy
 ## Prerequisites
 
 - A token in `pending` status
+- `tokens:write` permission on the API key
 - The exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
 
 ## How it works
@@ -26,11 +27,9 @@ Locate the token you want to deploy. Deployment is irreversible — the mint acc
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Issuance** list, click the token with a `Pending` badge to open its detail page.
+In the **Issuance** list, open the draft token.
 
-The **Deploy** button appears in the token header and in the fund management panel.
-
-![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
+The **Deploy** button is in the token header. It stays disabled while you have unsaved changes in the token's **Settings**; save or discard them first.
 
 </Tab>
 <Tab value="API">
@@ -63,15 +62,9 @@ SDP signs and submits the deploy transaction using `signingCustodyWalletId`. If 
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Click **Deploy**. A modal shows the signer wallet that will authorize the transaction. Review the wallet ID and public key, then click **Deploy now**.
+Click **Deploy**. The **Deploy token** dialog shows the signing wallet that will authorize the transaction. Review it, then click **Deploy token**.
 
-![Deploy token modal showing the signer wallet details](/images/tokens/token-deploy-modal.png)
-
-A confirmation prompt asks you to confirm the on-chain submission. Click **Deploy now** to proceed.
-
-![Deploy token confirmation dialog](/images/tokens/token-deploy-confirm.png)
-
-SDP submits the transaction to Solana and polls for confirmation. The page updates automatically when deployment completes.
+SDP submits the transaction to Solana. A "Deploy transaction finalized." toast appears when deployment completes.
 
 </Tab>
 <Tab value="API">
@@ -103,6 +96,10 @@ const { data } = await res.json();
 
 Always pass an `Idempotency-Key` — retrying with the same key after a network error prevents double-deployment.
 
+The deployment wallet holds the mint authority. To give the metadata, freeze, or permanent-delegate authority to other wallets, pass their SDP Wallet IDs in `authorityCustodyWalletIds` (`metadata`, `freeze`, `permanentDelegate`); omitted roles keep their template defaults. `feePayment` is `sponsored` (default) or `wallet`.
+
+SDP checks the deploy against the deployment wallet's policy before signing. A `deny` returns `403 FORBIDDEN`; a deploy held for approval returns `202` with error code `SIGNING_PENDING` and `error.details.approvalRequestId`. A separate metadata wallet must be allowed outright: if its policy denies or holds the deploy, the request returns `403`. See [Wallet policies](/docs/wallet-operations/policies).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -117,9 +114,7 @@ Once the transaction is confirmed, the token is active and ready for minting and
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The token status badge changes from `Not deployed` to the onchain mint address. The detail page shows Mint and Burn actions in the Operations tab, and a confirmed deploy transaction in the Transactions table.
-
-![Deployed token detail page with mint address, Operations tab, and confirmed deploy transaction](/images/tokens/token-deployed.png)
+The token header now shows the mint address and the token's status. The actions in the **Operations** section, such as **Mint tokens**, become available, and the **Activity** section lists the deploy transaction.
 
 </Tab>
 <Tab value="API">

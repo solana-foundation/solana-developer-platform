@@ -905,11 +905,13 @@ Pick the **Tokenization Template** that matches your asset's compliance and oper
 | Asset model | Template | Typical controls |
 | --- | --- | --- |
 | Fiat-backed stablecoin | `stablecoin` | Mint authority, freeze authority, pausable, permanent delegate |
-| Tokenized security or RWA | `tokenized-security` | Allowlist required, freeze authority, pausable, permanent delegate |
+| Tokenized security or RWA | `tokenized-security` | Allowlist (on by default), freeze authority, pausable, permanent delegate |
 | Loyalty, rewards, or utility token | `custom` | Manually selected extensions |
 | Non-standard asset | `custom` | Manually selected extensions |
 
-**Custody wallets** hold your token's authorities by default, so SDP can execute deploy, mint, and compliance actions without external signing.
+The dashboard creates `stablecoin` tokens and `custom` tokens (shown as **Non-Security Digital Asset**). Create `tokenized-security` tokens through the API. See [Tokenization Templates](/docs/reference/issuance-token-types) for how each template's defaults work.
+
+**Custody wallets** hold your token's authorities by default, so SDP can execute deploy, mint, and compliance actions without external signing. If you'd rather sign transactions yourself, mint, burn, seize, force-burn, and authority changes also have caller-signed `/prepare` routes; see the [execution model](/docs/developing-with-sdp#execution-model).
 
 ## Implementation sequence
 
@@ -922,8 +924,9 @@ Each step links to its own guide with UI and API instructions:
 5. [Deploy a Token](/docs/tokens/deploy-a-token)
 6. [Mint and Burn](/docs/tokens/mint-and-burn)
 7. [Basic payment](/docs/payments/send-basic-payment) — transfer tokens between wallets
-8. [Allowlists](/docs/tokens/allowlists) — Token Access Control, required for `tokenized-security`
-9. [Manage Token Settings](/docs/tokens/manage-token-settings) — freeze, pause, seize for compliance workflows
+8. [Allowlists](/docs/tokens/allowlists) — Token Access Control, on by default for `tokenized-security`
+9. [Freeze and Compliance](/docs/tokens/freeze-and-compliance) — screen, freeze, pause, and seize for compliance workflows
+10. [Manage Token Settings](/docs/tokens/manage-token-settings) — rotate or revoke authorities and edit token information
 
 ## Core API endpoints
 
@@ -947,6 +950,7 @@ See the full schema in the [Issuance API reference](/docs/reference/api/issuance
 - If the token is paused, minting and transfer operations are unavailable until it is unpaused.
 - Freeze and unfreeze flows accept a holder wallet address; SDP derives the associated token account automatically.
 - SDP operations require the relevant authority on a custody wallet. If an authority has been rotated outside SDP, rotate it back to a controlled wallet before deploying, minting, or running compliance actions.
+- Before SDP signs with a custody wallet, it checks the action against that wallet's policy. Deploy, mint, burn, force-burn, seize, authority changes, freeze and unfreeze, pause and unpause, on-chain metadata updates, and on-chain allowlist changes can all be denied (`403 FORBIDDEN`) or held for approval (`202 SIGNING_PENDING`). See [Wallet policies](/docs/wallet-operations/policies).
 
 ## For AI agents
 
@@ -961,15 +965,17 @@ Source: https://platform.solana.com/docs/tokens/create-a-token
 
 Token creation defines your token's metadata, extensions, and operational rules. The token is saved in SDP but **not yet deployed** onchain — see [Deploy a Token](/docs/tokens/deploy-a-token) for the next step.
 
-![Empty Issuance page with a create card](/images/tokens/token-list-empty.png)
+Creating a token requires the `tokens:write` permission.
 
 ## Templates
 
-| Template | Decimals | Key extensions | Use case |
+| Template | Default decimals | Key extensions | Use case |
 | --- | --- | --- | --- |
 | `stablecoin` | 6 | Permanent delegate, pausable | USD-backed tokens |
-| `tokenized-security` | 8 | Permanent delegate, pausable, scaled UI amount, allowlist required | Regulated assets |
+| `tokenized-security` | 8 | Permanent delegate, pausable; scaled UI amount available as an option; allowlist on by default | Regulated assets |
 | `custom` | 9 | None — you choose | Full control |
+
+The default decimals apply when you omit `decimals`. The `stablecoin` and `tokenized-security` templates also add the default account state extension: new accounts start frozen when the allowlist is on and initialized otherwise. See [Tokenization Templates](/docs/reference/issuance-token-types) for how to choose.
 
 ## How it works
 
@@ -983,17 +989,16 @@ Select the **Tokenization Template** that matches your asset model. Templates pr
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Navigate to **Issuance** in the sidebar and click **Create token** in the top right corner.
+Navigate to **Issuance** in the sidebar and click **New**.
 
-The first screen shows three template cards:
+The **Classification** step offers two options:
 
-- **Stablecoin** — USD-backed tokens with compliance controls
-- **Tokenized Security** — regulated assets with allowlist requirement
-- **Custom** — fully configurable Token-2022 setup
+- **Stablecoin** — creates a `stablecoin` token
+- **Non-Security Digital Asset** — creates a `custom` token
 
-Select a template and click **Continue**.
+The dashboard does not create `tokenized-security` tokens. Use the API for that template.
 
-![Template selection modal showing Stablecoin, Tokenized Security, and Custom cards](/images/tokens/token-create-templates.png)
+Click **Continue**.
 
 </Tab>
 <Tab value="API">
@@ -1021,27 +1026,27 @@ const { data } = await res.json();
 
 <Step number={2} title="Configure token identity">
 
-Set the core metadata: name, symbol, decimals, and a URI pointing to your token metadata JSON.
+Set the core metadata: name, symbol, decimals, and optionally a URI pointing to your own token metadata JSON. If you leave out the URI, SDP hosts the metadata JSON for you (see [Asset profile and hosted metadata](#asset-profile-and-hosted-metadata)).
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In step 2 of 3, fill in the identity fields:
+In the **Token details** step, fill in:
 
-- **Metadata URI** — HTTPS URL for the token metadata JSON
 - **Token name** — e.g., "Acme Dollar"
-- **Symbol** — 1–10 uppercase alphanumeric characters, e.g., `ACME`
-- **Decimals** — options depend on the selected template
+- **Symbol** — e.g., `ACME`
+- **Description** — optional
+- **Maximum supply** — leave empty for an uncapped Non-Security Digital Asset
+- **Decimals** — stablecoins use 6; digital assets default to 9
+- **Website** — optional link stored in the token's asset profile
 
 Click **Continue** when ready.
-
-![Identity configuration form with Metadata URI, Token Name, Symbol, and Decimals fields](/images/tokens/token-create-identity.png)
 
 </Tab>
 <Tab value="API">
 
-Pass identity fields in the `POST /v1/issuance/tokens` body:
+Pass identity fields in the `POST /v1/issuance/tokens` body. `symbol` takes 1–10 letters and digits, with single dots allowed between them.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens \
@@ -1070,14 +1075,13 @@ Choose the exact SDP Wallet that will deploy the token, and configure Token Acce
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In step 3 of 3, configure:
+In the **Controls** step:
 
-- **Main signer** — the exact SDP-controlled wallet selected for deployment
-- **Allowlist** — Token Access Control's allowlist mode; toggle on or off, required and locked for `tokenized-security`
+- **Approved recipients** — turns on Token Access Control's allowlist mode, so only approved addresses can receive the token
+- For a stablecoin, pause, freeze, and recovery controls are included
+- For a Non-Security Digital Asset, choose **Emergency pause capability**, and under **Advanced controls**, interest-bearing balances or a transfer fee
 
-Click **Create token** to save the draft.
-
-![Operational settings form showing Main Signer and Transfer Controls with Allowlist and Denylist toggles](/images/tokens/token-create-settings.png)
+In the **Permissions** step, choose an SDP wallet for each permission, such as **Who can mint tokens?** The wallet chosen for minting deploys the token.
 
 </Tab>
 <Tab value="API">
@@ -1139,13 +1143,9 @@ The token is saved in SDP with status `pending`. Nothing has been written to Sol
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-A success toast confirms creation. The token appears in the **Issuance** list with a `Draft` badge.
+The **Review** step summarizes the token and shows the API request the dashboard will send. Click **Save draft**.
 
-![Issuance list showing the newly created token with a Draft badge](/images/tokens/token-list-draft.png)
-
-Open the token to see its detail page. The status shows **Not deployed** and a **Deploy** button is available to move to the next step.
-
-![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
+The draft appears in the **Issuance** list. Open it to review its settings and deploy it.
 
 </Tab>
 <Tab value="API">
@@ -1169,6 +1169,46 @@ The token is not yet onchain. Pass `data.token.id` to [Deploy a Token](/docs/tok
 
 </HowItWorks>
 
+## Asset profile and hosted metadata
+
+An **asset profile** is SDP's record of what a token represents. A token has at most one active profile, holding an `assetCategory` (`generic`, `stablecoin`, or `tokenized_security`), an `assetType` within that category, and `issuanceMetadata`.
+
+`POST /v1/issuance/tokens` creates a default profile with the token: the category follows the template (`custom` maps to `generic`), the type is `generic`, and the metadata holds the token's name, description, and decimals. To set the profile yourself, create the token through `POST /v1/issuance/asset-profiles` instead. It takes the same body as `POST /v1/issuance/tokens` plus `assetCategory`, `assetType`, and `issuanceMetadata`, and creates the token and its profile together; if either write fails, neither is saved. The dashboard creates drafts this way.
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/issuance/asset-profiles \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Dollar",
+    "symbol": "ACME",
+    "template": "stablecoin",
+    "assetCategory": "stablecoin",
+    "assetType": "fiat_backed",
+    "issuanceMetadata": {
+      "asset": { "name": "Acme Dollar", "issuerName": "Acme Financial Inc." },
+      "chain": { "decimals": 6 }
+    }
+  }'
+```
+
+The response holds `data.token` and `data.assetProfile`. `GET /v1/issuance/asset-profiles/field-options` lists the valid categories and the types in each.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | Get a token's active profile |
+| `GET` | `/v1/issuance/asset-profiles` | List profiles in the project |
+| `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | Update the category, type, or metadata |
+| `DELETE` | `/v1/issuance/asset-profiles/{profileId}` | Archive a profile |
+
+Reads need `tokens:read`; creating, updating, and archiving need `tokens:write`.
+
+`issuanceMetadata` is private by default. Its `visibility.public` array lists the fields to publish; when you omit it, the asset type's default list applies. Only `asset.*` fields and `chain.decimals` can be published. `compliance` and `custom` fields are never published, even if you list them. The published subset is returned as `publicMetadata`.
+
+If you create a token without a `uri`, deployment writes SDP's hosted metadata URL into the token's onchain metadata: `GET /v1/issuance/tokens/{tokenId}/metadata.json` on the SDP API. Anyone can fetch it without credentials. It returns `name` and `symbol`, plus `description` and `image` when set, merged with the profile's `publicMetadata`; the token's own fields win where they overlap. Tokens that are not yet deployed return `404`.
+
+On a self-hosted deployment, set `PUBLIC_API_ORIGIN` to the API's public origin, or deploying a token without a `uri` fails. The profile fields in `metadata.json` also need `SDP_FLAG_ASSET_PROFILES` turned on. See the [Asset Profiles API reference](/docs/reference/api/asset-profiles) for the full schema.
+
 ---
 
 ### Deploy a Token
@@ -1181,6 +1221,7 @@ After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deploy
 ## Prerequisites
 
 - A token in `pending` status
+- `tokens:write` permission on the API key
 - The exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
 
 ## How it works
@@ -1195,11 +1236,9 @@ Locate the token you want to deploy. Deployment is irreversible — the mint acc
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Issuance** list, click the token with a `Pending` badge to open its detail page.
+In the **Issuance** list, open the draft token.
 
-The **Deploy** button appears in the token header and in the fund management panel.
-
-![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
+The **Deploy** button is in the token header. It stays disabled while you have unsaved changes in the token's **Settings**; save or discard them first.
 
 </Tab>
 <Tab value="API">
@@ -1232,15 +1271,9 @@ SDP signs and submits the deploy transaction using `signingCustodyWalletId`. If 
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Click **Deploy**. A modal shows the signer wallet that will authorize the transaction. Review the wallet ID and public key, then click **Deploy now**.
+Click **Deploy**. The **Deploy token** dialog shows the signing wallet that will authorize the transaction. Review it, then click **Deploy token**.
 
-![Deploy token modal showing the signer wallet details](/images/tokens/token-deploy-modal.png)
-
-A confirmation prompt asks you to confirm the on-chain submission. Click **Deploy now** to proceed.
-
-![Deploy token confirmation dialog](/images/tokens/token-deploy-confirm.png)
-
-SDP submits the transaction to Solana and polls for confirmation. The page updates automatically when deployment completes.
+SDP submits the transaction to Solana. A "Deploy transaction finalized." toast appears when deployment completes.
 
 </Tab>
 <Tab value="API">
@@ -1272,6 +1305,10 @@ const { data } = await res.json();
 
 Always pass an `Idempotency-Key` — retrying with the same key after a network error prevents double-deployment.
 
+The deployment wallet holds the mint authority. To give the metadata, freeze, or permanent-delegate authority to other wallets, pass their SDP Wallet IDs in `authorityCustodyWalletIds` (`metadata`, `freeze`, `permanentDelegate`); omitted roles keep their template defaults. `feePayment` is `sponsored` (default) or `wallet`.
+
+SDP checks the deploy against the deployment wallet's policy before signing. A `deny` returns `403 FORBIDDEN`; a deploy held for approval returns `202` with error code `SIGNING_PENDING` and `error.details.approvalRequestId`. A separate metadata wallet must be allowed outright: if its policy denies or holds the deploy, the request returns `403`. See [Wallet policies](/docs/wallet-operations/policies).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -1286,9 +1323,7 @@ Once the transaction is confirmed, the token is active and ready for minting and
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The token status badge changes from `Not deployed` to the onchain mint address. The detail page shows Mint and Burn actions in the Operations tab, and a confirmed deploy transaction in the Transactions table.
-
-![Deployed token detail page with mint address, Operations tab, and confirmed deploy transaction](/images/tokens/token-deployed.png)
+The token header now shows the mint address and the token's status. The actions in the **Operations** section, such as **Mint tokens**, become available, and the **Activity** section lists the deploy transaction.
 
 </Tab>
 <Tab value="API">
@@ -1345,11 +1380,9 @@ Open the token you want to manage. Mint and burn are both available from the tok
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Issuance** list, click an active token to open its detail page.
+In the **Issuance** list, open an active token.
 
-The **Fund management** panel shows the current supply with two primary actions: **Mint** and **Burn**.
-
-![Token Operations tab showing Mint and Burn actions](/images/tokens/token-deployed.png)
+The **Operations** section lists **Mint tokens** and **Burn tokens** under **Supply**. The token header shows the issued supply and the supply cap.
 
 </Tab>
 <Tab value="API">
@@ -1366,6 +1399,8 @@ The `amount` field is a decimal string in **UI units** (human-readable token amo
 
 `signingCustodyWalletId` always means the exact SDP Wallet `id`, not a provider-specific `walletId` or public key. It is required for a standard burn because that wallet owns and signs for the source. For mint and force-burn it is optional, but when supplied it must control the current mint or permanent-delegate authority. When omitted, SDP requires exactly one accessible wallet to match that live authority. Later actions never fall back to the token's deployment wallet.
 
+SDP checks each mint, burn, and force-burn against the signing wallet's policy before signing. A `deny` returns `403 FORBIDDEN`; an operation held for approval returns `202` with error code `SIGNING_PENDING` and `error.details.approvalRequestId`. See [Wallet policies](/docs/wallet-operations/policies).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -1380,25 +1415,14 @@ Issue new tokens to a destination address. SDP derives the associated token acco
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Mint** form:
+Next to **Mint tokens**, click **Mint**. In the form:
 
+- **Signing wallet** — the wallet that signs the mint; choose one when more than one is available
 - **Destination** — wallet address to receive the new tokens
 - **Amount** — in human-readable units (e.g., `1.0`)
 - **Memo** — optional, recorded onchain
 
-Click **Mint**. A modal shows the signer wallet and a destination picker — select or paste the destination address.
-
-Fill in the amount and optional memo, then click **Mint tokens**.
-
-![Mint Tokens modal with amount and memo filled in](/images/tokens/mint-modal-filled.png)
-
-Confirm the on-chain submission in the confirmation prompt.
-
-![Mint tokens confirmation dialog — click Mint now to submit the transaction on-chain](/images/tokens/mint-confirm.png)
-
-Once confirmed, the mint appears in the Transactions table with a `confirmed` status and a "Mint transaction finalized." toast appears.
-
-![Operations tab showing confirmed mint entry and Mint transaction finalized toast](/images/tokens/mint-confirmed.png)
+Click **Mint tokens**, then confirm the on-chain submission. A "Mint transaction finalized." toast appears once the mint confirms, and the **Activity** section lists the transaction.
 
 </Tab>
 <Tab value="API">
@@ -1442,6 +1466,8 @@ const res = await fetch(
 
 Control priority with `options.priorityFee`: `"none"`, `"low"`, `"medium"`, `"high"`, or a micro-lamport value.
 
+To sign the mint yourself, call `POST /v1/issuance/tokens/{tokenId}/mint/prepare` with the same body. It returns an unsigned transaction in `preparedTransaction.serialized` for the authority wallet to sign and submit; that wallet pays the network fee, and SDP does not sponsor it. See the [execution model](/docs/developing-with-sdp#execution-model).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -1456,27 +1482,11 @@ Reduce supply by burning from an account your wallet controls. Use force-burn to
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Click **Burn**. A modal shows the signer and a source field — select the wallet holding the tokens you want to remove.
+Next to **Burn tokens**, click **Burn**. Choose the signing wallet, then enter the **Source** that holds the tokens, the **Amount**, and an optional **Memo**.
 
-![Burn Tokens modal with empty source field](/images/tokens/burn-modal-empty.png)
+Click **Burn tokens**, then confirm the on-chain submission. A "Burn transaction finalized." toast appears once the burn confirms.
 
-Select the source wallet from the dropdown.
-
-![Burn Tokens modal with source wallet dropdown open](/images/tokens/burn-modal-source.png)
-
-Fill in the amount and optional memo, then click **Burn tokens**.
-
-![Burn Tokens modal filled with source, amount, and memo](/images/tokens/burn-modal-filled.png)
-
-Confirm the on-chain submission in the confirmation prompt.
-
-![Burn tokens confirmation dialog](/images/tokens/burn-confirm.png)
-
-The "Burn transaction finalized." toast appears and the burn shows as confirmed in the Transactions table.
-
-![Operations tab showing confirmed burn transaction and finalized toast](/images/tokens/burn-confirmed.png)
-
-For **Force burn** (requires `tokens:admin`), use the Compliance tab instead of the Operations tab — force-burn lets admins remove tokens from any holder account without their signature.
+For **Force burn** (requires `tokens:admin`), open **Recovery & permanent changes** in the **Operations** section. It appears for tokens with a permanent delegate and lets admins remove tokens from any holder account without their signature.
 
 </Tab>
 <Tab value="API">
@@ -1515,6 +1525,8 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
 });
 ```
 
+`POST /v1/issuance/tokens/{tokenId}/burn/prepare` and `POST /v1/issuance/tokens/{tokenId}/force-burn/prepare` take the same bodies and return an unsigned transaction in `preparedTransaction.serialized` for you to sign and submit. For a prepared burn, the signing wallet pays the network fee; SDP does not sponsor it. See the [execution model](/docs/developing-with-sdp#execution-model).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -1529,11 +1541,7 @@ After minting or burning, refresh the cached supply total.
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The dashboard refreshes supply automatically after a confirmed operation. The Transactions table shows all completed operations — deploy, mint, and burn — each with a `confirmed` status.
-
-![Operations tab showing confirmed burn, mint, and deploy transactions](/images/tokens/operations-history.png)
-
-Reload the token detail page if the displayed supply value appears stale.
+The token header shows the **Issued supply**. Click the refresh icon next to it to read the current supply from the chain.
 
 </Tab>
 <Tab value="API">
@@ -1543,7 +1551,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh
   -H "Authorization: Bearer sk_test_..."
 ```
 
-Safe to include in automated post-mint workflows.
+Safe to include in automated post-mint workflows. It needs only `tokens:read`.
 
 </Tab>
 </Tabs>
@@ -1764,6 +1772,132 @@ For an on-chain removal, pass the optional exact signer as a query parameter: `?
 
 ---
 
+### Verified Holders
+Source: https://platform.solana.com/docs/tokens/verified-holders
+
+> Enroll wallets as holders of a token and check their verification status.
+
+A **holder enrollment** records that a wallet is cleared to hold a specific token. Each enrolled wallet has an identity record with a KYC status, which SDP keeps once per wallet per project and reuses across your tokens. A wallet is a **verified holder** of a token when it has an active enrollment for that token and its KYC status is `verified`.
+
+| `kyc_status` | Meaning |
+| --- | --- |
+| `unverified` | No verification result yet. New wallets start here. |
+| `pending` | Verification is in progress. |
+| `verified` | Verification passed. |
+| `rejected` | Verification failed. |
+
+SDP updates `kyc_status` from identity verification results reported for the counterparty linked to the wallet. The public API has no endpoint to set it directly, so link a counterparty when you enroll a wallet that should receive a status.
+
+Enrollment is a record in SDP only. It does not add the wallet to the token's [allowlist](/docs/tokens/allowlists) or change anything onchain; manage who can receive the token through the allowlist endpoints.
+
+## Availability
+
+On managed SDP, the holder endpoints are always available. A self-hosted deployment must turn on `SDP_FLAG_ASSET_PROFILES`; without it, both endpoints return `403 FORBIDDEN`.
+
+Enrolling a holder requires `tokens:write`; listing holders requires `tokens:read`.
+
+## How it works
+
+<HowItWorks>
+
+<Step number={1} title="Enroll a holder">
+
+Register a wallet for the token. If the wallet is already known in the project, SDP reuses its identity record and KYC status; if it was enrolled before, the enrollment becomes active again.
+
+<StepPanel>
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/holders \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "walletAddress": "7xKXz...9fGh",
+    "counterpartyId": "cp_abc123"
+  }'
+```
+
+</Tab>
+<Tab value="TypeScript">
+
+```typescript title="enroll-holder.ts"
+const res = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/holders",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      walletAddress: "7xKXz...9fGh",
+      counterpartyId: "cp_abc123",
+    }),
+  }
+);
+const { data } = await res.json();
+// data.wallet.kyc_status — "unverified" | "pending" | "verified" | "rejected"
+// data.enrollment.status — "active"
+```
+
+</Tab>
+</Tabs>
+
+- `walletAddress` (required) — the holder's Solana address.
+- `counterpartyId` (optional) — a counterparty in the same project. An unknown ID returns `404`. If you leave it out, an existing link is kept.
+- `reviewMode` (optional) — `auto` or `manual`, stored on the enrollment. Defaults to `auto`.
+
+A `201` response returns two records, with snake_case field names:
+
+- `data.wallet` — the identity record: `id`, `wallet_address`, `network`, `counterparty_id`, `kyc_status`, `kyc_provider`, `verified_at`, and timestamps.
+- `data.enrollment` — the token enrollment: `id`, `kyc_wallet_id`, `token_id`, `status` (`active` or `revoked`), `review_mode`, `created_at`, and `revoked_at`.
+
+</StepPanel>
+
+</Step>
+
+<Step number={2} title="List holders">
+
+List the token's active enrollments, newest first. The list includes every enrolled wallet whatever its KYC status, so check `kyc_status` to find verified holders.
+
+<StepPanel>
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+
+```bash title="Terminal"
+curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/holders?page=1&pageSize=50" \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+</Tab>
+<Tab value="TypeScript">
+
+```typescript title="list-holders.ts"
+const res = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/holders?page=1&pageSize=50",
+  { headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await res.json();
+const verified = data.holders.filter((holder) => holder.kyc_status === "verified");
+// data.total, data.page, data.pageSize
+```
+
+</Tab>
+</Tabs>
+
+Each entry in `data.holders` is an enrollment record plus the wallet's `wallet_address` and `kyc_status`. `pageSize` defaults to 50 and is capped at 200. The public API has no endpoint to remove an enrollment.
+
+</StepPanel>
+
+</Step>
+
+</HowItWorks>
+
+See the [Issuance API reference](/docs/reference/api/issuance) for the endpoint definitions.
+
+---
+
 ### Freeze and Compliance
 Source: https://platform.solana.com/docs/tokens/freeze-and-compliance
 
@@ -1771,10 +1905,12 @@ Source: https://platform.solana.com/docs/tokens/freeze-and-compliance
 
 SDP provides two categories of compliance tooling:
 
-- **Token controls** — freeze individual accounts, pause all transfers, or seize tokens. Available for tokens with `isFreezable` enabled or the `pausable` extension.
-- **Address screening** — check a wallet against configured compliance providers before approving a destination or adding it to a token's Token Access Control allowlist.
+- **Token controls** — freeze individual accounts (tokens created with `isFreezable`), pause all transfers (tokens with the `pausable` extension), or seize tokens (tokens with a permanent delegate).
+- **Address screening** — check a wallet against your organization's compliance providers before approving a destination or adding it to a token's Token Access Control allowlist.
 
-Token-control actions require `tokens:admin` permission on the API key.
+Token-control actions require `tokens:admin` permission on the API key. Address screening requires `payments:read`.
+
+When SDP signs a freeze, unfreeze, pause, unpause, or seize with a custody wallet, it first checks the action against that wallet's policy. A `deny` returns `403 FORBIDDEN`; an action held for approval returns `202` with error code `SIGNING_PENDING` and `error.details.approvalRequestId`. See [Wallet policies](/docs/wallet-operations/policies).
 
 ## How it works
 
@@ -1782,15 +1918,15 @@ Token-control actions require `tokens:admin` permission on the API key.
 
 <Step number={1} title="Screen an address">
 
-Check a Solana address against configured compliance providers before onboarding a wallet or approving it as a transfer destination.
+Check a Solana address against your compliance providers before onboarding a wallet or approving it as a transfer destination.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Use the **Screen address** action in the Compliance section of the dashboard.
+The dashboard screens addresses automatically when you add a destination to a wallet's destination allowlist and when you add a crypto account to a counterparty.
 
-Enter the wallet address and select the intent (e.g., transfer destination or Token Access Control allowlist candidate). Results appear per provider — each showing risk level, score, and flags.
+To screen a token holder, use the API.
 
 </Tab>
 <Tab value="API">
@@ -1806,11 +1942,26 @@ curl -X POST https://api.solana.com/v1/compliance/address-screenings \
   }'
 ```
 
+`network` defaults to `solana`. `intent` is `transfer_destination`, `wallet_address_addition`, or `unknown` (the default).
+
 ```typescript title="screen-address.ts"
 const { data } = await res.json();
 // data.screening.providers[]
-// → { provider, status, riskScore, riskLevel, message, evaluatedAt }
+// → { provider, status, riskScore, riskLevel, providerStatus, message, evaluatedAt }
 ```
+
+SDP screens the address with every compliance provider enabled for your organization: `range`, `elliptic`, `trm`, or `chainalysis`. If none is enabled, the request returns `403 FORBIDDEN`. On a self-hosted deployment, a provider is enabled by its API credentials, such as `RANGE_API_KEY`.
+
+Each provider result has a normalized `status`:
+
+| `status` | Meaning |
+| --- | --- |
+| `ok` | The provider completed the screening and returned a verdict. Only this value can count as a pass. |
+| `pending` | The provider accepted the request but has not finished. |
+| `unavailable` | The provider is not configured for this deployment. |
+| `error` | The call failed, or the response was malformed or ambiguous. |
+
+`providerStatus` keeps the provider's own status word for your records.
 
 See the [Compliance API reference](/docs/reference/api/compliance) for the full schema.
 
@@ -1828,29 +1979,11 @@ Prevent a specific holder from sending or receiving this token. The freeze targe
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-On the token detail page, go to the **Compliance** tab and select **Freeze Controls**.
+On the token detail page, open the **Operations** section. Under **Transfers**, click **Manage** next to **Freeze a balance**.
 
-![Freeze Controls tab with empty wallet address and reason fields](/images/tokens/freeze-controls-empty.png)
+Choose the signing wallet, enter the holder's **Wallet Address** and an optional reason, then click **Freeze balance** and confirm the on-chain submission. A "Freeze transaction finalized." toast appears, and the **Frozen Accounts** count in the **Operations** section updates.
 
-Enter the holder's wallet address and an optional reason, then click **Freeze account**.
-
-![Freeze Controls tab with wallet address and reason filled in](/images/tokens/freeze-controls-filled.png)
-
-Confirm the on-chain submission in the confirmation prompt.
-
-![Freeze account confirmation dialog](/images/tokens/freeze-confirm.png)
-
-The "Freeze transaction finalized." toast appears and the Frozen Accounts count updates to 1.
-
-![Compliance tab showing Freeze transaction finalized toast and Frozen Accounts count updated to 1](/images/tokens/freeze-confirmed.png)
-
-To lift the freeze, find the account in the frozen list and click **Unfreeze**. Confirm the on-chain submission.
-
-![Unfreeze account confirmation dialog](/images/tokens/unfreeze-confirm.png)
-
-The "Unfreeze transaction finalized." toast appears and the Frozen Accounts count returns to 0.
-
-![Compliance tab showing Unfreeze transaction finalized toast and Frozen Accounts count back to 0](/images/tokens/unfreeze-confirmed.png)
+To lift the freeze, open the same form, enter the wallet address, and click **Unfreeze balance**.
 
 </Tab>
 <Tab value="API">
@@ -1867,7 +2000,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   }'
 ```
 
-`accountAddress` accepts a holder wallet or its token account — SDP derives the associated token account when needed.
+`accountAddress` accepts a holder wallet or its token account — SDP derives the associated token account when needed. `signingCustodyWalletId` is optional; when supplied, it must be the exact SDP Wallet `id` of a wallet that controls the current freeze authority.
 
 **Unfreeze:**
 
@@ -1900,23 +2033,13 @@ Halt all minting and transfer activity globally. Requires the `pausable` extensi
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-On the token detail page, go to the **Compliance** tab and select **Pause Controls**. Click **Pause token**.
+On the token detail page, open the **Operations** section. Under **Transfers**, click **Pause** next to **Pause transfers**, then confirm with **Pause all transfers**.
 
-![Pause Controls tab showing Pause token and Unpause token buttons](/images/tokens/pause-controls.png)
+The prompt uses the only matching authority wallet automatically. If several custody records control the same authority, select the signer before confirming. Unpausing uses the same selection rules.
 
-Confirm the on-chain submission in the confirmation prompt.
+A "Pause transaction finalized." toast appears, the token's status changes to **Paused**, and an **Unpause** button appears in the token header. Supply operations are blocked until you resume.
 
-![Pause token confirmation dialog](/images/tokens/pause-confirm.png)
-
-The prompt uses the only matching authority wallet automatically. If several custody records control the same authority, select the signer before confirming. The Unpause button uses the same selection rules.
-
-The "Pause transaction finalized." toast appears and an orange **Token is paused** banner displays across the page. All supply and transfer operations are now blocked.
-
-![Compliance tab showing Token is paused banner and Pause transaction finalized toast](/images/tokens/pause-confirmed.png)
-
-To resume, click **Unpause token** and confirm.
-
-![Unpause token confirmation dialog](/images/tokens/unpause-confirm.png)
+To resume, click **Unpause** in the header, or **Resume** next to **Resume transfers**, and confirm.
 
 </Tab>
 <Tab value="API">
@@ -1937,7 +2060,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
 
 `signingCustodyWalletId` is optional when exactly one in-scope custody record matches the current pause authority; send `{}` to use that resolution. Multiple matches without a selector return `409`. An explicit choice must control the live authority and pass authorization and runtime checks. Reusing an idempotency key with a different wallet returns `409`.
 
-While paused, all transfer-related and supply-management operations are rejected until unpause.
+While paused, mint, burn, force-burn, and seize requests return `TOKEN_PAUSED`, and onchain transfers are blocked until unpause.
 
 </Tab>
 </Tabs>
@@ -1947,13 +2070,13 @@ While paused, all transfer-related and supply-management operations are rejected
 
 <Step number={4} title="Seize tokens">
 
-Force-transfer tokens from a holder to a recovery address without the holder's signature. For court orders and regulatory enforcement. Requires `tokens:admin`.
+Force-transfer tokens from a holder to a recovery address without the holder's signature. For court orders and regulatory enforcement. Requires `tokens:admin` and a token with a permanent delegate.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Compliance** tab, click **Seize tokens**. Provide the source, destination, amount, and a memo (strongly recommended for audit records). Confirm to submit.
+In the **Operations** section, open **Recovery & permanent changes** and click **Recover** next to **Force transfer**. Choose the signing wallet, provide the source, destination, amount, and a memo (strongly recommended for audit records), then click **Force transfer** and confirm.
 
 </Tab>
 <Tab value="API">
@@ -1972,6 +2095,8 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
     }
   }'
 ```
+
+To sign the seizure yourself, call `POST /v1/issuance/tokens/{tokenId}/seize/prepare` with the same body. It returns an unsigned transaction in `preparedTransaction.serialized` for you to sign and submit. See the [execution model](/docs/developing-with-sdp#execution-model).
 
 </Tab>
 </Tabs>
@@ -1997,14 +2122,18 @@ Source: https://platform.solana.com/docs/tokens/manage-token-settings
 
 After a token is deployed, you can rotate its authorities and adjust operational settings. Authority management is separate from compliance actions — for freeze, pause, and seize flows see [Freeze and Compliance](/docs/tokens/freeze-and-compliance).
 
-For on-chain metadata edits, `PATCH /v1/issuance/tokens/{tokenId}` accepts optional `signingCustodyWalletId`. It selects the exact custody record controlling the current metadata authority for this request, not a new deployment wallet or authority. Omission requires exactly one matching in-scope record; multiple matches return `409`. Database-only edits need no signer. In the dashboard, one matching wallet is automatic; when there are several, choose one in the metadata confirmation or beside the Asset Profile Save button. Historical `data.token.signingCustodyWalletId` does not change.
+To edit token information, send `PATCH /v1/issuance/tokens/{tokenId}`. For a deployed token, `name`, `description`, `uri`, and `imageUrl` are also written to the onchain metadata through the current metadata authority. `symbol`, `decimals`, and `requiresAllowlist` can't change after deployment, and `maxSupply` can change only until the mint authority is revoked. To change what the token's asset profile says about it, see [Asset profile and hosted metadata](/docs/tokens/create-a-token#asset-profile-and-hosted-metadata).
 
-To select that signer after an external authority rotation, request `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true` and use `data.metadataAuthority`. For tokens with a mint this is read live from the chain, unlike the stored snapshot in `data.token.metadataAuthority`; tokens without a mint return their stored metadata authority or mint authority without RPC. RPC failure returns `502`, never the stored value as a fallback. The dashboard keeps metadata and allowlist lookup errors separate, and the update rechecks authority before signing. This read changes neither the stored token nor its deployment wallet.
+For on-chain metadata edits, `PATCH /v1/issuance/tokens/{tokenId}` accepts optional `signingCustodyWalletId`. It selects the exact custody record controlling the current metadata authority for this request, not a new deployment wallet or authority. Omission requires exactly one matching in-scope record; multiple matches return `409`. Database-only edits need no signer. In the dashboard, edit these fields in the token's **Settings** section and click **Save changes**; when more than one wallet controls the metadata authority, choose the signer beside the save button. Historical `data.token.signingCustodyWalletId` does not change.
+
+To select that signer after an external authority rotation, request `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true` and use `data.metadataAuthority`. For tokens with a mint this is read live from the chain; tokens without a mint return their stored metadata authority or mint authority without RPC. RPC failure returns `502`, never the stored value as a fallback. The update rechecks the authority before signing. This read changes neither the stored token nor its deployment wallet.
+
+SDP checks every on-chain metadata update and authority change against the signing wallet's policy before signing. A `deny` returns `403 FORBIDDEN`; a change held for approval returns `202` with error code `SIGNING_PENDING` and `error.details.approvalRequestId`. Database-only edits sign nothing and skip this check. See [Wallet policies](/docs/wallet-operations/policies).
 
 ## Prerequisites
 
 - A deployed token with status `active`
-- `tokens:admin` permission on the API key
+- `tokens:admin` permission on the API key to change authorities; `tokens:write` to edit token information
 
 ## How it works
 
@@ -2018,17 +2147,11 @@ Review the token's current authorities and configuration before making changes.
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Open the token detail page. The **Overview** tab shows the token address, mint authority, current supply, and core metadata.
+Open the token detail page. The header shows the token address, issued supply, and supply cap.
 
-![Token detail Overview tab showing token address, mint authority, supply, template, and decimals](/images/tokens/token-settings-overview.png)
+The **Permissions** section lists each permission — **Who can mint tokens?**, **Who can freeze balances?**, **Who can update token information?**, and **Who can recover or destroy balances?** — and the wallet that holds it. Authorities held outside SDP custody are flagged.
 
-The **Permissions** tab lists every authority and which wallet currently holds it.
-
-![Permissions tab showing Mint Authority, Freeze Authority, Metadata Authority, and Permanent Delegate Authority with Edit buttons](/images/tokens/token-settings-permissions.png)
-
-The **Extensions** tab shows the template and each operational flag — Token Access Control (allowlist) status, mintable, freezable, and default account state.
-
-![Extensions tab showing template, allowlist, mintable, freezable, and default account state settings](/images/tokens/token-settings-extensions.png)
+The **Settings** section shows the token's name, symbol, decimals, supply cap, description, website, and metadata URI, along with its controls.
 
 </Tab>
 <Tab value="API">
@@ -2042,10 +2165,13 @@ curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
 
 ```typescript title="get-token-settings.ts"
 const { data } = await res.json();
-// data.token.authorities — { mintAuthority, freezeAuthority, permanentDelegate }
-// data.token.extensions  — active extensions on the token
-// data.token.status      — "active" | "paused"
+// data.token.mintAuthority   — mint authority address
+// data.token.freezeAuthority — freeze authority address
+// data.token.extensions      — Token-2022 extensions, including permanentDelegate
+// data.token.status          — "pending" | "active" | "paused" | "revoked"
 ```
+
+To read a live authority from the chain, add `includeFreezeAuthority=true`, `includeMetadataAuthority=true`, `includePauseAuthority=true`, or `includeAllowlistAuthority=true`. The result is returned beside the token as `data.freezeAuthority`, `data.metadataAuthority`, `data.pauseAuthority`, or `data.allowlistAuthority`.
 
 </Tab>
 </Tabs>
@@ -2061,7 +2187,7 @@ Transfer a token authority to a different wallet. Use this to move signing respo
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-On the token detail page, go to **Permissions**. Click **Edit** next to the authority you want to change. Select another controlled wallet or choose **Use custom address**, then click **Save authority**.
+On the token detail page, open **Permissions** and click the wallet shown next to the permission you want to change. Select another controlled wallet or choose **Use custom address**, then click **Save authority** and confirm the on-chain submission.
 
 ![Mint Authority modal showing current authority wallet, new authority dropdown with controlled wallets, and Save authority button](/images/tokens/token-authority-edit.png)
 
@@ -2079,13 +2205,15 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
   -H "Idempotency-Key: rotate-001" \
   -d '{
     "authority": {
-      "type": "mintAuthority",
+      "role": "mint",
       "newAuthority": "9aBCd...4eEf"
     }
   }'
 ```
 
-`type` can be `mintAuthority`, `freezeAuthority`, or `permanentDelegate`.
+`role` can be `mint`, `freeze`, `permanentDelegate`, or `metadata`. `signingCustodyWalletId` is optional; when supplied, it must be the exact SDP Wallet `id` of a wallet that controls the authority being changed.
+
+To sign the change yourself, call `POST /v1/issuance/tokens/{tokenId}/authority/prepare` with the same body. It returns an unsigned transaction in `preparedTransaction.serialized` for you to sign and submit. See the [execution model](/docs/developing-with-sdp#execution-model).
 
 </Tab>
 </Tabs>
@@ -2101,7 +2229,9 @@ Permanently remove an authority from the token. This action is irreversible — 
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In **Settings → Authorities**, click **Revoke** next to the authority and confirm. A warning dialog explains the consequences before you proceed.
+In **Permissions**, open the permission and set the new authority to **None**, then click **Save authority**. A warning explains the consequences; click **Yes, set to None** to proceed. Some authorities can be reassigned but not removed, and the dialog says so.
+
+To cap supply for good, open **Recovery & permanent changes** in the **Operations** section and use **Lock supply on-chain**. It mints the remaining supply up to your maximum supply, then revokes the mint authority.
 
 </Tab>
 <Tab value="API">
@@ -2111,7 +2241,7 @@ Set `newAuthority` to `null` to revoke:
 ```typescript title="revoke-authority.ts"
 body: JSON.stringify({
   authority: {
-    type: "mintAuthority",
+    role: "mint",
     newAuthority: null,
   },
 }),
@@ -5335,18 +5465,18 @@ The public issuance surface currently exposes three **Tokenization Templates**:
 
 | Template | Defaults | Notes |
 | --- | --- | --- |
-| `stablecoin` | 6 decimals, permanent delegate + pausable extensions, default account state initialized | Intended for fiat-backed token patterns with compliance controls. |
-| `tokenized-security` | 8 decimals, allowlist required, permanent delegate + pausable + scaled UI amount extensions, default account state frozen | Regulated asset flows with stronger defaults. |
+| `stablecoin` | 6 decimals, permanent delegate + pausable extensions, default account state initialized (frozen if you turn on the allowlist) | Intended for fiat-backed token patterns with compliance controls. |
+| `tokenized-security` | 8 decimals, allowlist on by default, permanent delegate + pausable extensions, scaled UI amount available as an option, default account state frozen while the allowlist is on | Regulated asset flows with stronger defaults. |
 | `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match the stablecoin or tokenized-security templates. |
 
-These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
+These defaults are sourced from `packages/sdp-issuance/src/templates/definitions.ts`.
 
-Each template also sets the token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — enforced on-chain over who may hold or receive the token. This is distinct from a wallet's own destination allowlist, which is a wallet-policy concern.
+A token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — is enforced on-chain over who may hold or receive the token. It follows from the template and `requiresAllowlist`: with `requiresAllowlist: true` the mode is `allowlist`; otherwise `stablecoin` and `tokenized-security` tokens use `blocklist`, and `custom` tokens have it `disabled`. This is distinct from a wallet's own destination allowlist, which is a wallet-policy concern.
 
 ## Selecting a template
 
-Each template is a vetted, fixed composition of Token-2022 extensions for a specific class of
-asset, rather than an à-la-carte menu. The appropriate template is determined by the nature of
+The `stablecoin` and `tokenized-security` templates are vetted, fixed compositions of Token-2022
+extensions for a specific class of asset, rather than an à-la-carte menu. The appropriate template is determined by the nature of
 the instrument being issued. The `custom` template applies to assets that do not fit the
 stablecoin or tokenized-security models.
 
@@ -5365,9 +5495,11 @@ funds) rather than stablecoins.
 ### Tokenized security
 
 Intended for regulated instruments — equity, debt, or fund shares. The template applies the
-stablecoin controls together with stronger defaults: an **allowlist is required**, new accounts
-are **frozen by default** (holders must be approved before transacting), and the **scaled UI
-amount** extension is added for corporate actions such as splits or share-class rebasing.
+stablecoin controls together with stronger defaults: the **allowlist is on by default**, and while
+it is on, new accounts are **frozen by default** (holders must be approved before transacting).
+You can turn the allowlist off with `requiresAllowlist: false`, in which case a blocklist applies.
+The **scaled UI amount** extension is available as an option for corporate actions such as splits
+or share-class rebasing.
 Interest- and yield-bearing instruments (for example debt or fund tokens) also fall under this
 template.
 
@@ -5375,9 +5507,10 @@ template.
 
 Corresponds to the **Non-Security Digital Asset** classification in the issuance interface —
 assets that are neither fiat stablecoins nor regulated securities, such as commodities, real
-estate, or collectibles. The template exposes the full Token-2022 extension set (transfer fees,
-transfer hooks, non-transferable behaviour, interest, and others) and applies where the stablecoin
-and tokenized-security templates do not match the instrument.
+estate, or collectibles. The template lets you choose from the extensions SDP supports — transfer
+fee, interest-bearing, permanent delegate, pausable, non-transferable, default account state,
+scaled UI amount, and transfer hook — and applies where the stablecoin and tokenized-security
+templates do not match the instrument.
 
 ### Summary
 

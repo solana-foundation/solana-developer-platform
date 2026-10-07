@@ -1,0 +1,126 @@
+---
+title: Verified Holders
+description: Enroll wallets as holders of a token and check their verification status.
+steps:
+  - Enroll a holder
+  - List holders
+---
+
+A **holder enrollment** records that a wallet is cleared to hold a specific token. Each enrolled wallet has an identity record with a KYC status, which SDP keeps once per wallet per project and reuses across your tokens. A wallet is a **verified holder** of a token when it has an active enrollment for that token and its KYC status is `verified`.
+
+| `kyc_status` | Meaning |
+| --- | --- |
+| `unverified` | No verification result yet. New wallets start here. |
+| `pending` | Verification is in progress. |
+| `verified` | Verification passed. |
+| `rejected` | Verification failed. |
+
+SDP updates `kyc_status` from identity verification results reported for the counterparty linked to the wallet. The public API has no endpoint to set it directly, so link a counterparty when you enroll a wallet that should receive a status.
+
+Enrollment is a record in SDP only. It does not add the wallet to the token's [allowlist](/docs/tokens/allowlists) or change anything onchain; manage who can receive the token through the allowlist endpoints.
+
+## Availability
+
+On managed SDP, the holder endpoints are always available. A self-hosted deployment must turn on `SDP_FLAG_ASSET_PROFILES`; without it, both endpoints return `403 FORBIDDEN`.
+
+Enrolling a holder requires `tokens:write`; listing holders requires `tokens:read`.
+
+## How it works
+
+<HowItWorks>
+
+<Step number={1} title="Enroll a holder">
+
+Register a wallet for the token. If the wallet is already known in the project, SDP reuses its identity record and KYC status; if it was enrolled before, the enrollment becomes active again.
+
+<StepPanel>
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/holders \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "walletAddress": "7xKXz...9fGh",
+    "counterpartyId": "cp_abc123"
+  }'
+```
+
+</Tab>
+<Tab value="TypeScript">
+
+```typescript title="enroll-holder.ts"
+const res = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/holders",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      walletAddress: "7xKXz...9fGh",
+      counterpartyId: "cp_abc123",
+    }),
+  }
+);
+const { data } = await res.json();
+// data.wallet.kyc_status — "unverified" | "pending" | "verified" | "rejected"
+// data.enrollment.status — "active"
+```
+
+</Tab>
+</Tabs>
+
+- `walletAddress` (required) — the holder's Solana address.
+- `counterpartyId` (optional) — a counterparty in the same project. An unknown ID returns `404`. If you leave it out, an existing link is kept.
+- `reviewMode` (optional) — `auto` or `manual`, stored on the enrollment. Defaults to `auto`.
+
+A `201` response returns two records, with snake_case field names:
+
+- `data.wallet` — the identity record: `id`, `wallet_address`, `network`, `counterparty_id`, `kyc_status`, `kyc_provider`, `verified_at`, and timestamps.
+- `data.enrollment` — the token enrollment: `id`, `kyc_wallet_id`, `token_id`, `status` (`active` or `revoked`), `review_mode`, `created_at`, and `revoked_at`.
+
+</StepPanel>
+
+</Step>
+
+<Step number={2} title="List holders">
+
+List the token's active enrollments, newest first. The list includes every enrolled wallet whatever its KYC status, so check `kyc_status` to find verified holders.
+
+<StepPanel>
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+
+```bash title="Terminal"
+curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/holders?page=1&pageSize=50" \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+</Tab>
+<Tab value="TypeScript">
+
+```typescript title="list-holders.ts"
+const res = await fetch(
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/holders?page=1&pageSize=50",
+  { headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await res.json();
+const verified = data.holders.filter((holder) => holder.kyc_status === "verified");
+// data.total, data.page, data.pageSize
+```
+
+</Tab>
+</Tabs>
+
+Each entry in `data.holders` is an enrollment record plus the wallet's `wallet_address` and `kyc_status`. `pageSize` defaults to 50 and is capped at 200. The public API has no endpoint to remove an enrollment.
+
+</StepPanel>
+
+</Step>
+
+</HowItWorks>
+
+See the [Issuance API reference](/docs/reference/api/issuance) for the endpoint definitions.

@@ -28,11 +28,9 @@ Open the token you want to manage. Mint and burn are both available from the tok
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Issuance** list, click an active token to open its detail page.
+In the **Issuance** list, open an active token.
 
-The **Fund management** panel shows the current supply with two primary actions: **Mint** and **Burn**.
-
-![Token Operations tab showing Mint and Burn actions](/images/tokens/token-deployed.png)
+The **Operations** section lists **Mint tokens** and **Burn tokens** under **Supply**. The token header shows the issued supply and the supply cap.
 
 </Tab>
 <Tab value="API">
@@ -49,6 +47,8 @@ The `amount` field is a decimal string in **UI units** (human-readable token amo
 
 `signingCustodyWalletId` always means the exact SDP Wallet `id`, not a provider-specific `walletId` or public key. It is required for a standard burn because that wallet owns and signs for the source. For mint and force-burn it is optional, but when supplied it must control the current mint or permanent-delegate authority. When omitted, SDP requires exactly one accessible wallet to match that live authority. Later actions never fall back to the token's deployment wallet.
 
+SDP checks each mint, burn, and force-burn against the signing wallet's policy before signing. A `deny` returns `403 FORBIDDEN`; an operation held for approval returns `202` with error code `SIGNING_PENDING` and `error.details.approvalRequestId`. See [Wallet policies](/docs/wallet-operations/policies).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -63,25 +63,14 @@ Issue new tokens to a destination address. SDP derives the associated token acco
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Mint** form:
+Next to **Mint tokens**, click **Mint**. In the form:
 
+- **Signing wallet** — the wallet that signs the mint; choose one when more than one is available
 - **Destination** — wallet address to receive the new tokens
 - **Amount** — in human-readable units (e.g., `1.0`)
 - **Memo** — optional, recorded onchain
 
-Click **Mint**. A modal shows the signer wallet and a destination picker — select or paste the destination address.
-
-Fill in the amount and optional memo, then click **Mint tokens**.
-
-![Mint Tokens modal with amount and memo filled in](/images/tokens/mint-modal-filled.png)
-
-Confirm the on-chain submission in the confirmation prompt.
-
-![Mint tokens confirmation dialog — click Mint now to submit the transaction on-chain](/images/tokens/mint-confirm.png)
-
-Once confirmed, the mint appears in the Transactions table with a `confirmed` status and a "Mint transaction finalized." toast appears.
-
-![Operations tab showing confirmed mint entry and Mint transaction finalized toast](/images/tokens/mint-confirmed.png)
+Click **Mint tokens**, then confirm the on-chain submission. A "Mint transaction finalized." toast appears once the mint confirms, and the **Activity** section lists the transaction.
 
 </Tab>
 <Tab value="API">
@@ -125,6 +114,8 @@ const res = await fetch(
 
 Control priority with `options.priorityFee`: `"none"`, `"low"`, `"medium"`, `"high"`, or a micro-lamport value.
 
+To sign the mint yourself, call `POST /v1/issuance/tokens/{tokenId}/mint/prepare` with the same body. It returns an unsigned transaction in `preparedTransaction.serialized` for the authority wallet to sign and submit; that wallet pays the network fee, and SDP does not sponsor it. See the [execution model](/docs/developing-with-sdp#execution-model).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -139,27 +130,11 @@ Reduce supply by burning from an account your wallet controls. Use force-burn to
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Click **Burn**. A modal shows the signer and a source field — select the wallet holding the tokens you want to remove.
+Next to **Burn tokens**, click **Burn**. Choose the signing wallet, then enter the **Source** that holds the tokens, the **Amount**, and an optional **Memo**.
 
-![Burn Tokens modal with empty source field](/images/tokens/burn-modal-empty.png)
+Click **Burn tokens**, then confirm the on-chain submission. A "Burn transaction finalized." toast appears once the burn confirms.
 
-Select the source wallet from the dropdown.
-
-![Burn Tokens modal with source wallet dropdown open](/images/tokens/burn-modal-source.png)
-
-Fill in the amount and optional memo, then click **Burn tokens**.
-
-![Burn Tokens modal filled with source, amount, and memo](/images/tokens/burn-modal-filled.png)
-
-Confirm the on-chain submission in the confirmation prompt.
-
-![Burn tokens confirmation dialog](/images/tokens/burn-confirm.png)
-
-The "Burn transaction finalized." toast appears and the burn shows as confirmed in the Transactions table.
-
-![Operations tab showing confirmed burn transaction and finalized toast](/images/tokens/burn-confirmed.png)
-
-For **Force burn** (requires `tokens:admin`), use the Compliance tab instead of the Operations tab — force-burn lets admins remove tokens from any holder account without their signature.
+For **Force burn** (requires `tokens:admin`), open **Recovery & permanent changes** in the **Operations** section. It appears for tokens with a permanent delegate and lets admins remove tokens from any holder account without their signature.
 
 </Tab>
 <Tab value="API">
@@ -198,6 +173,8 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
 });
 ```
 
+`POST /v1/issuance/tokens/{tokenId}/burn/prepare` and `POST /v1/issuance/tokens/{tokenId}/force-burn/prepare` take the same bodies and return an unsigned transaction in `preparedTransaction.serialized` for you to sign and submit. For a prepared burn, the signing wallet pays the network fee; SDP does not sponsor it. See the [execution model](/docs/developing-with-sdp#execution-model).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -212,11 +189,7 @@ After minting or burning, refresh the cached supply total.
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The dashboard refreshes supply automatically after a confirmed operation. The Transactions table shows all completed operations — deploy, mint, and burn — each with a `confirmed` status.
-
-![Operations tab showing confirmed burn, mint, and deploy transactions](/images/tokens/operations-history.png)
-
-Reload the token detail page if the displayed supply value appears stale.
+The token header shows the **Issued supply**. Click the refresh icon next to it to read the current supply from the chain.
 
 </Tab>
 <Tab value="API">
@@ -226,7 +199,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh
   -H "Authorization: Bearer sk_test_..."
 ```
 
-Safe to include in automated post-mint workflows.
+Safe to include in automated post-mint workflows. It needs only `tokens:read`.
 
 </Tab>
 </Tabs>
