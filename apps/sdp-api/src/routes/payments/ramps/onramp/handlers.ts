@@ -21,16 +21,12 @@ import {
 } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
-import {
-  type AppContext,
-  getPaymentsRepository,
-  rampRuntime,
-  resolveSdpEnvironment,
-} from "../../context";
+import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
 import { bvnkOnrampQuote, readBvnkCustomerLink } from "../providers/bvnk";
 import { lightsparkProviderCustomerId } from "../providers/lightspark";
 import { muralOnrampQuote, resolveMuralOnrampAccount } from "../providers/mural";
@@ -111,7 +107,7 @@ export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnra
   const row = ONRAMP_SUPPORT.find(
     (pair) => pair.source === input.fiatCurrency && pair.dest === input.assetRail
   );
-  const providers = row ? filterProviders(row.providers, resolveSdpEnvironment(c)) : [];
+  const providers = row ? filterProviders(c, row.providers) : [];
 
   const estimates = await estimateAcrossProviders(c, providers, (provider, ctx) =>
     RAMP_PROVIDER_CLIENTS[provider].estimateOnramp(ctx, {
@@ -373,10 +369,13 @@ export async function listOnrampCurrencies(c: AppContext) {
   }
 
   const { source, dest, provider } = parsed.data;
+  if (provider) {
+    assertRampProviderInChannel(c, provider);
+  }
   const pairs: OnrampCurrencyPair[] = ONRAMP_SUPPORT.flatMap((row) => {
     if (source && row.source !== source) return [];
     if (dest && row.dest !== dest) return [];
-    const providers = filterProviders(row.providers, resolveSdpEnvironment(c), provider);
+    const providers = filterProviders(c, row.providers, provider);
     if (providers.length === 0) return [];
     return [{ source: row.source, dest: row.dest, providers }];
   });

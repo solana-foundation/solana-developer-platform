@@ -15,6 +15,7 @@ import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/cou
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { assertRampProviderInChannel, isRampProviderInChannel } from "@/middleware/require-module";
 import { rampRuntime } from "@/routes/payments/context";
 import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
 import type { AppContext } from "../counterparties/context";
@@ -45,6 +46,10 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     throw badRequestQuery({ errors: z.treeifyError(query.error) });
   }
 
+  if (query.data.provider) {
+    assertRampProviderInChannel(c, query.data.provider);
+  }
+
   const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
     counterpartyId: params.data.counterpartyId,
     organizationId: auth.organizationId,
@@ -54,12 +59,16 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     throw notFound("Counterparty");
   }
 
-  const rows = await getCounterpartyProviderAccountsRepository(c).listProviderAccounts({
-    organizationId: auth.organizationId,
-    projectId,
-    counterpartyId: counterparty.id,
-    ...query.data,
-  });
+  // Accounts at a provider the release channel leaves out are neither listed nor
+  // enriched: that provider is off completely.
+  const rows = (
+    await getCounterpartyProviderAccountsRepository(c).listProviderAccounts({
+      organizationId: auth.organizationId,
+      projectId,
+      counterpartyId: counterparty.id,
+      ...query.data,
+    })
+  ).filter((row) => isRampProviderInChannel(c, row.provider));
   const runtime = rampRuntime(c);
   const enriched = await enrichCounterpartyProviderAccounts(
     runtime,

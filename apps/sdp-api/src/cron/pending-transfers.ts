@@ -1,3 +1,4 @@
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 /**
  * Pending-transfers reconciliation entrypoint.
  *
@@ -29,8 +30,8 @@ export function runPendingTransfersReconciliation(deps: PendingTransfersReconcil
     await Promise.all([
       trackPendingTransfers(deps.env),
       reconcileSponsorshipBudgets(deps.env),
-      replayRampWebhookEvents(deps.env),
-      reconcileBvnkOnrampPayouts(deps.env),
+      replayRampWebhookEvents(deps.env, SDP_RAMP_PROVIDER_STAGES),
+      reconcileBvnkOnrampPayouts(deps.env, SDP_RAMP_PROVIDER_STAGES),
     ]);
   };
 

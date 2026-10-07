@@ -111,6 +111,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       module: "payments",
       kind: "batch_pay",
       status: "succeeded",
@@ -132,6 +133,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"] as UnifiedTransactionModule[],
+      excludedRampProviders: [],
       limit: 25,
     };
 
@@ -165,6 +167,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       counterpartyId: "cpty_match",
       limit: 25,
     });
@@ -201,6 +204,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       limit: 25,
     });
 
@@ -237,6 +241,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments", "issuance"],
+      excludedRampProviders: [],
       limit: 1,
     });
     if (first.nextCursor === null) throw new Error("first page did not produce a cursor");
@@ -244,6 +249,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments", "issuance"],
+      excludedRampProviders: [],
       cursor: first.nextCursor,
       limit: 1,
     });
@@ -279,6 +285,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       moduleWalletScopes: [{ module: "payments", custodyWalletIds: [CUSTODY_WALLET] }],
       limit: 25,
     });
@@ -304,6 +311,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments", "earn"],
+      excludedRampProviders: [],
       moduleWalletScopes: [
         { module: "payments", custodyWalletIds: [CUSTODY_WALLET] },
         { module: "earn", custodyWalletIds: [OTHER_CUSTODY_WALLET] },
@@ -325,6 +333,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       moduleWalletScopes: [{ module: "payments", custodyWalletIds: [] }],
       limit: 25,
     });
@@ -362,6 +371,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: PROJECT,
       modules: ["payments"],
+      excludedRampProviders: [],
       limit: 25,
     });
 
@@ -381,6 +391,7 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: PROJECT,
         modules: ["payments"],
+        excludedRampProviders: [],
         cursor: encodeKeysetCursor(JSON.stringify({ createdAt: CREATED_AT }), "missing-fields"),
         limit: 25,
       })

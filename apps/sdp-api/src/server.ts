@@ -9,6 +9,7 @@
 
 import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 
 import { createApp } from "@/app";
 import { startCron, startEarnCatalogueBootSync } from "@/cron/runner";
@@ -116,7 +117,9 @@ async function main(): Promise<void> {
   const shutdownTimeoutMs = resolveShutdownTimeoutMs();
   const fatalOnUnhandledRejection = shouldShutdownOnUnhandledRejection();
 
-  const app = createNodeHttpApp(createApp({ observability: noopObservability }));
+  const app = createNodeHttpApp(
+    createApp({ observability: noopObservability, rampProviderStages: SDP_RAMP_PROVIDER_STAGES })
+  );
   const bg = new NodeBackgroundRunner();
   const cron = startCron({ env, bg });
   startEarnCatalogueBootSync({ env, bg });
