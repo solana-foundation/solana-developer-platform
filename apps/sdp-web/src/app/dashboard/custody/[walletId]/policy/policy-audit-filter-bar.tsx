@@ -1,6 +1,6 @@
 "use client";
 
-import type { PolicyDecision } from "@sdp/types";
+import { POLICY_EVALUATION_REASON_CODES, type PolicyDecision } from "@sdp/types";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { DateRangePicker } from "@/components/ui/date-picker";
@@ -21,18 +21,6 @@ const DECISION_OPTIONS = [
   "approval_required",
   "review",
 ] as const satisfies readonly PolicyDecision[];
-
-const REASON_CODES = [
-  "implicit_default_allow",
-  "wallet_policy_match",
-  "api_key_policy_match",
-  "wallet_policy_missing",
-  "api_key_policy_missing",
-  "manual_review",
-  "provider_mapping_pending",
-  "provider_mapping_partial",
-  "provider_mapping_failed",
-] as const;
 
 /**
  * URL-backed filter navigation for the audit page: merges overrides into the
@@ -134,11 +122,14 @@ export function PolicyAuditFilterBar({ filters }: { filters: PolicyAuditFilters 
           placeholder={t("DashboardCustody.policyAuditAllReasons")}
           ariaLabel={t("DashboardCustody.policyAuditReasonCode")}
           onValueChange={(next) =>
-            apply({ reasonCode: REASON_CODES.find((option) => option === next), page: 1 })
+            apply({
+              reasonCode: POLICY_EVALUATION_REASON_CODES.find((option) => option === next),
+              page: 1,
+            })
           }
         >
           <SelectItem value="">{t("DashboardCustody.policyAuditAllReasons")}</SelectItem>
-          {REASON_CODES.map((reasonCode) => (
+          {POLICY_EVALUATION_REASON_CODES.map((reasonCode) => (
             <SelectItem key={reasonCode} value={reasonCode}>
               {formatDisplayLabel(reasonCode)}
             </SelectItem>

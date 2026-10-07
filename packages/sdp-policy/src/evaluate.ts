@@ -6,6 +6,7 @@ import type {
   MatchedPolicyRule,
   PolicyCandidate,
   PolicyDryRunCriterion,
+  PolicyDryRunResult,
   PolicyEvaluationContext,
   PolicyEvaluationReasonCode,
   PolicyRule,
@@ -31,6 +32,21 @@ export const IMPLICIT_DEFAULT_ALLOW_POLICY: EffectivePolicy<never, never> = {
   profile: null,
   revision: null,
   defaultAction: "allow",
+};
+
+const POLICIES_EXCLUDED_REASON =
+  "Policies is not in this deployment's release channel; no wallet or API key policy was evaluated.";
+
+/**
+ * The dry-run verdict on a deployment whose release channel excludes
+ * Policies: allowed, with no criteria, matching what enforcement records.
+ */
+export const POLICIES_EXCLUDED_DRY_RUN_RESULT: PolicyDryRunResult = {
+  decision: "allow",
+  reason: POLICIES_EXCLUDED_REASON,
+  criteria: [],
+  walletPolicyRevisionId: null,
+  apiKeyPolicyRevisionId: null,
 };
 
 export interface EvaluateCandidatePoliciesInput {
@@ -166,6 +182,52 @@ export function evaluateWalletOperationPolicies(
       evaluation.wallet,
       evaluation.apiKey
     ),
+  };
+}
+
+/**
+ * The allow evaluation recorded for an operation on a deployment whose release
+ * channel excludes Policies. No policy was loaded, so every scope reports no
+ * profile or revision and the implicit allow that applied in its place; the
+ * reason code says why. The API-key scope is present exactly when the
+ * operation was made with an API key, as in a real evaluation.
+ *
+ * @param operation - The recorded operation.
+ * @returns The allow evaluation with reason `policies_module_excluded`.
+ */
+export function policiesExcludedEvaluation(
+  operation: WalletOperationEnvelope
+): WalletOperationPolicyEvaluation {
+  const wallet = policiesExcludedScopeEvaluation("wallet");
+  const apiKey = operation.apiKeyId === null ? null : policiesExcludedScopeEvaluation("api_key");
+
+  return {
+    wallet,
+    apiKey,
+    decision: "allow",
+    reasonCode: "policies_module_excluded",
+    reason: POLICIES_EXCLUDED_REASON,
+    matchedRules: [],
+    requiresApproval: false,
+    walletPolicyRevisionId: null,
+    apiKeyPolicyRevisionId: null,
+    operation,
+    evaluationContext: createPolicyEvaluationContext(operation, wallet, apiKey),
+  };
+}
+
+function policiesExcludedScopeEvaluation(scope: PolicyRuleScope): PolicyScopeEvaluation {
+  return {
+    scope,
+    source: IMPLICIT_DEFAULT_ALLOW_POLICY.source,
+    profileId: null,
+    revisionId: null,
+    defaultAction: IMPLICIT_DEFAULT_ALLOW_POLICY.defaultAction,
+    decision: "allow",
+    reasonCode: "policies_module_excluded",
+    reason: POLICIES_EXCLUDED_REASON,
+    matchedRules: [],
+    requiresApproval: false,
   };
 }
 

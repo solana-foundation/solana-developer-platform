@@ -3,9 +3,12 @@ import {
   createVelocityLookup,
   describeCandidateRuleCriteria,
   evaluateCandidatePolicies,
+  POLICIES_EXCLUDED_DRY_RUN_RESULT,
 } from "@sdp/policy";
 import type { PolicyCandidate, PolicyDryRunResult } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { createPolicyRepository } from "@/db/repositories";
+import { isModuleAvailable } from "@/lib/feature-flags";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 import { PostgresPolicyEnforcementStore } from "./enforcement.store";
@@ -28,6 +31,11 @@ export const UNGOVERNED_POLICY_DRY_RUN_RESULT: PolicyDryRunResult = {
  * no evaluation audit row. Backs the Dry-Run exit of the policy gate, where
  * the handler never runs and the caller receives the verdict alone.
  *
+ * A release channel without Policies answers allow with no criteria, the same
+ * verdict enforcement records, and reads no policy: the rules are neither
+ * applied nor shown while their configuration routes are refused. API-key
+ * wallet bindings are still checked, as in enforcement.
+ *
  * @param env - The runtime environment.
  * @param scope - The trusted tenant scope of the request.
  * @param candidate - The candidate operation to evaluate.
@@ -42,6 +50,11 @@ export async function dryRunPolicyCandidate(
 ): Promise<PolicyDryRunResult> {
   assertTenantClaim(scope, candidate, "dryRunPolicyCandidate");
   const store = new PostgresPolicyEnforcementStore(createPolicyRepository(env, scope), scope);
+  if (!isModuleAvailable(env, "policies", SDP_RAMP_PROVIDER_STAGES)) {
+    // The same binding refusal enforcement applies, so a dry run predicts the real answer.
+    await store.assertApiKeyBindingScope(candidate);
+    return POLICIES_EXCLUDED_DRY_RUN_RESULT;
+  }
   const policies = await store.loadEffectivePolicies(candidate);
   // Same measurement enforcement takes, minus the row it would exclude: a
   // dry run inserts nothing, so the window is exactly the prior history.

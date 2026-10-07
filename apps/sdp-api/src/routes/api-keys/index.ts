@@ -9,6 +9,7 @@ import {
   unifiedAuthMiddleware,
 } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireModule } from "@/middleware/require-module";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -34,6 +35,9 @@ import {
 } from "./schemas";
 
 const apiKeys = new Hono<{ Bindings: Env }>();
+
+apiKeys.use("/:keyId/policy-profiles/*", requireModule("policies"));
+apiKeys.use("/:keyId/policy-bindings", requireModule("policies"));
 
 // All routes require authentication
 apiKeys.use("*", unifiedAuthMiddleware());

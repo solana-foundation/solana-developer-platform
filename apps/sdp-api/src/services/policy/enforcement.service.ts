@@ -1,5 +1,6 @@
 import {
   type CreateWalletOperationInput,
+  recordPoliciesExcludedWalletOperation,
   enforceWalletOperationPolicy as runPolicyEnforcement,
   type WalletOperationPolicyEnforcement,
 } from "@sdp/policy";
@@ -10,7 +11,7 @@ import type {
   WalletOperationEnvelope,
   WalletOperationProviderExtensions,
 } from "@sdp/types";
-import { WALLET_OPERATION_HUMAN_ACTOR_TYPES } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES, WALLET_OPERATION_HUMAN_ACTOR_TYPES } from "@sdp/types";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
@@ -20,6 +21,7 @@ import {
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, conflict } from "@/lib/errors";
+import { isModuleAvailable } from "@/lib/feature-flags";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import {
   CustodyConfigStore,
@@ -32,6 +34,14 @@ import { PostgresPolicyEnforcementStore } from "./enforcement.store";
  * Enforce policy on a wallet operation and translate the decision into the
  * route contract: allowed operations return, denied operations throw
  * FORBIDDEN, and approval-pending operations throw SIGNING_PENDING.
+ *
+ * Every wallet operation that records a policy decision comes through here
+ * (policyGate and the services that enforce outside a route), so this is
+ * where a release channel without Policies skips evaluation: the API key's
+ * wallet policy bindings are still enforced, then the operation is recorded
+ * with an allow evaluation whose reason code says why. An
+ * approval granted earlier still replays, because the approval, not a fresh
+ * evaluation, is what authorizes it.
  *
  * @param env - The runtime environment.
  * @param scope - The trusted tenant scope of the request.
@@ -52,6 +62,9 @@ export async function enforceWalletOperationPolicy(
       throw new AppError("FORBIDDEN", "Approved wallet operation attempt is unavailable");
     }
     return service.resumeApprovedOperation(approvedOperationId, approvedOperationAttemptId, input);
+  }
+  if (!isModuleAvailable(env, "policies", SDP_RAMP_PROVIDER_STAGES)) {
+    return service.recordWithoutPolicies(input);
   }
   return service.enforce(input);
 }
@@ -79,6 +92,30 @@ export class WalletPolicyEnforcementService {
     }
 
     throw walletOperationPolicyDecisionError(enforcement.operation, enforcement.evaluation);
+  }
+
+  /**
+   * Record a wallet operation without evaluating policy, for a release
+   * channel that excludes Policies. The API key's wallet policy bindings are
+   * still enforced first, because they restrict which wallets the key may
+   * act on; wallet rules, API-key rules and approvals are skipped.
+   *
+   * @param input - The operation to record.
+   * @returns The recorded operation and its `policies_module_excluded` evaluation.
+   * @throws FORBIDDEN when the key's bindings do not cover the requested wallet.
+   */
+  async recordWithoutPolicies(
+    input: CreateWalletOperationInput
+  ): Promise<WalletOperationPolicyEnforcement> {
+    const store = new PostgresPolicyEnforcementStore(this.repository, this.scope);
+    return recordPoliciesExcludedWalletOperation(store, input, () =>
+      store.assertApiKeyBindingScope({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        apiKeyId: input.apiKeyId ?? null,
+        custodyWalletId: input.custodyWalletId ?? null,
+      })
+    );
   }
 
   /**
