@@ -9,7 +9,7 @@ export function isProjectRpcProbeFailure(probe: ConnectionProbeDetails): boolean
 /** Concise server-action fallback for connect-time probe failures. */
 export function summarizeProbeFailure(probe: ConnectionProbeDetails): string {
   if (probe.rpc.ok === false) {
-    return `Project RPC check failed: ${probe.rpc.error} Fix the project's RPC integration or escrow deployment and try again.`;
+    return `Project RPC check failed: ${probe.rpc.error} Check the escrow deployment addresses and try again.`;
   }
   if (probe.auth.ok === false) {
     return `Auth failed: ${probe.auth.error}`;

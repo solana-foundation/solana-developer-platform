@@ -1,7 +1,5 @@
-import { PROJECT_RPC_PROVIDERS } from "@sdp/types";
 import {
   addMemberSchema as addMemberSchemaBase,
-  projectRpcEndpointSchema,
   updateMemberSchema as updateMemberSchemaBase,
   updateProjectSchema as updateProjectSchemaBase,
 } from "../../routes/projects/schemas";
@@ -19,16 +17,6 @@ import { userSchema } from "./organizations";
 
 export const projectSettingsSchema = z
   .object({
-    rpcProvider: z.enum(PROJECT_RPC_PROVIDERS).optional().openapi({
-      description:
-        "Preferred RPC provider for this project. Defaults to `default` (round-robin managed providers). Use `custom` with `rpcEndpoint` for a dedicated endpoint.",
-      example: "default",
-    }),
-    rpcEndpoint: projectRpcEndpointSchema.optional().openapi({
-      description:
-        "Custom Solana RPC endpoint for the project (used when rpcProvider=custom). Must be https, without embedded credentials, and must not point at a private or reserved address.",
-      example: "https://rpc.example.com",
-    }),
     webhookUrl: z.string().url().optional().openapi({
       description: "Webhook URL for event notifications.",
       example: "https://example.com/webhook",
@@ -42,10 +30,7 @@ export const projectSettingsSchema = z
       }),
   })
   .strict()
-  .openapi({
-    description:
-      "Project settings. `rpcProvider` defaults to `default` (round-robin) when omitted.",
-  });
+  .openapi({ description: "Project settings." });
 
 export const projectSchema = z
   .object({
@@ -60,8 +45,8 @@ export const projectSchema = z
     environment: z
       .enum(["sandbox", "beta", "production"])
       .openapi({ description: "Project environment.", example: "sandbox" }),
-    settings: projectSettingsSchema.openapi({
-      description: "Project settings with normalized defaults.",
+    settings: projectSettingsSchema.nullable().openapi({
+      description: "Project settings, or null when none have been set.",
     }),
     status: z.enum(["active", "archived"]).openapi({
       description: "Project status.",
@@ -156,8 +141,7 @@ export const updateProjectRequestSchema = updateProjectSchemaBase
     settings: withOpenApi(updateProjectSchemaBase.shape.settings, {
       description: "Updated project settings. Use null to clear.",
       example: {
-        rpcProvider: "custom",
-        rpcEndpoint: "https://rpc.example.com",
+        webhookUrl: "https://example.com/webhook",
       },
     }),
   })

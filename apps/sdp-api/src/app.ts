@@ -46,7 +46,6 @@ import health from "@/routes/health";
 import heliusRings from "@/routes/helius-rings";
 import internalCustody from "@/routes/internal-custody";
 import internalHeliusRings from "@/routes/internal-helius-rings";
-import internalRpc from "@/routes/internal-rpc";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -424,7 +423,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // public OpenAPI and AI discovery surfaces.
   app.route("/internal/playground", playgroundInternal);
   app.route("/internal/dashboard/custody", internalCustody);
-  app.route("/internal/dashboard/rpc", internalRpc);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
 
   // Admin routes (internal)

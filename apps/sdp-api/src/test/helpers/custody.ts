@@ -2,16 +2,22 @@
  * Custody test helpers
  */
 
-import { getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
 /**
- * Seed a custody config into the test database.
+ * Insert a custody config and point its scope default at it when active.
+ * @param db - Executor the inserts run on.
+ * @param config - Custody config row to insert.
+ * @returns Resolves once the config and scope default are written.
  */
-export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecord): Promise<void> {
-  await getDb(env)
+async function insertTestCustodyConfig(
+  db: DatabaseExecutor,
+  config: SigningConfigRecord
+): Promise<void> {
+  await db
     .prepare(
       `INSERT INTO custody_configs
      (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at)
@@ -32,7 +38,7 @@ export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecor
     .run();
 
   if (config.status === "active") {
-    const existingDefault = await getDb(env)
+    const existingDefault = await db
       .prepare(
         config.projectId
           ? `SELECT id
@@ -50,7 +56,7 @@ export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecor
       .first<{ id: string }>();
 
     if (existingDefault) {
-      await getDb(env)
+      await db
         .prepare(
           `UPDATE custody_scope_defaults
          SET default_custody_config_id = ?, updated_at = datetime('now')
@@ -59,7 +65,7 @@ export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecor
         .bind(config.id, existingDefault.id)
         .run();
     } else {
-      await getDb(env)
+      await db
         .prepare(
           `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
@@ -71,10 +77,13 @@ export async function seedTestCustodyConfig(env: Env, config: SigningConfigRecor
 }
 
 /**
- * Seed a custody wallet into the test database.
+ * Insert a custody wallet.
+ * @param db - Executor the insert runs on.
+ * @param wallet - Custody wallet row to insert.
+ * @returns Resolves once the wallet is written.
  */
-export async function seedTestCustodyWallet(env: Env, wallet: CustodyWallet): Promise<void> {
-  await getDb(env)
+async function insertTestCustodyWallet(db: DatabaseExecutor, wallet: CustodyWallet): Promise<void> {
+  await db
     .prepare(
       `INSERT INTO custody_wallets
      (id, custody_config_id, wallet_id, public_key, label, purpose, status, created_at)
@@ -94,15 +103,23 @@ export async function seedTestCustodyWallet(env: Env, wallet: CustodyWallet): Pr
 }
 
 /**
- * Seed full custody setup (config + wallet) for an organization.
+ * Seed a custody config and its wallet in one transaction, so a config whose
+ * `defaultWalletId` names that wallet satisfies the deferred
+ * `custody_configs_default_wallet_fkey` at commit.
+ * @param env - Test environment bindings.
+ * @param config - Custody config row to insert.
+ * @param wallet - Custody wallet row owned by `config`.
+ * @returns Resolves once the transaction commits.
  */
 export async function seedTestCustodySetup(
   env: Env,
   config: SigningConfigRecord,
   wallet: CustodyWallet
 ): Promise<void> {
-  await seedTestCustodyConfig(env, config);
-  await seedTestCustodyWallet(env, wallet);
+  await getDb(env).transaction(async (tx) => {
+    await insertTestCustodyConfig(tx, config);
+    await insertTestCustodyWallet(tx, wallet);
+  });
 }
 
 /**

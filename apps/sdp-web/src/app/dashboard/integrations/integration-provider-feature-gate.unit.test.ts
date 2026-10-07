@@ -40,11 +40,4 @@ describe("integration provider route feature gates", () => {
     );
     expect(mocks.auth).not.toHaveBeenCalled();
   });
-
-  it("keeps RPC provider routes independent of product module flags", async () => {
-    await expect(
-      IntegrationDetailPage({ params: Promise.resolve({ provider: "helius" }) })
-    ).rejects.toThrow("NEXT_REDIRECT");
-    expect(mocks.auth).toHaveBeenCalledOnce();
-  });
 });

@@ -336,8 +336,7 @@ Full getting-started guides and tutorials: https://platform.solana.com/docs (or 
 
 The hosted API is built as a container and deployed to Cloud Run through GitHub Actions:
 
-- Relevant pushes to `main` deploy stage, then production when `CONTINUOUS_PROD_DEPLOY` is `true`.
-- A merged `chore(main): release X.Y.Z` release commit deploys the tagged image to production.
+- Every push to `main` deploys stage, then production when `CONTINUOUS_PROD_DEPLOY` is `true`; release commits deploy the same way.
 - Manual production workflow dispatch can redeploy an existing Git SHA image without rebuilding it.
 
 Stage deploys and merge deploys to production update and execute the migration

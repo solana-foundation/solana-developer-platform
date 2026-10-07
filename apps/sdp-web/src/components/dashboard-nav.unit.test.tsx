@@ -255,7 +255,6 @@ describe("Integrations dashboard navigation", () => {
     expect(item?.subnavKey).toBe("integrations");
     expect(item?.children?.map((child) => child.href)).toEqual([
       "/dashboard/integrations?tab=custody",
-      "/dashboard/integrations?tab=rpc",
       "/dashboard/integrations?tab=ramps",
       "/dashboard/integrations?tab=compliance",
       "/dashboard/integrations?tab=privacy",
@@ -263,7 +262,7 @@ describe("Integrations dashboard navigation", () => {
     expect(item?.children?.every((child) => child.icon)).toBe(true);
   });
 
-  it("keeps only RPC when every owning module is disabled", () => {
+  it("lists no family when every owning module is disabled", () => {
     const item = findIntegrationsItem(
       navOptions({
         custodyEnabled: false,
@@ -273,7 +272,7 @@ describe("Integrations dashboard navigation", () => {
       })
     );
 
-    expect(item?.children?.map((child) => child.href)).toEqual(["/dashboard/integrations?tab=rpc"]);
+    expect(item?.children).toEqual([]);
   });
 });
 

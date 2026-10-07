@@ -20,7 +20,7 @@ vi.mock("@/lib/dashboard-url-state", () => ({
   useDashboardTab: () => urlState.tab,
 }));
 
-function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>[0]> = {}) {
+function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>[0]>) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <IntegrationsCatalog
@@ -32,16 +32,15 @@ function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>
                 enabledProviders: ["privy", "para"],
               })
         }
-        rpc={[
+        ramps={[
           {
-            provider: "helius",
-            label: "Helius",
-            status: "active",
-            descriptionKey: "DashboardCustody.integrationRpcHeliusDescription",
+            provider: "moonpay",
+            label: "MoonPay",
+            status: "enabled",
+            descriptionKey: "Shared.integrations.rampMoonpayDescription",
           },
-          { provider: "alchemy", label: "Alchemy", status: "available" },
+          { provider: "lightspark", label: "Lightspark", status: "enabled" },
         ]}
-        ramps={[{ provider: "moonpay", label: "MoonPay", status: "enabled" }]}
         compliance={[{ provider: "range", label: "Range", status: "request_access" }]}
         privacy={overrides.privacy}
         enabledFamilies={overrides.enabledFamilies}
@@ -63,10 +62,10 @@ describe("IntegrationsCatalog", () => {
   });
 
   it("uses a category hub on the landing page without status filters", () => {
-    renderCatalog();
+    renderCatalog({});
 
     expect(document.querySelector("[data-integrations-hub='true']")).toBeTruthy();
-    expect(document.querySelectorAll("[data-integration-hub-action]")).toHaveLength(5);
+    expect(document.querySelectorAll("[data-integration-hub-action]")).toHaveLength(4);
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
     expect(screen.queryByRole("searchbox")).toBeNull();
     expect(screen.queryByText("All")).toBeNull();
@@ -76,38 +75,38 @@ describe("IntegrationsCatalog", () => {
   });
 
   it("shows a provider catalog only for the sidebar category that is selected", () => {
-    urlState.tab = "rpc";
-    renderCatalog();
+    urlState.tab = "ramps";
+    renderCatalog({});
 
-    expect(visibleRowLabels()).toEqual(["Helius", "Alchemy"]);
+    expect(visibleRowLabels()).toEqual(["MoonPay", "Lightspark"]);
     expect(document.querySelector("[data-integrations-hub='true']")).toBeNull();
     expect(screen.getByRole("searchbox")).toBeTruthy();
   });
 
   it("returns disabled and unknown categories to the hub", () => {
     urlState.tab = "custody";
-    renderCatalog({ enabledFamilies: ["rpc"] });
+    renderCatalog({ enabledFamilies: ["ramps"] });
 
     expect(document.querySelectorAll("[data-integration-hub-action]")).toHaveLength(1);
-    expect(document.querySelector("[data-integration-hub-action='rpc']")).toBeTruthy();
+    expect(document.querySelector("[data-integration-hub-action='ramps']")).toBeTruthy();
   });
 
   it("searches within the selected category", async () => {
     const user = userEvent.setup();
-    urlState.tab = "rpc";
-    renderCatalog();
+    urlState.tab = "ramps";
+    renderCatalog({});
 
-    await user.type(screen.getByRole("searchbox"), "alchemy");
-    expect(visibleRowLabels()).toEqual(["Alchemy"]);
+    await user.type(screen.getByRole("searchbox"), "lightspark");
+    expect(visibleRowLabels()).toEqual(["Lightspark"]);
 
     await user.clear(screen.getByRole("searchbox"));
-    expect(visibleRowLabels()).toEqual(["Helius", "Alchemy"]);
+    expect(visibleRowLabels()).toEqual(["MoonPay", "Lightspark"]);
   });
 
   it("offers an empty state with a reset when nothing matches", async () => {
     const user = userEvent.setup();
-    urlState.tab = "rpc";
-    renderCatalog();
+    urlState.tab = "ramps";
+    renderCatalog({});
 
     await user.type(screen.getByRole("searchbox"), "zzz-no-such-provider");
 
@@ -119,10 +118,8 @@ describe("IntegrationsCatalog", () => {
 
   it("keeps cards action-free: browsing here, acting on the detail page", () => {
     urlState.tab = "custody";
-    renderCatalog();
+    renderCatalog({});
 
-    // RPC is managed on each provider's own page now (HOO-787), so the section
-    // no longer signposts Settings.
     expect(screen.queryAllByRole("link", { name: "Change in Settings" })).toHaveLength(0);
     expect(screen.queryAllByRole("link", { name: "Manage" })).toHaveLength(0);
     expect(screen.queryAllByRole("link", { name: "Configure" })).toHaveLength(0);
@@ -133,14 +130,14 @@ describe("IntegrationsCatalog", () => {
   });
 
   it("fills every row with a description instead of dead space", () => {
-    urlState.tab = "rpc";
-    renderCatalog();
+    urlState.tab = "ramps";
+    renderCatalog({});
 
-    expect(screen.getByText("Use Helius infrastructure for Solana RPC requests.")).toBeTruthy();
+    expect(screen.getByText("Card and bank fiat onramp and offramp.")).toBeTruthy();
   });
 
   it("keeps the custody-unknown alert off other family tabs", () => {
-    urlState.tab = "rpc";
+    urlState.tab = "ramps";
     renderCatalog({ custody: null });
 
     expect(screen.queryByRole("alert")).toBeNull();

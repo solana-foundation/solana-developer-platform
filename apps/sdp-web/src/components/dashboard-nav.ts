@@ -200,11 +200,6 @@ export function getIntegrationActions(
           },
         ]
       : []),
-    {
-      label: t("Shared.integrations.rpcTitle"),
-      href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.rpc,
-      icon: CircleDotDashedIcon,
-    },
     ...(options.paymentsEnabled
       ? [
           {

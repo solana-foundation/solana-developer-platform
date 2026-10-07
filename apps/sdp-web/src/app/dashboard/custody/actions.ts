@@ -410,7 +410,6 @@ async function waitForSignatureConfirmation(
 interface RpcRelayResponse<TResponse> {
   provider: {
     id: string;
-    selectionMode: string;
     endpoint: string;
   };
   upstream: {

@@ -35,7 +35,7 @@ const OPENAPI_TAG = {
     description: "Wallet signing provider configuration and wallet management.",
   },
   PROJECTS: { name: "Projects", description: "Project and project member management." },
-  RPC: { name: "RPC", description: "Managed Solana RPC relay and provider telemetry." },
+  RPC: { name: "RPC", description: "Managed Solana RPC relay." },
   ISSUANCE: {
     name: "Issuance",
     description: "Token issuance, allowlists, and lifecycle operations.",

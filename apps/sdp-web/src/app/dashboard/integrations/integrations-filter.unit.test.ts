@@ -4,7 +4,7 @@ import { type FilterableIntegration, matchesFilters, NO_FILTERS } from "./integr
 const ROWS: FilterableIntegration[] = [
   { family: "custody", provider: "privy", label: "Privy", status: "active" },
   { family: "custody", provider: "fireblocks", label: "Fireblocks", status: "request_access" },
-  { family: "rpc", provider: "helius", label: "Helius", status: "active" },
+  { family: "privacy", provider: "private-channels", label: "Private Channels", status: "active" },
   { family: "ramps", provider: "moonpay", label: "MoonPay", status: "enabled" },
 ];
 
@@ -24,14 +24,14 @@ describe("integration filters", () => {
     const connected = ROWS.filter((row) =>
       matchesFilters(row, { ...NO_FILTERS, status: "connected" })
     );
-    expect(connected.map((row) => row.provider)).toEqual(["privy", "helius", "moonpay"]);
+    expect(connected.map((row) => row.provider)).toEqual(["privy", "private-channels", "moonpay"]);
   });
 
   it("folds the two off states into one chip", () => {
     // `available` and `not_configured` both mean "not running"; the difference
     // is whether it could be switched on, which is the detail page's business.
     const rows: FilterableIntegration[] = [
-      { family: "rpc", provider: "alchemy", label: "Alchemy", status: "not_configured" },
+      { family: "compliance", provider: "elliptic", label: "Elliptic", status: "not_configured" },
       { family: "custody", provider: "turnkey", label: "Turnkey", status: "available" },
     ];
 
