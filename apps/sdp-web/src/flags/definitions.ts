@@ -3,6 +3,7 @@ import {
   isRampProviderInReleaseChannel,
   type RampProviderId,
   type SdpModule,
+  type SdpRampProviderStages,
   type SdpReleaseChannel,
 } from "@sdp/types";
 import type { Adapter, Identify } from "flags";
@@ -31,10 +32,10 @@ function flagDefault(envVar: string, fallback: boolean): boolean {
 }
 
 export interface DashboardFlagDependencies {
-  /** The deployment's release channel; it caps every module and ramp provider flag. */
-  releaseChannel: SdpReleaseChannel;
+  /** Reads the deployment's release channel, which caps every module and ramp provider flag. Called per decision. */
+  releaseChannel: () => SdpReleaseChannel;
   /** Each ramp provider's stage (`SDP_RAMP_PROVIDER_STAGES` in the app). */
-  rampProviderStages: Record<RampProviderId, SdpReleaseChannel>;
+  rampProviderStages: SdpRampProviderStages;
   /** Creates the adapter that decides a flag inside the release channel (Vercel in the app). */
   vercel: () => Adapter<boolean, DashboardFlagEntities>;
   /** Resolves the entities targeting rules match against. */
@@ -53,12 +54,15 @@ export function defineDashboardFlags({
   identify,
 }: DashboardFlagDependencies) {
   function moduleAdapter(module: Exclude<SdpModule, "ramps">) {
-    return capAdapterToReleaseChannel(isModuleInReleaseChannel(releaseChannel, module), vercel());
+    return capAdapterToReleaseChannel(
+      () => isModuleInReleaseChannel(releaseChannel(), module, rampProviderStages),
+      vercel()
+    );
   }
 
   function rampProviderAdapter(provider: RampProviderId) {
     return capAdapterToReleaseChannel(
-      isRampProviderInReleaseChannel(releaseChannel, provider, rampProviderStages),
+      () => isRampProviderInReleaseChannel(releaseChannel(), provider, rampProviderStages),
       vercel()
     );
   }

@@ -16,8 +16,7 @@ import {
   providerSupportsStoredCredentialSetup,
 } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
-import { custody, privyByok } from "@/flags";
-import { isComplianceEnabled } from "@/flags/compliance";
+import { custody, policies, privyByok } from "@/flags";
 import { isRampsEnabled } from "@/flags/ramps";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -234,7 +233,7 @@ export default async function IntegrationDetailPage({
   const [custodyEnabled, rampsEnabled, complianceEnabled] = await Promise.all([
     custody(),
     isRampsEnabled(),
-    isComplianceEnabled(),
+    policies(),
   ]);
   if (
     !isIntegrationProviderEnabled(provider, {

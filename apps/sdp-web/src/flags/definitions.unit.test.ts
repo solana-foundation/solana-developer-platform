@@ -53,7 +53,7 @@ function defineFlags(
   rampProviderStages: Record<RampProviderId, SdpReleaseChannel> = SDP_RAMP_PROVIDER_STAGES
 ) {
   return defineDashboardFlags({
-    releaseChannel,
+    releaseChannel: () => releaseChannel,
     rampProviderStages,
     vercel: () => vercelServesOn,
     identify: () => ({}),
@@ -74,8 +74,10 @@ async function decideAll(flags: DashboardFlags): Promise<Record<string, boolean>
 
 function inReleaseChannel(releaseChannel: SdpReleaseChannel, cap: FlagCap): boolean {
   if (cap === "uncapped") return true;
-  if ("module" in cap) return isModuleInReleaseChannel(releaseChannel, cap.module);
-  return isRampProviderInReleaseChannel(releaseChannel, cap.rampProvider);
+  if ("module" in cap) {
+    return isModuleInReleaseChannel(releaseChannel, cap.module, SDP_RAMP_PROVIDER_STAGES);
+  }
+  return isRampProviderInReleaseChannel(releaseChannel, cap.rampProvider, SDP_RAMP_PROVIDER_STAGES);
 }
 
 const EXCLUDED_FROM_STABLE = Object.entries(FLAG_CAPS)

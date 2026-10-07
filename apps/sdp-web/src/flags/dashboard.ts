@@ -13,12 +13,11 @@ import {
 } from "@/flags";
 import { getDesignModuleFlags } from "@/flags/new-design";
 import type { DesignModuleFlags } from "@/lib/design-modules";
-import { isComplianceEnabled } from "./compliance";
 import { isRampsEnabled } from "./ramps";
 
 export type DashboardFlags = {
   assetProfiles: boolean;
-  /** Compliance integrations: module in the release channel and the `policies` flag on. */
+  /** Compliance integrations follow the `policies` flag until Compliance gets its own visibility rule. */
   compliance: boolean;
   custody: boolean;
   dvp: boolean;
@@ -49,7 +48,6 @@ export type DashboardFlags = {
 export async function getDashboardFlags(): Promise<DashboardFlags> {
   const [
     assetProfilesEnabled,
-    complianceEnabled,
     custodyEnabled,
     dvpEnabled,
     earnEnabled,
@@ -64,7 +62,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     rampsEnabled,
   ] = await Promise.all([
     assetProfiles(),
-    isComplianceEnabled(),
     custody(),
     dvp(),
     earn(),
@@ -81,7 +78,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
 
   return {
     assetProfiles: assetProfilesEnabled,
-    compliance: complianceEnabled,
+    compliance: policiesEnabled,
     custody: custodyEnabled,
     dvp: dvpEnabled,
     earn: earnEnabled,

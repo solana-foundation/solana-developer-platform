@@ -3,8 +3,7 @@ import type { CustodyConfigSummary, PrivateChannelInstanceEnvelope } from "@sdp/
 import { redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
-import { custody, privateChannels } from "@/flags";
-import { isComplianceEnabled } from "@/flags/compliance";
+import { custody, policies, privateChannels } from "@/flags";
 import { isRampsEnabled } from "@/flags/ramps";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -81,7 +80,7 @@ export default async function IntegrationsPage() {
       getTranslations(),
       custody(),
       isRampsEnabled(),
-      isComplianceEnabled(),
+      policies(),
       privateChannels(),
     ]);
   const integrationFlags = {

@@ -6,7 +6,7 @@ export type IntegrationFeatureFlags = {
   custody: boolean;
   /** Payments on and at least one ramp provider enabled (`isRampsEnabled`). */
   ramps: boolean;
-  /** Compliance module in the release channel and the `policies` flag on (`isComplianceEnabled`). */
+  /** The `policies` flag, until Compliance gets its own visibility rule. */
   compliance: boolean;
   privateChannels: boolean;
 };

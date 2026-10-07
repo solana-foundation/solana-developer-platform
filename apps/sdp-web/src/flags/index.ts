@@ -36,7 +36,7 @@ const identifyDashboardEntities = dedupe(async (): Promise<DashboardFlagEntities
 
 // Only flag definitions may be exported here: the flags discovery endpoint serves this module wholesale.
 const flags = defineDashboardFlags({
-  releaseChannel: deploymentReleaseChannel(),
+  releaseChannel: deploymentReleaseChannel,
   rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
   vercel: () => vercelAdapter<boolean, DashboardFlagEntities>(),
   identify: identifyDashboardEntities,
