@@ -92,7 +92,9 @@ internalCustody.get("/connections", async (c) => {
   const store = new ProviderCredentialStore(getDb(c.env));
   const [{ connections, total }, availability] = await Promise.all([
     store.listProjectConnectionsPage(auth.organizationId, projectId, { limit, offset, provider }),
-    getProviderAvailability(c.env, getDb(c.env), auth.organizationId),
+    getProviderAvailability(c.env, getDb(c.env), auth.organizationId, {
+      rampProviderStages: c.get("rampProviderStages"),
+    }),
   ]);
 
   return success(c, {

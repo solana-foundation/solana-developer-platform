@@ -20,6 +20,8 @@ import {
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 
+const MANIFEST_STAGES = { rampProviderStages: SDP_RAMP_PROVIDER_STAGES };
+
 const TEST_ORG_ID = "org_provider_availability_test";
 
 const providerEnvKeys = [
@@ -211,7 +213,12 @@ describe("provider-availability.service", () => {
   });
 
   it("marks providers available only when the organization is entitled and the environment is configured", async () => {
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.privy).toEqual({
@@ -262,11 +269,17 @@ describe("provider-availability.service", () => {
   it("reports providers the release channel leaves out as not enabled", async () => {
     await setOrganizationTier("enterprise");
 
-    const onExperimental = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const onExperimental = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
     const onStable = await getProviderAvailability(
       { ...env, SDP_RELEASE_CHANNEL: "stable" },
       getDb(env),
-      TEST_ORG_ID
+      TEST_ORG_ID,
+      MANIFEST_STAGES
     );
 
     const enabledRamps = RAMP_PROVIDERS.filter((p) => onExperimental.providers.ramps[p]?.enabled);
@@ -289,7 +302,12 @@ describe("provider-availability.service", () => {
   it("follows injected ramp provider stages", async () => {
     await setOrganizationTier("enterprise");
     const onBeta = { ...env, SDP_RELEASE_CHANNEL: "beta" };
-    const onExperimental = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const onExperimental = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
     expect(onExperimental.providers.ramps.moonpay?.enabled).toBe(true);
 
     const availability = await getProviderAvailability(onBeta, getDb(env), TEST_ORG_ID, {
@@ -306,7 +324,12 @@ describe("provider-availability.service", () => {
     env.BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
     env.BVNK_HAWK_SECRET_KEY = undefined;
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.providers.ramps.bvnk).toEqual({
       entitled: true,
@@ -333,7 +356,7 @@ describe("provider-availability.service", () => {
       },
     });
 
-    const withoutKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const withoutKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
     expect(withoutKey.providers.custody.local).toEqual({
       entitled: true,
       configured: false,
@@ -343,7 +366,12 @@ describe("provider-availability.service", () => {
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
 
-    const managedWithKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const managedWithKey = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
     expect(managedWithKey.providers.custody.local).toEqual({
       entitled: true,
       configured: false,
@@ -351,7 +379,12 @@ describe("provider-availability.service", () => {
     });
 
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    const selfHostedWithKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const selfHostedWithKey = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
     expect(selfHostedWithKey.providers.custody.local).toEqual({
       entitled: true,
       configured: true,
@@ -399,7 +432,12 @@ describe("provider-availability.service", () => {
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
@@ -497,7 +535,12 @@ describe("provider-availability.service", () => {
       )
       .run();
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.providers.custody.local).toEqual({
       entitled: false,
@@ -512,7 +555,12 @@ describe("provider-availability.service", () => {
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
@@ -699,7 +747,12 @@ describe("provider-availability.service", () => {
       .run();
     env.UPSHIFT_API_KEY = "upshift_test_key";
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.providers.earn.upshift).toEqual({
       entitled: true,
@@ -725,7 +778,12 @@ describe("provider-availability.service", () => {
       .bind(JSON.stringify({ providerOverrides: { earn: { veda: true } } }), TEST_ORG_ID)
       .run();
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.providers.earn.veda).toEqual({
       entitled: true,
@@ -747,7 +805,7 @@ describe("provider-availability.service", () => {
       .run();
 
     env.JUPITER_SWAP_API_KEY = undefined;
-    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
     expect(without.providers.earn.ondo).toEqual({
       entitled: true,
       configured: false,
@@ -758,7 +816,7 @@ describe("provider-availability.service", () => {
     );
 
     env.JUPITER_SWAP_API_KEY = "jup_test_key";
-    const withKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const withKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
     expect(withKey.providers.earn.ondo).toEqual({
       entitled: true,
       configured: true,
@@ -776,7 +834,7 @@ describe("provider-availability.service", () => {
 
     env.JUPITER_SWAP_API_KEY = undefined;
     env.EARN_HASTRA_DEX_EXIT_ENABLED = undefined;
-    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
     expect(without.providers.earn.hastra).toEqual({
       entitled: true,
       configured: true,
@@ -787,7 +845,12 @@ describe("provider-availability.service", () => {
     // Enabling the optional DEX rail without its Jupiter prerequisite must not
     // disable the native provider. The rail's resolver fails closed instead.
     env.EARN_HASTRA_DEX_EXIT_ENABLED = "true";
-    const dexMisconfigured = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const dexMisconfigured = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
     expect(dexMisconfigured.providers.earn.hastra).toEqual({
       entitled: true,
       configured: true,

@@ -1,8 +1,7 @@
-import { RAMP_PROVIDERS, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { RAMP_PROVIDERS, SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import type { RampProviderStages } from "@/lib/feature-flags";
 import { requirePermissions } from "@/middleware/auth";
 import { getCounterpartyRequirements } from "@/routes/counterparties/handlers";
 import { listCounterpartyProviderAccounts } from "@/routes/counterparty-provider-accounts/handlers";
@@ -15,10 +14,10 @@ import { filterProviders, resolveRampQuoteRequest } from "./shared";
 
 // Today every provider is `experimental`, so a `beta` deployment leaves them all
 // out. These stages put MoonPay in `beta` and keep every other provider out.
-const MOONPAY_ONLY: RampProviderStages = { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" };
+const MOONPAY_ONLY: SdpRampProviderStages = { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" };
 const env: Env = { ...baseEnv, SDP_RELEASE_CHANNEL: "beta" };
 
-function buildApp(stages: RampProviderStages) {
+function buildApp(stages: SdpRampProviderStages) {
   const app = new Hono<{ Bindings: Env }>();
   app.use("*", async (c, next) => {
     c.set("rampProviderStages", stages);

@@ -223,7 +223,9 @@ export const getOrganizationProviderAccess = async (c: AppContext) => {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
-  const response = await getProviderAvailability(c.env, getDb(c.env), orgId);
+  const response = await getProviderAvailability(c.env, getDb(c.env), orgId, {
+    rampProviderStages: c.get("rampProviderStages"),
+  });
   return success(c, response);
 };
 

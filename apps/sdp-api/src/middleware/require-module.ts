@@ -1,21 +1,20 @@
-import type { RampProviderId, SdpModule } from "@sdp/types";
-import type { Context, Next } from "hono";
-import { forbidden } from "@/lib/errors";
 import {
-  isModuleAvailable,
-  isRampProviderAvailable,
-  type RampProviderStages,
-} from "@/lib/feature-flags";
+  isRampTransferType,
+  type PaymentTransferType,
+  type RampProviderId,
+  type SdpModule,
+  type SdpRampProviderStages,
+} from "@sdp/types";
+import type { Context, Next } from "hono";
+import { forbidden, internalError } from "@/lib/errors";
+import { isModuleAvailable, isRampProviderAvailable } from "@/lib/feature-flags";
 import { rampProviderSchema } from "@/routes/payments/ramps/schemas";
 import type { Env } from "@/types/env";
 
 type ReleaseChannelContext = Context<{ Bindings: Env }>;
 
-/**
- * Stages `createApp` was given in place of `SDP_RAMP_PROVIDER_STAGES` (tests only,
- * see `AppDeps`). Undefined runs the code's stages.
- */
-function rampProviderStages(c: ReleaseChannelContext): RampProviderStages | undefined {
+/** The ramp provider stages `createApp` runs the release channel against. */
+function rampProviderStages(c: ReleaseChannelContext): SdpRampProviderStages {
   return c.get("rampProviderStages");
 }
 
@@ -47,6 +46,24 @@ export function assertModuleInChannel(c: ReleaseChannelContext, module: SdpModul
   if (!isModuleInChannel(c, module)) {
     throw forbidden(`The ${module} module is not available in this release channel.`);
   }
+}
+
+/**
+ * Refuses a request about a stored ramp transfer whose provider the release channel
+ * leaves out. A ramp transfer always has a provider, so a missing one is a data bug
+ * and fails instead of skipping the gate. Other transfer types pass through.
+ */
+export function assertTransferRampProviderInChannel(
+  c: ReleaseChannelContext,
+  transfer: { type: PaymentTransferType; provider: RampProviderId | null }
+): void {
+  if (!isRampTransferType(transfer.type)) {
+    return;
+  }
+  if (transfer.provider === null) {
+    throw internalError("Ramp transfer has no provider.");
+  }
+  assertRampProviderInChannel(c, transfer.provider);
 }
 
 /**

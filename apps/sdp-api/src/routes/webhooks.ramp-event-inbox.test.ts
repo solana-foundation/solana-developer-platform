@@ -1,12 +1,11 @@
 import { createHmac } from "node:crypto";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import app from "@/index";
-import type { RampProviderStages } from "@/lib/feature-flags";
 import { TerminalRampWebhookError } from "@/routes/webhooks/ramps/processor";
 import { RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "@/routes/webhooks/ramps/registry";
 import { noopObservability } from "@/runtime/observability";
@@ -215,7 +214,7 @@ describe("Ramp webhook event inbox", () => {
       )
       .run();
 
-    const applied = await replayRampWebhookEvents(env);
+    const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
 
     expect(applied).toBe(0);
     const rows = await readInboxRows();
@@ -237,7 +236,7 @@ describe("Ramp webhook event inbox", () => {
       .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
       .run();
 
-    const applied = await replayRampWebhookEvents(env);
+    const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
 
     expect(applied).toBe(1);
     expect(await readTransferStatus()).toBe("completed");
@@ -251,7 +250,7 @@ describe("Ramp webhook event inbox", () => {
       payload: completedPayload,
     });
 
-    const applied = await replayRampWebhookEvents(env);
+    const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
 
     expect(applied).toBe(0);
     expect(await readTransferStatus()).toBe("awaiting_payment");
@@ -292,7 +291,7 @@ describe("Ramp webhook event inbox", () => {
       )
       .run();
 
-    await replayRampWebhookEvents(env);
+    await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
 
     const rows = await getDb(env)
       .prepare("SELECT id, status, attempts FROM ramp_webhook_events ORDER BY created_at ASC")
@@ -325,7 +324,7 @@ describe("Ramp webhook event inbox", () => {
       .bind(stored.id)
       .run();
 
-    await replayRampWebhookEvents(env);
+    await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
 
     const row = await getDb(env)
       .prepare("SELECT status, attempts FROM ramp_webhook_events WHERE id = ?")
@@ -396,7 +395,7 @@ describe("Ramp webhook event inbox", () => {
   describe("with one ramp provider in the release channel and another out", () => {
     // Today every provider is `experimental`, so `beta` would leave them all out:
     // these stages put MoonPay in `beta` and keep Lightspark out of it.
-    const MOONPAY_ONLY: RampProviderStages = { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" };
+    const MOONPAY_ONLY: SdpRampProviderStages = { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" };
     const betaEnv = (): Env => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
     const betaApp = createApp({
       observability: noopObservability,
@@ -503,7 +502,12 @@ describe("Ramp webhook event inbox", () => {
         .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
         .run();
 
-      expect(await replayRampWebhookEvents({ ...env, SDP_RELEASE_CHANNEL: "stable" })).toBe(0);
+      expect(
+        await replayRampWebhookEvents(
+          { ...env, SDP_RELEASE_CHANNEL: "stable" },
+          SDP_RAMP_PROVIDER_STAGES
+        )
+      ).toBe(0);
 
       expect(await readInboxRows()).toMatchObject([
         { id: stored.id, status: "pending", attempts: 0 },

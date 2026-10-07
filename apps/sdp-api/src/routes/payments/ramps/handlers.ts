@@ -22,7 +22,10 @@ import {
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
-import { assertRampProviderInChannel } from "@/middleware/require-module";
+import {
+  assertRampProviderInChannel,
+  assertTransferRampProviderInChannel,
+} from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { sendOnceUnderTransferClaim } from "@/services/payments/transfer-claim";
@@ -51,9 +54,7 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
     throw badRequest("Only ramp transfers can be canceled through this endpoint.");
   }
   // A provider the release channel leaves out is off completely, its transfers included.
-  if (transfer.provider !== null) {
-    assertRampProviderInChannel(c, transfer.provider);
-  }
+  assertTransferRampProviderInChannel(c, transfer);
   if (!isCancelableRampTransferStatus(transfer.status)) {
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
   }

@@ -1,10 +1,11 @@
+import type { SdpRampProviderStages } from "@sdp/types";
 import { RAMP_PROVIDERS } from "@sdp/types";
 import { getDb } from "@/db";
 import {
   createPostgresRampWebhookEventsRepository,
   type RampWebhookEventRow,
 } from "@/db/repositories/ramp-webhook-event.repository";
-import { isRampProviderAvailable, type RampProviderStages } from "@/lib/feature-flags";
+import { isRampProviderAvailable } from "@/lib/feature-flags";
 import { TerminalRampWebhookError, type WebhookProcessor } from "@/routes/webhooks/ramps/processor";
 import {
   isWebhookRampProvider,
@@ -133,11 +134,11 @@ export async function applyStoredRampWebhookEvent(
  * Rows from a ramp provider the release channel leaves out are never re-armed,
  * parked or replayed: they stay exactly as they are until the provider returns.
  *
- * @param rampProviderStages - Ramp provider stages; tests only, see `RampProviderStages`.
+ * @param rampProviderStages - `SDP_RAMP_PROVIDER_STAGES`; tests may pass their own.
  */
 export async function replayRampWebhookEvents(
   env: Env,
-  rampProviderStages?: RampProviderStages
+  rampProviderStages: SdpRampProviderStages
 ): Promise<number> {
   const excludedProviders = RAMP_PROVIDERS.filter(
     (provider) => !isRampProviderAvailable(env, provider, rampProviderStages)

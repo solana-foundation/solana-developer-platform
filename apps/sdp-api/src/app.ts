@@ -1,3 +1,4 @@
+import type { SdpRampProviderStages } from "@sdp/types";
 /**
  * SDP API — Hono application factory.
  *
@@ -25,7 +26,6 @@ import { prettyJSON } from "hono/pretty-json";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError, badRequest, payloadTooLarge } from "@/lib/errors";
-import type { RampProviderStages } from "@/lib/feature-flags";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { dryRunMiddleware } from "@/middleware/dry-run";
@@ -79,11 +79,11 @@ export interface AppDeps {
   observability: Observability;
   plugins?: SdpPlugin[];
   /**
-   * Ramp provider stages to run the release channel against, in place of
-   * `SDP_RAMP_PROVIDER_STAGES`. Tests only: lets one provider be in a release
-   * channel while another is out, which today's all-`experimental` stages cannot show.
+   * Ramp provider stages to run the release channel against. Production passes
+   * `SDP_RAMP_PROVIDER_STAGES`; tests may put one provider in a release channel and
+   * leave another out, which today's all-`experimental` stages cannot show.
    */
-  rampProviderStages?: RampProviderStages;
+  rampProviderStages: SdpRampProviderStages;
 }
 
 // Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
@@ -314,9 +314,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   app.use("*", async (c, next) => {
     c.set("observability", deps.observability);
-    if (deps.rampProviderStages) {
-      c.set("rampProviderStages", deps.rampProviderStages);
-    }
+    c.set("rampProviderStages", deps.rampProviderStages);
     await next();
   });
 

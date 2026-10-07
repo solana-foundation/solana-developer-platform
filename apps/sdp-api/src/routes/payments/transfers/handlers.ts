@@ -57,7 +57,7 @@ import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
-import { assertRampProviderInChannel } from "@/middleware/require-module";
+import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { isRampQuoteBindingExpired } from "@/routes/payments/ramps/quote-binding";
 import { getLogger } from "@/runtime/logger";
@@ -333,9 +333,7 @@ async function updateOnchainTransferForRamp(
   const existing = await getPaymentsRepository(c).getTransferById(tenant);
   if (!existing) throw notFound("Ramp transfer");
   // A provider the release channel leaves out is off completely: never fund its deposits.
-  if (existing.provider !== null) {
-    assertRampProviderInChannel(c, existing.provider);
-  }
+  assertTransferRampProviderInChannel(c, existing);
 
   const deposit = getRampCryptoDeposit(existing);
   if (
@@ -412,8 +410,8 @@ export async function extractTransferPolicyCandidate(
       organizationId: scope.auth.organizationId,
       projectId: scope.auth.projectId,
     });
-    if (existing?.provider) {
-      assertRampProviderInChannel(c, existing.provider);
+    if (existing) {
+      assertTransferRampProviderInChannel(c, existing);
     }
   }
   const operation = resolveOutboundPaymentOperation({

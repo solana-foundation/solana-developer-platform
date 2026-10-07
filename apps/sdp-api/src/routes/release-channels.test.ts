@@ -1,5 +1,6 @@
 import {
   SDP_MODULES,
+  SDP_RAMP_PROVIDER_STAGES,
   SDP_RELEASE_CHANNEL_NAMES,
   SDP_RELEASE_CHANNELS,
   type SdpModule,
@@ -65,7 +66,10 @@ function nextClientHeaders() {
 }
 
 async function probe(releaseChannel: SdpReleaseChannel, module: SdpModule) {
-  const app = createApp({ observability: noopObservability });
+  const app = createApp({
+    rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    observability: noopObservability,
+  });
   const env = {
     ...baseEnv,
     ...ALL_FLAGS_ON,

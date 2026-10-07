@@ -1677,6 +1677,38 @@ describe("Payments routes — ramps", () => {
       .first<{ status: string }>();
     expect(required(row).status).toBe("awaiting_payment");
   });
+  it("fails a ramp transfer with no provider instead of skipping the release channel gate", async () => {
+    await seedRampTransfer({
+      id: "xfr_cancel_no_provider",
+      provider: "bvnk",
+      providerReference: "bvnk_ref_cancel_no_provider",
+      status: "awaiting_payment",
+    });
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET provider = NULL WHERE id = ?")
+      .bind("xfr_cancel_no_provider")
+      .run();
+
+    const res = await moonpayOnlyBetaApp.request(
+      "/v1/payments/ramps/transfers/cancel",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ transferId: "xfr_cancel_no_provider" }),
+      },
+      betaEnv()
+    );
+
+    expect(res.status).toBe(500);
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_cancel_no_provider")
+      .first<{ status: string }>();
+    expect(required(row).status).toBe("awaiting_payment");
+  });
   it("cancels an awaiting BVNK on-ramp transfer after the custody-wallet authz without touching BVNK", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "d1b_cancel_onramp" });
     await seedBvnkOnrampTransfer(getDb(env), {

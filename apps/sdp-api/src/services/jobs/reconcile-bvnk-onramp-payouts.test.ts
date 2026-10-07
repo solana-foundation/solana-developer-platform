@@ -13,7 +13,7 @@ import {
   buildCompleteSettlement,
   bvnkPayoutObservationFromSource,
 } from "@sdp/payments/ramps/providers/bvnk/settlement";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AppDb, getDb } from "@/db";
 import type {
@@ -23,7 +23,6 @@ import type {
   SettleBvnkOnrampPayoutInput,
 } from "@/db/repositories/bvnk-onramp-transfers.repository";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
-import type { RampProviderStages } from "@/lib/feature-flags";
 import { rootLogger } from "@/runtime/logger";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -344,7 +343,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
   describe("release channel", () => {
     // Today every provider is `experimental`; these stages put one provider in `beta`.
     const betaEnv = () => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
-    const onlyInBeta = (provider: "bvnk" | "moonpay"): RampProviderStages => ({
+    const onlyInBeta = (provider: "bvnk" | "moonpay"): SdpRampProviderStages => ({
       ...SDP_RAMP_PROVIDER_STAGES,
       [provider]: "beta",
     });
@@ -366,7 +365,10 @@ describe("reconcileBvnkOnrampPayouts", () => {
       await seedUnclaimedCandidate({ id: "xfr_bvnk_stable" });
       const before = await readTransferRow("xfr_bvnk_stable");
 
-      const touched = await reconcileBvnkOnrampPayouts({ ...env, SDP_RELEASE_CHANNEL: "stable" });
+      const touched = await reconcileBvnkOnrampPayouts(
+        { ...env, SDP_RELEASE_CHANNEL: "stable" },
+        SDP_RAMP_PROVIDER_STAGES
+      );
 
       expect(touched).toBe(0);
       expect(dryRunSpy).not.toHaveBeenCalled();
@@ -389,7 +391,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       await seedUnclaimedCandidate({ id: "xfr_happy" });
       createSpy.mockResolvedValue(processingSummary("xfr_happy"));
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       const row = await readTransferRow("xfr_happy");
@@ -452,7 +454,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
           networkFeeCurrency: { ...networkFeeCurrency, actual: null },
         });
 
-        const touched = await reconcileBvnkOnrampPayouts(env);
+        const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
         expect(touched).toBe(1);
         await expectDefinitiveFail(id, error);
@@ -471,7 +473,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       assert(before);
       dryRunSpy.mockRejectedValueOnce(new Error("BVNK dry-run unavailable"));
 
-      await reconcileBvnkOnrampPayouts(env);
+      await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       const after = await getDb(env)
         .prepare("SELECT updated_at, status, provider_data FROM payment_transfers WHERE id = ?")
@@ -488,7 +490,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       await seedUnclaimedCandidate({ id: "xfr_claim_lost" });
       bvnkRepoHarness.claimPayout.mockImplementationOnce(async () => null);
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(0);
       expect(createSpy).not.toHaveBeenCalled();
@@ -500,7 +502,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       await seedUnclaimedCandidate({ id: "xfr_definitive" });
       createSpy.mockRejectedValue(new BvnkPayRequestError("MER-PAY-2012", "insufficient funds"));
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       await expectDefinitiveFail("xfr_definitive", "MER-PAY-2012");
@@ -512,7 +514,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
         new BvnkPayRequestError("MER-PAY-2010", "reference already exists")
       );
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       expect(await readTransferRow("xfr_dup")).toMatchObject({ status: "settling", error: null });
@@ -538,7 +540,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       });
       createSpy.mockRejectedValue(new BvnkPayRequestError("MER-PAY-2012", "insufficient funds"));
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       expect(await readTransferRow("xfr_stale_creator")).toMatchObject({
@@ -557,7 +559,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
         token: "11111111111111111111111111111111",
       });
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       await expectDefinitiveFail("xfr_unknown_mint", "UNSUPPORTED_ASSET");
@@ -570,7 +572,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       await seedUnclaimedCandidate({ id: "xfr_prod", projectId: TEST_PRODUCTION_PROJECT_ID });
       createSpy.mockResolvedValue(processingSummary("xfr_prod"));
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       expect(dryRunSpy.mock.calls[0]?.[0]).toMatchObject({ mode: "production" });
@@ -588,7 +590,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       });
       createSpy.mockResolvedValue(processingSummary("xfr_survives"));
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       expect(await readTransferRow("xfr_survives")).toMatchObject({ status: "settling" });
@@ -602,7 +604,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       listSpy.mockResolvedValue([processingSummary("xfr_adopt", PAYOUT_UUID_2)]);
       payoutSummarySpy.mockResolvedValue(processingSummary("xfr_adopt", PAYOUT_UUID_2));
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       expect(createSpy).not.toHaveBeenCalled();
@@ -636,7 +638,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
         })
       );
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(2);
       expect(createSpy).not.toHaveBeenCalled();
@@ -651,7 +653,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       await seedClaimedCandidate("xfr_reissue", false);
       createSpy.mockResolvedValue(processingSummary("xfr_reissue"));
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       expect(dryRunSpy).not.toHaveBeenCalled();
@@ -676,7 +678,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
         new BvnkPayRequestError("MER-PAY-2001", "below the minimum limit")
       );
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       expect(await readTransferRow("xfr_ambiguous")).toMatchObject({
@@ -695,7 +697,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       await seedClaimedCandidate("xfr_complete", true, PAYOUT_UUID_1);
       payoutSummarySpy.mockResolvedValue(completedSummary("xfr_complete"));
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(1);
       const row = await readTransferRow("xfr_complete");
@@ -721,7 +723,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
       await seedClaimedCandidate("xfr_processing", true, PAYOUT_UUID_1);
       payoutSummarySpy.mockResolvedValue(processingSummary("xfr_processing"));
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       // The still-settling path: no CAS write, markPolled invoked.
       expect(touched).toBe(1);
@@ -746,7 +748,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
         );
       });
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(3);
       for (const status of Object.values(FAILED_STATUS_BY_UUID)) {
@@ -817,7 +819,7 @@ describe("reconcileBvnkOnrampPayouts", () => {
         )
       );
 
-      const touched = await reconcileBvnkOnrampPayouts(env);
+      const touched = await reconcileBvnkOnrampPayouts(env, SDP_RAMP_PROVIDER_STAGES);
 
       expect(touched).toBe(0);
       expect((await readTransferRow("xfr_conflict_complete")).status).toBe("failed");
