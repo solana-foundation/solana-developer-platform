@@ -1,18 +1,22 @@
 ---
 title: Overview
-description: Configure custody-wallet controls, operation permissions, and balances.
+description: Configure custody-wallet controls, operation permissions, approvals, and balances.
 ---
 
-This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, signing, and on-chain program activity, whichever product flow initiates the request.
+This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, **API-key policies** that narrow what one key may do, the **approval requests** a policy creates when it holds an operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, signing, and on-chain program activity, whichever product flow initiates the request.
 
 ## What's in this section
 
-- [Wallet policies](/docs/wallet-operations/policies) — configure default decisions, destination controls, amount limits, operation permissions, approval requirements, and audit visibility.
+- [Wallet policies](/docs/wallet-operations/policies) — configure default decisions, destination controls, amount limits, operation permissions, approval requirements, and audit visibility, and list every policy control in a project.
+- [API key policies](/docs/wallet-operations/api-key-policies) — add per-key rules through profiles, revisions, and wallet bindings; they narrow what the wallet policy allows and never expand it.
+- [Approvals](/docs/wallet-operations/approvals) — review, approve, reject, or cancel operations a policy held for approval, by API or in the dashboard's Approvals inbox.
 - [Wallet balances](/docs/wallet-operations/balances) — retrieve token balances and optional USD valuations for a custody wallet.
 
 ## API surface
 
 The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include transfer, payment, ramp, issuance, and program.
+
+The related endpoints live with their resources: `GET /v1/policies` lists wallet and API-key policy controls, `/v1/api-keys/{keyId}/policy-profiles` and `/v1/api-keys/{keyId}/policy-bindings` manage API-key policies, and `/v1/wallets/approval-requests` lists and decides approval requests.
 
 ## Related
 

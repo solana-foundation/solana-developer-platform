@@ -1,0 +1,284 @@
+---
+title: API key policies
+description: Narrow what one API key can do with its own policy profiles, revisions, and wallet bindings.
+---
+
+An **API-key policy** adds operation rules to a single API key. It uses the same rule format as a [wallet policy](/docs/wallet-operations/policies), but it only applies to wallet operations requested with that key. SDP evaluates the wallet policy and the API-key policy together and applies the stricter decision, so an API-key policy can tighten what a key may do or send its operations to approval, but it never allows something the wallet policy blocks.
+
+Use API-key policies to give each integration only the operations it needs: for example, a payouts service key that may send payments but never touch issuance, or a key whose batch payouts always wait for an operator.
+
+## How API-key policies differ from wallet policies
+
+| | Wallet policy | API-key policy |
+| --- | --- | --- |
+| Applies to | Every operation on one custody wallet, whoever requests it | Operations requested with one API key |
+| Managed with | `PUT /v1/payments/wallets/{walletId}/policies` | `/v1/api-keys/{keyId}/policy-profiles` and `PUT /v1/api-keys/{keyId}/policy-bindings` |
+| Revisions | Each `PUT` creates and activates a new revision in one step | You create revisions, then activate one in a separate call |
+| Scope across wallets | One wallet | All wallets the key can use, or a different profile per wallet through bindings |
+| Rules | Rule kinds and default actions described in [Wallet policies](/docs/wallet-operations/policies#rule-kinds) | The same rule kinds and default actions |
+
+An API-key policy is also different from the key's permissions. Permissions such as `payments:write` decide which endpoints a key may call. The API-key policy decides what happens to the wallet operation once that call is authorized. Requests made from the dashboard do not use an API key, so only the wallet policy applies to them.
+
+## How profiles, revisions, and activation work
+
+- A **profile** belongs to one API key. A new profile starts in `draft` status with no active revision, and has no effect until you activate a revision.
+- A **revision** is an immutable snapshot of `rules` and `defaultAction`. Creating a revision never changes what is enforced. Revision numbers increase by one per profile.
+- **Activating** a revision makes it the profile's active revision and sets the profile's status to `active`. To change the rules, create a new revision and activate it. To roll back, activate an earlier revision.
+
+Until a key has [policy bindings](#bind-profiles-to-wallets), SDP applies one active profile of that key to every operation the key requests. If you keep more than one active profile for a key, write bindings so it is explicit which profile applies to which wallet.
+
+## Who can manage API-key policies
+
+All four authoring endpoints require the `api-keys:write` permission and an admin caller:
+
+- An API key with the `api_admin` role. Keys with any other role are refused with `403`.
+- In the dashboard, an organization admin.
+
+A key cannot manage its own policy profiles or bindings; such a request returns `400`. Authenticate with a different key or from the dashboard. The target key must belong to the same project as the caller.
+
+## Create a policy
+
+### 1. Create a profile
+
+`POST /v1/api-keys/{keyId}/policy-profiles` creates a draft profile for the key in the path.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/api-keys/key_abc123/policy-profiles \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Payouts service controls" }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-api-key-policy-profile.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/api-keys/key_abc123/policy-profiles",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name: "Payouts service controls" }),
+  }
+);
+const { data } = await response.json();
+// data.profile.id — for example "akcp_abc123"
+// data.profile.status — "draft"
+```
+</Tab>
+</Tabs>
+
+`name` is required, 1–100 characters. The response is `201` with the new `profile`.
+
+### 2. Add a revision
+
+`POST /v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions` appends a revision without activating it. The body is the complete rule set: up to 100 `rules` plus a `defaultAction` of `allow`, `deny`, `approval_required`, or `review`. Rules are validated like wallet-policy rules: rule `id` values must be unique, and `amount` and `velocity` rules must name the asset mints they bound.
+
+This revision denies every issuance operation and holds batch payouts for approval, while allowing everything else the wallet policy allows:
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/api-keys/key_abc123/policy-profiles/akcp_abc123/revisions \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "defaultAction": "allow",
+    "rules": [
+      {
+        "id": "deny-issuance",
+        "kind": "operation_family",
+        "family": "issuance",
+        "action": "deny"
+      },
+      {
+        "id": "approve-batches",
+        "kind": "operation_type",
+        "operationTypes": ["payment_transfer_batch_execute"],
+        "action": "approval_required"
+      }
+    ]
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="create-api-key-policy-revision.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/api-keys/key_abc123/policy-profiles/akcp_abc123/revisions",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      defaultAction: "allow",
+      rules: [
+        { id: "deny-issuance", kind: "operation_family", family: "issuance", action: "deny" },
+        {
+          id: "approve-batches",
+          kind: "operation_type",
+          operationTypes: ["payment_transfer_batch_execute"],
+          action: "approval_required",
+        },
+      ],
+    }),
+  }
+);
+const { data } = await response.json();
+// data.revision.id — for example "akcpr_abc123"
+// data.revision.revisionNumber
+// data.revision.activatedAt — null until activated
+```
+</Tab>
+</Tabs>
+
+A `velocity` rule with `"scope": "api_key"` counts only operations requested with this key. See [Velocity limits](/docs/wallet-operations/policies#velocity-limits).
+
+### 3. Activate the revision
+
+`POST /v1/api-keys/{keyId}/policy-profiles/{profileId}/revisions/{revisionId}/activate` takes no body.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/api-keys/key_abc123/policy-profiles/akcp_abc123/revisions/akcpr_abc123/activate \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="activate-api-key-policy-revision.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/api-keys/key_abc123/policy-profiles/akcp_abc123/revisions/akcpr_abc123/activate",
+  { method: "POST", headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await response.json();
+// data.profile.status — "active"
+// data.profile.activeRevisionId — "akcpr_abc123"
+```
+</Tab>
+</Tabs>
+
+The response returns both the profile and the activated revision:
+
+```json title="response.json"
+{
+  "data": {
+    "profile": {
+      "id": "akcp_abc123",
+      "organizationId": "org_abc123",
+      "projectId": "prj_abc123",
+      "apiKeyId": "key_abc123",
+      "name": "Payouts service controls",
+      "status": "active",
+      "activeRevisionId": "akcpr_abc123",
+      "createdBy": "user_abc123",
+      "createdAt": "2026-05-15T08:55:00.000Z",
+      "updatedAt": "2026-05-15T09:00:00.000Z",
+      "activatedAt": "2026-05-15T09:00:00.000Z",
+      "archivedAt": null
+    },
+    "revision": {
+      "id": "akcpr_abc123",
+      "profileId": "akcp_abc123",
+      "revisionNumber": 1,
+      "rules": [
+        { "id": "deny-issuance", "kind": "operation_family", "family": "issuance", "action": "deny" },
+        {
+          "id": "approve-batches",
+          "kind": "operation_type",
+          "operationTypes": ["payment_transfer_batch_execute"],
+          "action": "approval_required"
+        }
+      ],
+      "defaultAction": "allow",
+      "createdBy": "user_abc123",
+      "createdAt": "2026-05-15T08:58:00.000Z",
+      "activatedAt": "2026-05-15T09:00:00.000Z"
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-15T09:00:00.000Z" }
+}
+```
+
+The public API has no endpoint that lists a key's profiles or revisions, so keep the IDs returned when you create them. [`GET /v1/policies`](/docs/wallet-operations/policies#policy-control-inventory) shows each key's selected profile, its active revision, and its binding scope.
+
+## Bind profiles to wallets
+
+`PUT /v1/api-keys/{keyId}/policy-bindings` decides which profile applies on which wallet. It replaces the key's complete binding set, or clears it.
+
+| Binding | Fields | Effect |
+| --- | --- | --- |
+| `"bindingScope": "all"` | `apiKeyControlProfileId` (required, and the only profile field) | Applies the profile on every wallet the key can use. |
+| `"bindingScope": "selected"` | `walletId` (required), plus `apiKeyControlProfileId`, `walletControlProfileId`, or both | Applies to one wallet. A selected binding for a wallet takes precedence over the `all` binding. |
+
+- `walletId` is the provider wallet ID: the `walletId` field returned by `GET /v1/wallets`. The key must be allowed to use that wallet.
+- `apiKeyControlProfileId` must be an active profile of this key.
+- `walletControlProfileId` must be the wallet's active wallet control profile (`controlProfile.id` from the [wallet policy](/docs/wallet-operations/policies#reading-a-wallets-policies) endpoint). On a selected binding with no `apiKeyControlProfileId`, the key's default active profile applies, if it has one.
+- `"mode": "replace"` takes 1–100 bindings, with at most one `all` binding and one binding per wallet. `"mode": "clear"` removes every binding.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -X PUT https://api.solana.com/v1/api-keys/key_abc123/policy-bindings \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "replace",
+    "bindings": [
+      { "bindingScope": "all", "apiKeyControlProfileId": "akcp_abc123" },
+      {
+        "bindingScope": "selected",
+        "walletId": "privy_wallet_123",
+        "apiKeyControlProfileId": "akcp_def456"
+      }
+    ]
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="write-api-key-policy-bindings.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/api-keys/key_abc123/policy-bindings",
+  {
+    method: "PUT",
+    headers: {
+      "Authorization": "Bearer sk_test_...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      mode: "replace",
+      bindings: [
+        { bindingScope: "all", apiKeyControlProfileId: "akcp_abc123" },
+        {
+          bindingScope: "selected",
+          walletId: "privy_wallet_123",
+          apiKeyControlProfileId: "akcp_def456",
+        },
+      ],
+    }),
+  }
+);
+const { data } = await response.json();
+// data.policyBindings: the key's bindings after the write
+```
+</Tab>
+</Tabs>
+
+The response lists the key's bindings after the write. Each entry has an `id`, its `bindingScope`, the `walletId` and SDP wallet `custodyWalletId` (`cwlt_…`) for selected bindings, and the bound `apiKeyControlProfileId` and `walletControlProfileId` with the revision IDs active for each. `GET /v1/api-keys/{keyId}` returns the same summaries under `policyBindings`.
+
+Once a key has any binding, SDP refuses with `403` any operation the key requests on a wallet that no binding covers. Add an `all` binding to keep every wallet usable. `PATCH /v1/api-keys/{keyId}` and key rotation leave existing bindings in place; only this endpoint changes them.
+
+## How decisions combine
+
+For each operation requested with the key, SDP evaluates the wallet policy and the key's applicable API-key profile separately, then keeps the stricter decision. The policy evaluation records both: `reasonCode` is `api_key_policy_match` when the key's policy produced the stricter decision, and the evaluation detail lists the API-key revision that was evaluated. If the combined decision holds the operation, SDP creates an [approval request](/docs/wallet-operations/approvals).
+
+## Related
+
+- [Wallet policies](/docs/wallet-operations/policies) — the baseline rules for each custody wallet.
+- [Approvals](/docs/wallet-operations/approvals) — decide operations a policy held for approval.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys) — create, rotate, and revoke keys.
+- [API keys API reference](/docs/reference/api/api-keys) — request and response schemas for every endpoint on this page.

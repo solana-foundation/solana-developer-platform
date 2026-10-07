@@ -3,7 +3,9 @@ title: Wallet policies
 description: Wallet controls, operation permissions, and policy audit visibility.
 ---
 
-A **wallet policy** constrains how a custody wallet can move funds and execute supported operations. SDP starts from default allow, then applies the active wallet control profile and any policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before each wallet operation executes.
+A **wallet policy** constrains how a custody wallet can move funds and execute supported operations. SDP starts from default allow, then applies the wallet's active control profile: an ordered list of rules plus a default action. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before each wallet operation executes.
+
+In these paths, `walletId` is the provider wallet ID: the `walletId` field returned by `GET /v1/wallets`, such as `privy_wallet_123`. The SDP wallet `id` (`cwlt_…`) and the wallet's public key are not accepted here.
 
 Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
 
@@ -12,20 +14,20 @@ Use policies for treasury wallets, automated payout wallets, or any custody wall
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
+curl https://api.solana.com/v1/payments/wallets/privy_wallet_123/policies \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="get-wallet-policies.ts"
 const response = await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
+  "https://api.solana.com/v1/payments/wallets/privy_wallet_123/policies",
   { headers: { Authorization: "Bearer sk_test_..." } }
 );
 const { data } = await response.json();
-// data.policy.destinationAllowlist: string[]
-// data.policy.maxTransferAmount?: string
-// data.policy.maxDailyAmount?: string
+// data.policy.defaultAction
+// data.policy.rules
+// data.policy.controlProfile (null when no profile is active)
 // data.policy.controlProfile?.providerMappingStatus
 // data.policy.audit?.recentEvaluations
 ```
@@ -38,17 +40,24 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the policy
 {
   "data": {
     "policy": {
-      "walletId": "wal_abc123",
-      "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
-      "maxTransferAmount": "100.00",
-      "maxDailyAmount": "1000.00",
+      "walletId": "privy_wallet_123",
       "defaultAction": "allow",
+      "rules": [
+        {
+          "id": "approval-required",
+          "kind": "approval",
+          "families": ["payment", "ramp"],
+          "action": "approval_required",
+          "name": "Approval checks"
+        }
+      ],
       "controlProfile": {
         "id": "wcp_abc123",
         "status": "active",
         "activeRevisionId": "wcpr_abc123",
         "revisionId": "wcpr_abc123",
         "revisionNumber": 3,
+        "commitMessage": "Require approval for payments and ramps.",
         "defaultAction": "allow",
         "rules": [
           {
@@ -85,28 +94,28 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the policy
             "evaluatedAt": "2026-05-14T10:20:00Z"
           }
         ]
-      },
-      "createdAt": "2026-05-14T08:00:00Z",
-      "updatedAt": "2026-05-14T10:15:00Z"
+      }
     }
   },
   "meta": { "requestId": "req_...", "timestamp": "2026-05-18T00:00:00.000Z" }
 }
 ```
 
-Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, regardless of the mint's decimals — matching the transfer-request convention). The configured value is a **single threshold**, but enforcement is **per token**: `maxDailyAmount` sums each token's outbound transfers separately within the day window, so a wallet with `maxDailyAmount: "1000"` can send up to 1000 USDC *and* 1000 SOL in the same UTC day — there is no aggregate cap across mints. If you need different per-token thresholds (e.g., 10,000 USDC daily but 50 SOL daily), partition into separate wallets.
+`defaultAction` and `rules` mirror the active revision. A wallet with no active control profile returns `defaultAction: "allow"`, an empty `rules` array, and `controlProfile: null`.
 
 ## Default allow and active controls
 
 Wallet policy evaluation starts from default allow. If no wallet control profile exists, supported wallet operations continue to run unless another product-specific check rejects them. When you activate a control profile, SDP evaluates its rules first and returns the resulting `decision` as one of `allow`, `deny`, `approval_required`, `provider_approval_required`, `review`, or `not_evaluated`.
 
+When a request is made with an API key, SDP also evaluates that key's [API-key policy](/docs/wallet-operations/api-key-policies), if it has one, and applies the stricter of the two decisions.
+
 The `controlProfile` object shows the active immutable revision. Treat `revisionId` and `revisionNumber` as audit references: a policy evaluation records which revision was active when the wallet operation was checked.
 
 ### Dashboard actions
 
-The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **Require approval**. Choose **Require approval** when an operator must decide whether an operation can continue; it holds the operation and creates an **Approval Request**.
+The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **Require approval**. Choose **Require approval** when an operator must decide whether an operation can continue; it holds the operation and creates an [approval request](/docs/wallet-operations/approvals).
 
-`review` remains a possible API evaluation result for legacy or safety paths, such as an unrecognized policy rule. It is visible in audit records, but it is not a dashboard authoring option or a separate human-review workflow. Do not use it to model operator approval; use `approval_required` instead.
+`review` is the result SDP returns when a rule cannot be evaluated safely: for example an `operation_family`, `operation_type`, or `asset` rule with no values, a `destination` rule with no addresses, an `amount` rule with neither `min` nor `max`, or a `velocity` rule whose window total could not be read. The API also accepts `review` as a rule `action` or a `defaultAction`, but it is not a dashboard authoring option. A `review` decision holds the operation and creates an approval request, like `approval_required`, but the evaluation records `requiresApproval: false`. Treat `review` as a sign that a rule needs fixing. Do not use it to model operator approval; use `approval_required` instead.
 
 ## Rule kinds
 
@@ -154,19 +163,19 @@ Wallet policies can match operations at two levels:
 - **Operation family** rules apply to every evaluated operation in a broad product area.
 - **Operation type** rules match one exact operation identifier and take precedence when you need a narrower decision.
 
-These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. The wallet policy is the baseline: an API key policy can narrow what a key may do, or route an operation into approval, but it can never expand past what the wallet policy allows. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys) for caller permissions.
+These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. The wallet policy is the baseline: an [API-key policy](/docs/wallet-operations/api-key-policies) can narrow what a key may do, or route an operation into approval, but it can never expand past what the wallet policy allows. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys) for caller permissions.
 
 ### Operation families
 
 | Family | Description | Current evaluated operations |
 | --- | --- | --- |
-| `payment` | Outbound single and batch payments. | Single and batch transfer execution |
+| `payment` | Outbound single and batch payments. | Single and batch transfer execution; recurring payment creation, update, and collection |
 | `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | On-ramp and off-ramp quote creation |
-| `issuance` | Token lifecycle actions signed by the wallet. | Mint, burn, seize, and authority-update execution |
-| `program` | On-chain program interactions signed by the wallet. | No current public operation type |
-| `transfer` | Generic direct-transfer family reserved for operations outside the payment workflow. | No current public operation type |
+| `issuance` | Token lifecycle actions signed by the wallet. | Deploy, mint, burn, force burn, seize, authority update, freeze, unfreeze, pause, unpause, metadata update, and allowlist add and remove |
+| `program` | On-chain program interactions signed by the wallet. | None in the public API |
+| `transfer` | Direct transfers outside the payment workflow. | None in the public API; payment transfers use the `payment` family |
 
-Family values with no current public operation type are valid policy values, but they do not match a public SDP flow until an operation is emitted in that family.
+Family values with no public operation type are valid policy values, but no public SDP endpoint emits an operation in those families.
 
 ### Exact operation types
 
@@ -176,6 +185,7 @@ Family values with no current public operation type are valid policy values, but
 | `payment_transfer_batch_execute` | `payment` | Executes an outbound batch and evaluates the aggregate amount before submission. |
 | `ramp_onramp_quote` | `ramp` | Creates an on-ramp quote that delivers crypto to the destination wallet. |
 | `ramp_offramp_quote` | `ramp` | Creates an off-ramp quote that draws crypto from the source wallet. |
+| `issuance_deploy_execute` | `issuance` | Deploys the token using the configured signing wallet. |
 | `issuance_mint_execute` | `issuance` | Executes a token mint using the configured signing wallet. |
 | `issuance_burn_execute` | `issuance` | Executes a token burn using the configured signing wallet. |
 | `issuance_force_burn_execute` | `issuance` | Force-burns tokens from a holder account. |
@@ -186,11 +196,17 @@ Family values with no current public operation type are valid policy values, but
 | `issuance_pause_execute` | `issuance` | Pauses all token transfers using the pause authority wallet. |
 | `issuance_unpause_execute` | `issuance` | Resumes token transfers using the pause authority wallet. |
 | `issuance_metadata_update_execute` | `issuance` | Rewrites on-chain token metadata using the metadata authority wallet. |
+| `issuance_allowlist_add_execute` | `issuance` | Adds an address to the token's on-chain allowlist using the list authority wallet. |
+| `issuance_allowlist_remove_execute` | `issuance` | Removes an address from the token's on-chain allowlist using the list authority wallet. |
 | `recurring_payment_create` | `payment` | Creates a recurring payment schedule. |
 | `recurring_payment_update` | `payment` | Updates a recurring payment schedule. |
 | `recurring_payment_collection` | `payment` | Collects a due recurring payment. |
 
-Operation-type matching is exact and case-sensitive. The API accepts only the supported identifiers above, so a rule cannot be activated for an operation SDP never emits.
+Operation-type matching is exact and case-sensitive. The API rejects operation types it does not recognize.
+
+### Policy-gated issuance actions
+
+Every issuance action that SDP signs with a custody wallet is checked against that wallet's policy before it runs, not only the actions that move tokens: deploy, freeze and unfreeze, pause and unpause, authority updates, on-chain metadata updates, and allowlist changes are gated the same way as mint, burn, force burn, and seize. Requests that sign nothing are not evaluated. These include the `/prepare` endpoints, which return an unsigned transaction for you to sign, token edits that change no on-chain metadata or target a token that is not deployed yet, and allowlist changes on a token without an on-chain allowlist.
 
 ## Policy evaluation and audit records
 
@@ -203,53 +219,203 @@ Each supported action against the wallet is recorded as a **Wallet Operation** �
 
 Use these records to explain allow, deny, approval-required, and review outcomes. They are an operational audit summary, not the full raw provider payload.
 
+The request that triggered the operation reports the decision directly. A `deny` (or `not_evaluated`) decision fails the request with `403` and error code `FORBIDDEN`. A decision that holds the operation returns `202` with error code `SIGNING_PENDING` and the `approvalRequestId` in `error.details`; see [Approvals](/docs/wallet-operations/approvals) for what happens next.
+
+## Policy control inventory
+
+`GET /v1/policies` lists the policy controls of every wallet and API key in the project in one paginated response. Use it to find wallets still running on implicit default allow, profiles left in draft, or API keys that have policy bindings.
+
+| Query parameter | Values |
+| --- | --- |
+| `target` | `wallet`, `api_key`, or `all` (default) |
+| `status` | `default_allow`, `draft`, `active`, or `disabled` |
+| `query` | Case-insensitive substring of the wallet display name or API-key label, up to 200 characters |
+| `page` | Page number, starting at 1 (default 1) |
+| `pageSize` | Rows per page, 1–100 (default 25) |
+
+`target=wallet` requires the `wallets:read` permission, `target=api_key` requires `api-keys:read`, and `all` requires both. An API key limited to selected wallets only sees the wallets it can read.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl "https://api.solana.com/v1/policies?target=all&status=active&page=1&pageSize=25" \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="list-policy-controls.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/policies?target=all&status=active&page=1&pageSize=25",
+  { headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await response.json();
+// data.controls: one row per wallet or API key
+// data.total, data.page, data.pageSize
+// data.summary: counts per status, plus totalApiKeyBindings
+```
+</Tab>
+</Tabs>
+
+```json title="response.json"
+{
+  "data": {
+    "controls": [
+      {
+        "targetType": "wallet",
+        "targetId": "cwlt_abc123",
+        "walletId": "privy_wallet_123",
+        "walletAddress": "7xKXz...9fGh",
+        "displayName": "Treasury",
+        "controlProfileId": "wcp_abc123",
+        "status": "active",
+        "activeRevisionId": "wcpr_abc123",
+        "activeRevisionNumber": 3,
+        "defaultAction": "allow",
+        "ruleCount": 1,
+        "providerMappingStatus": "not_applicable",
+        "updatedAt": "2026-05-14T10:15:00.000Z",
+        "activatedAt": "2026-05-14T10:15:00.000Z",
+        "latestEvaluation": {
+          "decision": "approval_required",
+          "evaluatedAt": "2026-05-14T10:20:00.000Z"
+        }
+      },
+      {
+        "targetType": "api_key",
+        "targetId": "key_abc123",
+        "apiKeyPrefix": "sk_test_abc",
+        "displayName": "Payouts service",
+        "controlProfileId": "akcp_abc123",
+        "status": "active",
+        "activeRevisionId": "akcpr_abc123",
+        "activeRevisionNumber": 1,
+        "defaultAction": "allow",
+        "ruleCount": 2,
+        "bindingScope": "all",
+        "selectedWalletCount": 0,
+        "updatedAt": "2026-05-15T09:00:00.000Z",
+        "activatedAt": "2026-05-15T09:00:00.000Z",
+        "latestEvaluation": null
+      }
+    ],
+    "total": 2,
+    "page": 1,
+    "pageSize": 25,
+    "summary": {
+      "total": 6,
+      "defaultAllow": 3,
+      "draft": 1,
+      "active": 2,
+      "disabled": 0,
+      "totalApiKeyBindings": 1
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-18T00:00:00.000Z" }
+}
+```
+
+- `status` is computed per target: `default_allow` when no control profile exists, `draft` when the profile has no active revision yet, `active` when a revision is enforced, and `disabled` for a disabled profile, which is not reported as `default_allow`.
+- For a wallet row, `targetId` is the SDP wallet `id` (`cwlt_…`) and `walletId` is the provider wallet ID. For an API-key row, `targetId` is the API key ID and only the redacted `apiKeyPrefix` is returned.
+- `defaultAction` and `ruleCount` come from the active revision, or from the latest draft revision when none is active.
+- `latestEvaluation` is the most recent policy decision for the target, or `null`.
+- `bindingScope` and `selectedWalletCount` describe the key's [policy bindings](/docs/wallet-operations/api-key-policies#bind-profiles-to-wallets).
+- `summary` counts apply the `target` and `query` filters, but not the `status` filter.
+
 ## Provider mapping status
 
 `providerMappingStatus` describes whether an SDP policy revision has also been mapped into a custody or ramp provider's native policy system. Current payment wallet controls are SDP-enforced first. A value of `not_applicable` means there is no provider-native mapping for that revision. `pending`, `partial`, or `failed` mean SDP still evaluates the operation, but you should not assume the same rule has been fully synced to the provider.
 
 ## Destination allowlist
 
-This is a wallet-policy control on outbound destinations — distinct from a token's **Token Access Control** allowlist, which gates who may hold the token itself. It is a list of on-chain destination addresses (32-44 character base-58 Solana pubkeys). When set, `POST /v1/payments/transfers` rejects any destination not in the list.
+Destination controls are `destination` rules in the wallet policy. They are distinct from a token's **Token Access Control** allowlist, which gates who may hold the token itself. Each entry is a single on-chain address (a base-58 Solana public key), with no patterns, ranges, or address books.
 
-- Maximum entries: **500 addresses per wallet**.
-- Each entry is a single on-chain address — no patterns, ranges, or address books.
-- Empty allowlist (`[]`) means no destination restriction. To enable enforcement, populate at least one entry.
+```json title="destination-rule.json"
+{
+  "id": "known-counterparties",
+  "kind": "destination",
+  "allowlist": ["7xKXz...9fGh", "5aBCd...2eFg"]
+}
+```
+
+- `allowlist` (or `destination` / `destinations`): an operation whose destination is not on the list is denied. A destination on the list gets the rule's `action`, `allow` by default.
+- `blocklist`: an operation whose destination is on the list is denied. Any other destination is left to the other rules.
+- Each list holds up to **500 addresses** per rule.
+- A `destination` rule with no addresses returns `review`.
+
+An allowlist also denies operations that have no destination, such as pausing a token, because no address on the list can match. For a batch, destination rules are checked for each recipient.
 
 The allowlist exists to bound risk on automated wallets (a hot wallet that should only ever pay a known set of counterparties) and to enforce treasury controls (only the corporate cold-storage address can drain the operating wallet).
 
 ## Transfer limits
 
-A **transfer limit** always targets one **Policy Asset** — identified by mint, with native SOL under its well-known mint — never a blanket cap across assets. Two limits, both optional:
+Transfer limits are `amount` and `velocity` rules. Both always target specific assets, identified by mint, with native SOL under its well-known mint. There is no blanket cap across assets, and a rule that names no mint is rejected.
 
-- **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected. Compared against the request's `amount` directly, so it is naturally per-token.
-- **`maxDailyAmount`** — UTC-calendar-day cap, **enforced per token**. The day window resets at 00:00 UTC; the projected total is the sum of that wallet's outbound transfers for the **same token** in the current day (`pending`/`processing`/`confirmed`/`finalized`) plus the new request's `amount`. Different tokens are summed independently — see the per-token note under [Reading a wallet's policies](#reading-a-wallets-policies).
+- **Per-operation cap**: an `amount` rule denies any single operation whose amount is below `min` or above `max` for the named mints.
+- **Rolling cap**: a `velocity` rule sums prior operations over a rolling window. See [Velocity limits](#velocity-limits).
 
-Set both for defense in depth: a per-transaction cap that catches obvious mistakes, plus a daily cap that bounds blast radius if many small transfers are submitted in a coordinated attack.
+```json title="limit-rules.json"
+[
+  {
+    "id": "max-usdc-per-transfer",
+    "kind": "amount",
+    "max": "10000",
+    "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+  },
+  {
+    "id": "daily-usdc-cap",
+    "kind": "velocity",
+    "window": "P1D",
+    "max": "50000",
+    "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+  }
+]
+```
+
+Amounts are **UI-unit decimal strings**: `"100.00"` means 100 tokens, regardless of the mint's decimals, matching the transfer-request convention. A rule that names several mints applies the same bound to each mint separately, so there is no aggregate cap across mints. For different thresholds per token (for example 10,000 USDC but 50 SOL), write one rule per mint.
+
+Set both for defense in depth: a per-operation cap that catches obvious mistakes, plus a rolling cap that bounds blast radius if many small transfers are submitted in a coordinated attack.
 
 ## Updating policies
 
-`PUT /v1/payments/wallets/{walletId}/policies` has **full-replace** semantics — the request body becomes the new policy state in its entirety. To remove the allowlist, send `destinationAllowlist: []`. To drop a transfer limit, omit the field on the next PUT.
+`PUT /v1/payments/wallets/{walletId}/policies` has **full-replace** semantics: the request body is the complete rule set and default action for a new immutable revision, which SDP activates immediately. To remove a rule, leave it out of the next `PUT`. To lift every restriction, send `"defaultAction": "allow"` with an empty `rules` array.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `defaultAction` | Yes | `allow`, `deny`, `approval_required`, or `review`; applies when no rule matches. |
+| `rules` | Yes | Up to 100 rules. Rule `id` values must be unique. |
+| `commitMessage` | No | Up to 500 characters describing the change, stored on the revision. |
+| `expectedRevisionId` | No | The active revision ID you last read. If another update has activated a revision since, the request fails with `409`. Use `null` to require that no profile is active yet. Omit it to overwrite unconditionally. |
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
+curl -X PUT https://api.solana.com/v1/payments/wallets/privy_wallet_123/policies \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "destinationAllowlist": [
-      "7xKXz...9fGh",
-      "5aBCd...2eFg"
-    ],
-    "maxTransferAmount": "100.00",
-    "maxDailyAmount": "1000.00"
+    "defaultAction": "allow",
+    "commitMessage": "Restrict payouts to known counterparties.",
+    "expectedRevisionId": "wcpr_abc123",
+    "rules": [
+      {
+        "id": "known-counterparties",
+        "kind": "destination",
+        "allowlist": ["7xKXz...9fGh", "5aBCd...2eFg"]
+      },
+      {
+        "id": "max-usdc-per-transfer",
+        "kind": "amount",
+        "max": "100.00",
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+      }
+    ]
   }'
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="update-wallet-policies.ts"
 await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
+  "https://api.solana.com/v1/payments/wallets/privy_wallet_123/policies",
   {
     method: "PUT",
     headers: {
@@ -257,9 +423,22 @@ await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      destinationAllowlist: ["7xKXz...9fGh", "5aBCd...2eFg"],
-      maxTransferAmount: "100.00",
-      maxDailyAmount: "1000.00",
+      defaultAction: "allow",
+      commitMessage: "Restrict payouts to known counterparties.",
+      expectedRevisionId: "wcpr_abc123",
+      rules: [
+        {
+          id: "known-counterparties",
+          kind: "destination",
+          allowlist: ["7xKXz...9fGh", "5aBCd...2eFg"],
+        },
+        {
+          id: "max-usdc-per-transfer",
+          kind: "amount",
+          max: "100.00",
+          asset: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        },
+      ],
     }),
   }
 );
@@ -267,16 +446,28 @@ await fetch(
 </Tab>
 </Tabs>
 
-Because PUT is full-replace, treat policy edits like ordinary form submissions: read the current state, present it for editing, and PUT the complete updated object. Don't construct partial patches.
+Because PUT is full-replace, treat policy edits like ordinary form submissions: read the current state, present it for editing, and PUT the complete updated object with `expectedRevisionId` set to the `controlProfile.activeRevisionId` you read, so a concurrent edit fails instead of being overwritten. Don't construct partial patches.
+
+### Who can change wallet policies
+
+Updating a wallet policy requires the `wallets:write` and `payments:write` permissions and an admin caller:
+
+- An API key with the `api_admin` role. A key with any other role receives `403 FORBIDDEN`, even when it holds both permissions.
+- In the dashboard, an organization admin.
+
+Reading a wallet policy requires `wallets:read` and `payments:read`. API-key policies have their own authoring rules; see [API key policies](/docs/wallet-operations/api-key-policies#who-can-manage-api-key-policies).
 
 ## Interaction with compliance
 
-Wallet policies enforce **structural** constraints (where funds can go, how much, how fast). They do not replace compliance screening. If your organization has compliance screening enabled, screening happens on the destination address as a separate check, in addition to the allowlist match. A transfer can be rejected by either layer; both must pass to reach the network.
+Wallet policies enforce **structural** constraints (where funds can go, how much, how fast). They do not replace compliance screening. If your organization has compliance screening enabled, screening happens on the destination address as a separate check, in addition to any `destination` rule. A transfer can be rejected by either layer; both must pass to reach the network.
 
 See the [Compliance API reference](/docs/reference/api/compliance) for address-screening flows that complement policies.
 
 ## Related
 
+- [API key policies](/docs/wallet-operations/api-key-policies) — narrow what one API key can do on top of the wallet policy.
+- [Approvals](/docs/wallet-operations/approvals) — review and decide operations a policy held for approval.
+- [Policies API reference](/docs/reference/api/policies) — the policy control inventory endpoint.
 - [Payouts and disbursements](/docs/payments/send-payouts) — running an outbound batch from a policy-constrained wallet.
 - [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint subject to policy enforcement.
 - [Wallet balances](/docs/wallet-operations/balances) — current balance, useful to size transfer limits.

@@ -1,0 +1,253 @@
+---
+title: Approvals
+description: Review and decide wallet operations that a policy held for approval.
+---
+
+When a [wallet policy](/docs/wallet-operations/policies) or an [API-key policy](/docs/wallet-operations/api-key-policies) holds an operation, SDP pauses it and opens an **approval request**. Someone other than the requester approves the request, which runs the original operation, or rejects it, which cancels the operation. The requester can withdraw the request by canceling it.
+
+Approval requests are managed under `/v1/wallets/approval-requests` and in the dashboard's **Approvals** inbox.
+
+## When SDP creates an approval request
+
+SDP evaluates policy before each policy-gated wallet operation, such as payment transfers and batches, ramp quotes, recurring payments, and issuance actions signed with a custody wallet. It records the operation, then opens an approval request when the combined decision is one of:
+
+- `approval_required` — an `approval` rule matched, a matching rule has `action: "approval_required"`, a `velocity` rule with that action was breached, or the revision's `defaultAction` is `approval_required`.
+- `provider_approval_required` — a matching rule has that action.
+- `review` — a rule could not be evaluated safely. See [Dashboard actions](/docs/wallet-operations/policies#dashboard-actions) for when this happens and why it should be fixed rather than approved as routine.
+
+If a matching `approval` rule names an `approvalGroupId`, the request is routed to that approval group.
+
+The original request does not run. It returns HTTP `202` with error code `SIGNING_PENDING`, and `error.details` carries the IDs you need to follow up:
+
+```json title="response.json"
+{
+  "error": {
+    "code": "SIGNING_PENDING",
+    "message": "Wallet operation requires policy approval",
+    "details": {
+      "walletOperationId": "wop_abc123",
+      "policyEvaluationId": "peval_abc123",
+      "decision": "approval_required",
+      "reasonCode": "wallet_policy_match",
+      "reason": "Approval policy matched operation. Combined policy decision: wallet=approval_required, API key=allow.",
+      "requiresApproval": true,
+      "approvalRequestId": "appr_abc123"
+    }
+  },
+  "meta": { "requestId": "req_..." }
+}
+```
+
+A `deny` decision does not create an approval request; the request fails with `403` and error code `FORBIDDEN` instead.
+
+## Permissions
+
+| Endpoint | Permission |
+| --- | --- |
+| `GET /v1/wallets/approval-requests` | `wallets:read` |
+| `GET /v1/wallets/approval-requests/{approvalRequestId}` | `wallets:read` |
+| `POST /v1/wallets/approval-requests/{approvalRequestId}/approve` | `wallets:write` |
+| `POST /v1/wallets/approval-requests/{approvalRequestId}/reject` | `wallets:write` |
+| `POST /v1/wallets/approval-requests/{approvalRequestId}/cancel` | `wallets:write` |
+
+Requests are scoped to the caller's project. On top of the endpoint permission, each request has its own rules for who may decide it:
+
+- **The requester never approves or rejects their own request.** A user and every API key that user created count as the same requester, so you cannot raise a request with one and decide it with the other.
+- **The requester may cancel their own request.**
+- **A request routed to an approval group** can only be approved, rejected, or canceled by an active approver in that group, acting as a signed-in dashboard user. API keys cannot decide these requests.
+- **A request with no approval group** can be approved, rejected, or canceled by a caller with the `org:admin` permission or the `*` wildcard: organization admins in the dashboard, and `api_admin` API keys, which hold `*` by default.
+
+A caller who does not meet these rules receives `403 FORBIDDEN`. Every approval request in a response carries `viewerIsRequester` and `viewerCanDecide`, so you can tell in advance whether the caller may cancel or decide it.
+
+## Approval request lifecycle
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | Waiting for a decision. The wallet operation's status is `pending_approval`. |
+| `approved` | Approved. SDP ran the original operation; check `operation.status` for the outcome. |
+| `rejected` | Rejected by a decider. The wallet operation is `canceled`. |
+| `canceled` | Withdrawn by the requester, or canceled by a decider. The wallet operation is `canceled`. |
+| `failed` | SDP could not finish recording the hold, so the operation did not proceed. |
+| `expired` | Not set on requests created by policy. Those requests have `expiresAt: null` and stay `pending` until someone approves, rejects, or cancels them. |
+
+Only a `pending` request can change status. Approving, rejecting, or canceling a request that has already reached a different status returns `409`. Every decision records `resolvedBy` and `resolvedAt`.
+
+### What approving does
+
+Approving a request runs the original operation as it was submitted: the same method, path, and body, and the original `Idempotency-Key` when one was sent. SDP does not evaluate the policy a second time. The approve call waits for that run, and the approval request it returns shows the result on its `operation`:
+
+- `operation.status` is `completed` when the operation ran, or `failed` with the reason in `operation.executionError`.
+- `operation.executionStartedAt` and `operation.executionCompletedAt` record when it ran.
+
+The request itself stays `approved` even if the operation fails. If the wallet cannot run operations when you approve, for example because execution is paused, the approve call fails and the request stays `pending`, so you can approve it again later.
+
+### What rejecting and canceling do
+
+Rejecting or canceling a request cancels its wallet operation. A canceled operation cannot be resumed from the same request. To try again, submit the operation as a new request.
+
+## Review requests with the API
+
+### 1. List requests
+
+`GET /v1/wallets/approval-requests` returns requests newest first. Filter with `status` and cap the result with `limit` (1–100, default 50).
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl "https://api.solana.com/v1/wallets/approval-requests?status=pending&limit=50" \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="list-approval-requests.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/wallets/approval-requests?status=pending&limit=50",
+  { headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await response.json();
+// data.approvalRequests: newest first
+```
+</Tab>
+</Tabs>
+
+### 2. Get one request
+
+`GET /v1/wallets/approval-requests/{approvalRequestId}` returns one request with its wallet, operation, and policy context. Use it to show an approver what they are deciding.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl https://api.solana.com/v1/wallets/approval-requests/appr_abc123 \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="get-approval-request.ts"
+const response = await fetch(
+  "https://api.solana.com/v1/wallets/approval-requests/appr_abc123",
+  { headers: { Authorization: "Bearer sk_test_..." } }
+);
+const { data } = await response.json();
+// data.approvalRequest.operation — what will run if approved
+// data.approvalRequest.policyEvaluation — why it was held
+// data.approvalRequest.viewerCanDecide
+```
+</Tab>
+</Tabs>
+
+```json title="response.json"
+{
+  "data": {
+    "approvalRequest": {
+      "id": "appr_abc123",
+      "organizationId": "org_abc123",
+      "projectId": "prj_abc123",
+      "walletOperationId": "wop_abc123",
+      "approvalGroupId": null,
+      "status": "pending",
+      "provider": null,
+      "providerReference": null,
+      "requestedBy": "key_abc123",
+      "resolvedBy": null,
+      "expiresAt": null,
+      "resolvedAt": null,
+      "createdAt": "2026-05-14T10:20:00.000Z",
+      "updatedAt": "2026-05-14T10:20:00.000Z",
+      "wallet": {
+        "custodyWalletId": "cwlt_abc123",
+        "walletId": "privy_wallet_123",
+        "publicKey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+        "label": "Treasury"
+      },
+      "operation": {
+        "id": "wop_abc123",
+        "custodyWalletId": "cwlt_abc123",
+        "walletId": "privy_wallet_123",
+        "apiKeyId": "key_abc123",
+        "source": "api",
+        "operationFamily": "payment",
+        "operationType": "payment_transfer_batch_execute",
+        "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "amount": "2500.00",
+        "destination": null,
+        "status": "pending_approval",
+        "executionStartedAt": null,
+        "executionCompletedAt": null,
+        "executionError": null,
+        "createdAt": "2026-05-14T10:20:00.000Z",
+        "updatedAt": "2026-05-14T10:20:00.000Z"
+      },
+      "policyEvaluation": {
+        "id": "peval_abc123",
+        "decision": "approval_required",
+        "reasonCode": "api_key_policy_match",
+        "reason": "Operation type payment_transfer_batch_execute matched policy. Combined policy decision: wallet=allow, API key=approval_required.",
+        "matchedRules": [],
+        "requiresApproval": true,
+        "evaluatedAt": "2026-05-14T10:20:00.000Z"
+      },
+      "viewerIsRequester": false,
+      "viewerCanDecide": true
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-05-14T10:21:00.000Z" }
+}
+```
+
+`requestedBy` and `resolvedBy` hold a user ID or an API key ID. `policyEvaluation.matchedRules` lists the rules that matched; it is left empty in this example.
+
+### 3. Approve, reject, or cancel
+
+Each decision is a `POST` with no body. The response returns the updated approval request.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+# Approve: runs the held operation
+curl -X POST https://api.solana.com/v1/wallets/approval-requests/appr_abc123/approve \
+  -H "Authorization: Bearer sk_test_..."
+
+# Reject: cancels the held operation
+curl -X POST https://api.solana.com/v1/wallets/approval-requests/appr_abc123/reject \
+  -H "Authorization: Bearer sk_test_..."
+
+# Cancel: withdraws the request
+curl -X POST https://api.solana.com/v1/wallets/approval-requests/appr_abc123/cancel \
+  -H "Authorization: Bearer sk_test_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="decide-approval-request.ts"
+async function decide(
+  approvalRequestId: string,
+  action: "approve" | "reject" | "cancel"
+) {
+  const response = await fetch(
+    `https://api.solana.com/v1/wallets/approval-requests/${approvalRequestId}/${action}`,
+    { method: "POST", headers: { Authorization: "Bearer sk_test_..." } }
+  );
+  const { data } = await response.json();
+  return data.approvalRequest;
+}
+
+const approved = await decide("appr_abc123", "approve");
+// approved.status — "approved"
+// approved.operation.status — "completed" or "failed"
+// approved.operation.executionError — set when the run failed
+```
+</Tab>
+</Tabs>
+
+## Approvals inbox in the dashboard
+
+When policy controls are enabled for your organization, the dashboard sidebar shows an **Approvals** page with the number of pending requests. The page lists requests under **Pending** and **History** tabs, with filters for wallet, status, operation, API key, and date, and refreshes every 5 seconds.
+
+Open a request to review its policy decision, operation details, matched controls, and timeline, then choose **Approve**, **Reject**, or **Cancel** and confirm. The dashboard applies the same rules as the API and only offers the decisions you are allowed to make, explaining why when you cannot decide a request.
+
+Viewing the inbox requires the `wallets:read` permission. Deciding requires `wallets:write` plus the per-request rules in [Permissions](#permissions).
+
+## Related
+
+- [Wallet policies](/docs/wallet-operations/policies) — rules that decide when an operation needs approval.
+- [API key policies](/docs/wallet-operations/api-key-policies) — per-key rules that can also hold operations.
+- [Wallets API reference](/docs/reference/api/wallets) — request and response schemas for the approval request endpoints.
