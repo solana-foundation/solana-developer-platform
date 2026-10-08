@@ -64,6 +64,11 @@
       "import": "./src/date-value.ts",
       "default": "./src/date-value.ts"
     },
+    "./detail-list": {
+      "types": "./src/detail-list.tsx",
+      "import": "./src/detail-list.tsx",
+      "default": "./src/detail-list.tsx"
+    },
     "./drawer": {
       "types": "./src/drawer.tsx",
       "import": "./src/drawer.tsx",
