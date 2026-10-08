@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/markets/base58-address";
+import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
 import {
   type KaminoVaultAllocations,
   kaminoVaultAllocationsSchema,
-} from "@/app/dashboard/markets/treasury-solutions/kamino-allocations-schema";
-import { createSdpApiClient } from "@/lib/sdp-api";
+} from "@/app/dashboard/[projectId]/markets/treasury-solutions/kamino-allocations-schema";
+import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
 
 /**
  * Upstream reader behind the Treasury Solutions "Information" column BFF:
@@ -84,11 +84,14 @@ async function readKaminoAllocations(vault: string): Promise<KaminoVaultAllocati
  * in-flight read with it. A vault that is not a public key, or one the
  * catalogue does not front, is refused without costing Kamino anything.
  */
-export function readVaultAllocations(vault: string): Promise<KaminoVaultAllocations> {
+export function readVaultAllocations(
+  projectId: string,
+  vault: string
+): Promise<KaminoVaultAllocations> {
   if (!BASE58_ADDRESS_PATTERN.test(vault)) {
     return Promise.reject(new Error("vault must be a Solana public key"));
   }
-  return resolveAllowedVaults().then((allowed) => {
+  return resolveAllowedVaults(projectId).then((allowed) => {
     if (!allowed.has(vault)) {
       throw new Error("vault is not fronted by a listed strategy");
     }
@@ -201,12 +204,12 @@ let inFlightAllowlist: Promise<ReadonlySet<string>> | undefined;
  * unavailable catalogue REFUSES the allocation read (fail closed) rather than
  * allowing an unlisted one.
  */
-export function resolveAllowedVaults(): Promise<ReadonlySet<string>> {
+export function resolveAllowedVaults(projectId: string): Promise<ReadonlySet<string>> {
   if (allowlistCache && allowlistCache.expiresAt > Date.now()) {
     return Promise.resolve(allowlistCache.vaults);
   }
   if (inFlightAllowlist) return inFlightAllowlist;
-  const resolution = createSdpApiClient()
+  const resolution = createProjectBoundSdpApiClient(projectId)
     .then((client) => readAllowedVaults((path) => client.fetch<unknown>(path)))
     .then((vaults) => {
       allowlistCache = { expiresAt: Date.now() + ALLOWLIST_TTL_MS, vaults };

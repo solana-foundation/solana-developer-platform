@@ -3,15 +3,16 @@ import {
   DEFAULT_ISSUANCE_LIST_QUERY,
   InvalidIssuanceSearchEncodingError,
   parseIssuanceListRequestQuery,
-} from "@/app/dashboard/issuance/issuance-list-query";
+} from "@/app/dashboard/[projectId]/issuance/issuance-list-query";
 import {
   attachIssuanceAssetProfiles,
   fetchIssuanceTokensPage,
   type IssuanceTokensPage,
-} from "@/app/dashboard/issuance/issuance-tokens.data";
+} from "@/app/dashboard/[projectId]/issuance/issuance-tokens.data";
 import { assetProfiles } from "@/flags";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createProjectBoundSdpApiClient, proxyFailure } from "@/lib/sdp-api";
 
 // Paged asset list for the issuance workspace. The workspace re-fetches through
 // here on every search/filter/sort/page change, so a keystroke costs one token
@@ -41,8 +42,15 @@ export async function GET(request: Request) {
 
   try {
     query = parseIssuanceListRequestQuery(new URL(request.url).searchParams);
+    const projectId = request.headers.get(PROJECT_HEADER_NAME);
+    if (projectId === null) {
+      return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
+    }
     const [apiClient, assetProfilesEnabled] = await Promise.all([
-      createSdpApiClient(trace.childContext("route.dashboard.issuance.tokens.api")),
+      createProjectBoundSdpApiClient(
+        projectId,
+        trace.childContext("route.dashboard.issuance.tokens.api")
+      ),
       assetProfiles(),
     ]);
 

@@ -9,7 +9,7 @@ import type {
 import {
   formatCurrencyAmount,
   resolveTotalBalance,
-} from "../../src/app/dashboard/payments/payments-overview.utils";
+} from "../../src/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { getE2EEnv } from "../env";
 import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
 import { createLocalApiClient } from "../support/local-api-client";

@@ -1,0 +1,100 @@
+"use client";
+
+import { ChevronDown } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useTranslations } from "@/i18n/provider";
+import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { rotateApiKeyAction } from "./actions";
+import { DeleteApiKeyModal } from "./delete-api-key-modal";
+
+const DEFAULT_ROTATION_GRACE_HOURS = 24;
+
+interface ApiKeyActionsMenuProps {
+  keyId: string;
+  keyName: string;
+  canRotate: boolean;
+  onDeleted?: () => void;
+}
+
+export function ApiKeyActionsMenu({
+  keyId,
+  keyName,
+  canRotate,
+  onDeleted,
+}: ApiKeyActionsMenuProps) {
+  const t = useTranslations();
+  const router = useRouter();
+  const projectId = useProjectId();
+  const href = useProjectHref();
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const rotateFormRef = useRef<HTMLFormElement | null>(null);
+
+  return (
+    <>
+      <form
+        ref={rotateFormRef}
+        action={rotateApiKeyAction.bind(null, projectId)}
+        className="hidden"
+      >
+        <input type="hidden" name="keyId" value={keyId} />
+        <input type="hidden" name="grace" value={String(DEFAULT_ROTATION_GRACE_HOURS)} />
+      </form>
+
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="rounded-full px-5 whitespace-nowrap"
+            iconRight={<ChevronDown className="size-4" />}
+          >
+            {t("DashboardCustody.actions")}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-[200px]">
+          <DropdownMenuItem
+            onSelect={() =>
+              router.push(href(`/dashboard/api-keys/${encodeURIComponent(keyId)}/edit`))
+            }
+          >
+            {t("DashboardCustody.editApiKey")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              if (canRotate) {
+                rotateFormRef.current?.requestSubmit();
+              }
+            }}
+            disabled={!canRotate}
+          >
+            {t("DashboardCustody.rotateKey", { hours: DEFAULT_ROTATION_GRACE_HOURS })}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+            onSelect={() => setIsDeleteModalOpen(true)}
+          >
+            {t("DashboardCustody.deleteKey")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <DeleteApiKeyModal
+        keyId={keyId}
+        keyName={keyName}
+        open={isDeleteModalOpen}
+        onOpenChange={setIsDeleteModalOpen}
+        onDeleted={onDeleted}
+        renderTrigger={() => null}
+      />
+    </>
+  );
+}

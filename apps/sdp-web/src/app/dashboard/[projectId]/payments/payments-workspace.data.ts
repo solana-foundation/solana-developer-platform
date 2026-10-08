@@ -1,0 +1,910 @@
+"use client";
+
+import type {
+  CoinbaseRampEvent,
+  Counterparty,
+  CounterpartyAccount,
+  CryptoRailId,
+  CustodyWalletAggregate,
+  ListCounterpartiesResponse,
+  ListCounterpartyAccountsResponse,
+  ListProjectCounterpartyAccountsEnvelope,
+  ListProjectCounterpartyAccountsResponse,
+  MoneygramRampEvent,
+  PaymentRampEstimateEnvelope,
+  PaymentsWalletAggregateEnvelope,
+  PaymentTransferBatch,
+  PaymentTransferBatchEnvelope,
+  PaymentTransferBatchEstimate,
+  PaymentTransferBatchEstimateEnvelope,
+  PaymentTransferBatchRequest,
+  PaymentTransferRecipient,
+  RampDirection,
+  RampEventProvider,
+  RampFiatCurrency,
+  RampProviderEstimateResult,
+  PaymentTransferEnvelope as TransferEnvelope,
+  PaymentTransferSummary as TransferRecord,
+  PaymentWalletPolicy as WalletPolicy,
+  PaymentWalletPolicyEnvelope as WalletPolicyEnvelope,
+  PaymentsDashboardWallet as WalletRecord,
+  PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
+} from "@sdp/types";
+import type { Address } from "@solana/kit";
+import { z } from "zod";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import {
+  type ComplianceIntent,
+  type ComplianceProviderResult,
+  screenAddressCompliance,
+} from "@/lib/compliance";
+import { dashboardRequest } from "@/lib/dashboard-fetch";
+import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import {
+  type PaymentApiErrorBody as ApiErrorBody,
+  getPaymentApiError as getApiError,
+} from "./payment-api-errors";
+import type { ComplianceSnapshot } from "./payments-workspace.types";
+
+export type { PaymentRampInstruction } from "@sdp/types";
+export { getPaymentApiError as getApiError } from "./payment-api-errors";
+
+export interface PaymentWalletBalance {
+  token: string;
+  mint: string;
+  amount: string;
+  uiAmount: string;
+  decimals: number;
+}
+
+export interface PaymentWalletBalancesSnapshot {
+  walletId: string;
+  address: string;
+  balances: PaymentWalletBalance[];
+}
+
+export type RiskTone = "green" | "yellow" | "red" | "neutral";
+export type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+export function toProviderLabel(value: string): string {
+  const labels: Record<string, string> = {
+    range: "Range",
+    elliptic: "Elliptic",
+    trm: "TRM",
+    chainalysis: "Chainalysis",
+  };
+  return labels[value] ?? value.toUpperCase();
+}
+
+export function formatRiskScore(result: ComplianceProviderResult, t: Translate): string {
+  if (
+    typeof result.riskScore === "number" &&
+    typeof result.riskLevel === "string" &&
+    result.riskLevel
+  ) {
+    return `${result.riskScore} - ${result.riskLevel}`;
+  }
+  if (typeof result.riskScore === "number") {
+    return String(result.riskScore);
+  }
+  if (
+    result.provider === "trm" &&
+    result.status === "ok" &&
+    result.riskScore === null &&
+    !result.riskLevel?.trim()
+  ) {
+    return t("DashboardPayments.providerRisk.noTrmAttribution");
+  }
+  if (result.status === "error" && typeof result.message === "string" && result.message) {
+    return result.message;
+  }
+  if (result.status === "unavailable") {
+    return t("DashboardPayments.providerRisk.unavailable");
+  }
+  if (result.status === "ok" && typeof result.riskLevel === "string" && result.riskLevel) {
+    return result.riskLevel;
+  }
+  if (result.status === "error") {
+    return t("DashboardPayments.providerRisk.error");
+  }
+  return t("DashboardPayments.providerRisk.notAvailable");
+}
+
+export function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
+  if (result.status !== "ok") {
+    return "neutral";
+  }
+
+  if (result.provider === "elliptic" && result.riskLevel?.toLowerCase() === "check passed") {
+    return "green";
+  }
+
+  if (result.provider === "trm" && result.riskScore === null && !result.riskLevel?.trim()) {
+    return "green";
+  }
+
+  if (typeof result.riskScore === "number") {
+    if (result.riskScore >= 7) {
+      return "red";
+    }
+    if (result.riskScore >= 3) {
+      return "yellow";
+    }
+    return "green";
+  }
+
+  const riskLevel = result.riskLevel?.toLowerCase() ?? "";
+  if (!riskLevel) {
+    return "neutral";
+  }
+
+  if (
+    riskLevel.includes("severe") ||
+    riskLevel.includes("high") ||
+    riskLevel.includes("critical") ||
+    riskLevel.includes("elevated")
+  ) {
+    return "red";
+  }
+
+  if (
+    riskLevel.includes("medium") ||
+    riskLevel.includes("moderate") ||
+    riskLevel.includes("watch")
+  ) {
+    return "yellow";
+  }
+
+  if (
+    riskLevel.includes("low") ||
+    riskLevel.includes("very low") ||
+    riskLevel.includes("none") ||
+    riskLevel.includes("minimal")
+  ) {
+    return "green";
+  }
+
+  return "neutral";
+}
+
+/** Providers that flagged the address as high risk (red tone). */
+export function getHighRiskProviders(snapshot: ComplianceSnapshot): ComplianceProviderResult[] {
+  return snapshot.providers.filter((result) => resolveRiskTone(result) === "red");
+}
+
+export function riskToneClassName(result: ComplianceProviderResult): string {
+  const tone = resolveRiskTone(result);
+  if (tone === "green") {
+    return "border-success-border bg-success-bg text-success";
+  }
+  if (tone === "yellow") {
+    return "border-warning-border bg-warning-bg text-warning";
+  }
+  if (tone === "red") {
+    return "border-destructive-border bg-destructive-bg text-destructive-strong";
+  }
+  return "border-border-default bg-fill-subtle text-secondary";
+}
+
+export async function fetchWallets(
+  options: { signal?: AbortSignal; includeBalances?: boolean },
+  t: Translate
+): Promise<WalletRecord[]> {
+  const query = new URLSearchParams({
+    view: "summary",
+  });
+  if (options.includeBalances) {
+    query.set("includeBalances", "true");
+  }
+  const response = await dashboardRequest(`/api/dashboard/wallets?${query.toString()}`, {
+    method: "GET",
+    cache: "no-store",
+    signal: options.signal,
+  });
+  const body = (await response.json().catch(() => ({}))) as WalletsEnvelope;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.walletListRequestFailed", { status: response.status })
+      )
+    );
+  }
+  return body.data?.wallets ?? [];
+}
+
+export async function fetchWalletAggregate(
+  t: Translate,
+  signal?: AbortSignal
+): Promise<CustodyWalletAggregate> {
+  const response = await dashboardRequest("/api/dashboard/wallets/aggregate", {
+    method: "GET",
+    cache: "no-store",
+    signal,
+  });
+  const body = (await response.json().catch(() => ({}))) as PaymentsWalletAggregateEnvelope;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.walletAggregateRequestFailed", { status: response.status })
+      )
+    );
+  }
+
+  if (!body.data?.aggregate) {
+    throw new Error(t("DashboardPayments.workspace.walletAggregateMissing"));
+  }
+
+  return body.data.aggregate;
+}
+
+interface TransferListEnvelope {
+  data?: TransferRecord[];
+  error?: {
+    message?: string;
+  };
+}
+
+interface WalletBalancesEnvelope {
+  data?:
+    | {
+        walletBalances?: PaymentWalletBalancesSnapshot;
+      }
+    | {
+        walletId?: string;
+        address?: string;
+        balances?: PaymentWalletBalance[];
+      };
+  error?: {
+    message?: string;
+  };
+}
+
+function resolveWalletBalancesSnapshot(
+  envelope: WalletBalancesEnvelope
+): PaymentWalletBalancesSnapshot | null {
+  if (
+    envelope.data &&
+    "walletBalances" in envelope.data &&
+    envelope.data.walletBalances &&
+    typeof envelope.data.walletBalances.walletId === "string"
+  ) {
+    return envelope.data.walletBalances;
+  }
+
+  if (
+    envelope.data &&
+    "walletId" in envelope.data &&
+    typeof envelope.data.walletId === "string" &&
+    typeof envelope.data.address === "string" &&
+    Array.isArray(envelope.data.balances)
+  ) {
+    return {
+      walletId: envelope.data.walletId,
+      address: envelope.data.address,
+      balances: envelope.data.balances,
+    };
+  }
+
+  return null;
+}
+
+export async function fetchTransfers(
+  options: {
+    pageSize: number;
+    custodyWalletId?: string;
+    category?: "wallet" | "ramp";
+    counterpartyId?: string;
+    statuses?: readonly string[];
+    signal?: AbortSignal;
+  },
+  t: Translate
+): Promise<TransferRecord[]> {
+  const transfersQuery = new URLSearchParams({
+    page: "1",
+    pageSize: String(options.pageSize),
+    ...(options.custodyWalletId ? { custodyWalletId: options.custodyWalletId } : {}),
+    ...(options.category ? { category: options.category } : {}),
+    ...(options.counterpartyId ? { counterpartyId: options.counterpartyId } : {}),
+    ...(options.statuses ? { status: options.statuses.join(",") } : {}),
+  }).toString();
+  const response = await dashboardRequest(`/api/dashboard/payments/transfers?${transfersQuery}`, {
+    method: "GET",
+    cache: "no-store",
+    signal: options.signal,
+  });
+  const body = (await response.json()) as TransferListEnvelope;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.transferListRequestFailed", { status: response.status })
+      )
+    );
+  }
+
+  if (!body.data) {
+    throw new Error(t("DashboardPayments.workspace.transferListMissing"));
+  }
+
+  return body.data;
+}
+
+export async function fetchTransferById(
+  input: {
+    transferId: string;
+    signal?: AbortSignal;
+  },
+  t: Translate
+): Promise<TransferRecord> {
+  const response = await dashboardRequest(
+    `/api/dashboard/payments/transfers/${encodeURIComponent(input.transferId)}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      signal: input.signal,
+    }
+  );
+  const body = (await response.json()) as {
+    data?: { transfer?: TransferRecord };
+    error?: { message?: string };
+  };
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.transferLookupFailed", { status: response.status })
+      )
+    );
+  }
+  if (!body.data?.transfer) {
+    throw new Error(t("DashboardPayments.workspace.transferLookupMissing"));
+  }
+  return body.data.transfer;
+}
+
+export async function cancelRampTransfer(
+  input: {
+    transferId: string;
+  },
+  t: Translate
+): Promise<void> {
+  const response = await dashboardRequest("/api/dashboard/payments/ramps/transfers/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json()) as ApiErrorBody;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.transferCancellationFailed", { status: response.status })
+      )
+    );
+  }
+}
+
+export async function fetchRampEstimates(
+  input: {
+    direction: RampDirection;
+    assetRail: CryptoRailId;
+    fiatCurrency: RampFiatCurrency;
+    amount: string;
+    signal?: AbortSignal;
+  },
+  t: Translate
+): Promise<RampProviderEstimateResult[]> {
+  const amountField = input.direction === "onramp" ? "fiatAmount" : "cryptoAmount";
+  const response = await dashboardRequest(
+    `/api/dashboard/payments/ramps/${input.direction}/estimate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      signal: input.signal,
+      body: JSON.stringify({
+        assetRail: input.assetRail,
+        fiatCurrency: input.fiatCurrency,
+        [amountField]: input.amount,
+      }),
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as PaymentRampEstimateEnvelope;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.rampEstimateRequestFailed", { status: response.status })
+      )
+    );
+  }
+
+  const estimates = body.data?.estimates;
+  if (!estimates) {
+    throw new Error(t("DashboardPayments.workspace.rampEstimateMissing"));
+  }
+
+  return estimates;
+}
+
+export async function fetchWalletBalances(
+  walletId: string,
+  t: Translate,
+  signal?: AbortSignal
+): Promise<PaymentWalletBalancesSnapshot> {
+  const response = await dashboardRequest(
+    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
+    {
+      method: "GET",
+      cache: "no-store",
+      signal,
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as WalletBalancesEnvelope;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.walletBalancesRequestFailed", { status: response.status })
+      )
+    );
+  }
+
+  const snapshot = resolveWalletBalancesSnapshot(body);
+  if (!snapshot) {
+    throw new Error(t("DashboardPayments.workspace.walletBalancesMissing"));
+  }
+
+  return snapshot;
+}
+
+export async function updateWalletPolicy(
+  walletId: string,
+  policy: Pick<WalletPolicy, "defaultAction" | "rules">,
+  t: Translate,
+  commitMessage?: string,
+  options?: {
+    /**
+     * Active revision id of the server-read policy this edit was based on
+     * (null when no profile was active). Omit only without a server-read
+     * base — the API then skips the stale-write check.
+     */
+    expectedRevisionId?: string | null;
+  }
+): Promise<WalletPolicy> {
+  const trimmedCommitMessage = commitMessage?.trim();
+
+  const response = await dashboardRequest(
+    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        defaultAction: policy.defaultAction,
+        rules: policy.rules,
+        ...(trimmedCommitMessage ? { commitMessage: trimmedCommitMessage } : {}),
+        ...(options?.expectedRevisionId !== undefined
+          ? { expectedRevisionId: options.expectedRevisionId }
+          : {}),
+      }),
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as WalletPolicyEnvelope;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.walletPolicyUpdateFailed", { status: response.status })
+      )
+    );
+  }
+
+  if (!body.data?.policy) {
+    throw new Error(t("DashboardPayments.workspace.walletPolicyUpdateEmpty"));
+  }
+
+  return body.data.policy;
+}
+
+export interface CreateTransferInput {
+  transferId?: string;
+  sourceCustodyWalletId: string;
+  destination: string;
+  token: Address;
+  amount: string;
+  memo?: string;
+}
+
+export type CreateTransferOutcome =
+  | { kind: "submitted"; transfer: TransferRecord }
+  | { kind: "approval_pending"; approvalRequestId: string };
+
+/**
+ * An HTTP refusal from the transfer endpoint, carrying the status so the caller
+ * can decide the idempotency key's fate the way batches do: a 4xx retires it,
+ * a 5xx or a network failure keeps it.
+ */
+export class TransferRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "TransferRequestError";
+    this.status = status;
+  }
+}
+
+/**
+ * The 202 a policy approval answers with. The approval request id is the one
+ * thing the caller needs to point somebody at the decision.
+ */
+const signingPendingEnvelopeSchema = z.object({
+  error: z.object({
+    code: z.literal("SIGNING_PENDING"),
+    details: z.object({ approvalRequestId: z.string().min(1) }),
+  }),
+});
+
+/**
+ * Creates one transfer.
+ *
+ * A 202 is inside `response.ok` and is not a transfer: a wallet policy parked
+ * the payment until somebody approves it, and the body names that request.
+ * Reading it as a transfer turned a held payment into "Transfer failed", and a
+ * press of Send again opened a second approval for the same payment.
+ *
+ * The idempotency key is transport metadata, sent as a header and never in the
+ * body. Null for a caller whose request is already single-shot (a ramp transfer
+ * named by `transferId`).
+ */
+export async function createTransfer(
+  input: CreateTransferInput,
+  t: Translate,
+  idempotencyKey: string | null
+): Promise<CreateTransferOutcome> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (idempotencyKey !== null) {
+    headers[IDEMPOTENCY_KEY_HEADER] = idempotencyKey;
+  }
+  const response = await dashboardRequest("/api/dashboard/payments/transfers", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      ...(input.transferId ? { transferId: input.transferId } : {}),
+      sourceCustodyWalletId: input.sourceCustodyWalletId,
+      destination: input.destination,
+      token: input.token,
+      amount: input.amount,
+      ...(input.memo ? { memo: input.memo } : {}),
+    }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
+    throw new TransferRequestError(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.transferRequestFailed", { status: response.status })
+      ),
+      response.status
+    );
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+  if (response.status === 202) {
+    const held = signingPendingEnvelopeSchema.safeParse(body);
+    if (!held.success) {
+      throw new Error(t("DashboardPayments.workspace.transferMissing"));
+    }
+    return {
+      kind: "approval_pending",
+      approvalRequestId: held.data.error.details.approvalRequestId,
+    };
+  }
+  // SAFETY: the transfer endpoint's success envelope is `PaymentTransferEnvelope`
+  // (`@sdp/types`); only the presence of the transfer is checked here, as before.
+  const envelope = body as TransferEnvelope | null;
+  if (!envelope?.data?.transfer) {
+    throw new Error(t("DashboardPayments.workspace.transferMissing"));
+  }
+
+  return { kind: "submitted", transfer: envelope.data.transfer };
+}
+
+export async function fetchBatchRecipients(
+  input: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    ids?: string[];
+    signal?: AbortSignal;
+  },
+  t: Translate
+): Promise<ListProjectCounterpartyAccountsResponse> {
+  const query = new URLSearchParams({
+    ...(input.page ? { page: String(input.page) } : {}),
+    ...(input.pageSize ? { pageSize: String(input.pageSize) } : {}),
+    ...(input.search ? { search: input.search } : {}),
+    ...(input.ids && input.ids.length > 0 ? { ids: input.ids.join(",") } : {}),
+  });
+  const response = await dashboardRequest(
+    `/api/dashboard/counterparty/accounts?${query.toString()}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      signal: input.signal,
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as ListProjectCounterpartyAccountsEnvelope;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.recipientListRequestFailed", { status: response.status })
+      )
+    );
+  }
+  if (!body.data) {
+    throw new Error(t("DashboardPayments.workspace.recipientListMissing"));
+  }
+  return body.data;
+}
+
+export async function estimateTransferBatch(
+  input: PaymentTransferBatchRequest,
+  t: Translate
+): Promise<PaymentTransferBatchEstimate> {
+  const response = await dashboardRequest("/api/dashboard/payments/transfers/batch/estimate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEstimateEnvelope;
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.batchEstimateRequestFailed", { status: response.status })
+      )
+    );
+  }
+  if (!body.data?.estimate) {
+    throw new Error(t("DashboardPayments.workspace.batchEstimateMissing"));
+  }
+  return body.data.estimate;
+}
+
+export interface CreateTransferBatchResult {
+  batch: PaymentTransferBatch;
+  recipients: PaymentTransferRecipient[];
+  transfers: TransferRecord[];
+}
+
+export type CreateTransferBatchOutcome =
+  | { kind: "submitted"; result: CreateTransferBatchResult }
+  | { kind: "approval_pending"; message: string };
+
+/**
+ * An HTTP refusal from the batch endpoint, carrying the status so the caller
+ * can decide the idempotency key's fate: a 4xx is a definitive answer and
+ * retires the key, while a 5xx or a network failure (a plain Error) keeps it —
+ * the API may have recorded the batch before the response was lost, and only
+ * a replay with the SAME key can find out without moving the money again.
+ */
+export class TransferBatchRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "TransferBatchRequestError";
+    this.status = status;
+  }
+}
+
+/** An approval hold is specifically the 202 SIGNING_PENDING contract. */
+function isSigningPendingEnvelope(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || !("error" in body)) return false;
+  const error = (body as { error?: unknown }).error;
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "SIGNING_PENDING"
+  );
+}
+
+/**
+ * The caller's idempotency key is transport metadata and is never copied into
+ * the JSON body; the proxy route forwards that single header upstream.
+ */
+export async function createTransferBatch(
+  input: PaymentTransferBatchRequest,
+  t: Translate,
+  idempotencyKey: string
+): Promise<CreateTransferBatchOutcome> {
+  const response = await dashboardRequest("/api/dashboard/payments/transfers/batch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
+    throw new TransferBatchRequestError(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.batchTransferRequestFailed", { status: response.status })
+      ),
+      response.status
+    );
+  }
+  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
+  // 202 is inside `response.ok`: an approval hold is an accepted request whose
+  // execution is parked, not a refusal.
+  if (response.status === 202 && isSigningPendingEnvelope(body)) {
+    return {
+      kind: "approval_pending",
+      message: getApiError(body, t("DashboardPayments.batchSend.resultApprovalPending")),
+    };
+  }
+  if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
+    throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
+  }
+  return {
+    kind: "submitted",
+    result: {
+      batch: body.data.batch,
+      recipients: body.data.recipients,
+      transfers: body.data.transfers,
+    },
+  };
+}
+
+async function postRampEvent(
+  provider: RampEventProvider,
+  event: MoneygramRampEvent | CoinbaseRampEvent,
+  t: Translate
+): Promise<void> {
+  const response = await dashboardRequest(`/api/dashboard/payments/ramps/events/${provider}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(event),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.rampEventRequestFailed", {
+          provider,
+          status: response.status,
+        })
+      )
+    );
+  }
+}
+
+export function postMoneygramRampEvent(event: MoneygramRampEvent, t: Translate): Promise<void> {
+  return postRampEvent("moneygram", event, t);
+}
+
+export function postCoinbaseRampEvent(event: CoinbaseRampEvent, t: Translate): Promise<void> {
+  return postRampEvent("coinbase", event, t);
+}
+
+export async function fetchCounterpartyAccounts(
+  counterpartyId: string,
+  t: Translate
+): Promise<CounterpartyAccount[]> {
+  const response = await dashboardRequest(
+    `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/accounts?pageSize=100`,
+    {}
+  );
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: ListCounterpartyAccountsResponse;
+    error?: { message?: string };
+  };
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        body,
+        t("DashboardPayments.workspace.counterpartyAccountsRequestFailed", {
+          status: response.status,
+        })
+      )
+    );
+  }
+  return body.data?.accounts ?? [];
+}
+
+type SandboxTransferSimulationInput = { transferId: string };
+
+export async function simulateSandboxTransfer(
+  input: SandboxTransferSimulationInput,
+  t: Translate
+): Promise<void> {
+  const response = await dashboardRequest("/api/dashboard/payments/ramps/sandbox/simulate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      getApiError(
+        await response.json().catch(() => null),
+        t("DashboardPayments.workspace.sandboxSimulationRequestFailed", {
+          status: response.status,
+        })
+      )
+    );
+  }
+}
+
+export async function runComplianceCheck(
+  address: string,
+  intent: ComplianceIntent
+): Promise<ComplianceSnapshot> {
+  const result = await screenAddressCompliance({
+    address,
+    network: "solana",
+    intent,
+  });
+
+  return {
+    address,
+    checkedAt: result.checkedAt,
+    providers: result.providers.filter((provider) => provider.provider !== "chainalysis"),
+  };
+}
+
+const COUNTERPARTY_PAGE_SIZE = 100;
+const MAX_COUNTERPARTY_PAGES = 50;
+
+export interface CounterpartiesResult {
+  ok: boolean;
+  data: Counterparty[];
+  error?: string;
+}
+
+export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {
+  const counterparties: Counterparty[] = [];
+
+  try {
+    for (let page = 1; page <= MAX_COUNTERPARTY_PAGES; page += 1) {
+      const query = new URLSearchParams({
+        page: String(page),
+        pageSize: String(COUNTERPARTY_PAGE_SIZE),
+      });
+      const response = await dashboardRequest(`/api/dashboard/counterparty?${query.toString()}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) {
+        return { ok: false, data: [], error: await response.text() };
+      }
+
+      const json = (await response.json()) as { data?: ListCounterpartiesResponse };
+      const list = json.data;
+      counterparties.push(...(list?.counterparties ?? []));
+
+      const total = list?.total ?? counterparties.length;
+      if (counterparties.length >= total || (list?.counterparties.length ?? 0) === 0) {
+        break;
+      }
+    }
+
+    return { ok: true, data: counterparties };
+  } catch (error) {
+    return {
+      ok: false,
+      data: [],
+      ...(error instanceof Error ? { error: error.message } : {}),
+    };
+  }
+}

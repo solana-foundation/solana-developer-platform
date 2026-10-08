@@ -1,0 +1,406 @@
+import type { CustodyWalletSummary } from "@sdp/types";
+import { VenetianMaskIcon } from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
+import type {
+  ConnectionsFilters,
+  ConnectionsPageResult,
+  ConnectionsProjectSummary,
+} from "@/app/dashboard/[projectId]/custody/connections/connections.data";
+import { CUSTODY_CAPABILITY_LABEL_KEYS } from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
+import { docsHref } from "@/components/dashboard-nav";
+import { Button } from "@/components/ui/button";
+import { getTranslations } from "@/i18n/server";
+import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
+import { projectHref } from "@/lib/dashboard-project-path";
+import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
+import { CustodyConnectionCount, CustodyConnectionsSection } from "../custody-connections-section";
+import type { IntegrationDetail } from "../integration-detail";
+
+type Translate = Awaited<ReturnType<typeof getTranslations>>;
+
+function statusKey(status: IntegrationDetail["status"]): Parameters<Translate>[0] {
+  switch (status) {
+    case "active":
+      return "Shared.integrations.statusActive";
+    case "available":
+      return "Shared.integrations.statusAvailable";
+    case "enabled":
+      return "Shared.integrations.statusEnabled";
+    case "request_access":
+      return "Shared.integrations.statusRequestAccess";
+    case "not_configured":
+      return "Shared.integrations.statusNotConfigured";
+    default:
+      return "Shared.integrations.statusUnknown";
+  }
+}
+
+/**
+ * The family title key shown under the provider name.
+ *
+ * @param family - The provider's integration family.
+ * @returns The message key for the family title.
+ */
+function familyKey(family: IntegrationDetail["family"]): Parameters<Translate>[0] {
+  return (
+    {
+      custody: "Shared.integrations.custodyTitle",
+      ramps: "Shared.integrations.rampsTitle",
+      compliance: "Shared.integrations.complianceTitle",
+      privacy: "Shared.integrations.privacyTitle",
+    } as const
+  )[family];
+}
+
+/**
+ * The provider's logo mark for the detail header.
+ *
+ * @param props - The component props.
+ * @param props.detail - The resolved provider detail.
+ * @returns The family-specific mark.
+ */
+function DetailMark({ detail }: { detail: IntegrationDetail }) {
+  if (detail.family === "custody" && detail.custodyEntry) {
+    return <WalletProviderMark provider={detail.custodyEntry.id} size="sm" />;
+  }
+  if (detail.family === "privacy") {
+    return <VenetianMaskIcon aria-hidden className="size-5 text-secondary" strokeWidth={1.8} />;
+  }
+  const src =
+    detail.family === "ramps"
+      ? RAMP_PROVIDER_LOGOS[detail.provider as keyof typeof RAMP_PROVIDER_LOGOS]
+      : COMPLIANCE_PROVIDER_LOGOS[detail.provider as keyof typeof COMPLIANCE_PROVIDER_LOGOS];
+  return (
+    <span
+      aria-hidden
+      className="inline-flex h-7 w-7 items-center justify-center overflow-hidden rounded-md border border-border-subtle bg-[white]"
+    >
+      <span className="relative h-full w-full p-1">
+        <Image src={src} alt="" fill sizes="28px" className="object-contain" />
+      </span>
+    </span>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
+      <h2 className="text-base font-medium text-primary">{title}</h2>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+/**
+ * The header's state-correct action, if the provider's state offers one.
+ *
+ * @param detail - The resolved provider detail.
+ * @param t - The translator.
+ * @returns The action button, or `null` when no action applies.
+ */
+function resolvePrimaryAction(projectId: string, detail: IntegrationDetail, t: Translate) {
+  // With the connection state unreadable, no state-dependent action is honest.
+  if (detail.status === "unknown") {
+    return null;
+  }
+  if (detail.family === "custody" && detail.status === "active") {
+    return (
+      <Button asChild>
+        <Link href={projectHref(projectId, "/dashboard/wallets")}>
+          {t("Shared.integrations.ctaManage")}
+        </Link>
+      </Button>
+    );
+  }
+  if (detail.family === "custody" && detail.status === "available") {
+    return (
+      <Button asChild>
+        <Link href={projectHref(projectId, `/dashboard/wallets/setup?provider=${detail.provider}`)}>
+          {t("Shared.integrations.ctaConfigure")}
+        </Link>
+      </Button>
+    );
+  }
+  if (detail.requestAccessUrl) {
+    return (
+      <Button asChild>
+        <a href={detail.requestAccessUrl} target="_blank" rel="noreferrer noopener">
+          {t("Shared.integrations.ctaRequestAccess")}
+        </a>
+      </Button>
+    );
+  }
+  return null;
+}
+
+/**
+ * The project's custody connections, or the reason there are none to show.
+ * `null` means the section does not apply here; `"restricted"` means the
+ * viewer cannot read them.
+ */
+export type CustodyConnectionsContext =
+  | {
+      result: ConnectionsPageResult;
+      filters: ConnectionsFilters;
+      summary: ConnectionsProjectSummary;
+      walletsByConnection: Record<string, CustodyWalletSummary[]>;
+      walletsUnavailable: boolean;
+    }
+  | "restricted"
+  | null;
+
+function DetailHeader({
+  projectId,
+  detail,
+  connectionCount,
+  t,
+}: {
+  projectId: string;
+  detail: IntegrationDetail;
+  /** `null` on every family but custody, and on custody when unreadable. */
+  connectionCount: number | null;
+  t: Translate;
+}) {
+  const entry = detail.custodyEntry;
+  return (
+    <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-default bg-surface-raised p-6">
+      <div className="flex min-w-0 items-center gap-4">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-fill-strong">
+          <DetailMark detail={detail} />
+        </span>
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="truncate text-xl font-medium tracking-tight text-primary">
+              {detail.label}
+            </h1>
+            <span className="shrink-0 whitespace-nowrap rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
+              {t(statusKey(detail.status))}
+            </span>
+          </div>
+          <p className="text-sm text-tertiary">
+            {t(familyKey(detail.family))}
+            {entry
+              ? ` · ${t(
+                  entry.category === "server"
+                    ? "DashboardCustody.providerCategoryApi"
+                    : "DashboardCustody.providerCategoryInstitutional"
+                )}`
+              : ""}
+            {connectionCount !== null ? (
+              <>
+                {" · "}
+                <CustodyConnectionCount count={connectionCount} />
+              </>
+            ) : null}
+          </p>
+        </div>
+      </div>
+      {resolvePrimaryAction(projectId, detail, t)}
+    </header>
+  );
+}
+
+/**
+ * The project's connections, or the reason there are none on screen.
+ *
+ * Placed above everything but the header: on an integration you can act on,
+ * what this project has connected outranks what the provider is.
+ *
+ * @param props - The block's inputs.
+ * @param props.detail - The integration being shown.
+ * @param props.custodyConnections - The project's custody connections for this provider.
+ * @param props.canManageCustody - Whether the caller may manage custody connections.
+ * @param props.t - The translator.
+ * @returns The connections block.
+ */
+function CustodyConnectionsBlock({
+  detail,
+  custodyConnections,
+  canManageCustody,
+  t,
+}: {
+  detail: IntegrationDetail;
+  custodyConnections: CustodyConnectionsContext;
+  canManageCustody: boolean;
+  t: Translate;
+}) {
+  if (custodyConnections === "restricted") {
+    return (
+      <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
+        <h2 className="text-base font-medium text-primary">
+          {t("DashboardCustody.connectionsTitle")}
+        </h2>
+        <p className="mt-3 text-sm text-tertiary">{t("DashboardCustody.readOnlyViewer")}</p>
+      </section>
+    );
+  }
+  if (!custodyConnections || !detail.custodyEntry) {
+    return null;
+  }
+  return (
+    <CustodyConnectionsSection
+      result={custodyConnections.result}
+      filters={custodyConnections.filters}
+      summary={custodyConnections.summary}
+      walletsByConnection={custodyConnections.walletsByConnection}
+      walletsUnavailable={custodyConnections.walletsUnavailable}
+      canManageCustody={canManageCustody}
+      provider={detail.custodyEntry.id}
+    />
+  );
+}
+
+function CapabilitiesSection({
+  entry,
+  t,
+}: {
+  entry: NonNullable<IntegrationDetail["custodyEntry"]>;
+  t: Translate;
+}) {
+  return (
+    <Section title={t("Shared.integrations.detailCapabilities")}>
+      <ul className="flex flex-wrap gap-2">
+        {entry.useCases.map((useCase) => (
+          <li
+            key={useCase}
+            className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
+          >
+            {t(CUSTODY_CAPABILITY_LABEL_KEYS[useCase])}
+          </li>
+        ))}
+        {entry.technicalCapabilities.supportsSigning ? (
+          <li className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary">
+            {t("Shared.integrations.capabilitySigning")}
+          </li>
+        ) : null}
+        {entry.technicalCapabilities.supportsAdditionalWalletCreation ? (
+          <li className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary">
+            {t("Shared.integrations.capabilityAdditionalWallets")}
+          </li>
+        ) : null}
+      </ul>
+    </Section>
+  );
+}
+
+/**
+ * How access to this provider is obtained.
+ *
+ * Renders for every status, including Connected: a provider must never say
+ * "request access" without saying anywhere how the request is made.
+ */
+function HowItConnectsBody({ detail, t }: { detail: IntegrationDetail; t: Translate }) {
+  const entry = detail.custodyEntry;
+
+  if (entry?.storedCredentialSetup.mode === "self_service") {
+    return (
+      <div className="space-y-3">
+        <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
+          {t("Shared.integrations.connectSelfServe")}
+        </p>
+        <p className="text-xs font-medium tracking-wide text-tertiary uppercase">
+          {t("Shared.integrations.connectYouWillNeed")}
+        </p>
+        <ul className="flex flex-wrap gap-2">
+          {entry.storedCredentialSetup.fields
+            .filter((field) => field.key !== "credentialLabel" && field.key !== "scope")
+            .map((field) => (
+              <li
+                key={field.key}
+                className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
+              >
+                {t(field.labelKey)}
+              </li>
+            ))}
+        </ul>
+      </div>
+    );
+  }
+
+  // Manual providers, whether or not a request route is wired yet (HOO-775):
+  // access is granted by the SDP team, and the page must say so even when the
+  // header has no request button to offer. Everything else — generally
+  // available providers riding deployment credentials, and the deployment-wide
+  // rails — is turned on by the SDP operator.
+  const isByArrangement = entry?.availability === "manual" || detail.status === "request_access";
+  return (
+    <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
+      {t(
+        isByArrangement
+          ? "Shared.integrations.connectByArrangement"
+          : "Shared.integrations.connectManaged"
+      )}
+    </p>
+  );
+}
+
+/**
+ * One provider's detail page: header, custody connections, and the shared
+ * about, capabilities, connection and resources sections.
+ *
+ * @param props - The component props.
+ * @param props.projectId - The Project in the URL, which every link stays inside.
+ * @param props.detail - The resolved provider detail.
+ * @param props.custodyConnections - The project's custody connections, or why there are none.
+ * @param props.canManageCustody - Whether the viewer may manage custody connections.
+ * @returns The rendered detail page.
+ */
+export async function IntegrationDetailView({
+  projectId,
+  detail,
+  custodyConnections = null,
+  canManageCustody = false,
+}: {
+  projectId: string;
+  detail: IntegrationDetail;
+  custodyConnections?: CustodyConnectionsContext;
+  canManageCustody?: boolean;
+}) {
+  const t = await getTranslations();
+  const entry = detail.custodyEntry;
+  const connectionCount =
+    custodyConnections && custodyConnections !== "restricted"
+      ? custodyConnections.result.pagination.total
+      : null;
+
+  return (
+    <div className="w-full space-y-6 px-4 py-6 md:px-6" data-integration-detail={detail.provider}>
+      <DetailHeader projectId={projectId} detail={detail} connectionCount={connectionCount} t={t} />
+
+      <CustodyConnectionsBlock
+        detail={detail}
+        custodyConnections={custodyConnections}
+        canManageCustody={canManageCustody}
+        t={t}
+      />
+
+      {detail.descriptionKey ? (
+        <Section title={t("Shared.integrations.detailAbout")}>
+          <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
+            {t(detail.descriptionKey)}
+          </p>
+        </Section>
+      ) : null}
+
+      {entry ? <CapabilitiesSection entry={entry} t={t} /> : null}
+
+      <Section title={t("Shared.integrations.detailHowItConnects")}>
+        <HowItConnectsBody detail={detail} t={t} />
+      </Section>
+
+      <Section title={t("Shared.integrations.detailResources")}>
+        {/* The access request already leads the header; repeating it here read
+            as noise, so resources carry only what the header does not. */}
+        <div className="flex flex-wrap gap-3">
+          <Button asChild variant="secondary" size="sm">
+            <a href={docsHref} target="_blank" rel="noreferrer noopener">
+              {t("Shared.integrations.detailDocs")}
+            </a>
+          </Button>
+        </div>
+      </Section>
+    </div>
+  );
+}

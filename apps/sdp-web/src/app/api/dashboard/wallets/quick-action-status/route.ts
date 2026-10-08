@@ -3,9 +3,10 @@ import {
   CUSTODY_PROVIDER_CATALOG,
   isKnownCustodyProvider,
   type KnownCustodyProvider,
-} from "@/app/dashboard/custody/provider-catalog";
+} from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createOrgSdpApiClient, createSdpApiClient, getSelectedProjectId } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, createProjectBoundSdpApiClient, proxyFailure } from "@/lib/sdp-api";
 
 interface OnboardingStatusResponse {
   linked: boolean;
@@ -68,20 +69,13 @@ export async function GET(request: Request) {
       return response;
     }
 
-    const projectId = await getSelectedProjectId();
-    if (!projectId) {
-      const response = NextResponse.json(
-        { error: { message: "Selected project required" } },
-        {
-          status: 400,
-          headers: { "X-SDP-Trace-ID": trace.traceId, "Server-Timing": trace.serverTiming() },
-        }
-      );
-      logRouteResult(trace, 400, { error: "Selected project required" });
-      return response;
+    const projectId = request.headers.get(PROJECT_HEADER_NAME);
+    if (projectId === null) {
+      return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
     }
 
-    const apiClient = await createSdpApiClient(
+    const apiClient = await createProjectBoundSdpApiClient(
+      projectId,
       trace.childContext("route.dashboard.wallets.quick_action_status.api")
     );
     const configsResponse = await apiClient.request("/v1/wallets/configs");

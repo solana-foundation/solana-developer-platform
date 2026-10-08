@@ -1,21 +1,30 @@
 import { NextResponse } from "next/server";
-import { buildHomeActivityRows, fetchOrgIssuanceActivity } from "@/app/dashboard/home-page.data";
+import {
+  buildHomeActivityRows,
+  fetchOrgIssuanceActivity,
+} from "@/app/dashboard/[projectId]/home-page.data";
 import {
   fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols,
   WALLET_TRANSFERS_DEADLINE_MS,
-} from "@/app/dashboard/payments/payments-page.data";
+} from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createProjectBoundSdpApiClient, proxyFailure } from "@/lib/sdp-api";
 
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.home.activity", request);
+  const projectId = request.headers.get(PROJECT_HEADER_NAME);
+  if (projectId === null) {
+    return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
+  }
   const [t, issuanceEnabled] = await Promise.all([getTranslations(), issuance()]);
 
   try {
-    const apiClient = await createSdpApiClient(
+    const apiClient = await createProjectBoundSdpApiClient(
+      projectId,
       trace.childContext("route.dashboard.home.activity.api")
     );
     const [transfersResult, issuanceActivityResult, issuedTokenSymbolsResult] = await Promise.all([

@@ -1,24 +1,24 @@
 "use client";
 
 import type { ComponentType } from "react";
-import DashboardLoading from "@/app/dashboard/(home)/loading";
-import AllowlistLoading from "@/app/dashboard/allowlist/loading";
-import ApiKeyEditLoading from "@/app/dashboard/api-keys/[keyId]/edit/loading";
-import { ApiKeysListSkeleton } from "@/app/dashboard/api-keys/api-key-page-skeletons";
-import ApiKeyNewLoading from "@/app/dashboard/api-keys/new/loading";
+import DashboardLoading from "@/app/dashboard/[projectId]/(home)/loading";
+import AllowlistLoading from "@/app/dashboard/[projectId]/allowlist/loading";
+import ApiKeyEditLoading from "@/app/dashboard/[projectId]/api-keys/[keyId]/edit/loading";
+import { ApiKeysListSkeleton } from "@/app/dashboard/[projectId]/api-keys/api-key-page-skeletons";
+import ApiKeyNewLoading from "@/app/dashboard/[projectId]/api-keys/new/loading";
 import {
   ApprovalDetailSkeleton,
   ApprovalInboxSkeleton,
-} from "@/app/dashboard/approvals/approval-page-skeletons";
-import { HeliusRingsSkeleton } from "@/app/dashboard/helius-rings/helius-rings-skeleton";
+} from "@/app/dashboard/[projectId]/approvals/approval-page-skeletons";
+import { HeliusRingsSkeleton } from "@/app/dashboard/[projectId]/helius-rings/helius-rings-skeleton";
 import {
   IntegrationDetailSkeleton,
   IntegrationsSkeleton,
-} from "@/app/dashboard/integrations/integrations-skeleton";
-import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
-import { IssuanceCreateSkeleton } from "@/app/dashboard/issuance/issuance-create-skeleton";
-import { IssuanceDetailSkeleton } from "@/app/dashboard/issuance/issuance-detail-skeleton";
-import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
+} from "@/app/dashboard/[projectId]/integrations/integrations-skeleton";
+import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-route-skeletons";
+import { IssuanceCreateSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-create-skeleton";
+import { IssuanceDetailSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-detail-skeleton";
+import { IssuancePageSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-page-skeleton";
 import {
   DvpCreateSkeleton,
   DvpTradeDetailSkeleton,
@@ -27,16 +27,16 @@ import {
   EmbeddedYieldPortfolioSkeleton,
   MarketsLandingSkeleton,
   TreasurySolutionsSkeleton,
-} from "@/app/dashboard/markets/markets-route-skeletons";
-import { SettingsPageSkeleton } from "@/app/dashboard/operations-card-page-skeletons";
+} from "@/app/dashboard/[projectId]/markets/markets-route-skeletons";
+import { SettingsPageSkeleton } from "@/app/dashboard/[projectId]/operations-card-page-skeletons";
 import CounterpartyDirectoryLoading, {
   PreviousCounterpartyLoading as LegacyCounterpartyDirectoryLoading,
-} from "@/app/dashboard/payments/counterparty/loading";
-import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
+} from "@/app/dashboard/[projectId]/payments/counterparty/loading";
+import { PaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton";
 import {
   CounterpartyCreateSkeleton as LegacyCounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton as LegacyCounterpartyDetailSkeleton,
-} from "@/app/dashboard/payments/payments-route-skeletons";
+} from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import {
   CounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton,
@@ -46,10 +46,10 @@ import {
   RecurringPaymentCreateSkeleton,
   RecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton,
-} from "@/app/dashboard/payments/payments-route-skeletons.redesign";
-import PaymentRequestsLoading from "@/app/dashboard/payments/requests/loading";
-import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
-import TokenHoldingsLoading from "@/app/dashboard/tokens/loading";
+} from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
+import PaymentRequestsLoading from "@/app/dashboard/[projectId]/payments/requests/loading";
+import { PoliciesOverviewSkeleton } from "@/app/dashboard/[projectId]/policies/policies-overview";
+import TokenHoldingsLoading from "@/app/dashboard/[projectId]/tokens/loading";
 import {
   WalletConnectionsListSkeleton,
   WalletDetailSkeleton,
@@ -58,7 +58,7 @@ import {
   WalletPolicySkeleton,
   WalletSetupSkeleton,
   WalletsOverviewSkeleton,
-} from "@/app/dashboard/wallets/wallet-route-skeletons";
+} from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import type { DashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 
 interface PageLoadingProps {

@@ -15,12 +15,9 @@ import { useTranslations } from "@/i18n/provider";
 // Sitting under the layout means the chrome survives and only the content slot
 // is replaced, so the rest of the dashboard stays navigable.
 //
-// Project selection is not a reason to land here any more: createSdpApiClient()
-// resolves the sdp_selected_project_id cookie through the same chain the layout
-// renders with (lib/dashboard-project-selection.ts), so a missing or stale
-// cookie reads the sandbox project instead of throwing "Selected project
-// required" or sending the API a project it refuses. What still arrives is a
-// genuine failure: the API down, or an organization with no project at all.
+// Project selection is not a reason to land here: the `[projectId]` layout
+// redirects a Project the user cannot list to the Sandbox before any page
+// renders. What still arrives is a genuine failure, such as the API being down.
 export default function DashboardError({
   error,
   reset,

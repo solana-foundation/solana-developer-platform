@@ -2,13 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { projectHref } from "@/lib/dashboard-project-path";
+import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
 
-// createSdpApiClient is project-scoped rather than org-scoped on purpose:
-// /v1/members applies projectContextMiddleware to every route
-// (routes/members/index.ts), so it rejects a request without an x-project-id
-// header even though membership itself is organization-level.
+// Project-bound rather than org-scoped on purpose: /v1/members applies
+// projectContextMiddleware to every route (routes/members/index.ts), so it
+// rejects a request without an x-project-id header even though membership
+// itself is organization-level.
 
 export interface Member {
   id: string;
@@ -50,21 +51,27 @@ export interface MemberDirectory {
 export type RevokeInvitationResult = { ok: true } | { ok: false; error: string };
 export type RemoveMemberResult = { ok: true } | { ok: false; error: string };
 
-export async function removeMember(memberId: string): Promise<RemoveMemberResult> {
+export async function removeMember(
+  projectId: string,
+  memberId: string
+): Promise<RemoveMemberResult> {
   try {
-    const client = await createSdpApiClient();
+    const client = await createProjectBoundSdpApiClient(projectId);
     await client.fetch(`/v1/members/${encodeURIComponent(memberId)}`, { method: "DELETE" });
   } catch (error) {
     return { ok: false, error: readableApiError(error) };
   }
 
-  revalidatePath("/dashboard/settings");
+  revalidatePath(projectHref(projectId, "/dashboard/settings"));
   return { ok: true };
 }
 
-export async function revokeInvitation(invitationId: string): Promise<RevokeInvitationResult> {
+export async function revokeInvitation(
+  projectId: string,
+  invitationId: string
+): Promise<RevokeInvitationResult> {
   try {
-    const client = await createSdpApiClient();
+    const client = await createProjectBoundSdpApiClient(projectId);
     await client.fetch(`/v1/members/invitations/${encodeURIComponent(invitationId)}`, {
       method: "DELETE",
     });
@@ -72,14 +79,14 @@ export async function revokeInvitation(invitationId: string): Promise<RevokeInvi
     return { ok: false, error: readableApiError(error) };
   }
 
-  revalidatePath("/dashboard/settings");
+  revalidatePath(projectHref(projectId, "/dashboard/settings"));
   return { ok: true };
 }
 
 const MEMBERS_PAGE_SIZE = 25;
 
-export async function listMembers(page = 1): Promise<MemberDirectory> {
-  const client = await createSdpApiClient();
+export async function listMembers(projectId: string, page: number): Promise<MemberDirectory> {
+  const client = await createProjectBoundSdpApiClient(projectId);
   const query = new URLSearchParams({
     page: String(Math.max(1, page)),
     pageSize: String(MEMBERS_PAGE_SIZE),
@@ -110,7 +117,10 @@ export type InviteMemberResult = { ok: true; email: string } | { ok: false; erro
  * thrown server action surfaces as an error boundary, which discards the
  * typed-in address and tells the user nothing actionable.
  */
-export async function inviteMember(formData: FormData): Promise<InviteMemberResult> {
+export async function inviteMember(
+  projectId: string,
+  formData: FormData
+): Promise<InviteMemberResult> {
   const t = await getTranslations();
   const email = String(formData.get("email") ?? "").trim();
   const role = String(formData.get("role") ?? "member").trim();
@@ -120,7 +130,7 @@ export async function inviteMember(formData: FormData): Promise<InviteMemberResu
   }
 
   try {
-    const client = await createSdpApiClient();
+    const client = await createProjectBoundSdpApiClient(projectId);
     await client.fetch("/v1/members/invite", {
       method: "POST",
       body: JSON.stringify({ email, role }),
@@ -130,6 +140,6 @@ export async function inviteMember(formData: FormData): Promise<InviteMemberResu
   }
 
   // Members render inside the settings page; /members only redirects there.
-  revalidatePath("/dashboard/settings");
+  revalidatePath(projectHref(projectId, "/dashboard/settings"));
   return { ok: true, email };
 }

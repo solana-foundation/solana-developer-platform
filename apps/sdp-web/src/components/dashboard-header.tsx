@@ -14,8 +14,8 @@ import type { ReactNode } from "react";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
-} from "@/app/dashboard/custody/provider-catalog";
-import { privateChannelsInstancePath } from "@/app/dashboard/integrations/private-channels/private-channels-routes";
+} from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import { privateChannelsInstancePath } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
@@ -25,6 +25,7 @@ import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { type DesignModuleFlags, isNewDesignPage } from "@/lib/design-modules";
 import { PAYMENT_REQUESTS_HREF, PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
@@ -79,8 +80,11 @@ export function DashboardHeaderAction({
   action: DashboardHeaderActionConfig;
   search: string;
 }) {
+  const projectHref = useProjectHref();
   const Icon = action.icon === undefined ? null : action.icon === "plus" ? PlusIcon : DownloadIcon;
-  const href = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
+  const href = projectHref(
+    action.withCurrentQuery && search ? `${action.href}?${search}` : action.href
+  );
   const content = (
     <>
       {Icon === null ? null : <Icon className="size-4" aria-hidden="true" />}
@@ -135,9 +139,10 @@ export function HeaderBackAction({
   label: string;
   compactOnMobile?: boolean;
 }) {
+  const projectHref = useProjectHref();
   return (
     <Link
-      href={href}
+      href={projectHref(href)}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:h-5 refresh:gap-1"
     >
       <ArrowLeftIcon className="h-4 w-4 refresh:hidden" />

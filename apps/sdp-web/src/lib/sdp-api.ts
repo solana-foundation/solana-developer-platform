@@ -1,11 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import type { ListProjectsResponse, Project } from "@sdp/types";
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
-import { resolveProjectFromList } from "./dashboard-project-selection";
-import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
+import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
   logRouteResult,
@@ -230,64 +228,6 @@ export function listSdpProjects(): Promise<Project[]> {
   return getRequestProjects();
 }
 
-const getRequestProjectCookie = cache(async (): Promise<string | undefined> => {
-  const jar = await cookies();
-  return jar.get(PROJECT_COOKIE_NAME)?.value;
-});
-
-/**
- * The project every request-scoped client sends as `x-project-id`, resolved
- * through the same chain the dashboard layout renders with: the cookie's project
- * while this organization still lists it, else the default sandbox. A stale
- * cookie (two local stacks sharing `localhost`, an archived project, a revoked
- * membership) used to go upstream verbatim and come back as a 403 that every
- * project-scoped page rethrew into the error boundary, while the shell beside it
- * had already fallen back to the sandbox.
- *
- * Takes the caller's already-acquired token rather than minting its own, so one
- * request still mints exactly one. The list is the request-cached `/v1/projects`
- * read the layout already performed, so page renders pay nothing extra; a BFF
- * route handler without that warm cache pays one list call. If the list cannot be
- * loaded there is nothing to validate against, so the cookie's word stands,
- * exactly as the layout treats a failed load as non-authoritative. Nothing here
- * writes the cookie back: cookies cannot be set during a render, and the
- * workspace context's client-side repair effect already does that once the
- * layout flags the mismatch.
- */
-const resolveRequestProjectId = cache(async (token: string): Promise<string | undefined> => {
-  const cookieProjectId = await getRequestProjectCookie();
-  let projects: Project[];
-  try {
-    projects = await fetchRequestProjects(token);
-  } catch {
-    return cookieProjectId;
-  }
-  if (!Array.isArray(projects)) {
-    return cookieProjectId;
-  }
-  return resolveProjectFromList(projects, cookieProjectId)?.id;
-});
-
-/**
- * Route handlers that build a project-scoped client outside `proxyToSdpApi`
- * check this first so a missing selection surfaces as a 400 instead of a thrown
- * 500. Without a request-bound token there is no list to validate against, so an
- * unauthenticated caller still reads the raw cookie, as before.
- */
-const getRequestSelectedProjectId = cache(async (): Promise<string | undefined> => {
-  let token: string;
-  try {
-    token = await getRequestClerkToken();
-  } catch {
-    return getRequestProjectCookie();
-  }
-  return resolveRequestProjectId(token);
-});
-
-export function getSelectedProjectId(): Promise<string | undefined> {
-  return getRequestSelectedProjectId();
-}
-
 function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
   return {
     request,
@@ -303,37 +243,29 @@ function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
  * token so the same token is not acquired twice, and without a project header on the
  * organization client.
  *
- * A missing project is represented by a null project client, so onboarding pages can
- * still query organization state before a project has been selected.
- *
- * `getToken` is optional and should normally be omitted. Passing it bypasses the
- * request-scoped cache that the layout has usually already populated. The parameter
- * stays for callers that hold a token source without a request-bound `auth()` context.
+ * @param params.projectId - Project the page renders, from its route params.
+ * @param params.organizationTraceContext - Trace for the organization client's requests.
+ * @param params.projectTraceContext - Trace for the project client's requests.
+ * @returns The organization client and the client pinned to `projectId`.
  */
 export async function createRequestScopedSdpApiClients({
-  getToken,
+  projectId,
   organizationTraceContext,
   projectTraceContext,
 }: {
-  getToken?: ClerkGetToken;
+  projectId: string;
   organizationTraceContext?: TraceContext;
   projectTraceContext?: TraceContext;
-} = {}): Promise<{
+}): Promise<{
   organizationClient: SdpApiClient;
-  projectClient: SdpApiClient | null;
+  projectClient: SdpApiClient;
 }> {
-  // The project resolution validates the cookie against this organization's project
-  // list, so it needs the token first: sequential on purpose, and one mint either way.
-  const token = getToken ? await acquireClerkToken(getToken) : await getRequestClerkToken();
-  const projectId = await resolveRequestProjectId(token);
-
+  const token = await getRequestClerkToken();
   return {
     organizationClient: assembleSdpApiClient(
       createSdpApiRequest(token, null, organizationTraceContext)
     ),
-    projectClient: projectId
-      ? assembleSdpApiClient(createSdpApiRequest(token, projectId, projectTraceContext))
-      : null,
+    projectClient: assembleSdpApiClient(createSdpApiRequest(token, projectId, projectTraceContext)),
   };
 }
 
@@ -354,53 +286,22 @@ export function createTokenSdpApiClient(token: string): SdpApiClient {
 }
 
 /**
- * Creates a project-scoped SDP API client for the project the layout renders
- * with (see `getRequestSelectedProjectId`). Throws only when nothing resolves:
- * no cookie and no sandbox, or an organization with no projects at all.
- * Org-scoped endpoints go through `createOrgSdpApiClient` instead.
- */
-export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
-  const token = await getRequestClerkToken();
-  const projectId = await resolveRequestProjectId(token);
-  if (!projectId) {
-    throw new Error("Selected project required");
-  }
-  return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
-}
-
-/**
- * Creates a client pinned to an explicit project id for server actions that
- * must stay bound to the page they were rendered with instead of re-reading
- * the mutable selection cookie: a feed mounted for project A keeps asking for
- * project A even after the shared cookie has moved to B.
+ * Creates a client pinned to the project the calling tab renders, for route
+ * handlers and server actions. The id is relayed upstream as `x-project-id`
+ * unchecked: sdp-api's project context is the only authority on whether this
+ * caller may act on it, so a project the caller cannot reach comes back as the
+ * API's own refusal rather than being guessed at here (HOO-1965).
  *
- * The id is validated against this organization's project list first, so an
- * arbitrary or no-longer-listed project is refused here rather than sent
- * upstream. Each server-action request loads `/v1/projects` before the event
- * request; its request-scoped cache is not shared with the earlier layout
- * request. A failed list read fails closed — without the list
- * there is nothing to validate the scope against. The API still authorizes
- * the caller's membership on every request.
+ * @param projectId - Project the tab renders, from its URL or request header.
+ * @param traceContext - Trace to attach the upstream requests to.
+ * @returns A client whose every request carries `projectId`.
  */
 export async function createProjectBoundSdpApiClient(
   projectId: string,
   traceContext?: TraceContext
 ): Promise<SdpApiClient> {
   const token = await getRequestClerkToken();
-  const projects = await fetchRequestProjects(token);
-  if (!projects.some((project) => project.id === projectId)) {
-    throw new Error("Requested project is not available for this organization");
-  }
   return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
-}
-
-/**
- * Convenience helper for server actions that need to make a raw request to SDP
- * API with the current project and Clerk auth context.
- */
-export async function sdpApiRequest(path: string, options: RequestInit = {}): Promise<Response> {
-  const apiClient = await createSdpApiClient();
-  return apiClient.request(path, options);
 }
 
 /**
@@ -433,8 +334,11 @@ export function proxyFailure(
 /**
  * Proxies a dashboard API route to sdp-api: forwards the incoming method and
  * body to `path` and streams the upstream response back with trace headers.
- * Unauthenticated callers get 401/403; other local failures 500, with the
- * standard `{ error: { message } }` envelope.
+ * The project is the one the calling tab sent as `x-project-id`, never the
+ * shared selection cookie, so a tab rendering project A keeps acting on A after
+ * another tab switches to B. Unauthenticated callers get 401/403, a request
+ * without the header 400, other local failures 500, with the standard
+ * `{ error: { message } }` envelope.
  */
 export async function proxyToSdpApi({
   request,
@@ -461,13 +365,16 @@ export async function proxyToSdpApi({
   if (!orgId) {
     return proxyFailure(trace, 403, "Active organization required");
   }
-  const projectId = await getSelectedProjectId();
+  const projectId = request.headers.get(PROJECT_HEADER_NAME);
   if (!projectId) {
-    return proxyFailure(trace, 400, "Selected project required");
+    return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
   }
 
   try {
-    const apiClient = await createSdpApiClient(trace.childContext(`${traceSource}.api`));
+    const apiClient = await createProjectBoundSdpApiClient(
+      projectId,
+      trace.childContext(`${traceSource}.api`)
+    );
     const method = request.method;
     const rawBody = method === "GET" || method === "HEAD" ? "" : await request.text();
     const response = await apiClient.request(path, {

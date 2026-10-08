@@ -7,7 +7,7 @@ import type {
 import {
   isKnownCustodyProvider,
   type KnownCustodyProvider,
-} from "@/app/dashboard/custody/provider-catalog";
+} from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export interface DashboardProviderAvailability extends OrganizationProviderAvailabilityResponse {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { floorToReplay } from "../app/dashboard/markets/earn/earn-vault-slippage";
+import { floorToReplay } from "../app/dashboard/[projectId]/markets/earn/earn-vault-slippage";
 import {
   createFloorMemo,
   createIdempotencyKeyStore,
