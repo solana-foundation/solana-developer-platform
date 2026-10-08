@@ -6,6 +6,7 @@ const flagMock = vi.hoisted(() => ({ on: true, contacts: true }));
 vi.mock("@/flags", () => ({
   newDesign: async () => flagMock.on,
   newDesignContacts: async () => flagMock.contacts,
+  newDesignPayDeposit: async () => true,
 }));
 
 describe("withLegacyDesign", () => {
@@ -46,6 +47,6 @@ describe("withLegacyDesign", () => {
 describe("getDesignModuleFlags", () => {
   it("evaluates every module's own flag", async () => {
     flagMock.contacts = false;
-    await expect(getDesignModuleFlags()).resolves.toEqual({ contacts: false });
+    await expect(getDesignModuleFlags()).resolves.toEqual({ contacts: false, payDeposit: true });
   });
 });

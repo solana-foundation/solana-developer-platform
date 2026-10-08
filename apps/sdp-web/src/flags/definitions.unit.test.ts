@@ -23,6 +23,7 @@ const FLAG_CAPS = {
   homepageOpenSignup: "uncapped",
   newDesign: "uncapped",
   newDesignContacts: "uncapped",
+  newDesignPayDeposit: "uncapped",
   custody: { module: "custody" },
   privyByok: { module: "custody" },
   issuance: { module: "issuance" },
@@ -119,6 +120,7 @@ describe("defineDashboardFlags", () => {
         "homepageOpenSignup",
         "newDesign",
         "newDesignContacts",
+        "newDesignPayDeposit",
         "payments",
         "privyByok",
       ].sort()
