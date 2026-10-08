@@ -288,8 +288,10 @@ function buildBodyFields(operation: OperationObject, document: OpenAPIObject): P
 }
 
 function buildExpectedResponse(operation: OperationObject, document: OpenAPIObject): unknown {
-  const successEntry = Object.entries(operation.responses).find(([status]) =>
-    /^2\d\d$/.test(status)
+  // A 202 is the SIGNING_PENDING hold, not the operation's result, and numeric
+  // keys enumerate ascending, so it would otherwise shadow a 204.
+  const successEntry = Object.entries(operation.responses).find(
+    ([status]) => /^2\d\d$/.test(status) && status !== "202"
   );
   if (!successEntry) return {};
 

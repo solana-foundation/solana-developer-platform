@@ -41,6 +41,7 @@ import {
   jsonContent,
   projectScopeHeaders,
   projectScopeWithIdempotencyHeaders,
+  signingPendingResponse,
 } from "./helpers";
 import {
   offrampCurrenciesResponse,
@@ -248,6 +249,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer executed",
         content: jsonContent(transferResponse),
       },
+      202: signingPendingResponse,
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
     },
   });
@@ -341,6 +343,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer batch created",
         content: jsonContent(transferBatchResponse),
       },
+      202: signingPendingResponse,
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
@@ -408,6 +411,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment created",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
+      202: signingPendingResponse,
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
@@ -456,6 +460,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment updated",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
+      202: signingPendingResponse,
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
@@ -522,6 +527,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment collection result",
         content: jsonContent(paymentRecurringPaymentCollectionResponse),
       },
+      202: signingPendingResponse,
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
@@ -944,6 +950,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "On-ramp quote created",
         content: jsonContent(onrampQuoteResponse),
       },
+      202: signingPendingResponse,
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });

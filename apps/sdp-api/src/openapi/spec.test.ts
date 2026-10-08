@@ -607,6 +607,55 @@ describe("OpenAPI spec", () => {
     if (codes?.enum) expect(codes.enum).toContain("SIGNING_REJECTED");
   });
 
+  // Wallet policy can hold any `policyGate` route, and the recurring-payment
+  // services that call `enforceRecurringPaymentPolicy`, answering 202
+  // SIGNING_PENDING. Gating a new public route, or dropping a gate, has to
+  // update this list on purpose.
+  it("pins the public operations that declare the 202 SIGNING_PENDING response", () => {
+    const doc = createPublicOpenApiDocument();
+    const declared: string[] = [];
+    for (const [path, pathItem] of Object.entries(doc.paths ?? {})) {
+      for (const method of ["get", "post", "put", "patch", "delete"] as const) {
+        const accepted = pathItem[method]?.responses?.["202"];
+        if (accepted === undefined) continue;
+        expect(getJsonSchema(accepted), `${method} ${path}`).toEqual({
+          $ref: "#/components/schemas/SigningPendingResponse",
+        });
+        declared.push(`${method.toUpperCase()} ${path}`);
+      }
+    }
+
+    expect(declared.sort()).toEqual([
+      "DELETE /v1/issuance/tokens/{tokenId}/allowlist/{entryId}",
+      "PATCH /v1/issuance/tokens/{tokenId}",
+      "PATCH /v1/payments/recurring-payments/{id}",
+      "POST /v1/issuance/tokens/{tokenId}/allowlist",
+      "POST /v1/issuance/tokens/{tokenId}/authority",
+      "POST /v1/issuance/tokens/{tokenId}/burn",
+      "POST /v1/issuance/tokens/{tokenId}/deploy",
+      "POST /v1/issuance/tokens/{tokenId}/force-burn",
+      "POST /v1/issuance/tokens/{tokenId}/freeze",
+      "POST /v1/issuance/tokens/{tokenId}/mint",
+      "POST /v1/issuance/tokens/{tokenId}/pause",
+      "POST /v1/issuance/tokens/{tokenId}/seize",
+      "POST /v1/issuance/tokens/{tokenId}/unfreeze",
+      "POST /v1/issuance/tokens/{tokenId}/unpause",
+      "POST /v1/payments/ramps/onramp/quote",
+      "POST /v1/payments/recurring-payments",
+      "POST /v1/payments/recurring-payments/{id}/collect",
+      "POST /v1/payments/transfer-batches",
+      "POST /v1/payments/transfers",
+    ]);
+
+    const envelope = doc.components?.schemas?.SigningPendingResponse as TestJsonSchema | undefined;
+    const error = envelope?.properties?.error;
+    expect(error?.properties?.code?.enum).toEqual(["SIGNING_PENDING"]);
+    expect(error?.required).toContain("details");
+    expect(error?.properties?.details?.required).toEqual(
+      expect.arrayContaining(["walletOperationId", "decision", "reason", "approvalRequestId"])
+    );
+  });
+
   it("documents exact-one wallet ownership and request-time runtime admission", () => {
     const doc = createOpenApiDocument();
     const createWallet = getWalletResponseSchema(

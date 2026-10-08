@@ -231,6 +231,86 @@ export const errorResponseSchema = z
   })
   .openapi({ description: "Standard error response envelope." });
 
+/**
+ * `error.details` of a 202 SIGNING_PENDING. Mirrors
+ * `walletOperationPolicyDecisionError` (services/policy/enforcement.service.ts)
+ * and the pending-collection replay in `enforceRecurringPaymentPolicy`; keep
+ * the three in step.
+ */
+const signingPendingErrorDetailsSchema = z
+  .object({
+    walletOperationId: z.string().openapi({
+      description: "The wallet operation recorded for this request.",
+      example: "wop_example",
+    }),
+    policyEvaluationId: z.string().openapi({
+      description: "The policy evaluation that held the operation.",
+      example: "peval_example",
+    }),
+    decision: z
+      .enum(["approval_required", "provider_approval_required", "review"])
+      .openapi({ description: "The policy decision that held the operation." }),
+    reasonCode: z.string().openapi({
+      description: "Stable reason code explaining the decision.",
+      example: "wallet_policy_match",
+    }),
+    reason: z.string().nullable().openapi({
+      description: "Human-readable reason for the decision.",
+      example: "Approval policy matched operation.",
+    }),
+    requiresApproval: z.boolean().openapi({
+      description:
+        "True for `approval_required` and `provider_approval_required`, false for `review`.",
+      example: true,
+    }),
+    approvalRequestId: z.string().openapi({
+      description:
+        "The approval request that releases the operation; read it at GET /v1/wallets/approval-requests/{approvalRequestId}.",
+      example: "appr_example",
+    }),
+  })
+  .openapi({ description: "Identifiers and decision for the held operation." });
+
+/**
+ * The 202 a policy-gated operation answers when wallet or API-key policy holds
+ * it for approval. Registered as a named component so generated clients get
+ * one type for every policy-gated operation.
+ */
+export const signingPendingErrorResponseSchema = z
+  .object({
+    error: errorSchema
+      .extend({
+        code: z.enum(["SIGNING_PENDING"]).openapi({ description: "Machine-readable error code." }),
+        details: signingPendingErrorDetailsSchema,
+      })
+      .openapi({ description: "Error payload for an operation held for approval." }),
+    meta: z
+      .object({
+        requestId: requestIdSchema.optional(),
+      })
+      .optional(),
+  })
+  .openapi("SigningPendingResponse", {
+    description:
+      "Error envelope for an operation held for approval by wallet or API-key policy (SIGNING_PENDING).",
+    example: {
+      error: {
+        code: "SIGNING_PENDING",
+        message: "Wallet operation requires policy approval",
+        details: {
+          walletOperationId: "wop_example",
+          policyEvaluationId: "peval_example",
+          decision: "approval_required",
+          reasonCode: "wallet_policy_match",
+          reason: "Approval policy matched operation.",
+          requiresApproval: true,
+          approvalRequestId: "appr_example",
+        },
+      },
+      meta: { requestId: "req_example" },
+    },
+  });
+
 const successMetaSchema = z
   .object({
     requestId: requestIdSchema,

@@ -1,4 +1,9 @@
-import { idempotencyKeyHeaderSchema, projectScopeHeaderSchema, z } from "../schemas";
+import {
+  idempotencyKeyHeaderSchema,
+  projectScopeHeaderSchema,
+  signingPendingErrorResponseSchema,
+  z,
+} from "../schemas";
 
 export const jsonContent = (schema: z.ZodTypeAny) => ({
   "application/json": { schema },
@@ -37,3 +42,14 @@ export const errorResponses = (schema: z.ZodTypeAny, codes: number[]) =>
       },
     ])
   );
+
+/**
+ * The 202 every wallet-policy-gated operation can answer: `policyGate` routes
+ * and the recurring-payment services that call `enforceRecurringPaymentPolicy`.
+ * spec.test.ts pins the public operations that declare it.
+ */
+export const signingPendingResponse = {
+  description:
+    "Held for approval by wallet or API-key policy. The operation did not run; `error.details.approvalRequestId` identifies the approval request (`SIGNING_PENDING`).",
+  content: jsonContent(signingPendingErrorResponseSchema),
+};
