@@ -50,6 +50,8 @@ export function corsMiddleware(env: Env["ENVIRONMENT"]) {
     exposeHeaders: [
       "X-Request-ID",
       "Idempotency-Key",
+      "Idempotent-Replayed",
+      "Retry-After",
       "Server-Timing",
       "X-RateLimit-Limit",
       "X-RateLimit-Remaining",

@@ -10,6 +10,7 @@ import {
 } from "@/cron/earn-metrics-refresh";
 import { EARN_SPLIT_SWAPS_MONITOR } from "@/cron/earn-split-swaps";
 import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
+import { IDEMPOTENCY_KEY_PRUNE_MONITOR } from "@/cron/idempotency-keys";
 import type { CronMonitor } from "@/cron/money-effects";
 import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
@@ -37,6 +38,7 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
 import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
+import { pruneIdempotencyKeys } from "@/services/jobs/prune-idempotency-keys";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
@@ -105,6 +107,8 @@ const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
  *    queued. Non-fatal: a queued row is never abandoned, the next run picks it
  *    up, and a failing sweep must not sink the reconciliation this job exists
  *    for.
+ * 8. **Idempotency-Key prune** — behind no flag, and non-fatal: every claim
+ *    already ignores an expired key, so a missed sweep only costs disk.
  * 9. **Earn metrics refresh, then catalogue sync** (both gated on the two Earn
  *    flags). Refresh first — unslotted, this job's schedule IS its cadence —
  *    so a slow catalogue pass cannot eat the tick and leave rates stale;
@@ -229,6 +233,9 @@ export async function runCronJob(): Promise<void> {
         // Keep advisory detection after vault reconciliation and collect its failures.
         await collect(monitored(EARN_SPLIT_SWAPS_MONITOR, () => detectOrphanedEarnSplitSwaps(env)));
         await monitored(SECRET_RETIREMENTS_MONITOR, () => retireOrphanedSecrets(env)).catch(
+          () => undefined
+        );
+        await monitored(IDEMPOTENCY_KEY_PRUNE_MONITOR, () => pruneIdempotencyKeys(env)).catch(
           () => undefined
         );
         if (earnEnabled) {
