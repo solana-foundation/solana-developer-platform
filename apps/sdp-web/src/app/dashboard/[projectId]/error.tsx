@@ -12,8 +12,10 @@ import { useTranslations } from "@/i18n/provider";
 // whole document, taking the shell, the sidebar, and every client effect mounted
 // inside it with it.
 //
-// Sitting under the layout means the chrome survives and only the content slot
-// is replaced, so the rest of the dashboard stays navigable.
+// Sitting under the [projectId] layout means the chrome survives and only the
+// content slot is replaced, so the rest of the dashboard stays navigable. An
+// error in that layout itself (the Project list failing to load) is caught one
+// level up by app/dashboard/error.tsx, which re-exports this boundary.
 //
 // Project selection is not a reason to land here: the `[projectId]` layout
 // redirects a Project the user cannot list to the Sandbox before any page
