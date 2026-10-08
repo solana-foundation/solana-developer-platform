@@ -43,6 +43,7 @@ import {
   assertProjectProviderAdmitted,
   assertProviderAvailable,
   assertRampProviderSurfaced,
+  isStagedProviderRefusal,
 } from "@/services/provider-availability.service";
 import {
   type AppContext,
@@ -416,6 +417,15 @@ export async function estimateAcrossProviders(
       } catch (error) {
         if (error instanceof SdpPaymentsError && error.code === "ESTIMATE_NOT_AVAILABLE") {
           return { provider, status: "unsupported" };
+        }
+        if (isStagedProviderRefusal(error)) {
+          logEvent("info", {
+            event: "sdp_api_ramp_provider_refused",
+            provider,
+            organization_id: scope.auth.organizationId,
+            reason: error.details.reason,
+          });
+          return { provider, status: "error", error: error.message };
         }
         const cause = error instanceof Error ? error : new Error(String(error));
         logEvent("error", {

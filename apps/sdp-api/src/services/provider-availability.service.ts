@@ -753,6 +753,33 @@ export interface CustodySetupRefusal {
 /** The custody setup rule's verdict on one (provider, mode) pair for a project. */
 export type CustodySetupAdmission = { admitted: true } | CustodySetupRefusal;
 
+const STAGED_PROVIDER_REFUSAL_REASONS = [
+  "provider_not_in_release_channel",
+  "provider_not_offered",
+  "provider_stage_not_allowed",
+  "provider_not_entitled",
+] as const;
+
+type StagedProviderRefusalReason = (typeof STAGED_PROVIDER_REFUSAL_REASONS)[number];
+
+/**
+ * Whether `error` is the staged-provider rule refusing a ramps, compliance or
+ * Earn provider for a project (release channel, surfacing, Production stage
+ * bar or entitlement): a policy outcome, not a fault.
+ *
+ * @param error - Any thrown value.
+ * @returns True for a 403 carrying one of the staged-provider refusal reasons.
+ */
+export function isStagedProviderRefusal(
+  error: unknown
+): error is AppError & { details: { reason: StagedProviderRefusalReason } } {
+  if (!(error instanceof AppError) || error.code !== "FORBIDDEN" || error.details === undefined) {
+    return false;
+  }
+  const reason = error.details.reason;
+  return STAGED_PROVIDER_REFUSAL_REASONS.some((refusalReason) => refusalReason === reason);
+}
+
 /**
  * The project provider rule's refusal of one provider: its error and the
  * project, environment and request it was decided for, so whoever refuses the
