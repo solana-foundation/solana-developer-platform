@@ -23,11 +23,9 @@ export const getProjectProviderAvailabilityHandler = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const availability = await getProjectProviderAvailability(
-    c.env,
-    getDb(c.env),
-    { organizationId: getAuth(c).organizationId, projectId: params.data.projectId },
-    { rampProviderStages: c.get("rampProviderStages") }
-  );
+  const availability = await getProjectProviderAvailability(c.env, getDb(c.env), {
+    organizationId: getAuth(c).organizationId,
+    projectId: params.data.projectId,
+  });
   return success(c, availability);
 };

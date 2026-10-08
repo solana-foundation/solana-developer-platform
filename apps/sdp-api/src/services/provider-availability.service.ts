@@ -1018,21 +1018,20 @@ function decideStagedProvider(
  * The project provider rule, the one place it lives: every family's admission
  * for a project. The availability read and every entry-point gate decide from
  * this, so they cannot disagree. Custody follows the custody setup rule; ramps
- * are staged per provider; compliance and Earn by their module stage.
- * Evaluating is not refusing, so nothing is logged here: reads and replays
+ * are staged per provider; compliance and Earn by their module stage. Stages
+ * come from the `@sdp/types` manifests, as the custody stages do, so tests
+ * override them by mocking that module. Evaluating is not refusing, so nothing is logged here: reads and replays
  * evaluate too.
  *
  * @param env - Process environment naming the release channel.
  * @param facts - The project, its environment and its organization's provider access.
  * @param request - The provider being used (and, for custody, its mode).
- * @param rampProviderStages - The ramp provider stages the deployment runs against.
  * @returns Admitted, or the refusal carrying the first failed check's 403.
  */
 function decideProjectProvider(
   env: Env,
   facts: ProjectProviderFacts,
-  request: ProjectProviderRequest,
-  rampProviderStages: SdpRampProviderStages
+  request: ProjectProviderRequest
 ): ProjectProviderDecision {
   switch (request.family) {
     case "custody": {
@@ -1047,31 +1046,31 @@ function decideProjectProvider(
     }
     case "ramps":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isRampProviderAvailable(env, request.provider, rampProviderStages),
+        inReleaseChannel: isRampProviderAvailable(env, request.provider, SDP_RAMP_PROVIDER_STAGES),
         stageAllowed: isRampProviderStageAllowedInEnvironment(
           facts.environment,
           request.provider,
-          rampProviderStages
+          SDP_RAMP_PROVIDER_STAGES
         ),
         entry: facts.availability.providers.ramps[request.provider],
       });
     case "compliance":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isModuleAvailable(env, "compliance", rampProviderStages),
+        inReleaseChannel: isModuleAvailable(env, "compliance", SDP_RAMP_PROVIDER_STAGES),
         stageAllowed: isModuleStageAllowedInEnvironment(
           facts.environment,
           "compliance",
-          rampProviderStages
+          SDP_RAMP_PROVIDER_STAGES
         ),
         entry: facts.availability.providers.compliance[request.provider],
       });
     case "earn":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isModuleAvailable(env, "earn", rampProviderStages),
+        inReleaseChannel: isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_STAGES),
         stageAllowed: isModuleStageAllowedInEnvironment(
           facts.environment,
           "earn",
-          rampProviderStages
+          SDP_RAMP_PROVIDER_STAGES
         ),
         entry: facts.availability.providers.earn[request.provider],
       });
@@ -1144,14 +1143,12 @@ export function refuseCustodySetup(refusal: CustodySetupRefusal): CustodySetupRe
  * @param env - Process environment naming the release channel.
  * @param facts - The project's environment and its organization's provider access.
  * @param family - The provider family.
- * @param rampProviderStages - The ramp provider stages the deployment runs against.
  * @returns One entry per provider the deployment knows in `family`.
  */
 function projectProviderEntries(
   env: Env,
   facts: ProjectProviderFacts,
-  family: OrganizationProviderFamily,
-  rampProviderStages: SdpRampProviderStages
+  family: OrganizationProviderFamily
 ): ProjectProviderAvailabilityEntry[] {
   switch (family) {
     case "custody":
@@ -1159,31 +1156,26 @@ function projectProviderEntries(
         family,
         provider,
         modes: CUSTODY_MODES.filter(
-          (mode) =>
-            decideProjectProvider(env, facts, { family, provider, mode }, rampProviderStages)
-              .admitted
+          (mode) => decideProjectProvider(env, facts, { family, provider, mode }).admitted
         ),
       }));
     case "compliance":
       return COMPLIANCE_PROVIDERS.map((provider) => ({
         family,
         provider,
-        available: decideProjectProvider(env, facts, { family, provider }, rampProviderStages)
-          .admitted,
+        available: decideProjectProvider(env, facts, { family, provider }).admitted,
       }));
     case "ramps":
       return RAMP_PROVIDERS.map((provider) => ({
         family,
         provider,
-        available: decideProjectProvider(env, facts, { family, provider }, rampProviderStages)
-          .admitted,
+        available: decideProjectProvider(env, facts, { family, provider }).admitted,
       }));
     case "earn":
       return EARN_PROVIDERS.map((provider) => ({
         family,
         provider,
-        available: decideProjectProvider(env, facts, { family, provider }, rampProviderStages)
-          .admitted,
+        available: decideProjectProvider(env, facts, { family, provider }).admitted,
       }));
     default: {
       const exhaustive: never = family;
@@ -1202,7 +1194,6 @@ function projectProviderEntries(
  * @param scope - The project the read is for.
  * @param scope.organizationId - The organization that owns the project.
  * @param scope.projectId - The project the read is for.
- * @param options - The ramp provider stages the deployment runs against.
  * @returns The project's environment and one entry per provider, in
  *   `ORGANIZATION_PROVIDER_FAMILIES` order.
  * @throws 404 when the project is not an active project of the organization.
@@ -1210,15 +1201,14 @@ function projectProviderEntries(
 export async function getProjectProviderAvailability(
   env: Env,
   db: DatabaseExecutor,
-  scope: ProjectProviderScope,
-  options: ProviderAvailabilityOptions
+  scope: ProjectProviderScope
 ): Promise<ProjectProviderAvailability> {
   const facts = await loadProjectProviderFacts(env, db, scope);
   return {
     projectId: scope.projectId,
     environment: facts.environment,
     providers: ORGANIZATION_PROVIDER_FAMILIES.flatMap((family) =>
-      projectProviderEntries(env, facts, family, options.rampProviderStages)
+      projectProviderEntries(env, facts, family)
     ),
   };
 }
@@ -1234,7 +1224,6 @@ export async function getProjectProviderAvailability(
  * @param scope.organizationId - The organization that owns the project.
  * @param scope.projectId - The project using the provider.
  * @param request - The provider being used (and, for custody, its mode).
- * @param options - The ramp provider stages the deployment runs against.
  * @throws 403 `FORBIDDEN` whose `details.reason` names the failed check. Custody:
  *   `CUSTODY_SETUP_REFUSAL_REASONS`. Ramps, compliance and Earn:
  *   `provider_not_in_release_channel`, `provider_stage_not_allowed` or
@@ -1245,11 +1234,10 @@ export async function assertProjectProviderAdmitted(
   env: Env,
   db: DatabaseExecutor,
   scope: ProjectProviderScope,
-  request: ProjectProviderRequest,
-  options: ProviderAvailabilityOptions
+  request: ProjectProviderRequest
 ): Promise<void> {
   const facts = await loadProjectProviderFacts(env, db, scope);
-  const decision = decideProjectProvider(env, facts, request, options.rampProviderStages);
+  const decision = decideProjectProvider(env, facts, request);
   if (!decision.admitted) {
     throw refuseProjectProvider(decision);
   }
@@ -1276,13 +1264,11 @@ export async function assertCustodySetupAdmitted(
   db: DatabaseExecutor,
   request: CustodySetupRequest
 ): Promise<void> {
-  await assertProjectProviderAdmitted(
-    env,
-    db,
-    request,
-    { family: "custody", provider: request.provider, mode: request.mode },
-    MANIFEST_RAMP_STAGES
-  );
+  await assertProjectProviderAdmitted(env, db, request, {
+    family: "custody",
+    provider: request.provider,
+    mode: request.mode,
+  });
 }
 
 /**
