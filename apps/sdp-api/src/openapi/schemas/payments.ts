@@ -962,7 +962,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
         {
           externalId: "payroll_row_001",
           counterpartyId: "cpty_example",
-          counterpartyAccountId: "cpa_example",
+          counterpartyAccountId: "counterparty_account_example",
           amount: "25.00",
         },
       ],
@@ -1036,7 +1036,7 @@ export const transferBatchRecipientSchema = z
     }),
     counterpartyAccountId: z.string().openapi({
       description: "Counterparty account identifier for the recipient.",
-      example: "cpa_example",
+      example: "counterparty_account_example",
     }),
     destination: solanaAddressSchema.openapi({
       description: "Resolved Solana destination address.",
@@ -1196,7 +1196,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
       createRecurringPaymentSchemaBase.shape.counterpartyAccountId,
       {
         description: "Counterparty crypto_wallet account. It must contain Solana wallet details.",
-        example: "cpa_example",
+        example: "counterparty_account_example",
       }
     ),
     token: withOpenApi(createRecurringPaymentSchemaBase.shape.token, {
@@ -1213,7 +1213,8 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
       example: 720,
     }),
     firstCollectionAt: withOpenApi(createRecurringPaymentSchemaBase.shape.firstCollectionAt, {
-      description: "Optional first collection timestamp. Defaults to activation time when omitted.",
+      description:
+        "Optional first collection timestamp. When omitted, the first collection is due one period (`periodHours`) after activation.",
       example: "2099-01-01T00:00:00.000Z",
     }),
     metadataUri: withOpenApi(createRecurringPaymentSchemaBase.shape.metadataUri, {
@@ -1246,7 +1247,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
       {
         description:
           "Optional replacement counterparty account. Without counterpartyId, this changes the account for the current counterparty.",
-        example: "cpa_example",
+        example: "counterparty_account_example",
       }
     ),
     token: withOpenApi(updateRecurringPaymentSchemaBase.shape.token, {
@@ -1312,9 +1313,10 @@ export const paymentRecurringPaymentSchema = z
     counterpartyId: z
       .string()
       .openapi({ description: "Counterparty ID.", example: "cpty_example" }),
-    counterpartyAccountId: z
-      .string()
-      .openapi({ description: "Counterparty account ID.", example: "cpa_example" }),
+    counterpartyAccountId: z.string().openapi({
+      description: "Counterparty account ID.",
+      example: "counterparty_account_example",
+    }),
     destinationAddress: solanaAddressSchema.openapi({
       description: "Counterparty wallet owner address.",
     }),
@@ -1385,8 +1387,8 @@ export const paymentRecurringPaymentListResponseSchema = z
 export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaBase
   .extend({
     ownerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.ownerWalletId, {
-      description: "Custody wallet that owns the Solana subscription plan.",
-      example: "wal_merchant",
+      description: `Provider wallet ID of the custody wallet that owns the Solana subscription plan — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_123",
     }),
     token: withOpenApi(createSubscriptionPlanSchemaBase.shape.token, {
       description:
@@ -1415,8 +1417,8 @@ export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaB
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     pullerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.pullerWalletId, {
-      description: "Optional SDP custody wallet allowed to pull subscription payments.",
-      example: "wal_collector",
+      description: `Optional provider wallet ID of the custody wallet allowed to pull subscription payments — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_456",
     }),
     metadataUri: withOpenApi(createSubscriptionPlanSchemaBase.shape.metadataUri, {
       description: "Optional plan metadata URI.",
@@ -1439,8 +1441,8 @@ export const updateSubscriptionPlanRequestSchema = updateSubscriptionPlanSchemaB
       description: "Destination owner address, or null to clear it.",
     }),
     pullerWalletId: withOpenApi(updateSubscriptionPlanSchemaBase.shape.pullerWalletId, {
-      description: "Collection wallet ID, or null to clear it.",
-      example: "wal_collector",
+      description: `Provider wallet ID of the collection wallet, or null to clear it — ${WALLET_ID_INPUT_NOTE}`,
+      example: "privy_wallet_456",
     }),
     metadataUri: withOpenApi(updateSubscriptionPlanSchemaBase.shape.metadataUri, {
       description: "Plan metadata URI, or null to clear it.",
@@ -1473,7 +1475,10 @@ export const paymentSubscriptionPlanSchema = z
     destinationAddress: solanaAddressSchema
       .nullable()
       .openapi({ description: "Allowed destination owner address." }),
-    pullerWalletId: walletIdParamSchema.nullable().openapi({ description: "Collector wallet ID." }),
+    pullerWalletId: walletIdParamSchema.nullable().openapi({
+      description: "Provider wallet ID of the collector wallet, or null when none is set.",
+      example: "privy_wallet_456",
+    }),
     pullerAddress: solanaAddressSchema
       .nullable()
       .openapi({ description: "Collector wallet address." }),
@@ -1769,8 +1774,9 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       }
     ),
     assetRail: withOpenApi(createOnrampQuoteSchemaBase.shape.assetRail, {
-      description: "Canonical SDP crypto asset rail.",
-      example: "usdc.solana",
+      description:
+        "Canonical SDP crypto asset rail. The provider must support the fiat-to-rail corridor; list supported pairs with `GET /v1/payments/ramps/onramp/currency`.",
+      example: "sol.solana",
     }),
     fiatCurrency: withOpenApi(createOnrampQuoteSchemaBase.shape.fiatCurrency, {
       description: "Fiat currency for on-ramp.",
@@ -1792,7 +1798,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       provider: "moonpay",
       counterpartyId: "cpty_example",
       destinationCustodyWalletId: "cwlt_example",
-      assetRail: "usdc.solana",
+      assetRail: "sol.solana",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
     },
@@ -1895,7 +1901,7 @@ export const paymentOnrampCurrenciesQuerySchema = listOnrampCurrenciesQuerySchem
     }),
     dest: withOpenApi(listOnrampCurrenciesQuerySchemaBase.shape.dest, {
       description: "Optional Solana crypto rail destination filter.",
-      example: "usdc.solana",
+      example: "sol.solana",
     }),
     provider: withOpenApi(listOnrampCurrenciesQuerySchemaBase.shape.provider, {
       description: "Optional ramp provider filter.",
@@ -1908,7 +1914,7 @@ export const paymentOfframpCurrenciesQuerySchema = listOfframpCurrenciesQuerySch
   .extend({
     source: withOpenApi(listOfframpCurrenciesQuerySchemaBase.shape.source, {
       description: "Optional Solana crypto rail source filter.",
-      example: "usdc.solana",
+      example: "sol.solana",
     }),
     dest: withOpenApi(listOfframpCurrenciesQuerySchemaBase.shape.dest, {
       description: "Optional fiat destination currency filter.",
@@ -2158,11 +2164,11 @@ const onrampCurrencyPairSchema = z
     source: z.string().openapi({ description: "Fiat source currency code.", example: "USD" }),
     dest: z.enum(ONRAMP_CRYPTO_RAILS).openapi({
       description: "Destination crypto rail.",
-      example: "usdc.solana",
+      example: "sol.solana",
     }),
     providers: z.array(z.enum(RAMP_PROVIDERS)).openapi({
       description: "Providers that support this on-ramp pair.",
-      example: ["moonpay", "lightspark"],
+      example: ["moonpay", "stripe"],
     }),
   })
   .openapi({ description: "Provider support for one fiat-to-crypto on-ramp pair." });
@@ -2171,7 +2177,7 @@ const offrampCurrencyPairSchema = z
   .object({
     source: z.enum(OFFRAMP_CRYPTO_RAILS).openapi({
       description: "Source crypto rail.",
-      example: "usdc.solana",
+      example: "sol.solana",
     }),
     dest: z.string().openapi({ description: "Fiat destination currency code.", example: "USD" }),
     providers: z.array(z.enum(RAMP_PROVIDERS)).openapi({

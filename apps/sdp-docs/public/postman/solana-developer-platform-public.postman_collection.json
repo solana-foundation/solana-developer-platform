@@ -1286,7 +1286,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/holders",
-            "description": "Returns the wallets enrolled for this asset (KYC identity + enrollment state)."
+            "description": "Returns the token's active enrollments, newest first, each with the wallet address and KYC status."
           }
         },
         {
@@ -1301,10 +1301,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/holders",
-            "description": "Registers a wallet for this asset (upserts its KYC identity + an active enrollment).",
+            "description": "Registers a wallet for this asset: upserts its KYC identity and an active enrollment, and returns both.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"walletAddress\": \"\",\n  \"counterpartyId\": \"\",\n  \"reviewMode\": \"auto\"\n}",
+              "raw": "{\n  \"walletAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"counterpartyId\": \"cpty_example\",\n  \"reviewMode\": \"auto\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1444,7 +1444,7 @@
             "description": "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"counterparty_account_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1477,7 +1477,7 @@
             "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
+              "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"counterparty_account_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1519,7 +1519,7 @@
             "description": "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "raw": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"counterparty_account_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1552,7 +1552,7 @@
             "description": "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+              "raw": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"counterparty_account_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1621,7 +1621,7 @@
             "description": "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ownerWalletId\": \"wal_merchant\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"programPlanId\": \"17014118346046923173\",\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\",\n  \"status\": \"active\"\n}",
+              "raw": "{\n  \"ownerWalletId\": \"privy_wallet_123\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"programPlanId\": \"17014118346046923173\",\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"privy_wallet_456\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\",\n  \"status\": \"active\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1678,7 +1678,7 @@
             "description": "Updates mutable subscription plan fields and on-chain identifiers.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com\",\n  \"status\": \"active\"\n}",
+              "raw": "{\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"\",\n  \"pullerWalletId\": \"privy_wallet_456\",\n  \"metadataUri\": \"https://example.com\",\n  \"status\": \"active\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1867,7 +1867,7 @@
             "description": "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
+              "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"sol.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1987,7 +1987,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/issuance/asset-profiles",
-            "description": "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Requires the Asset Profiles feature to be enabled.",
+            "description": "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true,\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",

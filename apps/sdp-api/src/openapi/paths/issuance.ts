@@ -1,5 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import { TOKEN_TRANSACTION_TYPES } from "@sdp/types";
+import { KYC_STATUSES, TOKEN_TRANSACTION_TYPES, WALLET_ENROLLMENT_STATUSES } from "@sdp/types";
 import { z } from "zod";
 
 import {
@@ -14,13 +14,18 @@ import {
   forceBurnRequestSchema,
   freezeAccountRequestSchema,
   getTokenQueryOpenApiSchema,
+  isoDateTimeSchema,
   listTokensQueryOpenApiSchema,
   mintRequestSchema,
+  orgIdParamSchema,
   pageQuerySchema,
   pageSizeQuerySchema,
   pauseTokenRequestSchema,
+  projectIdParamSchema,
   removeTokenAllowlistQuerySchema,
   seizeRequestSchema,
+  solanaAddressSchema,
+  successResponseSchema,
   templateIdParamSchema,
   tokenIdParamSchema,
   tokenTransactionStatusQuerySchema,
@@ -1028,24 +1033,168 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
   // Verified holders
   // ═══════════════════════════════════════════════════════════════════════════
 
+  const reviewModeSchema = z.enum(["auto", "manual"]);
+
   const enrollHolderRequestSchema = z
     .object({
-      walletAddress: z.string(),
-      counterpartyId: z.string().nullish(),
-      reviewMode: z.enum(["auto", "manual"]).optional(),
+      walletAddress: z.string().openapi({
+        description: "Solana wallet address to enroll. Must be a valid base58 address.",
+        example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      }),
+      counterpartyId: z.string().nullish().openapi({
+        description:
+          "Counterparty this wallet belongs to, in the same project. Null or omitted keeps any existing link.",
+        example: "cpty_example",
+      }),
+      reviewMode: reviewModeSchema.optional().openapi({
+        description: "Review mode recorded on the enrollment. Defaults to `auto`.",
+        example: "auto",
+      }),
     })
     .openapi("EnrollHolderRequest");
 
-  const envelope = (inner: z.ZodTypeAny, name: string) =>
-    z.object({ data: inner, meta: z.record(z.string(), z.unknown()).optional() }).openapi(name);
-  const holdersResponse = envelope(
-    z.object({ holders: z.array(z.record(z.string(), z.unknown())) }),
-    "HoldersResponse"
-  );
-  const holderResponse = envelope(
-    z.object({ enrollment: z.record(z.string(), z.unknown()) }),
-    "HolderResponse"
-  );
+  // Field names are snake_case because the handler returns the repository rows as-is.
+  const actorIdSchema = z.string().nullable().openapi({
+    description:
+      "Actor that first created the row: the API key ID for API-key requests, or the user ID for dashboard requests.",
+    example: "key_example",
+  });
+  const kycStatusSchema = z.enum(KYC_STATUSES).openapi({
+    description:
+      "SDP-owned, provider-agnostic KYC status of the wallet. KYC providers (Mural today) write into it.",
+    example: "verified",
+  });
+  const enrollmentFields = {
+    id: z.string().openapi({
+      description: "Enrollment identifier.",
+      example: "wallet_asset_enrollment_example",
+    }),
+    organization_id: orgIdParamSchema,
+    project_id: projectIdParamSchema,
+    kyc_wallet_id: z.string().openapi({
+      description: "KYC wallet this enrollment clears.",
+      example: "kyc_wallet_example",
+    }),
+    token_id: tokenIdParamSchema,
+    status: z.enum(WALLET_ENROLLMENT_STATUSES).openapi({
+      description: "Enrollment status. An `active` enrollment clears the wallet for this token.",
+      example: "active",
+    }),
+    review_mode: reviewModeSchema.openapi({
+      description: "Review mode recorded on the enrollment.",
+      example: "auto",
+    }),
+    created_by: actorIdSchema,
+    created_at: isoDateTimeSchema.openapi({
+      description: "When the wallet was first enrolled for this token.",
+      example: "2026-07-02T10:00:00.000Z",
+    }),
+    revoked_at: isoDateTimeSchema.nullable().openapi({
+      description: "When the enrollment was revoked. Null while it is active.",
+      example: null,
+    }),
+  };
+
+  const kycWalletSchema = z
+    .object({
+      id: z
+        .string()
+        .openapi({ description: "KYC wallet identifier.", example: "kyc_wallet_example" }),
+      organization_id: orgIdParamSchema,
+      project_id: projectIdParamSchema,
+      wallet_address: solanaAddressSchema.openapi({
+        description: "Enrolled wallet address.",
+        example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      }),
+      network: z
+        .string()
+        .openapi({ description: "Network of the wallet address.", example: "solana" }),
+      counterparty_id: z.string().nullable().openapi({
+        description: "Counterparty the wallet belongs to, when linked.",
+        example: "cpty_example",
+      }),
+      kyc_status: kycStatusSchema,
+      kyc_provider: z.string().nullable().openapi({
+        description:
+          "Provider that last set the KYC status, if any. Records who verified the wallet; `kyc_status` is the source of truth.",
+        example: "mural",
+      }),
+      provider_ref: z.string().nullable().openapi({
+        description:
+          "Provider-side reference for the verification, when the provider supplies one.",
+        example: null,
+      }),
+      verified_at: isoDateTimeSchema.nullable().openapi({
+        description: "When the wallet became `verified`. Null in any other status.",
+        example: "2026-07-02T09:30:00.000Z",
+      }),
+      status_changed_at: isoDateTimeSchema.openapi({
+        description: "When `kyc_status` last changed. Other writes to the row leave it unchanged.",
+        example: "2026-07-02T09:30:00.000Z",
+      }),
+      created_by: actorIdSchema,
+      created_at: isoDateTimeSchema.openapi({
+        description: "When the wallet was first registered.",
+        example: "2026-07-01T12:00:00.000Z",
+      }),
+      updated_at: isoDateTimeSchema.openapi({
+        description: "Last write to the row.",
+        example: "2026-07-02T10:00:00.000Z",
+      }),
+    })
+    .openapi("KycWallet", {
+      description:
+        "SDP-owned KYC identity for one wallet in the project. Verified once and reused across assets.",
+    });
+
+  // Not registered as a component: zod-to-openapi would mark the shared component
+  // nullable because the POST response wraps it in `.nullable()`.
+  const walletAssetEnrollmentSchema = z.object(enrollmentFields);
+
+  const enrolledHolderSchema = z
+    .object({
+      ...enrollmentFields,
+      wallet_address: solanaAddressSchema.openapi({
+        description: "Address of the enrolled wallet.",
+        example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      }),
+      kyc_status: kycStatusSchema,
+    })
+    .openapi("EnrolledHolder", {
+      description:
+        "An active enrollment joined with its wallet's address and KYC status. `id` is the enrollment ID.",
+    });
+
+  const holdersResponse = successResponseSchema(
+    z.object({
+      holders: z.array(enrolledHolderSchema).openapi({
+        description: "Active enrollments for the token, newest first.",
+      }),
+      total: z.number().int().nonnegative().openapi({
+        description: "Total active enrollments for the token.",
+        example: 1,
+      }),
+      page: z
+        .number()
+        .int()
+        .positive()
+        .openapi({ description: "Current page number.", example: 1 }),
+      pageSize: z
+        .number()
+        .int()
+        .positive()
+        .openapi({ description: "Items per page.", example: 50 }),
+    })
+  ).openapi("HoldersResponse");
+  const holderResponse = successResponseSchema(
+    z.object({
+      wallet: kycWalletSchema,
+      enrollment: walletAssetEnrollmentSchema.nullable().openapi({
+        description:
+          "Clearance for this wallet to hold the token: the active enrollment, read back after the write. Null only if that read finds no active row.",
+      }),
+    })
+  ).openapi("HolderResponse");
 
   registry.registerPath({
     method: "get",
@@ -1053,12 +1202,23 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "List verified holders",
     operationId: "listHolders",
-    description: "Returns the wallets enrolled for this asset (KYC identity + enrollment state).",
+    description:
+      "Returns the token's active enrollments, newest first, each with the wallet address and KYC status.",
     security: [{ apiKeyAuth: [] }],
-    request: { headers: projectScopeHeaders, params: z.object({ tokenId: tokenIdParamSchema }) },
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema }),
+      query: z.object({
+        page: pageQuerySchema.optional(),
+        pageSize: pageSizeQuerySchema.optional().openapi({
+          description: "Items per page. Defaults to 50; values above 200 are capped at 200.",
+          example: 50,
+        }),
+      }),
+    },
     responses: {
       200: { description: "Enrolled holders", content: jsonContent(holdersResponse) },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
@@ -1069,7 +1229,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "Enroll a verified holder",
     operationId: "enrollHolder",
     description:
-      "Registers a wallet for this asset (upserts its KYC identity + an active enrollment).",
+      "Registers a wallet for this asset: upserts its KYC identity and an active enrollment, and returns both.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

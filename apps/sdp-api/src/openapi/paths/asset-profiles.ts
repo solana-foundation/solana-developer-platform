@@ -67,7 +67,7 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
     summary: "Create token with asset profile",
     operationId: "createTokenWithAssetProfile",
     description:
-      "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Requires the Asset Profiles feature to be enabled.",
+      "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

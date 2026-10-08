@@ -65,7 +65,7 @@ export const counterpartyRequirementsQuerySchema = z
     }),
     assetRail: withOpenApi(onrampRequirementsQuerySchema.shape.assetRail, {
       description: "Canonical SDP crypto asset rail.",
-      example: "usdc.solana",
+      example: "sol.solana",
     }),
     fiatCurrency: withOpenApi(onrampRequirementsQuerySchema.shape.fiatCurrency, {
       description: "Fiat currency code.",
@@ -90,54 +90,86 @@ export const counterpartyRequirementsQuerySchema = z
       "Ramp provider, direction, asset pair, and (for onramps) destination wallet used to evaluate counterparty requirements.",
   });
 
+// Examples mirror fields the providers emit today (Lightspark payout and identity
+// fields, BVNK residence and due-diligence fields).
+const requirementFieldIdentity = (example: { key: string; label: string }) => ({
+  key: withOpenApi(z.string(), {
+    description: "Field key. Nested parts use dotted keys, e.g. `customer.address.line1`.",
+    example: example.key,
+  }),
+  label: withOpenApi(z.string(), { description: "Display label.", example: example.label }),
+  required: withOpenApi(z.boolean(), {
+    description: "Whether a value must be collected.",
+    example: true,
+  }),
+});
+
+const requirementOptionSchema = z.object({
+  value: withOpenApi(z.string(), { description: "Value to submit.", example: "GIFT" }),
+  label: withOpenApi(z.string(), { description: "Display label.", example: "Personal gift" }),
+});
+
 const requirementTextFieldSchema = z.object({
   kind: z.literal("text"),
-  key: z.string(),
-  label: z.string(),
-  required: z.boolean(),
-  pattern: z.string().optional(),
-  minLength: z.number().int().nonnegative().optional(),
-  maxLength: z.number().int().nonnegative().optional(),
-  placeholder: z.string().optional(),
-  mask: z.string().optional(),
+  ...requirementFieldIdentity({ key: "bankAccount.sortCode", label: "Sort code" }),
+  pattern: withOpenApi(z.string().optional(), {
+    description: "Regular expression the value must match.",
+    example: "^[0-9]{6}$",
+  }),
+  minLength: withOpenApi(z.number().int().nonnegative().optional(), { example: 6 }),
+  maxLength: withOpenApi(z.number().int().nonnegative().optional(), { example: 6 }),
+  placeholder: withOpenApi(z.string().optional(), { example: "12-34-56" }),
+  mask: withOpenApi(z.string().optional(), {
+    description: "Display mask for the input.",
+    example: "##-##-##",
+  }),
 });
 
 const requirementSelectFieldSchema = z.object({
   kind: z.literal("select"),
-  key: z.string(),
-  label: z.string(),
-  required: z.boolean(),
-  options: z.array(z.object({ value: z.string(), label: z.string() })),
+  ...requirementFieldIdentity({ key: "purposeOfPayment", label: "Purpose of payment" }),
+  options: withOpenApi(z.array(requirementOptionSchema), {
+    description: "Allowed values.",
+    example: [
+      { value: "GIFT", label: "Personal gift" },
+      { value: "SELF", label: "Transfer to yourself" },
+    ],
+  }),
 });
 
 const requirementCountryFieldSchema = z.object({
   kind: z.literal("country"),
-  key: z.string(),
-  label: z.string(),
-  required: z.boolean(),
+  ...requirementFieldIdentity({
+    key: "taxIdentification.taxResidenceCountryCode",
+    label: "Tax residence country",
+  }),
   options: withOpenApi(z.array(z.string()).optional(), {
     description:
       "Subset of country codes the client may offer; absent means every supported country.",
+    example: ["US"],
   }),
 });
 
 const requirementCurrencyFieldSchema = z.object({
   kind: z.literal("currency"),
-  key: z.string(),
-  label: z.string(),
-  required: z.boolean(),
+  ...requirementFieldIdentity({
+    key: "cdd.expectedMonthlyVolume.currency",
+    label: "Expected monthly volume currency",
+  }),
   options: withOpenApi(z.array(z.string()).optional(), {
     description:
       "Subset of fiat currencies the client may offer; absent means every supported currency.",
+    example: ["USD", "EUR"],
   }),
 });
 
 const requirementDateFieldSchema = z.object({
   kind: z.literal("date"),
-  key: z.string(),
-  label: z.string(),
-  required: z.boolean(),
-  before: z.string().optional(),
+  ...requirementFieldIdentity({ key: "customer.birthDate", label: "Date of birth" }),
+  before: withOpenApi(z.string().optional(), {
+    description: "ISO date (YYYY-MM-DD) the collected date must fall before.",
+    example: "2026-07-01",
+  }),
 });
 
 const requirementFieldSchema = z.discriminatedUnion("kind", [
@@ -148,9 +180,7 @@ const requirementFieldSchema = z.discriminatedUnion("kind", [
   requirementDateFieldSchema,
   z.object({
     kind: z.literal("address"),
-    key: z.string(),
-    label: z.string(),
-    required: z.boolean(),
+    ...requirementFieldIdentity({ key: "customer.address", label: "Residential address" }),
     fields: z.array(
       z.discriminatedUnion("kind", [
         requirementTextFieldSchema,
@@ -170,19 +200,49 @@ const countryCodeDocSchema = withOpenApi(z.string(), {
 });
 
 const payoutRequirementTreeSchema = z.object({
-  countryRails: z.record(
-    countryCodeDocSchema,
-    z.array(z.object({ value: z.string(), label: z.string() }))
+  countryRails: withOpenApi(
+    z.record(countryCodeDocSchema, z.array(z.object({ value: z.string(), label: z.string() }))),
+    {
+      description: "Payout rails offered for each destination country.",
+      example: {
+        US: [
+          { value: "ACH", label: "ACH" },
+          { value: "WIRE", label: "Wire" },
+        ],
+      },
+    }
   ),
-  railFields: z.record(z.string(), z.array(requirementFieldSchema)),
+  railFields: withOpenApi(z.record(z.string(), z.array(requirementFieldSchema)), {
+    description: "Fields to collect for each payout rail, keyed by rail.",
+    example: {
+      ACH: [
+        {
+          kind: "text",
+          key: "bankAccount.routingNumber",
+          label: "Routing number",
+          required: true,
+          pattern: "^[0-9]{9}$",
+          minLength: 9,
+          maxLength: 9,
+          placeholder: "021000021",
+        },
+      ],
+    },
+  }),
   accounts: z.array(
     z.object({
-      id: z.string(),
+      id: withOpenApi(z.string(), {
+        description: "Counterparty provider-account row identifier of the payout account.",
+        example: "counterparty_provider_account_example",
+      }),
       destinationCountry: countryCodeDocSchema,
-      paymentRail: z.string().nullable(),
-      status: z.string(),
-      bankName: z.string().optional(),
-      accountNumberLast4: z.string().optional(),
+      paymentRail: withOpenApi(z.string().nullable(), { example: "ACH" }),
+      status: withOpenApi(z.string(), {
+        description: "Provider-reported external-account status.",
+        example: "ACTIVE",
+      }),
+      bankName: withOpenApi(z.string().optional(), { example: "Example Bank" }),
+      accountNumberLast4: withOpenApi(z.string().optional(), { example: "6789" }),
     })
   ),
 });
@@ -203,7 +263,9 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
   z.union([
     z.object({
       ...requirementBase,
-      provider: z.enum(RAMP_PROVIDERS).exclude(["lightspark"]),
+      provider: withOpenApi(z.enum(RAMP_PROVIDERS).exclude(["lightspark"]), {
+        example: "moonpay",
+      }),
       status: z.literal("ready"),
     }),
     z.object({
@@ -215,12 +277,15 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       direction: z.literal("offramp"),
       provider: z.literal("lightspark"),
       status: z.literal("ready"),
-      providerAccountId: z.string(),
+      providerAccountId: withOpenApi(z.string(), {
+        description: "Payout account resolved for the corridor, for explicit quote selection.",
+        example: "counterparty_provider_account_example",
+      }),
       payout: payoutRequirementTreeSchema.optional(),
     }),
     z.object({
       ...requirementBase,
-      provider: z.enum(RAMP_PROVIDERS),
+      provider: withOpenApi(z.enum(RAMP_PROVIDERS), { example: "moonpay" }),
       status: z.literal("collect"),
       fields: z.array(requirementFieldSchema),
     }),
@@ -250,20 +315,26 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
     }),
     z.object({
       ...requirementBase,
-      provider: z.enum(RAMP_PROVIDERS),
+      provider: withOpenApi(z.enum(RAMP_PROVIDERS), { example: "bvnk" }),
       status: z.literal("unsupported"),
-      reason: z.string(),
+      reason: withOpenApi(z.string(), {
+        description: "Why the provider cannot serve this counterparty or corridor.",
+        example: "BVNK supports USD only.",
+      }),
     }),
     z.object({
       ...requirementBase,
-      provider: z.enum(["lightspark", "mural"]),
+      provider: withOpenApi(z.enum(["lightspark", "mural"]), { example: "mural" }),
       status: z.literal("onboarding_not_started"),
     }),
     z.object({
       ...requirementBase,
       provider: z.literal("mural"),
       status: z.literal("terms_of_service_required"),
-      termsOfServiceUrl: z.url(),
+      termsOfServiceUrl: withOpenApi(z.url(), {
+        description: "Provider terms-of-service link the counterparty must accept.",
+        example: "https://example.com/terms-of-service",
+      }),
     }),
     z.object({
       ...requirementBase,
@@ -273,30 +344,42 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
         z.object({
           name: withOpenApi(z.string(), {
             description: "BVNK agreement identifier (v1 agreements have no id).",
+            example: "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
           }),
-          displayName: withOpenApi(z.string(), { description: "Agreement display name." }),
+          displayName: withOpenApi(z.string(), {
+            description: "Agreement display name.",
+            example: "Embedded US Partner Platform Customers Agreement",
+          }),
           description: withOpenApi(z.string(), {
             description: "Agreement summary text.",
+            example: "Embedded US Partner Platform Customers Agreement",
           }),
           url: withOpenApi(z.url(), {
             description: "Agreement text URL, stored statically on the customer link.",
+            example: "https://help.bvnk.com/hc/en-us/sections/example",
           }),
           privacyPolicyUrl: withOpenApi(z.url(), {
             description: "Privacy policy URL, stored statically on the customer link.",
+            example: "https://help.bvnk.com/hc/en-us/articles/example",
           }),
         })
       ),
     }),
     z.object({
       ...requirementBase,
-      provider: z.enum(["bvnk", "mural"]),
+      provider: withOpenApi(z.enum(["bvnk", "mural"]), { example: "bvnk" }),
       status: z.literal("customer_verification_required"),
-      verificationUrl: z.url(),
+      verificationUrl: withOpenApi(z.url(), {
+        description: "Provider-hosted identity verification link for the counterparty.",
+        example: "https://example.com/verify/session_example",
+      }),
     }),
     z.object({
       ...requirementBase,
-      provider: z.enum(["bvnk", "mural"]),
-      status: z.enum(["customer_verifying", "customer_verification_failed"]),
+      provider: withOpenApi(z.enum(["bvnk", "mural"]), { example: "bvnk" }),
+      status: withOpenApi(z.enum(["customer_verifying", "customer_verification_failed"]), {
+        example: "customer_verifying",
+      }),
     }),
     z.object({
       ...requirementBase,
@@ -354,7 +437,9 @@ export const counterpartySchema = withOpenApi(
     }),
     status: counterpartyStatusSchema,
     createdBy: withOpenApi(userIdSchema.nullable(), {
-      description: "User who created the counterparty. Null when created via API key.",
+      description:
+        "User who created the counterparty. With an API key, this is the user who created the key.",
+      example: "usr_example",
     }),
     createdAt: withOpenApi(isoDateTimeSchema, {
       description: "Creation timestamp.",
@@ -385,7 +470,7 @@ export const counterpartyAccountPathParamsSchema = counterpartyAccountParamsSche
       counterpartyAccountParamsSchemaBase.shape.counterpartyAccountId,
       {
         description: "Counterparty account identifier.",
-        example: "cpa_example",
+        example: "counterparty_account_example",
       }
     ),
   })
@@ -409,7 +494,7 @@ export const counterpartyAccountSchema = withOpenApi(
   z.object({
     id: withOpenApi(z.string(), {
       description: "Counterparty account identifier.",
-      example: "cpa_example",
+      example: "counterparty_account_example",
     }),
     organizationId: orgIdParamSchema,
     projectId: projectIdParamSchema,
@@ -497,7 +582,10 @@ const countrySchema = withOpenApi(
 export const counterpartyFieldOptionsResponseSchema = withOpenApi(
   z.object({
     fields: z.object({
-      entityTypes: z.array(z.enum(COUNTERPARTY_ENTITY_TYPES)),
+      entityTypes: withOpenApi(z.array(z.enum(COUNTERPARTY_ENTITY_TYPES)), {
+        description: "Supported counterparty entity types.",
+        example: [...COUNTERPARTY_ENTITY_TYPES],
+      }),
       countries: z.array(countrySchema),
     }),
   }),
@@ -655,7 +743,10 @@ export const counterpartyProviderAccountSchema = withOpenApi(
             ),
           }),
           z.object({
-            provider: z.enum(RAMP_PROVIDERS.filter((provider) => provider !== "bvnk")),
+            provider: withOpenApi(
+              z.enum(RAMP_PROVIDERS.filter((provider) => provider !== "bvnk")),
+              { example: "lightspark" }
+            ),
             ...customerLinkBaseDocFields,
             providerCustomerReference: withOpenApi(z.string(), {
               description: "Provider-side customer identifier for the counterparty.",
