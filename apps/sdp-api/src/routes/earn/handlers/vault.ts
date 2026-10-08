@@ -11,11 +11,7 @@ import type {
   EarnVaultWithdrawalsPage,
   SdpEnvironment,
 } from "@sdp/types";
-import {
-  type EarnProviderId,
-  earnDepositStyle,
-  earnWithdrawSlippageFloor,
-} from "@sdp/types/provider-access";
+import { type EarnProviderId, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
@@ -25,7 +21,7 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
-import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
   badRequest,
@@ -74,10 +70,6 @@ import {
   runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
-import {
-  assertEarnProviderSurfaced,
-  assertProviderAvailable,
-} from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import {
   earnRuntime,
@@ -96,12 +88,7 @@ import {
   type earnVaultWithdrawalSchema,
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
-import {
-  assertDepositFloorPresent,
-  assertStrategyDepositable,
-  assertVaultDepositAdmissible,
-  assertVaultDepositEnvironmentOpen,
-} from "./admission";
+import { assertDepositFloorPresent, assertVaultDepositAdmissible } from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
@@ -137,38 +124,24 @@ import {
  * `minSharesOut` floor from this quote, so the floor tracks the live share
  * rate instead of assuming one.
  *
- * A READ that takes the deposit's own money-in gates: the quote exists only
- * to open a NEW position, so surfacing, admission, and environment capability
- * always apply. Entitlement applies only when a credential supplies an
- * organization. There is no wallet, policy gate, persistence, or idempotency
+ * A READ that takes the deposit's own money-in gates through
+ * `assertVaultDepositAdmissible`, the function both deposit builds call: the
+ * quote exists only to open a NEW position, so surfacing, admission, and
+ * environment capability always apply, an authenticated caller takes the
+ * project provider rule, and an anonymous caller takes the Production `stable`
+ * bar for Earn. There is no wallet, policy gate, persistence, or idempotency
  * key because the preview moves and holds nothing.
  */
 export async function createEarnVaultDepositPreview(
   c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  const auth = getOptionalAuth(c);
   // The row names the shelf: a tenant caller must own it, an anonymous caller
   // chose it (PRO-1998).
   const { strategy, environment } = await requireEarnStrategyForCaller(c, body.strategyId);
-  if (earnDepositStyle(strategy.provider) !== "vault_direct") {
-    throw badRequest(
-      `${strategy.provider} is a custodial provider; use POST /v1/earn/programs instead.`
-    );
-  }
-  if (!isEarnProviderId(strategy.provider)) {
-    throw providerNotConfigured(
-      `Earn provider ${strategy.provider} is not available in this deployment`
-    );
-  }
-  const provider = strategy.provider;
-
-  assertVaultDepositEnvironmentOpen(environment, provider);
-  assertEarnProviderSurfaced(provider);
-  if (auth) {
-    await assertProviderAvailable(c, { family: "earn", provider });
-  }
-  assertStrategyDepositable(strategy, environment);
+  // No amount: the preview reports the cap below as a blocking issue instead
+  // of throwing it.
+  const provider = await assertVaultDepositAdmissible(c, strategy, undefined, { environment });
   // The exposure cap, evaluated WITHOUT throwing (the deposit's 409 becomes a
   // blocking issue here, ADR 0004 "previews are the contract"), but only after
   // the same gates the deposit takes and before the provider is asked: a

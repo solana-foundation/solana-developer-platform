@@ -110,8 +110,9 @@ function assertAnonymousEarnDepositStageAllowed(environment: SdpEnvironment): vo
 
 /**
  * The ONE vault money-in gate sequence for every handler that commits a
- * strategy to the vault-deposit path: `POST /vault-deposits` (custody) and
- * `POST /external-wallet/deposit-transactions` (caller-signed). Runs, in
+ * strategy to the vault-deposit path: `POST /vault-deposits` (custody),
+ * `POST /external-wallet/deposit-transactions` (caller-signed), and
+ * `POST /vault-deposit-previews` (the quote that opens either). Runs, in
  * order: deposit-style shape, provider registration, environment capability,
  * surfacing, the project provider rule for an authenticated caller (an
  * anonymous caller has no project, so it gets the Production `stable` bar
@@ -123,8 +124,8 @@ function assertAnonymousEarnDepositStageAllowed(environment: SdpEnvironment): vo
  * The cap runs last on purpose: it is the only step that reads the ledger,
  * and a caller refused by a cheaper gate should hear that reason, not "the
  * vault is full". Omitting `amount` skips the cap; only callers that are not
- * about to move money (none today) may do that, and a new money-in caller
- * must pass it.
+ * about to move money may do that (the deposit preview, which reports the cap
+ * as a blocking issue instead), and a new money-in caller must pass it.
  *
  * Money OUT never reaches this function (ADR 0002): withdrawals take none of
  * these gates, the exposure cap included. A vault over its cap is exit-only,
