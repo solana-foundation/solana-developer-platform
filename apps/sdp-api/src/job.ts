@@ -10,6 +10,7 @@ import {
 } from "@/cron/earn-metrics-refresh";
 import { EARN_SPLIT_SWAPS_MONITOR } from "@/cron/earn-split-swaps";
 import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
+import type { CronMonitor } from "@/cron/money-effects";
 import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
@@ -251,8 +252,11 @@ export async function runCronJob(): Promise<void> {
   }
 }
 
-function createManagedTickRunner(): <T>(monitor: string, work: () => Promise<T>) => Promise<T> {
-  return async <T>(monitor: string, work: () => Promise<T>): Promise<T> => {
+function createManagedTickRunner(): <T>(
+  monitor: CronMonitor,
+  work: () => Promise<T>
+) => Promise<T> {
+  return async <T>(monitor: CronMonitor, work: () => Promise<T>): Promise<T> => {
     const monitorSlug = getManagedMonitorSlug(monitor);
     try {
       // Reconciliation is cross-tenant by nature: every tick runs under a

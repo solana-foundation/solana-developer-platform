@@ -14,3 +14,9 @@ PAYLOAD=$(jq -cn --arg ts "$TS" --arg line "$LINE" --arg target "$SMOKE_TARGET" 
 
 curl -fsS -u "${GC_LOKI_USER}:${GC_LOKI_TOKEN}" -H "Content-Type: application/json" \
   -d "$PAYLOAD" "$GC_LOKI_PUSH_URL"
+
+if [ -n "${SF_LOKI_PUSH_URL:-}" ] && [ -n "${SF_LOKI_USER:-}" ] && [ -n "${SF_LOKI_TOKEN:-}" ]; then
+  curl -fsS --connect-timeout 5 --max-time 15 -u "${SF_LOKI_USER}:${SF_LOKI_TOKEN}" -H "Content-Type: application/json" \
+    -d "$PAYLOAD" "$SF_LOKI_PUSH_URL" ||
+    echo "loki push to solanafoundation failed: smoke result only reached the sdp stack" >&2
+fi

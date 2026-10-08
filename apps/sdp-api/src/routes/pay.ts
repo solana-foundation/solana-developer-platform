@@ -28,6 +28,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest, notFound, rateLimited } from "@/lib/errors";
+import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -105,6 +106,15 @@ pay.post(
     if (!request.project_id) {
       throw badRequest("Payment request is not eligible for sponsored fees");
     }
+    // `/pay` sponsors without an authenticated actor, so it admits the money
+    // movement itself: a production request stops being sponsored once its
+    // organization loses the production entitlement (APE-351), and a deleted
+    // organization's requests stop being sponsored at all (HOO-1955).
+    await assertMoneyStartAdmitted(
+      c.env,
+      { organizationId: request.organization_id, projectId: request.project_id },
+      { surface: "http", operation: "pay_request.sponsor", subjectId: request.id }
+    );
 
     const payer = assertValidAddress(c.req.valid("json").account, "account");
     const recipient = assertValidAddress(request.destination_address, "destinationAddress");

@@ -1,5 +1,5 @@
 import type { ComplianceProviderId, ProviderAvailabilityEntry, RampProviderId } from "@sdp/types";
-import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS } from "@sdp/types";
 import type { KnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import {
   type CustodyProviderAvailability,
@@ -98,11 +98,17 @@ function railIsOn(entry: ProviderAvailabilityEntry | undefined): boolean {
   return entry?.entitled === true && entry.configured && entry.enabled;
 }
 
-/** Every ramp is generally available; off means uncredentialed here, never gated. */
+/**
+ * One card per offered ramp provider; off means uncredentialed here, never gated.
+ *
+ * @param entries - The organization's ramp availability, by provider.
+ * @param providers - The providers offered (`getOfferedRampProviders`), in canonical order.
+ */
 export function resolveRampIntegrations(
-  entries: Partial<Record<RampProviderId, ProviderAvailabilityEntry>>
+  entries: Partial<Record<RampProviderId, ProviderAvailabilityEntry>>,
+  providers: readonly RampProviderId[]
 ): IntegrationEntry<RampProviderId>[] {
-  return RAMP_PROVIDERS.map((provider) => ({
+  return providers.map((provider) => ({
     provider,
     label: RAMP_PROVIDER_LABELS[provider],
     status: railIsOn(entries[provider]) ? "enabled" : "not_configured",

@@ -11,6 +11,19 @@ export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
 export const ORGANIZATION_STATUSES = ["active", "suspended", "deleted"] as const;
 export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
 
+/**
+ * Organization statuses that may start new money movement (HOO-1955). A
+ * suspended or deleted organization may only take money out.
+ */
+export const ORGANIZATION_STATUSES_THAT_MAY_START_MONEY = [
+  "active",
+] as const satisfies readonly OrganizationStatus[];
+
+/** Takes the raw column: an unknown status may not start money. */
+export function organizationStatusMayStartMoney(status: string): boolean {
+  return ORGANIZATION_STATUSES_THAT_MAY_START_MONEY.some((allowed) => allowed === status);
+}
+
 export type MemberStatus = "active" | "suspended" | "removed";
 
 export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
@@ -48,8 +61,9 @@ export interface OrganizationSettings {
   providerOverrides?: OrganizationProviderOverrides;
   /**
    * Set from Clerk org `private_metadata.sdp.enableProductionProject` by the
-   * Clerk webhook sync; `true` unlocks selecting production projects in the
-   * dashboard.
+   * Clerk webhook sync. Without `true` the API refuses every production
+   * project (API keys, dashboard selection, approval replays) and the project
+   * list hides them.
    */
   enableProductionProject?: boolean;
   customRateLimits?: {

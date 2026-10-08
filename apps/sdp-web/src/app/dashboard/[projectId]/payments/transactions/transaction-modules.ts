@@ -1,3 +1,4 @@
+// biome-ignore lint/style/noRestrictedImports: this is the gated list; it filters the tuple by the channel-capped flags
 import { UNIFIED_TRANSACTION_MODULES, type UnifiedTransactionModule } from "@sdp/types";
 import type { DashboardFlags } from "@/flags/dashboard";
 

@@ -139,6 +139,66 @@ describe("Public payment request routes", () => {
       expect(sponsorship).toHaveBeenCalledTimes(1);
     });
 
+    it("stops sponsoring a production request once its organization loses the entitlement (APE-351)", async () => {
+      const sponsorship = stubSponsorship();
+      const productionProjectId = `${TEST_PROJECT.id}_production`;
+      const request = await createPaymentRequestsRepository(
+        env,
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: productionProjectId })
+      ).createPaymentRequest({
+        organizationId: TEST_ORG.id,
+        projectId: productionProjectId,
+        counterpartyId: null,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId: TEST_WALLET_ID,
+        destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        token: SOL_MINT,
+        amount: "1.5",
+        expiresAt: null,
+        createdBy: TEST_USER.id,
+      });
+
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
+        .bind(TEST_ORG.id)
+        .run();
+      const refused = await postTransaction(request.public_token);
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({
+        error: { code: "FORBIDDEN", message: "Production is not enabled for this organization" },
+      });
+      expect(sponsorship).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops sponsoring every request once its organization is deleted (HOO-1955)", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+      await getDb(env)
+        .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
+        .bind(TEST_ORG.id)
+        .run();
+
+      const refused = await postTransaction(request.public_token);
+
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({
+        error: { code: "FORBIDDEN", message: "Organization is not active" },
+      });
+      expect(sponsorship).not.toHaveBeenCalled();
+    });
+
+    it("keeps sponsoring a sandbox request without the production entitlement", async () => {
+      stubSponsorship();
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
+        .bind(TEST_ORG.id)
+        .run();
+      const request = await createAwaitingPaymentRequest();
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+    });
+
     it("answers a different account with 429 and Retry-After while the claim is live", async () => {
       stubSponsorship();
       const request = await createAwaitingPaymentRequest();

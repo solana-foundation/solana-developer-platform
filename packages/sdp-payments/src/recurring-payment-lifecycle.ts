@@ -101,6 +101,25 @@ export function nextRecurringPaymentCollectionDueAt(dueAt: string, periodHours: 
   return new Date(new Date(dueAt).getTime() + periodHours * 60 * 60 * 1000).toISOString();
 }
 
+/**
+ * The first collection boundary strictly after `now`, in whole periods from
+ * `dueAt`. A skipped period is never caught up: the subscriptions program
+ * forfeits an elapsed period's allowance too.
+ */
+export function firstRecurringPaymentDueAfter(
+  dueAt: string,
+  periodHours: number,
+  now: Date
+): string {
+  if (!(periodHours > 0)) {
+    throw new Error(`Recurring payment period must be positive, got ${periodHours} hours`);
+  }
+  const periodMs = periodHours * 60 * 60 * 1000;
+  const dueMs = new Date(dueAt).getTime();
+  const periods = Math.max(1, Math.floor((now.getTime() - dueMs) / periodMs) + 1);
+  return new Date(dueMs + periods * periodMs).toISOString();
+}
+
 export function hasRecurringPaymentAdvancedPastDueAt(
   nextDueAt: string | null,
   dueAt: string

@@ -20,6 +20,7 @@ interface MockState {
   listStaleUpdatePayments: ReturnType<typeof vi.fn>;
   listRecoverableCollectionPayments: ReturnType<typeof vi.fn>;
   listDueCollectionPayments: ReturnType<typeof vi.fn>;
+  checkMoneyStart: ReturnType<typeof vi.fn>;
   rows: {
     due: PaymentRecurringPaymentRow[];
     lifecycle: PaymentRecurringPaymentRow[];
@@ -39,6 +40,7 @@ const mocks = vi.hoisted<MockState>(() => ({
   listStaleUpdatePayments: vi.fn(),
   listRecoverableCollectionPayments: vi.fn(),
   listDueCollectionPayments: vi.fn(),
+  checkMoneyStart: vi.fn(),
   rows: {
     due: [],
     lifecycle: [],
@@ -49,6 +51,13 @@ const mocks = vi.hoisted<MockState>(() => ({
 
 vi.mock("@/db", () => ({
   getDb: () => ({}),
+}));
+
+// The database is mocked out here, so admission (DB-backed in
+// payments.recurring.test.ts) admits unless a test says otherwise.
+vi.mock("@/lib/money-admission", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/money-admission")>()),
+  checkMoneyStart: mocks.checkMoneyStart,
 }));
 
 vi.mock("@/db/repositories/payment-recurring-payments.repository.postgres", () => ({
@@ -129,6 +138,7 @@ describe("collectDueRecurringPayments", () => {
   });
 
   beforeEach(() => {
+    mocks.checkMoneyStart.mockReset().mockResolvedValue({ admitted: true });
     mocks.activateRecurringPayment.mockReset();
     mocks.cancelRecurringPayment.mockReset();
     mocks.collectRecurringPayment.mockReset();
@@ -166,7 +176,7 @@ describe("collectDueRecurringPayments", () => {
 
     const result = await collectDueRecurringPayments(env, new Date("2026-07-01T12:30:00Z"));
 
-    expect(result).toEqual({ recovered: 2, collected: 1, failed: 0, skipped: 0 });
+    expect(result).toEqual({ recovered: 2, collected: 1, failed: 0, skipped: 0, refused: 0 });
     expect(activateRecurringPayment).toHaveBeenCalledWith(
       expect.objectContaining({ recurringPayment: lifecycle })
     );
@@ -195,7 +205,7 @@ describe("collectDueRecurringPayments", () => {
 
     const result = await collectDueRecurringPayments(env, new Date());
 
-    expect(result).toEqual({ recovered: 2, collected: 0, failed: 0, skipped: 0 });
+    expect(result).toEqual({ recovered: 2, collected: 0, failed: 0, skipped: 0, refused: 0 });
     expect(cancelRecurringPayment).toHaveBeenCalledWith(
       expect.objectContaining({ recurringPayment: canceling })
     );
@@ -210,7 +220,7 @@ describe("collectDueRecurringPayments", () => {
 
     const result = await collectDueRecurringPayments(env, new Date());
 
-    expect(result).toEqual({ recovered: 1, collected: 0, failed: 0, skipped: 0 });
+    expect(result).toEqual({ recovered: 1, collected: 0, failed: 0, skipped: 0, refused: 0 });
     expect(collectRecurringPayment).toHaveBeenCalledWith(
       expect.objectContaining({ recurringPayment: canceled })
     );
@@ -233,7 +243,7 @@ describe("collectDueRecurringPayments", () => {
 
     const result = await collectDueRecurringPayments(env, new Date());
 
-    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1, refused: 0 });
   });
 
   it("collects same-organization rows serially while fanning out across organizations", async () => {
@@ -263,7 +273,7 @@ describe("collectDueRecurringPayments", () => {
 
     const result = await collectDueRecurringPayments(env, new Date());
 
-    expect(result).toEqual({ recovered: 0, collected: 5, failed: 0, skipped: 0 });
+    expect(result).toEqual({ recovered: 0, collected: 5, failed: 0, skipped: 0, refused: 0 });
     expect(orgMaxInFlight).toBe(1);
     expect(globalMaxInFlight).toBeGreaterThan(1);
   });
@@ -274,7 +284,7 @@ describe("collectDueRecurringPayments", () => {
 
     const result = await collectDueRecurringPayments(env, new Date());
 
-    expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0 });
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0, refused: 0 });
     expect(collectRecurringPayment).not.toHaveBeenCalled();
     expect(mocks.journalAutomatedCollectionFailure).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
@@ -299,7 +309,7 @@ describe("collectDueRecurringPayments", () => {
 
     const result = await collectDueRecurringPayments(env, new Date());
 
-    expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0 });
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 1, skipped: 0, refused: 0 });
     expect(mocks.findOperationalWalletById).toHaveBeenCalledWith({
       organizationId: "org_1",
       projectId: "proj_1",
@@ -340,7 +350,7 @@ describe("collectDueRecurringPayments", () => {
 
     const result = await collectDueRecurringPayments(env, new Date("2026-07-01T12:30:00Z"));
 
-    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 0 });
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 0, refused: 0 });
     expect(collectRecurringPayment).not.toHaveBeenCalled();
     expect(mocks.journalAutomatedCollectionFailure).not.toHaveBeenCalled();
     expect(mocks.listStaleUpdatePayments).toHaveBeenCalledWith({

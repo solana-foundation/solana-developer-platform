@@ -291,6 +291,10 @@ export function defineDashboardFlags({
   );
 
   const newDesignPayDeposit = newDesignModuleFlag("pay-deposit", "Payments' Pay and Deposit flows");
+  const newDesignActivity = newDesignModuleFlag(
+    "activity",
+    "the rest of Payments (the overview and its API playground, Transactions, Requests, Schedules)"
+  );
 
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
   const rampProviderLightspark = rampProviderFlag("lightspark", "Lightspark");
@@ -316,6 +320,7 @@ export function defineDashboardFlags({
     newDesign,
     newDesignContacts,
     newDesignPayDeposit,
+    newDesignActivity,
     rampProviderMoonpay,
     rampProviderLightspark,
     rampProviderBvnk,

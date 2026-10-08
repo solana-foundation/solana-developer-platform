@@ -214,7 +214,7 @@ describe("runCronJob", () => {
       .mockResolvedValue({ scanned: 0, repaired: 0 });
     vi.mocked(collectDueRecurringPayments)
       .mockReset()
-      .mockResolvedValue({ recovered: 0, collected: 0, failed: 0, skipped: 0 });
+      .mockResolvedValue({ recovered: 0, collected: 0, failed: 0, skipped: 0, refused: 0 });
     vi.mocked(pollRingsIndexing).mockReset().mockResolvedValue(undefined);
     vi.mocked(trackPendingDeposits).mockReset().mockResolvedValue(undefined);
     vi.mocked(trackPendingWithdrawals).mockReset().mockResolvedValue(undefined);

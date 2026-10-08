@@ -55,10 +55,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The SDP Deploy run that dispatches this workflow is still in progress (notify-end runs after
+          # the dispatch), so gate on its stage jobs' conclusions, never on the run's own status.
           run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?head_sha=${IMAGE_SHA}&event=push&per_page=10" \
-            --jq '[.workflow_runs[] | select(.status == "completed")] | sort_by(.run_number) | last | .id // empty')"
+            --jq '.workflow_runs | sort_by(.run_number) | last | .id // empty')"
           if [[ -z "${run_id}" ]]; then
-            echo "No completed SDP Deploy run found for ${IMAGE_SHA}; stage has not deployed it." >&2
+            echo "No SDP Deploy run found for ${IMAGE_SHA}; stage has not deployed it." >&2
             exit 1
           fi
           stage_green="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100" \

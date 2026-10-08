@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary } from "@sdp/types";
+import type { CustodyConfigSummary, RampProviderId } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import {
   buildConnectionsPageUrl,
@@ -17,7 +17,7 @@ import {
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { custody, policies, privyByok } from "@/flags";
-import { isRampsEnabled } from "@/flags/ramps";
+import { getOfferedRampProviders } from "@/flags/ramps";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -183,16 +183,19 @@ type ProviderAvailability = Awaited<ReturnType<typeof fetchProviderAvailability>
  * @param params.provider - The provider id from the route.
  * @param params.connectedProviders - Active custody providers, or `null` when the lookup failed.
  * @param params.availability - The organization's provider availability.
+ * @param params.rampProviders - The ramp providers offered (`getOfferedRampProviders`).
  * @returns The provider's detail, or `null` when no family lists it.
  */
 function resolveDetail({
   provider,
   connectedProviders,
   availability,
+  rampProviders,
 }: {
   provider: string;
   connectedProviders: KnownCustodyProvider[] | null;
   availability: ProviderAvailability;
+  rampProviders: readonly RampProviderId[];
 }) {
   return resolveIntegrationDetail({
     provider,
@@ -203,7 +206,7 @@ function resolveDetail({
             connectedProviders,
             enabledProviders: availability.enabledCustodyProviders,
           }),
-    ramps: resolveRampIntegrations(availability.providers.ramps),
+    ramps: resolveRampIntegrations(availability.providers.ramps, rampProviders),
     compliance: resolveComplianceIntegrations(availability.providers.compliance),
   });
 }
@@ -231,15 +234,15 @@ export default async function IntegrationDetailPage({
   if (!isKnownIntegrationProvider(provider)) {
     notFound();
   }
-  const [custodyEnabled, rampsEnabled, complianceEnabled] = await Promise.all([
+  const [custodyEnabled, rampProviders, complianceEnabled] = await Promise.all([
     custody(),
-    isRampsEnabled(),
+    getOfferedRampProviders(),
     policies(),
   ]);
   if (
     !isIntegrationProviderEnabled(provider, {
       custody: custodyEnabled,
-      ramps: rampsEnabled,
+      rampProviders,
       compliance: complianceEnabled,
     })
   ) {
@@ -285,6 +288,7 @@ export default async function IntegrationDetailPage({
     provider,
     connectedProviders,
     availability,
+    rampProviders,
   });
 
   if (!detail) {
