@@ -25,7 +25,6 @@ import { STATUS_BADGE_VARIANTS, statusLabel } from "./connection-status-presenta
 import { ConnectionWalletsCard } from "./connection-wallets-card";
 import type { CustodyConnectionListItem } from "./connections.data";
 import { DeactivateConnectionDialog } from "./deactivate-connection-dialog";
-import { MakeDefaultDialog } from "./make-default-dialog";
 import { useSelectedProjectName } from "./use-selected-project-name";
 import { resolveCompletionOutcome } from "./verification-outcome";
 import { VerificationOutcomeCallout } from "./verification-outcome-callout";
@@ -40,7 +39,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 }
 
 /**
- * Identity of the connection, plus the two actions that apply to it as a whole.
+ * Identity of the connection, plus the action that applies to it as a whole.
  *
  * Signing availability sits on its own line under the badges rather than
  * becoming a third one: connection health and whether it may sign right now are
@@ -51,7 +50,6 @@ function ConnectionHeaderCard({
   connection,
   listItem,
   onAddWallet,
-  onMakeDefault,
   projectName,
   provider,
   t,
@@ -60,7 +58,6 @@ function ConnectionHeaderCard({
   connection: CustodyInstallationConnection;
   listItem: CustodyConnectionListItem | null;
   onAddWallet: () => void;
-  onMakeDefault: () => void;
   projectName: string | null;
   provider: CustodyProvider;
   t: ReturnType<typeof useTranslations>;
@@ -83,9 +80,6 @@ function ConnectionHeaderCard({
               <Badge variant={STATUS_BADGE_VARIANTS[connection.status]}>
                 {statusLabel(connection.status, t)}
               </Badge>
-              {connection.isDefault ? (
-                <Badge variant="outline">{t("DashboardCustody.projectDefaultBadge")}</Badge>
-              ) : null}
             </div>
             {listItem ? (
               <SigningLine
@@ -121,9 +115,6 @@ function ConnectionHeaderCard({
             half-finished one has exactly one next step, offered below. */}
         {canManageCustody && connection.status === "active" ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Button variant="secondary" disabled={connection.isDefault} onClick={onMakeDefault}>
-              {t("DashboardCustody.makeDefaultAction")}
-            </Button>
             <Button onClick={onAddWallet} iconLeft={<PlusIcon className="size-4" />}>
               {t("DashboardCustody.addWalletAction")}
             </Button>
@@ -291,7 +282,7 @@ function SetupStateBanner({
 }
 
 /** Which dialog, if any, the page is showing. */
-type DialogName = "addWallet" | "makeDefault" | "deactivate" | "cancelSetup" | null;
+type DialogName = "addWallet" | "deactivate" | "cancelSetup" | null;
 
 /** Every dialog the page can open, each deciding for itself when it is visible. */
 function ConnectionDialogs({
@@ -319,19 +310,6 @@ function ConnectionDialogs({
         provider={provider}
         projectName={projectName}
       />
-      <MakeDefaultDialog
-        isOpen={open === "makeDefault"}
-        onClose={onClose}
-        connectionId={connection.id}
-        label={connection.label}
-        provider={provider}
-        projectName={projectName}
-        // This page reads one connection, so it cannot see which of the others
-        // is the project default. Saying "the project has no default today"
-        // from here would be a guess; the dialog has copy for not knowing.
-        currentDefaultLabel={null}
-        currentDefaultKnown={false}
-      />
       <DeactivateConnectionDialog
         isOpen={open === "deactivate"}
         onClose={onClose}
@@ -339,7 +317,6 @@ function ConnectionDialogs({
         label={connection.label}
         provider={provider}
         activeWalletCount={activeWalletCount}
-        isDefault={connection.isDefault}
       />
       <CancelSetupDialog
         isOpen={open === "cancelSetup"}
@@ -413,7 +390,6 @@ export function ConnectionDetailView({
         connection={connection}
         listItem={listItem}
         onAddWallet={() => setOpenDialog("addWallet")}
-        onMakeDefault={() => setOpenDialog("makeDefault")}
         projectName={projectName}
         provider={provider}
         t={t}
@@ -437,7 +413,6 @@ export function ConnectionDetailView({
         walletsUnavailable={walletsUnavailable}
         isDeactivated={isDeactivated}
         pendingWalletLabel={connection.walletLabel ?? null}
-        defaultWalletId={listItem?.defaultCustodyWalletId ?? null}
       />
 
       <ConnectionCredentialsSection

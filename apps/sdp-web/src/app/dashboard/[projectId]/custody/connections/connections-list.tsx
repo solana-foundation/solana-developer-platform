@@ -4,12 +4,10 @@ import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types";
 import { CableIcon, MoreHorizontalIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
 import { formatCustodyProviderName } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { WalletAddressCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { formatWalletMeta } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -36,10 +34,8 @@ import {
   CONNECTIONS_PAGE_SIZE,
   type ConnectionsFilters,
   type ConnectionsPageResult,
-  type ConnectionsProjectSummary,
   type CustodyConnectionListItem,
 } from "./connections.data";
-import { MakeDefaultDialog } from "./make-default-dialog";
 
 const PROVIDER_COLUMN_CLASS = "hidden @2xl/connections-table:table-cell";
 const CREATED_COLUMN_CLASS = "hidden @4xl/connections-table:table-cell";
@@ -113,20 +109,16 @@ function WalletCell({
 export function ConnectionsList({
   result,
   filters,
-  summary,
   walletsByConnection,
   walletsUnavailable,
-  canManageCustody,
   provider,
   projectName,
   emptyStateAction,
 }: {
   result: ConnectionsPageResult;
   filters: ConnectionsFilters;
-  summary: ConnectionsProjectSummary;
   walletsByConnection: Record<string, CustodyWalletSummary[]>;
   walletsUnavailable: boolean;
-  canManageCustody: boolean;
   provider: CustodyProvider;
   projectName: string;
   emptyStateAction?: React.ReactNode;
@@ -136,7 +128,6 @@ export function ConnectionsList({
   const router = useRouter();
   const pathname = usePathname();
   const href = useProjectHref();
-  const [defaultTarget, setDefaultTarget] = useState<CustodyConnectionListItem | null>(null);
 
   const { connections, pagination } = result;
   const pageCount = Math.max(1, Math.ceil(pagination.total / CONNECTIONS_PAGE_SIZE));
@@ -200,9 +191,6 @@ export function ConnectionsList({
                   >
                     {connection.label}
                   </Link>
-                  {connection.isDefault ? (
-                    <Badge variant="outline">{t("DashboardCustody.defaultBadge")}</Badge>
-                  ) : null}
                 </span>
                 <span className="mt-1 block truncate font-mono text-[11px] font-normal text-tertiary">
                   {formatWalletMeta(connection.id, 10, 6)}
@@ -252,13 +240,6 @@ export function ConnectionsList({
                         {t("DashboardCustody.openConnection")}
                       </Link>
                     </DropdownMenuItem>
-                    {/* Only an active connection can take signing, and making
-                        the current default the default again is a no-op. */}
-                    {canManageCustody && connection.status === "active" && !connection.isDefault ? (
-                      <DropdownMenuItem onSelect={() => setDefaultTarget(connection)}>
-                        {t("DashboardCustody.makeDefaultAction")}
-                      </DropdownMenuItem>
-                    ) : null}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </TableCell>
@@ -272,22 +253,6 @@ export function ConnectionsList({
           page={filters.page}
           pageCount={pageCount}
           onPageChange={goToPage}
-        />
-      ) : null}
-
-      {defaultTarget ? (
-        <MakeDefaultDialog
-          isOpen
-          onClose={() => setDefaultTarget(null)}
-          connectionId={defaultTarget.id}
-          label={defaultTarget.label}
-          provider={provider}
-          projectName={projectName}
-          // The project's default, not this page's: found among the visible
-          // rows alone, a default on another page made the dialog tell the user
-          // the project had none.
-          currentDefaultLabel={summary.defaultConnection?.label ?? null}
-          currentDefaultKnown={summary.complete}
         />
       ) : null}
     </div>

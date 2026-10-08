@@ -37,6 +37,7 @@ interface WithdrawFormState {
   mint: string;
   amount: string;
   showAmountError: boolean;
+  showWalletError: boolean;
   destination: string;
   error: string | null;
   withdrawal: PrivateChannelWithdrawal | null;
@@ -64,10 +65,11 @@ export function WithdrawForm({
   tokens: PrivateChannelTokenEligibility[];
 }) {
   const [state, updateState] = useReducer(withdrawFormReducer, {
-    walletId: wallets[0]?.walletId ?? "",
+    walletId: "",
     mint: tokens[0]?.mint ?? "",
     amount: "",
     showAmountError: false,
+    showWalletError: false,
     destination: "",
     error: null,
     withdrawal: null,
@@ -82,6 +84,7 @@ export function WithdrawForm({
     mint,
     amount,
     showAmountError,
+    showWalletError,
     destination,
     error,
     withdrawal,
@@ -148,14 +151,16 @@ export function WithdrawForm({
 
   const amountErrorKey = showAmountError ? getAmountError(amount) : null;
   const amountError = amountErrorKey ? t(amountErrorKey) : null;
+  const walletError =
+    showWalletError && !walletId ? t("DashboardPrivateChannels.withdraw.selectWallet") : null;
   // Falls back to the first token so a `mint` left over from a changed token list
   // cannot leave the label and the payload disagreeing.
   const selectedToken = tokens.find((token) => token.mint === mint) ?? tokens[0];
 
   const submit = () => {
-    // An amount problem already renders under the field, so it is not repeated here.
-    updateState({ showAmountError: true, error: null });
-    if (getAmountError(amount)) {
+    // Field problems already render under their fields, so they are not repeated here.
+    updateState({ showAmountError: true, showWalletError: true, error: null });
+    if (!walletId || getAmountError(amount)) {
       return;
     }
     // One key per REQUEST, not per press — see the deposit form. It matters most
@@ -201,13 +206,18 @@ export function WithdrawForm({
     >
       <div className="space-y-1.5">
         <Label htmlFor="withdraw-wallet">{t("DashboardPrivateChannels.withdraw.fromWallet")}</Label>
-        <Select onValueChange={(value) => updateState({ walletId: value ?? "" })} value={walletId}>
+        <Select
+          onValueChange={(value) => updateState({ walletId: value ?? "" })}
+          placeholder={t("DashboardPrivateChannels.withdraw.selectWallet")}
+          value={walletId}
+        >
           {wallets.map((wallet) => (
             <SelectItem key={wallet.walletId} value={wallet.walletId}>
               {walletLabel(wallet)}
             </SelectItem>
           ))}
         </Select>
+        {walletError ? <p className="text-destructive text-sm">{walletError}</p> : null}
         <p className="text-secondary text-xs">
           {t("DashboardPrivateChannels.withdraw.fromWalletHelp")}
         </p>
@@ -259,7 +269,7 @@ export function WithdrawForm({
       {error && <p className="text-destructive text-sm">{error}</p>}
 
       <Button
-        disabled={isSubmitting || !walletId || !amount.trim()}
+        disabled={isSubmitting || !amount.trim()}
         iconLeft={isSubmitting ? <Loader2Icon className="size-4 animate-spin" /> : undefined}
         type="submit"
       >

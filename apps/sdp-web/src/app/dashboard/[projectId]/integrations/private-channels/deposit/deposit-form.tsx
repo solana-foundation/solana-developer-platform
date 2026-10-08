@@ -37,6 +37,7 @@ interface DepositFormState {
   mint: string;
   amount: string;
   showAmountError: boolean;
+  showWalletError: boolean;
   recipient: string;
   error: string | null;
   deposit: PrivateChannelDeposit | null;
@@ -61,10 +62,11 @@ export function DepositForm({
   tokens: PrivateChannelTokenEligibility[];
 }) {
   const [state, updateState] = useReducer(depositFormReducer, {
-    walletId: wallets[0]?.walletId ?? "",
+    walletId: "",
     mint: tokens[0]?.mint ?? "",
     amount: "",
     showAmountError: false,
+    showWalletError: false,
     recipient: "",
     error: null,
     deposit: null,
@@ -79,6 +81,7 @@ export function DepositForm({
     mint,
     amount,
     showAmountError,
+    showWalletError,
     recipient,
     error,
     deposit,
@@ -145,14 +148,16 @@ export function DepositForm({
 
   const amountErrorKey = showAmountError ? getAmountError(amount) : null;
   const amountError = amountErrorKey ? t(amountErrorKey) : null;
+  const walletError =
+    showWalletError && !walletId ? t("DashboardPrivateChannels.deposit.selectWallet") : null;
   // Falls back to the first token so a `mint` left over from a changed token list
   // cannot leave the label and the payload disagreeing.
   const selectedToken = tokens.find((token) => token.mint === mint) ?? tokens[0];
 
   const submit = () => {
-    // An amount problem already renders under the field, so it is not repeated here.
-    updateState({ showAmountError: true, error: null });
-    if (getAmountError(amount)) {
+    // Field problems already render under their fields, so they are not repeated here.
+    updateState({ showAmountError: true, showWalletError: true, error: null });
+    if (!walletId || getAmountError(amount)) {
       return;
     }
     // One key per REQUEST, not per press: the same wallet/mint/amount/recipient
@@ -202,13 +207,18 @@ export function DepositForm({
     >
       <div className="space-y-1.5">
         <Label htmlFor="deposit-wallet">{t("DashboardPrivateChannels.deposit.fromWallet")}</Label>
-        <Select onValueChange={(value) => updateState({ walletId: value ?? "" })} value={walletId}>
+        <Select
+          onValueChange={(value) => updateState({ walletId: value ?? "" })}
+          placeholder={t("DashboardPrivateChannels.deposit.selectWallet")}
+          value={walletId}
+        >
           {wallets.map((wallet) => (
             <SelectItem key={wallet.walletId} value={wallet.walletId}>
               {walletLabel(wallet)}
             </SelectItem>
           ))}
         </Select>
+        {walletError ? <p className="text-destructive text-sm">{walletError}</p> : null}
         <p className="text-secondary text-xs">
           {t("DashboardPrivateChannels.deposit.fromWalletHelp")}
         </p>
@@ -258,7 +268,7 @@ export function DepositForm({
       {error && <p className="text-destructive text-sm">{error}</p>}
 
       <Button
-        disabled={isSubmitting || !walletId || !amount.trim()}
+        disabled={isSubmitting || !amount.trim()}
         iconLeft={isSubmitting ? <Loader2Icon className="size-4 animate-spin" /> : undefined}
         type="submit"
       >

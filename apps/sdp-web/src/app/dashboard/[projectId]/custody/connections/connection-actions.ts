@@ -240,28 +240,6 @@ export async function cancelSetupAction(
 }
 
 /**
- * Points the project's wallet-less requests at this connection. Moves no
- * wallets, no funds, and no already-pinned operations.
- */
-export async function makeDefaultConnectionAction(
-  connectionId: string,
-  provider: string
-): Promise<CustodyActionResult> {
-  const t = await getTranslations();
-  try {
-    const client = await createSdpApiClient();
-    await client.fetch("/v1/wallets/switch", {
-      method: "POST",
-      body: JSON.stringify({ connectionId, provider }),
-    });
-  } catch (error) {
-    return classifyThrown(error, t("DashboardCustody.makeDefaultFailed"));
-  }
-  await revalidateCustody(provider, connectionId);
-  return { status: "success" };
-}
-
-/**
  * Creates a wallet inside this connection's provider account.
  *
  * Deliberately not auto-retried on an unknown outcome: wallet creation is not

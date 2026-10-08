@@ -38,7 +38,6 @@ const installationConnectionSchema = z.object({
   status: z.enum(CUSTODY_CONNECTION_LIFECYCLES),
   completion: completionSchema.nullable(),
   walletLabel: z.string().optional(),
-  isDefault: z.boolean(),
   canComplete: z.boolean(),
   canReplaceCredentials: z.boolean(),
   canCancel: z.boolean(),

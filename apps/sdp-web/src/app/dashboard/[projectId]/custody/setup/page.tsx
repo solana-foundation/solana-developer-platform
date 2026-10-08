@@ -53,7 +53,7 @@ async function getConnectedCustodyProviders(
   }
 
   const json = (await res.json()) as {
-    data: { configs: CustodyConfigSummary[]; defaultConfigId: string | null };
+    data: { configs: CustodyConfigSummary[] };
   };
 
   return json.data.configs

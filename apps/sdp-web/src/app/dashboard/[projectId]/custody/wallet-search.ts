@@ -22,7 +22,6 @@ export function filterWallets(
       wallet.provider,
       wallet.purpose,
       wallet.status,
-      wallet.isDefaultProvider ? "default" : null,
     ]
       .filter(Boolean)
       .join(" ")

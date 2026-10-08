@@ -35,7 +35,7 @@ function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
 
 async function getCustodyConfigs(
   request: SdpApiClient["request"]
-): Promise<{ configs: CustodyConfigSummary[]; defaultConfigId: string | null }> {
+): Promise<{ configs: CustodyConfigSummary[] }> {
   const res = await request("/v1/wallets/configs");
   if (!res.ok) {
     const body = await res.text();
@@ -43,7 +43,7 @@ async function getCustodyConfigs(
   }
 
   const json = (await res.json()) as {
-    data: { configs: CustodyConfigSummary[]; defaultConfigId: string | null };
+    data: { configs: CustodyConfigSummary[] };
   };
   return json.data;
 }
