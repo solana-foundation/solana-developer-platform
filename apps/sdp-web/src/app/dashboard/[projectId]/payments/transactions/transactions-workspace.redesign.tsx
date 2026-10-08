@@ -27,9 +27,9 @@ import {
   type TransactionsPageResult,
   transactionsApiQuery,
 } from "./transactions-page.data.redesign";
+import { parseTransactionModule } from "./transactions-query";
 import {
   DEFAULT_TRANSACTION_PAGE_SIZE,
-  parseTransactionModule,
   TRANSACTION_PAGE_SIZES,
   type TransactionFilters,
   toTransactionUrlUpdates,

@@ -72,7 +72,7 @@ vi.mock("@/components/ui/filter-menu", () => ({
 
 function renderWorkspace(
   filters: TransactionFilters,
-  modules: readonly UnifiedTransactionModule[] = UNIFIED_TRANSACTION_MODULES
+  modules: readonly UnifiedTransactionModule[]
 ) {
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
@@ -97,7 +97,7 @@ afterEach(cleanup);
 
 describe("TransactionsWorkspace", () => {
   it("commits a search only once it has three characters", () => {
-    renderWorkspace({ cursors: [] });
+    renderWorkspace({ cursors: [] }, UNIFIED_TRANSACTION_MODULES);
     const search = screen.getByRole("searchbox", { name: "Search transactions" });
 
     fireEvent.change(search, { target: { value: "xf" } });
@@ -114,7 +114,7 @@ describe("TransactionsWorkspace", () => {
   });
 
   it("names an active contact filter and clears it from its chip", () => {
-    renderWorkspace({ counterpartyId: "cpty_42", cursors: [] });
+    renderWorkspace({ counterpartyId: "cpty_42", cursors: [] }, UNIFIED_TRANSACTION_MODULES);
 
     expect(screen.getByText("Acme Treasury")).toBeDefined();
     act(() => fireEvent.click(screen.getByLabelText("Clear Contact filter")));
@@ -122,7 +122,7 @@ describe("TransactionsWorkspace", () => {
   });
 
   it("clears the module and kind together from the type chip", () => {
-    renderWorkspace({ module: "earn", kind: "deposit", cursors: [] });
+    renderWorkspace({ module: "earn", kind: "deposit", cursors: [] }, UNIFIED_TRANSACTION_MODULES);
 
     expect(screen.getByText("Earn · Deposit")).toBeDefined();
     act(() => fireEvent.click(screen.getByLabelText("Clear Type filter")));
@@ -139,7 +139,7 @@ describe("TransactionsWorkspace", () => {
   });
 
   it("writes a new page size and restarts on the first page", () => {
-    renderWorkspace({ cursors: ["a"], cursor: "b" });
+    renderWorkspace({ cursors: ["a"], cursor: "b" }, UNIFIED_TRANSACTION_MODULES);
     expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeDefined();
   });
 });

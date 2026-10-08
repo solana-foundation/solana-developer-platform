@@ -66,6 +66,8 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  */
 export async function GET(request: Request) {
   const params = Object.fromEntries(new URL(request.url).searchParams);
+  // A module the channel hides is dropped like the list drops it, so such a link exports All
+  // rather than failing; the API never returns that module's rows either way.
   const filters = {
     ...parseTransactionFilters(params, enabledTransactionModules(await getDashboardFlags())),
     cursor: undefined,

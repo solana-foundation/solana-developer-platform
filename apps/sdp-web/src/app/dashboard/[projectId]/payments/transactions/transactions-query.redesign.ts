@@ -2,10 +2,6 @@ import { UNIFIED_TRANSACTION_STATUSES, type UnifiedTransactionModule } from "@sd
 import { z } from "zod";
 import { parseTransactionModule } from "./transactions-query";
 
-// One reading of a module param for both designs: the redesign forked its own once and lost the
-// release-channel filter.
-export { parseTransactionModule };
-
 /** Rows per page the list offers; 25 is the default and carries no URL param. */
 export const TRANSACTION_PAGE_SIZES = [10, 25, 50, 100] as const;
 export const DEFAULT_TRANSACTION_PAGE_SIZE = 25;

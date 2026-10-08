@@ -1,8 +1,8 @@
 import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
 import { describe, expect, it } from "vitest";
+import { parseTransactionModule } from "./transactions-query";
 import {
   parseTransactionFilters,
-  parseTransactionModule,
   serializeTransactionFilters,
   toTransactionsApiQuery,
 } from "./transactions-query.redesign";

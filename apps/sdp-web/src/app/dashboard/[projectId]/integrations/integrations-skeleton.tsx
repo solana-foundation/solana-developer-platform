@@ -1,4 +1,4 @@
-// biome-ignore lint/style/noRestrictedImports: sizes anonymous placeholder cards only; it still draws hidden families, tracked in HOO-1976
+// biome-ignore lint/style/noRestrictedImports: sizes anonymous placeholder cards only; it still draws hidden families, tracked in HOO-1978
 import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { INTEGRATION_FAMILIES, type IntegrationFamily } from "./integrations-filter";
