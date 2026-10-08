@@ -28,6 +28,7 @@ exports[`API route ownership > lists every route with its owner 1`] = `
   "core GET /v1/projects/:projectId",
   "core GET /v1/projects/:projectId/api-keys",
   "core GET /v1/projects/:projectId/members",
+  "core GET /v1/projects/:projectId/provider-availability",
   "core PATCH /v1/api-keys/:keyId",
   "core PATCH /v1/organizations/:orgId",
   "core PATCH /v1/projects/:projectId",
