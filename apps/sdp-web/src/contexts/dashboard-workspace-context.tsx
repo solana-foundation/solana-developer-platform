@@ -24,7 +24,7 @@ import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { isNewDesignPage } from "@/lib/design-modules";
 import { clearStoredApiKeySecrets, syncStoredApiKeySecretScope } from "@/lib/playground-api-keys";
-import { useDashboardPathname, useOptionalProjectId } from "@/lib/use-dashboard-project";
+import { useDashboardPathname, useProjectId } from "@/lib/use-dashboard-project";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
@@ -45,7 +45,7 @@ type DashboardWorkspaceContextValue = {
   projects: Project[];
   sandboxProject: Project | null;
   productionProject: Project | null;
-  selectedProjectId: string | null;
+  selectedProjectId: string;
   sdpEnvironment: SdpEnvironment;
   isSidebarOpen: boolean;
   issuanceTab: IssuanceWorkspaceTab;
@@ -98,9 +98,9 @@ export function DashboardWorkspaceProvider({
     [projects]
   );
 
-  const selectedProjectId = useOptionalProjectId();
+  const selectedProjectId = useProjectId();
   const sdpEnvironment: SdpEnvironment =
-    selectedProjectId && selectedProjectId === productionProject?.id ? "production" : "sandbox";
+    selectedProjectId === productionProject?.id ? "production" : "sandbox";
   const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
     DashboardPlaygroundApiKeyOption[]
   >([]);

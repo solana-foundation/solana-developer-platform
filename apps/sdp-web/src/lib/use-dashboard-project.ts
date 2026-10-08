@@ -18,17 +18,6 @@ export function useProjectId(): string {
 }
 
 /**
- * The Project in the current URL, or null on Organization-level pages
- * (settings, members) that render outside any Project.
- *
- * @returns The URL's Project id, or null outside a Project-scoped URL.
- */
-export function useOptionalProjectId(): string | null {
-  const { projectId } = useParams<{ projectId?: string }>();
-  return projectId === undefined ? null : projectId;
-}
-
-/**
  * The current pathname without its Project segment, so route tables and
  * active-link checks keep comparing against `/dashboard/<page>` paths.
  *
@@ -39,33 +28,12 @@ export function useDashboardPathname(): string {
 }
 
 /**
- * Link builder bound to the current URL's Project. On Organization-level pages
- * there is no Project, so links stay project-less and the `[projectId]` layout
- * resolves them to the last-used or Sandbox Project on arrival.
+ * Link builder bound to the current URL's Project, so callers write project-less
+ * dashboard paths and never handle the Project themselves.
  *
- * @returns A function mapping a project-less dashboard path to the href to render;
- *   stable until the URL's Project changes, so it is safe in hook deps.
+ * @returns A function mapping a project-less dashboard path to its href in this Project.
  */
 export function useProjectHref(): (dashboardPath: string) => string {
-  return projectHrefBuilder(useOptionalProjectId());
-}
-
-const projectHrefBuilders = new Map<string | null, (dashboardPath: string) => string>();
-
-/**
- * The link builder for one Project, created once per Project id so every
- * caller in every render gets the same function reference.
- *
- * @param projectId - The URL's Project, or null outside a Project-scoped URL.
- * @returns The cached builder for that Project.
- */
-function projectHrefBuilder(projectId: string | null): (dashboardPath: string) => string {
-  const cached = projectHrefBuilders.get(projectId);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const builder = (dashboardPath: string) =>
-    projectId === null ? dashboardPath : projectHref(projectId, dashboardPath);
-  projectHrefBuilders.set(projectId, builder);
-  return builder;
+  const projectId = useProjectId();
+  return (dashboardPath) => projectHref(projectId, dashboardPath);
 }

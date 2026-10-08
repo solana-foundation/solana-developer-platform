@@ -1,31 +1,11 @@
-import type { Project } from "@sdp/types";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
-import { DashboardScopeLoadingScreen } from "@/components/dashboard-loading-screen";
-import { DashboardShell } from "@/components/dashboard-shell";
 import { SelectExistingOrganizationPanel } from "@/components/select-existing-organization-panel";
-import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
-import { NetworkDebugProvider } from "@/contexts/network-debug-context";
-import { getDashboardFlags } from "@/flags/dashboard";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
-import { loadQuickStartStep } from "@/lib/quick-start-server";
-import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
-
-async function loadProjects(): Promise<Project[] | null> {
-  try {
-    return await listSdpProjects();
-  } catch {
-    return null;
-  }
-}
+import { getSdpAuth } from "@/lib/sdp-api";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const [{ orgRole, orgId, userId }, flags] = await Promise.all([
-    getSdpAuth(),
-    getDashboardFlags(),
-  ]);
+  const { orgId, userId } = await getSdpAuth();
 
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -35,31 +15,5 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     return <SelectExistingOrganizationPanel />;
   }
 
-  const dashboardAccess = resolveDashboardAccess(orgRole);
-  const dashboardCacheScope = {
-    orgId,
-    userId,
-  } satisfies DashboardCacheScope;
-
-  const [loadedProjects, initialQuickStartStep] = await Promise.all([
-    loadProjects(),
-    loadQuickStartStep(),
-  ]);
-  const projects = loadedProjects ?? [];
-
-  return (
-    <DashboardWorkspaceProvider
-      key={getDashboardCacheScopeKey(dashboardCacheScope)}
-      scopeRefreshFallback={<DashboardScopeLoadingScreen />}
-      dashboardAccess={dashboardAccess}
-      initialQuickStartStep={initialQuickStartStep}
-      flags={flags}
-      serverDashboardCacheScope={dashboardCacheScope}
-      projects={projects}
-    >
-      <NetworkDebugProvider>
-        <DashboardShell flags={flags}>{children}</DashboardShell>
-      </NetworkDebugProvider>
-    </DashboardWorkspaceProvider>
-  );
+  return children;
 }

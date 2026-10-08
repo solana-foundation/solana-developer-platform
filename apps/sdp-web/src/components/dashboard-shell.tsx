@@ -595,8 +595,9 @@ export function DashboardShell({
     }
   }, [pathname]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-fetch pending approvals when the URL's Project changes; the request reads it from the URL.
   useEffect(() => {
-    if (!policiesEnabled || !dashboardAccess.capabilities.canReadApprovals || !selectedProjectId) {
+    if (!policiesEnabled || !dashboardAccess.capabilities.canReadApprovals) {
       setPendingApprovalCount(null);
       return;
     }

@@ -96,7 +96,6 @@ function isQuickStartEligible(workspace: ReturnType<typeof useDashboardWorkspace
     workspace.initialQuickStartStep &&
       workspace.initialQuickStartStep !== "done" &&
       workspace.dashboardCacheScope.orgId &&
-      workspace.selectedProjectId &&
       workspace.sdpEnvironment === "sandbox" &&
       workspace.dashboardAccess.capabilities.canManageApiKeys
   );
