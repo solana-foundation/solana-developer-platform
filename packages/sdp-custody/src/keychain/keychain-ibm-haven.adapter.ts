@@ -8,9 +8,7 @@
  *    Haven" (telemetry / availability / UI / error messages).
  *  - wallet ids are stored with an `ibmhaven_` prefix; the reused DfnsSigner only
  *    strips `dfns_`, so per-call ids are denormalized to the raw `wa-…` id here
- *    before delegating, keeping the Dfns signer Haven-agnostic. The no-argument /
- *    sign() path relies on config.defaultWalletId, which the adapter factories
- *    already store denormalized (raw).
+ *    before delegating, keeping the Dfns signer Haven-agnostic.
  */
 
 import type { Address } from "@solana/kit";

@@ -296,7 +296,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
-  if (provisionWallet !== undefined) {
+  if (provisionWalletRequested) {
     if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
     }

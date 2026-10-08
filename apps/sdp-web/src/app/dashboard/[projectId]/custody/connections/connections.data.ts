@@ -296,7 +296,7 @@ export async function fetchConnectionPickerOptions(
 export async function fetchWalletsByConnection(
   request: SdpApiClient["request"]
 ): Promise<Map<string, CustodyWalletSummary[]>> {
-  const res = await request("/v1/wallets?includeAllProviders=true");
+  const res = await request("/v1/wallets");
   if (!res.ok) {
     throw new ConnectionsRequestError(res.status);
   }

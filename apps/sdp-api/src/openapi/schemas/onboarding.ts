@@ -1,10 +1,11 @@
 import { z } from "./base";
+import { orgCustodyProviderSchema } from "./custody";
 import { organizationSchema } from "./organizations";
 
 export const organizationOnboardingSetupSchema = z.object({
   status: z.enum(["not_started", "in_progress", "complete"]),
   currentStep: z.enum(["custody", "complete"]),
-  custodyProviders: z.array(z.string()).openapi({
+  custodyProviders: z.array(orgCustodyProviderSchema).openapi({
     description:
       "Custody providers with an active Managed config or active BYOK connection in the default sandbox project, in provider-catalog order.",
   }),

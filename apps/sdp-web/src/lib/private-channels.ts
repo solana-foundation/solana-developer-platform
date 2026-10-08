@@ -97,15 +97,7 @@ export function deletePrivateChannel(client: SdpApiClient, id: string): Promise<
   });
 }
 
-/**
- * List the project's custody wallets we can SIGN from — the deposit source picker.
- *
- * Deliberately NARROWER than `fetchCustodyWallets` (which adds
- * `includeAllProviders=true` for the wallet-verify picker): a deposit is
- * server-signed via `createOrgSigner`, so this picker must only offer wallets we
- * can actually sign from — surfacing every provider's wallets would let a user
- * pick one that fails at submit time.
- */
+/** List the project's custody wallets for the deposit source picker. */
 export async function fetchSignableCustodyWallets(
   client: SdpApiClient
 ): Promise<CustodyWalletSummary[]> {
@@ -392,9 +384,6 @@ export function deletePrivateChannelVerifiedWallet(
 
 /** List the org's custody wallets across all providers (the verify picker source). */
 export async function fetchCustodyWallets(client: SdpApiClient): Promise<CustodyWalletSummary[]> {
-  const query = new URLSearchParams({ includeAllProviders: "true" }).toString();
-  const { wallets } = await client.fetch<{ wallets: CustodyWalletSummary[] }>(
-    `/v1/wallets?${query}`
-  );
+  const { wallets } = await client.fetch<{ wallets: CustodyWalletSummary[] }>("/v1/wallets");
   return wallets;
 }

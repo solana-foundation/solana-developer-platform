@@ -172,6 +172,7 @@ interface OperationalConfigWalletRow {
 
 interface OperationalConnectionWalletRow extends ConnectionWalletRow {
   wallet_record_id: string;
+  wallet_status: "active";
   wallet_label: string | null;
   wallet_purpose: string | null;
   wallet_created_at: string;
@@ -1136,9 +1137,7 @@ export class CustodyRuntimeTargets {
       custodyConnectionId: row.connection_id,
       provider,
       isRuntimeExecutionAllowed:
-        this.isConnectionRuntimeAvailable(row) &&
-        row.wallet_status === "active" &&
-        isCustodyProviderEntitled(availability, provider),
+        this.isConnectionRuntimeAvailable(row) && isCustodyProviderEntitled(availability, provider),
       walletId: row.wallet_id,
       publicKey: row.wallet_public_key,
       label: row.wallet_label,

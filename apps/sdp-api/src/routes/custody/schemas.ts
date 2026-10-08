@@ -8,6 +8,7 @@ import type {
   CustodyWalletAggregateResponse,
   CustodyWalletByIdResponse,
   CustodyWalletMetadataResponse,
+  CustodyWalletOwnerTarget,
   CustodyWalletResponse,
   CustodyWalletsResponse,
   DeleteWalletResponse,
@@ -123,9 +124,7 @@ export const connectionWalletOwnerSchema = z.object({
 export const custodyWalletOwnerSchema = z.union([
   managedWalletOwnerSchema,
   connectionWalletOwnerSchema,
-]);
-
-export type CustodyWalletOwnerTarget = z.infer<typeof custodyWalletOwnerSchema>;
+]) satisfies z.ZodType<CustodyWalletOwnerTarget>;
 
 const walletCreationFields = {
   label: z.string().max(100).optional(),

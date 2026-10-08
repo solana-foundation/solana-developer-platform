@@ -162,7 +162,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
-  if (provisionWallet !== undefined) {
+  if (provisionWalletRequested) {
     if (!(auth.permissions.includes("*") || auth.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
     }

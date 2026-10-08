@@ -13,12 +13,11 @@
  * SDP's leg, never a reuse of it.
  */
 
-import type { SdpEnvironment } from "@sdp/types";
+import type { CustodyWalletOwnerTarget, SdpEnvironment } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { conflict, notFound } from "@/lib/errors";
-import type { CustodyWalletOwnerTarget } from "@/routes/custody/schemas";
 import { getLogger } from "@/runtime/logger";
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
 import type { Env } from "@/types/env";
@@ -143,10 +142,16 @@ export async function getOrCreateDvpSettlementWallet(
 }
 
 /**
- * Picks the Privy backend a new settlement wallet is created under. Production
- * projects use their one active Privy BYOK connection. Sandbox projects use the
- * Managed Privy config when one is active, else their one active Privy BYOK
- * connection. Anything else is refused with 409 `dvp_settlement_privy_unavailable`.
+ * Picks the Privy backend a new settlement wallet is created under:
+ *
+ * - Sandbox with an active Managed Privy config: the Managed config, however many
+ *   active Privy BYOK connections the project also has.
+ * - Sandbox without one, and every Production project (Managed config ignored):
+ *   exactly one active Privy BYOK connection is used; zero, or more than one, is
+ *   refused with 409 `dvp_settlement_privy_unavailable`.
+ *
+ * The more-than-one-connection 409 therefore applies only where no Managed config
+ * is taken.
  *
  * Decided from database reads alone and writes nothing, so a refusal precedes
  * every provider call. A connection that stops being usable after this choice is
@@ -155,7 +160,8 @@ export async function getOrCreateDvpSettlementWallet(
  * @param env - API process environment.
  * @param scope - Organization and project the trade belongs to.
  * @returns The connection or Managed provider the settlement wallet lives under.
- * @throws 409 when the project has no usable Privy backend or more than one active Privy connection.
+ * @throws 404 when the project is not in the organization.
+ * @throws 409 when no Managed config is taken and the project has zero or more than one active Privy connection.
  */
 export async function resolveDvpSettlementOwner(
   env: Env,

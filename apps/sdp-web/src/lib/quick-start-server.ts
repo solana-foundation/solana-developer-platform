@@ -21,10 +21,10 @@ export const loadQuickStartStep = cache(async (): Promise<QuickStartStep | null>
     if (projects.length === 0) return null;
     const wallets = await Promise.allSettled(
       projects.map((project) =>
-        client.fetch<CustodyWalletsResponse>(
-          "/v1/wallets?includeAllProviders=true&includeBalances=false&view=summary",
-          { headers: { [PROJECT_HEADER_NAME]: project.id }, signal }
-        )
+        client.fetch<CustodyWalletsResponse>("/v1/wallets?includeBalances=false&view=summary", {
+          headers: { [PROJECT_HEADER_NAME]: project.id },
+          signal,
+        })
       )
     );
     if (wallets.some((result) => result.status === "fulfilled" && result.value.wallets.length > 0))
