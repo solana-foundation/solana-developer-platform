@@ -17,7 +17,7 @@ import {
   assertProviderAvailable,
   CustodySetupRefusedError,
   custodyProviderNotInReleaseChannel,
-  getCustodyModesForProject,
+  getProjectProviderAvailability,
   getProviderAvailability,
   parseClerkOrganizationTierMetadata,
   parseProviderOverridesFromClerkMetadata,
@@ -920,15 +920,16 @@ describe("provider-availability.service", () => {
       });
       expect(warn).toHaveBeenCalledExactlyOnceWith(
         {
-          event: "sdp_api_custody_setup_refused",
+          event: "sdp_api_project_provider_refused",
           organization_id: TEST_ORG_ID,
           project_id: projects.production.id,
           environment: "production",
+          family: "custody",
           provider: "privy",
           mode: "managed",
           reason: "custody_mode_not_allowed",
         },
-        "sdp_api_custody_setup_refused"
+        "sdp_api_project_provider_refused"
       );
     });
 
@@ -976,9 +977,9 @@ describe("provider-availability.service", () => {
       env.PRIVY_APP_SECRET = undefined;
 
       await expect(admitCustodySetup(projects.sandbox, "privy", "managed")).rejects.toMatchObject({
-        code: "FORBIDDEN",
-        statusCode: 403,
-        message: "Privy is not configured in this environment.",
+        code: "PROVIDER_NOT_CONFIGURED",
+        statusCode: 503,
+        message: "Privy is not configured for sandbox projects in this deployment.",
         details: { reason: "provider_not_configured" },
       });
       await expect(admitCustodySetup(projects.sandbox, "privy", "byok")).resolves.toBeUndefined();
@@ -1034,9 +1035,12 @@ describe("provider-availability.service", () => {
       const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
       const project = { organizationId: TEST_ORG_ID, projectId: projects.production.id };
 
-      await expect(getCustodyModesForProject(env, getDb(env), project, "privy")).resolves.toEqual([
-        "byok",
-      ]);
+      const availability = await getProjectProviderAvailability(env, getDb(env), project);
+      expect(availability.providers).toContainEqual({
+        family: "custody",
+        provider: "privy",
+        modes: ["byok"],
+      });
       expect(warn).not.toHaveBeenCalled();
     });
 
@@ -1060,9 +1064,9 @@ describe("provider-availability.service", () => {
         await expect(admitByokCustodySetup(env, getDb(env), scope, "privy")).rejects.toMatchObject(
           notFound
         );
-        await expect(
-          getCustodyModesForProject(env, getDb(env), scope, "privy")
-        ).rejects.toMatchObject(notFound);
+        await expect(getProjectProviderAvailability(env, getDb(env), scope)).rejects.toMatchObject(
+          notFound
+        );
         expect(warn).not.toHaveBeenCalled();
       }
     );

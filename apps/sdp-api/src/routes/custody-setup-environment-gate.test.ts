@@ -264,7 +264,7 @@ async function auditRows() {
 }
 
 const NO_CUSTODY_ROWS = { configs: [], wallets: [], credentials: [], connections: [] };
-const REFUSAL_EVENT = "sdp_api_custody_setup_refused";
+const REFUSAL_EVENT = "sdp_api_project_provider_refused";
 
 function spyOnWarn() {
   const logger = getLogger();
@@ -286,6 +286,7 @@ function refusalLog(
       organization_id: ORGANIZATION_ID,
       project_id: PROJECT_IDS[environment],
       environment,
+      family: "custody",
       provider: "privy",
       mode,
       reason,
@@ -360,11 +361,11 @@ describe("Custody setup by project environment", () => {
 
     const response = await initialize("sandbox", "privy");
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       error: {
-        code: "FORBIDDEN",
-        message: "Privy is not configured in this environment.",
+        code: "PROVIDER_NOT_CONFIGURED",
+        message: "Privy is not configured for sandbox projects in this deployment.",
         details: { reason: "provider_not_configured" },
       },
       meta: { requestId: expect.any(String) },
