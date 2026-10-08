@@ -47,7 +47,7 @@ curl -X POST https://api.solana.com/v1/payments/recurring-payments \
   -d '{
     "sourceCustodyWalletId": "cwlt_123",
     "counterpartyId": "cpty_4837",
-    "counterpartyAccountId": "cpa_4837",
+    "counterpartyAccountId": "counterparty_account_4837",
     "token": "USDC",
     "amount": "2500.00",
     "periodHours": 720,
@@ -68,7 +68,7 @@ const response = await fetch(
     body: JSON.stringify({
       sourceCustodyWalletId: "cwlt_123",
       counterpartyId: "cpty_4837",
-      counterpartyAccountId: "cpa_4837",
+      counterpartyAccountId: "counterparty_account_4837",
       token: "USDC",
       amount: "2500.00",
       periodHours: 720,
@@ -91,7 +91,7 @@ HttpRequest request = HttpRequest.newBuilder()
         {
           "sourceCustodyWalletId": "cwlt_123",
           "counterpartyId": "cpty_4837",
-          "counterpartyAccountId": "cpa_4837",
+          "counterpartyAccountId": "counterparty_account_4837",
           "token": "USDC",
           "amount": "2500.00",
           "periodHours": 720,
@@ -113,7 +113,7 @@ A `201` returns the stored schedule. The on-chain fields stay `null` until activ
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "5aBCd...2eFg",
       "counterpartyId": "cpty_4837",
-      "counterpartyAccountId": "cpa_4837",
+      "counterpartyAccountId": "counterparty_account_4837",
       "destinationAddress": "7xKXz...9fGh",
       "destinationTokenAccount": null,
       "token": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",

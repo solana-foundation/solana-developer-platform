@@ -54,8 +54,8 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches/estimate \
     "sourceCustodyWalletId": "cwlt_123",
     "token": "USDC",
     "recipients": [
-      { "counterpartyAccountId": "cpa_4837", "amount": "150.00" },
-      { "counterpartyAccountId": "cpa_4838", "amount": "75.50" }
+      { "counterpartyAccountId": "counterparty_account_4837", "amount": "150.00" },
+      { "counterpartyAccountId": "counterparty_account_4838", "amount": "75.50" }
     ]
   }'
 ```
@@ -99,13 +99,13 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
       {
         "externalId": "row_4837",
         "counterpartyId": "cpty_4837",
-        "counterpartyAccountId": "cpa_4837",
+        "counterpartyAccountId": "counterparty_account_4837",
         "amount": "150.00"
       },
       {
         "externalId": "row_4838",
         "counterpartyId": "cpty_4838",
-        "counterpartyAccountId": "cpa_4838",
+        "counterpartyAccountId": "counterparty_account_4838",
         "amount": "75.50"
       }
     ],
@@ -129,8 +129,8 @@ const response = await fetch(
       sourceCustodyWalletId: "cwlt_123",
       token: "USDC",
       recipients: [
-        { externalId: "row_4837", counterpartyId: "cpty_4837", counterpartyAccountId: "cpa_4837", amount: "150.00" },
-        { externalId: "row_4838", counterpartyId: "cpty_4838", counterpartyAccountId: "cpa_4838", amount: "75.50" },
+        { externalId: "row_4837", counterpartyId: "cpty_4837", counterpartyAccountId: "counterparty_account_4837", amount: "150.00" },
+        { externalId: "row_4838", counterpartyId: "cpty_4838", counterpartyAccountId: "counterparty_account_4838", amount: "75.50" },
       ],
       options: { maxRecipientsPerTransaction: 20, preflight: true },
     }),
@@ -160,8 +160,8 @@ HttpRequest request = HttpRequest.newBuilder()
           "sourceCustodyWalletId": "cwlt_123",
           "token": "USDC",
           "recipients": [
-            { "externalId": "row_4837", "counterpartyId": "cpty_4837", "counterpartyAccountId": "cpa_4837", "amount": "150.00" },
-            { "externalId": "row_4838", "counterpartyId": "cpty_4838", "counterpartyAccountId": "cpa_4838", "amount": "75.50" }
+            { "externalId": "row_4837", "counterpartyId": "cpty_4837", "counterpartyAccountId": "counterparty_account_4837", "amount": "150.00" },
+            { "externalId": "row_4838", "counterpartyId": "cpty_4838", "counterpartyAccountId": "counterparty_account_4838", "amount": "75.50" }
           ],
           "options": { "maxRecipientsPerTransaction": 20, "preflight": true }
         }"""))
@@ -191,7 +191,7 @@ A `200` returns the batch, one row per recipient, and the transfer record of eac
         "id": "xrec_...",
         "transferId": "xfr_...",
         "externalId": "row_4837",
-        "counterpartyAccountId": "cpa_4837",
+        "counterpartyAccountId": "counterparty_account_4837",
         "destination": "7xKXz...9fGh",
         "amount": "150.00",
         "status": "processing",
