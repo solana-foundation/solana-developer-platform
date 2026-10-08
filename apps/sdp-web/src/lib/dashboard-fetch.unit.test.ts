@@ -167,6 +167,31 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
   });
 
+  it("keeps the key when a success's body fails to download", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const brokenBody = () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new TypeError("connection reset"));
+          },
+        }),
+        { status: 201 }
+      );
+    const fetchMock = vi
+      .fn(
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response("{}", { status: 201 })
+      )
+      .mockResolvedValueOnce(brokenBody());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submit()).rejects.toThrow();
+    await submit();
+
+    expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+  });
+
   it("does not let one caller's abort cancel the request another caller joined", async () => {
     setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     let respond: (response: Response) => void = () => undefined;

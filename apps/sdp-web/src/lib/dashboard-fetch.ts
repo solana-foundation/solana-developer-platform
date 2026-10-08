@@ -41,6 +41,7 @@ function isStableMutationPath(path: string): boolean {
 }
 
 const KEYED_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const BODYLESS_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
 
 let mutationKeyStore: IdempotencyKeyStore | null = null;
 
@@ -112,8 +113,9 @@ function abortable(response: Promise<Response>, signal: AbortSignal | null | und
  * Sends a `stable` mutation under one Idempotency-Key per user action: the
  * key is minted for the (Project, method, path, body) the user submitted and
  * reused by every retry and double-click of that same action until the answer
- * is definitive ({@link retiresKey}). While the outcome is unknown (a network
- * failure, a first 5xx) the key is held past its normal expiry. A second
+ * (headers and body) is definitive ({@link retiresKey}). The key is pinned
+ * before the request goes out, so an unanswered write (a reload, a network
+ * failure, a first 5xx) keeps it past its normal expiry. A second
  * identical submit while the first is in flight joins it, and one caller
  * aborting never cancels the shared request.
  */
@@ -129,21 +131,24 @@ async function sendUnderActionKey(
   if (!sent) {
     const { signal: _callerSignal, ...shared } = init;
     const fingerprint = storageFingerprint(material);
-    headers.set(IDEMPOTENCY_KEY_HEADER, mutationKeys().claim(fingerprint));
-    sent = sendWithProject(path, shared, headers).then(
-      (response) => {
-        if (retiresKey(response)) {
-          mutationKeys().release(fingerprint);
-        } else {
-          mutationKeys().markUncertain(fingerprint);
-        }
-        return response;
-      },
-      (error: unknown) => {
-        mutationKeys().markUncertain(fingerprint);
-        throw error;
+    const keys = mutationKeys();
+    headers.set(IDEMPOTENCY_KEY_HEADER, keys.claim(fingerprint));
+    // Pinned before the request goes out: a reload mid-flight must not let
+    // an unanswered write's key expire or be evicted.
+    keys.markUncertain(fingerprint);
+    sent = sendWithProject(path, shared, headers).then(async (response) => {
+      // The answer only counts once its body has arrived: a download that
+      // fails leaves the key pinned, so the retry recovers the first result.
+      const body = await response.arrayBuffer();
+      if (retiresKey(response)) {
+        keys.release(fingerprint);
       }
-    );
+      return new Response(BODYLESS_STATUSES.has(response.status) ? null : body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    });
     inFlightMutations.set(material, sent);
     void sent.finally(() => inFlightMutations.delete(material)).catch(() => undefined);
   }
