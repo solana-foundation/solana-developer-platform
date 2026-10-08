@@ -29,8 +29,14 @@ import {
   TreasurySolutionsSkeleton,
 } from "@/app/dashboard/markets/markets-route-skeletons";
 import { SettingsPageSkeleton } from "@/app/dashboard/operations-card-page-skeletons";
-import CounterpartyDirectoryLoading from "@/app/dashboard/payments/counterparty/loading";
+import CounterpartyDirectoryLoading, {
+  PreviousCounterpartyLoading as LegacyCounterpartyDirectoryLoading,
+} from "@/app/dashboard/payments/counterparty/loading";
 import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
+import {
+  CounterpartyCreateSkeleton as LegacyCounterpartyCreateSkeleton,
+  CounterpartyDetailSkeleton as LegacyCounterpartyDetailSkeleton,
+} from "@/app/dashboard/payments/payments-route-skeletons";
 import {
   CounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton,
@@ -40,7 +46,7 @@ import {
   RecurringPaymentCreateSkeleton,
   RecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton,
-} from "@/app/dashboard/payments/payments-route-skeletons";
+} from "@/app/dashboard/payments/payments-route-skeletons.redesign";
 import PaymentRequestsLoading from "@/app/dashboard/payments/requests/loading";
 import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
 import TokenHoldingsLoading from "@/app/dashboard/tokens/loading";
@@ -59,11 +65,14 @@ interface PageLoadingProps {
   assetProfilesEnabled?: boolean;
 }
 
-// The previous design's skeletons for the routes NEW DESIGN redesigns. Each redesigned route
-// adds its previous skeleton here; the rest load as they always have.
+// The previous design's skeletons for the routes NEW DESIGN redesigns.
 const LEGACY_DESIGN_PAGE_LOADING: Partial<
   Record<DashboardLoadingRoute, ComponentType<PageLoadingProps>>
-> = {};
+> = {
+  "counterparty-directory": LegacyCounterpartyDirectoryLoading,
+  "counterparty-create": LegacyCounterpartyCreateSkeleton,
+  "counterparty-detail": LegacyCounterpartyDetailSkeleton,
+};
 
 export function resolvePageLoadingComponent(
   route: DashboardLoadingRoute,

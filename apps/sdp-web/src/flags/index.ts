@@ -56,6 +56,7 @@ export const {
   dvp,
   earn,
   newDesign,
+  newDesignContacts,
   rampProviderMoonpay,
   rampProviderLightspark,
   rampProviderBvnk,

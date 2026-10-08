@@ -484,6 +484,8 @@ export function DashboardShell({
     pendingApprovalCount,
     policiesEnabled,
     privateChannelsEnabled,
+    newDesign: newDesignEnabled,
+    newDesignModules: flags.newDesignModules,
     rampsEnabled,
   });
   const pageTitle =

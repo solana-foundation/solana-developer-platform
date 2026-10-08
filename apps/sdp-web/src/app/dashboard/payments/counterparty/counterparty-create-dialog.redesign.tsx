@@ -1,0 +1,36 @@
+"use client";
+
+import type { Counterparty } from "@sdp/types";
+import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
+import { CounterpartyCreateProvider } from "./counterparty-create-context.redesign";
+import { CounterpartyCreatePage } from "./counterparty-create-page.redesign";
+
+interface CounterpartyCreateDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (counterparty: Counterparty) => void;
+}
+
+export function CounterpartyCreateDialog({
+  open,
+  onClose,
+  onCreated,
+}: CounterpartyCreateDialogProps) {
+  const t = useTranslations();
+
+  return (
+    <Modal
+      isOpen={open}
+      onClose={onClose}
+      ariaLabel={t("DashboardPayments.counterparty.addCounterparty")}
+      size="lg"
+    >
+      <div className="p-6">
+        <CounterpartyCreateProvider onCreated={onCreated}>
+          <CounterpartyCreatePage embedded onCancel={onClose} />
+        </CounterpartyCreateProvider>
+      </div>
+    </Modal>
+  );
+}

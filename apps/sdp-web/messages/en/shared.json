@@ -184,6 +184,10 @@
     "unknownToken": "Unknown",
     "sdpMintedToken": "SDP-Minted",
     "rowsCount": "{count} rows",
+    "filter": "Filter",
+    "filterBy": "Filter by…",
+    "any": "Any",
+    "notSet": "Not set",
     "openCalendarFor": "Open the calendar for {field}"
   },
   "dashboardShell": {
@@ -265,7 +269,13 @@
     "integrations": "Integrations",
     "holdings": "Holdings",
     "backToHome": "Back to Home",
-    "privacy": "Privacy"
+    "privacy": "Privacy",
+    "contactList": "Contact list",
+    "contacts": "Contacts",
+    "contact": "Contact",
+    "newDesign": {
+      "newCounterparty": "New counterparty"
+    }
   },
   "validation": {
     "allowlistValueRequired": "Allowlist value is required",

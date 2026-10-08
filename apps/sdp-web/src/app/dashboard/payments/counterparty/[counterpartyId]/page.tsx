@@ -1,14 +1,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { isRampsEnabled } from "@/flags/ramps";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterpartyDetail } from "../counterparty-detail.data";
 import { CounterpartyDetailWorkspace } from "../counterparty-detail-workspace";
+import RedesignCounterpartyDetailRoute from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 
-export default async function CounterpartyDetailRoute({
+async function CounterpartyDetailRoute({
   params,
 }: {
   params: Promise<{ counterpartyId: string }>;
@@ -56,3 +58,9 @@ export default async function CounterpartyDetailRoute({
     }
   );
 }
+
+export default withLegacyDesign(
+  RedesignCounterpartyDetailRoute,
+  CounterpartyDetailRoute,
+  "contacts"
+);

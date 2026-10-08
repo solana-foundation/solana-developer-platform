@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
-import { newDesign } from "@/flags";
+import { newDesign, newDesignContacts } from "@/flags";
 import type { DesignModule, DesignModuleFlags } from "@/lib/design-modules";
 
 type Page<P> = (props: P) => ReactNode | Promise<ReactNode>;
 type ModuleFlag = () => Promise<boolean>;
 
 // Each design module's own flag (lib/design-modules.ts). It counts only while NEW DESIGN is on.
-const DESIGN_MODULE_FLAGS: Record<DesignModule, ModuleFlag> = {};
+const DESIGN_MODULE_FLAGS: Record<DesignModule, ModuleFlag> = {
+  contacts: newDesignContacts,
+};
 
 /**
  * Evaluates every design module's own flag for this request, NEW DESIGN aside.
