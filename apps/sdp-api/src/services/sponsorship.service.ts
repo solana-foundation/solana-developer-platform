@@ -8,14 +8,13 @@ import {
 import type { ProjectEnvironment, SolanaCluster } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { type AdmittedMovement, readAdmittedMovement } from "@/lib/admit-movement";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
-import { ProjectService } from "./project.service";
 import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budget.service";
 import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
 
@@ -213,28 +212,28 @@ export function createAuthenticatedSponsorshipFeePayment(c: AppContext): Sponsor
 }
 
 /**
- * Resolve service/background sponsorship from persisted project ownership.
- * The actor id must itself come from persisted service state (for example a
- * custody wallet id), never a public request field.
+ * Resolve service/background sponsorship from an admitted movement (HOO-1955).
+ * The project's environment and status come from the admission join, so this
+ * costs no project read. The actor id must itself come from persisted service
+ * state (for example a custody wallet id), never a public request field.
  */
-export async function createProjectSponsorshipFeePayment(
+export function createProjectSponsorshipFeePayment(
   env: Env,
+  movement: AdmittedMovement,
   input: {
-    organizationId: string;
-    projectId: string;
     actor: SponsorshipScope["actor"];
     cluster?: SolanaCluster;
   }
-): Promise<SponsorshipFeePayment> {
-  const project = await new ProjectService(getDb(env)).getProject(input.projectId);
-  if (!project || project.organizationId !== input.organizationId || project.status !== "active") {
+): SponsorshipFeePayment {
+  const admitted = readAdmittedMovement(movement);
+  if (admitted.projectStatus !== "active") {
     throw new AppError("FORBIDDEN", "Sponsorship project is not active or accessible");
   }
 
   return createSponsorshipFeePayment(env, {
-    environment: project.environment,
-    organizationId: project.organizationId,
-    projectId: project.id,
+    environment: admitted.environment,
+    organizationId: admitted.organizationId,
+    projectId: admitted.projectId,
     actor: input.actor,
     cluster: input.cluster,
   });

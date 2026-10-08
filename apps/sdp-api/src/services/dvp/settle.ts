@@ -24,6 +24,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import { badRequest, conflict, transactionFailed } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -165,8 +166,11 @@ export async function closeDvpTrade(
 
   const signer = await createOrgSignerForCustodyWallet(
     env,
-    trade.organizationId,
-    trade.projectId,
+    await uncheckedLegacyMovement(
+      env,
+      { organizationId: trade.organizationId, projectId: trade.projectId },
+      "dvp"
+    ),
     settlement.custodyWalletId
   );
   if (signer.address !== trade.settlementAuthority) {

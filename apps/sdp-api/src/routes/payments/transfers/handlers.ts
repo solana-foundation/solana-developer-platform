@@ -56,6 +56,7 @@ import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
+import { requireAdmittedMovement } from "@/middleware/movement";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -644,11 +645,9 @@ async function executeSponsoredTransfer(
     }) => Promise<readonly Instruction[]>;
   }
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const auth = getAuth(c);
   const signer = await solanaServices.createOrgSignerForCustodyWallet(
     c.env,
-    auth.organizationId,
-    auth.projectId,
+    requireAdmittedMovement(c),
     params.sourceWallet.id
   );
 

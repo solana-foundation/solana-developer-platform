@@ -11,6 +11,7 @@ import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { admittedMovementMatching } from "@/test/helpers/admitted-movement";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -465,8 +466,7 @@ describe("Custody wallet scope routes", () => {
     });
     expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      admittedMovementMatching({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id }),
       "cwlt_scope_signer_check"
     );
     expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
@@ -619,8 +619,7 @@ describe("Custody wallet scope routes", () => {
     expect(response.status).toBe(200);
     expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      admittedMovementMatching({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id }),
       "cwlt_scope_privy_a"
     );
   });
@@ -714,8 +713,7 @@ describe("Custody wallet scope routes", () => {
     expect(body.data.walletId).toBe("privy_wallet_a");
     expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      admittedMovementMatching({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id }),
       "cwlt_scope_privy_a"
     );
 
@@ -781,8 +779,7 @@ describe("Custody wallet scope routes", () => {
         });
         expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
           env,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
+          admittedMovementMatching({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id }),
           recordId
         );
       } else {
@@ -847,8 +844,7 @@ describe("Custody wallet scope routes", () => {
     expect(body.data.memo).not.toBe(callerMemo);
     expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      admittedMovementMatching({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id }),
       "cwlt_scope_privy_a"
     );
     expect(signerCheckMocks.createSponsorship).toHaveBeenCalledOnce();

@@ -1,5 +1,6 @@
 import {
   isActivatingRecurringPaymentStatus,
+  type MovementId,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
   recurringPaymentInFlightLifecycleOperation,
 } from "@sdp/types";
@@ -10,14 +11,13 @@ import {
   type PaymentRecurringPaymentRow,
   type RecoverableCollectionRecurringPaymentRow,
 } from "@/db/repositories";
+import { type AdmittedMovement, admitMovement } from "@/lib/admit-movement";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, internalError } from "@/lib/errors";
 import {
-  assertMoneyStartAdmitted,
   checkMoneyStart,
   type MoneyAdmissionScope,
   MoneyMovementRefusedError,
-  type MoneyStartContext,
 } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -55,13 +55,21 @@ function emptyResult(): CollectDueRecurringPaymentsResult {
   return { recovered: 0, collected: 0, failed: 0, skipped: 0, refused: 0 };
 }
 
-function admissionFor(
+function rowScope(row: PaymentRecurringPaymentRow): MoneyAdmissionScope {
+  return { organizationId: row.organization_id, projectId: row.project_id };
+}
+
+/**
+ * Admits the row's movement lazily: the operation asks only once it knows it
+ * still has to sign, so work that is already signed finishes (HOO-1955).
+ */
+function jobAdmission(
+  env: Env,
   row: PaymentRecurringPaymentRow,
-  operation: MoneyStartContext["operation"]
-): { scope: MoneyAdmissionScope; context: MoneyStartContext } {
+  movement: MovementId
+): { admit: () => Promise<AdmittedMovement> } {
   return {
-    scope: { organizationId: row.organization_id, projectId: row.project_id },
-    context: { surface: "job", operation, subjectId: row.id },
+    admit: () => admitMovement(env, rowScope(row), movement, { surface: "job", subjectId: row.id }),
   };
 }
 
@@ -159,13 +167,16 @@ async function collectRow(
   env: Env,
   row: CollectibleRecurringPaymentRow | RecoverableCollectionRecurringPaymentRow
 ): Promise<CollectionRowOutcome> {
-  const { scope, context } = admissionFor(row, "recurring_payment.collect");
   try {
     const sourceWallet = await resolveSourceWallet(env, row);
     if (!sourceWallet) {
       // A refused organization skips the period rather than journaling a
       // failure every retry window.
-      const decision = await checkMoneyStart(env, scope, context);
+      const decision = await checkMoneyStart(env, rowScope(row), {
+        surface: "job",
+        movement: "recurring.collect",
+        subjectId: row.id,
+      });
       if (!decision.admitted) {
         return skipRefusedPeriod(env, row, new MoneyMovementRefusedError(decision.reason));
       }
@@ -191,7 +202,7 @@ async function collectRow(
       recurringPayment: row,
       initiatedByKeyId: null,
       collectionSource: "automated",
-      admitStart: () => assertMoneyStartAdmitted(env, scope, context),
+      admission: jobAdmission(env, row, "recurring.collect"),
     });
     return "ok";
   } catch (error) {
@@ -224,25 +235,26 @@ async function recoverLifecycleRow(
       recurringPayment: row,
     };
     if (isActivatingRecurringPaymentStatus(row.status)) {
-      const { scope, context } = admissionFor(row, "recurring_payment.activate");
       await activateRecurringPayment({
         ...input,
         createdBy: row.created_by,
-        admitStart: () => assertMoneyStartAdmitted(env, scope, context),
+        admission: jobAdmission(env, row, "recurring.activate"),
       });
       return "ok";
     }
     const operation = recurringPaymentInFlightLifecycleOperation(row.status);
     if (operation === "cancel") {
       // An exit: never refused, for deleted and unentitled organizations alike.
-      await cancelRecurringPayment(input);
+      await cancelRecurringPayment({
+        ...input,
+        admission: jobAdmission(env, row, "recurring.cancel"),
+      });
       return "ok";
     }
     if (operation === "resume") {
-      const { scope, context } = admissionFor(row, "recurring_payment.resume");
       await resumeRecurringPayment({
         ...input,
-        admitStart: () => assertMoneyStartAdmitted(env, scope, context),
+        admission: jobAdmission(env, row, "recurring.resume"),
       });
       return "ok";
     }

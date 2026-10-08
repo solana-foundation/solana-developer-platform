@@ -34,10 +34,12 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
+  admittedMovementFrom,
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
+  type RecurringMovementAdmission,
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
 } from "./shared";
@@ -330,27 +332,20 @@ async function finalizeRecurringPaymentLifecycle(input: {
   });
 }
 
-/**
- * Resume starts money movement again, so it runs money admission (HOO-1955)
- * before it signs. Cancel is an exit and is never refused (ADR 0002).
- */
-type RecurringPaymentLifecycleRun =
-  | { operation: Extract<RecurringPaymentLifecycleOperation, "cancel"> }
-  | {
-      operation: Extract<RecurringPaymentLifecycleOperation, "resume">;
-      admitStart: () => Promise<void>;
-    };
-
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Lifecycle recovery keeps each persisted stage explicit.
-async function runRecurringPaymentLifecycle(
-  input: {
-    env: Env;
-    organizationId: string;
-    projectId: string;
-    sourceWallet: CustodyWallet;
-    recurringPayment: PaymentRecurringPaymentRow;
-  } & RecurringPaymentLifecycleRun
-): Promise<PaymentRecurringPaymentRow> {
+async function runRecurringPaymentLifecycle(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  sourceWallet: CustodyWallet;
+  recurringPayment: PaymentRecurringPaymentRow;
+  operation: RecurringPaymentLifecycleOperation;
+  /**
+   * Resume is a start and cancel an exit (ADR 0002: never refused); both are
+   * admitted only when they still have to sign.
+   */
+  admission: RecurringMovementAdmission;
+}): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
     createTenantScope(input)
@@ -396,11 +391,14 @@ async function runRecurringPaymentLifecycle(
     return collectionState.recurringPayment;
   }
 
-  await createSigningService(input.env).admitRuntimeExecution(
-    input.organizationId,
-    input.projectId,
-    input.sourceWallet.id
-  );
+  // HTTP already holds the token, so it checks the wallet's runtime before it
+  // claims; a job's runtime check runs at signer acquisition, inside the claim.
+  if ("admitted" in input.admission) {
+    await createSigningService(input.env).admitRuntimeExecution(
+      input.admission.admitted,
+      input.sourceWallet.id
+    );
+  }
 
   const claimResult = await getDb(input.env).transaction(async (tx) => {
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
@@ -479,27 +477,24 @@ async function runRecurringPaymentLifecycle(
       );
     }
 
-    // Admission runs only before a new signature. An attempt that already
-    // submitted only confirms below, so a refusal never strands an operation
-    // that is on chain. A refused resume goes back to `canceled` through the
-    // failure reset, which matches the subscription on chain.
-    if (!signature && input.operation === "resume") {
-      await input.admitStart();
-    }
-    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
-      input.env,
-      input.organizationId,
-      input.projectId,
-      input.sourceWallet.id
-    );
-    if (sourceSigner.address !== input.sourceWallet.publicKey) {
-      throw badRequest("Resolved signing wallet does not match source wallet");
-    }
-
     const planPda = assertValidAddress(claimed.plan_pda, "planPda");
     const subscriptionPda = assertValidAddress(claimed.subscription_pda, "subscriptionPda");
 
     if (!signature) {
+      // Admission runs only before a new signature. An attempt that already
+      // submitted only confirms below, so a refusal never strands an operation
+      // that is on chain. A refused resume goes back to `canceled` through the
+      // failure reset, which matches the subscription on chain.
+      const movement = await admittedMovementFrom(input.admission);
+      const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+        input.env,
+        movement,
+        input.sourceWallet.id
+      );
+      if (sourceSigner.address !== input.sourceWallet.publicKey) {
+        throw badRequest("Resolved signing wallet does not match source wallet");
+      }
+
       currentStage = "submit";
       await recurringRepo.updateLifecycleAttempt({
         attemptId: attempt.id,
@@ -520,8 +515,7 @@ async function runRecurringPaymentLifecycle(
 
       signature = await sendSubscriptionInstructions({
         env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+        movement,
         sourceWallet: input.sourceWallet,
         sourceSigner,
         instructions: [instruction],
@@ -624,6 +618,8 @@ export async function cancelRecurringPayment(input: {
   projectId: string;
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
+  /** An exit (ADR 0002): admitted for deleted and unentitled organizations alike. */
+  admission: RecurringMovementAdmission;
 }): Promise<PaymentRecurringPaymentRow> {
   if (isPendingActivationRecurringPaymentStatus(input.recurringPayment.status)) {
     const recurringRepo = createPaymentRecurringPaymentsRepository(
@@ -653,7 +649,7 @@ export async function resumeRecurringPayment(input: {
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
   /** Money admission (HOO-1955), run only if the resume still has to sign. */
-  admitStart: () => Promise<void>;
+  admission: RecurringMovementAdmission;
 }): Promise<PaymentRecurringPaymentRow> {
   return runRecurringPaymentLifecycle({ ...input, operation: "resume" });
 }

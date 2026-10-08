@@ -8,6 +8,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
+import { requireMovement } from "@/middleware/movement";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import { isEarnExitOrRead } from "@/routes/earn/exits";
@@ -127,6 +128,7 @@ wallets.patch(
 wallets.post(
   "/signer-check",
   requirePermissions("wallets:write"),
+  requireMovement("custody.signer_check"),
   validateBody(signerCheckSchema),
   meteredQuota({ name: "signer-check", actorMax: 2, orgMax: 10 }),
   signerCheck

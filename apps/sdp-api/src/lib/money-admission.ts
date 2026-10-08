@@ -1,4 +1,9 @@
-import { organizationStatusMayStartMoney, type ProjectEnvironment } from "@sdp/types";
+import {
+  type MovementId,
+  organizationStatusMayStartMoney,
+  type ProjectEnvironment,
+  type ProjectStatus,
+} from "@sdp/types";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { parseOrganizationEntitlements } from "@/lib/production-entitlement";
@@ -39,6 +44,9 @@ export interface MoneyAdmissionFacts {
   /** The raw `organizations.status` column. */
   organizationStatus: string;
   projectEnvironment: ProjectEnvironment;
+  projectStatus: ProjectStatus;
+  /** The raw `organizations.tier` column. */
+  organizationTier: string;
   /** The raw `organizations.settings` column. */
   rawSettings: string | null;
 }
@@ -50,11 +58,7 @@ export type MoneyAdmissionDecision =
 /** What is asking to start money, for the refusal event. */
 export interface MoneyStartContext {
   surface: "job" | "http";
-  operation:
-    | "recurring_payment.collect"
-    | "recurring_payment.activate"
-    | "recurring_payment.resume"
-    | "pay_request.sponsor";
+  movement: MovementId;
   /** The row the movement belongs to, such as a recurring payment id. */
   subjectId: string;
 }
@@ -104,17 +108,25 @@ export async function readMoneyAdmissionFacts(
 ): Promise<MoneyAdmissionFacts | null> {
   const row = await getDb(env)
     .prepare(
-      `SELECT p.environment, o.status, o.settings
+      `SELECT p.environment, p.status AS project_status, o.status, o.tier, o.settings
          FROM projects p
          JOIN organizations o ON o.id = p.organization_id
         WHERE p.id = ? AND p.organization_id = ?`
     )
     .bind(scope.projectId, scope.organizationId)
-    .first<{ environment: ProjectEnvironment; status: string; settings: string | null }>();
+    .first<{
+      environment: ProjectEnvironment;
+      project_status: ProjectStatus;
+      status: string;
+      tier: string;
+      settings: string | null;
+    }>();
   return row
     ? {
         organizationStatus: row.status,
         projectEnvironment: row.environment,
+        projectStatus: row.project_status,
+        organizationTier: row.tier,
         rawSettings: row.settings,
       }
     : null;
@@ -131,7 +143,7 @@ export async function checkMoneyStart(
     logEvent("warn", {
       event: "sdp_money_refused",
       surface: context.surface,
-      operation: context.operation,
+      movement: context.movement,
       subject_id: context.subjectId,
       organization_id: scope.organizationId,
       project_id: scope.projectId,
@@ -139,16 +151,4 @@ export async function checkMoneyStart(
     });
   }
   return decision;
-}
-
-/** {@link checkMoneyStart}, throwing {@link MoneyMovementRefusedError} (403) on refusal. */
-export async function assertMoneyStartAdmitted(
-  env: Env,
-  scope: MoneyAdmissionScope,
-  context: MoneyStartContext
-): Promise<void> {
-  const decision = await checkMoneyStart(env, scope, context);
-  if (!decision.admitted) {
-    throw new MoneyMovementRefusedError(decision.reason);
-  }
 }

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
+import { requireMovement } from "@/middleware/movement";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -35,32 +36,35 @@ recurringPayments.get("/", requirePermissions("payments:read"), listRecurringPay
 recurringPayments.patch(
   "/:id",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
-  requireAllowedOperation("recurring_payment_update"),
+  requireMovement("recurring.update"),
   validateBody(updateRecurringPaymentSchema),
   updateRecurringPayment
 );
 recurringPayments.post(
   "/:id/activate",
   requirePermissions("payments:write", "wallets:read"),
+  requireMovement("recurring.activate"),
   validateBody(activateRecurringPaymentSchema),
   activateRecurringPayment
 );
 recurringPayments.post(
   "/:id/cancel",
   requirePermissions("payments:write", "wallets:read"),
+  requireMovement("recurring.cancel"),
   validateBody(cancelRecurringPaymentSchema),
   cancelRecurringPayment
 );
 recurringPayments.post(
   "/:id/collect",
   requirePermissions("payments:write", "wallets:read"),
-  requireAllowedOperation("recurring_payment_collection"),
+  requireMovement("recurring.collect"),
   validateBody(collectRecurringPaymentSchema),
   collectRecurringPayment
 );
 recurringPayments.post(
   "/:id/resume",
   requirePermissions("payments:write", "wallets:read"),
+  requireMovement("recurring.resume"),
   validateBody(resumeRecurringPaymentSchema),
   resumeRecurringPayment
 );

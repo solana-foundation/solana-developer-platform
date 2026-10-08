@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
+import { requireMovement } from "@/middleware/movement";
 import { policyGate } from "@/middleware/policy-gate";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
@@ -19,7 +19,7 @@ const transfers = new Hono<{ Bindings: Env }>();
 transfers.post(
   "/",
   requirePermissions("payments:write", "wallets:read"),
-  requireAllowedOperation("payment_transfer_execute"),
+  requireMovement("payments.transfer"),
   validateBody(createTransferSchema),
   policyGate({
     extract: extractTransferPolicyCandidate,

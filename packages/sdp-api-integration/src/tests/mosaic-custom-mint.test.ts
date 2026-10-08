@@ -12,7 +12,7 @@ import {
   TEST_PROJECT,
 } from "../helpers/integration";
 
-const { createOrgSigner } = apiTestSupport;
+const { createLegacyOrgSigner } = apiTestSupport;
 
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom mint", () => {
   let apiKeyHash: string;
@@ -31,7 +31,11 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
   });
 
   it("creates a custom mint through the sponsored Mosaic service", { timeout: 60000 }, async () => {
-    const signer = await createOrgSigner(env as ApiTestEnv, TEST_ORG.id, TEST_PROJECT.id);
+    const signer = await createLegacyOrgSigner(
+      env as ApiTestEnv,
+      { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id },
+      "issuance"
+    );
     const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
       environment: TEST_PROJECT.environment,
       organizationId: TEST_ORG.id,

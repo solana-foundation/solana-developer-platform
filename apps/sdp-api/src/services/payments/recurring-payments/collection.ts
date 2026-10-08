@@ -83,9 +83,11 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { enforceRecurringPaymentPolicy } from "./policy";
 import {
+  admittedMovementFrom,
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
+  type RecurringMovementAdmission,
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
 } from "./shared";
@@ -1439,11 +1441,11 @@ export async function collectRecurringPayment(input: {
   collectionSource: RecurringCollectionSource;
   /**
    * Money admission (HOO-1955), run once, after recovery and right before the
-   * attempt that leads to a new signature. A refusal throws
-   * `MoneyMovementRefusedError` with nothing written; finishing an in-flight
-   * collection never asks.
+   * attempt that leads to a new signature. It returns the token the signer and
+   * sponsorship require; a refusal throws `MoneyMovementRefusedError` with
+   * nothing written. Finishing an in-flight collection never asks.
    */
-  admitStart: () => Promise<void>;
+  admission: RecurringMovementAdmission;
 }): Promise<RecurringPaymentCollectionResult> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
   if (!hasRecoverableRecurringPaymentCollection(input.recurringPayment.status)) {
@@ -1494,7 +1496,7 @@ export async function collectRecurringPayment(input: {
   if (!recurringPayment.plan_pda || !recurringPayment.subscription_pda) {
     throw conflict("Recurring payment is missing on-chain subscription records");
   }
-  await input.admitStart();
+  const movement = await admittedMovementFrom(input.admission);
   const nowIso = new Date().toISOString();
 
   let attempt: PaymentSubscriptionCollectionAttemptRow | null = null;
@@ -1503,11 +1505,7 @@ export async function collectRecurringPayment(input: {
   let submissionStore: TransferSignedSubmissionStore | null = null;
   try {
     try {
-      await createSigningService(input.env).admitRuntimeExecution(
-        input.organizationId,
-        input.projectId,
-        input.sourceWallet.id
-      );
+      await createSigningService(input.env).admitRuntimeExecution(movement, input.sourceWallet.id);
     } catch (error) {
       if (!(error instanceof Error)) throw error;
       if (input.collectionSource === "automated") {
@@ -1670,8 +1668,7 @@ export async function collectRecurringPayment(input: {
     const mint = assertValidAddress(input.recurringPayment.token, "token");
     const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
-      input.organizationId,
-      input.projectId,
+      movement,
       input.sourceWallet.id
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
@@ -1715,9 +1712,7 @@ export async function collectRecurringPayment(input: {
       source: sourceTokenAccount.tokenAccount,
       tokenProgram,
     });
-    const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+    const feePayment = createProjectSponsorshipFeePayment(input.env, movement, {
       actor: { type: "wallet", id: input.sourceWallet.walletId },
     });
     const feePayer = await feePayment.getFeePayer();
@@ -1756,8 +1751,7 @@ export async function collectRecurringPayment(input: {
 
     const signature = await sendSubscriptionInstructions({
       env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+      movement,
       sourceWallet: input.sourceWallet,
       sourceSigner,
       instructions: [createDestinationAtaInstruction, collectInstruction],

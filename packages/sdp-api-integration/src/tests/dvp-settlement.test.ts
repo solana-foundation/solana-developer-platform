@@ -22,7 +22,7 @@ import {
   TEST_PROJECT,
 } from "../helpers/integration";
 
-const { createOrgSigner, createSigningService, getDb } = apiTestSupport;
+const { createLegacyOrgSigner, createSigningService, getDb } = apiTestSupport;
 
 /** Covers the custody wallet's funding transaction and account rent. */
 const WALLET_FUNDING_LAMPORTS = 2_000_000_000;
@@ -140,7 +140,11 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
     { timeout: 240_000 },
     async (side) => {
       const api = requestWithApiKey();
-      const signer = await createOrgSigner(env as ApiTestEnv, TEST_ORG.id, TEST_PROJECT.id);
+      const signer = await createLegacyOrgSigner(
+        env as ApiTestEnv,
+        { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id },
+        "dvp"
+      );
       const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
         environment: TEST_PROJECT.environment,
         organizationId: TEST_ORG.id,

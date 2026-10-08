@@ -52,6 +52,11 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Prefer reusing generated docs/OpenAPI metadata instead of duplicating route inventories by hand.
 - Implement each optional-auth Earn endpoint once. A valid credential enriches that request with tenant context and retains its previous permission requirement; an anonymous request must never acquire tenant identity or persist a build, advisory, movement, or position row.
 - Never downgrade a presented Earn credential to anonymous access. Invalid or expired API keys, plus Clerk tokens without organization context, return 401.
+- **Money moves only with an admitted movement.** Custody signers, wallet runtime admission and
+  project sponsorship take an `AdmittedMovement`, minted by `admitMovement` (route:
+  `requireMovement(id)`; jobs: lazily, before a new signature). Movements and their start/exit kind
+  live in `packages/sdp-types/src/movements.ts`; exits are never refused. `pnpm check:value-movement`
+  pins who may mint or use the escape hatch. See the money admission ADR in `docs/decisions/`.
 - Keep public URLs coherent with the shared site constants in `@sdp/types/site`.
 - When changing docs URLs or discovery resources, update both the docs site and any product links that point at it.
 - Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.

@@ -43,6 +43,7 @@ import {
   TEST_PROJECT_CACHED_KEY,
   TEST_SOLANA_ADDRESSES,
 } from "@/test/fixtures/tokens";
+import { admittedMovementMatching } from "@/test/helpers/admitted-movement";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -423,7 +424,7 @@ describe("Issuance Routes", () => {
     } as never);
 
     vi.spyOn(SolanaServices, "createOrgSignerForCustodyWallet").mockImplementation(
-      async (runtimeEnv, organizationId, projectId, custodyWalletId) => {
+      async (runtimeEnv, movement, custodyWalletId) => {
         const wallet = await getDb(runtimeEnv)
           .prepare(
             `SELECT wallet_id, public_key
@@ -438,12 +439,9 @@ describe("Issuance Routes", () => {
 
         // Preserve the existing route assertions around the legacy signer seam
         // while K5a routes now enter through the exact-row signer seam.
-        await SolanaServices.createOrgSigner(
-          runtimeEnv,
-          organizationId,
-          projectId,
-          wallet.wallet_id
-        ).catch(() => undefined);
+        await SolanaServices.createOrgSigner(runtimeEnv, movement, wallet.wallet_id).catch(
+          () => undefined
+        );
         return { address: wallet.public_key } as never;
       }
     );
@@ -2904,8 +2902,11 @@ describe("Issuance Routes", () => {
         );
         expect(SolanaServices.createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
           env,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
+          admittedMovementMatching({
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            movement: "legacy.issuance",
+          }),
           selectedWalletId
         );
         if (operation === "pause" || operation === "unpause") {
@@ -2935,8 +2936,11 @@ describe("Issuance Routes", () => {
         );
         expect(SolanaServices.createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
           env,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
+          admittedMovementMatching({
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            movement: "legacy.issuance",
+          }),
           DEFAULT_ISSUANCE_CUSTODY_WALLET_ID
         );
       }
@@ -9452,8 +9456,11 @@ describe("Issuance Routes", () => {
           });
           expect(signerSpy).toHaveBeenCalledWith(
             env,
-            TEST_ORG.id,
-            TEST_PROJECT.id,
+            admittedMovementMatching({
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT.id,
+              movement: "legacy.issuance",
+            }),
             requestedWallet.custodyWalletId
           );
         } finally {
@@ -10345,7 +10352,6 @@ describe("Issuance Routes", () => {
           expect(createOrgSignerSpy).toHaveBeenCalledWith(
             expect.anything(),
             expect.anything(),
-            expect.anything(),
             "wallet_pinned"
           );
         } finally {
@@ -10974,7 +10980,6 @@ describe("Issuance Routes", () => {
           );
           expect(confirmRes.status).toBe(200);
           expect(createOrgSignerSpy).toHaveBeenCalledWith(
-            expect.anything(),
             expect.anything(),
             expect.anything(),
             "cwlt_issuance_activity_wallet_custom_pin"

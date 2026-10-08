@@ -27,8 +27,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { admitMovement } from "@/lib/admit-movement";
 import { badRequest, notFound, rateLimited } from "@/lib/errors";
-import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -110,10 +110,12 @@ pay.post(
     // movement itself: a production request stops being sponsored once its
     // organization loses the production entitlement (APE-351), and a deleted
     // organization's requests stop being sponsored at all (HOO-1955).
-    await assertMoneyStartAdmitted(
+    const movement = await admitMovement(
       c.env,
       { organizationId: request.organization_id, projectId: request.project_id },
-      { surface: "http", operation: "pay_request.sponsor", subjectId: request.id }
+      "payments.pay_request",
+      { surface: "http", subjectId: request.id },
+      { rampProviderStages: c.get("rampProviderStages") }
     );
 
     const payer = assertValidAddress(c.req.valid("json").account, "account");
@@ -152,19 +154,16 @@ pay.post(
       return signAndStore(claim.unsignedTransaction);
     };
 
-    let feePaymentInstance: Awaited<ReturnType<typeof createProjectSponsorshipFeePayment>> | null =
-      null;
-    const getFeePayment = async () => {
-      feePaymentInstance ??= await createProjectSponsorshipFeePayment(c.env, {
-        organizationId: request.organization_id,
-        projectId: request.project_id as string,
+    let feePaymentInstance: ReturnType<typeof createProjectSponsorshipFeePayment> | null = null;
+    const getFeePayment = () => {
+      feePaymentInstance ??= createProjectSponsorshipFeePayment(c.env, movement, {
         actor: { type: "wallet", id: request.wallet_id },
       });
       return feePaymentInstance;
     };
 
     const signAndStore = async (unsignedBase64: string) => {
-      const feePayment = await getFeePayment();
+      const feePayment = getFeePayment();
       const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
       const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
       // /pay bytes are partially signed by design: the payer signs client-side.
@@ -217,7 +216,7 @@ pay.post(
       accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
     });
     const payerSigner = createNoopSigner(payer);
-    const feePayment = await getFeePayment();
+    const feePayment = getFeePayment();
     const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
       feePayment.getFeePayer(),
       solanaRpc.getRecentBlockhash(rpc, "confirmed"),

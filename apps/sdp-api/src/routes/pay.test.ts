@@ -59,7 +59,7 @@ describe("Public payment request routes", () => {
   function stubSponsorship() {
     return vi
       .spyOn(sponsorshipService, "createProjectSponsorshipFeePayment")
-      .mockImplementation(async () => ({
+      .mockImplementation(() => ({
         providerId: "test",
         getFeePayer: async () => TEST_MOCK_FEE_PAYER,
         signAsFeePayer: sponsorSignTestTransaction,
@@ -242,7 +242,7 @@ describe("Public payment request routes", () => {
 
     it("keeps the claim when signing fails and signs the stored bytes on retry", async () => {
       const sponsorship = stubSponsorship();
-      sponsorship.mockImplementationOnce(async () => ({
+      sponsorship.mockImplementationOnce(() => ({
         providerId: "test",
         getFeePayer: async () => TEST_MOCK_FEE_PAYER,
         signAsFeePayer: () => Promise.reject(new Error("signing timed out")),

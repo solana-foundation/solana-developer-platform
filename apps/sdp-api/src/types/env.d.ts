@@ -1,6 +1,7 @@
 /** Environment variables consumed by the Node API runtime. */
 
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import type { AllowedOperation, OrganizationEntitlements, SdpRampProviderStages } from "@sdp/types";
 import type { PolicyGateContext } from "@/middleware/policy-gate";
@@ -368,6 +369,8 @@ declare module "hono" {
     organizationEntitlements: OrganizationEntitlements;
     approvedWalletOperationId?: string;
     approvedWalletOperationAttemptId?: string;
+    // Set by requireMovement for routes that move money (HOO-1955)
+    admittedMovement?: AdmittedMovement;
     // Set by policyGate middleware for gated routes
     policyGate?: PolicyGateContext<unknown, unknown, WalletOperationPolicyEnforcement | null>;
     apiKey?: {

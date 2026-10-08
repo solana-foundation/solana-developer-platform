@@ -20,6 +20,7 @@ import {
   type TransactionPartialSigner,
 } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { admittedMovementMatching } from "@/test/helpers/admitted-movement";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
@@ -35,6 +36,20 @@ const env = {} as Env;
 // Only the resolution path uses these; a test that passes `signer` does not.
 const findActiveWalletByPublicKey = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
+
+// The module is still on the HOO-1955 escape hatch: mint a test token instead
+// of reading the admission join.
+vi.mock("@/lib/admit-movement", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/admit-movement")>();
+  return {
+    ...actual,
+    uncheckedLegacyMovement: async (
+      _env: unknown,
+      scope: { organizationId: string; projectId: string },
+      module: "dvp" | "earn" | "helius_rings" | "issuance" | "private_channels"
+    ) => actual.mintAdmittedMovementForTests({ ...scope, movement: `legacy.${module}` }),
+  };
+});
 
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/services/stores/custody-config.store", () => ({
@@ -153,8 +168,11 @@ describe("signRingsOuterTransaction", () => {
       expect(findActiveWalletByPublicKey).toHaveBeenCalledWith("org_1", "prj_1", FEE_PAYER);
       expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
         env,
-        "org_1",
-        "prj_1",
+        admittedMovementMatching({
+          organizationId: "org_1",
+          projectId: "prj_1",
+          movement: "legacy.helius_rings",
+        }),
         "cw_owner"
       );
       expect(getTransactionDecoder().decode(base64.encode(signed)).signatures[FEE_PAYER]).toEqual(

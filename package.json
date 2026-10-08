@@ -63,6 +63,7 @@
     "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
     "check:ui-flow-coverage": "node scripts/check-ui-flow-coverage.mjs",
     "check:secretref-serialization": "node scripts/check-secretref-serialization.mjs",
+    "check:value-movement": "node scripts/check-value-movement.mjs",
     "check:well-known-mints": "pnpm --filter @sdp/api exec tsx ../../scripts/check-well-known-mints.mjs",
     "check:api-playground": "pnpm -C apps/sdp-api playground:check",
     "generate:api-playground": "pnpm -C apps/sdp-api playground:generate",

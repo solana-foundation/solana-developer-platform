@@ -1,9 +1,24 @@
 import type { Address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { admittedMovementMatching } from "@/test/helpers/admitted-movement";
 import type { Env } from "@/types/env";
 import { createVaultDeadline } from "./vault-deadline";
 
 const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
+
+// The module is still on the HOO-1955 escape hatch: mint a test token instead
+// of reading the admission join.
+vi.mock("@/lib/admit-movement", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/admit-movement")>();
+  return {
+    ...actual,
+    uncheckedLegacyMovement: async (
+      _env: unknown,
+      scope: { organizationId: string; projectId: string },
+      module: "dvp" | "earn" | "helius_rings" | "issuance" | "private_channels"
+    ) => actual.mintAdmittedMovementForTests({ ...scope, movement: `legacy.${module}` }),
+  };
+});
 
 vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),
@@ -97,6 +112,7 @@ describe("resolveVaultSponsorship", () => {
     // budget is charged, not the process default's.
     expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
       env,
+      admittedMovementMatching({ movement: "legacy.earn" }),
       expect.objectContaining({ cluster: "mainnet-beta" })
     );
   });
@@ -109,12 +125,15 @@ describe("resolveVaultSponsorship", () => {
 
     await resolveVaultSponsorship(env, { ...input, cluster: "devnet" });
 
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(env, {
-      organizationId: "org_1",
-      projectId: "prj_1",
-      actor: { type: "wallet", id: "cwlt_1" },
-      cluster: "devnet",
-    });
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
+      env,
+      admittedMovementMatching({
+        organizationId: "org_1",
+        projectId: "prj_1",
+        movement: "legacy.earn",
+      }),
+      { actor: { type: "wallet", id: "cwlt_1" }, cluster: "devnet" }
+    );
   });
 
   it("bounds sponsor resolution with the caller's deadline", async () => {

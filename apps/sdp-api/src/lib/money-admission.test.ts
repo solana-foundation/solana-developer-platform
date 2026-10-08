@@ -2,10 +2,9 @@ import { ORGANIZATION_STATUSES, type ProjectEnvironment } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, runWithSystemDatabaseIdentity } from "@/db";
 import {
-  assertMoneyStartAdmitted,
+  checkMoneyStart,
   decideMoneyStart,
   type MoneyAdmissionFacts,
-  MoneyMovementRefusedError,
   readMoneyAdmissionFacts,
 } from "@/lib/money-admission";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -20,6 +19,8 @@ function facts(overrides: Partial<MoneyAdmissionFacts> = {}): MoneyAdmissionFact
   return {
     organizationStatus: "active",
     projectEnvironment: "production",
+    projectStatus: "active",
+    organizationTier: "individual",
     rawSettings: ENTITLED,
     ...overrides,
   };
@@ -121,23 +122,20 @@ describe("money admission reads", () => {
     const scope = { organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT.id };
     const context = {
       surface: "job",
-      operation: "recurring_payment.collect",
+      movement: "recurring.collect",
       subjectId: "prp_test",
     } as const;
+    await expect(asSystem(() => checkMoneyStart(env, scope, context))).resolves.toEqual({
+      admitted: true,
+    });
     await getDb(env)
       .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
       .bind(TEST_ORG.id)
       .run();
 
-    const refusal = await asSystem(() => assertMoneyStartAdmitted(env, scope, context)).catch(
-      (error: unknown) => error
-    );
-
-    expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
-    expect(refusal).toMatchObject({
-      code: "FORBIDDEN",
+    await expect(asSystem(() => checkMoneyStart(env, scope, context))).resolves.toEqual({
+      admitted: false,
       reason: "organization_inactive",
-      message: "Organization is not active",
     });
   });
 });

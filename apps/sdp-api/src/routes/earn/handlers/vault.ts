@@ -25,6 +25,7 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
@@ -602,8 +603,11 @@ export async function admitEarnVaultRuntimeExecution(
     }
   }
   await createSigningService(c.env).admitRuntimeExecution(
-    resolved.auth.organizationId,
-    resolved.projectId,
+    await uncheckedLegacyMovement(
+      c.env,
+      { organizationId: resolved.auth.organizationId, projectId: resolved.projectId },
+      "earn"
+    ),
     resolved.wallet.id
   );
 }

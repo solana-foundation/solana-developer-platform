@@ -22,6 +22,7 @@ import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { requireAdmittedMovement } from "@/middleware/movement";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   assertFreshApiKeyCustodyWalletAccess,
@@ -90,9 +91,9 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     }
     // Resolve once to an exact row, then admit before any signer, Kora, or RPC work.
     // The exact signer repeats its runtime guard; a default change cannot select another wallet.
+    const movement = requireAdmittedMovement(c);
     await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
-      auth.organizationId,
-      auth.projectId ?? undefined,
+      movement,
       wallet.id
     );
 
@@ -103,7 +104,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // simulation, and is never broadcast.
     const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const [signer, feePayer] = await Promise.all([
-      createOrgSignerForCustodyWallet(c.env, auth.organizationId, auth.projectId, wallet.id),
+      createOrgSignerForCustodyWallet(c.env, movement, wallet.id),
       feePayment.getFeePayer(),
     ]);
 

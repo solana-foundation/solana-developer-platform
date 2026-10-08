@@ -22,6 +22,7 @@ import {
   generateEarnVaultWithdrawalRequestId,
   generateEarnVaultWithdrawalRequestReservationId,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnVaultParRedemptionFingerprint,
@@ -425,11 +426,14 @@ async function prepareCustodyTransaction(
       rawSimulationDetails(simulation.raw)
     );
   }
-  const signer = await deadline.run("Resolving the queued withdrawal signer", () =>
+  const signer = await deadline.run("Resolving the queued withdrawal signer", async () =>
     solanaServices.createOrgSignerForCustodyWallet(
       env,
-      input.actor.organizationId,
-      input.actor.projectId,
+      await uncheckedLegacyMovement(
+        env,
+        { organizationId: input.actor.organizationId, projectId: input.actor.projectId },
+        "earn"
+      ),
       input.actor.custodyWalletId
     )
   );
@@ -574,11 +578,14 @@ export async function createCustodyQueuedWithdrawal(
         rawSimulationDetails(simulation.raw)
       );
     }
-    const signer = await executionDeadline.run("Resolving the queued withdrawal signer", () =>
+    const signer = await executionDeadline.run("Resolving the queued withdrawal signer", async () =>
       solanaServices.createOrgSignerForCustodyWallet(
         env,
-        input.actor.organizationId,
-        input.actor.projectId,
+        await uncheckedLegacyMovement(
+          env,
+          { organizationId: input.actor.organizationId, projectId: input.actor.projectId },
+          "earn"
+        ),
         input.actor.custodyWalletId
       )
     );

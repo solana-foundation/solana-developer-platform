@@ -18,6 +18,7 @@ import { SigningService } from "@/services/domain/signing.service";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { admittedMovementMatching } from "@/test/helpers/admitted-movement";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import {
@@ -837,8 +838,7 @@ describe("Payments routes — transfer policy", () => {
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledOnce();
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      admittedMovementMatching({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id }),
       TEST_CUSTODY_WALLET_ID
     );
   });

@@ -36,6 +36,7 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { admittedMovementMatching } from "@/test/helpers/admitted-movement";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import {
@@ -925,8 +926,7 @@ describe("payment transfer batches", () => {
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledOnce();
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      admittedMovementMatching({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id }),
       TEST_CUSTODY_WALLET_ID
     );
   });

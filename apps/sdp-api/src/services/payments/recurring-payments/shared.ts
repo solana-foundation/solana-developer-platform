@@ -27,6 +27,7 @@ import type {
   PaymentSubscriptionRow,
 } from "@/db/repositories";
 import { createTokenRepository } from "@/db/repositories";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import {
   AppError,
   badRequest,
@@ -215,10 +216,25 @@ export function assertRecurringPaymentSourceWallet(
   }
 }
 
+/**
+ * How a recurring operation gets its admitted movement (HOO-1955). HTTP
+ * admitted it at the route (`requireMovement`); a job admits lazily, only once
+ * the operation knows it still has to sign, so work that is already signed
+ * only confirms and never asks.
+ */
+export type RecurringMovementAdmission =
+  | { admitted: AdmittedMovement }
+  | { admit: () => Promise<AdmittedMovement> };
+
+export function admittedMovementFrom(
+  admission: RecurringMovementAdmission
+): Promise<AdmittedMovement> {
+  return "admitted" in admission ? Promise.resolve(admission.admitted) : admission.admit();
+}
+
 export async function sendSubscriptionInstructions(input: {
   env: Env;
-  organizationId: string;
-  projectId: string;
+  movement: AdmittedMovement;
   sourceWallet: CustodyWallet;
   sourceSigner?: TransactionSigner;
   instructions: Instruction[];
@@ -229,8 +245,7 @@ export async function sendSubscriptionInstructions(input: {
     input.sourceSigner ??
     (await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
-      input.organizationId,
-      input.projectId,
+      input.movement,
       input.sourceWallet.id
     ));
 
@@ -240,9 +255,7 @@ export async function sendSubscriptionInstructions(input: {
 
   const rpc = solanaRpc.createRpc(input.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-    organizationId: input.organizationId,
-    projectId: input.projectId,
+  const feePayment = createProjectSponsorshipFeePayment(input.env, input.movement, {
     actor: { type: "wallet", id: input.sourceWallet.walletId },
   });
   const feePayer = input.feePayer ?? (await feePayment.getFeePayer());

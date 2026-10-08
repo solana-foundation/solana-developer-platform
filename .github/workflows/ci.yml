@@ -525,6 +525,12 @@ jobs:
       - name: Check SecretRef serialization
         run: pnpm check:secretref-serialization
 
+      # Pins which API files may mint admitted movements, use the escape hatch
+      # or reach the raw signer and sponsorship constructors (HOO-1955). Needs
+      # the TypeScript checker, so it runs where dependencies are installed.
+      - name: Check value movement
+        run: pnpm check:value-movement
+
       - name: Check UI flow matrix
         run: pnpm check:ui-flow-coverage
 

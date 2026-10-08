@@ -33,6 +33,7 @@ import {
   type PaymentSubscriptionRow,
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { AppError, badRequest, conflict, internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
@@ -47,10 +48,12 @@ import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.servi
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
+  admittedMovementFrom,
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
+  type RecurringMovementAdmission,
   recurringPaymentErrorMessage,
   requireUpdatedAttempt,
   requireUpdatedSubscription,
@@ -528,6 +531,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   organizationId: string;
   projectId: string;
   rpc: ReturnType<typeof solanaRpc.createRpc>;
+  movement: AdmittedMovement;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
@@ -565,8 +569,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
       });
   const initSignature = await sendSubscriptionInstructions({
     env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
+    movement: input.movement,
     sourceWallet: input.sourceWallet,
     sourceSigner: input.sourceSigner,
     instructions: [
@@ -611,12 +614,13 @@ export async function activateRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   createdBy: string | null;
   /**
-   * Money admission (HOO-1955), run once, and only when the plan or the
-   * authorization still has to be signed. A refusal fails the attempt and
-   * returns the row to `pending_activation`, keeping any stored signatures so
-   * a later activation confirms or adopts them instead of signing again.
+   * Money admission (HOO-1955). HTTP admitted the movement at the route
+   * (`requireMovement`); a job admits after the claim, and only when the plan
+   * or the authorization still has to be signed. A refusal fails the attempt
+   * and returns the row to `pending_activation`, keeping any stored
+   * signatures so a later activation confirms or adopts them.
    */
-  admitStart: () => Promise<void>;
+  admission: RecurringMovementAdmission;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
@@ -641,11 +645,16 @@ export async function activateRecurringPayment(input: {
     return input.recurringPayment;
   }
 
-  await createSigningService(input.env).admitRuntimeExecution(
-    input.organizationId,
-    input.projectId,
-    input.sourceWallet.id
-  );
+  // HTTP already holds the token, so it checks the wallet's runtime before it
+  // claims. A job's runtime check runs at signer acquisition, inside the claim,
+  // so a refusal takes the failure path instead of leaving the row `activating`.
+  const { admission } = input;
+  if ("admitted" in admission) {
+    await createSigningService(input.env).admitRuntimeExecution(
+      admission.admitted,
+      input.sourceWallet.id
+    );
+  }
 
   const recoveringStaleActivation = isActivatingRecurringPaymentStatus(
     input.recurringPayment.status
@@ -696,21 +705,33 @@ export async function activateRecurringPayment(input: {
   );
 
   try {
+    // Admitted once, and only if something still has to be signed: an
+    // activation whose signatures are stored only confirms them.
+    let admitted: Promise<AdmittedMovement> | null = null;
+    const admittedMovement = () => {
+      admitted ??= admittedMovementFrom(admission);
+      return admitted;
+    };
     if (!planCreationSignature || !authorizationSignature) {
-      await input.admitStart();
+      await admittedMovement();
     }
+    let signer: TransactionSigner | null = null;
+    const sourceSigner = async (): Promise<TransactionSigner> => {
+      if (!signer) {
+        signer = await solanaServices.createOrgSignerForCustodyWallet(
+          input.env,
+          await admittedMovement(),
+          input.sourceWallet.id
+        );
+        if (signer.address !== input.sourceWallet.publicKey) {
+          throw badRequest("Resolved signing wallet does not match source wallet");
+        }
+      }
+      return signer;
+    };
     const owner = assertValidAddress(claimed.source_address, "sourceAddress");
     const destination = assertValidAddress(claimed.destination_address, "destinationAddress");
     const mint = assertValidAddress(claimed.token, "token");
-    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
-      input.env,
-      input.organizationId,
-      input.projectId,
-      input.sourceWallet.id
-    );
-    if (sourceSigner.address !== input.sourceWallet.publicKey) {
-      throw badRequest("Resolved signing wallet does not match source wallet");
-    }
     const tokenProgram = await resolveMintTokenProgram(rpc, mint);
     const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, tokenProgram);
     const amountBaseUnits = parseDecimalAmount(claimed.amount, sourceTokenAccount.decimals);
@@ -765,7 +786,7 @@ export async function activateRecurringPayment(input: {
           endTs: 0n,
           metadataUri: subscriptionProgramMetadataUri(claimed.metadata_uri),
           mint,
-          owner: sourceSigner,
+          owner: await sourceSigner(),
           periodHours: BigInt(claimed.period_hours),
           planId: programPlanId,
           pullers: [owner],
@@ -774,10 +795,9 @@ export async function activateRecurringPayment(input: {
       );
       planCreationSignature = await sendSubscriptionInstructions({
         env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+        movement: await admittedMovement(),
         sourceWallet: input.sourceWallet,
-        sourceSigner,
+        sourceSigner: await sourceSigner(),
         instructions: [createPlanInstruction],
       });
       const signatureUpdatedAt = new Date().toISOString();
@@ -888,9 +908,7 @@ export async function activateRecurringPayment(input: {
         subscriptionAuthorityAddress,
         { commitment: "confirmed" }
       );
-      const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+      const feePayment = createProjectSponsorshipFeePayment(input.env, await admittedMovement(), {
         actor: { type: "wallet", id: input.sourceWallet.walletId },
       });
       const feePayer = await feePayment.getFeePayer();
@@ -903,8 +921,9 @@ export async function activateRecurringPayment(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
         rpc,
+        movement: await admittedMovement(),
         sourceWallet: input.sourceWallet,
-        sourceSigner,
+        sourceSigner: await sourceSigner(),
         sourceTokenAccount,
         subscriptionAuthority,
         subscriptionAuthorityAddress,
@@ -925,15 +944,14 @@ export async function activateRecurringPayment(input: {
         merchant: owner,
         payer,
         planId: programPlanId,
-        subscriber: sourceSigner,
+        subscriber: await sourceSigner(),
         tokenMint: mint,
       });
       authorizationSignature = await sendSubscriptionInstructions({
         env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+        movement: await admittedMovement(),
         sourceWallet: input.sourceWallet,
-        sourceSigner,
+        sourceSigner: await sourceSigner(),
         instructions: [subscribeInstruction],
         feePayer,
       });

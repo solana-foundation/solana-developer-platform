@@ -10,6 +10,7 @@ import { AppError, badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
+import { requireAdmittedMovement } from "@/middleware/movement";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
@@ -267,8 +268,7 @@ export async function createTransferBatch(c: AppContext) {
   const [signer, feePayer, lifetime] = await Promise.all([
     solanaServices.createOrgSignerForCustodyWallet(
       c.env,
-      resolved.scope.auth.organizationId,
-      resolved.projectId,
+      requireAdmittedMovement(c),
       resolved.sourceWallet.id
     ),
     feePayment.getFeePayer(),

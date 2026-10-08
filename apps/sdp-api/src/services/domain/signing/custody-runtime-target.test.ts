@@ -1,8 +1,14 @@
 import type { CustodyProvider } from "@sdp/custody";
 import type { SigningPort } from "@sdp/custody/signing";
+import type { OrganizationSettings } from "@sdp/types";
 import { PrivySigner } from "@solana/keychain-privy";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import {
+  type AdmittedMovement,
+  type AdmittedMovementFacts,
+  mintAdmittedMovementForTests,
+} from "@/lib/admit-movement";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters";
@@ -26,6 +32,24 @@ const CONFIG_PUBLIC_KEY = "Vote111111111111111111111111111111111111111";
 const CONNECTION_PUBLIC_KEY = "11111111111111111111111111111111";
 const SECOND_CONNECTION_PUBLIC_KEY = "Stake11111111111111111111111111111111111111";
 
+/**
+ * Custody entitlement is read from the admitted movement (HOO-1955), not from a
+ * second organizations read in the sink. `setPrivyEntitlement` updates both the
+ * row and the settings each newly admitted movement carries.
+ */
+let organizationSettings: OrganizationSettings | null = null;
+
+function movement(
+  fields: Partial<Pick<AdmittedMovementFacts, "organizationId" | "projectId">> = {}
+): AdmittedMovement {
+  return mintAdmittedMovementForTests({
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    organization: { tier: "individual", settings: organizationSettings },
+    ...fields,
+  });
+}
+
 describe("CustodyRuntimeTargets", () => {
   const original = {
     byokEnabled: env.PRIVY_BYOK_ENABLED,
@@ -37,6 +61,7 @@ describe("CustodyRuntimeTargets", () => {
 
   beforeEach(async () => {
     await seedTestDatabase(env);
+    organizationSettings = null;
     env.PRIVY_BYOK_ENABLED = "true";
     env.PRIVY_APP_ID = undefined;
     env.PRIVY_APP_SECRET = undefined;
@@ -75,17 +100,17 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
 
     env.PRIVY_BYOK_ENABLED = "false";
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
 
     env.PRIVY_BYOK_ENABLED = "true";
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
 
     expect(read).toHaveBeenCalledOnce();
@@ -101,8 +126,7 @@ describe("CustodyRuntimeTargets", () => {
       .bind(connection.id)
       .run();
     await new CustodyRuntimeTargets(getDb(env), env, new Map()).getTransactionSigner(
-      ORGANIZATION_ID,
-      PROJECT_ID,
+      movement(),
       undefined,
       getConfigAdapter
     );
@@ -117,11 +141,7 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.admitRuntimeExecution({
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        custodyWalletId: `cwlt_${config.id}`,
-      })
+      targets.admitRuntimeExecution(movement(), `cwlt_${config.id}`)
     ).resolves.toBeUndefined();
   });
 
@@ -135,13 +155,7 @@ describe("CustodyRuntimeTargets", () => {
     const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
-    await expect(
-      targets.admitRuntimeExecution({
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        custodyWalletId,
-      })
-    ).rejects.toMatchObject({
+    await expect(targets.admitRuntimeExecution(movement(), custodyWalletId)).rejects.toMatchObject({
       code: "CONFLICT",
       details: { reason: "runtime_execution_unavailable" },
     });
@@ -167,13 +181,19 @@ describe("CustodyRuntimeTargets", () => {
     );
 
     await expect(
-      service.admitRuntimeExecution(ORGANIZATION_ID, PROJECT_ID, `cwlt_${config.id}`)
+      service.admitRuntimeExecution(movement(), `cwlt_${config.id}`)
     ).resolves.toBeUndefined();
     expect(() =>
-      service.admitRuntimeExecution("org_foreign", PROJECT_ID, `cwlt_${config.id}`)
+      service.admitRuntimeExecution(
+        movement({ organizationId: "org_foreign" }),
+        `cwlt_${config.id}`
+      )
     ).toThrow(TenantScopeViolationError);
     expect(() =>
-      service.getTransactionSignerForWalletRecord("org_foreign", PROJECT_ID, `cwlt_${config.id}`)
+      service.getTransactionSignerForWalletRecord(
+        movement({ organizationId: "org_foreign" }),
+        `cwlt_${config.id}`
+      )
     ).toThrow(TenantScopeViolationError);
   });
 
@@ -186,11 +206,7 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.admitRuntimeExecution({
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        custodyWalletId: `cwlt_${connection.id}`,
-      })
+      targets.admitRuntimeExecution(movement(), `cwlt_${connection.id}`)
     ).resolves.toBeUndefined();
     expect(read).not.toHaveBeenCalled();
     expect(createPrivySigner).not.toHaveBeenCalled();
@@ -207,11 +223,7 @@ describe("CustodyRuntimeTargets", () => {
       const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
       await expect(
-        targets.admitRuntimeExecution({
-          organizationId: ORGANIZATION_ID,
-          projectId: PROJECT_ID,
-          custodyWalletId: `cwlt_${wallet.id}`,
-        })
+        targets.admitRuntimeExecution(movement(), `cwlt_${wallet.id}`)
       ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
       expect(read).not.toHaveBeenCalled();
       expect(fetch).not.toHaveBeenCalled();
@@ -225,11 +237,7 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.admitRuntimeExecution({
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        custodyWalletId: `cwlt_${connection.id}`,
-      })
+      targets.admitRuntimeExecution(movement(), `cwlt_${connection.id}`)
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
       statusCode: 403,
@@ -249,11 +257,7 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.admitRuntimeExecution({
-        organizationId: ORGANIZATION_ID,
-        projectId,
-        custodyWalletId,
-      })
+      targets.admitRuntimeExecution(movement({ projectId }), custodyWalletId)
     ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
     expect(read).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
@@ -273,8 +277,7 @@ describe("CustodyRuntimeTargets", () => {
 
     await expect(
       targets.getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
+        movement(),
         "cwlt_missing",
         createConfigAdapterFactory()
       )
@@ -319,11 +322,7 @@ describe("CustodyRuntimeTargets", () => {
       const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
       await expect(
-        targets.admitRuntimeExecution({
-          organizationId: ORGANIZATION_ID,
-          projectId: PROJECT_ID,
-          custodyWalletId: `cwlt_${connection.id}`,
-        })
+        targets.admitRuntimeExecution(movement(), `cwlt_${connection.id}`)
       ).rejects.toMatchObject({
         code: "CONFLICT",
         statusCode: 409,
@@ -351,11 +350,7 @@ describe("CustodyRuntimeTargets", () => {
     const getConfigAdapter = createConfigAdapterFactory();
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
-    await targets.admitRuntimeExecution({
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      custodyWalletId: `cwlt_${connection.id}`,
-    });
+    await targets.admitRuntimeExecution(movement(), `cwlt_${connection.id}`);
     await getDb(env)
       .prepare("UPDATE provider_credentials SET status = 'retired' WHERE id = ?")
       .bind(connection.credentialId)
@@ -363,8 +358,7 @@ describe("CustodyRuntimeTargets", () => {
 
     await expect(
       targets.getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
+        movement(),
         `cwlt_${connection.id}`,
         getConfigAdapter
       )
@@ -385,25 +379,20 @@ describe("CustodyRuntimeTargets", () => {
     const getConfigAdapter = createConfigAdapterFactory();
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
-    await targets.admitRuntimeExecution({
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      custodyWalletId: `cwlt_${connection.id}`,
-    });
+    await targets.admitRuntimeExecution(movement(), `cwlt_${connection.id}`);
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
     expect(read).toHaveBeenCalledOnce();
 
     await setPrivyEntitlement(false);
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
     await expect(
       targets.getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
+        movement(),
         `cwlt_${connection.id}`,
         getConfigAdapter
       )
@@ -423,20 +412,15 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
     await setPrivyEntitlement(false);
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
     await expect(
-      targets.getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        `cwlt_${config.id}`,
-        getConfigAdapter
-      )
+      targets.getTransactionSignerForWalletRecord(movement(), `cwlt_${config.id}`, getConfigAdapter)
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
     expect(getConfigAdapter).toHaveBeenCalledOnce();
   });
@@ -473,16 +457,11 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.admitRuntimeExecution({
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        custodyWalletId,
-      })
+      targets.admitRuntimeExecution(movement(), custodyWalletId)
     ).resolves.toBeUndefined();
     await expect(
       targets.getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
+        movement(),
         custodyWalletId,
         createConfigAdapterFactory()
       )
@@ -505,11 +484,7 @@ describe("CustodyRuntimeTargets", () => {
       const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
       await expect(
-        targets.admitRuntimeExecution({
-          organizationId: ORGANIZATION_ID,
-          projectId: PROJECT_ID,
-          custodyWalletId: `cwlt_${config.id}`,
-        })
+        targets.admitRuntimeExecution(movement(), `cwlt_${config.id}`)
       ).rejects.toMatchObject({
         code: "CONFLICT",
         statusCode: 409,
@@ -541,23 +516,14 @@ describe("CustodyRuntimeTargets", () => {
     const getConfigAdapter = createConfigAdapterFactory();
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
-    await targets.admitRuntimeExecution({
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      custodyWalletId: `cwlt_${config.id}`,
-    });
+    await targets.admitRuntimeExecution(movement(), `cwlt_${config.id}`);
     await getDb(env)
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
       .bind(`cwlt_${config.id}`)
       .run();
 
     await expect(
-      targets.getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        `cwlt_${config.id}`,
-        getConfigAdapter
-      )
+      targets.getTransactionSignerForWalletRecord(movement(), `cwlt_${config.id}`, getConfigAdapter)
     ).rejects.toMatchObject({
       code: "CONFLICT",
       details: { reason: "runtime_execution_unavailable" },
@@ -571,8 +537,7 @@ describe("CustodyRuntimeTargets", () => {
 
     await expect(
       targets.getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
+        movement(),
         `cwlt_${config.id}`,
         createConfigAdapterFactory(CONNECTION_PUBLIC_KEY)
       )
@@ -602,12 +567,7 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toMatchObject({ kind: "connection", isRuntimeAvailable: false });
 
     await expect(
-      targets.getTransactionSigner(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        connection.walletId,
-        createConfigAdapterFactory()
-      )
+      targets.getTransactionSigner(movement(), connection.walletId, createConfigAdapterFactory())
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
     expect(read).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
@@ -857,15 +817,10 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        connection.walletId,
-        getConfigAdapter
-      )
+      targets.getTransactionSigner(movement(), connection.walletId, getConfigAdapter)
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, config.walletId, getConfigAdapter)
+      targets.getTransactionSigner(movement(), config.walletId, getConfigAdapter)
     ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
   });
 
@@ -954,7 +909,7 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
     expect(read).not.toHaveBeenCalled();
     expect(getConfigAdapter).not.toHaveBeenCalled();
@@ -973,7 +928,7 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
     expect(read).not.toHaveBeenCalled();
     expect(getConfigAdapter).not.toHaveBeenCalled();
@@ -999,7 +954,7 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
     expect(getConfigAdapter).not.toHaveBeenCalled();
   });
@@ -1015,7 +970,7 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
     expect(read).not.toHaveBeenCalled();
   });
@@ -1044,7 +999,7 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSigner(movement(), undefined, getConfigAdapter)
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(getConfigAdapter).not.toHaveBeenCalled();
   });
@@ -1056,18 +1011,8 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
     const getConfigAdapter = createConfigAdapterFactory();
 
-    await targets.getTransactionSigner(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      connection.walletId,
-      getConfigAdapter
-    );
-    await targets.getTransactionSigner(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      connection.walletId,
-      getConfigAdapter
-    );
+    await targets.getTransactionSigner(movement(), connection.walletId, getConfigAdapter);
+    await targets.getTransactionSigner(movement(), connection.walletId, getConfigAdapter);
     expect(read).toHaveBeenCalledOnce();
 
     await getDb(env)
@@ -1079,12 +1024,7 @@ describe("CustodyRuntimeTargets", () => {
       .bind(connection.credentialId)
       .run();
 
-    await targets.getTransactionSigner(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      connection.walletId,
-      getConfigAdapter
-    );
+    await targets.getTransactionSigner(movement(), connection.walletId, getConfigAdapter);
     expect(read).toHaveBeenCalledTimes(2);
   });
 
@@ -1103,8 +1043,7 @@ describe("CustodyRuntimeTargets", () => {
 
     await expect(
       targets.getTransactionSignerForWalletRecord(
-        ORGANIZATION_ID,
-        PROJECT_ID,
+        movement(),
         `cwlt_${connection.id}`,
         createConfigAdapterFactory()
       )
@@ -1124,18 +1063,8 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
     const getConfigAdapter = createConfigAdapterFactory();
 
-    await targets.getTransactionSigner(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      connection.walletId,
-      getConfigAdapter
-    );
-    await targets.getTransactionSigner(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      connection.walletId,
-      getConfigAdapter
-    );
+    await targets.getTransactionSigner(movement(), connection.walletId, getConfigAdapter);
+    await targets.getTransactionSigner(movement(), connection.walletId, getConfigAdapter);
 
     expect(read).toHaveBeenCalledTimes(2);
   });
@@ -1149,12 +1078,7 @@ describe("CustodyRuntimeTargets", () => {
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        connection.walletId,
-        createConfigAdapterFactory()
-      )
+      targets.getTransactionSigner(movement(), connection.walletId, createConfigAdapterFactory())
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
   });
 
@@ -1164,11 +1088,7 @@ describe("CustodyRuntimeTargets", () => {
     mockStoredCredentialRead();
 
     await expect(
-      createSigningService(env).getTransactionSigner(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        connection.walletId
-      )
+      createSigningService(env).getTransactionSigner(movement(), connection.walletId)
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
   });
 
@@ -1356,9 +1276,10 @@ async function setOrganizationDefault(configId: string): Promise<void> {
 }
 
 async function setPrivyEntitlement(entitled: boolean): Promise<void> {
+  organizationSettings = { providerOverrides: { custody: { privy: entitled } } };
   await getDb(env)
     .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-    .bind(JSON.stringify({ providerOverrides: { custody: { privy: entitled } } }), ORGANIZATION_ID)
+    .bind(JSON.stringify(organizationSettings), ORGANIZATION_ID)
     .run();
 }
 

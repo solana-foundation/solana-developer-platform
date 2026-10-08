@@ -14,6 +14,7 @@ import {
 } from "@solana/kit";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type AdmittedMovement, mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import { ProjectService } from "@/services/project.service";
 import {
   buildKoraUserId,
@@ -259,39 +260,55 @@ describe("sponsorship identity boundary", () => {
     const response = await app.request("/probe", {}, testEnv);
     expect(response.status).toBe(200);
   });
-  it("derives background and public scopes from persisted project ownership", async () => {
-    projectMocks.getProject.mockResolvedValue({
-      id: "project_stored",
-      organizationId: "org_stored",
-      environment: "production",
-      status: "active",
-    });
+  // HOO-1955: the admitted movement carries the persisted project's environment
+  // and status from the admission join, so sponsorship no longer re-reads the
+  // project. An organization/project mismatch cannot be admitted at all (see
+  // admit-movement.test.ts), so the old cross-organization case is covered there.
+  it("derives the sponsored scope from the admitted movement without a project read", () => {
     const env: Env = { ...testEnv, FEE_PAYMENT_PROVIDER: "kora" };
-    await createProjectSponsorshipFeePayment(env, {
-      organizationId: "org_stored",
-      projectId: "project_stored",
-      actor: { type: "wallet", id: "wallet_stored" },
-    });
+    createProjectSponsorshipFeePayment(
+      env,
+      mintAdmittedMovementForTests({
+        organizationId: "org_stored",
+        projectId: "project_stored",
+        environment: "production",
+      }),
+      { actor: { type: "wallet", id: "wallet_stored" } }
+    );
     expect(createFeePaymentAdapter).toHaveBeenCalledWith(
       env,
       "sdp:v1:production:org_stored:project:project_stored:wallet:wallet_stored",
       undefined
     );
+    expect(projectMocks.getProject).not.toHaveBeenCalled();
   });
-  it("rejects a persisted project that does not belong to the claimed organization", async () => {
-    projectMocks.getProject.mockResolvedValue({
-      id: "project_stored",
-      organizationId: "org_other",
+  it("refuses a movement admitted for a project that is not active", () => {
+    expect(() =>
+      createProjectSponsorshipFeePayment(
+        testEnv,
+        mintAdmittedMovementForTests({
+          organizationId: "org_stored",
+          projectId: "project_stored",
+          projectStatus: "archived",
+        }),
+        { actor: { type: "wallet", id: "wallet_stored" } }
+      )
+    ).toThrow(expect.objectContaining({ code: "FORBIDDEN" }));
+    expect(createFeePaymentAdapter).not.toHaveBeenCalled();
+  });
+  it("refuses a movement that was not minted by admission", () => {
+    const forged = {
+      organizationId: "org_claimed",
+      projectId: "project_stored",
       environment: "production",
-      status: "active",
-    });
-    await expect(
-      createProjectSponsorshipFeePayment(testEnv, {
-        organizationId: "org_claimed",
-        projectId: "project_stored",
+      projectStatus: "active",
+    } as unknown as AdmittedMovement;
+    expect(() =>
+      createProjectSponsorshipFeePayment(testEnv, forged, {
         actor: { type: "wallet", id: "wallet_stored" },
       })
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    ).toThrow("Value movement was not admitted");
+    expect(createFeePaymentAdapter).not.toHaveBeenCalled();
   });
 });
 

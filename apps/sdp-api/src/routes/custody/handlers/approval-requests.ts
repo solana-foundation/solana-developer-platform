@@ -1,7 +1,8 @@
 import type { WalletApprovalRequestSummary } from "@sdp/types";
 import { z } from "zod";
 import { type ApprovalRequestDetailRow, createPolicyRepository } from "@/db/repositories";
-import { type ApiKeyContext, getAuth } from "@/lib/auth";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
   badRequestParams,
@@ -288,8 +289,14 @@ export const approveApprovalRequest = async (c: AppContext) => {
     try {
       if (current.custody_wallet_id) {
         await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
-          current.organization_id,
-          current.project_id ?? undefined,
+          await uncheckedLegacyMovement(
+            c.env,
+            {
+              organizationId: current.organization_id,
+              projectId: current.project_id ?? requireProjectId(c),
+            },
+            "policies"
+          ),
           current.custody_wallet_id
         );
       } else if (

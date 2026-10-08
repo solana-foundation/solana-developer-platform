@@ -36,6 +36,7 @@ import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { admittedMovementMatching } from "@/test/helpers/admitted-movement";
 import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
@@ -327,7 +328,10 @@ async function expectRuntimeAdmissionDenialWithoutWrites(input: {
 
     expect(response.status).toBe(409);
     expect(admission).toHaveBeenCalledOnce();
-    expect(admission).toHaveBeenCalledWith(TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET_ID);
+    expect(admission).toHaveBeenCalledWith(
+      admittedMovementMatching({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id }),
+      TEST_CUSTODY_WALLET_ID
+    );
   } finally {
     admission.mockRestore();
   }
@@ -2156,8 +2160,7 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      admittedMovementMatching({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id }),
       TEST_CUSTODY_WALLET_ID
     );
     expect(createOrgSignerMock).toHaveBeenCalledTimes(providerSignerCallsBeforeCollection);
@@ -3478,7 +3481,7 @@ describe("Payments routes — recurring", () => {
       expect(await collectionAttempts(recurringPayment.subscriptionId)).toEqual([]);
     });
 
-    it("fails a refused activation back to pending_activation without signing", async () => {
+    it("refuses an activation at the route before claiming or signing", async () => {
       const signAndSendMock = recurringExecution.signAndSendMock();
       const recurringPayment = await createRecurringPaymentFixture({
         ...DEFAULT_RECURRING_FIXTURE,
@@ -3497,14 +3500,14 @@ describe("Payments routes — recurring", () => {
       expect((await recurringPaymentDueAt(recurringPayment.id)).status).toBe("pending_activation");
       const attempt = await getDb(env)
         .prepare(
-          "SELECT status, error FROM payment_recurring_payment_activation_attempts WHERE recurring_payment_id = ?"
+          "SELECT status FROM payment_recurring_payment_activation_attempts WHERE recurring_payment_id = ?"
         )
         .bind(recurringPayment.id)
-        .first<{ status: string; error: string | null }>();
-      expect(attempt).toMatchObject({ status: "failed", error: "Organization is not active" });
+        .first<{ status: string }>();
+      expect(attempt).toBeNull();
     });
 
-    it("returns a refused resume to canceled without signing", async () => {
+    it("refuses a resume at the route before claiming or signing", async () => {
       const signAndSendMock = recurringExecution.signAndSendMock();
       signAndSendMock.mockResolvedValue(
         signature(
@@ -3532,6 +3535,46 @@ describe("Payments routes — recurring", () => {
       expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceled");
       const attempt = await getDb(env)
         .prepare(
+          `SELECT status FROM payment_recurring_payment_lifecycle_attempts
+            WHERE recurring_payment_id = ? AND operation = 'resume'`
+        )
+        .bind(activated.id)
+        .first<{ status: string }>();
+      expect(attempt).toBeNull();
+    });
+
+    it("fails a stale resume the job may not sign back to canceled", async () => {
+      const signAndSendMock = recurringExecution.signAndSendMock();
+      signAndSendMock.mockResolvedValue(
+        signature(
+          "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+        )
+      );
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const cancelRes = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(cancelRes.status).toBe(200);
+      const signaturesBefore = signAndSendMock.mock.calls.length;
+      // A resume claimed before the deletion, with nothing submitted yet.
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET status = 'resuming', updated_at = ? WHERE id = ?"
+        )
+        .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), activated.id)
+        .run();
+      await deleteTestOrganization();
+
+      expect(await collectDueRecurringPayments(env, new Date())).toMatchObject({
+        refused: 1,
+        recovered: 0,
+      });
+      expect(signAndSendMock).toHaveBeenCalledTimes(signaturesBefore);
+      expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceled");
+      const attempt = await getDb(env)
+        .prepare(
           `SELECT status, signature, error
              FROM payment_recurring_payment_lifecycle_attempts
             WHERE recurring_payment_id = ? AND operation = 'resume'`
@@ -3543,6 +3586,36 @@ describe("Payments routes — recurring", () => {
         signature: null,
         error: "Organization is not active",
       });
+    });
+
+    it("fails a stale activation the job may not sign back to pending_activation", async () => {
+      const signAndSendMock = recurringExecution.signAndSendMock();
+      const recurringPayment = await createRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      // An activation claimed before the deletion, with nothing signed yet.
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET status = 'activating', updated_at = ? WHERE id = ?"
+        )
+        .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), recurringPayment.id)
+        .run();
+      await deleteTestOrganization();
+
+      expect(await collectDueRecurringPayments(env, new Date())).toMatchObject({
+        refused: 1,
+        recovered: 0,
+      });
+      expect(signAndSendMock).not.toHaveBeenCalled();
+      expect((await recurringPaymentDueAt(recurringPayment.id)).status).toBe("pending_activation");
+      const attempt = await getDb(env)
+        .prepare(
+          "SELECT status, error FROM payment_recurring_payment_activation_attempts WHERE recurring_payment_id = ?"
+        )
+        .bind(recurringPayment.id)
+        .first<{ status: string; error: string | null }>();
+      expect(attempt).toMatchObject({ status: "failed", error: "Organization is not active" });
     });
 
     it.each(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS)(

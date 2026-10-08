@@ -28,6 +28,7 @@ import type { DvpCloseClaim, DvpTradeRow } from "@/db/repositories";
 import { type AppError, conflict, solanaRpcError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import { buildFundedDvpTradeRow, DVP_TEST_AUTHORITY, DVP_TEST_USER_B } from "@/test/fixtures/dvp";
+import { admittedMovementMatching } from "@/test/helpers/admitted-movement";
 import { env } from "@/test/helpers/env";
 import { deriveDvpSettleAtas } from "./settle-atas";
 import type { DvpSettlementWallet } from "./settlement-wallet";
@@ -75,6 +76,20 @@ const trades = vi.hoisted(() => ({
     }
   }),
 }));
+
+// The module is still on the HOO-1955 escape hatch: mint a test token instead
+// of reading the admission join.
+vi.mock("@/lib/admit-movement", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/admit-movement")>();
+  return {
+    ...actual,
+    uncheckedLegacyMovement: async (
+      _env: unknown,
+      scope: { organizationId: string; projectId: string },
+      module: "dvp" | "earn" | "helius_rings" | "issuance" | "private_channels"
+    ) => actual.mintAdmittedMovementForTests({ ...scope, movement: `legacy.${module}` }),
+  };
+});
 
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/db/repositories", async () => ({
@@ -231,8 +246,11 @@ describe("closeDvpTrade", () => {
 
     expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
       env,
-      "org_x",
-      "prj_x",
+      admittedMovementMatching({
+        organizationId: "org_x",
+        projectId: "prj_x",
+        movement: "legacy.dvp",
+      }),
       "cwlt_settlement"
     );
   });

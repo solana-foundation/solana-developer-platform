@@ -7,6 +7,7 @@ import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
 import { supportsVaultDirect } from "@sdp/earn/capabilities";
 import { createFeePaymentAdapter, KoraAdapter, KoraClient } from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
+import type { LegacyMovementModule } from "@sdp/types";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import {
   findAssociatedTokenPda,
@@ -17,6 +18,7 @@ import { closeDatabasePools, getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import app from "@/index";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import { closeAllRedisClients, createKVStoreSet } from "@/runtime/kv-redis";
 import { createSigningService } from "@/services/domain/signing.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
@@ -54,7 +56,15 @@ export const apiTestSupport = {
   createFeePaymentAdapter,
   createKVStoreSet,
   createMosaicService,
-  createOrgSigner,
+  /**
+   * The org signer, admitted the way its module mints today: DvP and issuance
+   * still go through the escape hatch (HOO-1955).
+   */
+  createLegacyOrgSigner: async (
+    env: Env,
+    scope: { organizationId: string; projectId: string },
+    module: LegacyMovementModule
+  ) => createOrgSigner(env, await uncheckedLegacyMovement(env, scope, module)),
   createPostgresEarnRepository,
   createSigningService,
   createVaultDeadline,

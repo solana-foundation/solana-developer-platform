@@ -20,6 +20,7 @@ import {
   type TransactionSigner,
 } from "@solana/signers";
 import { getDb } from "@/db";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import type { SigningProviderType } from "@/services/adapters/signing";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -311,8 +312,11 @@ async function resolveOwnerSigner(
 
   const signer = await createOrgSignerForCustodyWallet(
     input.env,
-    input.organizationId,
-    input.projectId,
+    await uncheckedLegacyMovement(
+      input.env,
+      { organizationId: input.organizationId, projectId: input.projectId },
+      "helius_rings"
+    ),
     wallet.id
   );
 

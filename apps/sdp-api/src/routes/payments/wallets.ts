@@ -4,6 +4,7 @@ import type { Permission } from "@sdp/types";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, conflict, walletNotFound } from "@/lib/errors";
+import { requireAdmittedMovement } from "@/middleware/movement";
 import {
   assertApiKeyWalletAccess,
   assertFreshApiKeyCustodyWalletAccess,
@@ -182,12 +183,7 @@ export async function admitPaymentWalletRuntimeExecution(
   c: AppContext,
   wallet: CustodyWallet
 ): Promise<void> {
-  const auth = getAuth(c);
-  await createSigningService(c.env).admitRuntimeExecution(
-    auth.organizationId,
-    auth.projectId ?? undefined,
-    wallet.id
-  );
+  await createSigningService(c.env).admitRuntimeExecution(requireAdmittedMovement(c), wallet.id);
 }
 
 export function assertPaymentWalletReadAccess(
