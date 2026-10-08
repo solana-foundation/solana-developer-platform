@@ -45,7 +45,10 @@ test.describe("payments command center and transaction ledger", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await gotoProjectPage(page, projectId, "/dashboard/payments/transactions");
 
-    const search = page.getByRole("textbox", { name: /search transactions/i });
+    // new-design-activity renders the search as a searchbox; the previous design's is a textbox.
+    const search = page
+      .getByRole("searchbox", { name: /search transactions/i })
+      .or(page.getByRole("textbox", { name: /search transactions/i }));
     await expect(search).toBeVisible();
     await search.fill("invoice-42");
     await search.press("Enter");

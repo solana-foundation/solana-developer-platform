@@ -65,6 +65,13 @@ const sectionClassName = "min-w-0 rounded-lg border border-border-default bg-sur
 // giving it every spare pixel left a dead gap between it and the amount.
 const activityColumns = "grid-cols-[6.5rem_minmax(10rem,1.4fr)_minmax(8rem,1fr)_8rem_7.5rem_1rem]";
 
+/** A raw base58 address shortens; a contact's name keeps its text and truncates like any label. */
+function compactCounterparty(counterparty: string): string {
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(counterparty)
+    ? shortenAddress(counterparty)
+    : counterparty;
+}
+
 function SectionHeading({ title }: { title: string }) {
   return <h2 className="text-base font-semibold tracking-[-0.01em] text-primary">{title}</h2>;
 }
@@ -257,7 +264,10 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
   return (
     // self-start keeps this card at its content height instead of stretching to match the
     // taller Upcoming/Network column, which otherwise leaves dead space inside the card.
-    <section className={`${sectionClassName} self-start`} data-payments-overview-section="activity">
+    <section
+      className={`${sectionClassName} @container/activity self-start`}
+      data-payments-overview-section="activity"
+    >
       <SectionHeading title={t("DashboardPayments.commandCenter.activity")} />
       <div className="mt-3 flex items-end gap-5 border-b border-border-default text-sm">
         <Link
@@ -281,7 +291,9 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
         <p className="py-8 text-sm text-tertiary">{t("DashboardPayments.noTransactions")}</p>
       ) : (
         <>
-          <div className="mt-2 hidden overflow-hidden rounded-md border border-border-default lg:block">
+          {/* The table needs about 48rem; a narrower card (the NEW DESIGN overview draws this one
+              beside its summary column) keeps the stacked rows a phone shows. */}
+          <div className="mt-2 hidden overflow-x-auto rounded-md border border-border-default @3xl/activity:block">
             <div
               className={`grid ${activityColumns} items-center gap-2 bg-fill-subtle px-3 py-2 text-xs font-medium text-secondary`}
             >
@@ -316,7 +328,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                       {formatDirection(transfer.direction, t)} · {compactType(transfer)}
                     </span>
                     <span className="truncate text-secondary" title={counterparty}>
-                      {counterparty.length > 24 ? shortenAddress(counterparty) : counterparty}
+                      {compactCounterparty(counterparty)}
                     </span>
                     <span
                       className="truncate font-medium text-primary"
@@ -333,7 +345,7 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
               })}
             </div>
           </div>
-          <div className="mt-2 divide-y divide-border-subtle border-y border-border-default lg:hidden">
+          <div className="mt-2 divide-y divide-border-subtle border-y border-border-default @3xl/activity:hidden">
             {transfers.map((transfer) => {
               const counterparty = resolveCommandCenterCounterparty(transfer);
               return (
@@ -355,7 +367,9 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                     </Badge>
                   </span>
                   <span className="flex min-w-0 items-center justify-between gap-3">
-                    <span className="truncate text-secondary">{counterparty}</span>
+                    <span className="truncate text-secondary" title={counterparty}>
+                      {compactCounterparty(counterparty)}
+                    </span>
                     <span className="shrink-0 font-medium text-primary">
                       {compactAmount(transfer, issuedTokenSymbolsByMint)}
                     </span>

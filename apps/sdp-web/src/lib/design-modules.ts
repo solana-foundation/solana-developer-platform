@@ -12,6 +12,9 @@ const DESIGN_MODULE_ROUTES = {
   contacts: /^\/dashboard\/payments\/counterparty(?:\/[^/]+)?\/?$/,
   // Payments' two flows, Pay and Deposit.
   payDeposit: /^\/dashboard\/payments\/(?:pay|deposit)\/?$/,
+  // The rest of Payments: the overview and its API playground, Transactions, Requests and
+  // Schedules. A catch-all, so it goes last.
+  activity: /^\/dashboard\/payments(?:\/|$)/,
 } satisfies Record<string, RegExp>;
 
 export type DesignModule = keyof typeof DESIGN_MODULE_ROUTES;
