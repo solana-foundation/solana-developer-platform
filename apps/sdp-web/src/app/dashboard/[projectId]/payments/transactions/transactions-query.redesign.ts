@@ -1,9 +1,6 @@
-import {
-  UNIFIED_TRANSACTION_MODULES,
-  UNIFIED_TRANSACTION_STATUSES,
-  type UnifiedTransactionModule,
-} from "@sdp/types";
+import { UNIFIED_TRANSACTION_STATUSES, type UnifiedTransactionModule } from "@sdp/types";
 import { z } from "zod";
+import { parseTransactionModule } from "./transactions-query";
 
 /** Rows per page the list offers; 25 is the default and carries no URL param. */
 export const TRANSACTION_PAGE_SIZES = [10, 25, 50, 100] as const;
@@ -45,30 +42,28 @@ function scalar(value: string | string[] | undefined): string | undefined {
   return value;
 }
 
-/**
- * Narrows a raw `?module=` (or legacy `?tab=`) value to a transaction module.
- *
- * @param value - The raw param value, if any.
- * @returns The matching module, or undefined for "all", an absent tab, or an unknown value.
- */
-export function parseTransactionModule(
-  value: string | null | undefined
-): UnifiedTransactionModule | undefined {
-  return UNIFIED_TRANSACTION_MODULES.find((candidate) => candidate === value);
-}
-
-export function parseTransactionFilters(searchParams: RawSearchParams): TransactionFilters {
+export function parseTransactionFilters(
+  searchParams: RawSearchParams,
+  modules: readonly UnifiedTransactionModule[]
+): TransactionFilters {
   const parsed = rawFiltersSchema.parse(
     Object.fromEntries(Object.entries(searchParams).map(([key, value]) => [key, scalar(value)]))
   );
-  const { module, tab, pageSize, cursors: rawCursors, ...rest } = parsed;
-  const cursors = rawCursors === undefined || rawCursors === "" ? [] : rawCursors.split(",");
-  return {
-    ...rest,
+  const { module: rawModule, tab, kind, pageSize, cursors: rawCursors, ...fields } = parsed;
+  const rest = {
+    ...fields,
     ...(pageSize === undefined || pageSize === DEFAULT_TRANSACTION_PAGE_SIZE ? {} : { pageSize }),
-    module: parseTransactionModule(module ?? tab),
-    cursors,
   };
+  const cursors = rawCursors === undefined || rawCursors === "" ? [] : rawCursors.split(",");
+  const requested = rawModule ?? tab;
+  const module = parseTransactionModule(requested, modules);
+  if (module !== undefined) return { ...rest, module, kind, cursors };
+  // A kind belongs to its module (the API refuses one without it), so All never carries one.
+  if (requested === undefined || requested === "all") return { ...rest, cursors };
+  // The link named a module that is hidden or unknown: open All from its first page, since that
+  // module's cursor would skip newer transactions on All.
+  const { cursor: _discardedCursor, ...unpaged } = rest;
+  return { ...unpaged, cursors: [] };
 }
 
 const TRANSACTION_URL_PARAM_KEYS = [

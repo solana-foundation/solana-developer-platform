@@ -1,3 +1,4 @@
+import { RAMP_PROVIDERS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { isKnownIntegrationProvider, resolveIntegrationDetail } from "./integration-detail";
 import {
@@ -13,7 +14,7 @@ const INPUTS = {
     connectedProviders: ["privy"],
     enabledProviders: ["privy", "para"],
   }),
-  ramps: resolveRampIntegrations({ moonpay: on }),
+  ramps: resolveRampIntegrations({ moonpay: on }, RAMP_PROVIDERS),
   compliance: resolveComplianceIntegrations({}),
 };
 

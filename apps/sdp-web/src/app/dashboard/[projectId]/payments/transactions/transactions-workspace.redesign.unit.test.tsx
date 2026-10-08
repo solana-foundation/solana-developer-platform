@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
+import { UNIFIED_TRANSACTION_MODULES, type UnifiedTransactionModule } from "@sdp/types";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -42,7 +44,36 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard/prj_test_sandbox/payments/transactions",
 }));
 
-function renderWorkspace(filters: TransactionFilters) {
+// The real menu is a Radix dropdown; render its sections flat so a test can read the options (labels
+// stay out of the text, so the chips are the only text match).
+vi.mock("@/components/ui/filter-menu", () => ({
+  FilterMenu: ({ sections }: { sections: { id: string; content: ReactNode }[] }) => (
+    <div>
+      {sections.map((section) => (
+        <div key={section.id} data-filter-section={section.id}>
+          {section.content}
+        </div>
+      ))}
+    </div>
+  ),
+  FilterMenuOptions: ({ options }: { options: { value: string; label: string }[] }) => (
+    <>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          data-filter-option={option.value}
+          aria-label={option.label}
+        />
+      ))}
+    </>
+  ),
+}));
+
+function renderWorkspace(
+  filters: TransactionFilters,
+  modules: readonly UnifiedTransactionModule[]
+) {
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
       <I18nProvider locale="en" messages={getMessages("en")}>
@@ -52,6 +83,7 @@ function renderWorkspace(filters: TransactionFilters) {
           issuedTokensByMint={{}}
           wallets={[{ id: "cwlt_1", label: "Treasury", publicKey: "Pub111" }]}
           counterparties={[{ id: "cpty_42", name: "Acme Treasury" }]}
+          modules={modules}
         />
       </I18nProvider>
     </SWRConfig>
@@ -65,7 +97,7 @@ afterEach(cleanup);
 
 describe("TransactionsWorkspace", () => {
   it("commits a search only once it has three characters", () => {
-    renderWorkspace({ cursors: [] });
+    renderWorkspace({ cursors: [] }, UNIFIED_TRANSACTION_MODULES);
     const search = screen.getByRole("searchbox", { name: "Search transactions" });
 
     fireEvent.change(search, { target: { value: "xf" } });
@@ -82,7 +114,7 @@ describe("TransactionsWorkspace", () => {
   });
 
   it("names an active contact filter and clears it from its chip", () => {
-    renderWorkspace({ counterpartyId: "cpty_42", cursors: [] });
+    renderWorkspace({ counterpartyId: "cpty_42", cursors: [] }, UNIFIED_TRANSACTION_MODULES);
 
     expect(screen.getByText("Acme Treasury")).toBeDefined();
     act(() => fireEvent.click(screen.getByLabelText("Clear Contact filter")));
@@ -90,15 +122,24 @@ describe("TransactionsWorkspace", () => {
   });
 
   it("clears the module and kind together from the type chip", () => {
-    renderWorkspace({ module: "earn", kind: "deposit", cursors: [] });
+    renderWorkspace({ module: "earn", kind: "deposit", cursors: [] }, UNIFIED_TRANSACTION_MODULES);
 
     expect(screen.getByText("Earn · Deposit")).toBeDefined();
     act(() => fireEvent.click(screen.getByLabelText("Clear Type filter")));
     expect(replace).toHaveBeenLastCalledWith(expect.objectContaining({ module: null, kind: null }));
   });
 
+  it("offers only the modules the channel leaves on in the Type filter", () => {
+    const { container } = renderWorkspace({ cursors: [] }, ["payments"]);
+
+    const types = [
+      ...container.querySelectorAll('[data-filter-section="type"] [data-filter-option]'),
+    ].map((option) => option.getAttribute("data-filter-option")?.split(":")[0]);
+    expect(new Set(types)).toEqual(new Set(["payments"]));
+  });
+
   it("writes a new page size and restarts on the first page", () => {
-    renderWorkspace({ cursors: ["a"], cursor: "b" });
+    renderWorkspace({ cursors: ["a"], cursor: "b" }, UNIFIED_TRANSACTION_MODULES);
     expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeDefined();
   });
 });

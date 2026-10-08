@@ -1,3 +1,4 @@
+import { RAMP_PROVIDERS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   resolveComplianceIntegrations,
@@ -13,6 +14,12 @@ const entry = (entitled: boolean, configured: boolean, enabled: boolean) => ({
 });
 
 describe("integrations status", () => {
+  it("lists only the ramp providers offered, so a provider the channel leaves out has no card", () => {
+    const ramps = resolveRampIntegrations({ moonpay: entry(true, true, true) }, ["moonpay"]);
+
+    expect(ramps.map((p) => p.provider)).toEqual(["moonpay"]);
+  });
+
   it("keeps the custody family on the same vocabulary as the setup step", () => {
     const custody = resolveCustodyIntegrations({
       connectedProviders: ["privy"],
@@ -46,11 +53,14 @@ describe("integrations status", () => {
     // reduces to "this deployment holds the secret". Reporting that as
     // Connected put MoonPay on every account that had never opened payments;
     // an on rail is Enabled, an off rail is a deployment gap, never access.
-    const ramps = resolveRampIntegrations({
-      moonpay: entry(true, true, true),
-      coinbase: entry(true, false, true),
-      mural: entry(false, true, true),
-    });
+    const ramps = resolveRampIntegrations(
+      {
+        moonpay: entry(true, true, true),
+        coinbase: entry(true, false, true),
+        mural: entry(false, true, true),
+      },
+      RAMP_PROVIDERS
+    );
 
     expect(ramps.find((p) => p.provider === "moonpay")?.status).toBe("enabled");
     expect(ramps.some((p) => p.status === "active")).toBe(false);
@@ -79,7 +89,7 @@ describe("integrations status", () => {
       ...resolveCustodyIntegrations({ connectedProviders: [], enabledProviders: [] }).map(
         (p) => p.status
       ),
-      ...resolveRampIntegrations({}).map((p) => p.status),
+      ...resolveRampIntegrations({}, RAMP_PROVIDERS).map((p) => p.status),
       ...resolveComplianceIntegrations({}).map((p) => p.status),
     ];
 

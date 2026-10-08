@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   custody: vi.fn(),
-  ramps: vi.fn(),
+  rampProviders: vi.fn(),
   payments: vi.fn(),
   policies: vi.fn(),
 }));
@@ -15,7 +15,7 @@ vi.mock("@/flags", () => ({
   payments: mocks.payments,
   policies: mocks.policies,
 }));
-vi.mock("@/flags/ramps", () => ({ isRampsEnabled: mocks.ramps }));
+vi.mock("@/flags/ramps", () => ({ getOfferedRampProviders: mocks.rampProviders }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 
@@ -26,7 +26,7 @@ describe("integration provider route feature gates", () => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue({ userId: null, orgId: null, orgRole: null });
     mocks.custody.mockResolvedValue(false);
-    mocks.ramps.mockResolvedValue(false);
+    mocks.rampProviders.mockResolvedValue([]);
     mocks.payments.mockResolvedValue(false);
     mocks.policies.mockResolvedValue(false);
   });
@@ -35,6 +35,15 @@ describe("integration provider route feature gates", () => {
     await expect(IntegrationDetailPage({ params: Promise.resolve({ provider }) })).rejects.toThrow(
       "NEXT_NOT_FOUND"
     );
+    expect(mocks.auth).not.toHaveBeenCalled();
+  });
+
+  it("404s a ramp provider the channel leaves out while another ramp is offered", async () => {
+    mocks.rampProviders.mockResolvedValue(["moonpay"]);
+
+    await expect(
+      IntegrationDetailPage({ params: Promise.resolve({ provider: "lightspark" }) })
+    ).rejects.toThrow("NEXT_NOT_FOUND");
     expect(mocks.auth).not.toHaveBeenCalled();
   });
 });

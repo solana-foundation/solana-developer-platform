@@ -1,9 +1,11 @@
 import type { UnifiedTransaction, UnifiedTransactionsListResponse } from "@sdp/types";
 import { NextResponse } from "next/server";
+import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
 import {
   parseTransactionFilters,
   toTransactionsApiQuery,
 } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query.redesign";
+import { getDashboardFlags } from "@/flags/dashboard";
 import { toCsv } from "@/lib/csv";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
@@ -64,8 +66,10 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  */
 export async function GET(request: Request) {
   const params = Object.fromEntries(new URL(request.url).searchParams);
+  // A module the channel hides is dropped like the list drops it, so such a link exports All
+  // rather than failing; the API never returns that module's rows either way.
   const filters = {
-    ...parseTransactionFilters(params),
+    ...parseTransactionFilters(params, enabledTransactionModules(await getDashboardFlags())),
     cursor: undefined,
     cursors: [],
     pageSize: undefined,
