@@ -275,21 +275,30 @@ function CustodyModeField({
  * @param props - The component props.
  * @param props.provider - The BYOK provider being set up.
  * @param props.formId - The id the footer's submit button targets.
+ * @param props.onPendingChange - Called with whether a submit, replay or re-check request is in flight.
  * @param props.onRecoveryLockChange - Called with whether leaving the form would strand a stored credential or key.
  * @returns The provider's credential form.
  */
 function ByokCredentialForm({
   provider,
   formId,
+  onPendingChange,
   onRecoveryLockChange,
 }: {
   provider: ByokCustodyProvider;
   formId: string;
+  onPendingChange: (pending: boolean) => void;
   onRecoveryLockChange: (locked: boolean) => void;
 }) {
   switch (provider) {
     case "privy":
-      return <PrivyCredentialForm formId={formId} onRecoveryLockChange={onRecoveryLockChange} />;
+      return (
+        <PrivyCredentialForm
+          formId={formId}
+          onPendingChange={onPendingChange}
+          onRecoveryLockChange={onRecoveryLockChange}
+        />
+      );
     default: {
       const unhandledProvider: never = provider;
       throw new Error(`Unhandled BYOK custody provider: ${String(unhandledProvider)}`);
@@ -436,6 +445,29 @@ function WalletDetailsFields({
   );
 }
 
+/**
+ * The wizard heading for the current step: the provider choice, BYOK provider
+ * details, or Managed and additional-wallet details.
+ *
+ * @param input - The step and what it shows.
+ * @param input.currentStep - The step on screen.
+ * @param input.isByokDetails - Whether the details step shows a BYOK credential form.
+ * @param input.t - The translator.
+ * @returns The translated heading.
+ */
+function resolveSetupHeading(input: {
+  currentStep: SetupStep;
+  isByokDetails: boolean;
+  t: ReturnType<typeof useTranslations>;
+}): string {
+  if (input.currentStep === "provider") {
+    return input.t("DashboardCustody.chooseProvider");
+  }
+  return input.isByokDetails
+    ? input.t("DashboardCustody.byokProviderDetails")
+    : input.t("DashboardCustody.walletDetails");
+}
+
 function getInitialSelection(input: {
   availability: CustodyProviderAvailability[];
   initialProvider: KnownCustodyProvider | null;
@@ -495,6 +527,7 @@ export function WalletSetupFlow({
   // While a BYOK submission is in an unknown state, leaving the step would
   // unmount the frozen payload and key that are the only path to recovery.
   const [byokRecoveryLocked, setByokRecoveryLocked] = useState(false);
+  const [byokRequestPending, setByokRequestPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submissionInFlightRef = useRef(false);
 
@@ -523,6 +556,10 @@ export function WalletSetupFlow({
   // A BYOK setup goes through provider details (credential submission +
   // connection check) instead of the Managed initialize path.
   const isByokDetails = byokSetupProvider !== null;
+  // Every setup request, Managed or BYOK, holds the mode picker and Back: a
+  // BYOK request settling after its form unmounted could lock recovery with no
+  // form left to recover from.
+  const setupRequestInFlight = isPending || byokRequestPending;
 
   const continueFromProvider = () => {
     if (!selectedProviderEntry) {
@@ -643,12 +680,7 @@ export function WalletSetupFlow({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const heading =
-    currentStep === "provider"
-      ? t("DashboardCustody.chooseProvider")
-      : isByokDetails
-        ? t("DashboardCustody.byokProviderDetails")
-        : t("DashboardCustody.walletDetails");
+  const heading = resolveSetupHeading({ currentStep, isByokDetails, t });
   const canContinue = Boolean(selectedProviderEntry);
   const stepIndex = SETUP_STEPS.indexOf(currentStep);
 
@@ -708,7 +740,7 @@ export function WalletSetupFlow({
               <>
                 {showModeChoice ? (
                   <CustodyModeField
-                    disabled={byokRecoveryLocked || isPending}
+                    disabled={byokRecoveryLocked || setupRequestInFlight}
                     mode={chosenMode}
                     onModeChange={(mode) => {
                       setChosenMode(mode);
@@ -721,6 +753,7 @@ export function WalletSetupFlow({
                   <ByokCredentialForm
                     provider={byokSetupProvider}
                     formId={DETAILS_FORM_ID}
+                    onPendingChange={setByokRequestPending}
                     onRecoveryLockChange={setByokRecoveryLocked}
                   />
                 )}
@@ -747,7 +780,7 @@ export function WalletSetupFlow({
               type="button"
               variant="secondary"
               onClick={goBack}
-              disabled={isPending}
+              disabled={setupRequestInFlight}
               iconLeft={currentStep === "details" ? <ArrowLeft className="size-4" /> : undefined}
             >
               {currentStep === "provider"

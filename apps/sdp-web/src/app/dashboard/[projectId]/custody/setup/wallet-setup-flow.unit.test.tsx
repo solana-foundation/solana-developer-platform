@@ -8,6 +8,10 @@ import {
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
 } from "@/app/dashboard/[projectId]/custody/actions";
+import {
+  recheckPrivyCredentialAction,
+  submitPrivyCredentialAction,
+} from "@/app/dashboard/[projectId]/custody/byok-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { availableCustodyProviders } from "@/lib/provider-availability";
@@ -30,12 +34,19 @@ vi.mock("@/app/dashboard/[projectId]/custody/actions", () => ({
   initializeCustodySetupAction: vi.fn(),
 }));
 
+vi.mock("@/app/dashboard/[projectId]/custody/byok-actions", () => ({
+  submitPrivyCredentialAction: vi.fn(),
+  recheckPrivyCredentialAction: vi.fn(),
+}));
+
 type FlowProps = Parameters<typeof WalletSetupFlow>[0];
 type ConnectionItem = FlowProps["connections"][number];
 
 beforeEach(() => {
   vi.mocked(createCustodySetupWalletAction).mockReset();
   vi.mocked(initializeCustodySetupAction).mockReset();
+  vi.mocked(submitPrivyCredentialAction).mockReset();
+  vi.mocked(recheckPrivyCredentialAction).mockReset();
 });
 
 afterEach(() => {
@@ -307,6 +318,40 @@ describe("WalletSetupFlow custody mode", () => {
     expect(markup).toContain('id="wallet-details-form"');
     expect(markup).toContain(">Sandbox<");
     expect(detailsSubmitButton(markup)).not.toContain('disabled=""');
+  });
+
+  it("holds the mode choice and Back while a BYOK re-check is in flight", async () => {
+    const refusal = {
+      status: "refused",
+      message: "Install checks are not enabled for this organization",
+      connectionId: "conn_refused",
+    } as const;
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue(refusal);
+    const recheck = Promise.withResolvers<typeof refusal>();
+    vi.mocked(recheckPrivyCredentialAction).mockReturnValue(recheck.promise);
+    const user = userEvent.setup();
+    renderInteractiveFlow({ ...SANDBOX_FLOW, connectedProviders: [], initialProvider: "privy" });
+
+    await user.click(screen.getByRole("combobox", { name: "Custody mode" }));
+    await user.click(await screen.findByRole("option", { name: "Bring your own credentials" }));
+    await user.type(screen.getByLabelText("Privy app ID"), "app_test");
+    await user.type(screen.getByLabelText("Privy app secret"), "secret_test");
+    await user.click(screen.getByRole("button", { name: "Connect and verify" }));
+    await user.click(await screen.findByRole("button", { name: "Check again" }));
+
+    expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_refused");
+    expect(screen.getByRole("combobox", { name: "Custody mode" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", true);
+
+    recheck.resolve(refusal);
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Custody mode" })).toHaveProperty(
+        "disabled",
+        false
+      )
+    );
+    expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", false);
   });
 });
 
