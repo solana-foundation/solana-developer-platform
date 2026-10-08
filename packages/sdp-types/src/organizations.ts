@@ -48,8 +48,9 @@ export interface OrganizationSettings {
   providerOverrides?: OrganizationProviderOverrides;
   /**
    * Set from Clerk org `private_metadata.sdp.enableProductionProject` by the
-   * Clerk webhook sync; `true` unlocks selecting production projects in the
-   * dashboard.
+   * Clerk webhook sync. Without `true` the API refuses every production
+   * project (API keys, dashboard selection, approval replays) and the project
+   * list hides them.
    */
   enableProductionProject?: boolean;
   customRateLimits?: {

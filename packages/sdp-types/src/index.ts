@@ -17,6 +17,7 @@ export * from "./helius-rings";
 export * from "./jupiter-lend-programs";
 export * from "./kamino-programs";
 export * from "./kyc";
+export * from "./organization-entitlements";
 export * from "./organizations";
 export * from "./pagination";
 export * from "./payment-rails";
