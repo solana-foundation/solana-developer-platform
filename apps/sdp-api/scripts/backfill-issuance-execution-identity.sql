@@ -19,8 +19,7 @@ SELECT
     wallet.id,
     wallet.wallet_id,
     config.organization_id,
-    config.project_id,
-    'config'::TEXT AS owner_kind
+    config.project_id
 FROM custody_wallets wallet
 JOIN custody_configs config ON config.id = wallet.custody_config_id
 UNION ALL
@@ -28,8 +27,7 @@ SELECT
     wallet.id,
     wallet.wallet_id,
     connection.organization_id,
-    connection.project_id,
-    'connection'::TEXT AS owner_kind
+    connection.project_id
 FROM custody_wallets wallet
 JOIN custody_connections connection ON connection.id = wallet.custody_connection_id;
 
@@ -38,12 +36,7 @@ WITH unique_matches AS (
     FROM issued_tokens token
     JOIN issuance_catch_up_wallet_scope wallet
       ON wallet.organization_id = token.organization_id
-     AND (
-          (wallet.owner_kind = 'config'
-           AND wallet.project_id = token.project_id)
-          OR
-          (wallet.owner_kind = 'connection' AND wallet.project_id = token.project_id)
-     )
+     AND wallet.project_id = token.project_id
      AND wallet.wallet_id = token.signing_wallet_id
     WHERE token.status = 'pending'
       AND token.mint_address IS NULL

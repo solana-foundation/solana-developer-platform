@@ -64,6 +64,18 @@ export function isCustodyModeAllowedInEnvironment(
 }
 
 /**
+ * Why the custody setup rule refused a (provider, mode) pair for a project,
+ * carried as `details.reason` on its 403.
+ */
+export const CUSTODY_SETUP_REFUSAL_REASONS = [
+  "custody_provider_not_in_release_channel",
+  "custody_mode_not_allowed",
+  "provider_not_entitled",
+  "provider_not_configured",
+] as const;
+export type CustodySetupRefusalReason = (typeof CUSTODY_SETUP_REFUSAL_REASONS)[number];
+
+/**
  * Every provider the catalog shows is built and runnable, so the status only
  * ever answers "what is my next step" — never "does this exist". The two
  * non-actionable states are deliberately distinct (HOO-772/775 and the

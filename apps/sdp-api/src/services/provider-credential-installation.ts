@@ -1,5 +1,7 @@
-import type { AppError } from "@/lib/errors";
-import type { CustodySetupAdmission } from "@/services/provider-availability.service";
+import type {
+  CustodySetupAdmission,
+  CustodySetupRefusal,
+} from "@/services/provider-availability.service";
 import type {
   CustodyConnectionStatus,
   InstallationConnectionState,
@@ -21,7 +23,7 @@ type ExecuteDecision<Mode extends string = never> = [Mode] extends [never]
 export type InstallationDecision<Mode extends string = never> =
   | ExecuteDecision<Mode>
   | { kind: "replay" }
-  | { kind: "disabled"; error: AppError }
+  | { kind: "disabled"; refusal: CustodySetupRefusal }
   | { kind: "conflict"; reason?: InstallationConflictReason };
 
 export interface InstallationFacts {
@@ -114,7 +116,7 @@ function decideComplete(
   }
   return facts.providerAccountFingerprint
     ? { kind: "execute", mode: "reconcile_only" }
-    : { kind: "disabled", error: facts.completionAdmission.error };
+    : { kind: "disabled", refusal: facts.completionAdmission };
 }
 
 function decideCancel(facts: InstallationFacts, leaseCurrent: boolean): InstallationDecision {
@@ -134,7 +136,7 @@ function decideCancel(facts: InstallationFacts, leaseCurrent: boolean): Installa
 
 function decideReplace(facts: InstallationFacts): InstallationDecision {
   if (!facts.completionAdmission.admitted) {
-    return { kind: "disabled", error: facts.completionAdmission.error };
+    return { kind: "disabled", refusal: facts.completionAdmission };
   }
   if (facts.hasSiblingUnfinished) {
     return { kind: "conflict", reason: "unfinished_installation_exists" };

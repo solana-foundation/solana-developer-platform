@@ -7,22 +7,19 @@
 \echo '=== 1. Pending Issuance draft selection resolution ==='
 WITH wallet_scope AS (
   SELECT wallet.id, wallet.wallet_id,
-         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+         config.organization_id, config.project_id
   FROM custody_wallets wallet
   JOIN custody_configs config ON config.id = wallet.custody_config_id
   UNION ALL
   SELECT wallet.id, wallet.wallet_id,
-         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+         connection.organization_id, connection.project_id
   FROM custody_wallets wallet
   JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
 ), resolutions AS (
   SELECT token.id,
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = token.organization_id
-            AND ((wallet.owner_kind = 'config'
-                  AND wallet.project_id = token.project_id)
-              OR (wallet.owner_kind = 'connection'
-                  AND wallet.project_id = token.project_id))
+            AND wallet.project_id = token.project_id
             AND wallet.wallet_id = token.signing_wallet_id) AS match_count
   FROM issued_tokens token
   WHERE token.status = 'pending'
@@ -38,22 +35,19 @@ FROM resolutions;
 \echo '=== 1a. Unpinned uniquely-resolvable pending drafts (must be zero after catch-up) ==='
 WITH wallet_scope AS (
   SELECT wallet.id, wallet.wallet_id,
-         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+         config.organization_id, config.project_id
   FROM custody_wallets wallet
   JOIN custody_configs config ON config.id = wallet.custody_config_id
   UNION ALL
   SELECT wallet.id, wallet.wallet_id,
-         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+         connection.organization_id, connection.project_id
   FROM custody_wallets wallet
   JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
 ), resolutions AS (
   SELECT token.id, token.organization_id, token.project_id, token.signing_wallet_id,
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = token.organization_id
-            AND ((wallet.owner_kind = 'config'
-                  AND wallet.project_id = token.project_id)
-              OR (wallet.owner_kind = 'connection'
-                  AND wallet.project_id = token.project_id))
+            AND wallet.project_id = token.project_id
             AND wallet.wallet_id = token.signing_wallet_id) AS match_count
   FROM issued_tokens token
   WHERE token.status = 'pending'
@@ -70,22 +64,19 @@ LIMIT 100;
 \echo '=== 1b. Unresolved or ambiguous pending drafts (resolve before those drafts can deploy) ==='
 WITH wallet_scope AS (
   SELECT wallet.id, wallet.wallet_id,
-         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+         config.organization_id, config.project_id
   FROM custody_wallets wallet
   JOIN custody_configs config ON config.id = wallet.custody_config_id
   UNION ALL
   SELECT wallet.id, wallet.wallet_id,
-         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+         connection.organization_id, connection.project_id
   FROM custody_wallets wallet
   JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
 ), resolutions AS (
   SELECT token.id, token.organization_id, token.project_id, token.signing_wallet_id,
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = token.organization_id
-            AND ((wallet.owner_kind = 'config'
-                  AND wallet.project_id = token.project_id)
-              OR (wallet.owner_kind = 'connection'
-                  AND wallet.project_id = token.project_id))
+            AND wallet.project_id = token.project_id
             AND wallet.wallet_id = token.signing_wallet_id) AS match_count
   FROM issued_tokens token
   WHERE token.status = 'pending'
@@ -102,12 +93,12 @@ LIMIT 100;
 \echo '=== 2. Persisted token exact-ID disagreements (must be zero) ==='
 WITH wallet_scope AS (
   SELECT wallet.id, wallet.wallet_id,
-         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+         config.organization_id, config.project_id
   FROM custody_wallets wallet
   JOIN custody_configs config ON config.id = wallet.custody_config_id
   UNION ALL
   SELECT wallet.id, wallet.wallet_id,
-         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+         connection.organization_id, connection.project_id
   FROM custody_wallets wallet
   JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
 )
@@ -120,9 +111,7 @@ WHERE token.signing_custody_wallet_id IS NOT NULL
     FROM wallet_scope wallet
     WHERE wallet.id = token.signing_custody_wallet_id
       AND wallet.organization_id = token.organization_id
-      AND ((wallet.owner_kind = 'config'
-            AND wallet.project_id = token.project_id)
-        OR (wallet.owner_kind = 'connection' AND wallet.project_id = token.project_id))
+      AND wallet.project_id = token.project_id
       AND wallet.wallet_id = token.signing_wallet_id
   )
 ORDER BY token.organization_id, token.project_id, token.id
@@ -172,12 +161,12 @@ LIMIT 100;
 \echo '=== 4. Issuance transaction exact-ID tenant disagreements (must be zero) ==='
 WITH wallet_scope AS (
   SELECT wallet.id,
-         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+         config.organization_id, config.project_id
   FROM custody_wallets wallet
   JOIN custody_configs config ON config.id = wallet.custody_config_id
   UNION ALL
   SELECT wallet.id,
-         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+         connection.organization_id, connection.project_id
   FROM custody_wallets wallet
   JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
 )
@@ -194,9 +183,7 @@ WHERE transaction.custody_wallet_id IS NOT NULL
       FROM wallet_scope wallet
       WHERE wallet.id = transaction.custody_wallet_id
         AND wallet.organization_id = token.organization_id
-        AND ((wallet.owner_kind = 'config'
-              AND wallet.project_id = token.project_id)
-          OR (wallet.owner_kind = 'connection' AND wallet.project_id = token.project_id))
+        AND wallet.project_id = token.project_id
     )
   )
 ORDER BY transaction.organization_id, transaction.id

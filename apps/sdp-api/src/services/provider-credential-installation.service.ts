@@ -31,7 +31,11 @@ import {
   type ProvisionPrivyResult,
   provisionPrivyWallet,
 } from "@/services/custody/provisioning";
-import { isPersistedCustodyCompletionEnabled } from "@/services/provider-availability.service";
+import {
+  admitByokCustodySetup,
+  type CustodySetupAdmission,
+  refuseCustodySetup,
+} from "@/services/provider-availability.service";
 import {
   decideInstallation,
   type InstallationConflictReason,
@@ -92,6 +96,7 @@ interface InstallationContext {
 
 interface LoadedInstallation {
   target: InstallationConnectionState;
+  admission: CustodySetupAdmission;
   decisions: InstallationDecisions;
 }
 
@@ -199,12 +204,13 @@ export async function deactivateCustodyConnection(
       const deactivated = { ...target, status: "deactivated" as const };
       return projectConnection({
         target: deactivated,
+        admission: loaded.admission,
         decisions: decideInstallation(
-          // A deactivated connection can neither complete nor take replacement
-          // credentials, so custody setup admission cannot change its projection.
-          installationFactsFromConnection(deactivated, await store.getDatabaseNowMs(), {
-            admitted: true,
-          })
+          installationFactsFromConnection(
+            deactivated,
+            await store.getDatabaseNowMs(),
+            loaded.admission
+          )
         ),
       });
     });
@@ -289,7 +295,7 @@ export async function completeProviderCredentialInstallation(
     return completionResult(loaded);
   }
   if (loaded.decisions.complete.kind === "disabled") {
-    throw loaded.decisions.complete.error;
+    throw refuseCustodySetup(loaded.decisions.complete.refusal);
   }
   if (loaded.decisions.complete.kind === "conflict") {
     throw installationConflict(loaded.decisions.complete.reason);
@@ -550,7 +556,7 @@ async function loadInstallation(
     if (!target) {
       throw notFound("Custody Connection");
     }
-    const completionAdmission = await isPersistedCustodyCompletionEnabled(
+    const admission = await admitByokCustodySetup(
       context.c.env,
       context.db,
       { organizationId: context.organizationId, projectId: context.projectId },
@@ -558,9 +564,8 @@ async function loadInstallation(
     );
     return {
       target,
-      decisions: decideInstallation(
-        installationFactsFromConnection(target, nowMs, completionAdmission)
-      ),
+      admission,
+      decisions: decideInstallation(installationFactsFromConnection(target, nowMs, admission)),
     };
   } catch (error) {
     if (error instanceof AppError) {
@@ -889,7 +894,7 @@ async function resolveCompletionRace(
     throw installationConflict(current.decisions.complete.reason);
   }
   if (current.decisions.complete.kind === "disabled") {
-    throw current.decisions.complete.error;
+    throw refuseCustodySetup(current.decisions.complete.refusal);
   }
   throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
 }

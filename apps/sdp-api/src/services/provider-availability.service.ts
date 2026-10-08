@@ -5,6 +5,7 @@ import {
   CUSTODY_PROVIDERS,
   type CustodyMode,
   type CustodyProvider,
+  type CustodySetupRefusalReason,
   EARN_PROVIDERS,
   type EarnProviderId,
   isCustodyModeAllowedInEnvironment,
@@ -27,7 +28,7 @@ import {
 } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
-import { AppError, forbidden } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
 import {
   isCustodyProviderAvailable,
   isModuleAvailable,
@@ -663,6 +664,24 @@ export async function assertCustodyProviderEntitled(
 }
 
 /**
+ * A 403 from the custody setup rule. Its `details.reason` names the failed
+ * check, typed so a refusal's reason is read from the error itself.
+ */
+export class CustodySetupRefusedError extends AppError {
+  declare readonly details: { reason: CustodySetupRefusalReason };
+
+  /**
+   * Builds the 403 for one failed custody setup check.
+   *
+   * @param message - What the failed check found.
+   * @param reason - The failed check.
+   */
+  constructor(message: string, reason: CustodySetupRefusalReason) {
+    super("FORBIDDEN", message, { reason });
+  }
+}
+
+/**
  * The refusal for a (custody provider, mode) pair the deployment's release channel leaves out.
  *
  * @param provider - The custody provider.
@@ -672,10 +691,10 @@ export async function assertCustodyProviderEntitled(
 export function custodyProviderNotInReleaseChannel(
   provider: CustodyProvider,
   mode: CustodyMode
-): AppError {
-  return forbidden(
+): CustodySetupRefusedError {
+  return new CustodySetupRefusedError(
     `The ${provider} custody provider is not available in this release channel for ${mode} custody.`,
-    { reason: "custody_provider_not_in_release_channel" }
+    "custody_provider_not_in_release_channel"
   );
 }
 
@@ -708,18 +727,20 @@ export interface CustodySetupRequest extends CustodySetupProject {
   mode: CustodyMode;
 }
 
+/**
+ * The custody setup rule's refusal of one pair: the 403 and the request and
+ * project environment it was decided for, so whoever refuses the request can
+ * log it.
+ */
+export interface CustodySetupRefusal {
+  admitted: false;
+  request: CustodySetupRequest;
+  environment: SdpEnvironment;
+  error: CustodySetupRefusedError;
+}
+
 /** The custody setup rule's verdict on one (provider, mode) pair for a project. */
-export type CustodySetupAdmission = { admitted: true } | { admitted: false; error: AppError };
-
-type CustodySetupRefusalReason =
-  | "custody_provider_not_in_release_channel"
-  | "custody_mode_not_allowed"
-  | "provider_not_entitled"
-  | "provider_not_configured";
-
-type CustodySetupDecision =
-  | { admitted: true }
-  | { admitted: false; reason: CustodySetupRefusalReason; error: AppError };
+export type CustodySetupAdmission = { admitted: true } | CustodySetupRefusal;
 
 interface CustodySetupFacts {
   environment: SdpEnvironment;
@@ -733,8 +754,8 @@ const CUSTODY_MODE_LABELS = {
 
 /**
  * Reads what the custody setup rule decides from: the project's environment from
- * its `projects` row (never from the API key, its cache or request state) and
- * the organization's provider access.
+ * its active `projects` row (never from the API key, its cache or request state)
+ * and the organization's provider access.
  *
  * @param env - Process environment the provider access is evaluated against.
  * @param db - Database client for the project and organization rows.
@@ -742,7 +763,7 @@ const CUSTODY_MODE_LABELS = {
  * @param project.organizationId - The organization that owns the project.
  * @param project.projectId - The project setting up custody.
  * @returns The project's environment and its organization's provider access.
- * @throws 404 when the project does not belong to the organization.
+ * @throws 404 when the project is not an active project of the organization.
  */
 async function loadCustodySetupFacts(
   env: Env,
@@ -750,7 +771,9 @@ async function loadCustodySetupFacts(
   project: CustodySetupProject
 ): Promise<CustodySetupFacts> {
   const row = await db
-    .prepare("SELECT environment FROM projects WHERE id = ? AND organization_id = ?")
+    .prepare(
+      "SELECT environment FROM projects WHERE id = ? AND organization_id = ? AND status = 'active'"
+    )
     .bind(project.projectId, project.organizationId)
     .first<{ environment: SdpEnvironment }>();
   if (!row) {
@@ -779,72 +802,69 @@ async function loadCustodySetupFacts(
  *
  * @param env - Process environment naming the release channel.
  * @param facts - The project's environment and its organization's provider access.
- * @param provider - The custody provider being set up.
- * @param mode - The custody mode being set up.
- * @returns Admitted, or the first failed check with its 403.
+ * @param request - The pair being set up and the project it is for.
+ * @param request.organizationId - The organization that owns the project.
+ * @param request.projectId - The project setting up custody.
+ * @param request.provider - The custody provider being set up.
+ * @param request.mode - The custody mode being set up.
+ * @returns Admitted, or the refusal carrying the first failed check's 403.
  */
 function decideCustodySetup(
   env: Env,
   facts: CustodySetupFacts,
-  provider: CustodyProvider,
-  mode: CustodyMode
-): CustodySetupDecision {
+  request: CustodySetupRequest
+): CustodySetupAdmission {
+  const { provider, mode } = request;
+  const refuse = (error: CustodySetupRefusedError): CustodySetupRefusal => ({
+    admitted: false,
+    request,
+    environment: facts.environment,
+    error,
+  });
   if (!isCustodyProviderAvailable(env, provider, mode)) {
-    return {
-      admitted: false,
-      reason: "custody_provider_not_in_release_channel",
-      error: custodyProviderNotInReleaseChannel(provider, mode),
-    };
+    return refuse(custodyProviderNotInReleaseChannel(provider, mode));
   }
   const label = `${getProviderLabel("custody", provider)} ${CUSTODY_MODE_LABELS[mode]} custody`;
   if (!isCustodyModeAllowedInEnvironment(facts.environment, mode)) {
-    return {
-      admitted: false,
-      reason: "custody_mode_not_allowed",
-      error: forbidden(`${label} is not allowed in a ${facts.environment} project.`, {
-        reason: "custody_mode_not_allowed",
-      }),
-    };
+    return refuse(
+      new CustodySetupRefusedError(
+        `${label} is not allowed in a ${facts.environment} project.`,
+        "custody_mode_not_allowed"
+      )
+    );
   }
   if (!isCustodyProviderStageAllowedInEnvironment(facts.environment, provider, mode)) {
-    return {
-      admitted: false,
-      reason: "custody_mode_not_allowed",
-      error: forbidden(
+    return refuse(
+      new CustodySetupRefusedError(
         `${label} is not stable yet, so a ${facts.environment} project cannot use it.`,
-        { reason: "custody_mode_not_allowed" }
-      ),
-    };
+        "custody_mode_not_allowed"
+      )
+    );
   }
   const entry = facts.availability.providers.custody[provider];
   if (!entry.entitled) {
-    return {
-      admitted: false,
-      reason: "provider_not_entitled",
-      error: new AppError(
-        "FORBIDDEN",
+    return refuse(
+      new CustodySetupRefusedError(
         getAvailabilityMessage(facts.availability.tier, "custody", provider, entry),
-        { reason: "provider_not_entitled" }
-      ),
-    };
+        "provider_not_entitled"
+      )
+    );
   }
   if (mode === "managed" && !entry.configured) {
-    return {
-      admitted: false,
-      reason: "provider_not_configured",
-      error: new AppError(
-        "FORBIDDEN",
+    return refuse(
+      new CustodySetupRefusedError(
         getAvailabilityMessage(facts.availability.tier, "custody", provider, entry),
-        { reason: "provider_not_configured" }
-      ),
-    };
+        "provider_not_configured"
+      )
+    );
   }
   return { admitted: true };
 }
 
 /**
- * Loads the project's facts and applies the custody setup rule to one pair,
- * logging a refusal.
+ * Loads the project's facts and applies the custody setup rule to one pair.
+ * Evaluating is not refusing, so nothing is logged here: reads and replays
+ * evaluate too.
  *
  * @param env - Process environment naming the release channel.
  * @param db - Database client for the project and organization rows.
@@ -854,26 +874,35 @@ function decideCustodySetup(
  * @param request.provider - The custody provider being set up.
  * @param request.mode - The custody mode being set up.
  * @returns The rule's verdict.
+ * @throws 404 when the project is not an active project of the organization.
  */
 async function admitCustodySetup(
   env: Env,
   db: DatabaseExecutor,
   request: CustodySetupRequest
-): Promise<CustodySetupDecision> {
+): Promise<CustodySetupAdmission> {
   const facts = await loadCustodySetupFacts(env, db, request);
-  const decision = decideCustodySetup(env, facts, request.provider, request.mode);
-  if (!decision.admitted) {
-    logEvent("warn", {
-      event: "sdp_api_custody_setup_refused",
-      organization_id: request.organizationId,
-      project_id: request.projectId,
-      environment: facts.environment,
-      provider: request.provider,
-      mode: request.mode,
-      reason: decision.reason,
-    });
-  }
-  return decision;
+  return decideCustodySetup(env, facts, request);
+}
+
+/**
+ * Logs a custody setup refusal a request is being refused with. Call it only
+ * where the request is refused, never where an admission is merely evaluated.
+ *
+ * @param refusal - The custody setup rule's refusal.
+ * @returns The refusal's 403, to throw.
+ */
+export function refuseCustodySetup(refusal: CustodySetupRefusal): CustodySetupRefusedError {
+  logEvent("warn", {
+    event: "sdp_api_custody_setup_refused",
+    organization_id: refusal.request.organizationId,
+    project_id: refusal.request.projectId,
+    environment: refusal.environment,
+    provider: refusal.request.provider,
+    mode: refusal.request.mode,
+    reason: refusal.error.details.reason,
+  });
+  return refusal.error;
 }
 
 /**
@@ -888,7 +917,7 @@ async function admitCustodySetup(
  * @param project.projectId - The project the modes are for.
  * @param provider - The custody provider.
  * @returns Every admitted mode in `CUSTODY_MODES` order; empty when none is.
- * @throws 404 when the project does not belong to the organization.
+ * @throws 404 when the project is not an active project of the organization.
  */
 export async function getCustodyModesForProject(
   env: Env,
@@ -897,13 +926,15 @@ export async function getCustodyModesForProject(
   provider: CustodyProvider
 ): Promise<readonly CustodyMode[]> {
   const facts = await loadCustodySetupFacts(env, db, project);
-  return CUSTODY_MODES.filter((mode) => decideCustodySetup(env, facts, provider, mode).admitted);
+  return CUSTODY_MODES.filter(
+    (mode) => decideCustodySetup(env, facts, { ...project, provider, mode }).admitted
+  );
 }
 
 /**
  * Refuses setting up a (custody provider, mode) pair for a project unless the
- * custody setup rule admits it. Managed setup calls this before any provider
- * call, row write or audit intent.
+ * custody setup rule admits it, logging the refusal. Managed setup calls this
+ * before any provider call, row write or audit intent.
  *
  * @param env - Process environment naming the release channel.
  * @param db - Database client for the project and organization rows.
@@ -912,26 +943,26 @@ export async function getCustodyModesForProject(
  * @param request.projectId - The project setting up custody.
  * @param request.provider - The custody provider being set up.
  * @param request.mode - The custody mode being set up.
- * @throws 403 `FORBIDDEN` whose `details.reason` names the failed check:
- *   `custody_provider_not_in_release_channel`, `custody_mode_not_allowed`,
- *   `provider_not_entitled` or `provider_not_configured`; 404 when the project
- *   does not belong to the organization.
+ * @throws 403 `CustodySetupRefusedError` whose `details.reason` names the failed
+ *   check (`CUSTODY_SETUP_REFUSAL_REASONS`); 404 when the project is not an
+ *   active project of the organization.
  */
 export async function assertCustodySetupAdmitted(
   env: Env,
   db: DatabaseExecutor,
   request: CustodySetupRequest
 ): Promise<void> {
-  const decision = await admitCustodySetup(env, db, request);
-  if (!decision.admitted) {
-    throw decision.error;
+  const admission = await admitCustodySetup(env, db, request);
+  if (!admission.admitted) {
+    throw refuseCustodySetup(admission);
   }
 }
 
 /**
  * The BYOK form of the custody setup gate, for submission and installation,
  * which serve an idempotent replay before refusing: whether the project may set
- * up a BYOK connection for `provider`.
+ * up a BYOK connection for `provider`. A caller that refuses the request throws
+ * `refuseCustodySetup(admission)`.
  *
  * @param env - Process environment naming the release channel.
  * @param db - Database client for the project and organization rows.
@@ -939,10 +970,10 @@ export async function assertCustodySetupAdmitted(
  * @param project.organizationId - The organization that owns the project.
  * @param project.projectId - The project setting up the connection.
  * @param provider - The custody provider the connection names.
- * @returns Admitted, or the 403 `assertCustodySetupAdmitted` would throw.
- * @throws 404 when the project does not belong to the organization.
+ * @returns Admitted, or the refusal `assertCustodySetupAdmitted` would throw.
+ * @throws 404 when the project is not an active project of the organization.
  */
-export async function isPersistedCustodyCompletionEnabled(
+export async function admitByokCustodySetup(
   env: Env,
   db: DatabaseExecutor,
   project: CustodySetupProject,

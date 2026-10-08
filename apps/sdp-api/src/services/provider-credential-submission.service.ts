@@ -14,7 +14,10 @@ import {
   CredentialSecretStoreError,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
-import { isPersistedCustodyCompletionEnabled } from "@/services/provider-availability.service";
+import {
+  admitByokCustodySetup,
+  refuseCustodySetup,
+} from "@/services/provider-availability.service";
 import {
   assertCredentialCreationSettled,
   recoverCredentialCreation,
@@ -275,7 +278,7 @@ async function loadReplay(context: SubmissionContext): Promise<ProviderCredentia
 async function admitSubmission(
   context: SubmissionContext
 ): Promise<{ kind: "admitted" } | { kind: "replay"; result: ProviderCredentialSubmissionResult }> {
-  const admission = await isPersistedCustodyCompletionEnabled(
+  const admission = await admitByokCustodySetup(
     context.c.env,
     context.db,
     { organizationId: context.organizationId, projectId: context.projectId },
@@ -296,7 +299,7 @@ async function admitSubmission(
       ),
     };
   }
-  throw admission.error;
+  throw refuseCustodySetup(admission);
 }
 
 async function prepareSetup(
