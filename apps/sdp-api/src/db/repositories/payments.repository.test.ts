@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -19,38 +20,58 @@ const TEST_WALLET_ID = "wallet_payments_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_payments_repo_test";
 const CANCELABLE = ["pending", "awaiting_payment"] as const;
 
-async function seedExactWallet(): Promise<void> {
+async function resetPaymentFixtures(): Promise<SeededDefaultProjects> {
   const db = getDb(env);
-  await db
-    .prepare(
-      `INSERT INTO custody_configs
-         (id, organization_id, project_id, provider, config_encrypted)
-       VALUES ('cfg_payments_repo_exact', ?, NULL, 'test_payments_repo_exact', 'encrypted')
-       ON CONFLICT (id) DO NOTHING`
-    )
-    .bind(TEST_ORG.id)
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
-       VALUES (?, 'cfg_payments_repo_exact', ?, 'Source111')
-       ON CONFLICT (id) DO NOTHING`
-    )
-    .bind(TEST_CUSTODY_WALLET_ID, TEST_WALLET_ID)
-    .run();
-}
-
-/** Wipes payment_transfers and re-upserts the test organization for filter suites. */
-async function resetPaymentTransfers(): Promise<void> {
-  const db = getDb(env);
+  await db.prepare("DELETE FROM custody_scope_defaults").run();
   await db.prepare("DELETE FROM payment_transfers").run();
+  await db.prepare("DELETE FROM custody_wallets").run();
+  await db.prepare("DELETE FROM custody_configs").run();
+  await db.prepare("DELETE FROM projects").run();
+
   await db
     .prepare(
       "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
     )
     .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
     .run();
-  await seedExactWallet();
+  await db
+    .prepare(
+      "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+    )
+    .bind(TEST_USER.id, TEST_USER.email)
+    .run();
+  const projects = await seedDefaultProjects(db, {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+  });
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: "cfg_payments_repo_exact",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        provider: "local",
+        configEncrypted: "encrypted",
+        defaultWalletId: null,
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: TEST_CUSTODY_WALLET_ID,
+        owner: { kind: "config", custodyConfigId: "cfg_payments_repo_exact" },
+        walletId: TEST_WALLET_ID,
+        publicKey: "Source111",
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+    scopeDefaults: [],
+  });
+  return projects;
 }
 
 function transferInput(overrides: {
@@ -108,34 +129,8 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
   });
 
   beforeEach(async () => {
-    const db = getDb(env);
-    await db.prepare("DELETE FROM custody_scope_defaults").run();
-    await db.prepare("DELETE FROM payment_transfers").run();
-    await db.prepare("DELETE FROM custody_wallets").run();
-    await db.prepare("DELETE FROM custody_configs").run();
-    await db.prepare("DELETE FROM projects").run();
-
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
-      )
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
-    projects = await seedDefaultProjects(db, {
-      organizationId: TEST_ORG.id,
-      createdBy: TEST_USER.id,
-      members: [],
-      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
-    });
-    await seedExactWallet();
-
-    repo = createPostgresPaymentsRepository(db);
+    projects = await resetPaymentFixtures();
+    repo = createPostgresPaymentsRepository(getDb(env));
   });
 
   it("installs the indexed payment-ledger search plan", async () => {
@@ -1173,7 +1168,9 @@ describe("PaymentsRepository.listTransfers token filter (postgres)", () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
-  beforeEach(resetPaymentTransfers);
+  beforeEach(async () => {
+    await resetPaymentFixtures();
+  });
 
   async function seedMixedForms() {
     // Exactly the shape the local ledger holds: the same asset written as a bare
@@ -1243,30 +1240,46 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
-  beforeEach(resetPaymentTransfers);
+  beforeEach(async () => {
+    await resetPaymentFixtures();
+  });
 
   async function seedTwoWallets() {
     const db = getDb(env);
-    await db
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted)
-         VALUES ('cfg_payments_exact_allowlist', ?, NULL, 'test_exact_allowlist', 'encrypted')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(TEST_ORG.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key)
-         VALUES
-           (?, 'cfg_payments_exact_allowlist', ?, 'Sourcea-1'),
-           (?, 'cfg_payments_exact_allowlist', ?, 'Sourceb-1')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(CUSTODY_WALLET_A, WALLET_A, CUSTODY_WALLET_B, WALLET_B)
-      .run();
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cfg_payments_exact_allowlist",
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          provider: "privy",
+          configEncrypted: "encrypted",
+          defaultWalletId: null,
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: CUSTODY_WALLET_A,
+          owner: { kind: "config", custodyConfigId: "cfg_payments_exact_allowlist" },
+          walletId: WALLET_A,
+          publicKey: "Sourcea-1",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+        {
+          id: CUSTODY_WALLET_B,
+          owner: { kind: "config", custodyConfigId: "cfg_payments_exact_allowlist" },
+          walletId: WALLET_B,
+          publicKey: "Sourceb-1",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+      scopeDefaults: [],
+    });
     const repo = createPostgresPaymentsRepository(getDb(env));
     await repo.createTransfer(
       transferInput({ custodyWalletId: CUSTODY_WALLET_A, walletId: WALLET_A, suffix: "a-1" })
