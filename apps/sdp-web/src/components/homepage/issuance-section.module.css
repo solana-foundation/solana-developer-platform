@@ -1,0 +1,211 @@
+/* Issuance; its rhythm (--pad, --title, --sub) is the page's. */
+
+/* the words beside the sheet; the first line of the words and the first row of the sheet share a top */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: clamp(48px, 6vw, 96px);
+  align-items: start;
+  padding: var(--pad) 0;
+}
+
+.vis {
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--title);
+  line-height: 1.04;
+  letter-spacing: -0.028em;
+}
+
+.body {
+  max-width: 42ch;
+  margin-top: 24px;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: var(--sub);
+}
+
+/* the sheet: hairline rows, the asset and its status at the top */
+.sheet {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+}
+
+.row > dt,
+.row > dd {
+  margin: 0;
+}
+
+.sheet > .row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+  font-size: 16px;
+  color: var(--ink3);
+}
+
+.sheet > .row:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.sheet > .top {
+  padding-top: 12px;
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.note {
+  margin-left: 10px;
+  font-size: 14px;
+  font-style: normal;
+  color: var(--ink4);
+}
+
+.value {
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.supply {
+  font-variant-numeric: tabular-nums;
+}
+
+/* the status capsule: the bubbles' violet, small, with the operation's own mark */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 15px 5px 5px;
+  border-radius: 999px;
+  font: 400 15px / 1 var(--font);
+  color: var(--ink);
+  background: radial-gradient(90% 150% at 32% 78%, #dcc8ff 0%, #e9ddff 50%, #f4eeff 100%);
+  box-shadow:
+    inset 0 0 10px #9945ff33,
+    0 0 0 5px #9945ff0d;
+}
+
+.status.beat {
+  animation: statusBeat 1300ms cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+
+@keyframes statusBeat {
+  0% {
+    scale: 1;
+  }
+  24% {
+    scale: 1.07;
+    box-shadow:
+      inset 0 0 14px #9945ff55,
+      0 0 0 9px #9945ff14;
+  }
+  56% {
+    scale: 0.995;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+.statusIcon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #fff;
+  background: radial-gradient(90% 150% at 32% 78%, #8a3bf0 0%, #9d5cfa 45%, #b484ff 100%);
+  transition:
+    opacity 220ms var(--e),
+    transform 320ms var(--e);
+}
+
+.statusIcon.iconOut {
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+.statusSvg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* a word that changes leaves upward and the new one comes in */
+.swap {
+  display: inline-block;
+  transition:
+    opacity 220ms var(--e),
+    transform 320ms var(--e);
+}
+
+.swap.out {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* the row an operation touched lights for a moment */
+.lit {
+  position: relative;
+}
+
+.lit::after {
+  content: "";
+  position: absolute;
+  inset: 0 -12px;
+  border-radius: 10px;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(90deg, #9945ff00, #9945ff14 50%, #9945ff00);
+  background-size: 200% 100%;
+}
+
+.lit.hot::after {
+  animation: rowLight 1500ms var(--e);
+}
+
+.lit.hot .value {
+  animation: rowInk 1500ms var(--e);
+}
+
+@keyframes rowLight {
+  0% {
+    opacity: 0;
+    background-position: 100% 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    background-position: 0 0;
+  }
+}
+
+@keyframes rowInk {
+  0%,
+  100% {
+    color: var(--ink);
+  }
+  25% {
+    color: #7a2fe0;
+  }
+}
+
+@media (max-width: 1000px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

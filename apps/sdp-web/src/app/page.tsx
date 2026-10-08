@@ -1,95 +1,72 @@
-import Image from "next/image";
-import Link from "next/link";
-import { HomepageCtas } from "@/components/homepage-ctas";
-import { LanguagePicker } from "@/components/language-picker";
+import { auth } from "@clerk/nextjs/server";
+import { BuildersSection } from "@/components/homepage/builders-section";
+import { HeroSection } from "@/components/homepage/hero-section";
+import styles from "@/components/homepage/homepage.module.css";
+import { HomepageFooter } from "@/components/homepage/homepage-footer";
+import { resolveHomepageLinks } from "@/components/homepage/homepage-links";
+import { HomepageNav } from "@/components/homepage/homepage-nav";
+import { InterfacesSection } from "@/components/homepage/interfaces-section";
+import { IssuanceSection } from "@/components/homepage/issuance-section";
+import { homepageRootStyle } from "@/components/homepage/layout";
+import { MarketsSection } from "@/components/homepage/markets-section";
+import { NetworkSection } from "@/components/homepage/network-section";
+import { PaymentsSection } from "@/components/homepage/payments-section";
+import { PillarsSection } from "@/components/homepage/pillars-section";
+import { PrivacySection } from "@/components/homepage/privacy-section";
+import { StackSection } from "@/components/homepage/stack-section";
+import { StartSection } from "@/components/homepage/start-section";
+import { WalkthroughsSection } from "@/components/homepage/walkthroughs-section";
 import { homepageOpenSignup } from "@/flags";
 import { getTranslations } from "@/i18n/server";
-import { resolveDocsUrl } from "@/lib/docs-url";
 
-const docsHref = resolveDocsUrl();
+/*
+ * Without script the page must still read: the blocks that rise in (`data-rise`), the letters that
+ * form in (`data-form-letter`) and the captions shown by a scene (`data-noscript-reveal`) wait on
+ * client effects, so a noscript style sets them in their final state. Stable data attributes,
+ * since the CSS modules' class names are hashed. With script it never applies.
+ */
+const NOSCRIPT_CSS = [
+  "[data-rise]{opacity:1!important;transform:none!important;clip-path:none!important}",
+  "[data-form-letter]{color:inherit!important;-webkit-text-stroke:0!important;filter:none!important;opacity:1!important;transform:none!important}",
+  "[data-noscript-reveal],[data-noscript-reveal] *{opacity:1!important;visibility:visible!important}",
+  "[data-noscript-reveal] a{pointer-events:auto!important}",
+].join("");
+
 export default async function Home() {
-  const [t, openSignup] = await Promise.all([getTranslations(), homepageOpenSignup()]);
+  const [t, openSignup, { userId }] = await Promise.all([
+    getTranslations(),
+    homepageOpenSignup(),
+    auth(),
+  ]);
+  const links = resolveHomepageLinks({
+    signedIn: Boolean(userId),
+    openSignup,
+    createAccountLabel: t("Homepage.cta.createAccount"),
+    joinWaitlistLabel: t("Homepage.cta.joinWaitlist"),
+    dashboardLabel: t("Homepage.cta.dashboard"),
+  });
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-surface to-surface-sunken text-primary">
-      <header className="border-b border-border-subtle">
-        <div className="mx-auto flex h-[72px] max-w-[1200px] items-center justify-between px-6 xl:px-0">
-          <Image
-            data-testid="landing-solana-logo"
-            src="/landing/solana-logo.svg"
-            alt={t("Home.solanaLogo")}
-            width={20}
-            height={18}
-            className="dark:invert"
-          />
-          <div className="flex items-center gap-2">
-            <Link
-              href={docsHref}
-              className="mr-2 text-sm font-medium text-secondary transition-colors hover:text-primary"
-            >
-              {t("Home.docs")}
-            </Link>
-            <LanguagePicker variant="landing" />
-            <Link
-              href="/sign-in"
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-sm font-semibold text-on-primary transition hover:opacity-90"
-            >
-              {t("Home.dashboard")}
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <section className="mx-auto grid min-h-[calc(100vh-72px)] max-w-[1200px] gap-12 px-6 pb-28 pt-16 md:pt-20 lg:grid-cols-[568px_1fr] lg:items-center lg:gap-6 xl:px-0 xl:pt-24">
-        <div>
-          <h1 className="max-w-[560px] text-balance text-[42px] font-medium leading-[0.98] tracking-[-0.5px] md:text-[56px]">
-            {t("Home.title")}
-          </h1>
-
-          <p className="mt-[26px] max-w-[510px] text-[16px] font-[450] leading-6 text-secondary">
-            {t("Home.description")}
-          </p>
-
-          <HomepageCtas
-            contactUsLabel={t("Home.contactUs")}
-            joinWaitlistLabel={t("Home.joinWaitlist")}
-            openSignup={openSignup}
-            trySdpLabel={t("Home.trySdp")}
-          />
-        </div>
-
-        <div
-          className="relative hidden h-[470px] w-full overflow-visible lg:block"
-          aria-hidden="true"
-        >
-          <div className="absolute right-[8px] top-0 flex h-[443px] w-[625px] items-center">
-            <div className="relative h-[443px] w-[313px]">
-              <Image
-                data-testid="landing-hero-figure"
-                src="/landing/hero-figure.svg"
-                alt=""
-                width={313}
-                height={443}
-                className="h-full w-full dark:invert"
-              />
-            </div>
-
-            <div className="relative ml-[-1px] flex h-[443px] w-[313px] items-center justify-center">
-              <Image
-                src="/landing/hero-plate.svg"
-                alt=""
-                width={313}
-                height={443}
-                className="h-full w-full dark:invert"
-              />
-            </div>
-
-            <div className="absolute left-0 top-[-75px] h-[60px] w-px bg-border-strong" />
-            <div className="absolute left-0 top-[281px] h-[299px] w-px bg-border-strong" />
-            <div className="absolute right-0 top-[447px] h-[137px] w-px bg-border-strong" />
-          </div>
-        </div>
-      </section>
-    </main>
+    <div className={styles.root} style={homepageRootStyle} data-homepage-root>
+      <noscript>
+        <style>{NOSCRIPT_CSS}</style>
+      </noscript>
+      <HomepageNav links={links} />
+      <main id="main">
+        <HeroSection links={links} />
+        <StackSection />
+        <PillarsSection />
+        <NetworkSection />
+        <IssuanceSection />
+        <PaymentsSection />
+        <MarketsSection />
+        <PrivacySection />
+        <InterfacesSection links={links} />
+        <BuildersSection />
+        <WalkthroughsSection />
+        <StartSection links={links} />
+      </main>
+      <HomepageFooter links={links} />
+    </div>
   );
 }

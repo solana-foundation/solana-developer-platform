@@ -1,0 +1,50 @@
+/*
+ * Privacy; its rhythm (--pad, --title,
+ * --sub) is the page's. The picture sits on the left and the words on the right; the words stay
+ * first in the DOM so they are read first.
+ */
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(48px, 6vw, 96px);
+  align-items: center;
+  padding: var(--pad) 0;
+  border-top: 1px solid var(--line);
+}
+
+.text {
+  order: 2;
+}
+
+.vis {
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--title);
+  line-height: 1.04;
+  letter-spacing: -0.028em;
+}
+
+.body {
+  max-width: 42ch;
+  margin-top: 24px;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: var(--sub);
+}
+
+@media (max-width: 1000px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .text {
+    order: 0;
+  }
+
+  .vis {
+    order: 2;
+  }
+}

@@ -1,0 +1,546 @@
+/*
+ * The homepage's sticky bar. `.root` is `display: contents` and carries `data-ground`, which
+ * flips the bar to its night colours over night sections. The phone menu stays
+ * paper on both grounds.
+ */
+.root {
+  display: contents;
+}
+
+/* skip link: off screen until it takes focus */
+.skip {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 60;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  font: 500 14px / 1 var(--font);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+
+.skip:focus-visible,
+.skip:focus {
+  transform: none;
+}
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: var(--nav-height);
+  background: color-mix(in srgb, var(--paper) 84%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  backdrop-filter: blur(14px) saturate(1.1);
+  border-bottom: 1px solid transparent;
+  transition:
+    border-color 300ms var(--micro),
+    background 700ms var(--e);
+}
+
+.scrolled {
+  border-bottom-color: var(--line2);
+}
+
+.inner {
+  width: var(--band);
+  height: var(--nav-height);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 26px;
+}
+
+/* the SDP lockup; the dark one over night */
+.brand {
+  position: relative;
+  display: block;
+  width: 78px;
+  height: 30px;
+  justify-self: start;
+}
+
+.brand img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.brand .onDark {
+  display: none;
+}
+
+/* ── the groups and their panels ── */
+.menu {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  gap: 26px;
+  height: var(--nav-height);
+}
+
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* the hover keeps the panel open across the gap under the bar */
+.item::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: -20px;
+  right: -20px;
+  height: 12px;
+}
+
+.trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--nav-height);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 500 15px / 1 var(--font);
+  color: var(--ink3);
+  cursor: pointer;
+  transition: color 700ms var(--e);
+}
+
+.trigger svg {
+  width: 12px;
+  height: 12px;
+  margin-top: 1px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--ink4);
+  transition:
+    transform 300ms var(--e),
+    color 160ms;
+}
+
+/* the underline runs under the word only, not its chevron */
+.trigger::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 18px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--magenta);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 260ms var(--e);
+}
+
+.trigger:hover,
+.itemOpen .trigger,
+.itemHere .trigger {
+  color: var(--ink);
+}
+
+.itemOpen .trigger::after,
+.itemHere .trigger::after {
+  transform: scaleX(1);
+}
+
+.itemOpen .trigger svg {
+  transform: rotate(180deg);
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  width: max-content;
+  min-width: 520px;
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(156px, max-content);
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow:
+    0 1px 2px #0f0f130a,
+    0 18px 40px -16px #0f0f1329;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -6px);
+  transition:
+    opacity 0.25s,
+    transform 0.3s,
+    visibility 0s 0.3s;
+}
+
+.itemOpen .panel {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition:
+    opacity 0.25s,
+    transform 0.3s,
+    visibility 0s;
+}
+
+.features {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  padding-right: 8px;
+}
+
+.feature {
+  display: grid;
+  gap: 2px;
+  padding: 10px 14px 11px;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background-color 180ms var(--micro);
+}
+
+.feature b {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.feature span {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ink4);
+  white-space: nowrap;
+}
+
+.links {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0 4px 8px;
+  border-left: 1px solid var(--line2);
+}
+
+.links a {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ink3);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    color 160ms var(--micro),
+    background-color 180ms var(--micro);
+}
+
+.feature:hover,
+.links a:hover {
+  background: var(--paper2);
+}
+
+.links a:hover {
+  color: var(--ink);
+}
+
+.root .feature:focus-visible,
+.root .links a:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: -2px;
+}
+
+/* ── the account actions ── */
+.right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+}
+
+.ghost {
+  padding: 0 10px;
+  font-weight: 500;
+  font-size: 15px;
+  transition: color 700ms var(--e);
+}
+
+.fill {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  transition:
+    color 700ms var(--e),
+    background 700ms var(--e);
+}
+
+/* the language button (Tailwind-styled for the old landing), in the bar's own colours */
+.lang {
+  display: inline-flex;
+}
+
+.lang button,
+.mobileLang button {
+  color: var(--ink3);
+  transition: color 700ms var(--e);
+}
+
+.lang button:hover,
+.mobileLang button:hover {
+  color: var(--ink);
+  background: var(--paper2);
+}
+
+/* ── the burger ── */
+.burger {
+  display: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.burger span {
+  width: 20px;
+  height: 1.5px;
+  background: var(--ink);
+  transition: transform 300ms var(--e);
+}
+
+.burger[aria-expanded="true"] span:first-child {
+  transform: translateY(3.75px) rotate(45deg);
+}
+
+.burger[aria-expanded="true"] span:last-child {
+  transform: translateY(-3.75px) rotate(-45deg);
+}
+
+/* while a panel is open the page under it blurs */
+.scrim {
+  position: fixed;
+  inset: var(--nav-height) 0 0 0;
+  z-index: 48;
+  background: #fbfaf966;
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  backdrop-filter: blur(14px) saturate(1.1);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.scrimOn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ── the phone menu ── */
+.mobile {
+  position: fixed;
+  top: var(--nav-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 49;
+  display: block;
+  padding: 8px 20px calc(24px + env(safe-area-inset-bottom));
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--paper);
+}
+
+.mobile[hidden] {
+  display: none;
+}
+
+.mobileLink {
+  display: block;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line2);
+  font-size: 18px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* the bar keeps its language button until the account actions fold away (900px) */
+.mobileLang {
+  display: none;
+  padding-top: 14px;
+}
+
+.mobileCta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.mobileCta a {
+  justify-content: center;
+  padding: 0 16px;
+  font-size: 16px;
+}
+
+/* ── night ground ── */
+.root[data-ground="night"] .bar {
+  background: #08080ad9;
+}
+
+.root[data-ground="night"] .scrolled {
+  border-bottom-color: #ffffff14;
+}
+
+.root[data-ground="night"] .trigger,
+.root[data-ground="night"] .ghost,
+.root[data-ground="night"] .lang button {
+  color: var(--night-ink2);
+}
+
+.root[data-ground="night"] .trigger:hover,
+.root[data-ground="night"] .itemOpen .trigger,
+.root[data-ground="night"] .itemHere .trigger,
+.root[data-ground="night"] .ghost:hover,
+.root[data-ground="night"] .lang button:hover {
+  color: var(--night-ink);
+}
+
+.root[data-ground="night"] .lang button:hover {
+  background: #ffffff14;
+}
+
+.root[data-ground="night"] .trigger svg {
+  color: var(--night-ink3);
+}
+
+.root[data-ground="night"] .fill {
+  background: var(--night-ink);
+  color: var(--ink);
+}
+
+.root[data-ground="night"] .burger span {
+  background: var(--night-ink);
+}
+
+.root[data-ground="night"] .brand .onLight {
+  display: none;
+}
+
+.root[data-ground="night"] .brand .onDark {
+  display: block;
+}
+
+.root[data-ground="night"] .panel {
+  background: var(--night2);
+  border-color: #ffffff14;
+  box-shadow:
+    0 1px 2px #0000004d,
+    0 22px 48px -16px #000000b3;
+}
+
+.root[data-ground="night"] .links {
+  border-left-color: #ffffff14;
+}
+
+.root[data-ground="night"] .feature b {
+  color: var(--night-ink);
+}
+
+.root[data-ground="night"] .feature span {
+  color: var(--night-ink3);
+}
+
+.root[data-ground="night"] .links a {
+  color: var(--night-ink2);
+}
+
+.root[data-ground="night"] .links a:hover {
+  color: var(--night-ink);
+}
+
+.root[data-ground="night"] .feature:hover,
+.root[data-ground="night"] .links a:hover {
+  background: #ffffff0a;
+}
+
+.root[data-ground="night"] .scrim {
+  background: #08080a66;
+}
+
+/* the groups fold into the burger as soon as they no longer fit (mobile-menu.tsx WIDE_QUERY is
+   this breakpoint's other side: keep the two in step) */
+@media (max-width: 1180px) {
+  .inner {
+    grid-template-columns: auto 1fr auto auto;
+    gap: 14px;
+  }
+
+  .menu {
+    display: none;
+  }
+
+  .right {
+    grid-column: 3;
+  }
+
+  .burger {
+    display: flex;
+    grid-column: 4;
+  }
+}
+
+/* on a phone the account actions fold too: the burger at the right edge */
+@media (max-width: 900px) {
+  .bar {
+    background: color-mix(in srgb, var(--paper) 96%, transparent);
+  }
+
+  .inner {
+    grid-template-columns: auto 1fr;
+  }
+
+  .right {
+    display: none;
+  }
+
+  .burger {
+    grid-column: 2;
+    justify-self: end;
+    width: 44px;
+    height: 44px;
+    margin-right: -10px;
+  }
+
+  .mobileLang {
+    display: block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar,
+  .trigger,
+  .trigger svg,
+  .trigger::after,
+  .panel,
+  .itemOpen .panel,
+  .ghost,
+  .fill,
+  .lang button,
+  .burger span,
+  .scrim {
+    transition: none;
+  }
+}

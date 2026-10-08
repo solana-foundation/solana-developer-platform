@@ -1,0 +1,453 @@
+/*
+ * Interfaces: the head, then the three ways in as the tabs of a code
+ * card showing the call and what answers it. On wide screens the head and the card span two of
+ * the page's three columns and the ways take the third; on a phone the card comes first.
+ */
+.section {
+  --code-pad: clamp(22px, 2.2vw, 30px);
+
+  padding: var(--pad) 0 calc(var(--pad) * 1.2);
+}
+
+/* ── the head ─────────────────────────────────────────────────────────── */
+.sechead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 34px;
+  align-items: end;
+}
+
+.intro {
+  margin: 0;
+  max-width: 48ch;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: var(--ink3);
+}
+
+/* ── the grid ─────────────────────────────────────────────────────────── */
+.ifc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+  margin-top: var(--lead);
+}
+
+.ways {
+  --ways-gap: 8px;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--ways-gap);
+}
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ways-gap);
+}
+
+/* ── the ways: words only, the chosen one in ink with its line filling under it ── */
+.way {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 0 0 clamp(18px, 1.6vw, 24px);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wayTitle {
+  align-self: end;
+  font: 400 clamp(20px, 1.6vw, 24px) / 1.15 var(--font);
+  letter-spacing: -0.02em;
+  color: #75737e;
+  transition: color 420ms var(--e);
+}
+
+.wayBody {
+  max-width: 44ch;
+  font: 500 14.5px / 1.5 var(--font);
+  letter-spacing: -0.003em;
+  color: #6a6873;
+  text-wrap: pretty;
+  transition: color 420ms var(--e);
+}
+
+.wayOn .wayTitle {
+  color: var(--ink);
+}
+
+.wayOn .wayBody {
+  color: var(--ink3);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .way:hover .wayTitle,
+  .way:hover .wayBody {
+    color: var(--ink2);
+  }
+}
+
+/* the tabs' list in the selector outranks the page's shared focus ring */
+.tabs .way:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 6px;
+  border-radius: 4px;
+}
+
+.wayBar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: var(--line);
+}
+
+.wayBar i {
+  position: absolute;
+  top: -0.5px;
+  right: 0;
+  left: 0;
+  height: 2px;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, #9945ff, #b65cff 60%, #dc1fff);
+}
+
+/* the line is the timer: when it has filled, the next way takes its turn */
+.wayBar .barRun {
+  animation: barFill 6200ms linear forwards;
+}
+
+.wayBar .barFull {
+  transform: none;
+}
+
+@keyframes barFill {
+  to {
+    transform: none;
+  }
+}
+
+/* ── the reference links ──────────────────────────────────────────────── */
+.reflinks {
+  /* the links sit in their own row, without the more link's top margin */
+  --more-top: 0;
+
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  padding-top: clamp(2px, 0.4vw, 6px);
+}
+
+/* ── the code card ────────────────────────────────────────────────────── */
+.req {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #0f0f1314;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow:
+    0 24px 60px -36px #1e0b3d40,
+    inset 0 0 0 1px #fff;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #0f0f130f;
+  background: linear-gradient(#fbfaf9, #fff);
+}
+
+.endpoint {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font: 500 14px / 1 var(--font);
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+
+.endpoint i {
+  flex-shrink: 0;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #9945ff14;
+  font: 500 11px / 1 var(--font);
+  font-style: normal;
+  letter-spacing: 0.08em;
+  color: #7a2fe0;
+}
+
+.endpoint span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the mint status lands with the answer, with one beat */
+.status {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 10px;
+  border-radius: 999px;
+  background: radial-gradient(90% 150% at 32% 78%, #bdf7dd 0%, #d8fbea 60%, #eefdf5 100%);
+  box-shadow: inset 0 0 8px #14f19540;
+  font: 500 13px / 1 var(--font);
+  white-space: nowrap;
+  color: #0b2a1f;
+  opacity: 0;
+  transform: translateY(3px);
+}
+
+.status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #14d98a;
+  box-shadow: 0 0 0 3px #14f19533;
+}
+
+.statusIn {
+  animation:
+    statusIn 400ms var(--e) var(--status-delay-wide) both,
+    statusBeat 1300ms cubic-bezier(0.3, 0.7, 0.3, 1) var(--status-delay-wide);
+}
+
+@keyframes statusIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes statusBeat {
+  0% {
+    scale: 1;
+  }
+  24% {
+    scale: 1.07;
+    box-shadow:
+      inset 0 0 14px #9945ff55,
+      0 0 0 9px #9945ff14;
+  }
+  56% {
+    scale: 0.995;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+/* both layouts of the request are in the markup; the screen picks one */
+.narrow {
+  display: none;
+}
+
+.code {
+  margin: 0;
+  padding: 20px var(--code-pad);
+  font:
+    400 clamp(12.5px, 1vw, 14px) / 1.8 ui-monospace,
+    "SF Mono",
+    Menlo,
+    Consolas,
+    monospace;
+  color: #3a3842;
+  /* a line wider than the card wraps rather than hiding past its edge */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.response {
+  box-sizing: content-box;
+  min-height: calc(var(--rows, 0) * 1.8em);
+  padding-bottom: 24px;
+  background: #fbfaf9;
+}
+
+.separator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 34px;
+  padding: 0 var(--code-pad);
+  border-top: 1px solid #0f0f130d;
+  background: #fbfaf9;
+}
+
+.separator span {
+  font: 500 12px / 1 var(--font);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #0f0f13a6;
+}
+
+.prompt {
+  color: #0f0f134d;
+}
+
+.key {
+  color: #7a2fe0;
+}
+
+.value {
+  color: #047857;
+}
+
+/* the request rolls in a line at a time, the answer a beat after it */
+/* each line takes the card's width, so a long one wraps inside itself */
+.line {
+  display: inline-block;
+  width: 100%;
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.lineIn {
+  animation: lineIn 420ms var(--e) forwards;
+  animation-delay: calc(var(--i) * 70ms);
+}
+
+.lineAnswer.lineIn {
+  animation-delay: calc(var(--i) * 70ms + 380ms);
+}
+
+@keyframes lineIn {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── layout by width ──────────────────────────────────────────────────── */
+@media (min-width: 901px) {
+  /* the paragraph starts where the third column starts and sits on the headline's first line */
+  .sechead {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 56px 26px;
+    align-items: first baseline;
+  }
+
+  .headline {
+    grid-column: 1 / 3;
+  }
+
+  .intro {
+    grid-column: 3;
+    max-width: none;
+  }
+
+  .ifc {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: clamp(40px, 5vw, 72px) 26px;
+    align-items: stretch;
+  }
+
+  .ways {
+    --ways-gap: clamp(18px, 1.8vw, 26px);
+
+    grid-row: 1;
+    grid-column: 1;
+    align-self: stretch;
+    justify-content: flex-start;
+    padding: clamp(8px, 1vw, 16px) 0 clamp(6px, 0.8vw, 12px);
+  }
+
+  .req {
+    grid-row: 1;
+    grid-column: 2 / 4;
+    align-self: start;
+  }
+}
+
+@media (max-width: 600px) {
+  /* the code first, the three modes under it: a tap shows its answer above the finger */
+  .req {
+    order: -1;
+  }
+
+  /* the real paths are longer than a phone's row: the path keeps its whole name on the first row
+     and the status takes the second, so the head is one shape in every mode */
+  .head {
+    flex-wrap: wrap;
+    gap: 10px 8px;
+    padding: 12px 14px;
+  }
+
+  .endpoint {
+    flex-basis: 100%;
+  }
+
+  .endpoint span {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.3;
+  }
+
+  .status {
+    padding: 5px 10px 5px 8px;
+    font-size: 12px;
+  }
+
+  .statusIn {
+    animation-delay: var(--status-delay-narrow);
+  }
+
+  .wide {
+    display: none;
+  }
+
+  .narrow {
+    display: block;
+  }
+}
+
+@media (max-width: 374px) {
+  .code {
+    padding-inline: 16px;
+    font-size: 11.5px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line,
+  .status {
+    opacity: 1;
+    transform: none;
+  }
+
+  .lineIn,
+  .statusIn,
+  .wayBar .barRun {
+    animation: none;
+  }
+
+  .wayTitle,
+  .wayBody {
+    transition: none;
+  }
+}

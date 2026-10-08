@@ -1,0 +1,269 @@
+/*
+ * The homepage's own palette and primitives.
+ * The homepage paints fixed paper and night grounds and ignores the user's theme, so these
+ * values are scoped to `.root` instead of joining the dashboard's design tokens.
+ */
+.root {
+  --paper: #fbfaf9;
+  --paper2: #f4f3f0;
+  --ink: #0f0f13;
+  --ink2: #4a4852;
+  --ink3: #585660;
+  --ink4: #666470;
+  --line: #0f0f1318;
+  --line2: #0f0f130d;
+  --purple: #9945ff;
+  --magenta: #dc1fff;
+  --green: #14f195;
+  --accent: #9945ff;
+  --night: #08080a;
+  --night2: #101014;
+  --night-ink: #fbfaf9;
+  --night-ink2: #b4b0be;
+  --night-ink3: #8c8895;
+  --night-line: #ffffff14;
+  --font: var(--font-season-sans), "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  --band: min(1240px, calc(100vw - 96px));
+  --e: cubic-bezier(0.32, 0.72, 0, 1);
+  --micro: cubic-bezier(0.4, 0, 0.2, 1);
+  --display: clamp(36px, 5vw, 72px);
+  /* the headline's outline colour while it forms; night sections override it */
+  --form-stroke: #bdb9c7;
+  /* the sections' rhythm: their padding (--pad), the gap under a head (--lead), the size of a
+     head that shares its row with a picture (--title) and the subline ink (--sub) */
+  --pad: clamp(88px, 8.9vw, 128px);
+  --lead: clamp(56px, 6vw, 88px);
+  --title: clamp(32px, 3.9vw, 56px);
+  --sub: #0f0f1399;
+
+  /* native controls and scrollbars follow the ground, not the system theme */
+  color-scheme: light;
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink2);
+  font: 500 16px / 1.55 var(--font);
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+.root :where(h1, h2, h3) {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 400;
+}
+
+.root :where(p) {
+  margin: 0;
+}
+
+.root :where(a) {
+  color: inherit;
+}
+
+.root :where(img) {
+  max-width: 100%;
+  display: block;
+}
+
+.root :where(a, button):focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* the page band: every section's content sits in it */
+.wrap {
+  width: var(--band);
+  margin-inline: auto;
+}
+
+.section {
+  padding: 104px 0;
+}
+
+.paper {
+  background: var(--paper);
+}
+
+.night {
+  --form-stroke: #fbfaf959;
+  color-scheme: dark;
+  background: var(--night);
+  color: var(--night-ink2);
+}
+
+.night :where(h1, h2, h3) {
+  color: var(--night-ink);
+}
+
+.h2 {
+  font-size: clamp(30px, 3.6vw, 46px);
+  line-height: 1.1;
+  letter-spacing: -0.022em;
+}
+
+.display {
+  font-size: var(--display);
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 17px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  font: 500 14px / 1 var(--font);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background 160ms var(--micro),
+    border-color 160ms var(--micro),
+    transform 160ms var(--micro);
+}
+
+.btnFill {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.btnFill:hover {
+  background: #26242c;
+}
+
+.btnLine {
+  background: none;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.btnLine:hover {
+  background: var(--paper2);
+}
+
+.btnGhost {
+  background: none;
+  color: var(--ink3);
+  padding: 0 6px;
+}
+
+.btnGhost:hover {
+  color: var(--ink);
+}
+
+.btnLg {
+  height: 44px;
+  padding: 0 21px;
+  font-size: 15px;
+}
+
+/*
+ * The "more" link (more-link.tsx): a hairline under the words only, over which a magenta line
+ * draws from the left on hover or focus, and an arrow that leaves through its own top right
+ * corner while a twin comes in from the bottom left. A section moves its top margin with
+ * --more-top, and the top margin it keeps on a touch screen with --more-touch-top.
+ */
+.more {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--more-top, 22px);
+  font: 500 15px / 1 var(--font);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.moreText {
+  padding-bottom: 5px;
+  background:
+    linear-gradient(var(--magenta), var(--magenta)) 0 100% / 0 1px no-repeat,
+    linear-gradient(var(--line), var(--line)) 0 100% / 100% 1px no-repeat;
+  transition: background-size 420ms var(--e);
+}
+
+.more:hover .moreText,
+.more:focus-visible .moreText {
+  background-size:
+    100% 1px,
+    100% 1px;
+}
+
+.moreIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-bottom: 5px;
+  overflow: hidden;
+}
+
+.moreArrow {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.more:hover .moreArrow,
+.more:focus-visible .moreArrow {
+  animation: moreFly 560ms var(--e) both;
+}
+
+@keyframes moreFly {
+  0% {
+    transform: none;
+  }
+  42% {
+    transform: translate(120%, -120%);
+  }
+  42.01% {
+    transform: translate(-120%, 120%);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  .root {
+    --band: calc(100vw - 40px);
+  }
+
+  .section {
+    padding: 72px 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .root {
+    --pad: 64px;
+    --lead: 40px;
+  }
+}
+
+/* a link set in a line of text gets a finger's height without moving anything */
+@media (max-width: 600px), (pointer: coarse) {
+  .more {
+    padding-block: 12px;
+    margin-block: var(--more-touch-top, -12px) -12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moreText {
+    transition: none;
+  }
+
+  .more:hover .moreArrow,
+  .more:focus-visible .moreArrow {
+    animation: none;
+  }
+}

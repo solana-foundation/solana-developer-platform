@@ -1,0 +1,279 @@
+/* The sandbox walkthroughs: the video, and the chapters as hairline rows. */
+.section {
+  padding: calc(var(--pad) * 1.1) 0 calc(var(--pad) * 1.2);
+}
+
+.playerBlock {
+  margin-top: var(--lead);
+}
+
+.player {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  gap: 44px;
+  align-items: start;
+}
+
+/* the player keeps its own black frame on the night */
+.frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid #ffffff14;
+  border-radius: 14px;
+  background: #08080a;
+}
+
+.video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Watch: a bubble pill low left, clear of the poster's words; gone once the film plays */
+.watch {
+  position: absolute;
+  left: clamp(24px, 3vw, 40px);
+  bottom: clamp(24px, 3vw, 40px);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 22px 7px 7px;
+  border: 0;
+  border-radius: 999px;
+  font: 500 17px / 1 var(--font);
+  letter-spacing: -0.01em;
+  color: #1e0b3d;
+  cursor: pointer;
+  background: radial-gradient(
+    90% 150% at 32% 78%,
+    #b68bff 0%,
+    #c9a8ff 40%,
+    #ddcbff 78%,
+    #ebe1ff 100%
+  );
+  background-size: 160% 160%;
+  box-shadow:
+    inset 0 0 18px #9945ff55,
+    0 0 0 10px #9945ff24,
+    0 0 0 22px #9945ff10,
+    0 18px 50px -18px #9945ffaa;
+  transition:
+    transform 420ms cubic-bezier(0.3, 1.4, 0.4, 1),
+    opacity 300ms var(--e),
+    visibility 0s linear 0s;
+  animation:
+    light 9s ease-in-out infinite,
+    breath 5s ease-in-out infinite;
+  animation-play-state: paused;
+}
+
+.player[data-on-screen="true"] .watch {
+  animation-play-state: running;
+}
+
+.watch:hover {
+  transform: scale(1.04);
+}
+
+.player[data-playing="true"] .watch {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: scale(0.8);
+  animation: none;
+  transition:
+    transform 420ms cubic-bezier(0.3, 1.4, 0.4, 1),
+    opacity 300ms var(--e),
+    visibility 0s linear 300ms;
+}
+
+.watchKnob {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #fff;
+  color: #7a2fe0;
+  box-shadow: 0 4px 12px -4px #3b1a7a66;
+}
+
+.playIcon {
+  display: block;
+}
+
+.watchKnob .playIcon {
+  width: 20px;
+  height: 20px;
+}
+
+.watchTime {
+  font-style: normal;
+  color: #1e0b3d99;
+}
+
+@keyframes light {
+  0%,
+  100% {
+    background-position: 30% 70%;
+  }
+  50% {
+    background-position: 70% 30%;
+  }
+}
+
+@keyframes breath {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 18px #9945ff55,
+      0 0 0 10px #9945ff24,
+      0 0 0 22px #9945ff10,
+      0 18px 50px -18px #9945ffaa;
+  }
+  50% {
+    box-shadow:
+      inset 0 0 18px #9945ff55,
+      0 0 0 12px #9945ff2b,
+      0 0 0 27px #9945ff12,
+      0 18px 56px -16px #9945ffbb;
+  }
+}
+
+/* the chapters: a play knob in its own column, the title and its line beside it, the time last */
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chapter {
+  position: relative;
+  display: grid;
+  width: 100%;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 16px;
+  padding: 22px 0 26px;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: 500 15px / 1.35 var(--font);
+  color: var(--night-ink3);
+  cursor: pointer;
+}
+
+.chapter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: #ffffff1f;
+  transition: background 420ms var(--e);
+}
+
+.item:first-child .chapter {
+  padding-top: 0;
+}
+
+.item:first-child .chapter::before {
+  display: none;
+}
+
+.chapter[aria-current="true"]::before,
+.chapter:hover::before {
+  background: var(--magenta);
+}
+
+.knob {
+  display: inline-grid;
+  place-items: center;
+  grid-column: 1;
+  grid-row: 1 / 3;
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #ffffff10;
+  color: var(--night-ink2);
+}
+
+.knob .playIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.chapter[aria-current="true"] .knob {
+  color: #fff;
+  background: radial-gradient(90% 150% at 32% 78%, #8a3bf0 0%, #9d5cfa 45%, #b484ff 100%);
+}
+
+.chapterTitle {
+  grid-column: 2;
+  grid-row: 1;
+  font-weight: 400;
+  font-size: 21px;
+  letter-spacing: -0.015em;
+  color: var(--night-ink3);
+  transition: color 200ms;
+}
+
+.chapter[aria-current="true"] .chapterTitle,
+.chapter:hover .chapterTitle {
+  color: var(--night-ink);
+}
+
+.chapterNote {
+  grid-column: 2;
+  grid-row: 2;
+  margin-top: 5px;
+  font-size: 14px;
+  color: var(--night-ink3);
+}
+
+.chapterTime {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: start;
+  padding-top: 6px;
+  font-style: normal;
+  font-size: 13px;
+  color: var(--night-ink3);
+}
+
+@media (max-width: 760px) {
+  .player {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  /* a smaller Watch, the recording shown whole */
+  .watch {
+    left: 14px;
+    bottom: 14px;
+  }
+
+  .video {
+    object-fit: contain;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch,
+  .player[data-on-screen="true"] .watch {
+    animation: none;
+  }
+
+  .chapter::before,
+  .chapterTitle {
+    transition: none;
+  }
+}

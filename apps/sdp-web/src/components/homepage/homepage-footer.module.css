@@ -1,0 +1,109 @@
+/*
+ * The footer on the close's night. The close's glass mark overflows down into it: the footer
+ * paints its night as a plain block (no position, no z-index), the mark paints over that, and the
+ * footer's content is lifted above the mark, so the links sit over the mark's lower bars.
+ */
+.footer {
+  padding: 64px 0 34px;
+  color: var(--night-ink3);
+}
+
+.inner {
+  position: relative;
+  z-index: 1;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 0.6fr));
+  gap: 40px;
+}
+
+.brand {
+  display: block;
+  width: 78px;
+  height: 30px;
+}
+
+.brand img {
+  width: 100%;
+  height: 100%;
+}
+
+.tagline {
+  margin-top: 14px;
+  max-width: 30ch;
+  font-size: 14px;
+  color: var(--night-ink3);
+}
+
+.columnTitle {
+  margin: 0 0 14px;
+  font: 500 10px / 1 var(--font);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--night-ink3);
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.link {
+  display: block;
+  padding: 5px 0;
+  font-size: 14px;
+  color: var(--night-ink2);
+  text-decoration: none;
+  transition: color 160ms var(--micro);
+}
+
+.link:hover {
+  color: var(--night-ink);
+}
+
+.bottom {
+  margin-top: 48px;
+  padding-top: 22px;
+  border-top: 1px solid #232329;
+  font: 500 10px / 1 var(--font);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--night-ink3);
+}
+
+/* links get a finger's height on any touch screen */
+@media (pointer: coarse) {
+  .link {
+    padding-block: 8px;
+  }
+}
+
+@media (max-width: 1000px) {
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 28px 16px;
+  }
+
+  .lead {
+    grid-column: 1 / -1;
+  }
+}
+
+/* on a phone: two columns, the links a finger tall */
+@media (max-width: 600px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .link {
+    padding-block: 8px;
+  }
+
+  .columnTitle,
+  .bottom {
+    font-size: 11px;
+  }
+}
