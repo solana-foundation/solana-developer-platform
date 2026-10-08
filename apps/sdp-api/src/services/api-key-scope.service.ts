@@ -1,4 +1,5 @@
 import {
+  type AllowedOperation,
   type ApiKeyRole,
   type ApiKeyStatus,
   type ApiKeyWalletBinding,
@@ -6,6 +7,7 @@ import {
   getPermissionsForApiKeyRole,
   hasAllPermissions,
   hasAnyPermission,
+  isAllowedOperationsWithin,
   type Permission,
 } from "@sdp/types";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
@@ -384,6 +386,22 @@ export function assertGrantableApiKeyPermissions(
     throw new AppError(
       "INSUFFICIENT_PERMISSIONS",
       "Cannot grant an API key more permissions than you hold"
+    );
+  }
+}
+
+/**
+ * A key may not mint or rotate a key with wider Allowed Operations than its
+ * own (ADR 0006). A dashboard actor and an unrestricted key pass `null`.
+ */
+export function assertGrantableAllowedOperations(
+  actorAllowedOperations: AllowedOperation[] | null | undefined,
+  requestedAllowedOperations: AllowedOperation[] | null | undefined
+): void {
+  if (!isAllowedOperationsWithin(actorAllowedOperations, requestedAllowedOperations)) {
+    throw new AppError(
+      "INSUFFICIENT_PERMISSIONS",
+      "Cannot grant an API key operations outside your own allowed operations"
     );
   }
 }

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
@@ -26,6 +27,7 @@ const recurringPayments = new Hono<{ Bindings: Env }>();
 recurringPayments.post(
   "/",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  requireAllowedOperation("recurring_payment_create"),
   validateBody(createRecurringPaymentSchema),
   createRecurringPayment
 );
@@ -33,6 +35,7 @@ recurringPayments.get("/", requirePermissions("payments:read"), listRecurringPay
 recurringPayments.patch(
   "/:id",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  requireAllowedOperation("recurring_payment_update"),
   validateBody(updateRecurringPaymentSchema),
   updateRecurringPayment
 );
@@ -51,6 +54,7 @@ recurringPayments.post(
 recurringPayments.post(
   "/:id/collect",
   requirePermissions("payments:write", "wallets:read"),
+  requireAllowedOperation("recurring_payment_collection"),
   validateBody(collectRecurringPaymentSchema),
   collectRecurringPayment
 );

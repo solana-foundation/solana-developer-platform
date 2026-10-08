@@ -38,7 +38,7 @@
  * this paragraph first: the fences below are already that check.
  */
 
-import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
+import type { AllowedOperation, ApiKeyStatus, CachedApiKey } from "@sdp/types";
 import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import type { KVStore } from "@/runtime/kv";
@@ -77,8 +77,8 @@ export async function loadCachedApiKeyFromDb(
     .prepare(
       `SELECT ak.id, ak.organization_id, ak.project_id, ak.role, ak.permissions,
               p.environment,
-              ak.rate_limit_tier, ak.allowed_ips, ak.signing_wallet_id, ak.status, ak.expires_at,
-              ak.rotation_deadline, o.status AS organization_status
+              ak.rate_limit_tier, ak.allowed_ips, ak.allowed_operations, ak.signing_wallet_id,
+              ak.status, ak.expires_at, ak.rotation_deadline, o.status AS organization_status
        FROM api_keys ak
        JOIN projects p ON p.id = ak.project_id
        JOIN organizations o ON o.id = ak.organization_id
@@ -95,6 +95,7 @@ export async function loadCachedApiKeyFromDb(
       environment: string;
       rate_limit_tier: string;
       allowed_ips: string | null;
+      allowed_operations: string | null;
       signing_wallet_id: string | null;
       status: string;
       expires_at: string | null;
@@ -106,6 +107,9 @@ export async function loadCachedApiKeyFromDb(
     return null;
   }
 
+  const allowedOperations = parseOptionalPostgresJson<AllowedOperation[]>(
+    result.allowed_operations
+  );
   const { walletScope, signingWalletId, signingWalletIds, walletBindings } =
     await loadApiKeyWalletAuthorization(
       db,
@@ -126,6 +130,10 @@ export async function loadCachedApiKeyFromDb(
     environment: result.environment as "sandbox" | "production",
     rateLimitTier: result.rate_limit_tier as "standard" | "elevated" | "unlimited",
     allowedIps: parseOptionalPostgresJson<string[]>(result.allowed_ips),
+    // Present only for a restricted key. An unrestricted key serializes exactly
+    // like a cache entry written before this field existed, so the
+    // stringify-based verification below keeps matching legacy entries.
+    ...(allowedOperations && allowedOperations.length > 0 ? { allowedOperations } : {}),
     walletScope,
     signingWalletId,
     signingWalletIds,

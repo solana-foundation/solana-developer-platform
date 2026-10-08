@@ -9,6 +9,7 @@ import {
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { assertOperationAllowed } from "@/middleware/allowed-operations";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
@@ -354,6 +355,9 @@ export async function createRingsZone(c: AppContext) {
 export async function prepareRingsOperation(c: AppContext) {
   const parsed = prepareRingsOperationSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
+  // The operation type comes from the body, so the Allowed Operations check
+  // runs here instead of as a static route declaration.
+  assertOperationAllowed(c, `rings_${parsed.data.opType}`);
 
   const { auth, tenant } = tenantOf(c);
   const ringsWallet = await requireRingsWallet(c, tenant, parsed.data.walletId, ["payments:write"]);

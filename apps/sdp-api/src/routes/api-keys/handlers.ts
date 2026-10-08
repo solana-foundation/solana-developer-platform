@@ -234,6 +234,7 @@ export const listApiKeys = async (c: AppContext) => {
         signingWalletIds: walletBindings.map((binding) => binding.walletId),
         walletBindings,
         policyBindings: accessSummary?.policyBindings ?? [],
+        allowedOperations: key.allowedOperations,
         lastUsedAt: key.lastUsedAt,
         expiresAt: key.expiresAt,
         createdAt: key.createdAt,
@@ -255,6 +256,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
     permissions,
     walletScope,
     allowedIps,
+    allowedOperations,
     expiresAt,
     signingWalletId,
     signingWalletIds,
@@ -386,11 +388,13 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
       createdByKeyId: actor.apiKeyId ?? undefined,
       actorPermissions: actor.permissions,
       actorApiKeyRole: c.get("apiKey")?.role ?? null,
+      actorAllowedOperations: c.get("apiKey")?.allowedOperations ?? null,
       name,
       description,
       role,
       permissions,
       allowedIps,
+      allowedOperations,
       expiresAt,
       signingWalletId: resolvedSigningWalletId,
       pepper: c.env.API_KEY_PEPPER,
@@ -414,6 +418,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
       walletScope: resolvedWalletBindings.length > 0 ? "selected" : "all",
       signingWalletId: resolvedSigningWalletId,
       signingWalletIds: resolvedWalletBindings.map((binding) => binding.walletId),
+      allowedOperations: allowedOperations ?? [],
       provisionedWallet: provisionWalletRequested,
     },
   });
@@ -471,6 +476,7 @@ export const getApiKey = async (c: AppContext) => {
     signingWalletIds: walletBindings.map((binding) => binding.walletId),
     walletBindings,
     policyBindings: accessSummary?.policyBindings ?? [],
+    allowedOperations: key.allowedOperations,
     lastUsedAt: key.lastUsedAt,
     expiresAt: key.expiresAt,
     rotatedFrom: key.rotatedFrom,
@@ -536,10 +542,12 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
       projectId,
       actorPermissions: actor.permissions,
       actorApiKeyRole: c.get("apiKey")?.role ?? null,
+      actorAllowedOperations: c.get("apiKey")?.allowedOperations ?? null,
       currentRole: existing.role,
       name: body.name,
       description: body.description,
       allowedIps: body.allowedIps,
+      allowedOperations: body.allowedOperations,
       expiresAt: body.expiresAt,
       permissions: body.permissions,
       signingWallet: walletSelection.touched
@@ -557,6 +565,7 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
   // delete: an emptied slot invites an in-flight stale fill to repopulate it.
   if (
     body.allowedIps !== undefined ||
+    body.allowedOperations !== undefined ||
     body.permissions !== undefined ||
     body.expiresAt !== undefined ||
     walletSelection.touched
@@ -805,6 +814,7 @@ export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSc
     gracePeriodHours,
     actor.permissions,
     c.get("apiKey")?.role ?? null,
+    c.get("apiKey")?.allowedOperations ?? null,
     c.env.API_KEY_PEPPER,
     // The pre-flight check above fails fast, but the rows it judged can
     // change before the rotation lock is taken; this guard re-judges the

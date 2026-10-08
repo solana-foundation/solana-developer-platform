@@ -27,6 +27,7 @@ A request must clear every layer that is configured on its key:
 | **Role** | Baseline permission set — see the table below |
 | **Per-key permissions** | Optional fine-grained overrides of the role's defaults. A key can only grant permissions its creator holds |
 | **Wallet bindings** | Restrict which custody wallets the key can operate, each binding with its own permission list |
+| **Allowed operations** | Optional allow-list of operation families and types the key may perform on those wallets. Empty means unrestricted |
 | **Policy profiles** | Rule sets (destination controls, amount limits, approval requirements) evaluated before a bound wallet moves funds |
 | **IP allowlist** | Optional IPv4/IPv6/CIDR ranges the key may be used from |
 

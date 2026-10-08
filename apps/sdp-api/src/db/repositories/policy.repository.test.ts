@@ -1309,6 +1309,7 @@ describe("PolicyRepository (postgres)", () => {
       24,
       ["*"],
       null,
+      null,
       "pepper"
     );
     expect(rotation).not.toBeNull();

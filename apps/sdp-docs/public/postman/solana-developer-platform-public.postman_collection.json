@@ -110,7 +110,7 @@
             "description": "Updates API key attributes. Use null to clear optional fields.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Key Updated\",\n  \"description\": \"Rotated key for new service.\",\n  \"walletScope\": \"all\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"expiresAt\": \"2026-01-01T00:00:00.000Z\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Primary Key Updated\",\n  \"description\": \"Rotated key for new service.\",\n  \"walletScope\": \"all\",\n  \"allowedIps\": [\n    \"203.0.113.0/24\"\n  ],\n  \"allowedOperations\": [\n    \"issuance_mint_execute\"\n  ],\n  \"expiresAt\": \"2026-01-01T00:00:00.000Z\",\n  \"permissions\": [\n    \"tokens:read\",\n    \"tokens:write\"\n  ],\n  \"signingWalletId\": \"privy_wallet_123\",\n  \"signingWalletIds\": [\n    \"privy_wallet_123\",\n    \"dfns_wallet_456\"\n  ],\n  \"walletBindings\": [\n    {\n      \"walletId\": \"\",\n      \"permissions\": [\n        \"tokens:read\"\n      ]\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"

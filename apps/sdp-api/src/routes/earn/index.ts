@@ -2,6 +2,7 @@ import { type Context, Hono, type Next } from "hono";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
 import { isEarnEnabled } from "@/lib/feature-flags";
+import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import {
   optionalAuth,
   requirePermissions,
@@ -412,6 +413,7 @@ earn.get(
 earn.post(
   "/vault-deposits",
   requirePermissions("earn:write", "wallets:read"),
+  requireAllowedOperation("earn_vault_deposit"),
   validateBody(earnVaultDepositSchema),
   policyGate({
     extract: extractEarnVaultDepositPolicyCandidate,
@@ -449,6 +451,7 @@ earn.get(
 earn.post(
   "/vault-withdrawals",
   requirePermissions("earn:write", "wallets:read"),
+  requireAllowedOperation("earn_vault_withdrawal"),
   validateBody(earnVaultWithdrawalSchema),
   policyGate({
     extract: extractEarnVaultWithdrawalPolicyCandidate,
@@ -505,6 +508,7 @@ earn.post(
 earn.post(
   "/vault-withdrawal-requests",
   requirePermissions("earn:write", "wallets:read"),
+  requireAllowedOperation("earn_vault_withdrawal"),
   validateBody(earnVaultWithdrawalRequestSchema),
   policyGate({
     extract: extractEarnVaultWithdrawalRequestPolicyCandidate,
@@ -652,6 +656,7 @@ earn.post(
 earn.post(
   "/programs/:programId/withdrawals",
   requirePermissions("earn:write"),
+  requireAllowedOperation("earn_program_withdrawal"),
   validateBody(earnProgramWithdrawalCreateSchema),
   policyGate({
     extract: extractEarnProgramWithdrawalPolicyCandidate,

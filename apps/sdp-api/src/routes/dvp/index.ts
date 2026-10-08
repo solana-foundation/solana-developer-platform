@@ -1,6 +1,7 @@
 import { type Context, Hono, type Next } from "hono";
 import { forbidden } from "@/lib/errors";
 import { isDvpEnabled } from "@/lib/feature-flags";
+import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { type MeteredQuotaConfig, meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
@@ -97,6 +98,7 @@ dvp.get("/trades/:tradeId", requirePermissions("wallets:read", "payments:read"),
 dvp.post(
   "/trades/:tradeId/fund",
   requirePermissions("payments:write", "wallets:read"),
+  requireAllowedOperation("dvp_fund"),
   validateBody(fundDvpTradeSchema),
   // Quota before the gate, so a caller who is out of quota is refused without
   // recording a wallet operation or raising an approval request for work that
@@ -124,6 +126,7 @@ dvp.post(
 dvp.post(
   "/trades/:tradeId/settle",
   requirePermissions("payments:write", "wallets:read"),
+  requireAllowedOperation("dvp_settle"),
   callerMeteredQuota({ name: "dvp-settle", actorMax: 2, orgMax: 10 }),
   policyGate({ extract: extractDvpSettlePolicyCandidate }),
   settleTrade
