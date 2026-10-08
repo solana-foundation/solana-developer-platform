@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
+import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { insertTestCustodyScopeDefault } from "@/test/helpers/custody";
 import {
@@ -30,6 +31,7 @@ const ORGANIZATION_ID = "org_byok_release_channel";
 const PROJECT_ID = "prj_byok_release_channel";
 const USER_ID = "usr_byok_release_channel";
 const CREDENTIAL_ID = "pcred_byok_release_channel";
+const SUCCESSOR_CREDENTIAL_ID = "pcred_byok_release_channel_successor";
 const CONNECTION_ID = "cconn_byok_release_channel";
 const DEFAULT_CUSTODY_WALLET_ID = "cwlt_byok_release_channel_default";
 const OTHER_CUSTODY_WALLET_ID = "cwlt_byok_release_channel_other";
@@ -80,9 +82,10 @@ async function seedActor(): Promise<void> {
   });
 }
 
-async function seedPendingInstallation(providerAccountFingerprint: string | null): Promise<void> {
-  const db = getDb(env);
-  const credential: TestStoredProviderCredential = {
+async function storedCredential(
+  status: TestStoredProviderCredential["status"]
+): Promise<TestStoredProviderCredential> {
+  return {
     id: CREDENTIAL_ID,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
@@ -95,13 +98,18 @@ async function seedPendingInstallation(providerAccountFingerprint: string | null
       appSecret: APP_SECRET,
     }),
     displayMetadata: { appIdSuffix: "1234" },
-    status: "pending",
+    status,
     credentialVersion: 1,
     rotatedFromProviderCredentialId: null,
     lastValidatedAt: null,
     deactivatedAt: null,
     createdBy: USER_ID,
   };
+}
+
+async function seedPendingInstallation(providerAccountFingerprint: string | null): Promise<void> {
+  const db = getDb(env);
+  const credential = await storedCredential("pending");
   await insertTestStoredProviderCredential(db, credential);
   await insertTestCustodyConnection(db, {
     id: CONNECTION_ID,
@@ -162,6 +170,59 @@ async function seedSelectedActiveConnection(): Promise<void> {
       defaultCustodyConnectionId: CONNECTION_ID,
     });
   });
+}
+
+async function seedTornDownConnection(): Promise<void> {
+  const db = getDb(env);
+  const credential = await storedCredential("active");
+  await insertTestStoredProviderCredential(db, credential);
+  await insertTestCustodyConnection(db, {
+    id: CONNECTION_ID,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    provider: "privy",
+    credential,
+    status: "deactivated",
+    setupMetadata: {},
+    providerAccountFingerprint: await getPrivyProviderAccountFingerprint(APP_ID),
+    lastCheckStatus: "success",
+    lastCheckAt: SEEDED_AT,
+    lastCheckFailureCode: null,
+    activatedAt: SEEDED_AT,
+    deactivatedAt: SEEDED_AT,
+    createdBy: USER_ID,
+    createdAt: SEEDED_AT,
+  });
+}
+
+async function seedSuccessor(
+  lifecycle: Pick<TestStoredProviderCredential, "status" | "deactivatedAt">
+): Promise<void> {
+  await insertTestStoredProviderCredential(getDb(env), {
+    id: SUCCESSOR_CREDENTIAL_ID,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    provider: "privy",
+    label: "Privy",
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "byok-channel-successor" },
+    displayMetadata: {},
+    status: lifecycle.status,
+    credentialVersion: 2,
+    rotatedFromProviderCredentialId: CREDENTIAL_ID,
+    lastValidatedAt: null,
+    deactivatedAt: lifecycle.deactivatedAt,
+    createdBy: USER_ID,
+  });
+}
+
+async function seedFailedCandidate(): Promise<void> {
+  await seedSuccessor({ status: "pending", deactivatedAt: null });
+  expect(
+    await new ProviderCredentialStore(getDb(env)).recordRotationFailure(
+      SUCCESSOR_CREDENTIAL_ID,
+      "invalid_credentials"
+    )
+  ).toBe(true);
 }
 
 function dashboardRequest(
@@ -394,6 +455,87 @@ describe("BYOK Privy outside the release channel", () => {
     });
     expect(providerFetch).not.toHaveBeenCalled();
     expect(await credentialState()).toEqual(before);
+  });
+
+  it.each([
+    {
+      operation: "rollback",
+      state: "a retired Credential",
+      seed: () => seedSuccessor({ status: "retired", deactivatedAt: null }),
+      path: `/internal/dashboard/custody/provider-credentials/${SUCCESSOR_CREDENTIAL_ID}/rollback`,
+      idempotencyKey: null,
+      body: null,
+    },
+    {
+      operation: "rotate",
+      state: "a deactivated Credential",
+      seed: () => seedSuccessor({ status: "deactivated", deactivatedAt: SEEDED_AT }),
+      path: `/internal/dashboard/custody/provider-credentials/${SUCCESSOR_CREDENTIAL_ID}/rotate`,
+      idempotencyKey: "byok-out-rotate-deactivated",
+      body: { fields: { appId: APP_ID, appSecret: "rotated secret" } },
+    },
+    {
+      operation: "complete-rotation",
+      state: "a failed rotation candidate",
+      seed: seedFailedCandidate,
+      path: `/internal/dashboard/custody/provider-credentials/${SUCCESSOR_CREDENTIAL_ID}/complete-rotation`,
+      idempotencyKey: null,
+      body: null,
+    },
+  ])(
+    "refuses $operation on $state before its state check",
+    async ({ seed, path, idempotencyKey, body }) => {
+      await seedSelectedActiveConnection();
+      await seed();
+      const before = await credentialState();
+
+      const response = await dashboardRequest(path, { method: "POST", idempotencyKey, body });
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: CHANNEL_REFUSAL,
+        meta: { requestId: expect.any(String) },
+      });
+      expect(providerFetch).not.toHaveBeenCalled();
+      expect(await credentialState()).toEqual(before);
+    }
+  );
+
+  it("deactivates a Credential whose Connection is torn down", async () => {
+    await seedTornDownConnection();
+    const [before] = await credentialState();
+
+    const response = await dashboardRequest(
+      `/internal/dashboard/custody/provider-credentials/${CREDENTIAL_ID}/deactivate`,
+      { method: "POST", idempotencyKey: null, body: null }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: {
+        providerCredential: {
+          id: CREDENTIAL_ID,
+          provider: "privy",
+          label: "Treasury Privy",
+          scope: "project",
+          projectId: PROJECT_ID,
+          status: "deactivated",
+          createdAt: expect.any(String),
+          displayMetadata: { appIdSuffix: "1234" },
+        },
+      },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(await credentialState()).toEqual([
+      {
+        ...required(before),
+        status: "deactivated",
+        encrypted_secret_payload: null,
+        deactivated_at: expect.any(String),
+        updated_at: expect.any(String),
+      },
+    ]);
   });
 
   it("lists a selected Connection as neither default nor runtime-executable", async () => {
