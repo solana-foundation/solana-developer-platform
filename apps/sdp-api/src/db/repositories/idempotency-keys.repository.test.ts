@@ -45,6 +45,7 @@ function claimInput(overrides: Partial<IdempotencyKeyClaimInput> = {}): Idempote
     projectId: PROJECT,
     operation: "POST /v1/things",
     idempotencyKey: "key-1",
+    principal: "key_api_1",
     fingerprint: "fp-1",
     leaseSeconds: 60,
     retentionSeconds: 86_400,
@@ -101,6 +102,13 @@ describe("idempotency keys repository", () => {
     expect(await repository().claim(claimInput())).toEqual({
       kind: "completed",
       response: bodyless,
+    });
+  });
+
+  it("refuses the key to another credential, even for the same request", async () => {
+    await repository().claim(claimInput());
+    expect(await repository().claim(claimInput({ principal: "key_api_2" }))).toEqual({
+      kind: "mismatch",
     });
   });
 

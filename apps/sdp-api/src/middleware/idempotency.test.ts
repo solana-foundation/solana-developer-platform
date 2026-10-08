@@ -111,7 +111,6 @@ const KEY = { "Idempotency-Key": "key-1" };
 describe("requestFingerprint", () => {
   const base = {
     operation: "POST /x",
-    principal: "key_a",
     dryRun: false,
     params: {},
     query: {},
@@ -126,10 +125,9 @@ describe("requestFingerprint", () => {
     );
   });
 
-  it("separates principal, dry run, path parameters and query", () => {
+  it("separates dry run, path parameters and query", () => {
     const fingerprint = requestFingerprint(base);
     for (const variant of [
-      { principal: "key_b" },
       { dryRun: true },
       { params: { id: "1" } },
       { query: { force: ["true"] } },

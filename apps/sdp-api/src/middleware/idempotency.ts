@@ -72,7 +72,6 @@ const STORED_RESPONSE_HEADERS = ["content-type", "location"] as const;
 /** SHA-256 hex over the canonical form of everything that defines the request. */
 export function requestFingerprint(input: {
   operation: string;
-  principal: string;
   dryRun: boolean;
   params: Record<string, string>;
   query: Record<string, string[]>;
@@ -269,9 +268,6 @@ export async function runIdempotency(
   const leaseSeconds = options.leaseSeconds ?? DEFAULT_IDEMPOTENCY_LEASE_SECONDS;
   const fingerprint = requestFingerprint({
     operation,
-    // Another credential reusing the key is a different request (422), so it
-    // never reads a response produced for a narrower or wider credential.
-    principal: auth.id,
     // A dry run with the key is a different request from the real one.
     dryRun: isDryRunRequest(c),
     params: c.req.param(),
@@ -289,6 +285,9 @@ export async function runIdempotency(
     projectId: c.get("projectId") ?? null, // null only on routes without project context
     operation,
     idempotencyKey,
+    // Another credential reusing the key is refused (422), so it never reads a
+    // response produced for a narrower or wider credential.
+    principal: auth.id,
     fingerprint,
     leaseSeconds,
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,

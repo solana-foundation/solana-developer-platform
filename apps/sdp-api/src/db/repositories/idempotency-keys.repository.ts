@@ -19,6 +19,8 @@ export interface IdempotencyKeyClaimInput {
   projectId: string | null;
   operation: string;
   idempotencyKey: string;
+  /** The credential (API key id or user id) making the request. */
+  principal: string;
   fingerprint: string;
   leaseSeconds: number;
   retentionSeconds: number;
@@ -41,7 +43,7 @@ export type IdempotencyKeyClaim =
    */
   | { kind: "claimed"; fresh: boolean }
   | { kind: "completed"; response: StoredIdempotentResponse }
-  /** The key was first used for a different request. */
+  /** The key was first used for a different request or by another credential. */
   | { kind: "mismatch" }
   /** Another request holds a live lease on the key. */
   | { kind: "in_flight"; retryAfterSeconds: number };
@@ -63,11 +65,13 @@ export interface IdempotencyKeyRepository {
 const existingRowSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("in_progress"),
+    principal: z.string(),
     fingerprint: z.string(),
     retry_after_seconds: z.number().int(),
   }),
   z.object({
     status: z.literal("completed"),
+    principal: z.string(),
     fingerprint: z.string(),
     response_status: z.number().int().min(100).max(599),
     response_headers: z.record(z.string(), z.string()),
@@ -101,12 +105,13 @@ export function createPostgresIdempotencyKeyRepository(
     const inserted = await db
       .prepare(
         `INSERT INTO idempotency_keys
-           (id, organization_id, project_id, operation, idempotency_key, fingerprint,
+           (id, organization_id, project_id, operation, idempotency_key, principal, fingerprint,
             status, claim_token, locked_until, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?,
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress', ?,
                  now() + make_interval(secs => ?), now() + make_interval(secs => ?))
          ON CONFLICT ON CONSTRAINT idempotency_keys_scope_key DO UPDATE
            SET id = EXCLUDED.id,
+               principal = EXCLUDED.principal,
                fingerprint = EXCLUDED.fingerprint,
                status = 'in_progress',
                claim_token = EXCLUDED.claim_token,
@@ -126,6 +131,7 @@ export function createPostgresIdempotencyKeyRepository(
         input.projectId,
         input.operation,
         input.idempotencyKey,
+        input.principal,
         input.fingerprint,
         input.claimToken,
         input.leaseSeconds,
@@ -145,11 +151,18 @@ export function createPostgresIdempotencyKeyRepository(
             SET id = ?, claim_token = ?, locked_until = now() + make_interval(secs => ?),
                 updated_at = sdp_iso_now()
           WHERE ${scope.sql}
-            AND status = 'in_progress' AND fingerprint = ?
+            AND status = 'in_progress' AND principal = ? AND fingerprint = ?
             AND locked_until <= now() AND expires_at > now()
           RETURNING id`
       )
-      .bind(input.id, input.claimToken, input.leaseSeconds, ...scope.params, input.fingerprint)
+      .bind(
+        input.id,
+        input.claimToken,
+        input.leaseSeconds,
+        ...scope.params,
+        input.principal,
+        input.fingerprint
+      )
       .first<{ id: string }>();
     if (takenOver !== null) {
       return { kind: "claimed", fresh: false };
@@ -157,7 +170,7 @@ export function createPostgresIdempotencyKeyRepository(
 
     const existing = await db
       .prepare(
-        `SELECT fingerprint, status, response_status, response_headers, response_body,
+        `SELECT principal, fingerprint, status, response_status, response_headers, response_body,
                 GREATEST(1, CEIL(EXTRACT(EPOCH FROM (locked_until - now()))))::int
                   AS retry_after_seconds
            FROM idempotency_keys
@@ -170,7 +183,7 @@ export function createPostgresIdempotencyKeyRepository(
       return null;
     }
     const row = existingRowSchema.parse(existing);
-    if (row.fingerprint !== input.fingerprint) {
+    if (row.principal !== input.principal || row.fingerprint !== input.fingerprint) {
       return { kind: "mismatch" };
     }
     if (row.status === "completed") {

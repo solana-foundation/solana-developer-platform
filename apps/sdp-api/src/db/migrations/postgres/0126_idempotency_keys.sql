@@ -28,7 +28,11 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
     operation TEXT NOT NULL,
     idempotency_key TEXT NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
-    -- SHA-256 hex of the canonical operation, path parameters and body.
+    -- The credential (API key id or user id) that first used the key. Another
+    -- credential reusing it is refused like a different request.
+    principal TEXT NOT NULL,
+    -- SHA-256 hex of the canonical operation, path parameters, query, Dry-Run
+    -- flag and body.
     fingerprint TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('in_progress', 'completed')),
     claim_token TEXT,

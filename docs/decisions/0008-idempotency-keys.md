@@ -37,7 +37,8 @@ route pattern, read with `routePath(c)`, so it needs no shared vocabulary that c
 - The step must sit in a route's own chain. It throws if the pattern is a `use("*")` wildcard.
 - Renaming a path resets that route's keys, which is acceptable with 24h retention.
 
-**Fingerprint.** SHA-256 over canonical JSON (keys sorted by code unit) of:
+**Fingerprint.** SHA-256 over canonical JSON (keys sorted by code unit) of the parts below. The
+credential is recorded on the row and compared in plain text rather than hashed:
 
 - the operation, path parameters, sorted query parameters and body;
 - the credential (API key id or user id), so another credential reusing the key gets 422 and
