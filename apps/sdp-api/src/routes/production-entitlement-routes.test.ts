@@ -20,10 +20,7 @@ import { isEarnExitOrRead } from "./earn/exits";
 const NO_PROJECT_ROUTES: readonly (readonly [RegExp, string])[] = [
   [/^\/(health|docs|openapi\.json|llms\.txt)?(\/|$)/, "public metadata"],
   [/^\/webhooks\//, "provider- or Clerk-signed inbound events; they finish money already moving"],
-  [
-    /^\/pay(\/|$)/,
-    "public payment page; checks the entitlement itself (assertProjectProductionAllowed)",
-  ],
+  [/^\/pay(\/|$)/, "public payment page; admits its own money movement (lib/money-admission.ts)"],
   [/^\/admin\//, "operator routes behind their own credential"],
   [/^\/v1\/(organizations|onboarding|places)(\/|$)/, "organization-scoped, no project"],
   [/^\/v1\/projects$/, "lists projects; hides production without the entitlement"],

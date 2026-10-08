@@ -53,33 +53,3 @@ export function isProductionEntitled(c: Context<{ Bindings: Env }>): boolean {
 export function productionNotEnabled() {
   return forbidden("Production is not enabled for this organization");
 }
-
-/**
- * Refuses an action on a production project whose organization lacks the
- * production entitlement, for the one public route that acts on a project
- * without an authenticated actor (`/pay`, scoped by its payment request).
- * `/pay` already runs under its own system identity (middleware/database-identity.ts),
- * so this read sees the organization row.
- */
-export async function assertProjectProductionAllowed(
-  env: Env,
-  organizationId: string,
-  projectId: string
-): Promise<void> {
-  const row = await getDb(env)
-    .prepare(
-      `SELECT p.environment, o.settings
-       FROM projects p
-       JOIN organizations o ON o.id = p.organization_id
-       WHERE p.id = ? AND p.organization_id = ?`
-    )
-    .bind(projectId, organizationId)
-    .first<{ environment: string; settings: string | null }>();
-  if (
-    !row ||
-    (row.environment === "production" &&
-      parseOrganizationEntitlements(row.settings).enableProductionProject !== true)
-  ) {
-    throw productionNotEnabled();
-  }
-}

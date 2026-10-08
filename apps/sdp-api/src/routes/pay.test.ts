@@ -172,6 +172,23 @@ describe("Public payment request routes", () => {
       expect(sponsorship).toHaveBeenCalledTimes(1);
     });
 
+    it("stops sponsoring every request once its organization is deleted (HOO-1955)", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest();
+      await getDb(env)
+        .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
+        .bind(TEST_ORG.id)
+        .run();
+
+      const refused = await postTransaction(request.public_token);
+
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({
+        error: { code: "FORBIDDEN", message: "Organization is not active" },
+      });
+      expect(sponsorship).not.toHaveBeenCalled();
+    });
+
     it("keeps sponsoring a sandbox request without the production entitlement", async () => {
       stubSponsorship();
       await getDb(env)

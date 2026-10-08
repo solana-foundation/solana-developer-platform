@@ -330,15 +330,27 @@ async function finalizeRecurringPaymentLifecycle(input: {
   });
 }
 
+/**
+ * Resume starts money movement again, so it runs money admission (HOO-1955)
+ * before it signs. Cancel is an exit and is never refused (ADR 0002).
+ */
+type RecurringPaymentLifecycleRun =
+  | { operation: Extract<RecurringPaymentLifecycleOperation, "cancel"> }
+  | {
+      operation: Extract<RecurringPaymentLifecycleOperation, "resume">;
+      admitStart: () => Promise<void>;
+    };
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Lifecycle recovery keeps each persisted stage explicit.
-async function runRecurringPaymentLifecycle(input: {
-  env: Env;
-  organizationId: string;
-  projectId: string;
-  sourceWallet: CustodyWallet;
-  recurringPayment: PaymentRecurringPaymentRow;
-  operation: RecurringPaymentLifecycleOperation;
-}): Promise<PaymentRecurringPaymentRow> {
+async function runRecurringPaymentLifecycle(
+  input: {
+    env: Env;
+    organizationId: string;
+    projectId: string;
+    sourceWallet: CustodyWallet;
+    recurringPayment: PaymentRecurringPaymentRow;
+  } & RecurringPaymentLifecycleRun
+): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
     createTenantScope(input)
@@ -467,6 +479,13 @@ async function runRecurringPaymentLifecycle(input: {
       );
     }
 
+    // Admission runs only before a new signature. An attempt that already
+    // submitted only confirms below, so a refusal never strands an operation
+    // that is on chain. A refused resume goes back to `canceled` through the
+    // failure reset, which matches the subscription on chain.
+    if (!signature && input.operation === "resume") {
+      await input.admitStart();
+    }
     const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
@@ -633,6 +652,8 @@ export async function resumeRecurringPayment(input: {
   projectId: string;
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
+  /** Money admission (HOO-1955), run only if the resume still has to sign. */
+  admitStart: () => Promise<void>;
 }): Promise<PaymentRecurringPaymentRow> {
   return runRecurringPaymentLifecycle({ ...input, operation: "resume" });
 }
