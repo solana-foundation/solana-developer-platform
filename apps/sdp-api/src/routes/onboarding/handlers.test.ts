@@ -217,6 +217,21 @@ describe("organization onboarding handlers", () => {
   });
 
   it("lists distinct active sandbox providers in catalog order", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO organizations (id, name, slug, tier, status)
+         VALUES ('org_onboarding_other', 'Onboarding other', 'onboarding-other', 'enterprise', 'active')`
+      )
+      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: "org_onboarding_other",
+      createdBy: USER_ID,
+      members: [],
+      ids: {
+        sandbox: "project_onboarding_other_sandbox",
+        production: "project_onboarding_other_production",
+      },
+    });
     await seedTestCustodyRows(env, {
       configs: [
         custodyConfig({
@@ -243,12 +258,14 @@ describe("organization onboarding handlers", () => {
           provider: "anchorage",
           status: "inactive",
         }),
-        custodyConfig({
-          id: "cfg_onboarding_production_dfns",
-          projectId: `${PROJECT_ID}_production`,
+        {
+          id: "cfg_onboarding_other_organization_dfns",
+          organizationId: "org_onboarding_other",
+          projectId: "project_onboarding_other_sandbox",
           provider: "dfns",
+          configEncrypted: "encrypted",
           status: "active",
-        }),
+        },
       ],
       wallets: [],
     });

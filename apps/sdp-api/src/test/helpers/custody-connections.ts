@@ -12,13 +12,10 @@ import {
 import { insertTestCustodyWalletRow, type TestCustodyWalletRow } from "@/test/helpers/custody";
 import type { Env } from "@/types/env";
 
-const ORGANIZATION_CREDENTIAL_SCOPE_KEY = "__organization__";
-
 export interface TestStoredProviderCredential {
   id: string;
   organizationId: string;
-  /** `null` seeds an organization-scope credential shared by the org's projects. */
-  projectId: string | null;
+  projectId: string;
   provider: CustodyProvider;
   label: string;
   stored: StoredCredentialSecret;
@@ -92,7 +89,7 @@ function storedSecretColumns(stored: StoredCredentialSecret): StoredSecretColumn
 }
 
 /**
- * Insert a `source = 'stored'` provider credential; scope follows `projectId`.
+ * Insert a `source = 'stored'` provider credential scoped to `projectId`.
  * @param db - Executor the insert runs on.
  * @param credential - Credential row to insert.
  * @returns Resolves once the row is written.
@@ -108,14 +105,13 @@ export async function insertTestStoredProviderCredential(
        storage_backend, secret_ref, secret_version_ref, encrypted_secret_payload,
        display_metadata, status, credential_version, rotated_from_provider_credential_id,
        last_validated_at, deactivated_at, created_by
-     ) VALUES (?, ?, ?, ?, ?, ?, 'stored', ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, 'project', 'stored', ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)`,
     [
       credential.id,
       credential.organizationId,
       credential.projectId,
       credential.provider,
       credential.label,
-      credential.projectId === null ? "organization" : "project",
       credential.stored.storageBackend,
       secret.secretRef,
       secret.secretVersionRef,
@@ -132,7 +128,8 @@ export async function insertTestStoredProviderCredential(
 }
 
 /**
- * Insert a project-scope custody connection over an existing provider credential.
+ * Insert a project-scope custody connection over an existing provider credential
+ * scoped to the same project.
  * @param db - Executor the insert runs on.
  * @param connection - Connection row to insert.
  * @returns Resolves once the row is written.
@@ -154,9 +151,7 @@ export async function insertTestCustodyConnection(
       connection.projectId,
       connection.provider,
       connection.credential.id,
-      connection.credential.projectId === null
-        ? ORGANIZATION_CREDENTIAL_SCOPE_KEY
-        : connection.credential.projectId,
+      connection.credential.projectId,
       connection.status,
       JSON.stringify(connection.setupMetadata),
       connection.providerAccountFingerprint,

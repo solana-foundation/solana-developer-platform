@@ -349,20 +349,6 @@ describe("DvP settlement owner", () => {
     await expectSettlementMapped(PRODUCTION_PROJECT_ID);
   });
 
-  it("refuses a Production project whose only Privy backend is Managed", async () => {
-    await seedManagedConfig({
-      id: "cust_dvp_production_privy",
-      projectId: PRODUCTION_PROJECT_ID,
-      provider: "privy",
-      status: "active",
-    });
-
-    await expectRefusedWithoutSpend(
-      productionScope,
-      "DvP settlement needs a Privy custody backend for this project"
-    );
-  });
-
   it("creates a Sandbox settlement wallet under Managed Privy even when a Privy connection is active", async () => {
     await seedManagedConfig({
       id: CUSTODY_CONFIG_ID,

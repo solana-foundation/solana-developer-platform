@@ -343,14 +343,35 @@ describe("internal custody providers", () => {
     expect(privy?.effectiveTargetType).toBe("none");
   });
 
-  it("reports a project with no configs as uninstalled while the organization's other project has one", async () => {
+  it("reports a project with no configs as uninstalled while other projects have a config and a connection", async () => {
     const otherProjectId = `${TEST_PROJECT.id}_production`;
+    const otherOrganizationId = "org_setup_status_other";
+    const otherOrganizationSandboxProjectId = "prj_setup_status_other_sandbox";
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(
+        otherOrganizationId,
+        "Setup Status Other Org",
+        "setup-status-other",
+        "enterprise",
+        "active"
+      )
+      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: otherOrganizationId,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: {
+        sandbox: otherOrganizationSandboxProjectId,
+        production: "prj_setup_status_other_production",
+      },
+    });
     await seedTestCustodyRows(env, {
       configs: [
         {
           id: "cust_cfg_setup_status_other_project",
-          organizationId: TEST_ORG.id,
-          projectId: otherProjectId,
+          organizationId: otherOrganizationId,
+          projectId: otherOrganizationSandboxProjectId,
           provider: "privy",
           configEncrypted: "test-config",
           status: "active",

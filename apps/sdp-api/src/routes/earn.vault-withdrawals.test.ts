@@ -25,6 +25,7 @@ import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
+  seedTestPrivyConnection,
   writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -802,20 +803,33 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
       environment: "production",
     });
     await seedAuth();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
-         VALUES ('cfg_earn_vw_prod', ?, ?, 'privy', 'encrypted', 'active')`
-      )
-      .bind(TEST_ORG.id, TEST_PRODUCTION_PROJECT.id)
-      .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES ('cwlt_earn_vw_prod', 'cfg_earn_vw_prod', 'privy_earn_vw_prod', ?, 'active')`
-      )
-      .bind(WALLET_ADDRESS)
-      .run();
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
+    await seedTestPrivyConnection(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PRODUCTION_PROJECT.id,
+      connectionId: "cconn_earn_vw_prod",
+      credentialId: "pcred_earn_vw_prod",
+      createdBy: TEST_USER.id,
+      stored: await writeTestPrivyCredentialSecret(env, {
+        organizationId: TEST_ORG.id,
+        credentialId: "pcred_earn_vw_prod",
+        appId: "earn-vw-prod-app",
+        appSecret: "earn-vw-prod-secret",
+      }),
+      providerAccountFingerprint: "sha256:earn-vw-prod",
+      wallets: [
+        {
+          id: "cwlt_earn_vw_prod",
+          walletId: "privy_earn_vw_prod",
+          publicKey: WALLET_ADDRESS,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+      lastCheckStatus: "success",
+      defaultCustodyWalletId: "cwlt_earn_vw_prod",
+    });
     const positionId = await seedPosition({
       environment: "production",
       projectId: TEST_PRODUCTION_PROJECT.id,

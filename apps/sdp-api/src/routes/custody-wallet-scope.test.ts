@@ -516,29 +516,29 @@ describe("Custody wallet scope routes", () => {
   ] as const)(
     "simulates a $environment project's signer check on $cluster",
     async ({ projectId, walletId, cluster }) => {
-      await seedTestCustodyRows(env, {
-        configs: [
-          {
-            id: "cust_cfg_scope_privy_production",
-            organizationId: TEST_ORG.id,
-            projectId: TEST_PRODUCTION_PROJECT_ID,
-            provider: "privy",
-            configEncrypted: "test-config",
-            status: "active",
-          },
-        ],
-        wallets: [
-          {
-            id: "cwlt_scope_privy_production",
-            owner: { kind: "config", custodyConfigId: "cust_cfg_scope_privy_production" },
-            walletId: "privy_wallet_production",
-            publicKey: TEST_SOLANA_ADDRESSES.wallet3,
-            label: null,
-            purpose: "root",
-            status: "active",
-          },
-        ],
-      });
+      await getDb(env).transaction((tx) =>
+        seedTestPrivyConnection(tx, {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PRODUCTION_PROJECT_ID,
+          connectionId: "cconn_scope_privy_production",
+          credentialId: "pcred_scope_privy_production",
+          createdBy: TEST_USER.id,
+          stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+          providerAccountFingerprint: "sha256:privy_production",
+          lastCheckStatus: "success",
+          wallets: [
+            {
+              id: "cwlt_scope_privy_production",
+              walletId: "privy_wallet_production",
+              publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+              label: null,
+              purpose: "root",
+              status: "active",
+            },
+          ],
+          defaultCustodyWalletId: "cwlt_scope_privy_production",
+        })
+      );
       env.SOLANA_MAINNET_RPC_URL = "https://mainnet-rpc.mock.invalid";
       const response = await app.request(
         "/v1/wallets/signer-check",

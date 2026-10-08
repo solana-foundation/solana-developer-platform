@@ -16,6 +16,9 @@ const ORGANIZATION_ID = "org_custody_cross_project";
 const USER_ID = "usr_custody_cross_project";
 const REQUESTER_PROJECT_ID = "prj_custody_cross_project";
 const OWNER_PROJECT_ID = "prj_custody_cross_project_production";
+const OTHER_ORGANIZATION_ID = "org_custody_cross_project_other";
+const OTHER_ORGANIZATION_SANDBOX_PROJECT_ID = "prj_custody_cross_project_other_sandbox";
+const OTHER_ORGANIZATION_PRODUCTION_PROJECT_ID = "prj_custody_cross_project_other_production";
 const OWNER_CONFIG_ID = "cust_cfg_cross_project_owner";
 const REQUESTER_CONFIG_ID = "cust_cfg_cross_project_requester";
 const REQUESTER_WALLET_ID = "privy_wallet_requester";
@@ -51,6 +54,15 @@ async function seedOrganizationCustody(): Promise<void> {
         "active"
       ),
     db
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(
+        OTHER_ORGANIZATION_ID,
+        "Custody Cross Project Other Org",
+        "custody-cross-project-other",
+        "enterprise",
+        "active"
+      ),
+    db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER_ID, "custody-cross-project@example.com", 1, "active"),
   ]);
@@ -59,6 +71,15 @@ async function seedOrganizationCustody(): Promise<void> {
     createdBy: USER_ID,
     members: [USER_ID],
     ids: { sandbox: REQUESTER_PROJECT_ID, production: OWNER_PROJECT_ID },
+  });
+  await seedDefaultProjects(db, {
+    organizationId: OTHER_ORGANIZATION_ID,
+    createdBy: USER_ID,
+    members: [],
+    ids: {
+      sandbox: OTHER_ORGANIZATION_SANDBOX_PROJECT_ID,
+      production: OTHER_ORGANIZATION_PRODUCTION_PROJECT_ID,
+    },
   });
   await seedProjectApiKey(db, env, {
     key: API_KEY,
@@ -72,8 +93,8 @@ async function seedOrganizationCustody(): Promise<void> {
     configs: [
       {
         id: OWNER_CONFIG_ID,
-        organizationId: ORGANIZATION_ID,
-        projectId: OWNER_PROJECT_ID,
+        organizationId: OTHER_ORGANIZATION_ID,
+        projectId: OTHER_ORGANIZATION_SANDBOX_PROJECT_ID,
         provider: "privy",
         configEncrypted: "test-config",
         status: "active",

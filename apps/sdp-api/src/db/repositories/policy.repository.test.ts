@@ -17,6 +17,7 @@ import { TEST_CUSTODY_CONFIG, TEST_CUSTODY_WALLET } from "@/test/fixtures/custod
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -77,7 +78,7 @@ const DUPLICATE_PROVIDER_CUSTODY_WALLET = {
 } as const;
 
 const FOREIGN_PROJECT_ID = `${TEST_PROJECT.id}_production`;
-const FOREIGN_PROJECT_CUSTODY_CONFIG_ID = "ccfg_policy_foreign_project";
+const FOREIGN_PROJECT_CUSTODY_CONNECTION_ID = "cconn_policy_foreign_project";
 const FOREIGN_PROJECT_CUSTODY_WALLET = {
   id: "cw_policy_foreign_project",
   walletId: "wallet_policy_foreign_project",
@@ -1536,29 +1537,29 @@ async function seedPolicyFoundationFixtures(): Promise<void> {
 }
 
 async function seedForeignProjectCustodyWallet(): Promise<void> {
-  await seedTestCustodyRows(env, {
-    configs: [
-      {
-        id: FOREIGN_PROJECT_CUSTODY_CONFIG_ID,
-        organizationId: TEST_ORG.id,
-        projectId: FOREIGN_PROJECT_ID,
-        provider: "local",
-        configEncrypted: "encrypted",
-        status: "active",
-      },
-    ],
-    wallets: [
-      {
-        id: FOREIGN_PROJECT_CUSTODY_WALLET.id,
-        owner: { kind: "config", custodyConfigId: FOREIGN_PROJECT_CUSTODY_CONFIG_ID },
-        walletId: FOREIGN_PROJECT_CUSTODY_WALLET.walletId,
-        publicKey: FOREIGN_PROJECT_CUSTODY_WALLET.publicKey,
-        label: null,
-        purpose: "transfer",
-        status: "active",
-      },
-    ],
-  });
+  await getDb(env).transaction((tx) =>
+    seedTestPrivyConnection(tx, {
+      organizationId: TEST_ORG.id,
+      projectId: FOREIGN_PROJECT_ID,
+      connectionId: FOREIGN_PROJECT_CUSTODY_CONNECTION_ID,
+      credentialId: "pcred_policy_foreign_project",
+      createdBy: TEST_USER.id,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+      providerAccountFingerprint: "sha256:policy-foreign-project",
+      lastCheckStatus: "success",
+      wallets: [
+        {
+          id: FOREIGN_PROJECT_CUSTODY_WALLET.id,
+          walletId: FOREIGN_PROJECT_CUSTODY_WALLET.walletId,
+          publicKey: FOREIGN_PROJECT_CUSTODY_WALLET.publicKey,
+          label: null,
+          purpose: "transfer",
+          status: "active",
+        },
+      ],
+      defaultCustodyWalletId: FOREIGN_PROJECT_CUSTODY_WALLET.id,
+    })
+  );
 }
 
 async function seedAdditionalCustodyWallet(): Promise<void> {

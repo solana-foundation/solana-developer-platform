@@ -158,6 +158,41 @@ async function seedWallet(params: {
   });
 }
 
+async function seedProductionConnectionWallet(params: {
+  connectionId: string;
+  credentialId: string;
+  custodyWalletId: string;
+  providerWalletId: string;
+}): Promise<void> {
+  env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 43).toString("base64");
+  await seedTestPrivyConnection(getDb(env), {
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT.id,
+    connectionId: params.connectionId,
+    credentialId: params.credentialId,
+    createdBy: TEST_USER.id,
+    stored: await writeTestPrivyCredentialSecret(env, {
+      organizationId: TEST_ORG.id,
+      credentialId: params.credentialId,
+      appId: `${params.connectionId}-app`,
+      appSecret: `${params.connectionId}-secret`,
+    }),
+    providerAccountFingerprint: `sha256:${params.connectionId}`,
+    lastCheckStatus: "success",
+    wallets: [
+      {
+        id: params.custodyWalletId,
+        walletId: params.providerWalletId,
+        publicKey: WALLET_ADDRESS,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+    defaultCustodyWalletId: params.custodyWalletId,
+  });
+}
+
 async function seedConnectionWallet(): Promise<void> {
   env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 43).toString("base64");
   await seedTestPrivyConnection(getDb(env), {
@@ -644,13 +679,11 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
         .run();
     }
     if (state === "foreign-pin") {
-      await seedWallet({
-        publicKey: WALLET_ADDRESS,
-        configId: "cust_approval_foreign",
-        provider: "privy",
+      await seedProductionConnectionWallet({
+        connectionId: "cconn_approval_foreign",
+        credentialId: "pcred_approval_foreign",
         custodyWalletId: "cwlt_approval_foreign",
         providerWalletId: "privy_earn_vault_connection",
-        projectId: TEST_PRODUCTION_PROJECT.id,
       });
       await getDb(env)
         .prepare("UPDATE wallet_operations SET custody_wallet_id = ? WHERE id = ?")
@@ -776,13 +809,11 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
 describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
   it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
-    await seedWallet({
-      publicKey: WALLET_ADDRESS,
-      configId: "cfg_earn_vault_kamino_prod",
-      provider: "privy",
+    await seedProductionConnectionWallet({
+      connectionId: "cconn_earn_vault_kamino_prod",
+      credentialId: "pcred_earn_vault_kamino_prod",
       custodyWalletId: "cwlt_earn_vault_kamino_prod",
       providerWalletId: "privy_earn_vault_kamino_prod",
-      projectId: TEST_PRODUCTION_PROJECT.id,
     });
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta", environment: "production" });
 
@@ -828,13 +859,11 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
     await seedAuth();
-    await seedWallet({
-      publicKey: WALLET_ADDRESS,
-      configId: "cfg_earn_vault_veda_prod",
-      provider: "privy",
+    await seedProductionConnectionWallet({
+      connectionId: "cconn_earn_vault_veda_prod",
+      credentialId: "pcred_earn_vault_veda_prod",
       custodyWalletId: "cwlt_earn_vault_veda_prod",
       providerWalletId: "privy_earn_vault_veda_prod",
-      projectId: TEST_PRODUCTION_PROJECT.id,
     });
     const strategy = await seedStrategy({
       provider: "veda",
@@ -861,13 +890,11 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
-    await seedWallet({
-      publicKey: WALLET_ADDRESS,
-      configId: "cfg_earn_vault_jupiter",
-      provider: "privy",
+    await seedProductionConnectionWallet({
+      connectionId: "cconn_earn_vault_jupiter",
+      credentialId: "pcred_earn_vault_jupiter",
       custodyWalletId: "cwlt_earn_vault_jupiter",
       providerWalletId: "privy_earn_vault_jupiter",
-      projectId: TEST_PRODUCTION_PROJECT.id,
     });
     const strategy = await seedStrategy({
       provider: "jupiter_lend",
@@ -918,13 +945,11 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("opens Ondo USDY only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
-    await seedWallet({
-      publicKey: WALLET_ADDRESS,
-      configId: "cfg_earn_vault_ondo",
-      provider: "privy",
+    await seedProductionConnectionWallet({
+      connectionId: "cconn_earn_vault_ondo",
+      credentialId: "pcred_earn_vault_ondo",
       custodyWalletId: "cwlt_earn_vault_ondo",
       providerWalletId: "privy_earn_vault_ondo",
-      projectId: TEST_PRODUCTION_PROJECT.id,
     });
     const strategy = await seedStrategy({
       provider: "ondo",
