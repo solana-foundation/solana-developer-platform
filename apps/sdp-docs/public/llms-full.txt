@@ -5653,6 +5653,7 @@ Source: https://platform.solana.com/docs/reference/api/projects
 | `POST` | `/v1/projects/{projectId}/members` | Add project member |
 | `DELETE` | `/v1/projects/{projectId}/members/{memberId}` | Remove project member |
 | `PATCH` | `/v1/projects/{projectId}/members/{memberId}` | Update project member |
+| `GET` | `/v1/projects/{projectId}/provider-availability` | Get project provider availability |
 
 ---
 
