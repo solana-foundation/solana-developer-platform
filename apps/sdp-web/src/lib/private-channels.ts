@@ -97,14 +97,6 @@ export function deletePrivateChannel(client: SdpApiClient, id: string): Promise<
   });
 }
 
-/** List the project's custody wallets for the deposit source picker. */
-export async function fetchSignableCustodyWallets(
-  client: SdpApiClient
-): Promise<CustodyWalletSummary[]> {
-  const { wallets } = await client.fetch<{ wallets: CustodyWalletSummary[] }>("/v1/wallets");
-  return wallets;
-}
-
 /** List the project's deposits, newest first. */
 export async function fetchPrivateChannelDeposits(
   client: SdpApiClient
@@ -338,12 +330,12 @@ export async function fetchSignableWalletsWithBalances(
 export async function fetchVerifiedSignableWallets(
   client: SdpApiClient
 ): Promise<CustodyWalletSummary[]> {
-  const [signable, verified] = await Promise.all([
-    fetchSignableCustodyWallets(client),
+  const [custodyWallets, verified] = await Promise.all([
+    fetchCustodyWallets(client),
     fetchVerifiedWallets(client),
   ]);
   const verifiedIds = new Set(verified.map((w) => w.walletId));
-  return signable.filter((w) => verifiedIds.has(w.walletId));
+  return custodyWallets.filter((w) => verifiedIds.has(w.walletId));
 }
 
 /** The caller's custody wallets that have completed SPC verification, newest first. */
@@ -382,7 +374,7 @@ export function deletePrivateChannelVerifiedWallet(
   });
 }
 
-/** List the org's custody wallets across all providers (the verify picker source). */
+/** List the project's custody wallets (the deposit source and verify picker source). */
 export async function fetchCustodyWallets(client: SdpApiClient): Promise<CustodyWalletSummary[]> {
   const { wallets } = await client.fetch<{ wallets: CustodyWalletSummary[] }>("/v1/wallets");
   return wallets;
