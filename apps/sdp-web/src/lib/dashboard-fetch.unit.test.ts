@@ -192,6 +192,35 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
   });
 
+  it("sends nothing for a call already cancelled", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = statusFetchMock(201);
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      dashboardRequest(PATH, { method: "POST", body: "{}", signal: controller.signal })
+    ).rejects.toBeDefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still sends, and reuses the key in this page, when storage refuses the write", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = statusFetchMock(502, 201);
+    vi.stubGlobal("fetch", fetchMock);
+    // This suite runs without browser storage, so every persist is refused.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await submit();
+    await submit();
+
+    expect(keyOfCall(fetchMock, 0)).toMatch(/^[0-9a-f-]{36}$/);
+    expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("does not let one caller's abort cancel the request another caller joined", async () => {
     setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     let respond: (response: Response) => void = () => undefined;

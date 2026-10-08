@@ -126,6 +126,10 @@ async function sendUnderActionKey(
 ): Promise<Response> {
   // Joined synchronously, before any await, so a double submit can never race
   // past the check. The in-memory map may hold the raw action; storage may not.
+  // A call cancelled before it starts never claims a key or sends anything.
+  if (init.signal?.aborted) {
+    throw init.signal.reason;
+  }
   const material = actionMaterial(path, init);
   let sent = inFlightMutations.get(material);
   if (!sent) {
@@ -134,8 +138,13 @@ async function sendUnderActionKey(
     const keys = mutationKeys();
     headers.set(IDEMPOTENCY_KEY_HEADER, keys.claim(fingerprint));
     // Pinned before the request goes out: a reload mid-flight must not let
-    // an unanswered write's key expire or be evicted.
-    keys.markUncertain(fingerprint);
+    // an unanswered write's key expire or be evicted. When browser storage
+    // refuses the write (private mode, quota), the key lives in memory only:
+    // retries in this page still reuse it, but a reload cannot. Sending anyway
+    // is deliberate; refusing would block every write in such a browser.
+    if (!keys.markUncertain(fingerprint)) {
+      console.warn("Idempotency-Key not persisted; a reload will not recover it");
+    }
     sent = sendWithProject(path, shared, headers).then(async (response) => {
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
