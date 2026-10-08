@@ -2,7 +2,7 @@ import type { PrivateChannelInstanceInput } from "@sdp/types";
 import { z } from "zod";
 
 // Solana base58 pubkey: same regex used across the SDP codebase (see
-// apps/sdp-web/src/app/dashboard/custody/actions.ts:9).
+// apps/sdp-web/src/app/dashboard/[projectId]/custody/actions.ts:9).
 const BASE58_PUBKEY_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 function isHttpUrl(value: string): boolean {

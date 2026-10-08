@@ -282,7 +282,7 @@ key to the hosted `/v1/earn` routes.
 | 1. Declare the id | `packages/sdp-types/src/provider-access.ts` | Append to `EARN_PROVIDERS`. Earn entitlements are override-only (`createBooleanRecord(EARN_PROVIDERS, [])`): every org gets the provider disabled until an explicit `providerOverrides.earn.<id>` — there is no tier-default list to join. |
 | 1b. Decide if it is OFFERED | `packages/sdp-types/src/provider-access.ts` | Add the id to `EARN_PROVIDER_SURFACING` — it is exhaustive over `EarnProviderId`, so step 1 does not compile without it. `true` = customers see its strategies and may open programs with it; `false` = fully integrated but not offered (§6). Start a work-in-progress integration at `false`. |
 | 1c. Declare the policy maps | `packages/sdp-types/src/provider-access.ts` | Same file; the id now demands an entry in every remaining exhaustive map: `EARN_PROVIDER_DEPOSIT_STYLE` (`custodial` or `vault_direct`; load-bearing in the UI, and the drift test in `provider-availability.drift.test.ts` pins it to the client's `supportsPortfolioWallets` answer), `EARN_PROGRAM_SOLANA_PAYOUT_TOKENS` (`[]` unless the provider pays custodial withdrawals to Solana addresses), and `EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR` / `EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR` (`null` unless the provider quotes and its builders REQUIRE an explicit floor, as Veda's do). The compiler forces all of them; this row is a map of what you are deciding, not a reminder to look. |
-| 1d. Dashboard label | `apps/sdp-web/src/app/dashboard/markets/earn/earn-format.ts` | Add the display name to `EARN_PROVIDER_LABELS`. Exhaustive over `EarnProviderId`, so the **web** typecheck is the one that fails — an API-only check run misses it (found by the Ondo pass, 2026-09-02). |
+| 1d. Dashboard label | `apps/sdp-web/src/app/dashboard/[projectId]/markets/earn/earn-format.ts` | Add the display name to `EARN_PROVIDER_LABELS`. Exhaustive over `EarnProviderId`, so the **web** typecheck is the one that fails — an API-only check run misses it (found by the Ondo pass, 2026-09-02). |
 | 2. Client class | `packages/sdp-earn/src/providers/<id>/client.ts` | Subclass `StubEarnClient` (`packages/sdp-earn/src/providers/stub.ts`) carrying only the `provider` literal and `declaredSupport`. Every operation throws `NOT_IMPLEMENTED` until you override it — the integration lands method-by-method, with `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) as the HTTP core. |
 | 3. Registry | `packages/sdp-earn/src/index.ts` | `<id>: new <Id>EarnClient()` in `EARN_PROVIDER_CLIENTS` + the class re-export. |
 | 4. Subpath export | `packages/sdp-earn/package.json` | A `"./providers/<id>/client"` exports entry. |
@@ -729,7 +729,7 @@ there is no deposit flow left.
 ### The dashboard trap: never read a surfacing constant out of a client module
 
 `EARN_PROGRAM_CREATION_ENABLED` lives in
-`apps/sdp-web/src/app/dashboard/markets/earn/earn-surfacing.ts`, which carries
+`apps/sdp-web/src/app/dashboard/[projectId]/markets/earn/earn-surfacing.ts`, which carries
 **no `"use client"` directive**, and that is load-bearing. A Server Component
 importing a *value* from a client module gets a **client-reference proxy, not the
 value** — an object, therefore always truthy — so `if (!FLAG)` silently becomes
@@ -739,8 +739,8 @@ create anything.
 
 `tsc` passes (the types are right), unit tests pass (they mock the module), lint
 is silent. **Only a browser catches it**, so finish a surfacing change by loading
-`/dashboard/markets/embedded-yield` and
-`/dashboard/markets/embedded-yield/integrate` for real.
+`/dashboard/{projectId}/markets/embedded-yield` and
+`/dashboard/{projectId}/markets/embedded-yield/integrate` for real.
 
 ### Tests
 

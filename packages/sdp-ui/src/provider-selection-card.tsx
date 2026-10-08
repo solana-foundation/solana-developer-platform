@@ -3,7 +3,7 @@ import { cn } from "./cn";
 
 /**
  * Selection-card grammar shared with the Markets path cards
- * (app/dashboard/markets/markets-landing.tsx): one source so the two surfaces
+ * (app/dashboard/[projectId]/markets/markets-landing.tsx): one source so the two surfaces
  * cannot drift. The underline grows by width rather than a scale-from-zero
  * transform, which React Doctor flags on any PR touching the file.
  */
