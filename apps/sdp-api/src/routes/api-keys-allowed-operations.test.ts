@@ -252,6 +252,26 @@ describe("API key allowed operations", () => {
     expect(narrower.status).toBe(201);
   });
 
+  it("judges a wider grant before provisioning a wallet, so a refusal leaves nothing behind", async () => {
+    const walletsBefore = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM custody_wallets")
+      .first<{ count: number | string }>();
+
+    const response = await createKey(PAYMENTS_ONLY_KEY.raw, {
+      name: "Provisioned and wider",
+      walletScope: "selected",
+      provisionWallet: true,
+      allowedOperations: ["issuance"],
+    });
+    expect(response.status).toBe(403);
+    expect((await readJson<ErrorBody>(response)).error.code).toBe("INSUFFICIENT_PERMISSIONS");
+
+    const walletsAfter = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM custody_wallets")
+      .first<{ count: number | string }>();
+    expect(Number(walletsAfter?.count)).toBe(Number(walletsBefore?.count));
+  });
+
   it("refuses a restricted key widening another key's list", async () => {
     const created = await createKey(ADMIN_KEY.raw, {
       name: "Target",

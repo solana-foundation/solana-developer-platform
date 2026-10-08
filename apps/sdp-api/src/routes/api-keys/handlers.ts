@@ -27,6 +27,7 @@ import { getLogger } from "@/runtime/logger";
 import { ApiKeyService, isApiKeyAlreadyRotated } from "@/services/api-key.service";
 import {
   assertBindingsWithinActorWalletScope,
+  assertGrantableAllowedOperations,
   isWalletScopedActor,
   legacySigningWalletBinding,
   resolveCreateWalletScope,
@@ -289,6 +290,11 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
       walletScope
     );
   }
+
+  // Judge the requested Allowed Operations before any wallet is provisioned,
+  // so a refused request leaves nothing behind. The service judges again
+  // inside the key transaction.
+  assertGrantableAllowedOperations(actorApiKey?.allowedOperations ?? null, allowedOperations);
 
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];

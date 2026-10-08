@@ -454,6 +454,88 @@ describe("Helius Rings routes", () => {
       expect(listBody.data.operations.length).toBeGreaterThanOrEqual(2);
     });
 
+    it("judges prepare, retry and execute against the key's allowed operations", async () => {
+      const gateway = new InMemoryRingsGateway();
+      gateway.buildOperation = () =>
+        Promise.reject(new HeliusRingsError("gateway_unavailable", "port unavailable"));
+      gatewayOverride.current = gateway;
+
+      const failed = (await (
+        await post("/v1/helius-rings/operations", {
+          walletId: ringsWalletId,
+          opType: "shield",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+          clientNonce: "route-nonce-allowed-ops",
+        })
+      ).json()) as { data: { operation: { id: string } } };
+
+      const paymentsOnlyKey = { id: "key_hr_payments_only", raw: "sk_test_helius_rings_pay" };
+      await seedCachedApiKey(env, await hashString(paymentsOnlyKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        id: paymentsOnlyKey.id,
+        allowedOperations: ["payment"],
+      });
+      const restricted = (path: string, body: unknown) =>
+        app.request(
+          path,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${paymentsOnlyKey.raw}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+          },
+          env
+        );
+      const refusedCode = async (res: Response) =>
+        ((await res.json()) as { error: { code: string } }).error.code;
+
+      const prepared = await restricted("/v1/helius-rings/operations", {
+        walletId: ringsWalletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000000" },
+        clientNonce: "route-nonce-allowed-ops-prepare",
+      });
+      expect(prepared.status).toBe(403);
+      expect(await refusedCode(prepared)).toBe("OPERATION_NOT_ALLOWED");
+
+      const retried = await restricted(
+        `/v1/helius-rings/operations/${failed.data.operation.id}/retry`,
+        { clientNonce: "route-nonce-allowed-ops-retry" }
+      );
+      expect(retried.status).toBe(403);
+      expect(await refusedCode(retried)).toBe("OPERATION_NOT_ALLOWED");
+
+      const executed = await restricted(
+        `/v1/helius-rings/operations/${failed.data.operation.id}/execute`,
+        {}
+      );
+      expect(executed.status).toBe(403);
+      expect(await refusedCode(executed)).toBe("OPERATION_NOT_ALLOWED");
+
+      // A key whose list names the Rings family goes through to the normal path.
+      const transferKey = { id: "key_hr_transfer_family", raw: "sk_test_helius_rings_xfer" };
+      await seedCachedApiKey(env, await hashString(transferKey.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        id: transferKey.id,
+        allowedOperations: ["transfer"],
+      });
+      const allowedRetry = await app.request(
+        `/v1/helius-rings/operations/${failed.data.operation.id}/retry`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${transferKey.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ clientNonce: "route-nonce-allowed-ops-retry-ok" }),
+        },
+        env
+      );
+      expect(allowedRetry.status).toBe(201);
+    });
+
     it("execute is a no-op on a terminal operation", async () => {
       const failed = (await (
         await post("/v1/helius-rings/operations", {

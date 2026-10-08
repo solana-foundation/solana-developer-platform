@@ -12,6 +12,7 @@ import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
   assertBindingsWithinActorWalletScope,
+  assertGrantableAllowedOperations,
   isWalletScopedActor,
   resolveCreateWalletScope,
   resolveWalletBindingsInScope,
@@ -155,6 +156,11 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       walletScope
     );
   }
+
+  // Judge the requested Allowed Operations before any wallet is provisioned,
+  // so a refused request leaves nothing behind. The service judges again
+  // inside the key transaction.
+  assertGrantableAllowedOperations(actorApiKey?.allowedOperations ?? null, allowedOperations);
 
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];

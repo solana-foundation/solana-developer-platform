@@ -420,7 +420,12 @@ export async function getRingsOperation(c: AppContext) {
  */
 export async function executeRingsOperation(c: AppContext) {
   const { tenant } = tenantOf(c);
-  await requireRingsOperation(c, tenant, requireParam(c, "operationId"), ["payments:write"]);
+  const waiting = await requireRingsOperation(c, tenant, requireParam(c, "operationId"), [
+    "payments:write",
+  ]);
+  // Execution pushes a prepared operation to signing, and the executing key
+  // may not be the one that prepared it, so it is judged on its own list.
+  assertOperationAllowed(c, `rings_${waiting.op_type}`);
   const service = getHeliusRingsService(c, tenant);
   const operation = await withRingsErrors(() =>
     service.executeOperation(requireParam(c, "operationId"))
@@ -440,6 +445,9 @@ export async function retryRingsOperation(c: AppContext) {
   const { auth, tenant } = tenantOf(c);
   const failedId = requireParam(c, "operationId");
   const failed = await requireRingsOperation(c, tenant, failedId, ["payments:write"]);
+  // A retry prepares a fresh operation of the same type, so the retrying key
+  // is judged exactly like a key preparing it for the first time.
+  assertOperationAllowed(c, `rings_${failed.op_type}`);
 
   const ringsWallet = await getHeliusRingsWalletRepository(c).getWalletById({
     ...tenant,
