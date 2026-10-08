@@ -3,7 +3,7 @@ title: Embedded Yield
 description: Offer yield from your own app. SDP builds the transactions, your customer's wallet signs, and your backend can pay the fees with a co-signing wallet.
 ---
 
-{/* Keep this guide and the dashboard integration module (apps/sdp-web/src/app/dashboard/markets/earn/earn-integration-snippets.ts) in sync: they document the same flow. */}
+{/* Keep this guide and the dashboard integration module (apps/sdp-web/src/app/dashboard/[projectId]/markets/earn/earn-integration-snippets.ts) in sync: they document the same flow. */}
 
 Embedded Yield lets your platform offer vault yield without SDP ever holding your users' funds. SDP **builds** an unsigned Solana transaction for the customer's own wallet and the customer signs it in your app. With an API key, your backend **submits** the signed bytes to SDP for verification, durable tracking, and broadcast. Without a key, you broadcast and track the signed transaction yourself. Withdrawals work the same way in reverse.
 
