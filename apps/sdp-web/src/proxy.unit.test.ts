@@ -1,4 +1,5 @@
-import { NextFetchEvent, NextRequest } from "next/server";
+import { NextFetchEvent } from "next/dist/server/web/spec-extension/fetch-event";
+import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 
 const clerk = vi.hoisted(() => ({ protect: vi.fn(async () => undefined) }));

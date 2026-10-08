@@ -1,7 +1,6 @@
 "use client";
 
 import { useParams, usePathname } from "next/navigation";
-import { useCallback } from "react";
 import { parseDashboardPathname, projectHref } from "./dashboard-project-path";
 
 /**
@@ -48,10 +47,25 @@ export function useDashboardPathname(): string {
  *   stable until the URL's Project changes, so it is safe in hook deps.
  */
 export function useProjectHref(): (dashboardPath: string) => string {
-  const projectId = useOptionalProjectId();
-  return useCallback(
-    (dashboardPath: string) =>
-      projectId === null ? dashboardPath : projectHref(projectId, dashboardPath),
-    [projectId]
-  );
+  return projectHrefBuilder(useOptionalProjectId());
+}
+
+const projectHrefBuilders = new Map<string | null, (dashboardPath: string) => string>();
+
+/**
+ * The link builder for one Project, created once per Project id so every
+ * caller in every render gets the same function reference.
+ *
+ * @param projectId - The URL's Project, or null outside a Project-scoped URL.
+ * @returns The cached builder for that Project.
+ */
+function projectHrefBuilder(projectId: string | null): (dashboardPath: string) => string {
+  const cached = projectHrefBuilders.get(projectId);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const builder = (dashboardPath: string) =>
+    projectId === null ? dashboardPath : projectHref(projectId, dashboardPath);
+  projectHrefBuilders.set(projectId, builder);
+  return builder;
 }

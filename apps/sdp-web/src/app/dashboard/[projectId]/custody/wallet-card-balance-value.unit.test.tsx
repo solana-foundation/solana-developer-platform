@@ -1,6 +1,8 @@
 import type { CustodyWalletTokenBalance } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 
 const { mockUsePersistedDashboardSWR } = vi.hoisted(() => ({
   mockUsePersistedDashboardSWR: vi.fn(),
@@ -35,8 +37,13 @@ function renderBalance(initialBalances: CustodyWalletTokenBalance[] = [balance(1
   );
 }
 
+beforeEach(() => {
+  setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/custody`);
+});
+
 afterEach(() => {
   mockUsePersistedDashboardSWR.mockReset();
+  restoreWindowLocation();
   vi.unstubAllGlobals();
 });
 
