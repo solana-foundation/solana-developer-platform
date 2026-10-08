@@ -379,21 +379,44 @@ describe("idempotent()", () => {
     expect((await post(app, "/v1/composite", { a: 2 }, KEY)).status).toBe(201);
   });
 
-  it("stores a 5xx thrown past a composite step's checks, like one inside the chain", async () => {
+  it("stores a 5xx AppError thrown past a composite step's checks, like one inside the chain", async () => {
     const app = testApp();
     const run = vi.fn(async () => {
-      throw new Error("upstream down");
+      throw new AppError("SERVICE_UNAVAILABLE");
     });
     app.post(
       "/v1/composite",
       async (c) => (await runIdempotency(c, run, { key: "required" })) ?? c.res
     );
 
-    expect((await post(app, "/v1/composite", { a: 1 }, KEY)).status).toBe(500);
+    expect((await post(app, "/v1/composite", { a: 1 }, KEY)).status).toBe(503);
     const replayed = await post(app, "/v1/composite", { a: 1 }, KEY);
-    expect(replayed.status).toBe(500);
+    expect(replayed.status).toBe(503);
     expect(replayed.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("never stores an error the app maps itself, so a corrected retry runs", async () => {
+    const app = testApp();
+    let fail = true;
+    app.post("/v1/composite", async (c) => {
+      const res = await runIdempotency(
+        c,
+        async () => {
+          // Not an AppError: only the app's error handler knows its status.
+          if (fail) throw new Error("package-level refusal");
+          c.res = c.json({ ok: true }, 201);
+        },
+        { key: "required" }
+      );
+      return res ?? c.res;
+    });
+
+    expect((await post(app, "/v1/composite", { a: 1 }, KEY)).status).toBe(500);
+    fail = false;
+    const retried = await post(app, "/v1/composite", { a: 1 }, KEY);
+    expect(retried.status).toBe(201);
+    expect(retried.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBeNull();
   });
 
   it("stores the status alone when the body is too large, and never runs twice", async () => {

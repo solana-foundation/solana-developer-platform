@@ -10,7 +10,7 @@ import {
   type StoredIdempotentResponse,
 } from "@/db/repositories/idempotency-keys.repository";
 import { getAuth } from "@/lib/auth";
-import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
 import { canonicalJson, type JsonValue } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
@@ -173,15 +173,18 @@ async function snapshot(response: Response, operation: string): Promise<StoredId
   return { status: response.status, headers, body };
 }
 
-/** The answer an error thrown past a composite caller's checks stands for. */
-function thrownResponse(error: unknown): Response {
-  const body =
-    error instanceof AppError
-      ? error.toResponse()
-      : { error: { code: "INTERNAL_ERROR", message: PUBLIC_INTERNAL_ERROR_MESSAGE } };
-  const status = error instanceof AppError ? error.statusCode : 500;
-  return new Response(JSON.stringify(body), {
-    status,
+/**
+ * The answer an error thrown past a composite caller's checks stands for, when
+ * this step can know it: an AppError carries its own status. Any other error
+ * is mapped by the app's error handler, which this step cannot see, so it
+ * returns null and the key is never stored for it.
+ */
+function thrownResponse(error: unknown): Response | null {
+  if (!(error instanceof AppError)) {
+    return null;
+  }
+  return new Response(JSON.stringify(error.toResponse()), {
+    status: error.statusCode,
     headers: { "content-type": "application/json" },
   });
 }
@@ -212,21 +215,28 @@ function startLeaseRenewal(
   leaseSeconds: number,
   operation: string
 ): () => Promise<void> {
+  // Renewals are chained, never concurrent: one finishing out of order after
+  // the release could otherwise lock the key again.
   let pending: Promise<void> = Promise.resolve();
+  let stopped = false;
   const timer = setInterval(
     () => {
-      pending = repository.renew(id, claimToken, leaseSeconds).then(
-        (held) => {
-          if (!held) getLogger().warn({ operation }, "idempotency: lease lost while running");
-        },
-        (error: unknown) =>
-          getLogger().error({ operation, ...describeError(error) }, "idempotency: renewal failed")
-      );
+      pending = pending.then(async () => {
+        if (stopped) return;
+        try {
+          if (!(await repository.renew(id, claimToken, leaseSeconds))) {
+            getLogger().warn({ operation }, "idempotency: lease lost while running");
+          }
+        } catch (error) {
+          getLogger().error({ operation, ...describeError(error) }, "idempotency: renewal failed");
+        }
+      });
     },
     (leaseSeconds * 1000) / 3
   );
   timer.unref?.();
   return () => {
+    stopped = true;
     clearInterval(timer);
     return pending;
   };
@@ -321,6 +331,13 @@ export async function runIdempotency(
   await stopRenewal();
 
   const response = thrown === null ? c.res : thrownResponse(thrown.error);
+  if (response === null) {
+    // An error the app maps itself (a 400 from a package error, a 500): the
+    // status is unknown here, so free the lease and keep the key bound to its
+    // request rather than store a guess. A same-key retry runs again.
+    await settle(() => repository.unlock(id, claimToken), operation);
+    throw (thrown as { error: unknown }).error;
+  }
   const status = response.status;
   if (UNSTORED_STATUSES.has(status)) {
     await settle(

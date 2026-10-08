@@ -70,6 +70,9 @@ step** → admission → validation → handler.
 
 - `rerun` is only for a route whose handler writes its own row under a unique key before it moves
   anything. That row recovers the earlier attempt.
+- An error thrown past a composite caller (such as `requireMovement`) is stored only if it is an
+  `AppError`, whose status is known. Any other error is mapped by the app's handler, so the key is
+  unlocked and stays bound to its request instead of storing a guess.
 - A success is never unlocked. A body over 1 MiB is stored without its body, and a bodyless status
   (204, 205, 304) replays without one.
 
