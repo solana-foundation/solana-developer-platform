@@ -221,6 +221,7 @@ async function renderReadyForm() {
     sourceWallets,
   });
   await screen.findByRole("option", { name: "Alice Treasury (Alic…1111)" });
+  await user.selectOptions(screen.getByLabelText("From wallet"), "wallet_sender");
   await user.selectOptions(screen.getByLabelText("Recipient wallet"), "pcvw_alice");
   await user.type(screen.getByLabelText("Amount (USDC)"), "1.25");
   return user;
@@ -398,6 +399,28 @@ describe("TransferForm", () => {
     });
   });
 
+  it("refuses to submit until the user picks the source wallet", async () => {
+    mocks.fetchTransferRecipientsAction.mockResolvedValue({
+      ok: true,
+      recipients: alphaRecipients,
+    });
+    const user = userEvent.setup();
+    renderForm({
+      channels,
+      scopeKey: "org_test:project_test:pci_test",
+      sourceWallets,
+    });
+
+    expect(screen.getByLabelText("From wallet")).toHaveProperty("value", "");
+    await screen.findByRole("option", { name: "Alice Treasury (Alic…1111)" });
+    await user.selectOptions(screen.getByLabelText("Recipient wallet"), "pcvw_alice");
+    await user.type(screen.getByLabelText("Amount (USDC)"), "1.25");
+    await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
+
+    expect(await screen.findByText("Select a wallet to transfer from.")).toBeTruthy();
+    expect(mocks.createTransferAction).not.toHaveBeenCalled();
+  });
+
   it("renders an HTTP-200 failed transfer without reporting success", async () => {
     const failedTransfer = makeTransfer({
       status: "failed",
@@ -432,6 +455,7 @@ describe("TransferForm", () => {
     await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
     await screen.findByText("Progress: confirmed");
     await user.click(screen.getByRole("button", { name: "New transfer" }));
+    await user.selectOptions(screen.getByLabelText("From wallet"), "wallet_sender");
 
     await waitFor(() => expect(mocks.fetchWalletBalancesAction).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("8.75 USDC")).toBeTruthy();
@@ -548,6 +572,7 @@ describe("TransferForm", () => {
     });
 
     await screen.findByRole("option", { name: /Alic…1111/ });
+    await user.selectOptions(screen.getByLabelText("From wallet"), "wallet_sender");
     await user.selectOptions(screen.getByLabelText("Recipient wallet"), "pcvw_alice");
     await user.type(screen.getByLabelText("Amount (USDC)"), "1.25");
     await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
@@ -564,11 +589,12 @@ describe("TransferForm", () => {
 
     expect(screen.queryByText("Progress: submitted")).toBeNull();
     expect(screen.getByLabelText("Channel")).toHaveProperty("value", "channel_gamma");
-    expect(screen.getByLabelText("From wallet")).toHaveProperty("value", "wallet_gamma");
+    expect(screen.getByLabelText("From wallet")).toHaveProperty("value", "");
     expect(screen.getByLabelText("Amount (USDC)")).toHaveProperty("value", "");
     await screen.findByRole("option", { name: /Caro…3333/ });
     expect(screen.getByLabelText("Recipient wallet")).toHaveProperty("value", "");
 
+    await user.selectOptions(screen.getByLabelText("From wallet"), "wallet_gamma");
     await user.selectOptions(screen.getByLabelText("Recipient wallet"), "pcvw_carol");
     await user.type(screen.getByLabelText("Amount (USDC)"), "2");
     await user.click(screen.getByRole("button", { name: "Transfer USDC" }));

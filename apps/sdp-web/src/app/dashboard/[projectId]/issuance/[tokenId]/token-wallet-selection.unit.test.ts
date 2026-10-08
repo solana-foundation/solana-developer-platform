@@ -80,6 +80,20 @@ describe("issuance exact wallet selection", () => {
     ).toBe("cwlt_b");
   });
 
+  it("leaves direct deploy unselected when the token saved no signer", () => {
+    const selection = getSignerSelectionForAction({
+      action: "deploy",
+      token: { ...token, signingCustodyWalletId: null },
+      authorityWallets: wallets,
+      metadataAuthority: null,
+      t,
+    });
+
+    expect(selection.wallets).toEqual(wallets);
+    expect(selection.defaultWalletId).toBe("");
+    expect(selection.unavailableReason).toBeNull();
+  });
+
   it("does not switch a persisted deployment choice to a runtime-enabled wallet", () => {
     const inventory = wallets.map((wallet) => ({
       ...wallet,
@@ -188,17 +202,30 @@ describe("issuance exact wallet selection", () => {
     expect(selection.defaultWalletId).toBe("cwlt_connection");
   });
 
-  it("does not default burn when the same source address has multiple wallet rows", () => {
+  it("does not default burn when several wallets can sign", () => {
     const selection = getSignerSelectionForAction({
       action: "burn",
       token,
-      authorityWallets: duplicateAuthorityWallets,
+      authorityWallets: wallets,
       metadataAuthority: null,
       t,
     });
 
-    expect(selection.wallets).toEqual(duplicateAuthorityWallets);
+    expect(selection.wallets).toEqual(wallets);
     expect(selection.defaultWalletId).toBe("");
+  });
+
+  it("selects the only wallet that can sign a burn", () => {
+    const selection = getSignerSelectionForAction({
+      action: "burn",
+      token,
+      authorityWallets: [wallets[0]],
+      metadataAuthority: null,
+      t,
+    });
+
+    expect(selection.wallets).toEqual([wallets[0]]);
+    expect(selection.defaultWalletId).toBe("cwlt_a");
   });
 
   it("selects by the list authority rather than the token freeze authority", () => {
