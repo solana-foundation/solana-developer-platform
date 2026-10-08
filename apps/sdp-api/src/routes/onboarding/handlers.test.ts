@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
+import { requestIdMiddleware } from "@/middleware/request-id";
 import { validateBody } from "@/middleware/validate";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
@@ -40,6 +41,7 @@ function createApp() {
     }
     return c.json({ error: { code: "INTERNAL_ERROR", message: error.message } }, 500);
   });
+  app.use("*", requestIdMiddleware());
   app.use("*", async (c, next) => {
     c.set("clerkOnboarding", {
       clerkUserId: "user_clerk_onboarding_test",

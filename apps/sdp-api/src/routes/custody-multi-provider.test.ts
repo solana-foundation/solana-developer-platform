@@ -462,7 +462,7 @@ describe("Custody multi-provider routes", () => {
     expect(body.error.message).toContain("Custody not initialized");
   });
 
-  it("returns 404 when deleting a wallet for an uninitialized provider", async () => {
+  it("returns 404 when deleting an unknown wallet id", async () => {
     const res = await app.request(
       "/v1/wallets",
       {
@@ -472,21 +472,16 @@ describe("Custody multi-provider routes", () => {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
-          provider: "coinbase_cdp",
-          walletId: "cdp_wallet_missing",
+          walletId: "wallet_unknown_test",
         }),
       },
       env
     );
 
     expect(res.status).toBe(404);
-    const body = (await res.json()) as {
-      error: {
-        code: string;
-        message: string;
-      };
-    };
-    expect(body.error.code).toBe("NOT_FOUND");
-    expect(body.error.message).toContain("Custody not initialized");
+    expect(await res.json()).toEqual({
+      error: { code: "NOT_FOUND", message: "Custody wallet not found" },
+      meta: { requestId: expect.any(String) },
+    });
   });
 });
