@@ -40,7 +40,7 @@ route pattern, read with `routePath(c)`, so it needs no shared vocabulary that c
 **Fingerprint.** SHA-256 over canonical JSON (keys sorted by code unit) of the parts below. The
 credential is recorded on the row and compared in plain text rather than hashed:
 
-- the operation, path parameters, sorted query parameters and body;
+- the operation, path parameters, query parameters (repeated values in order) and body;
 - the credential (API key id or user id), so another credential reusing the key gets 422 and
   never reads a response produced for different wallet access. A retry made after rotating the
   API key is therefore a new request; the resource row's own unique key still stops it moving
