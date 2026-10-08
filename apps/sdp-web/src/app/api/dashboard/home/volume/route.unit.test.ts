@@ -6,10 +6,10 @@ const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
 }));
 
-vi.mock("@/app/dashboard/home-page.data", () => ({
+vi.mock("@/app/dashboard/[projectId]/home-page.data", () => ({
   computeTodaysVolume: mocks.computeTodaysVolume,
 }));
-vi.mock("@/app/dashboard/payments/payments-page.data", () => ({
+vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
   fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
 }));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));

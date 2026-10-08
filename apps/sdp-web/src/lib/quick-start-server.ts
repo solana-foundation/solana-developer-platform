@@ -1,6 +1,6 @@
 import type { CustodyWalletsResponse, ListApiKeysResponse } from "@sdp/types";
 import { cache } from "react";
-import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
+import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import type { QuickStartStep } from "./dashboard-quick-start";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import { createOrgSdpApiClient, listSdpProjects } from "./sdp-api";

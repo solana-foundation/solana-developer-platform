@@ -12,24 +12,25 @@ import {
   readQuickStart,
   setQuickStart,
 } from "@/lib/dashboard-quick-start";
+import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
+import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { DashboardQuickStart } from "./dashboard-quick-start";
 
 const workspace = vi.hoisted(() => ({
   initialQuickStartStep: "api-key" as "api-key" | "wallet" | "done" | null,
-  pathname: "/dashboard",
   dashboardCacheScope: { userId: "user_test", orgId: "org_test" },
-  selectedProjectId: "project_test",
+  selectedProjectId: "prj_test_sandbox",
   dashboardAccess: { capabilities: { canManageApiKeys: true, canManageCustody: true } },
   flags: { custody: true },
   sdpEnvironment: "sandbox",
 }));
-vi.mock("next/navigation", () => ({ usePathname: () => workspace.pathname }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => workspace,
 }));
 
 const key = () => quickStartKey(workspace.dashboardCacheScope);
-const ui = (collapsed = false) => (
+const ui = (collapsed: boolean) => (
   <I18nProvider locale="en" messages={getMessages("en")}>
     <DashboardQuickStart collapsed={collapsed} />
   </I18nProvider>
@@ -41,7 +42,7 @@ const settingsUi = () => (
 );
 
 const renderGuide = () => {
-  const view = render(ui());
+  const view = render(ui(false));
   const launcher = view.queryByRole("button", { name: /SDP quick start · \d\/3/ });
   if (launcher) fireEvent.click(launcher);
   return view;
@@ -49,10 +50,10 @@ const renderGuide = () => {
 let orgSequence = 0;
 
 beforeEach(() => {
+  resetDashboardNavigation();
   workspace.initialQuickStartStep = "api-key";
-  workspace.pathname = "/dashboard";
   workspace.dashboardCacheScope = { userId: "user_test", orgId: `org_${++orgSequence}` };
-  workspace.selectedProjectId = "project_test";
+  workspace.selectedProjectId = SANDBOX_PROJECT.id;
   workspace.sdpEnvironment = "sandbox";
   workspace.flags.custody = true;
   workspace.dashboardAccess.capabilities.canManageApiKeys = true;
@@ -64,7 +65,7 @@ afterEach(() => {
 
 describe("dashboard quick start", () => {
   it("starts as a sidebar card and opens the guide only when requested", async () => {
-    const view = render(ui());
+    const view = render(ui(false));
     expect(view.queryByRole("dialog")).toBeNull();
     const card = view.getByRole("complementary");
     expect(card.hasAttribute("data-quick-start-sidebar")).toBe(true);
@@ -88,14 +89,14 @@ describe("dashboard quick start", () => {
   it("links to API-key creation without prematurely completing the step", () => {
     const view = renderGuide();
     expect(view.getByRole("link", { name: "Create API key" }).getAttribute("href")).toBe(
-      "/dashboard/api-keys/new"
+      `/dashboard/${SANDBOX_PROJECT.id}/api-keys/new`
     );
     expect(view.getByRole("status").textContent).toBe("Step 1 of 3");
     expect(readQuickStart(key())).toBe("api-key");
     act(() => completeQuickStartStep(key(), "api-key"));
     expect(view.getByText("Step 2 of 3 · Optional")).toBeTruthy();
     expect(view.getByRole("link", { name: "Create wallet" }).getAttribute("href")).toBe(
-      "/dashboard/wallets/setup"
+      `/dashboard/${SANDBOX_PROJECT.id}/wallets/setup`
     );
     act(() => completeQuickStartStep(key(), "wallet"));
     expect(readQuickStart(key())).toBe("done");
@@ -118,7 +119,7 @@ describe("dashboard quick start", () => {
   });
 
   it("remembers dismissal and does not reopen after unrelated creation", () => {
-    const view = render(ui());
+    const view = render(ui(false));
     fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
     expect(view.getByRole("alertdialog", { name: "Dismiss SDP quick start?" })).toBeTruthy();
     expect(view.getByText(/You can continue anytime in Settings → Onboarding/)).toBeTruthy();
@@ -128,12 +129,12 @@ describe("dashboard quick start", () => {
     act(() => completeQuickStartStep(key(), "api-key"));
     expect(readQuickStart(key())).toBe("wallet");
     view.unmount();
-    expect(render(ui()).queryByRole("complementary")).toBeNull();
+    expect(render(ui(false)).queryByRole("complementary")).toBeNull();
   });
 
   it("keeps the card and its progress when dismissal is canceled", async () => {
     setQuickStart(key(), "wallet");
-    const view = render(ui());
+    const view = render(ui(false));
     const dismiss = view.getByRole("button", { name: "Dismiss SDP quick start" });
     fireEvent.click(dismiss);
     fireEvent.click(view.getByRole("button", { name: "Keep quick start" }));
@@ -148,7 +149,7 @@ describe("dashboard quick start", () => {
     setQuickStart(key(), "wallet");
     const view = render(
       <>
-        {ui()}
+        {ui(false)}
         {settingsUi()}
       </>
     );
@@ -158,7 +159,7 @@ describe("dashboard quick start", () => {
     view.unmount();
     const restored = render(
       <>
-        {ui()}
+        {ui(false)}
         {settingsUi()}
       </>
     );
@@ -207,61 +208,62 @@ describe("dashboard quick start", () => {
 
   it("keeps dismissal across projects and isolates it between organizations and users", () => {
     dismissQuickStart(key());
-    const view = render(ui());
+    const view = render(ui(false));
     expect(view.queryByRole("complementary")).toBeNull();
-    workspace.selectedProjectId = "another_project";
-    view.rerender(ui());
+    workspace.selectedProjectId = PRODUCTION_PROJECT.id;
+    setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}`, {});
+    view.rerender(ui(false));
     expect(view.queryByRole("dialog")).toBeNull();
     expect(view.queryByRole("complementary")).toBeNull();
     workspace.dashboardCacheScope.orgId = "another_org";
-    view.rerender(ui());
+    view.rerender(ui(false));
     expect(view.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
     fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
     fireEvent.click(view.getByRole("button", { name: "Dismiss quick start" }));
     workspace.dashboardCacheScope.userId = "another_user";
-    view.rerender(ui());
+    view.rerender(ui(false));
     expect(view.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
   });
 
   it("hides in production and for users who cannot create API keys", () => {
     workspace.sdpEnvironment = "production";
-    const view = render(ui());
+    const view = render(ui(false));
     expect(view.queryByRole("complementary")).toBeNull();
     workspace.sdpEnvironment = "sandbox";
     workspace.dashboardAccess.capabilities.canManageApiKeys = false;
-    view.rerender(ui());
+    view.rerender(ui(false));
     expect(view.queryByRole("complementary")).toBeNull();
   });
 
   it("does not show the wizard for completed or unknown server setup", () => {
     workspace.initialQuickStartStep = "done";
-    const view = render(ui());
+    const view = render(ui(false));
     expect(view.queryByRole("dialog")).toBeNull();
     workspace.initialQuickStartStep = null;
-    view.rerender(ui());
+    view.rerender(ui(false));
     expect(view.queryByRole("dialog")).toBeNull();
   });
 
   it("keeps the sidebar card after navigation without advancing on click", () => {
     const view = renderGuide();
     fireEvent.click(view.getByRole("link", { name: "Create API key" }));
-    workspace.pathname = "/dashboard/api-keys/new";
-    view.rerender(ui());
+    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/api-keys/new`, {});
+    view.rerender(ui(false));
     expect(view.queryByRole("dialog")).toBeNull();
     expect(view.getByRole("complementary").hasAttribute("data-quick-start-sidebar")).toBe(true);
     expect(readQuickStart(key())).toBe("api-key");
     view.unmount();
-    const restored = render(ui());
+    const restored = render(ui(false));
     expect(restored.queryByRole("dialog")).toBeNull();
     expect(restored.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
   });
 
   it("returns focus to the sidebar without resetting an in-progress form", async () => {
-    workspace.pathname = "/dashboard/api-keys/new";
+    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/api-keys/new`, {});
     const view = render(
       <>
         <input aria-label="Key name" defaultValue="My integration" />
-        {ui()}
+        {ui(false)}
       </>
     );
     const launcher = view.getByRole("button", { name: "SDP quick start · 1/3" });
@@ -326,7 +328,7 @@ describe("dashboard quick start", () => {
 
   it("picks up dismissal from another browser tab", () => {
     setQuickStart(key(), "wallet");
-    const view = render(ui());
+    const view = render(ui(false));
     act(() => {
       window.localStorage.setItem(`${key()}:dismissed`, "true");
       window.dispatchEvent(

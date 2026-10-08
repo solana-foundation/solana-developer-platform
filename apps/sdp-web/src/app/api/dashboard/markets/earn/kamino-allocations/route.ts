@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/markets/base58-address";
+import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
 import { readVaultAllocations } from "./kamino-allocations-store";
 
 /**

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import {
   getStoredApiKeySecret,
@@ -406,7 +407,7 @@ async function executePlaygroundRequest({
   setIsExecuting(true);
 
   try {
-    const proxyResponse = await fetch("/api/playground/execute", {
+    const proxyResponse = await dashboardRequest("/api/playground/execute", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

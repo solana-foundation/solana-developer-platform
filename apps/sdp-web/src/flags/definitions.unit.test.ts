@@ -22,6 +22,8 @@ type FlagCap =
 const FLAG_CAPS = {
   homepageOpenSignup: "uncapped",
   newDesign: "uncapped",
+  newDesignContacts: "uncapped",
+  newDesignPayDeposit: "uncapped",
   custody: { module: "custody" },
   privyByok: { module: "custody" },
   issuance: { module: "issuance" },
@@ -113,7 +115,15 @@ describe("defineDashboardFlags", () => {
     const values = await decideAll(defineFlags("stable"));
     const delegated = Object.keys(FLAG_CAPS).filter((name) => !EXCLUDED_FROM_STABLE.includes(name));
     expect(delegated.sort()).toEqual(
-      ["custody", "homepageOpenSignup", "newDesign", "payments", "privyByok"].sort()
+      [
+        "custody",
+        "homepageOpenSignup",
+        "newDesign",
+        "newDesignContacts",
+        "newDesignPayDeposit",
+        "payments",
+        "privyByok",
+      ].sort()
     );
     for (const name of delegated) {
       expect(values[name], name).toBe(true);

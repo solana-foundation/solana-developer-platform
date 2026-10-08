@@ -3,9 +3,9 @@ import {
   CUSTODY_PROVIDER_CATALOG,
   isKnownCustodyProvider,
   type KnownCustodyProvider,
-} from "@/app/dashboard/custody/provider-catalog";
+} from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createOrgSdpApiClient, createSdpApiClient, getSelectedProjectId } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 
 interface OnboardingStatusResponse {
   linked: boolean;
@@ -65,19 +65,6 @@ export async function GET(request: Request) {
         }
       );
       logRouteResult(trace, 200, { linked: false });
-      return response;
-    }
-
-    const projectId = await getSelectedProjectId();
-    if (!projectId) {
-      const response = NextResponse.json(
-        { error: { message: "Selected project required" } },
-        {
-          status: 400,
-          headers: { "X-SDP-Trace-ID": trace.traceId, "Server-Timing": trace.serverTiming() },
-        }
-      );
-      logRouteResult(trace, 400, { error: "Selected project required" });
       return response;
     }
 

@@ -4,8 +4,8 @@ import { createLocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
   getBootstrapApiBaseUrl,
+  gotoProjectPage,
   provisionWithAdminSession,
-  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
 const E2E_TIMEOUT_MS = 180_000;
@@ -50,10 +50,6 @@ test.describe("policies responsive table", () => {
     });
   });
 
-  test.beforeEach(async ({ page }) => {
-    await seedProjectCookie(page, projectId);
-  });
-
   test("uses cards on phones and progressively reveals table columns without overflow", async ({
     page,
   }) => {
@@ -67,7 +63,7 @@ test.describe("policies responsive table", () => {
     };
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/dashboard/policies", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, projectId, "/dashboard/policies");
     await expect(page.getByRole("heading", { name: "Policies" })).toBeVisible({
       timeout: E2E_TIMEOUT_MS,
     });

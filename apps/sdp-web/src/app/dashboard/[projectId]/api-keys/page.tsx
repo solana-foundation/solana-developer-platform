@@ -1,0 +1,109 @@
+import { auth } from "@clerk/nextjs/server";
+import type { PaymentsDashboardWallet } from "@sdp/types";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { getTranslations } from "@/i18n/server";
+import { getAuthEntryPath } from "@/lib/auth-entry";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { createTimedTrace } from "@/lib/request-tracing";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { fetchPaymentsWallets } from "../payments/payments-page.data";
+import { ApiKeyFlashSurface } from "./api-key-flash-surface";
+import { type ApiKeyRecord, ApiKeysTableClient } from "./api-keys-table-client";
+
+export const dynamic = "force-dynamic";
+
+export default async function ApiKeysPage() {
+  const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
+  if (!userId) {
+    redirect(await getAuthEntryPath());
+  }
+  if (!orgId) {
+    redirect("/dashboard");
+  }
+
+  const trace = createTimedTrace("dashboard.api_keys.page");
+  const dashboardAccess = resolveDashboardAccess(orgRole);
+  let apiKeys: ApiKeyRecord[] = [];
+  let wallets: PaymentsDashboardWallet[] = [];
+
+  try {
+    const apiClient = await trace.step("create_sdp_api_client", () =>
+      createSdpApiClient(trace.childContext("dashboard.api_keys.api"))
+    );
+    const [apiKeysResponse, walletsResponse] = await Promise.all([
+      trace.step("fetch_api_keys", () =>
+        apiClient.fetch<{ apiKeys: ApiKeyRecord[] }>("/v1/api-keys")
+      ),
+      dashboardAccess.capabilities.canManageApiKeys
+        ? trace.step("fetch_wallets", () =>
+            fetchPaymentsWallets(apiClient.request, { includeBalances: false })
+          )
+        : Promise.resolve({ ok: true as const, data: [] }),
+    ]);
+
+    apiKeys = apiKeysResponse.apiKeys;
+    wallets = walletsResponse.ok ? (walletsResponse.data ?? []) : [];
+
+    trace.log({
+      ok: true,
+      apiKeyCount: apiKeys.length,
+      walletCount: wallets.length,
+    });
+  } catch (error) {
+    trace.log({
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    throw error;
+  }
+
+  return (
+    <DashboardWorkspaceOverviewPanel className="flex flex-col gap-6">
+      <ApiKeyFlashSurface />
+
+      <Card className="flex-1">
+        <CardHeader>
+          <CardTitle>{t("DashboardCustody.existingApiKeys")}</CardTitle>
+          <CardDescription>{t("DashboardCustody.existingApiKeysDescription")}</CardDescription>
+          {dashboardAccess.capabilities.canManageApiKeys && apiKeys.length > 0 ? (
+            <CardAction>
+              <Button asChild>
+                <Link href={await requestProjectHref("/dashboard/api-keys/new")}>
+                  {t("DashboardCustody.newApiKey")}
+                </Link>
+              </Button>
+            </CardAction>
+          ) : null}
+        </CardHeader>
+        <CardContent className="flex flex-1 flex-col">
+          {!dashboardAccess.capabilities.canManageApiKeys ? (
+            <div className="mb-4 rounded-[10px] border border-border-default bg-fill-subtle px-3 py-2 text-xs text-secondary">
+              {t("DashboardCustody.apiKeysViewOnly")}
+            </div>
+          ) : null}
+          <div className="mb-4 rounded-[10px] border border-border-default bg-fill-subtle px-3 py-2 text-xs text-secondary">
+            <p className="text-xs text-secondary">{t("DashboardCustody.apiKeyRotationHint")}</p>
+          </div>
+          <div className="@container/api-keys-table flex flex-1 flex-col">
+            <ApiKeysTableClient
+              initialApiKeys={apiKeys}
+              canManageApiKeys={dashboardAccess.capabilities.canManageApiKeys}
+              wallets={wallets}
+            />
+          </div>
+        </CardContent>
+      </Card>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}

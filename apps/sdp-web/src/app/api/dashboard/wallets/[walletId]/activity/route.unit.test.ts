@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   loadWalletActivity: vi.fn(),
 }));
 
-vi.mock("@/app/dashboard/custody/wallet-activity.data", () => ({
+vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", () => ({
   loadWalletActivity: mocks.loadWalletActivity,
 }));
 vi.mock("@/i18n/server", () => ({

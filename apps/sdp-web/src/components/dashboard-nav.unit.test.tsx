@@ -1,7 +1,11 @@
 import { LandmarkIcon, PercentIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
+import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
@@ -26,7 +30,13 @@ import { getNavSections, withSubnavOpen, withSubnavToggled } from "./dashboard-n
 type Translate = Parameters<typeof getNavSections>[0];
 const t = ((key: string) => key) as Translate;
 
-function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]> = {}) {
+const SANDBOX_DASHBOARD = `/dashboard/${SANDBOX_PROJECT.id}`;
+
+beforeEach(() => {
+  resetDashboardNavigation();
+});
+
+function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]>) {
   return {
     canReadApprovals: false,
     complianceEnabled: true,
@@ -51,9 +61,7 @@ function findManageItem(options: ReturnType<typeof navOptions>, label: string) {
     ?.items.find((item) => item.label === label);
 }
 
-function moreSheetMarkup(
-  overrides: Partial<ComponentProps<typeof DashboardMoreSheet>> = {}
-): string {
+function moreSheetMarkup(overrides: Partial<ComponentProps<typeof DashboardMoreSheet>>): string {
   return renderToStaticMarkup(
     <DashboardMoreSheet
       pathname="/dashboard"
@@ -100,9 +108,6 @@ describe("Markets dashboard navigation", () => {
     expect(JSON.stringify(getNavSections(t, options))).not.toContain("dashboardShell.markets");
   });
 
-  // Treasury Solutions left the Earn gate on main, so it is now listed for any
-  // org with the Markets flag. Markets therefore always has at least one child
-  // and can no longer be emptied by turning the sub-modules off.
   it("still lists Treasury when every sub-module flag is off", () => {
     const markets = findMarketsItem(
       navOptions({ marketsEnabled: true, earnEnabled: false, dvpEnabled: false })
@@ -113,8 +118,6 @@ describe("Markets dashboard navigation", () => {
     ]);
   });
 
-  // DvP is the first Markets sub-module that is not Earn-backed, so the entry
-  // point can no longer depend on Earn specifically.
   it("shows Markets for a DvP-only organization", () => {
     const markets = findMarketsItem(
       navOptions({ marketsEnabled: true, earnEnabled: false, dvpEnabled: true })
@@ -137,7 +140,7 @@ describe("Markets dashboard navigation", () => {
 
   it("keeps Markets out of the mobile More sheet when the module flag is off", () => {
     expect(moreSheetMarkup({ earnEnabled: true, marketsEnabled: false })).not.toContain(
-      'href="/dashboard/markets"'
+      `href="${SANDBOX_DASHBOARD}/markets"`
     );
   });
 
@@ -148,7 +151,7 @@ describe("Markets dashboard navigation", () => {
       marketsEnabled: true,
     });
 
-    expect(markup).toContain('href="/dashboard/markets"');
+    expect(markup).toContain(`href="${SANDBOX_DASHBOARD}/markets"`);
     expect(markup).toContain("Shared.dashboardShell.markets");
     expect(markup).toContain('aria-current="page"');
   });
@@ -167,7 +170,7 @@ describe("Helius Rings dashboard navigation", () => {
 
   it("hides the entry when the flag is off", () => {
     expect(findHeliusRingsItem(navOptions({ heliusRingsEnabled: false }))).toBeUndefined();
-    expect(JSON.stringify(getNavSections(t, navOptions()))).not.toContain(
+    expect(JSON.stringify(getNavSections(t, navOptions({})))).not.toContain(
       "Shared.dashboardShell.heliusRings"
     );
   });
@@ -175,12 +178,12 @@ describe("Helius Rings dashboard navigation", () => {
   it("surfaces the entry in the mobile More sheet when the flag is on", () => {
     const markup = moreSheetMarkup({ heliusRingsEnabled: true });
 
-    expect(markup).toContain('href="/dashboard/helius-rings"');
+    expect(markup).toContain(`href="${SANDBOX_DASHBOARD}/helius-rings"`);
     expect(markup).toContain("Shared.dashboardShell.heliusRings");
   });
 
   it("keeps the entry out of the mobile More sheet when the flag is off", () => {
-    expect(moreSheetMarkup()).not.toContain("/dashboard/helius-rings");
+    expect(moreSheetMarkup({})).not.toContain("/helius-rings");
   });
 });
 
@@ -189,13 +192,13 @@ describe("Payments dashboard navigation", () => {
     findManageItem(options, "Shared.dashboardShell.payments");
 
   it("shows the entry with its ordered subnav under Manage when the flag is on", () => {
-    const item = findPaymentsItem(navOptions());
+    const item = findPaymentsItem(navOptions({}));
 
     expect(item?.href).toBe("/dashboard/payments");
     expect(item?.subnavKey).toBe("payments");
     expect(item?.children?.map((child) => child.label)).toEqual([
       "Shared.dashboardShell.transactions",
-      "Shared.dashboardShell.counterparty",
+      "Shared.dashboardShell.contacts",
       "Shared.dashboardShell.pay",
       "Shared.dashboardShell.deposit",
       "Shared.dashboardShell.requests",
@@ -208,35 +211,6 @@ describe("Payments dashboard navigation", () => {
 
     expect(findPaymentsItem(options)).toBeUndefined();
     expect(JSON.stringify(getNavSections(t, options))).not.toContain("dashboardShell.payments");
-  });
-
-  it("shows the bottom-bar tab when the flag is on", () => {
-    const markup = renderToStaticMarkup(
-      <DashboardBottomNav
-        pathname="/dashboard"
-        custodyEnabled
-        issuanceEnabled
-        paymentsEnabled
-        onOpenMore={() => {}}
-      />
-    );
-
-    expect(markup).toContain('href="/dashboard/payments"');
-    expect(markup).toContain("Shared.dashboardShell.payments");
-  });
-
-  it("keeps the bottom-bar tab out when the flag is off", () => {
-    const markup = renderToStaticMarkup(
-      <DashboardBottomNav
-        pathname="/dashboard"
-        custodyEnabled
-        issuanceEnabled
-        paymentsEnabled={false}
-        onOpenMore={() => {}}
-      />
-    );
-
-    expect(markup).not.toContain("/dashboard/payments");
   });
 });
 
@@ -281,7 +255,6 @@ describe("Integrations dashboard navigation", () => {
     expect(item?.children).toEqual([]);
   });
 
-  // The release channel caps every ramp provider flag, so ramps can be off while Payments is on.
   it("drops Ramps when no ramp provider is enabled, even with Payments on", () => {
     const item = findIntegrationsItem(navOptions({ paymentsEnabled: true, rampsEnabled: false }));
 
@@ -291,51 +264,43 @@ describe("Integrations dashboard navigation", () => {
   });
 });
 
-describe("Custody dashboard navigation", () => {
-  it("hides the Wallets entry when the module is disabled", () => {
-    const options = { ...navOptions(), custodyEnabled: false };
-
-    expect(JSON.stringify(getNavSections(t, options))).not.toContain(
-      "Shared.dashboardShell.wallets"
-    );
-  });
-
-  it("keeps Wallets out of the mobile bottom bar when the module is disabled", () => {
-    const markup = renderToStaticMarkup(
-      <DashboardBottomNav
-        pathname="/dashboard"
-        issuanceEnabled
-        paymentsEnabled
-        custodyEnabled={false}
-        onOpenMore={() => {}}
-      />
-    );
-
-    expect(markup).not.toContain("/dashboard/wallets");
+describe("module entries", () => {
+  it.each([
+    { options: { custodyEnabled: false }, label: "Shared.dashboardShell.wallets" },
+    { options: { issuanceEnabled: false }, label: "Shared.dashboardShell.issuance" },
+  ])("drops $label when its module is disabled", ({ options, label }) => {
+    expect(JSON.stringify(getNavSections(t, navOptions(options)))).not.toContain(label);
   });
 });
 
-describe("Issuance dashboard navigation", () => {
-  it("hides the Issuance entry when the module is disabled", () => {
-    const options = { ...navOptions(), issuanceEnabled: false };
-
-    expect(JSON.stringify(getNavSections(t, options))).not.toContain(
-      "Shared.dashboardShell.issuance"
-    );
-  });
-
-  it("keeps Issuance out of the mobile bottom bar when the module is disabled", () => {
+describe("mobile bottom bar", () => {
+  it("links every enabled module inside the URL's Project", () => {
+    setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}`, {});
     const markup = renderToStaticMarkup(
       <DashboardBottomNav
         pathname="/dashboard"
         custodyEnabled
-        issuanceEnabled={false}
+        issuanceEnabled
         paymentsEnabled
         onOpenMore={() => {}}
       />
     );
 
-    expect(markup).not.toContain("/dashboard/issuance");
+    for (const segment of ["wallets", "payments", "issuance"]) {
+      expect(markup).toContain(`href="/dashboard/${PRODUCTION_PROJECT.id}/${segment}"`);
+    }
+  });
+
+  it.each([
+    { segment: "wallets", custodyEnabled: false, issuanceEnabled: true, paymentsEnabled: true },
+    { segment: "payments", custodyEnabled: true, issuanceEnabled: true, paymentsEnabled: false },
+    { segment: "issuance", custodyEnabled: true, issuanceEnabled: false, paymentsEnabled: true },
+  ])("keeps /$segment out when its module is disabled", ({ segment, ...flags }) => {
+    const markup = renderToStaticMarkup(
+      <DashboardBottomNav pathname="/dashboard" onOpenMore={() => {}} {...flags} />
+    );
+
+    expect(markup).not.toContain(`/${segment}"`);
   });
 });
 
@@ -355,9 +320,9 @@ describe("Policies dashboard navigation", () => {
       policiesEnabled: false,
     });
 
-    expect(markup).not.toContain("/dashboard/policies");
-    expect(markup).not.toContain("/dashboard/approvals");
-    expect(markup).toContain("/dashboard/api-keys");
+    expect(markup).not.toContain("/policies");
+    expect(markup).not.toContain("/approvals");
+    expect(markup).toContain(`href="${SANDBOX_DASHBOARD}/api-keys"`);
   });
 });
 
@@ -365,8 +330,6 @@ describe("subnav open state", () => {
   const closed = { integrations: false, payments: false, markets: false } as const;
 
   it("opens a section when its top-level item is followed", () => {
-    // Gui's ask: clicking Payments in the side nav expands the Payments
-    // submenu rather than only navigating to it (HOO-1218).
     expect(withSubnavOpen(closed, "payments")).toEqual({
       integrations: false,
       payments: true,
@@ -375,15 +338,11 @@ describe("subnav open state", () => {
   });
 
   it("never closes the section being navigated into", () => {
-    // The whole reason this is not a toggle. A second click on the section you
-    // are already inside would otherwise hide the pages you are looking at.
     const open = { integrations: false, payments: true, markets: false };
     expect(withSubnavOpen(open, "payments").payments).toBe(true);
   });
 
   it("returns the same object when the section is already open", () => {
-    // Held in React state, so a click that decides nothing must not re-render
-    // the whole shell.
     const open = { integrations: false, payments: true, markets: false };
     expect(withSubnavOpen(open, "payments")).toBe(open);
   });

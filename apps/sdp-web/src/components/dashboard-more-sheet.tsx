@@ -22,6 +22,7 @@ import {
   DASHBOARD_SIDE_NAV_HREFS,
   isDashboardNavItemActive,
 } from "@/lib/dashboard-navigation-loading";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
 type MoreItem = {
@@ -143,6 +144,7 @@ function TileLink({
   className: string;
   children: React.ReactNode;
 } & Record<string, unknown>) {
+  const projectHref = useProjectHref();
   if (external) {
     return (
       <a href={href} target="_blank" rel="noreferrer" onClick={onClick} className={className}>
@@ -151,7 +153,7 @@ function TileLink({
     );
   }
   return (
-    <Link href={href} onClick={onClick} className={className} {...rest}>
+    <Link href={projectHref(href)} onClick={onClick} className={className} {...rest}>
       {children}
     </Link>
   );
