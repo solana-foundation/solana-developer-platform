@@ -302,7 +302,6 @@ describe("Custody setup by project environment", () => {
     custodyReleaseChannel.outOfChannelMode = null;
     custodyReleaseChannel.stageOverride = null;
     vi.clearAllMocks();
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>());
     env.PRIVY_APP_ID = "managed-privy-app-id";
     env.PRIVY_APP_SECRET = "managed-privy-app-secret";
     env.PRIVY_API_BASE_URL = PRIVY_API_BASE_URL;
@@ -314,6 +313,7 @@ describe("Custody setup by project environment", () => {
     await seedFixture();
     clerkToken = await signSeededClerkMember(env, getDb(env), USER_ID, ORGANIZATION_ID);
     await verifyClerkJwt(clerkToken, env);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>());
   });
 
   afterEach(async () => {
@@ -511,10 +511,9 @@ describe("Custody setup by project environment", () => {
 
     beforeEach(() => {
       warn = spyOnWarn();
-    });
-
-    afterEach(() => {
-      warn.mockRestore();
+      return () => {
+        warn.mockRestore();
+      };
     });
 
     it("logs a refused Managed initialization in a Production project exactly once", async () => {
