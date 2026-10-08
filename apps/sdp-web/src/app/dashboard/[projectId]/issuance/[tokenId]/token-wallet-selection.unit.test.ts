@@ -80,7 +80,21 @@ describe("issuance exact wallet selection", () => {
     ).toBe("cwlt_b");
   });
 
-  it("leaves direct deploy unselected when the token saved no signer", () => {
+  it("selects the only available wallet for direct deploy when the token saved no signer", () => {
+    const selection = getSignerSelectionForAction({
+      action: "deploy",
+      token: { ...token, signingCustodyWalletId: null },
+      authorityWallets: [wallets[0]],
+      metadataAuthority: null,
+      t,
+    });
+
+    expect(selection.wallets).toEqual([wallets[0]]);
+    expect(selection.defaultWalletId).toBe("cwlt_a");
+    expect(selection.unavailableReason).toBeNull();
+  });
+
+  it("leaves direct deploy unselected when the token saved no signer and several wallets can sign", () => {
     const selection = getSignerSelectionForAction({
       action: "deploy",
       token: { ...token, signingCustodyWalletId: null },
