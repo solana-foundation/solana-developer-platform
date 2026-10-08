@@ -2,8 +2,8 @@
 
 import {
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
-  UNIFIED_TRANSACTION_MODULES,
   UNIFIED_TRANSACTION_STATUSES,
+  type UnifiedTransactionModule,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
 import { ReceiptTextIcon, XIcon } from "lucide-react";
@@ -111,12 +111,15 @@ export function TransactionsWorkspace({
   issuedTokensByMint,
   wallets,
   counterparties,
+  modules,
 }: {
   initialFilters: TransactionFilters;
   initialResult: TransactionsPageResult;
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   wallets: readonly TransactionWalletOption[];
   counterparties: readonly TransactionCounterpartyOption[];
+  /** The modules the dashboard shows (`enabledTransactionModules`); the Type filter offers only these. */
+  modules: readonly UnifiedTransactionModule[];
 }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
@@ -173,9 +176,9 @@ export function TransactionsWorkspace({
       label: token.symbol,
     })),
   ];
-  const moduleLabel = (module: (typeof UNIFIED_TRANSACTION_MODULES)[number]) =>
+  const moduleLabel = (module: UnifiedTransactionModule) =>
     t(`DashboardPayments.transactions.modules.${module}` as MessageKey);
-  const typeOptions = UNIFIED_TRANSACTION_MODULES.flatMap((module) => [
+  const typeOptions = modules.flatMap((module) => [
     { value: `${module}:`, label: moduleLabel(module) },
     ...UNIFIED_TRANSACTION_MODULE_CONTRACTS[module].kinds.map((kind) => ({
       value: `${module}:${kind}`,
@@ -226,7 +229,7 @@ export function TransactionsWorkspace({
           options={typeOptions}
           onChange={(value) => {
             const [module, kind] = (value ?? "").split(":");
-            update({ module: parseTransactionModule(module), kind: kind || undefined });
+            update({ module: parseTransactionModule(module, modules), kind: kind || undefined });
           }}
         />
       ),

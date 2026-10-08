@@ -6,6 +6,18 @@ const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("@/lib/sdp-api", () => ({
   createSdpApiClient: async () => ({ request: mocks.request }),
 }));
+// The modules a stable deployment shows today: Payments only.
+vi.mock("@/flags/dashboard", () => ({
+  getDashboardFlags: async () => ({
+    payments: true,
+    markets: false,
+    earn: false,
+    dvp: false,
+    privateChannels: false,
+    issuance: false,
+    heliusRings: false,
+  }),
+}));
 
 import { GET } from "./route";
 
@@ -129,5 +141,21 @@ describe("GET /api/dashboard/payments/transactions/export", () => {
       error: { message: "Insufficient permissions" },
     });
     expect(mocks.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a module the channel leaves out, and its kind, from the API query", async () => {
+    mocks.request.mockResolvedValueOnce(page(["xfr_1"], null));
+
+    const response = await GET(
+      new Request(
+        "http://localhost/api/dashboard/payments/transactions/export?module=issuance&kind=mint&status=succeeded"
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const query = new URL(String(mocks.request.mock.calls[0]?.[0]), "http://api").searchParams;
+    expect(query.get("module")).toBeNull();
+    expect(query.get("kind")).toBeNull();
+    expect(query.get("status")).toBe("succeeded");
   });
 });

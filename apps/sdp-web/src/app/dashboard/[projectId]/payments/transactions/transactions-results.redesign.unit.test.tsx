@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { UnifiedTransaction } from "@sdp/types";
+import { UNIFIED_TRANSACTION_MODULES, type UnifiedTransaction } from "@sdp/types";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -89,6 +89,7 @@ function renderResults(result: TransactionsPageResult, filters: TransactionFilte
           issuedTokensByMint={ISSUED_TOKENS}
           wallets={[]}
           counterparties={[{ id: "cpty_test", name: "Acme Treasury" }]}
+          modules={UNIFIED_TRANSACTION_MODULES}
         />
       </I18nProvider>
     </SWRConfig>
