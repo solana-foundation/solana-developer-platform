@@ -566,7 +566,11 @@ export const retargetEarnProgram = async (
   const body = c.req.valid("json");
   const { row, client } = await requireProgramContext(c, programId);
 
-  await assertProviderAvailable(c, { family: "earn", provider: client.provider });
+  await assertProviderAvailable(c, {
+    family: "earn",
+    provider: client.provider,
+    program: "existing",
+  });
   await assertKnownYieldSources(c, client.provider, body.allocations);
 
   // Same two accepted key sources as create and withdrawals — a header-keyed

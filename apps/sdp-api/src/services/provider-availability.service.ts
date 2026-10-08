@@ -733,12 +733,20 @@ export interface CustodySetupRequest extends ProjectProviderScope {
   mode: CustodyMode;
 }
 
-/** A provider a project is about to use; custody names the mode it is used in. */
+/**
+ * A provider a project is about to use; custody names the mode it is used in.
+ * Earn has two arms: the plain one opens a NEW position (create, deposit and
+ * the availability read), and `program: "existing"` points a program that
+ * already exists at a provider (re-target). The existing-program arm skips
+ * only surfacing, so un-surfacing can never trap a position (ADR 0002); every
+ * other check still applies because it points money at the provider.
+ */
 export type ProjectProviderRequest =
   | { family: "custody"; provider: CustodyProvider; mode: CustodyMode }
   | { family: "compliance"; provider: ComplianceProviderId }
   | { family: "ramps"; provider: RampProviderId }
-  | { family: "earn"; provider: EarnProviderId };
+  | { family: "earn"; provider: EarnProviderId }
+  | { family: "earn"; provider: EarnProviderId; program: "existing" };
 
 /**
  * The custody setup rule's refusal of one pair: the 403 and the request and
@@ -993,7 +1001,7 @@ function providerNotConfiguredForProject(
  * @param request - The provider being used.
  * @param checks - The provider's verdicts from its family's stage table, surfacing, access entry and credentials.
  * @param checks.inReleaseChannel - Whether the deployment's release channel includes it.
- * @param checks.offered - Whether SDP surfaces it for the project's environment.
+ * @param checks.offered - Whether SDP surfaces it for the project's environment (always true for an existing Earn program).
  * @param checks.entry - The organization's access entry for the provider.
  * @param checks.configured - Whether the deployment holds its credentials for the project's environment.
  * @returns Admitted, or the first failed check with its 403 (503 when not configured).
@@ -1055,7 +1063,8 @@ function decideStagedProvider(
  * for a project. The availability read and every entry-point gate decide from
  * this, so they cannot disagree. Custody follows the custody setup rule; ramps
  * are staged per provider; compliance and Earn by their module stage; ramps and
- * Earn must also be surfaced, as their entry points require. Stages
+ * Earn must also be surfaced, as their entry points require, except an Earn
+ * request for an existing program, which skips surfacing alone. Stages
  * come from the `@sdp/types` manifests, as the custody stages do, so tests
  * override them by mocking that module. Every family that runs on deployment
  * credentials (all but BYOK custody) also needs the deployment to hold them
@@ -1113,7 +1122,8 @@ function decideProjectProvider(
     case "earn":
       return decideStagedProvider(facts, request, {
         inReleaseChannel: isEarnEnabled(env),
-        offered: isEarnProviderSurfaced(request.provider),
+        // An existing program ignores surfacing (ADR 0002 exit safety).
+        offered: "program" in request || isEarnProviderSurfaced(request.provider),
         entry: facts.availability.providers.earn[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
@@ -1542,11 +1552,12 @@ export async function loadProjectProviderVerdict(
  * applies the project provider rule (release channel, surfacing, the
  * Production `stable` bar, entitlement and the deployment's credentials for
  * the project's environment) through the same core the availability read
- * uses, logging a refusal. Webhooks, reconcilers, reads and Earn exits
- * (ADR 0002) never call it.
+ * uses, logging a refusal. Re-targeting an existing Earn program passes
+ * `program: "existing"`, which skips surfacing alone. Webhooks, reconcilers,
+ * reads and Earn exits (ADR 0002) never call it.
  *
  * @param c - Request context carrying the authenticated project scope.
- * @param request - The ramps or Earn provider being used.
+ * @param request - The ramps or Earn provider being used (Earn: a new position, or `program: "existing"`).
  * @throws 403 `FORBIDDEN` whose `details.reason` is `provider_not_in_release_channel`,
  *   `provider_not_offered`, `provider_stage_not_allowed` or
  *   `provider_not_entitled`; 503 `PROVIDER_NOT_CONFIGURED` when the deployment
