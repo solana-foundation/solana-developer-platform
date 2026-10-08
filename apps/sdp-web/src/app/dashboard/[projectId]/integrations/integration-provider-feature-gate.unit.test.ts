@@ -129,4 +129,12 @@ describe("integration provider route availability", () => {
       IntegrationDetailPage({ params: Promise.resolve({ provider: "moonpay" }) })
     ).rejects.toThrow("SDP API request failed (503): unavailable");
   });
+
+  it("throws when the custody config read fails instead of rendering an unknown status", async () => {
+    mocks.projectRequest.mockResolvedValue(new Response("configs unavailable", { status: 503 }));
+
+    await expect(
+      IntegrationDetailPage({ params: Promise.resolve({ provider: "privy" }) })
+    ).rejects.toThrow("SDP API request failed (503): configs unavailable");
+  });
 });

@@ -92,15 +92,6 @@ describe("IntegrationDetailView", () => {
     expect(compliance).toContain("Provisioned per deployment");
   });
 
-  it("offers no state-dependent action when the connection state is unknown", async () => {
-    const detail = resolveIntegrationDetail({ ...INPUTS, provider: "privy", custody: null });
-    if (!detail) throw new Error("expected detail");
-    const markup = await markupOf(<IntegrationDetailView detail={detail} />);
-    expect(markup).toContain("Status unavailable");
-    expect(markup).not.toContain(`${PROJECT_PATH}/wallets/setup`);
-    expect(markup).not.toContain(">Manage<");
-  });
-
   it("keeps the shared skeleton within one block of every family", async () => {
     const skeleton = (
       renderToStaticMarkup(<IntegrationDetailSkeleton />).match(/rounded-2xl/g) ?? []

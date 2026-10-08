@@ -72,13 +72,6 @@ describe("integration detail", () => {
     expect(resolveIntegrationDetail({ provider: "range", ...INPUTS })?.family).toBe("compliance");
   });
 
-  it("keeps a known custody provider reachable when connection state is unknown", () => {
-    const detail = resolveIntegrationDetail({ ...INPUTS, provider: "privy", custody: null });
-    expect(detail).not.toBeNull();
-    expect(detail?.status).toBe("unknown");
-    expect(detail?.custodyEntry?.id).toBe("privy");
-  });
-
   it("recognises every provider the catalog can render, without a hand-written list", () => {
     // Guards the drift Opeyemi flagged: a newly added ramp used to get a card
     // that 404'd on click, because the id lists here were literals.

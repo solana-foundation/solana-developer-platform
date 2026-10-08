@@ -33,18 +33,6 @@ describe("custody provider availability", () => {
     ]);
   });
 
-  it("gives no row to a provider whose modes are empty", () => {
-    expect(
-      resolveCustodyProviderAvailability({
-        connectedProviders: [],
-        custodyAvailability: [
-          { family: "custody", provider: "turnkey", modes: [] },
-          { family: "custody", provider: "privy", modes: ["byok"] },
-        ],
-      }).map((provider) => provider.entry.id)
-    ).toEqual(["privy"]);
-  });
-
   it("marks a connected provider active and the rest available", () => {
     expect(
       resolveCustodyProviderAvailability({

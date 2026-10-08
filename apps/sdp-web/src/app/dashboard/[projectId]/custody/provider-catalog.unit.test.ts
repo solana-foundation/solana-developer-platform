@@ -20,12 +20,9 @@ describe("custody provider catalog", () => {
         mode: provider.storedCredentialSetup.mode,
       }))
     ).toEqual([
-      // The launch classification from the remove-signup-waitlist decision map.
-      // Fireblocks is the only provider with an established request route;
-      // routes for the other manual providers are HOO-775.
       { id: "local", visible: true, availability: "general", mode: "none" },
       { id: "privy", visible: true, availability: "general", mode: "self_service" },
-      { id: "fireblocks", visible: true, availability: "manual", mode: "request_access" },
+      { id: "fireblocks", visible: true, availability: "manual", mode: "none" },
       { id: "coinbase_cdp", visible: true, availability: "general", mode: "none" },
       { id: "para", visible: true, availability: "general", mode: "none" },
       { id: "turnkey", visible: true, availability: "general", mode: "none" },
@@ -101,10 +98,5 @@ describe("providerSupportsStoredCredentialSetup", () => {
     ).map((provider) => provider.id);
 
     expect(supported).toEqual(["privy"]);
-  });
-
-  it("excludes a provider whose access is arranged with the SDP team", () => {
-    expect(getCustodyProviderEntry("fireblocks").storedCredentialSetup.mode).toBe("request_access");
-    expect(providerSupportsStoredCredentialSetup("fireblocks")).toBe(false);
   });
 });

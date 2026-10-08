@@ -158,43 +158,45 @@ beforeEach(() => {
       activityNotice: null,
     },
   });
-  mockRequest.mockImplementation(async (path: string) => {
-    if (path.startsWith("/v1/wallets/wallet%2Fone")) {
-      return walletMetadataResponse();
-    }
-
-    if (path.includes("/balances")) {
-      return Response.json({ data: { walletBalances: { balances: [solBalance("0")] } } });
-    }
-
-    if (path.includes("/policies")) {
-      return new Response(null, { status: 404 });
-    }
-
-    if (path.startsWith("/v1/issuance/tokens")) {
-      return Response.json({ data: [] });
-    }
-
-    if (path === "/internal/dashboard/custody/connections/connection_one") {
-      return Response.json({
-        data: {
-          connection: {
-            id: "connection_one",
-            provider: "privy",
-            label: "Treasury connection",
-            status: "active",
-            completion: null,
-            canComplete: false,
-            canReplaceCredentials: false,
-            canCancel: false,
-          },
-        },
-      });
-    }
-
-    throw new Error(`Unexpected request: ${path}`);
-  });
+  mockRequest.mockImplementation(defaultApiResponse);
 });
+
+async function defaultApiResponse(path: string): Promise<Response> {
+  if (path.startsWith("/v1/wallets/wallet%2Fone")) {
+    return walletMetadataResponse();
+  }
+
+  if (path.includes("/balances")) {
+    return Response.json({ data: { walletBalances: { balances: [solBalance("0")] } } });
+  }
+
+  if (path.includes("/policies")) {
+    return new Response(null, { status: 404 });
+  }
+
+  if (path.startsWith("/v1/issuance/tokens")) {
+    return Response.json({ data: [] });
+  }
+
+  if (path === "/internal/dashboard/custody/connections/connection_one") {
+    return Response.json({
+      data: {
+        connection: {
+          id: "connection_one",
+          provider: "privy",
+          label: "Treasury connection",
+          status: "active",
+          completion: null,
+          canComplete: false,
+          canReplaceCredentials: false,
+          canCancel: false,
+        },
+      },
+    });
+  }
+
+  throw new Error(`Unexpected request: ${path}`);
+}
 
 describe("WalletDetailPage critical path", () => {
   it("keeps a connection-owned wallet readable without connection requests or links for a member", async () => {
@@ -227,27 +229,32 @@ describe("WalletDetailPage critical path", () => {
     expect(markup).toContain("Treasury connection");
   });
 
-  it.each(["http", "network", "invalid response"])(
-    "keeps the wallet readable after a connection lookup %s failure",
-    async (failure) => {
+  it.each([
+    [
+      "http",
+      async () => new Response(null, { status: 503 }),
+      { name: "ConnectionDetailRequestError", status: 503 },
+    ],
+    [
+      "network",
+      async () => {
+        throw new Error("Connection unavailable");
+      },
+      { message: "Connection unavailable" },
+    ],
+    ["invalid response", async () => Response.json({ data: {} }), { name: "ZodError" }],
+  ])(
+    "propagates a connection lookup %s failure instead of rendering the wallet without it",
+    async (_failure, connectionResponse, expectedError) => {
       walletOverrides = { custodyConnectionId: "connection_one" };
       mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
-      mockRequest.mockImplementation(async (path: string) => {
-        if (path.startsWith("/v1/wallets/wallet%2Fone")) return walletMetadataResponse();
-        if (path === "/internal/dashboard/custody/connections/connection_one") {
-          if (failure === "network") throw new Error("Connection unavailable");
-          if (failure === "invalid response") return Response.json({ data: {} });
-          return new Response(null, { status: 503 });
-        }
-        return new Response(null, { status: 404 });
-      });
+      mockRequest.mockImplementation(async (path: string) =>
+        path === "/internal/dashboard/custody/connections/connection_one"
+          ? connectionResponse()
+          : defaultApiResponse(path)
+      );
 
-      const page = await renderPage();
-
-      const markup = renderWalletIdentity(page);
-      expect(markup).toContain("Fast wallet");
-      expect(markup).toContain("wallet/one");
-      expect(markup).toContain("connection_one");
+      await expect(renderPage()).rejects.toMatchObject(expectedError);
     }
   );
 
