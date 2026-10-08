@@ -58,14 +58,13 @@ export function RotateCredentialsModal({
     const formData = attempt ?? new FormData();
     if (!attempt) {
       formData.set("credentialId", lifecycle.providerCredential.id);
-      formData.set("provider", provider);
       formData.set("connectionId", connectionId);
       formData.set("idempotencyKey", idempotencyKey);
       formData.set("appId", appId);
       formData.set("appSecret", appSecret);
       setAttempt(formData);
     }
-    const result = await run(() => rotateCredentialsAction(formData, attempt !== null), {
+    const result = await run(() => rotateCredentialsAction(formData, provider, attempt !== null), {
       successTitle: t("DashboardCustody.rotateSuccessTitle"),
       successDescription: t("DashboardCustody.rotateSuccessDescription", {
         connections: connectionCount,

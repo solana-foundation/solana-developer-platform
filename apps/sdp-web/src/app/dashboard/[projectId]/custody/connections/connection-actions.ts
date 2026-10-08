@@ -1,5 +1,6 @@
 "use server";
 
+import type { CustodyProvider } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient, extractSdpApiError, requestProjectHref } from "@/lib/sdp-api";
@@ -29,8 +30,8 @@ async function revalidateCustody(provider: string, connectionId?: string) {
       await requestProjectHref(`/dashboard/integrations/${provider}/connections/${connectionId}`)
     );
   }
-  // Wallet surfaces read the same connections, and a default switch or a new
-  // wallet changes what they show.
+  // Wallet surfaces read the same connections, so a new wallet or a credential
+  // change shows there too.
   revalidatePath(await requestProjectHref("/dashboard/wallets"));
   revalidatePath(await requestProjectHref("/dashboard/custody"));
 }
@@ -64,16 +65,21 @@ function classifyThrown(
  * Note the rejection path — an invalid or foreign-account credential comes back
  * on an HTTP **200** with `rotation.status === "failed"`, so the result body is
  * what settles this, not the status code.
+ *
+ * @param formData - `credentialId`, `connectionId`, `idempotencyKey`, `appId`, `appSecret`.
+ * @param provider - The connection's provider, used to revalidate its integration pages.
+ * @param isRecoveryAttempt - Whether this replays an earlier submission whose outcome is unknown.
+ * @returns The rotation outcome.
  */
 export async function rotateCredentialsAction(
   formData: FormData,
-  isRecoveryAttempt = false
+  provider: CustodyProvider,
+  isRecoveryAttempt: boolean
 ): Promise<CustodyActionResult> {
   const t = await getTranslations();
   const fallback = t("DashboardCustody.rotateFailed");
 
   const credentialId = String(formData.get("credentialId") ?? "").trim();
-  const provider = String(formData.get("provider") ?? "privy").trim();
   const connectionId = String(formData.get("connectionId") ?? "").trim();
   const idempotencyKey = String(formData.get("idempotencyKey") ?? "").trim();
   const appId = String(formData.get("appId") ?? "").trim();
@@ -245,13 +251,17 @@ export async function cancelSetupAction(
  * Deliberately not auto-retried on an unknown outcome: wallet creation is not
  * idempotent here, so a silent retry could mint a second wallet. The dialog
  * tells the user to check the list first.
+ *
+ * @param formData - `connectionId` and an optional `label`.
+ * @param provider - The connection's provider, used to revalidate its integration pages.
+ * @returns The creation outcome.
  */
 export async function createConnectionWalletAction(
-  formData: FormData
+  formData: FormData,
+  provider: CustodyProvider
 ): Promise<CustodyActionResult> {
   const t = await getTranslations();
   const connectionId = String(formData.get("connectionId") ?? "").trim();
-  const provider = String(formData.get("provider") ?? "privy").trim();
   const label = String(formData.get("label") ?? "").trim();
 
   if (!connectionId) {

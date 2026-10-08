@@ -408,9 +408,19 @@ export function WalletSetupFlow({
       try {
         const result = await formAction(formData);
 
-        if (result.status === "error") {
-          setErrorMessage(result.message);
-          return;
+        switch (result.status) {
+          case "error":
+            setErrorMessage(result.message);
+            return;
+          case "provider_already_set_up":
+            setErrorMessage(t("DashboardCustody.walletSetupProviderAlreadySetUp"));
+            return;
+          case "success":
+            break;
+          default: {
+            const unhandledResult: never = result;
+            throw new Error(`Unhandled wallet setup result: ${JSON.stringify(unhandledResult)}`);
+          }
         }
 
         if (selectedProjectId) {

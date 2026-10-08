@@ -1,7 +1,6 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigsResponse, InitializeSigningResponse } from "@sdp/types";
 import {
   commitmentComparator,
   decimalFixedPointToNumber,
@@ -11,7 +10,6 @@ import {
   solToLamports,
 } from "@solana/kit";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { extractPolicyDenialReason, withPolicyDenialReason } from "@/lib/policy-denial-reason";
 import { createSdpApiClient, requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
@@ -94,32 +92,23 @@ function toApiActionErrorMessage(
   });
 }
 
-function parseApiActionError(error: unknown): { status: number; message: string } | null {
-  const raw = extractErrorMessage(error).trim();
-  const match = /^SDP API request failed \((\d+)\):\s*([\s\S]*)$/.exec(raw);
-  if (!match) {
-    return null;
-  }
-
-  const status = Number.parseInt(match[1] ?? "", 10);
-  if (!Number.isFinite(status)) {
-    return null;
-  }
-
-  return {
-    status,
-    message: getApiErrorMessageFromText(match[2] ?? ""),
-  };
+/**
+ * Reads the HTTP status from an error thrown by `SdpApiClient.fetch`.
+ *
+ * @param error - The caught error.
+ * @returns The response status, or null when the error is not an API response failure.
+ */
+function parseApiErrorStatus(error: unknown): number | null {
+  const match = /^SDP API request failed \((\d+)\):/.exec(extractErrorMessage(error).trim());
+  return match ? Number(match[1]) : null;
 }
 
-export async function initializeCustody(formData: FormData) {
-  await initializeCustodyWallet(formData);
-  await revalidateWalletPaths();
-  redirect(await requestProjectHref("/dashboard/wallets"));
-}
-
-/** Returns the wallet provisioned by a custody initialization request. */
-async function initializeCustodyWallet(formData: FormData): Promise<ProvisionedWallet> {
+/**
+ * Connects the provider the form names and provisions its first wallet.
+ *
+ * @param formData - The submitted setup form: `provider`, optional `walletLabel`, `network`, `accountPolicy`.
+ */
+async function initializeCustodyWallet(formData: FormData): Promise<void> {
   const provider = requireCustodyProvider(formData);
   const walletLabel = getOptionalString(formData, "walletLabel");
   const network = getOptionalString(formData, "network");
@@ -140,70 +129,15 @@ async function initializeCustodyWallet(formData: FormData): Promise<ProvisionedW
   }
 
   const client = await createSdpApiClient();
-
-  try {
-    const initialized = await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    return { publicKey: initialized.publicKey, walletId: initialized.walletId };
-  } catch (error) {
-    const apiError = parseApiActionError(error);
-
-    if (
-      apiError?.status === 409 &&
-      apiError.message.includes("Signing already initialized for org")
-    ) {
-      const configurations = await client.fetch<CustodyConfigsResponse>("/v1/wallets/configs");
-
-      // The conflict is per provider: a project holds one active Managed config
-      // per provider, so the repair acts on that config and no other.
-      const configuration = configurations.configs.find(
-        (candidate) => candidate.provider === provider && candidate.status === "active"
-      );
-      if (!configuration) {
-        throw error;
-      }
-
-      if (configuration.defaultWalletId !== null) {
-        // Already provisioned by an earlier attempt; the configuration carries
-        // the wallet, so completion can still show it.
-        return {
-          publicKey: configuration.publicKey,
-          walletId: configuration.defaultWalletId,
-        };
-      }
-
-      // Repair a provider connection whose first wallet did not finish
-      // persisting instead of leaving the organization without a usable wallet.
-      // This endpoint nests its wallet, unlike initialize.
-      const repaired = await client.fetch<{ wallet: { walletId: string; publicKey: string } }>(
-        "/v1/wallets",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            provider,
-            label: walletLabel,
-            purpose: "root",
-          }),
-        }
-      );
-      return { publicKey: repaired.wallet.publicKey, walletId: repaired.wallet.walletId };
-    } else {
-      throw error;
-    }
-  }
+  await client.fetch("/v1/wallets/initialize", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 async function revalidateWalletPaths() {
   revalidatePath(await requestProjectHref("/dashboard/custody"));
   revalidatePath(await requestProjectHref("/dashboard/wallets"));
-}
-
-export async function createCustodyWallet(formData: FormData) {
-  await createCustodyWalletForProvider(formData);
-  await revalidateWalletPaths();
-  redirect(await requestProjectHref("/dashboard/wallets"));
 }
 
 /**
@@ -229,11 +163,6 @@ async function createCustodyWalletForProvider(formData: FormData) {
   });
 }
 
-interface ProvisionedWallet {
-  publicKey: string;
-  walletId: string;
-}
-
 export type WalletSetupActionResult =
   | {
       status: "success";
@@ -243,15 +172,32 @@ export type WalletSetupActionResult =
       message: string;
     };
 
+export type InitializeCustodySetupActionResult =
+  | WalletSetupActionResult
+  | {
+      status: "provider_already_set_up";
+    };
+
+/**
+ * Connects a provider from the setup flow. `/initialize` answers 409 only when
+ * the project already holds this provider's Managed config; that is reported
+ * as its own result so the flow can send the user to add a wallet instead.
+ *
+ * @param formData - The submitted setup form.
+ * @returns The setup outcome.
+ */
 export async function initializeCustodySetupAction(
   formData: FormData
-): Promise<WalletSetupActionResult> {
+): Promise<InitializeCustodySetupActionResult> {
   const t = await getTranslations();
   try {
     await initializeCustodyWallet(formData);
     await revalidateWalletPaths();
     return { status: "success" };
   } catch (error) {
+    if (parseApiErrorStatus(error) === 409) {
+      return { status: "provider_already_set_up" };
+    }
     return {
       status: "error",
       message: toApiActionErrorMessage(error, t),

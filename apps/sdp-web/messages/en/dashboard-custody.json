@@ -902,6 +902,7 @@
     "walletSetupConnectionPlaceholder": "Choose an account",
     "walletSetupConnectionManaged": "Managed",
     "walletSetupConnectionRequired": "Choose the account the wallet is created in.",
+    "walletSetupProviderAlreadySetUp": "This provider is already set up. Add a wallet instead.",
     "walletSetupConnectionUnavailablePending": "Setup unfinished",
     "walletSetupConnectionUnavailableFailed": "Needs attention"
   }
