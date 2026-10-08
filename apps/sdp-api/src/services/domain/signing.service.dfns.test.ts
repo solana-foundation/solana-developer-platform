@@ -66,6 +66,7 @@ function createTestEnv(overrides?: Partial<Env>): Env {
     DFNS_PRIVATE_KEY: "dfns-test-private-key",
     ENVIRONMENT: "development",
     API_VERSION: "v1",
+    SDP_RELEASE_CHANNEL: "stable",
     ...overrides,
   } as Env;
 }

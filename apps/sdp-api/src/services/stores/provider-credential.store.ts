@@ -37,6 +37,7 @@ export interface ProviderCredentialRow {
 }
 
 export interface LifecycleCredentialRow extends ProviderCredentialRow {
+  provider: "privy";
   source: "stored" | "runtime";
   storage_backend: StoredCredentialSecret["storageBackend"];
   deactivated_at: string | null;

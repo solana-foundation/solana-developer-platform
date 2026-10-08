@@ -140,9 +140,9 @@ export async function rotateProviderCredential(
   fields: { appId: string; appSecret: string },
   idempotencyKey: string
 ): Promise<ProviderCredentialRotationResult> {
-  assertCustodyProviderAvailable(c.env, "privy", "byok");
   const context = createContext(c);
   const target = await loadAuthorizedCredential(context, currentCredentialId);
+  assertCustodyProviderAvailable(c.env, target.credential.provider, "byok");
   const fingerprint = await rotationFingerprint(context, currentCredentialId, fields);
   const existing = await context.store.findReplayByKey(context.organizationId, idempotencyKey);
   if (existing) {
@@ -432,9 +432,9 @@ export async function completeRotationCandidate(
   c: Context<{ Bindings: Env }>,
   candidateId: string
 ): Promise<ProviderCredentialRotationResult> {
-  assertCustodyProviderAvailable(c.env, "privy", "byok");
   const context = createContext(c);
   const loaded = await loadAuthorizedCandidate(context, candidateId);
+  assertCustodyProviderAvailable(c.env, loaded.candidate.provider, "byok");
   assertCredentialCreationSettled(loaded.candidate);
   if (loaded.candidate.status === "active") {
     return rotationResult(loaded.candidate, "success");
@@ -563,9 +563,9 @@ export async function rollbackProviderCredential(
   c: Context<{ Bindings: Env }>,
   currentCredentialId: string
 ): Promise<{ providerCredential: SafeProviderCredential }> {
-  assertCustodyProviderAvailable(c.env, "privy", "byok");
   const context = createContext(c);
   const current = await loadAuthorizedCurrent(context, currentCredentialId, ROLLBACK_UNAVAILABLE);
+  assertCustodyProviderAvailable(c.env, current.credential.provider, "byok");
   if (
     await context.store.findUnfinishedDirectChild(context.organizationId, current.credential.id)
   ) {

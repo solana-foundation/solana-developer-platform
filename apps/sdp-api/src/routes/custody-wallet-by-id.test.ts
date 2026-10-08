@@ -241,7 +241,7 @@ describe("Custody wallet by ID route", () => {
     });
   });
 
-  it("returns a persisted Connection public key while the BYOK pair is out of channel", async () => {
+  it("hides a persisted Connection public key while the BYOK pair is out of channel", async () => {
     const connection = await seedConnectionWallet();
     custodyReleaseChannel.outOfChannelMode = "byok";
 
@@ -253,21 +253,11 @@ describe("Custody wallet by ID route", () => {
       },
       env
     );
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(404);
     expect(await response.json()).toEqual({
-      data: { publicKey: connection.publicKey },
-      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      error: { code: "NOT_FOUND", message: "Wallet not found" },
+      meta: { requestId: expect.any(String) },
     });
-
-    const alias = await app.request(
-      `/v1/wallets/public-key?walletId=${connection.walletRecordId}`,
-      {
-        method: "GET",
-        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
-      },
-      env
-    );
-    expect(alias.status).toBe(404);
   });
 
   it("returns 404 for a wallet under a non-active Connection", async () => {

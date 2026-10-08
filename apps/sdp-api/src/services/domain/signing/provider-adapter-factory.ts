@@ -28,6 +28,7 @@ import {
 } from "@/services/adapters";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
+import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import {
   type ProviderConfigRecord,
@@ -277,12 +278,25 @@ const providerAdapterFactories = {
   >;
 };
 
+/**
+ * Builds the signing adapter for a stored Managed custody config. The one function
+ * every Managed signing path passes through, so it refuses a (provider, managed)
+ * pair the release channel leaves out before any decrypt.
+ *
+ * @param env - Process environment naming the release channel and provider credentials.
+ * @param orgId - The organization that owns the config, the decryption context.
+ * @param record - The stored custody config row.
+ * @param cipher - Decrypts the config's sealed fields.
+ * @returns The instrumented signing adapter for the config's provider.
+ * @throws 403 when the (provider, managed) pair is outside the release channel.
+ */
 export async function createAdapterFromEncryptedConfig(
   env: Env,
   orgId: string,
   record: SigningConfigRecord,
   cipher: CustodyCipher = createCustodyCipher(env)
 ): Promise<SigningPort> {
+  assertCustodyProviderAvailable(env, record.provider, "managed");
   // Checked before parsing, which can decrypt: a stored local key must never be
   // loaded in a managed deployment, whatever row exists.
   if (record.provider === "local") {
@@ -300,10 +314,25 @@ export async function createAdapterFromEncryptedConfig(
   );
 }
 
+/**
+ * Builds the Privy signing adapter for a BYOK custody connection's stored credential.
+ * The one function every BYOK signing path passes through, so it refuses the
+ * (privy, byok) pair when the release channel leaves it out, before reading the input.
+ *
+ * @param env - Process environment naming the release channel and Privy API settings.
+ * @param input - The connection's decrypted Privy credential and default wallet.
+ * @param input.appId - The Privy app ID.
+ * @param input.appSecret - The Privy app secret.
+ * @param input.defaultWalletId - The Privy wallet the adapter signs with by default.
+ * @param input.requestDelayMs - The connection's request delay, else `PRIVY_REQUEST_DELAY_MS`.
+ * @returns The Privy signing adapter.
+ * @throws 403 when the (privy, byok) pair is outside the release channel.
+ */
 export function createPrivyAdapterFromCredential(
   env: Env,
   input: PrivyCredentialAdapterInput
 ): SigningPort {
+  assertCustodyProviderAvailable(env, "privy", "byok");
   if (!input.appId || !input.appSecret || !input.defaultWalletId) {
     throw new SigningError(
       "Privy credential or default wallet is unavailable",

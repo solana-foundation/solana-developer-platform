@@ -21,7 +21,10 @@ import {
 } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import { assertCustodyProviderCanDeleteWallet } from "@/services/custody-provider-lifecycle.service";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import {
+  CustodyRuntimeTargets,
+  type CustodyRuntimeWalletProjection,
+} from "@/services/domain/signing/custody-runtime-target";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import {
   aggregateTrackedWalletBalances,
@@ -798,6 +801,23 @@ export const getWalletById = async (c: AppContext) => {
   return success(c, response);
 };
 
+/**
+ * Refuses a persisted wallet whose (provider, custody mode) pair the release channel
+ * leaves out, for read paths that answer from the wallet row and build no adapter.
+ * A Connection wallet is BYOK custody, a Config wallet Managed.
+ *
+ * @param c - Request context carrying the release channel.
+ * @param wallet - The operational wallet about to be answered from.
+ * @throws 403 when the pair is outside the release channel.
+ */
+function assertWalletInReleaseChannel(c: AppContext, wallet: CustodyRuntimeWalletProjection): void {
+  assertCustodyProviderAvailable(
+    c.env,
+    wallet.provider,
+    wallet.custodyConnectionId ? "byok" : "managed"
+  );
+}
+
 export const getPublicKey = async (c: AppContext) => {
   const actor = resolveActor(c);
   const auth = getAuth(c);
@@ -821,6 +841,7 @@ export const getPublicKey = async (c: AppContext) => {
       if (!wallet) {
         throw new AppError("NOT_FOUND", "Wallet not found");
       }
+      assertWalletInReleaseChannel(c, wallet);
       return success(c, { publicKey: wallet.publicKey });
     }
     if (walletId) {
@@ -833,6 +854,7 @@ export const getPublicKey = async (c: AppContext) => {
         throw new AppError("NOT_FOUND", "Wallet not found");
       }
       if (wallet.custodyConnectionId) {
+        assertWalletInReleaseChannel(c, wallet);
         return success(c, { publicKey: wallet.publicKey });
       }
       const publicKey = await signingService.getPublicKey(
@@ -859,6 +881,7 @@ export const getPublicKey = async (c: AppContext) => {
       if (!wallet || wallet.custodyConnectionId !== effective.connectionId) {
         throw new AppError("NOT_FOUND", "Wallet not found");
       }
+      assertWalletInReleaseChannel(c, wallet);
       return success(c, { publicKey: wallet.publicKey });
     }
     const publicKey = await signingService.getPublicKey(actor.organizationId, projectId, undefined);

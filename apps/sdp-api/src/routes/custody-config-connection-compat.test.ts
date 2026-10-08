@@ -124,10 +124,10 @@ describe("custody Config compatibility with an effective Connection", () => {
     expect((await request("/v1/wallets/config")).status).toBe(404);
     expect(await (await request("/v1/wallets/configs")).json()).toEqual(nonDefaultConfigsBody());
     const publicKey = await request("/v1/wallets/public-key");
-    expect(publicKey.status).toBe(200);
+    expect(publicKey.status).toBe(404);
     expect(await publicKey.json()).toEqual({
-      data: { publicKey: CONNECTION_PUBLIC_KEY },
-      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      error: { code: "NOT_FOUND", message: "Wallet not found" },
+      meta: { requestId: expect.any(String) },
     });
   });
 });
