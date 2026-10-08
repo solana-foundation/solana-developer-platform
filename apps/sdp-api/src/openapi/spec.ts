@@ -168,7 +168,7 @@ function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   if (publishEarn) {
     registerPublicEarnPaths(registry);
   }
-  registerProjectPaths(registry);
+  registerProjectPaths(registry, publishEarn);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerTransactionsPaths(registry);
@@ -186,7 +186,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerCustodyPaths(registry);
   registerEarnPaths(registry);
   registerDvpPaths(registry);
-  registerProjectPaths(registry);
+  registerProjectPaths(registry, true);
   registerRpcPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);

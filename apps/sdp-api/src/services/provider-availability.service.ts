@@ -757,6 +757,7 @@ export type CustodySetupAdmission = { admitted: true } | CustodySetupRefusal;
 type ProjectProviderRefusalReason =
   | CustodySetupRefusalReason
   | "provider_not_in_release_channel"
+  | "provider_not_offered"
   | "provider_stage_not_allowed"
   | "provider_not_configured";
 
@@ -997,14 +998,16 @@ function providerNotConfiguredForProject(
 /**
  * The staged-provider rule for ramps, compliance and Earn. A provider is
  * admitted for a project when, in order: the deployment's release channel
- * includes it; a Production project runs it only at `stable`, whatever the
- * channel; the organization is entitled to it; and the deployment holds its
- * credentials for the project's environment.
+ * includes it; SDP offers it (its surfacing, the same check the ramp and Earn
+ * entry points run before entitlement); a Production project runs it only at
+ * `stable`, whatever the channel; the organization is entitled to it; and the
+ * deployment holds its credentials for the project's environment.
  *
  * @param facts - The project's environment and its organization's provider access.
  * @param request - The provider being used.
- * @param checks - The provider's verdicts from its family's stage table, access entry and credentials.
+ * @param checks - The provider's verdicts from its family's stage table, surfacing, access entry and credentials.
  * @param checks.inReleaseChannel - Whether the deployment's release channel includes it.
+ * @param checks.offered - Whether SDP surfaces it for the project's environment.
  * @param checks.stageAllowed - Whether its stage meets the project environment's bar.
  * @param checks.entry - The organization's access entry for the provider.
  * @param checks.configured - Whether the deployment holds its credentials for the project's environment.
@@ -1015,6 +1018,7 @@ function decideStagedProvider(
   request: Exclude<ProjectProviderRequest, { family: "custody" }>,
   checks: {
     inReleaseChannel: boolean;
+    offered: boolean;
     stageAllowed: boolean;
     entry: ProviderAvailabilityEntry;
     configured: boolean;
@@ -1029,6 +1033,14 @@ function decideStagedProvider(
       forbidden(`${label} is not available in this release channel.`, {
         reason: "provider_not_in_release_channel",
       })
+    );
+  }
+  if (!checks.offered) {
+    return projectProviderRefusal(
+      facts,
+      request,
+      "provider_not_offered",
+      forbidden(`${label} is not currently offered.`, { reason: "provider_not_offered" })
     );
   }
   if (!checks.stageAllowed) {
@@ -1068,7 +1080,8 @@ function decideStagedProvider(
  * The project provider rule, the one place it lives: every family's admission
  * for a project. The availability read and every entry-point gate decide from
  * this, so they cannot disagree. Custody follows the custody setup rule; ramps
- * are staged per provider; compliance and Earn by their module stage. Stages
+ * are staged per provider; compliance and Earn by their module stage; ramps and
+ * Earn must also be surfaced, as their entry points require. Stages
  * come from the `@sdp/types` manifests, as the custody stages do, so tests
  * override them by mocking that module. Every family that runs on deployment
  * credentials (all but BYOK custody) also needs the deployment to hold them
@@ -1111,6 +1124,7 @@ function decideProjectProvider(
     case "ramps":
       return decideStagedProvider(facts, request, {
         inReleaseChannel: isRampProviderAvailable(env, request.provider, SDP_RAMP_PROVIDER_STAGES),
+        offered: isRampProviderSurfaced(request.provider, facts.environment),
         stageAllowed: isRampProviderStageAllowedInEnvironment(
           facts.environment,
           request.provider,
@@ -1122,6 +1136,8 @@ function decideProjectProvider(
     case "compliance":
       return decideStagedProvider(facts, request, {
         inReleaseChannel: isModuleAvailable(env, "compliance", SDP_RAMP_PROVIDER_STAGES),
+        // Compliance has no surfacing table: every compliance provider is offered.
+        offered: true,
         stageAllowed: isModuleStageAllowedInEnvironment(
           facts.environment,
           "compliance",
@@ -1133,6 +1149,7 @@ function decideProjectProvider(
     case "earn":
       return decideStagedProvider(facts, request, {
         inReleaseChannel: isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_STAGES),
+        offered: isEarnProviderSurfaced(request.provider),
         stageAllowed: isModuleStageAllowedInEnvironment(
           facts.environment,
           "earn",
@@ -1293,8 +1310,8 @@ export async function getProjectProviderAvailability(
  * @param request - The provider being used (and, for custody, its mode).
  * @throws 403 `FORBIDDEN` whose `details.reason` names the failed check. Custody:
  *   `CUSTODY_SETUP_REFUSAL_REASONS`. Ramps, compliance and Earn:
- *   `provider_not_in_release_channel`, `provider_stage_not_allowed` or
- *   `provider_not_entitled`. 503 `PROVIDER_NOT_CONFIGURED` with
+ *   `provider_not_in_release_channel`, `provider_not_offered`,
+ *   `provider_stage_not_allowed` or `provider_not_entitled`. 503 `PROVIDER_NOT_CONFIGURED` with
  *   `details.reason` `provider_not_configured` when the deployment lacks the
  *   provider's credentials for the project's environment (any family; custody
  *   Managed only). 404 when the project is not an active project of the

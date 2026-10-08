@@ -1,4 +1,8 @@
-import { projectProviderAvailabilitySchema } from "@sdp/types";
+import {
+  type ProjectProviderAvailabilityEntry,
+  projectProviderAvailabilityEntrySchema,
+  projectProviderAvailabilitySchema,
+} from "@sdp/types";
 import {
   addMemberSchema as addMemberSchemaBase,
   updateMemberSchema as updateMemberSchemaBase,
@@ -129,24 +133,46 @@ export const listProjectApiKeysResponseSchema = z
   })
   .openapi({ description: "List of project API keys." });
 
-export const projectProviderAvailabilityResponseSchema = withOpenApi(
-  projectProviderAvailabilitySchema,
-  {
-    description:
-      "Every provider the deployment knows, with whether this project can use it, so an absent provider is never mistaken for an unavailable one. Custody entries list the custody modes the project can set the provider up in (empty when none); ramps, compliance and Earn entries carry `available`. A provider is available only when the deployment's release channel includes it, the organization is entitled to it, in a Production project its stage is stable, and the deployment holds its credentials for the project's environment. Custody `modes` include `managed` only when the deployment holds the provider's credentials; `byok` runs on the organization's own credentials.",
+const PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS = [
+  { family: "custody", provider: "privy", modes: ["byok"] },
+  { family: "custody", provider: "fireblocks", modes: [] },
+  { family: "compliance", provider: "range", available: true },
+  { family: "ramps", provider: "moonpay", available: false },
+] as const satisfies readonly ProjectProviderAvailabilityEntry[];
+
+/**
+ * The documented project provider availability, with or without the Earn
+ * family. The runtime response always carries Earn entries; the public
+ * document leaves them out while `EARN_PUBLIC_SURFACE_PUBLISHED` is false.
+ *
+ * @param publishEarn - Whether the document carries the Earn family.
+ * @returns The response schema, its description and example matching `publishEarn`.
+ */
+export function projectProviderAvailabilityResponseSchema(publishEarn: boolean) {
+  const [custodyEntry, complianceEntry, rampsEntry] =
+    projectProviderAvailabilityEntrySchema.options;
+  const schema = publishEarn
+    ? projectProviderAvailabilitySchema
+    : projectProviderAvailabilitySchema.extend({
+        providers: z.array(
+          z.discriminatedUnion("family", [custodyEntry, complianceEntry, rampsEntry])
+        ),
+      });
+  const nonCustodyFamilies = publishEarn ? "ramps, compliance and Earn" : "ramps and compliance";
+  return withOpenApi(schema, {
+    description: `Every provider the deployment knows, with whether this project can use it, so an absent provider is never mistaken for an unavailable one. Custody entries list the custody modes the project can set the provider up in (empty when none); ${nonCustodyFamilies} entries carry \`available\`. A provider is available only when the deployment's release channel includes it, SDP currently offers it, the organization is entitled to it, in a Production project its stage is stable, and the deployment holds its credentials for the project's environment. Custody \`modes\` include \`managed\` only when the deployment holds the provider's credentials; \`byok\` runs on the organization's own credentials.`,
     example: {
-      projectId: "proj_example",
+      projectId: "prj_example",
       environment: "production",
-      providers: [
-        { family: "custody", provider: "privy", modes: ["byok"] },
-        { family: "custody", provider: "fireblocks", modes: [] },
-        { family: "compliance", provider: "range", available: true },
-        { family: "ramps", provider: "moonpay", available: false },
-        { family: "earn", provider: "kamino", available: false },
-      ],
+      providers: publishEarn
+        ? [
+            ...PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS,
+            { family: "earn", provider: "kamino", available: false },
+          ]
+        : PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS,
     },
-  }
-);
+  });
+}
 
 export const updateProjectRequestSchema = updateProjectSchemaBase
   .extend({
