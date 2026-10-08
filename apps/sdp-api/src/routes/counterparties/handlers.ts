@@ -435,7 +435,7 @@ export const submitCounterpartyRequirements = async (
   const body = c.req.valid("json");
 
   assertRampProviderOffered(c, body.provider);
-  await assertRampProviderAvailable(c, body.provider, auth.organizationId);
+  await assertRampProviderAvailable(c, body.provider);
 
   const repo = getCounterpartiesRepository(c);
   const counterparty = await repo.getCounterpartyById({

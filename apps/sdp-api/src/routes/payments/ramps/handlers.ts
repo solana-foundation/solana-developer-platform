@@ -115,7 +115,7 @@ export async function simulateSandboxTransfer(
     throw internalError("On-ramp transfer has no provider.");
   }
   assertRampProviderInChannel(c, transfer.provider);
-  await assertRampProviderAvailable(c, transfer.provider, scope.auth.organizationId);
+  await assertRampProviderAvailable(c, transfer.provider);
   if (transfer.counterparty_id === null) {
     throw internalError("On-ramp transfer has no counterparty.");
   }
