@@ -14,7 +14,8 @@ import { required } from "@/test/helpers/required";
 const surfacing = vi.hoisted(() => ({ forceOn: true }));
 
 vi.mock("@sdp/types", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@sdp/types")>();
+  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
+  const actual = mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
   return {
     ...actual,
     isEarnProviderSurfaced: (provider: string) =>
@@ -70,6 +71,7 @@ import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { providerStages } from "@/test/helpers/provider-stages";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 
@@ -400,6 +402,8 @@ beforeEach(async () => {
   env.UPSHIFT_SANDBOX_API_KEY = UPSHIFT_SANDBOX_KEY;
   env.UPSHIFT_API_KEY = undefined;
   surfacing.forceOn = true;
+  providerStages.rampStageOverride = null;
+  providerStages.moduleStageOverride = null;
   await seedTestDatabase(env);
 });
 
@@ -580,7 +584,13 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       },
       {}
     );
-    expect(noCredentials.status).toBe(403);
+    expect(noCredentials.status).toBe(503);
+    expect(await noCredentials.json()).toMatchObject({
+      error: {
+        code: "PROVIDER_NOT_CONFIGURED",
+        message: "Upshift is not configured for sandbox projects in this deployment.",
+      },
+    });
     expect(updateStrategy).not.toHaveBeenCalled();
   });
 
@@ -727,7 +737,13 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       createProgramBody({ requestId: crypto.randomUUID() }),
       {}
     );
-    expect(unconfigured.status).toBe(403);
+    expect(unconfigured.status).toBe(503);
+    expect(await unconfigured.json()).toMatchObject({
+      error: {
+        code: "PROVIDER_NOT_CONFIGURED",
+        message: "Upshift is not configured for sandbox projects in this deployment.",
+      },
+    });
     expect(createWallet).not.toHaveBeenCalled();
   });
 
@@ -1182,9 +1198,38 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
 });
 
 describe("Earn program — Clerk callers and environment isolation", () => {
+  it("refuses a production program while Earn is not stable, before any provider call or wallet row", async () => {
+    providerStages.moduleStageOverride = { module: "earn", stage: "beta" };
+    await seedAuth({ entitleGround: true });
+    await seedClerkAuth();
+    env.UPSHIFT_API_KEY = UPSHIFT_PRODUCTION_KEY;
+    await seedUpshiftStrategy({ environment: "production" });
+    const createWallet = vi.spyOn(portfolioClient, "createPortfolioWallet");
+
+    const res = await requestEarnAsClerk(
+      "POST",
+      PROGRAMS_PATH,
+      TEST_PRODUCTION_PROJECT.id,
+      createProgramBody({ requestId: crypto.randomUUID() })
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "Upshift is not stable yet, so a production project cannot use it.",
+        details: { reason: "provider_stage_not_allowed" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(createWallet).not.toHaveBeenCalled();
+    expect(await countProviderWallets()).toBe(0);
+  });
+
   it("creates a production program from a production-project dashboard Clerk", async () => {
     await seedAuth({ entitleGround: true });
     await seedClerkAuth();
+    providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
     env.UPSHIFT_API_KEY = UPSHIFT_PRODUCTION_KEY;
     await seedUpshiftStrategy({ environment: "production" });
     const createWallet = vi

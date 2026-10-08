@@ -11,10 +11,10 @@ import { getDb } from "@/db";
 import { getLogger } from "@/runtime/logger";
 import {
   admitByokCustodySetup,
+  assertCustodyProviderEnabled,
   assertCustodyProviderEntitled,
   assertCustodySetupAdmitted,
   assertEarnProviderConfigured,
-  assertProviderAvailable,
   CustodySetupRefusedError,
   custodyProviderNotInReleaseChannel,
   getProjectProviderAvailability,
@@ -286,27 +286,33 @@ describe("provider-availability.service", () => {
     expect(availability.providers.ramps.lightspark.entitled).toBe(true);
   });
 
-  it("explains when a configured provider is not entitled for the organization", async () => {
+  it("admits an organization's enabled custody provider", async () => {
     await expect(
-      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "compliance", "range")
+      assertCustodyProviderEnabled(env, getDb(env), TEST_ORG_ID, "privy")
+    ).resolves.toBeUndefined();
+  });
+
+  it("explains when a configured custody provider is not entitled for the organization", async () => {
+    await disablePrivyEntitlement();
+
+    await expect(
+      assertCustodyProviderEnabled(env, getDb(env), TEST_ORG_ID, "privy")
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
-      message: "Range requires manual activation for this organization.",
+      statusCode: 403,
+      message: "Privy requires manual activation for this organization.",
     });
   });
 
-  it("explains when an entitled provider is not configured in the environment", async () => {
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ providerOverrides: { compliance: { range: true } } }), TEST_ORG_ID)
-      .run();
-    env.RANGE_API_KEY = undefined;
+  it("explains when an entitled custody provider is not configured in the deployment", async () => {
+    env.PRIVY_APP_SECRET = undefined;
 
     await expect(
-      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "compliance", "range")
+      assertCustodyProviderEnabled(env, getDb(env), TEST_ORG_ID, "privy")
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
-      message: "Range is not configured in this environment.",
+      statusCode: 403,
+      message: "Privy is not configured in this environment.",
     });
   });
 
@@ -865,25 +871,6 @@ describe("provider-availability.service", () => {
       entitled: true,
       configured: true,
       enabled: true,
-    });
-  });
-
-  it("re-checks earn credentials for the requested mode like ramps", async () => {
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ providerOverrides: { earn: { upshift: true } } }), TEST_ORG_ID)
-      .run();
-    env.UPSHIFT_API_KEY = "upshift_production_key";
-
-    await expect(
-      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "upshift", false)
-    ).resolves.toBeUndefined();
-
-    await expect(
-      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "upshift", true)
-    ).rejects.toMatchObject({
-      code: "PROVIDER_NOT_CONFIGURED",
-      message: "Upshift is not configured for sandbox mode.",
     });
   });
 

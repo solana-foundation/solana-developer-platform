@@ -13,6 +13,7 @@ import { badRequest, conflict } from "@/lib/errors";
 import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { providerStages } from "@/test/helpers/provider-stages";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   clearKVStores,
@@ -53,6 +54,11 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultWithdrawClient,
 }));
+
+vi.mock("@sdp/types", async (importOriginal) => {
+  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
+  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+});
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/types/provider-access")>()),
@@ -369,6 +375,8 @@ beforeEach(async () => {
   env.EARN_ENABLED = "true";
   surfacingEnabled.value = true;
   rateLimitStoreDown.value = false;
+  providerStages.rampStageOverride = null;
+  providerStages.moduleStageOverride = null;
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
@@ -425,6 +433,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
   it("builds anonymously against the shelf the strategy names, not the deployment", async () => {
     // A keyless caller has no project, so the row it named decides: a
     // production strategy builds on mainnet from any deployment (PRO-1998).
+    providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
     const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
 
     const res = await post(
@@ -440,6 +449,28 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     );
     const input = buildExternalWalletDepositTransaction.mock.calls[0]?.[1];
     expect(input).not.toHaveProperty("organizationId");
+  });
+
+  it("refuses an anonymous build against a Production strategy while Earn is not stable", async () => {
+    providerStages.moduleStageOverride = { module: "earn", stage: "beta" };
+    const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "Earn is not stable yet, so a production strategy cannot take deposits.",
+        details: { reason: "provider_stage_not_allowed" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
   });
 
   it("builds against a resolved, admitted strategy", async () => {
@@ -874,6 +905,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
 
   it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
+    providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
     const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
     const missingFloor = await post(
       "deposit-transactions",
@@ -927,6 +959,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
 
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
+    providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
     const strategy = await seedStrategy({
       provider: "jupiter_lend",
       providerReference: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",

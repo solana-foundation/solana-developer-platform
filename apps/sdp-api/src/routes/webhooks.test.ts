@@ -47,9 +47,15 @@ import {
 import { env } from "@/test/helpers/env";
 import { startJsonServer } from "@/test/helpers/json-server";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { providerStages } from "@/test/helpers/provider-stages";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+vi.mock("@sdp/types", async (importOriginal) => {
+  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
+  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+});
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString("base64")}`;
 
@@ -943,6 +949,7 @@ describe("BVNK ramp webhook", () => {
   afterEach(async () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    providerStages.rampStageOverride = null;
     env.BVNK_SANDBOX_WEBHOOK_SECRET = undefined;
     env.BVNK_WEBHOOK_SECRET = undefined;
   });
@@ -1490,6 +1497,37 @@ describe("BVNK ramp webhook", () => {
       walletId: WALLET_ID,
       customerId: bvnkSeedCustomerReference("payin_settles"),
     });
+    await expectNoBvnkWebhookEvents();
+  });
+  it("settles a Production project's on-ramp pay-in while BVNK is not stable", async () => {
+    providerStages.rampStageOverride = { provider: "bvnk", stage: "beta" };
+    const transferId = "xfr_123e4567-e89b-12d3-a456-426614174099";
+    const productionProjectId = `${PROJECT_ID}_production`;
+    const { counterpartyId } = await seedBvnkOnrampCounterpartyAndFundingWallet(getDb(env), {
+      organizationId: ORG_ID,
+      projectId: productionProjectId,
+      name: "production_payin_settles",
+      createdBy: USER_ID,
+      fundingWalletReference: WALLET_ID,
+    });
+    await seedOnrampTransfer(transferId, "awaiting_payment", counterpartyId, {
+      projectId: productionProjectId,
+      fiatAmount: "100",
+    });
+
+    const response = await sendBvnkWebhook(
+      bvnkV1PayinEvent({
+        transactionReference: "production_payin_settles_1",
+        paymentReference: "SDP-ONRAMP",
+        additionalRemittanceInformation: `xfr_${transferId.slice(4)}`,
+        amount: 149.5,
+        customerReference: bvnkSeedCustomerReference("production_payin_settles"),
+      }),
+      { headers: {}, environment: "production" }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readTransferStatus(transferId)).toEqual({ status: "settling" });
     await expectNoBvnkWebhookEvents();
   });
   it("acknowledges a replayed pay-in id with identical immutable facts whatever the transfer status", async () => {

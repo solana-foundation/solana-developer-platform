@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/services/provider-availability.service", async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  assertProviderAvailable: vi.fn().mockResolvedValue(undefined),
+  loadProjectProviderVerdict: vi.fn(),
 }));
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -20,8 +20,13 @@ vi.mock("../wallets", async (importOriginal) => ({
 }));
 
 import type { PaymentRampEstimate } from "@sdp/types";
+import { AppError } from "@/lib/errors";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
+import {
+  loadProjectProviderVerdict,
+  type ProjectProviderRefusal,
+} from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import { estimateAcrossProviders } from "./shared";
 
@@ -33,7 +38,24 @@ function buildContext(options?: { sentryDsn?: string; observability?: Observabil
   } as unknown as AppContext;
 }
 
+const MOONPAY_NOT_CONFIGURED: ProjectProviderRefusal = {
+  admitted: false,
+  scope: { organizationId: "org_fanout_test", projectId: "prj_fanout_test" },
+  environment: "sandbox",
+  request: { family: "ramps", provider: "moonpay" },
+  reason: "provider_not_configured",
+  error: new AppError(
+    "PROVIDER_NOT_CONFIGURED",
+    "MoonPay is not configured for sandbox projects in this deployment.",
+    { reason: "provider_not_configured" }
+  ),
+};
+
 describe("estimateAcrossProviders", () => {
+  beforeEach(() => {
+    vi.mocked(loadProjectProviderVerdict).mockResolvedValue(() => ({ admitted: true }));
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
@@ -54,6 +76,31 @@ describe("estimateAcrossProviders", () => {
         organization_id: "org_fanout_test",
         error_name: "Error",
         error_message: "provider exploded",
+      })
+    );
+  });
+
+  it("keeps a provider the deployment cannot run on the error log, without calling it", async () => {
+    vi.mocked(loadProjectProviderVerdict).mockResolvedValue(() => MOONPAY_NOT_CONFIGURED);
+    const runProvider = vi.fn();
+
+    const results = await estimateAcrossProviders(buildContext(), ["moonpay"], runProvider);
+
+    expect(results).toEqual([
+      {
+        provider: "moonpay",
+        status: "error",
+        error: "MoonPay is not configured for sandbox projects in this deployment.",
+      },
+    ]);
+    expect(runProvider).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledExactlyOnceWith(
+      "error",
+      expect.objectContaining({
+        event: "sdp_api_ramp_provider_error",
+        provider: "moonpay",
+        organization_id: "org_fanout_test",
+        error_code: "PROVIDER_NOT_CONFIGURED",
       })
     );
   });

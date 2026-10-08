@@ -52,6 +52,7 @@ import {
   TEST_MOONPAY_ONRAMP_URL,
   TEST_MOONPAY_SECRET_KEY,
   TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_USER,
   TEST_WALLET_ID,
@@ -2051,11 +2052,11 @@ describe("Payments routes — ramps", () => {
       try {
         const res = await simulateRequest(transferId);
 
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(503);
         const body: { error: { code: string; message: string } } = await res.json();
         expect(body.error).toMatchObject({
-          code: "FORBIDDEN",
-          message: "Lightspark is not configured in this environment.",
+          code: "PROVIDER_NOT_CONFIGURED",
+          message: "Lightspark is not configured for sandbox projects in this deployment.",
         });
         expect(simulateSpy).not.toHaveBeenCalled();
         const transfer = await readSimulationTransfer(transferId);
@@ -3085,8 +3086,6 @@ describe("Payments routes — ramps", () => {
   });
 
   describe("Clerk-caller environment resolution", () => {
-    const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
-
     async function seedClerkAuth(): Promise<void> {
       await getDb(env).batch([
         getDb(env)
@@ -3121,7 +3120,10 @@ describe("Payments routes — ramps", () => {
     it("refuses the sandbox simulator from a production-project Clerk", async () => {
       await seedClerkAuth();
 
-      const res = await simulateAsClerk(PRODUCTION_PROJECT_ID, NONEXISTENT_MURAL_SIMULATE_BODY);
+      const res = await simulateAsClerk(
+        TEST_PRODUCTION_PROJECT_ID,
+        NONEXISTENT_MURAL_SIMULATE_BODY
+      );
 
       expect(res.status).toBe(403);
       const body = (await res.json()) as { error: { message: string } };

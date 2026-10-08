@@ -21,6 +21,7 @@ import { getDb } from "@/db";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import {
   type BvnkSandboxEnvSnapshot,
   restoreBvnkSandboxEnv,
@@ -91,6 +92,8 @@ export const TEST_PROJECT = {
   slug: "test-payments-policy-project",
 };
 
+export const TEST_PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
+
 export const TEST_USER = {
   id: "usr_payments_policy_test",
   email: "payments-policy-test@example.com",
@@ -100,6 +103,12 @@ export const TEST_API_KEY = {
   id: "key_payments_policy_test",
   raw: "sk_test_payments_policy",
   prefix: "sk_test_pay",
+};
+
+export const TEST_PRODUCTION_API_KEY = {
+  id: "key_payments_policy_production",
+  raw: "sk_live_payments_policy",
+  prefix: "sk_live_pay",
 };
 
 export const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q";
@@ -228,7 +237,7 @@ async function seedAuthAndWallet(): Promise<void> {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
     members: [TEST_USER.id],
-    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT_ID },
   });
   await getDb(env).batch([
     getDb(env)
@@ -280,6 +289,29 @@ async function seedAuthAndWallet(): Promise<void> {
         "active"
       ),
   ]);
+}
+
+/**
+ * Seed an `api_admin` key bound to the seeded Production project, in the
+ * database and the key cache, so a request authenticates as that project.
+ *
+ * @returns Resolves once the key row and its cache entry exist.
+ */
+export async function seedProductionApiKey(): Promise<void> {
+  const keyHash = await seedProjectApiKey(getDb(env), env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT_ID,
+    createdBy: TEST_USER.id,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, keyHash, {
+    ...TEST_CACHED_API_KEY,
+    id: TEST_PRODUCTION_API_KEY.id,
+    projectId: TEST_PRODUCTION_PROJECT_ID,
+    environment: "production",
+  });
 }
 
 export async function updateSeededWalletPublicKey(publicKey: string): Promise<void> {
