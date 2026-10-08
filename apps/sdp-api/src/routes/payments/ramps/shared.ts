@@ -18,14 +18,13 @@ import type {
 import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import type { z } from "zod";
-import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type {
   PaymentTransferRow,
   PaymentTransferStatus,
 } from "@/db/repositories/payments.repository";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import { requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
   AppError,
@@ -40,7 +39,6 @@ import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterpartie
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import {
-  assertProjectProviderAdmitted,
   assertProviderAvailable,
   assertRampProviderSurfaced,
   isStagedProviderRefusal,
@@ -134,46 +132,6 @@ export function providersFromPairs(
   return uniqueSorted(pairs.flatMap((row) => row.providers));
 }
 
-/**
- * The ramp family's provider gate: every ramp path that starts provider work
- * for a project (estimate, quote, counterparty onboarding, sandbox simulation)
- * passes here before any provider call, claim or row write. It applies the
- * project provider rule to the request's own project (release channel, the
- * Production `stable` bar, entitlement), then requires the deployment to hold
- * the provider's credentials for the request's environment. Webhooks,
- * reconcilers and reads of existing transfers never call it, so a transfer
- * already in flight still settles.
- *
- * @param c - Request context carrying the authenticated project scope.
- * @param providerId - The ramp provider the request is about to use.
- * @throws 403 `FORBIDDEN` whose `details.reason` is `provider_not_in_release_channel`,
- *   `provider_stage_not_allowed` or `provider_not_entitled`; then 403 when the
- *   deployment lacks the provider's credentials, or 503 `PROVIDER_NOT_CONFIGURED`
- *   when it lacks them for the request's environment.
- */
-export async function assertRampProviderAvailable(
-  c: AppContext,
-  providerId: RampProviderId
-): Promise<void> {
-  const { organizationId } = getAuth(c);
-  const db = getDb(c.env);
-  await assertProjectProviderAdmitted(
-    c.env,
-    db,
-    { organizationId, projectId: requireProjectId(c) },
-    { family: "ramps", provider: providerId }
-  );
-  await assertProviderAvailable(
-    c.env,
-    db,
-    organizationId,
-    "ramps",
-    providerId,
-    resolveSdpEnvironment(c) === "sandbox",
-    { rampProviderStages: c.get("rampProviderStages") }
-  );
-}
-
 type RampQuoteDirection = "onramp" | "offramp";
 
 /**
@@ -256,7 +214,7 @@ export async function resolveRampQuoteRequest(
   assertRampProviderOffered(c, input.provider);
   assertRampCorridorSupported(c, direction, input);
   const scope = await resolveScope(c);
-  await assertRampProviderAvailable(c, input.provider);
+  await assertProviderAvailable(c, { family: "ramps", provider: input.provider });
 
   const projectId = requireProjectId(c);
   const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
@@ -411,7 +369,7 @@ export async function estimateAcrossProviders(
     RAMP_ESTIMATE_PROVIDER_CONCURRENCY,
     async (provider): Promise<RampProviderEstimateResult> => {
       try {
-        await assertRampProviderAvailable(c, provider);
+        await assertProviderAvailable(c, { family: "ramps", provider: provider });
         const estimate = await runProvider(provider, ctx);
         return { provider, status: "ok", estimate };
       } catch (error) {

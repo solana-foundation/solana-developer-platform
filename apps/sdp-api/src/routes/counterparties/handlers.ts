@@ -54,7 +54,6 @@ import {
 import { resolveMuralRequirements } from "@/routes/payments/ramps/providers/mural";
 import {
   advanceCounterpartyRequirements,
-  assertRampProviderAvailable,
   assertRampProviderOffered,
 } from "@/routes/payments/ramps/shared";
 import {
@@ -65,6 +64,7 @@ import {
 import { AuditService } from "@/services/audit.service";
 import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
 import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
+import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   type AppContext,
   getCounterpartiesRepository,
@@ -435,7 +435,7 @@ export const submitCounterpartyRequirements = async (
   const body = c.req.valid("json");
 
   assertRampProviderOffered(c, body.provider);
-  await assertRampProviderAvailable(c, body.provider);
+  await assertProviderAvailable(c, { family: "ramps", provider: body.provider });
 
   const repo = getCounterpartiesRepository(c);
   const counterparty = await repo.getCounterpartyById({

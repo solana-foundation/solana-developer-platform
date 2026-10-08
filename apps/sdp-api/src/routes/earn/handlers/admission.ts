@@ -6,7 +6,6 @@ import {
   earnDepositSlippagePolicy,
   earnDepositStyle,
 } from "@sdp/types/provider-access";
-import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { getAuth } from "@/lib/auth";
 import { badRequest, forbidden } from "@/lib/errors";
@@ -136,14 +135,7 @@ export async function assertVaultDepositAdmissible(
   const organizationId =
     options.organizationId === undefined ? getAuth(c).organizationId : options.organizationId;
   if (organizationId !== null) {
-    await assertProviderAvailable(
-      c.env,
-      getDb(c.env),
-      organizationId,
-      "earn",
-      provider,
-      environment === "sandbox"
-    );
+    await assertProviderAvailable(c, { family: "earn", provider });
   }
   assertStrategyDepositable(strategy, environment);
 

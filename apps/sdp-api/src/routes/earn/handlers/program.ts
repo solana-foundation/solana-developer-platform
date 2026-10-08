@@ -480,14 +480,7 @@ export const createEarnProgram = async (
   assertEarnProviderSurfaced(client.provider);
 
   // Money-in gate: full entitlement + mode-specific credential check.
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    auth.organizationId,
-    "earn",
-    client.provider,
-    environment === "sandbox"
-  );
+  await assertProviderAvailable(c, { family: "earn", provider: client.provider });
   await assertKnownYieldSources(c, client.provider, body.allocations);
 
   if (!auth.projectId) {
@@ -574,17 +567,8 @@ export const retargetEarnProgram = async (
   const { programId } = parseParams(c, earnProgramParamsSchema);
   const body = c.req.valid("json");
   const { row, client } = await requireProgramContext(c, programId);
-  const auth = getAuth(c);
-  const environment = resolveSdpEnvironment(c);
 
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    auth.organizationId,
-    "earn",
-    client.provider,
-    environment === "sandbox"
-  );
+  await assertProviderAvailable(c, { family: "earn", provider: client.provider });
   await assertKnownYieldSources(c, client.provider, body.allocations);
 
   // Same two accepted key sources as create and withdrawals — a header-keyed

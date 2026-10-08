@@ -29,8 +29,10 @@ import {
   type SdpEnvironment,
   type SdpRampProviderStages,
 } from "@sdp/types";
-import type { DatabaseExecutor } from "@/db";
+import type { Context } from "hono";
+import { type DatabaseExecutor, getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, forbidden } from "@/lib/errors";
 import {
   isCustodyProviderAvailable,
@@ -1502,87 +1504,68 @@ function getAvailabilityMessage(
   return `${label} is unavailable for this organization.`;
 }
 
-export async function assertProviderAvailable(
+/**
+ * Refuses an organization using a custody provider it does not have enabled:
+ * entitled by its tier or overrides, and configured in this deployment. An
+ * organization-level check for the signing runtime, which has no project in
+ * scope; custody's environment and stage rules live in the custody setup gate.
+ *
+ * @param env - Process environment the provider access is evaluated against.
+ * @param db - Database client for the organization row.
+ * @param organizationId - The organization whose custody config is about to be used.
+ * @param provider - The custody provider.
+ * @throws 403 `FORBIDDEN` naming the missing entitlement or configuration.
+ */
+export async function assertCustodyProviderEnabled(
   env: Env,
-  db: DatabaseClient,
+  db: DatabaseExecutor,
   organizationId: string,
-  family: "custody",
-  providerId: CustodyProvider
-): Promise<void>;
-export async function assertProviderAvailable(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  family: "compliance",
-  providerId: ComplianceProviderId
-): Promise<void>;
-export async function assertProviderAvailable(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  family: "ramps",
-  providerId: RampProviderId,
-  testMode: boolean,
-  options: ProviderAvailabilityOptions
-): Promise<void>;
-export async function assertProviderAvailable(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  family: "earn",
-  providerId: EarnProviderId,
-  testMode: boolean
-): Promise<void>;
-export async function assertProviderAvailable(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  family: OrganizationProviderFamily,
-  providerId: string,
-  testMode?: boolean,
-  // Only the ramps overload takes options; the other families never read a ramp entry.
-  options: ProviderAvailabilityOptions = MANIFEST_RAMP_STAGES
+  provider: CustodyProvider
 ): Promise<void> {
-  const access = await getProviderAvailability(env, db, organizationId, options);
-  const entry = access.providers[family][
-    providerId as keyof (typeof access.providers)[typeof family]
-  ] as ProviderAvailabilityEntry | undefined;
-
-  if (!entry?.enabled) {
+  const access = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_STAGES);
+  const entry = access.providers.custody[provider];
+  if (!entry.enabled) {
     throw new AppError(
       "FORBIDDEN",
-      getAvailabilityMessage(
-        access.tier,
-        family,
-        providerId,
-        entry ?? {
-          entitled: false,
-          configured: false,
-          enabled: false,
-        }
-      )
+      getAvailabilityMessage(access.tier, "custody", provider, entry)
     );
   }
+}
 
-  // Secondary mode-specific check for ramps/earn: the general availability check
-  // uses a union of sandbox + production credentials, but the runtime handler only
-  // uses credentials for the requested mode. Re-check with the specific mode so
-  // callers get a clear PROVIDER_NOT_CONFIGURED (503) instead of a silent runtime
-  // failure.
-  if ((family === "ramps" || family === "earn") && testMode !== undefined) {
-    const definitions = PROVIDER_AVAILABILITY_DEFINITIONS[family] as Record<
-      string,
-      ProviderAvailabilityDefinition
-    >;
-    const def = definitions[providerId];
-    if (def && !def.isConfigured(env, testMode)) {
-      const mode = testMode ? "sandbox" : "production";
-      throw new AppError(
-        "PROVIDER_NOT_CONFIGURED",
-        `${def.label} is not configured for ${mode} mode.`
-      );
-    }
-  }
+/** A ramps or Earn provider a project is about to start provider work with. */
+export type StagedProviderGateRequest = Extract<
+  ProjectProviderRequest,
+  { family: "ramps" | "earn" }
+>;
+
+/**
+ * The provider gate for ramps and Earn money-in: every path that starts
+ * provider work for a project calls this before any provider call, claim or
+ * row write. Reads the project from the request's authenticated scope and
+ * applies the project provider rule (release channel, surfacing, the
+ * Production `stable` bar, entitlement and the deployment's credentials for
+ * the project's environment) through the same core the availability read
+ * uses, logging a refusal. Webhooks, reconcilers, reads and Earn exits
+ * (ADR 0002) never call it.
+ *
+ * @param c - Request context carrying the authenticated project scope.
+ * @param request - The ramps or Earn provider being used.
+ * @throws 403 `FORBIDDEN` whose `details.reason` is `provider_not_in_release_channel`,
+ *   `provider_not_offered`, `provider_stage_not_allowed` or
+ *   `provider_not_entitled`; 503 `PROVIDER_NOT_CONFIGURED` when the deployment
+ *   lacks the provider's credentials for the project's environment; 404 when
+ *   the project is not an active project of the organization.
+ */
+export async function assertProviderAvailable(
+  c: Context<{ Bindings: Env }>,
+  request: StagedProviderGateRequest
+): Promise<void> {
+  await assertProjectProviderAdmitted(
+    c.env,
+    getDb(c.env),
+    { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) },
+    request
+  );
 }
 
 /**

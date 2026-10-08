@@ -166,14 +166,7 @@ export async function createEarnVaultDepositPreview(
   assertVaultDepositEnvironmentOpen(environment, provider);
   assertEarnProviderSurfaced(provider);
   if (auth) {
-    await assertProviderAvailable(
-      c.env,
-      getDb(c.env),
-      auth.organizationId,
-      "earn",
-      provider,
-      environment === "sandbox"
-    );
+    await assertProviderAvailable(c, { family: "earn", provider });
   }
   assertStrategyDepositable(strategy, environment);
   // The exposure cap, evaluated WITHOUT throwing (the deposit's 409 becomes a
