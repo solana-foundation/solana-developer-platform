@@ -8,8 +8,15 @@ import {
 } from "./prune-idempotency-keys";
 
 function repositoryDeleting(counts: number[]): IdempotencyKeyRepository {
-  const pruneExpired = vi.fn(async () => counts.shift() ?? 0);
-  return { pruneExpired } as unknown as IdempotencyKeyRepository;
+  const unused = () => Promise.reject(new Error("not used by the prune"));
+  return {
+    claim: unused,
+    renew: unused,
+    complete: unused,
+    discard: unused,
+    unlock: unused,
+    pruneExpired: vi.fn(async () => counts.shift() ?? 0),
+  };
 }
 
 describe("pruneIdempotencyKeys", () => {

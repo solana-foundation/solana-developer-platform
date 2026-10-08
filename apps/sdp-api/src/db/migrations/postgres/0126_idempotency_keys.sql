@@ -7,12 +7,13 @@
 -- unique too.
 --
 -- `in_progress` is claimed before the handler runs and carries a lease
--- (`locked_until`) plus the claim token of the request that holds it, so a
--- request that outlived its lease can never overwrite the request that took
--- over. A crashed or failed (5xx) request leaves the row `in_progress` with an
--- expired lease: the next request with the same key and fingerprint takes it
--- over, and a different fingerprint is refused. `completed` holds the response
--- that every later request with the key replays.
+-- (`locked_until`), renewed while the request runs, plus the claim token of the
+-- request that holds it, so a request that lost the key can never overwrite the
+-- request that took over. A crashed request (or a 5xx on a route that opts to
+-- re-run) leaves the row `in_progress` with an ended lease: the next request
+-- with the same key and fingerprint takes it over, and a different fingerprint
+-- is refused. `completed` holds the response every later request replays;
+-- `response_body` is null for a bodyless status or a body too large to keep.
 --
 -- Rows are kept for 24 hours (`expires_at`) and pruned by the idempotency-key
 -- sweep. Money-moving resources keep the key on their own row behind a unique
@@ -40,8 +41,8 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     expires_at TIMESTAMPTZ NOT NULL,
     CHECK (
       (status = 'in_progress' AND response_status IS NULL AND claim_token IS NOT NULL)
-      OR (status = 'completed' AND response_status IS NOT NULL AND claim_token IS NULL
-          AND locked_until IS NULL)
+      OR (status = 'completed' AND response_status IS NOT NULL AND response_headers IS NOT NULL
+          AND claim_token IS NULL AND locked_until IS NULL)
     ),
     CONSTRAINT idempotency_keys_scope_key
       UNIQUE NULLS NOT DISTINCT (organization_id, project_id, operation, idempotency_key)

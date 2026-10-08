@@ -82,6 +82,28 @@ describe("idempotency keys repository", () => {
     });
   });
 
+  it("renews only the holder's lease, and ignores stale tokens", async () => {
+    const first = claimInput();
+    await repository().claim(first);
+    expect(await repository().renew(first.id, first.claimToken, 60)).toBe(true);
+    expect(await repository().renew(first.id, "stale", 60)).toBe(false);
+
+    await repository().discard(first.id, "stale");
+    await repository().unlock(first.id, "stale");
+    expect(await repository().claim(claimInput())).toMatchObject({ kind: "in_flight" });
+  });
+
+  it("stores and replays a bodyless response", async () => {
+    const first = claimInput();
+    await repository().claim(first);
+    const bodyless = { status: 204, headers: {}, body: null };
+    await repository().complete(first.id, first.claimToken, bodyless);
+    expect(await repository().claim(claimInput())).toEqual({
+      kind: "completed",
+      response: bodyless,
+    });
+  });
+
   it("treats an expired row as a new key", async () => {
     const first = claimInput();
     await repository().claim(first);
