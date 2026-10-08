@@ -327,7 +327,7 @@ describe("fetchWalletsByConnection", () => {
 
     const byConnection = await fetchWalletsByConnection(request);
 
-    expect(request).toHaveBeenCalledWith("/v1/wallets?includeAllProviders=true");
+    expect(request).toHaveBeenCalledWith("/v1/wallets");
     expect([...byConnection.keys()].sort()).toEqual(["conn-1", "conn-2"]);
     expect(byConnection.get("conn-1")?.map((wallet) => wallet.walletId)).toEqual(["w-1", "w-2"]);
   });

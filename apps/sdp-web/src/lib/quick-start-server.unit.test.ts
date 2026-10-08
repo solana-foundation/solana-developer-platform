@@ -33,10 +33,10 @@ describe("onboarding eligibility from organization state", () => {
   it("starts a synced organization only when all accessible projects have no wallets or API keys", async () => {
     expect(await loadQuickStartStep()).toBe("api-key");
     for (const projectId of ["sandbox_project", "production_project"]) {
-      expect(mocks.fetch).toHaveBeenCalledWith(
-        "/v1/wallets?includeAllProviders=true&includeBalances=false&view=summary",
-        { headers: { "x-project-id": projectId }, signal: expect.any(AbortSignal) }
-      );
+      expect(mocks.fetch).toHaveBeenCalledWith("/v1/wallets?includeBalances=false&view=summary", {
+        headers: { "x-project-id": projectId },
+        signal: expect.any(AbortSignal),
+      });
       expect(mocks.fetch).toHaveBeenCalledWith("/v1/api-keys", {
         headers: { "x-project-id": projectId },
         signal: expect.any(AbortSignal),

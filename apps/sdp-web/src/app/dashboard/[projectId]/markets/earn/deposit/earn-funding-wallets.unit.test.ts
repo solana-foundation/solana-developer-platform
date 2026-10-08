@@ -64,10 +64,9 @@ describe("fetchFundingWallets", () => {
     stubResponse({ data: { wallets } });
 
     await expect(fetchFundingWallets()).resolves.toEqual(wallets);
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/dashboard/wallets?view=summary&includeBalances=true&includeAllProviders=true",
-      { headers: PROJECT_HEADERS }
-    );
+    expect(fetch).toHaveBeenCalledWith("/api/dashboard/wallets?view=summary&includeBalances=true", {
+      headers: PROJECT_HEADERS,
+    });
   });
 });
 

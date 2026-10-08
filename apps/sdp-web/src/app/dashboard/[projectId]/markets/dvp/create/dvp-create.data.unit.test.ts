@@ -85,7 +85,7 @@ describe("fetchDvpCreateContext", () => {
     { custodyConnectionId: "conn_conflict" },
   ])("reports invalid wallet fields instead of offering a signing choice: %j", async (fields) => {
     const load = vi.fn(async (path: string) => {
-      if (path === "/v1/wallets?includeAllProviders=true") {
+      if (path === "/v1/wallets") {
         return Response.json({
           data: [
             { ...WALLET, custodyConfigId: "cc_config", isRuntimeExecutionAllowed: true, ...fields },
@@ -119,7 +119,7 @@ describe("fetchDvpCreateContext", () => {
 
     const context = await fetchDvpCreateContext(load);
 
-    expect(load).toHaveBeenCalledWith("/v1/wallets?includeAllProviders=true");
+    expect(load).toHaveBeenCalledWith("/v1/wallets");
     expect(context.wallets).toEqual([
       expect.objectContaining({
         id: WALLET.id,
@@ -283,9 +283,7 @@ describe("fetchDvpCreateContext", () => {
     const paths = vi
       .mocked(fetchContext as (path: string) => unknown)
       .mock.calls.map(([path]) => path);
-    expect(paths.filter((path) => path.startsWith("/v1/wallets"))).toEqual([
-      "/v1/wallets?includeAllProviders=true",
-    ]);
+    expect(paths.filter((path) => path.startsWith("/v1/wallets"))).toEqual(["/v1/wallets"]);
     expect(context.wallets[0].balances).toBeNull();
   });
 
