@@ -381,6 +381,7 @@ describe("createDvpTrade", () => {
     expect(sendTransaction).toHaveBeenCalledOnce();
     expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
       env,
+      expect.objectContaining({ purpose: "legacy.dvp" }),
       expect.objectContaining({ actor: { type: "wallet", id: "cwlt_settlement" } })
     );
   });
@@ -745,11 +746,15 @@ describe("createDvpTrade", () => {
       instructions: [{ accountIndices: expect.arrayContaining([0]) }],
     });
     expect(trade.createSignature).toBe(getSignatureFromTransaction(transaction));
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(env, {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      actor: { type: "wallet", id: "cwlt_settlement" },
-    });
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        purpose: "legacy.dvp",
+      }),
+      { actor: { type: "wallet", id: "cwlt_settlement" } }
+    );
   });
   it("fails the claim when the port refuses the sponsor response and never attaches a signature", async () => {
     const refusal = new SponsorMessageMismatchError();

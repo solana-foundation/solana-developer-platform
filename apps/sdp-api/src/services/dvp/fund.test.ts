@@ -51,6 +51,20 @@ const fetchMaybeToken = vi.hoisted(() => vi.fn());
 
 let sponsor: Awaited<ReturnType<typeof createTestSponsor>>;
 
+// The module is still on the HOO-1955 escape hatch: mint a test token instead
+// of reading the admission join.
+vi.mock("@/lib/admit-movement", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/admit-movement")>();
+  return {
+    ...actual,
+    uncheckedLegacyMovement: async (
+      _env: unknown,
+      scope: { organizationId: string; projectId: string },
+      module: "dvp" | "earn" | "helius_rings" | "issuance" | "private_channels"
+    ) => actual.mintAdmittedMovementForTests({ ...scope, purpose: `legacy.${module}` }),
+  };
+});
+
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("@/services/sponsorship.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/sponsorship.service")>()),

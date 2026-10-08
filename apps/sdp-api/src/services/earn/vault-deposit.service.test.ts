@@ -32,6 +32,20 @@ const getBlockHeight = vi.hoisted(() => vi.fn());
 
 // The confirmed block height the broadcast tail reads before it may call a
 // preflight blockhash refusal definitive.
+// The module is still on the HOO-1955 escape hatch: mint a test token instead
+// of reading the admission join.
+vi.mock("@/lib/admit-movement", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/admit-movement")>();
+  return {
+    ...actual,
+    uncheckedLegacyMovement: async (
+      _env: unknown,
+      scope: { organizationId: string; projectId: string },
+      module: "dvp" | "earn" | "helius_rings" | "issuance" | "private_channels"
+    ) => actual.mintAdmittedMovementForTests({ ...scope, purpose: `legacy.${module}` }),
+  };
+});
+
 vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
@@ -465,7 +479,11 @@ describe("depositIntoVault — validation and custody identity", () => {
   it("resolves signing by the exact custody-wallet row id", async () => {
     await depositIntoVault(env, depositInput());
 
-    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(env, ORG, PROJECT, WALLET_ROW_ID);
+    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ organizationId: ORG, projectId: PROJECT, purpose: "legacy.earn" }),
+      WALLET_ROW_ID
+    );
   });
 });
 

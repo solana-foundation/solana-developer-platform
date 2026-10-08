@@ -26,6 +26,20 @@ const { fetchMaybeMintMock, getTokenAclMintConfigMock } = vi.hoisted(() => ({
   getTokenAclMintConfigMock: vi.fn(),
 }));
 
+// The module is still on the HOO-1955 escape hatch: mint a test token instead
+// of reading the admission join.
+vi.mock("@/lib/admit-movement", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/admit-movement")>();
+  return {
+    ...actual,
+    uncheckedLegacyMovement: async (
+      _env: unknown,
+      scope: { organizationId: string; projectId: string },
+      module: "dvp" | "earn" | "helius_rings" | "issuance" | "private_channels"
+    ) => actual.mintAdmittedMovementForTests({ ...scope, purpose: `legacy.${module}` }),
+  };
+});
+
 vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
   fetchMaybeMint: fetchMaybeMintMock,
@@ -607,7 +621,15 @@ describe("authority-resolution", () => {
         requiredWalletPermissions: ["tokens:write"],
       })
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
-    expect(exactSigner).toHaveBeenCalledWith(testEnv, "org_test", "proj_test", "cwlt_inactive");
+    expect(exactSigner).toHaveBeenCalledWith(
+      testEnv,
+      expect.objectContaining({
+        organizationId: "org_test",
+        projectId: "proj_test",
+        purpose: "legacy.issuance",
+      }),
+      "cwlt_inactive"
+    );
   });
 
   it("resolves an exact draft wallet without performing runtime admission", async () => {
