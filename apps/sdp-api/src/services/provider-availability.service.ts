@@ -36,6 +36,7 @@ import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError, forbidden } from "@/lib/errors";
 import {
   isCustodyProviderAvailable,
+  isEarnEnabled,
   isModuleAvailable,
   isRampProviderAvailable,
 } from "@/lib/feature-flags";
@@ -622,7 +623,7 @@ export async function getProviderAvailability(
         isRampProviderAvailable(env, provider, options.rampProviderStages)
       ),
       earn: buildAvailabilityEntries(resolved.providers.earn, configured.earn, () =>
-        isModuleAvailable(env, "earn", options.rampProviderStages)
+        isEarnEnabled(env)
       ),
     },
   };
@@ -1148,7 +1149,7 @@ function decideProjectProvider(
       });
     case "earn":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_STAGES),
+        inReleaseChannel: isEarnEnabled(env),
         offered: isEarnProviderSurfaced(request.provider),
         stageAllowed: isModuleStageAllowedInEnvironment(
           facts.environment,
