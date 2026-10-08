@@ -18,7 +18,7 @@ Keep these points in mind:
 - **Batches appear per transaction.** SDP splits a transfer batch into Solana transactions, and each one is a `batch_pay` row. There is no row per recipient and no single row for the whole batch. Use `GET /v1/payments/transfer-batches/{batchId}` for recipient outcomes.
 - **`moduleId` points at the record.** For payments it is the transfer ID (`xfr_…`). For issuance it is the token transaction ID (`ttx_…`).
 
-The schema also lists `module` values for features that are not generally available. Requests for them go through the same [permission check](#permissions) and return only rows your project has for that module. If you list without a `module` filter, skip rows whose `module` you don't handle.
+The schema also lists `module` values for features that are not generally available. A module the deployment doesn't run contributes no rows, and filtering on it returns `403`; otherwise a filter goes through the same [permission check](#permissions). If you list without a `module` filter, skip rows whose `module` you don't handle.
 
 ## List transactions
 
