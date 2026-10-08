@@ -43,9 +43,7 @@ function makeConnection(
     lastCheck: { status: "success", at: "2026-08-10T09:05:00.000Z", failureCode: null },
     pendingWalletLabel: null,
     label: "Production signing",
-    isDefault: false,
     isRuntimeExecutionAllowed: true,
-    defaultCustodyWalletId: null,
     ...overrides,
   };
 }
@@ -81,30 +79,9 @@ function render({
 }
 
 describe("custody connections section", () => {
-  it("warns that wallet-less requests fail while no active connection is default", () => {
-    const html = render({ connections: [makeConnection({ id: "cconn_1", isDefault: false })] });
-
-    expect(html).toContain("No default connection.");
-    expect(html).toContain("fail until you make one of the active connections the default");
-  });
-
-  it("stays quiet once an active connection is the default", () => {
-    const html = render({ connections: [makeConnection({ id: "cconn_1", isDefault: true })] });
-    expect(html).not.toContain("No default connection.");
-  });
-
-  it("does not demand a default when there is no active connection to be one", () => {
-    const html = render({
-      connections: [makeConnection({ id: "cconn_1", status: "pending", activatedAt: null })],
-    });
-    expect(html).not.toContain("No default connection.");
-  });
-
   it("explains a signing pause without implying anything was removed", () => {
     const html = render({
-      connections: [
-        makeConnection({ id: "cconn_1", isDefault: true, isRuntimeExecutionAllowed: false }),
-      ],
+      connections: [makeConnection({ id: "cconn_1", isRuntimeExecutionAllowed: false })],
     });
 
     expect(html).toContain("Signing through your own credentials is currently not allowed");
@@ -112,39 +89,28 @@ describe("custody connections section", () => {
     expect(html).toContain("Active");
   });
 
-  it("stays quiet about a default that lives on another page", () => {
-    const onPage = makeConnection({ id: "cconn_1", isDefault: false });
-    const html = render({
-      connections: [onPage],
-      projectConnections: [onPage, makeConnection({ id: "cconn_2", isDefault: true })],
-    });
-
-    expect(html).not.toContain("No default connection.");
-  });
-
   it("does not pause signing over one paused connection among several", () => {
     const onPage = makeConnection({ id: "cconn_1", isRuntimeExecutionAllowed: false });
     const html = render({
       connections: [onPage],
-      projectConnections: [onPage, makeConnection({ id: "cconn_2", isDefault: true })],
+      projectConnections: [onPage, makeConnection({ id: "cconn_2" })],
     });
 
     expect(html).not.toContain("Signing through your own credentials is currently not allowed");
   });
 
-  it("raises neither banner when the project could not be read through", () => {
+  it("does not pause signing when the project could not be read through", () => {
     const html = render({
       connections: [makeConnection({ id: "cconn_1", isRuntimeExecutionAllowed: false })],
       complete: false,
     });
 
-    expect(html).not.toContain("No default connection.");
     expect(html).not.toContain("Signing through your own credentials is currently not allowed");
   });
 
   it("names the role a read-only viewer is missing, and offers them no actions", () => {
     const html = render({
-      connections: [makeConnection({ id: "cconn_1", isDefault: true })],
+      connections: [makeConnection({ id: "cconn_1" })],
       canManageCustody: false,
     });
 

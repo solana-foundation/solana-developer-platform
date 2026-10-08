@@ -211,9 +211,7 @@ describe("WalletSetupFlow connection picker", () => {
       provider: "privy" as const,
       label: "Production signing",
       status: "active" as const,
-      isDefault: false,
       isRuntimeExecutionAllowed: true,
-      defaultCustodyWalletId: null,
       createdAt: "2026-08-10T09:00:00.000Z",
       activatedAt: "2026-08-10T09:05:00.000Z",
       lastCheck: null,
@@ -239,22 +237,18 @@ describe("WalletSetupFlow connection picker", () => {
     );
   }
 
-  it("offers the connection once the project has a usable one", () => {
+  it("offers the account picker once the project has a usable connection", () => {
     const markup = renderInstalledPrivy([connection()]);
 
-    expect(markup).toContain("The wallet is created in this connection");
-    expect(markup).toContain('name="connectionId"');
+    expect(markup).toContain("The wallet is created in this account");
+    expect(markup).toContain('name="walletTarget"');
   });
 
-  it("preselects the project default over the first connection", () => {
-    const markup = renderInstalledPrivy([
-      connection({ id: "conn-first" }),
-      connection({ id: "conn-default", isDefault: true }),
-    ]);
+  it("preselects no account, even when only one is selectable", () => {
+    const markup = renderInstalledPrivy([connection({ id: "conn-only" })], []);
 
-    // The non-default connection must not be what submits.
-    expect(markup).toContain("conn-default");
-    expect(markup).not.toContain("conn-first");
+    expect(markup).toContain('name="walletTarget"');
+    expect(markup).not.toContain("conn-only");
   });
 
   // A project with only unfinished connections has nothing to choose between,
@@ -262,24 +256,23 @@ describe("WalletSetupFlow connection picker", () => {
   it("stays out of the way when nothing is selectable", () => {
     const markup = renderInstalledPrivy([connection({ status: "pending" })]);
 
-    expect(markup).not.toContain("The wallet is created in this connection");
+    expect(markup).not.toContain("The wallet is created in this account");
     expect(markup).toContain("Wallet details");
   });
 
   it("stays out of the way when the project has no connections at all", () => {
     const markup = renderInstalledPrivy([]);
 
-    expect(markup).not.toContain("The wallet is created in this connection");
+    expect(markup).not.toContain("The wallet is created in this account");
   });
 
   // A BYOK-only project has no legacy config, so `/v1/wallets/configs` reports
   // nothing connected; the active connection alone must mark privy installed.
-  it("offers an active connection when there is no legacy config and no default", () => {
-    const markup = renderInstalledPrivy([connection({ isDefault: false })], []);
+  it("offers an active connection when there is no legacy config", () => {
+    const markup = renderInstalledPrivy([connection()], []);
 
     expect(markup).toContain("Wallet details");
-    expect(markup).toContain('name="connectionId"');
-    expect(markup).toContain("conn-active");
+    expect(markup).toContain('name="walletTarget"');
     expect(markup).toContain('name="label"');
     expect(markup).not.toContain("data-privy-byok-form");
     expect(markup).not.toMatch(/type="password"/);
@@ -289,7 +282,7 @@ describe("WalletSetupFlow connection picker", () => {
     const markup = renderInstalledPrivy([connection({ status: "pending" })], []);
 
     expect(markup).toContain("data-privy-byok-form");
-    expect(markup).not.toContain('name="connectionId"');
+    expect(markup).not.toContain('name="walletTarget"');
   });
 
   // Connections belong to one provider; switching on step 1 must not carry them over.
@@ -305,6 +298,6 @@ describe("WalletSetupFlow connection picker", () => {
       </I18nProvider>
     );
 
-    expect(markup).not.toContain("The wallet is created in this connection");
+    expect(markup).not.toContain("The wallet is created in this account");
   });
 });

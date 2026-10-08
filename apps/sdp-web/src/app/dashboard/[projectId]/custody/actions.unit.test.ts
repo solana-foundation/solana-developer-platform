@@ -67,7 +67,7 @@ describe("createCustodySetupWalletAction", () => {
     expect(requestBody(client)).not.toHaveProperty("provider");
   });
 
-  it("falls back to the provider when no connection is chosen", async () => {
+  it("names the provider's Managed config when no connection is chosen", async () => {
     await createCustodySetupWalletAction(walletForm({ provider: "privy", label: "Treasury" }));
 
     expect(requestBody(client)).toEqual({ provider: "privy", label: "Treasury" });
@@ -80,6 +80,13 @@ describe("createCustodySetupWalletAction", () => {
     );
 
     expect(requestBody(client)).toEqual({ provider: "privy", label: "Treasury" });
+  });
+
+  it("refuses a wallet that names neither a provider nor a connection", async () => {
+    const result = await createCustodySetupWalletAction(walletForm({ label: "Treasury" }));
+
+    expect(result.status).toBe("error");
+    expect(client.fetch).not.toHaveBeenCalled();
   });
 
   it("reports a failure instead of throwing", async () => {

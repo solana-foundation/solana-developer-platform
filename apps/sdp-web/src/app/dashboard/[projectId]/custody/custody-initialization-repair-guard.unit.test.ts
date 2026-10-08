@@ -33,7 +33,7 @@ describe("custody initialization repair guard", () => {
     setPageRequest(`/dashboard/${SANDBOX_PROJECT.id}/wallets/setup`);
   });
 
-  it("refuses to repair across providers when another provider owns the default", async () => {
+  it("refuses to repair when the submitted provider has no active config", async () => {
     fetchMock.mockImplementation(async (path: string) => {
       if (path === "/v1/wallets/initialize") {
         throw ALREADY_INITIALIZED;
@@ -44,13 +44,11 @@ describe("custody initialization repair guard", () => {
             {
               id: "cfg_privy",
               provider: "privy",
-              isDefault: true,
               defaultWalletId: "wal_privy_root",
               publicKey: "PrivyRootPublicKey11111111111111111111111111",
               status: "active",
             },
           ],
-          defaultConfigId: "cfg_privy",
         };
       }
       throw new Error(`unexpected call: ${path}`);
@@ -63,7 +61,7 @@ describe("custody initialization repair guard", () => {
     expect(walletPosts).toHaveLength(0);
   });
 
-  it("still repairs the same provider's incomplete default", async () => {
+  it("repairs the provider's config that has no wallet yet, naming the provider", async () => {
     fetchMock.mockImplementation(async (path: string) => {
       if (path === "/v1/wallets/initialize") {
         throw ALREADY_INITIALIZED;
@@ -72,15 +70,20 @@ describe("custody initialization repair guard", () => {
         return {
           configs: [
             {
+              id: "cfg_local",
+              provider: "local",
+              defaultWalletId: "wal_local_root",
+              publicKey: "LocalRootPublicKey1111111111111111111111111",
+              status: "active",
+            },
+            {
               id: "cfg_privy",
               provider: "privy",
-              isDefault: true,
               defaultWalletId: null,
               publicKey: "PrivyRootPublicKey11111111111111111111111111",
               status: "active",
             },
           ],
-          defaultConfigId: "cfg_privy",
         };
       }
       if (path === "/v1/wallets") {
@@ -92,13 +95,44 @@ describe("custody initialization repair guard", () => {
     const result = await initializeCustodySetupAction(form("privy"));
 
     expect(result.status).toBe("success");
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/v1/wallets",
-      expect.objectContaining({ method: "POST" })
-    );
+    const walletPosts = fetchMock.mock.calls.filter(([path]) => path === "/v1/wallets");
+    expect(walletPosts).toHaveLength(1);
+    expect(JSON.parse(String(walletPosts[0]?.[1]?.body))).toEqual({
+      provider: "privy",
+      label: "Default wallet",
+      purpose: "root",
+    });
   });
 
-  it("accepts an already-complete default for the same provider", async () => {
+  it("ignores an archived config of the same provider", async () => {
+    fetchMock.mockImplementation(async (path: string) => {
+      if (path === "/v1/wallets/initialize") {
+        throw ALREADY_INITIALIZED;
+      }
+      if (path === "/v1/wallets/configs") {
+        return {
+          configs: [
+            {
+              id: "cfg_privy_old",
+              provider: "privy",
+              defaultWalletId: "wal_old",
+              publicKey: "OldKey",
+              status: "archived",
+            },
+          ],
+        };
+      }
+      throw new Error(`unexpected call: ${path}`);
+    });
+
+    const result = await initializeCustodySetupAction(form("privy"));
+
+    expect(result.status).toBe("error");
+    const walletPosts = fetchMock.mock.calls.filter(([path]) => path === "/v1/wallets");
+    expect(walletPosts).toHaveLength(0);
+  });
+
+  it("accepts an already-provisioned config for the same provider", async () => {
     fetchMock.mockImplementation(async (path: string) => {
       if (path === "/v1/wallets/initialize") {
         throw ALREADY_INITIALIZED;
@@ -109,13 +143,11 @@ describe("custody initialization repair guard", () => {
             {
               id: "cfg_privy",
               provider: "privy",
-              isDefault: true,
               defaultWalletId: "wal_done",
               publicKey: "DoneKey",
               status: "active",
             },
           ],
-          defaultConfigId: "cfg_privy",
         };
       }
       throw new Error(`unexpected call: ${path}`);
