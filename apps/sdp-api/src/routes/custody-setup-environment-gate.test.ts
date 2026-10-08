@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
+import { getLogger } from "@/runtime/logger";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-keys";
@@ -172,6 +173,22 @@ function submit(environment: SdpEnvironment, idempotencyKey: string): Promise<Re
   );
 }
 
+function getConnection(environment: SdpEnvironment, connectionId: string): Promise<Response> {
+  return Promise.resolve(
+    app.request(
+      `/internal/dashboard/custody/connections/${connectionId}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${clerkToken}`,
+          "X-Project-ID": PROJECT_IDS[environment],
+        },
+      },
+      env
+    )
+  );
+}
+
 function complete(environment: SdpEnvironment, connectionId: string): Promise<Response> {
   return Promise.resolve(
     app.request(
@@ -245,6 +262,31 @@ async function auditRows() {
 }
 
 const NO_CUSTODY_ROWS = { configs: [], wallets: [], credentials: [], connections: [] };
+const REFUSAL_EVENT = "sdp_api_custody_setup_refused";
+
+function spyOnWarn() {
+  const logger = getLogger();
+  return vi.spyOn(logger, "warn").mockImplementation(() => logger);
+}
+
+function refusalLogs(warn: ReturnType<typeof spyOnWarn>) {
+  return warn.mock.calls.filter((call) => call[1] === REFUSAL_EVENT);
+}
+
+function refusalLog(environment: SdpEnvironment, mode: "managed" | "byok") {
+  return [
+    {
+      event: REFUSAL_EVENT,
+      organization_id: ORGANIZATION_ID,
+      project_id: PROJECT_IDS[environment],
+      environment,
+      provider: "privy",
+      mode,
+      reason: "custody_mode_not_allowed",
+    },
+    REFUSAL_EVENT,
+  ];
+}
 
 describe("Custody setup by project environment", () => {
   const original = {
@@ -462,5 +504,95 @@ describe("Custody setup by project environment", () => {
     expect(await fresh.json()).toEqual(NOT_STABLE_REFUSAL);
     expect(fetch).not.toHaveBeenCalled();
     expect(await custodyRows()).toEqual(afterFirst);
+  });
+
+  describe("refusal logging and archived projects", () => {
+    let warn: ReturnType<typeof spyOnWarn>;
+
+    beforeEach(() => {
+      warn = spyOnWarn();
+    });
+
+    afterEach(() => {
+      warn.mockRestore();
+    });
+
+    it("logs a refused Managed initialization in a Production project exactly once", async () => {
+      const response = await initialize("production", "privy");
+
+      expect(response.status).toBe(403);
+      expect(refusalLogs(warn)).toEqual([refusalLog("production", "managed")]);
+    });
+
+    it("reads a Production installation the gate refuses without logging, and logs its refused completion exactly once", async () => {
+      const connectionId = await submittedConnectionId(
+        await submit("production", "gate-prod-read-then-complete")
+      );
+      custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
+
+      const read = await getConnection("production", connectionId);
+
+      expect(read.status).toBe(200);
+      expect(await read.json()).toEqual({
+        data: {
+          connection: {
+            id: connectionId,
+            provider: "privy",
+            label: "Treasury Privy",
+            status: "pending",
+            completion: null,
+            canComplete: false,
+            canReplaceCredentials: false,
+            canCancel: true,
+          },
+        },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      });
+      expect(refusalLogs(warn)).toEqual([]);
+
+      const completed = await complete("production", connectionId);
+
+      expect(completed.status).toBe(403);
+      expect(await completed.json()).toEqual(NOT_STABLE_REFUSAL);
+      expect(refusalLogs(warn)).toEqual([refusalLog("production", "byok")]);
+    });
+
+    it("replays a Production submission the gate refuses without logging, and logs a refused new submission exactly once", async () => {
+      await submittedConnectionId(await submit("production", "gate-prod-log-replay"));
+      custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
+
+      const replay = await submit("production", "gate-prod-log-replay");
+
+      expect(replay.status).toBe(201);
+      expect(refusalLogs(warn)).toEqual([]);
+
+      const fresh = await submit("production", "gate-prod-log-fresh");
+
+      expect(fresh.status).toBe(403);
+      expect(refusalLogs(warn)).toEqual([refusalLog("production", "byok")]);
+    });
+
+    it.each(["sandbox", "production"] as const)(
+      "answers not found for Managed initialization in an archived %s project, writing nothing and logging no refusal",
+      async (environment) => {
+        await getDb(env)
+          .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
+          .bind(PROJECT_IDS[environment])
+          .run();
+
+        const response = await initialize(environment, "privy");
+
+        expect(response.status).toBe(404);
+        expect(await response.json()).toEqual({
+          error: { code: "NOT_FOUND", message: "Project not found" },
+          meta: { requestId: expect.any(String) },
+        });
+        expect(fetch).not.toHaveBeenCalled();
+        expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+        expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
+        expect(await auditRows()).toEqual([]);
+        expect(refusalLogs(warn)).toEqual([]);
+      }
+    );
   });
 });

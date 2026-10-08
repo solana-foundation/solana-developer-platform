@@ -1,12 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { forbidden } from "@/lib/errors";
+import {
+  type CustodySetupRefusal,
+  CustodySetupRefusedError,
+} from "./provider-availability.service";
 import { decideInstallation, type InstallationFacts } from "./provider-credential-installation";
 
 const NOW = Date.parse("2026-08-06T12:00:00.000Z");
-const SETUP_REFUSAL = forbidden(
-  "Privy BYOK custody is not stable yet, so a production project cannot use it.",
-  { reason: "custody_mode_not_allowed" }
-);
+const SETUP_REFUSAL: CustodySetupRefusal = {
+  admitted: false,
+  request: {
+    organizationId: "org_installation_decisions",
+    projectId: "prj_installation_decisions_production",
+    provider: "privy",
+    mode: "byok",
+  },
+  environment: "production",
+  error: new CustodySetupRefusedError(
+    "Privy BYOK custody is not stable yet, so a production project cannot use it.",
+    "custody_mode_not_allowed"
+  ),
+};
 
 function facts(overrides: Partial<InstallationFacts>): InstallationFacts {
   return {
@@ -45,14 +58,14 @@ describe("provider credential installation decisions", () => {
   });
 
   it("allows reconciliation without full completion only after the Provider account is pinned", () => {
-    expect(
-      decideInstallation(facts({ completionAdmission: { admitted: false, error: SETUP_REFUSAL } }))
-        .complete
-    ).toEqual({ kind: "disabled", error: SETUP_REFUSAL });
+    expect(decideInstallation(facts({ completionAdmission: SETUP_REFUSAL })).complete).toEqual({
+      kind: "disabled",
+      refusal: SETUP_REFUSAL,
+    });
     expect(
       decideInstallation(
         facts({
-          completionAdmission: { admitted: false, error: SETUP_REFUSAL },
+          completionAdmission: SETUP_REFUSAL,
           providerAccountFingerprint: "sha256:app",
           lastCheckStatus: "retry_unknown",
           lastCheckAt: "2026-08-06T11:58:00.000Z",
@@ -88,9 +101,9 @@ describe("provider credential installation decisions", () => {
     expect(
       decideInstallation({
         ...failed,
-        completionAdmission: { admitted: false, error: SETUP_REFUSAL },
+        completionAdmission: SETUP_REFUSAL,
       }).replace
-    ).toEqual({ kind: "disabled", error: SETUP_REFUSAL });
+    ).toEqual({ kind: "disabled", refusal: SETUP_REFUSAL });
     expect(decideInstallation({ ...failed, hasSiblingUnfinished: true }).replace).toEqual({
       kind: "conflict",
       reason: "unfinished_installation_exists",

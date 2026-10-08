@@ -10,13 +10,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { getLogger } from "@/runtime/logger";
 import {
+  admitByokCustodySetup,
   assertCustodyProviderEntitled,
   assertCustodySetupAdmitted,
   assertEarnProviderConfigured,
   assertProviderAvailable,
+  CustodySetupRefusedError,
   custodyProviderNotInReleaseChannel,
+  getCustodyModesForProject,
   getProviderAvailability,
-  isPersistedCustodyCompletionEnabled,
   parseClerkOrganizationTierMetadata,
   parseProviderOverridesFromClerkMetadata,
   syncProviderAccessFromClerk,
@@ -993,7 +995,7 @@ describe("provider-availability.service", () => {
       env.PRIVY_APP_SECRET = undefined;
 
       await expect(
-        isPersistedCustodyCompletionEnabled(
+        admitByokCustodySetup(
           env,
           getDb(env),
           { organizationId: TEST_ORG_ID, projectId: projects.production.id },
@@ -1002,30 +1004,84 @@ describe("provider-availability.service", () => {
       ).resolves.toEqual({ admitted: true });
     });
 
-    it("returns the gate's refusal for BYOK completion instead of throwing it", async () => {
+    it("returns the gate's refusal for BYOK completion with its request and environment, without logging it", async () => {
+      const logger = getLogger();
+      const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
       const project = { organizationId: TEST_ORG_ID, projectId: projects.production.id };
 
-      await expect(
-        isPersistedCustodyCompletionEnabled(env, getDb(env), project, "turnkey")
-      ).resolves.toMatchObject({
+      const notInChannel = await admitByokCustodySetup(env, getDb(env), project, "turnkey");
+      expect(notInChannel).toMatchObject({
         admitted: false,
+        request: { ...project, provider: "turnkey", mode: "byok" },
+        environment: "production",
         error: {
           code: "FORBIDDEN",
+          statusCode: 403,
           message: custodyProviderNotInReleaseChannel("turnkey", "byok").message,
           details: { reason: "custody_provider_not_in_release_channel" },
         },
       });
+      expect(notInChannel).toMatchObject({ error: expect.any(CustodySetupRefusedError) });
 
       custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
-      await expect(
-        isPersistedCustodyCompletionEnabled(env, getDb(env), project, "privy")
-      ).resolves.toMatchObject({ admitted: false, error: NOT_STABLE_PRODUCTION_REFUSAL });
+      await expect(admitByokCustodySetup(env, getDb(env), project, "privy")).resolves.toMatchObject(
+        {
+          admitted: false,
+          request: { ...project, provider: "privy", mode: "byok" },
+          environment: "production",
+          error: NOT_STABLE_PRODUCTION_REFUSAL,
+        }
+      );
 
       custodyReleaseChannel.stageOverride = null;
       await disablePrivyEntitlement();
-      await expect(
-        isPersistedCustodyCompletionEnabled(env, getDb(env), project, "privy")
-      ).resolves.toMatchObject({ admitted: false, error: NOT_ENTITLED_REFUSAL });
+      await expect(admitByokCustodySetup(env, getDb(env), project, "privy")).resolves.toMatchObject(
+        {
+          admitted: false,
+          request: { ...project, provider: "privy", mode: "byok" },
+          environment: "production",
+          error: NOT_ENTITLED_REFUSAL,
+        }
+      );
+      expect(warn).not.toHaveBeenCalled();
     });
+
+    it("lists a Production project's admitted modes without logging the Managed refusal", async () => {
+      const logger = getLogger();
+      const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+      const project = { organizationId: TEST_ORG_ID, projectId: projects.production.id };
+
+      await expect(getCustodyModesForProject(env, getDb(env), project, "privy")).resolves.toEqual([
+        "byok",
+      ]);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it.each(["sandbox", "production"] as const)(
+      "treats an archived %s project as not found at every gate entry point, without logging",
+      async (environment) => {
+        const logger = getLogger();
+        const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+        const project = projects[environment];
+        await getDb(env)
+          .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
+          .bind(project.id)
+          .run();
+        const notFound = { code: "NOT_FOUND", statusCode: 404, message: "Project not found" };
+        const scope = { organizationId: project.organizationId, projectId: project.id };
+
+        await expect(admitCustodySetup(project, "privy", "byok")).rejects.toMatchObject(notFound);
+        await expect(admitCustodySetup(project, "privy", "managed")).rejects.toMatchObject(
+          notFound
+        );
+        await expect(admitByokCustodySetup(env, getDb(env), scope, "privy")).rejects.toMatchObject(
+          notFound
+        );
+        await expect(
+          getCustodyModesForProject(env, getDb(env), scope, "privy")
+        ).rejects.toMatchObject(notFound);
+        expect(warn).not.toHaveBeenCalled();
+      }
+    );
   });
 });
