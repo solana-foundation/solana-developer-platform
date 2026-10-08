@@ -19,21 +19,14 @@ import { getTranslations } from "@/i18n/server";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
 
-const {
-  mockAuth,
-  mockIssuanceFlag,
-  mockLoadWalletActivity,
-  mockPoliciesFlag,
-  mockPrivyByokFlag,
-  mockRequest,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockIssuanceFlag: vi.fn(),
-  mockLoadWalletActivity: vi.fn(),
-  mockPoliciesFlag: vi.fn(),
-  mockPrivyByokFlag: vi.fn(),
-  mockRequest: vi.fn(),
-}));
+const { mockAuth, mockIssuanceFlag, mockLoadWalletActivity, mockPoliciesFlag, mockRequest } =
+  vi.hoisted(() => ({
+    mockAuth: vi.fn(),
+    mockIssuanceFlag: vi.fn(),
+    mockLoadWalletActivity: vi.fn(),
+    mockPoliciesFlag: vi.fn(),
+    mockRequest: vi.fn(),
+  }));
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: mockAuth,
@@ -49,7 +42,6 @@ vi.mock("@/i18n/server", () => ({
 vi.mock("@/flags", () => ({
   issuance: mockIssuanceFlag,
   policies: mockPoliciesFlag,
-  privyByok: mockPrivyByokFlag,
 }));
 
 vi.mock("@/lib/sdp-api", async (importOriginal) => ({
@@ -153,13 +145,11 @@ beforeEach(() => {
   mockIssuanceFlag.mockReset();
   mockLoadWalletActivity.mockReset();
   mockPoliciesFlag.mockReset();
-  mockPrivyByokFlag.mockReset();
   mockRequest.mockReset();
 
   mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
   mockIssuanceFlag.mockResolvedValue(true);
   mockPoliciesFlag.mockResolvedValue(true);
-  mockPrivyByokFlag.mockResolvedValue(true);
   mockLoadWalletActivity.mockResolvedValue({
     ok: true,
     data: {
@@ -207,28 +197,21 @@ beforeEach(() => {
 });
 
 describe("WalletDetailPage critical path", () => {
-  it.each([
-    ["an admin while BYOK is off", "org:admin", false],
-    ["a member", "org:member", true],
-  ])(
-    "keeps a connection-owned wallet readable without connection requests or links for %s",
-    async (_viewer, orgRole, byokEnabled) => {
-      walletOverrides = { custodyConnectionId: "connection_one" };
-      mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole });
-      mockPrivyByokFlag.mockResolvedValue(byokEnabled);
+  it("keeps a connection-owned wallet readable without connection requests or links for a member", async () => {
+    walletOverrides = { custodyConnectionId: "connection_one" };
+    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:member" });
 
-      const page = await renderPage();
+    const page = await renderPage();
 
-      expect(
-        mockRequest.mock.calls.some(([path]) => String(path).includes("/custody/connections"))
-      ).toBe(false);
-      const markup = renderWalletIdentity(page);
-      expect(markup).toContain("Fast wallet");
-      expect(markup).not.toContain("/integrations/privy/connections/");
-    }
-  );
+    expect(
+      mockRequest.mock.calls.some(([path]) => String(path).includes("/custody/connections"))
+    ).toBe(false);
+    const markup = renderWalletIdentity(page);
+    expect(markup).toContain("Fast wallet");
+    expect(markup).not.toContain("/integrations/privy/connections/");
+  });
 
-  it("loads the wallet's exact connection and links its label for an admin with BYOK enabled", async () => {
+  it("loads the wallet's exact connection and links its label for an admin", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
     mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
 

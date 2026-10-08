@@ -3,7 +3,13 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PRODUCTION_PROJECT } from "@/test/projects";
+import {
+  availableComplianceProviders,
+  availableCustodyProviders,
+  availableRampProviders,
+} from "@/lib/provider-availability";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { projectProviderAvailability } from "@/test/provider-availability";
 import { resetRequestProject, setPageRequest } from "@/test/request-project";
 import { resolveIntegrationDetail } from "../integration-detail";
 import { IntegrationDetailSkeleton } from "../integrations-skeleton";
@@ -16,18 +22,27 @@ import { IntegrationDetailView } from "./integration-detail-view";
 
 vi.mock("next/headers", () => import("@/test/next-headers"));
 
-const PROJECT_PATH = `/dashboard/${PRODUCTION_PROJECT.id}`;
+const PROJECT_PATH = `/dashboard/${SANDBOX_PROJECT.id}`;
 
-const on = { entitled: true, configured: true, enabled: true };
-const off = { entitled: false, configured: false, enabled: false };
+const AVAILABILITY = projectProviderAvailability({
+  project: SANDBOX_PROJECT,
+  custody: [
+    { provider: "privy", modes: ["managed", "byok"] },
+    { provider: "para", modes: ["managed"] },
+    { provider: "fireblocks", modes: ["managed"] },
+  ],
+  compliance: ["range"],
+  ramps: ["moonpay"],
+  earn: [],
+});
 
 const INPUTS = {
   custody: resolveCustodyIntegrations({
     connectedProviders: ["privy"],
-    enabledProviders: ["privy", "para"],
+    custodyAvailability: availableCustodyProviders(AVAILABILITY),
   }),
-  ramps: resolveRampIntegrations({ moonpay: on }, RAMP_PROVIDERS),
-  compliance: resolveComplianceIntegrations({ range: off }),
+  ramps: resolveRampIntegrations(availableRampProviders(AVAILABILITY), RAMP_PROVIDERS),
+  compliance: resolveComplianceIntegrations(availableComplianceProviders(AVAILABILITY)),
 };
 
 async function markupOf(node: ReactNode): Promise<string> {
@@ -60,18 +75,10 @@ describe("IntegrationDetailView", () => {
     expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=para`);
   });
 
-  it("gives the one routed gated provider its request access button", async () => {
+  it("routes an available manual provider into setup and says it is by arrangement", async () => {
     const markup = await render("fireblocks");
-    expect(markup).toContain("Request access");
-    expect(markup).toContain("https://solanafoundation.typeform.com/to/wShiq9SN");
-    expect(markup).toContain("Available by arrangement");
-  });
-
-  it("explains an unrouted gated provider without borrowing a link", async () => {
-    const markup = await render("ibm_haven");
-    expect(markup).toContain("Not configured");
-    expect(markup).not.toContain("Request access");
-    expect(markup).not.toContain("typeform.com");
+    expect(markup).toContain("Ready to connect");
+    expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=fireblocks`);
     expect(markup).toContain("Available by arrangement");
   });
 
@@ -81,9 +88,8 @@ describe("IntegrationDetailView", () => {
     expect(ramp).toContain("Provisioned per deployment");
 
     const compliance = await render("range");
-    expect(compliance).toContain("Request access");
-    expect(compliance).toContain("Available by arrangement");
-    expect(compliance).not.toContain("typeform.com");
+    expect(compliance).toContain("Enabled");
+    expect(compliance).toContain("Provisioned per deployment");
   });
 
   it("offers no state-dependent action when the connection state is unknown", async () => {

@@ -8,12 +8,7 @@ import {
 
 describe("custody provider catalog", () => {
   it("publishes the complete provider display status vocabulary", () => {
-    expect(CUSTODY_PROVIDER_DISPLAY_STATUSES).toEqual([
-      "available",
-      "active",
-      "request_access",
-      "not_configured",
-    ]);
+    expect(CUSTODY_PROVIDER_DISPLAY_STATUSES).toEqual(["available", "active"]);
   });
 
   it("publishes every provider with its launch classification and setup mode", () => {

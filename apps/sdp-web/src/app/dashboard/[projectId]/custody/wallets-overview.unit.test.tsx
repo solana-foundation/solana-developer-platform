@@ -4,6 +4,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { availableCustodyProviders } from "@/lib/provider-availability";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { projectProviderAvailability } from "@/test/provider-availability";
 
 const urlState = vi.hoisted(() => ({ query: "" }));
 
@@ -68,9 +71,22 @@ const wallets: CustodyWalletSummary[] = [
   },
 ];
 
+const CUSTODY_AVAILABILITY = availableCustodyProviders(
+  projectProviderAvailability({
+    project: SANDBOX_PROJECT,
+    custody: [
+      { provider: "privy", modes: ["managed", "byok"] },
+      { provider: "coinbase_cdp", modes: ["managed"] },
+    ],
+    compliance: [],
+    ramps: [],
+    earn: [],
+  })
+);
+
 function renderOverview(
   query: string,
-  overrides: Partial<ComponentProps<typeof WalletsOverview>> = {}
+  overrides: Partial<ComponentProps<typeof WalletsOverview>>
 ): string {
   urlState.query = query;
   return renderToStaticMarkup(
@@ -78,7 +94,7 @@ function renderOverview(
       <WalletsOverview
         canManageCustody
         connectedProviders={[]}
-        enabledProviders={["privy", "coinbase_cdp"]}
+        custodyAvailability={CUSTODY_AVAILABILITY}
         configsError={null}
         wallets={wallets}
         walletsError={null}
@@ -90,37 +106,33 @@ function renderOverview(
 }
 
 describe("wallets overview search", () => {
-  it("shows the full provider catalog when no wallets or enabled providers exist", () => {
-    const html = renderOverview("", { wallets: [], enabledProviders: [] });
-    for (const provider of [
-      "Privy",
-      "Coinbase CDP",
-      "Para",
-      "Turnkey",
-      "Fireblocks",
-      "DFNS",
-      "IBM Digital Asset Haven",
-      "Anchorage",
-      "Utila",
-    ]) {
-      expect(html).toContain(provider);
+  it("shows only the providers the project can use when it has no wallets", () => {
+    const html = renderOverview("", { wallets: [] });
+    expect(html).toContain("Privy");
+    expect(html).toContain("Coinbase CDP");
+    for (const provider of ["Turnkey", "Fireblocks", "DFNS", "Anchorage", "Utila"]) {
+      expect(html).not.toContain(provider);
     }
-    expect(html).toContain("Not configured");
-    expect(html).toContain("Request access");
     expect(html).not.toContain("<h3");
     expect(html.match(/<section /g)).toHaveLength(1);
-    expect(html).not.toContain('data-provider-selectable="true"');
+    expect(html.match(/data-provider-selection-card="true"/g)).toHaveLength(2);
+    expect(html.match(/data-provider-selectable="true"/g)).toHaveLength(2);
   });
 
-  it("shows unavailable providers alongside selectable providers in the empty state", () => {
-    const html = renderOverview("", { wallets: [] });
-    expect(html.match(/data-provider-selectable="true"/g)).toHaveLength(2);
-    expect(html).toContain("Fireblocks");
-    expect(html).toContain("Not configured");
+  it("explains provider setup and offers no creation when the project can use no provider", () => {
+    const emptyProject = renderOverview("", { wallets: [], custodyAvailability: [] });
+    expect(emptyProject).toContain(
+      "Wallet creation is available after a custody provider is enabled for this organization."
+    );
+    expect(emptyProject).not.toContain("data-provider-selection-card");
+
+    const withWallets = renderOverview("", { custodyAvailability: [] });
+    expect(withWallets.match(/data-wallet-card=/g)).toHaveLength(2);
+    expect(withWallets).not.toContain('data-wallet-create-tile="true"');
   });
 
   it("keeps the provider catalog out of the existing wallet list", () => {
-    const html = renderOverview("");
+    const html = renderOverview("", {});
     expect(html).not.toContain("data-provider-selection-card");
     expect(html).toContain('data-wallet-card="wallet-treasury"');
   });
@@ -128,13 +140,12 @@ describe("wallets overview search", () => {
   it("shows the catalog without creation actions for read-only members", () => {
     const html = renderOverview("", { wallets: [], canManageCustody: false });
     expect(html).toContain("Privy");
-    expect(html).toContain("Fireblocks");
+    expect(html).toContain("Coinbase CDP");
     expect(html).not.toContain('data-provider-selectable="true"');
-    expect(html).not.toContain('target="_blank"');
   });
 
   it("renders one responsive toolbar and only matching wallet cards", () => {
-    const html = renderOverview("treasury");
+    const html = renderOverview("treasury", {});
 
     expect(html.match(/data-wallet-search-toolbar="true"/g)).toHaveLength(1);
     expect(html).toContain("flex-col gap-3 sm:flex-row");
@@ -146,7 +157,7 @@ describe("wallets overview search", () => {
   });
 
   it("shows an actionable empty state without confusing it with an empty project", () => {
-    const html = renderOverview("does-not-exist");
+    const html = renderOverview("does-not-exist", {});
 
     expect(html).toContain("No wallets match this search");
     expect(html).toContain("Clear search");
@@ -155,7 +166,7 @@ describe("wallets overview search", () => {
   });
 
   it("restores every wallet and the create tile when the query is reset", () => {
-    const html = renderOverview("");
+    const html = renderOverview("", {});
 
     expect(html.match(/data-wallet-card=/g)).toHaveLength(2);
     expect(html.match(/data-wallet-create-tile="true"/g)).toHaveLength(1);
@@ -165,7 +176,7 @@ describe("wallets overview search", () => {
 
 describe("wallets overview signing restriction", () => {
   it("badges a wallet whose signing is disabled, and only that wallet", () => {
-    expect(renderOverview("")).not.toContain("Restricted");
+    expect(renderOverview("", {})).not.toContain("Restricted");
     const html = renderOverview("", {
       wallets: [{ ...wallets[0], isRuntimeExecutionAllowed: false }, wallets[1]],
     });
