@@ -254,7 +254,8 @@ describe("WalletSetupFlow custody mode", () => {
     expect(markup).toMatch(/type="password"/);
     expect(markup).not.toContain('aria-label="Custody mode"');
     expect(markup).not.toContain(">Managed<");
-    expect(markup).not.toContain('id="wallet-details-form"');
+    expect(markup).not.toContain('id="wallet-label"');
+    expect(markup).not.toContain("Wallet label");
     expect(markup).not.toContain("Create wallet");
   });
 
