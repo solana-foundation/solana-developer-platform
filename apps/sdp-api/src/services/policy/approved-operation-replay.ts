@@ -10,6 +10,7 @@ import {
   type WalletOperationRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
+import { loadOrganizationEntitlements } from "@/lib/production-entitlement";
 import { createTenantScope, getRequestTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
@@ -242,6 +243,8 @@ export async function tryApprovedOperationReplayAuth(
   }
 
   const organizationId = operation.organization_id as string;
+  // Replays skip authMiddleware, so they load the entitlements themselves.
+  await loadOrganizationEntitlements(c, organizationId);
   const projectId = (operation.project_id as string | null | undefined) ?? null;
   const apiKeyId = (operation.api_key_id as string | null | undefined) ?? null;
   const rawPayload = walletOperationRawPayloadSchema.parse(

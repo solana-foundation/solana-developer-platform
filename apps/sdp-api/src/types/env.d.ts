@@ -2,7 +2,7 @@
 
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
-import type { SdpRampProviderStages } from "@sdp/types";
+import type { OrganizationEntitlements, SdpRampProviderStages } from "@sdp/types";
 import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
@@ -364,9 +364,8 @@ declare module "hono" {
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;
-    // Set during authentication from the organizations row it already reads;
-    // see lib/production-entitlement.ts
-    productionEntitlement?: { organizationId: string; entitled: boolean };
+    // Loaded once by authentication for every actor; see lib/production-entitlement.ts
+    organizationEntitlements: OrganizationEntitlements;
     approvedWalletOperationId?: string;
     approvedWalletOperationAttemptId?: string;
     // Set by policyGate middleware for gated routes

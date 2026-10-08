@@ -1,10 +1,8 @@
+import type { SdpEnvironment } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db";
 import { badRequest, forbidden, notFound, unauthorized } from "@/lib/errors";
-import {
-  isOrganizationProductionEntitled,
-  productionNotEnabled,
-} from "@/lib/production-entitlement";
+import { isProductionEntitled, productionNotEnabled } from "@/lib/production-entitlement";
 import type { Env } from "@/types/env";
 
 const PROJECT_HEADER = "x-project-id";
@@ -44,7 +42,7 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
 
     if (
       scope.environment === "production" &&
-      !(await isOrganizationProductionEntitled(c, scope.organizationId)) &&
+      !isProductionEntitled(c) &&
       !(await options.allowUnentitledProduction?.(c))
     ) {
       throw productionNotEnabled();
@@ -59,7 +57,7 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
 async function resolveProjectScope(c: Context<{ Bindings: Env }>): Promise<{
   organizationId: string;
   projectId: string;
-  environment: "sandbox" | "production";
+  environment: SdpEnvironment;
 }> {
   // An API key is pinned to its project, whether it authenticated this request
   // or an approved-operation replay restored it.
@@ -94,8 +92,9 @@ async function resolveProjectScope(c: Context<{ Bindings: Env }>): Promise<{
 async function resolvePathProjectScope(
   c: Context<{ Bindings: Env }>,
   param: string
-): Promise<{ organizationId: string; projectId: string; environment: "sandbox" | "production" }> {
-  const projectId = c.req.param(param);
+): Promise<{ organizationId: string; projectId: string; environment: SdpEnvironment }> {
+  // Mounted only under a `/:projectId` path, so the parameter is always present.
+  const projectId = c.req.param(param) as string;
   const organizationId =
     c.get("apiKey")?.organizationId ??
     c.get("clerk")?.organizationId ??
@@ -103,10 +102,6 @@ async function resolvePathProjectScope(
   if (!organizationId) {
     throw unauthorized("Authentication is required");
   }
-  if (!projectId) {
-    throw notFound("Project");
-  }
-
   const apiKey = c.get("apiKey");
   if (apiKey && apiKey.projectId !== projectId) {
     throw notFound("Project");
@@ -115,7 +110,7 @@ async function resolvePathProjectScope(
   const row = await getDb(c.env)
     .prepare("SELECT id, environment FROM projects WHERE id = ? AND organization_id = ? LIMIT 1")
     .bind(projectId, organizationId)
-    .first<{ id: string; environment: "sandbox" | "production" }>();
+    .first<{ id: string; environment: SdpEnvironment }>();
   if (!row) {
     throw notFound("Project");
   }
@@ -127,7 +122,7 @@ async function assertProjectMembership(
   organizationId: string,
   userId: string,
   projectId: string
-): Promise<{ id: string; environment: "sandbox" | "production" }> {
+): Promise<{ id: string; environment: SdpEnvironment }> {
   const row = await getDb(c.env)
     .prepare(
       `SELECT p.id, p.environment
@@ -137,7 +132,7 @@ async function assertProjectMembership(
        LIMIT 1`
     )
     .bind(projectId, organizationId, userId)
-    .first<{ id: string; environment: "sandbox" | "production" }>();
+    .first<{ id: string; environment: SdpEnvironment }>();
 
   if (!row) {
     throw forbidden("Requested project is not accessible");

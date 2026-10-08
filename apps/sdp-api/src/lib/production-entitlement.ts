@@ -1,78 +1,57 @@
-import type { OrganizationSettings } from "@sdp/types";
+import { type OrganizationEntitlements, organizationEntitlementsSchema } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { forbidden } from "@/lib/errors";
-import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 /**
- * Whether an organization's raw `settings` column grants production access
- * (`enableProductionProject`, synced from Clerk).
- *
- * Fails closed: unparseable settings grant nothing. Unlike the IP allowlist,
- * where an unreadable blob expresses no restriction, this is the grant itself.
+ * Parses an organization's raw `settings` column into its entitlements. A
+ * missing row or column grants nothing. The column is JSON the API writes
+ * itself, so a value that does not parse is a bug: it throws, and the request
+ * fails loudly with a 500 rather than reading as "not entitled".
  */
-export function isProductionEntitled(rawSettings: string | null, organizationId: string): boolean {
+export function parseOrganizationEntitlements(
+  rawSettings: string | null
+): OrganizationEntitlements {
   if (rawSettings === null) {
-    return false;
+    return {};
   }
-  try {
-    return (
-      parsePostgresJson<OrganizationSettings | null>(rawSettings)?.enableProductionProject === true
-    );
-  } catch (error) {
-    getLogger().error(
-      { error, organizationId },
-      "Organization settings could not be parsed; production access denied"
-    );
-    return false;
-  }
+  return organizationEntitlementsSchema.parse(parsePostgresJson<unknown>(rawSettings) ?? {});
 }
 
-export function productionNotEnabled() {
-  return forbidden("Production is not enabled for this organization");
-}
-
-/**
- * Records the entitlement read from an `organizations` row this request
- * already loaded (authentication reads it for the IP allowlist), so the
- * project-scope check costs no second read.
- */
-export function recordProductionEntitlement(
+/** Records the entitlements authentication loaded for this request's organization. */
+export function recordOrganizationEntitlements(
   c: Context<{ Bindings: Env }>,
-  organizationId: string,
   rawSettings: string | null
 ): void {
-  c.set("productionEntitlement", {
-    organizationId,
-    entitled: isProductionEntitled(rawSettings, organizationId),
-  });
+  c.set("organizationEntitlements", parseOrganizationEntitlements(rawSettings));
 }
 
 /**
- * Whether the organization may act on production in this request. Uses the
- * entitlement recorded during authentication; a door that recorded none (an
- * approved-operation replay, a Clerk organization first provisioned by this
- * request) costs one primary-key read here instead.
- *
- * Deliberately uncached across requests, like the IP allowlist: revoking the
+ * Loads and records the entitlements for an authentication door that does not
+ * already read the organization row (an approved-operation replay, a Clerk
+ * organization first provisioned by this request). Uncached, so revoking an
  * entitlement takes effect on the next request.
  */
-export async function isOrganizationProductionEntitled(
+export async function loadOrganizationEntitlements(
   c: Context<{ Bindings: Env }>,
   organizationId: string
-): Promise<boolean> {
-  const recorded = c.get("productionEntitlement");
-  if (recorded?.organizationId === organizationId) {
-    return recorded.entitled;
-  }
-
+): Promise<void> {
   const row = await getDb(c.env)
     .prepare("SELECT settings FROM organizations WHERE id = ?")
     .bind(organizationId)
     .first<{ settings: string | null }>();
-  return !!row && isProductionEntitled(row.settings, organizationId);
+  recordOrganizationEntitlements(c, row?.settings ?? null);
+}
+
+/** Whether this request's organization may act on production (APE-351). */
+export function isProductionEntitled(c: Context<{ Bindings: Env }>): boolean {
+  return c.get("organizationEntitlements").enableProductionProject === true;
+}
+
+export function productionNotEnabled() {
+  return forbidden("Production is not enabled for this organization");
 }
 
 /**
@@ -98,7 +77,8 @@ export async function assertProjectProductionAllowed(
     .first<{ environment: string; settings: string | null }>();
   if (
     !row ||
-    (row.environment === "production" && !isProductionEntitled(row.settings, organizationId))
+    (row.environment === "production" &&
+      parseOrganizationEntitlements(row.settings).enableProductionProject !== true)
   ) {
     throw productionNotEnabled();
   }

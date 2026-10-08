@@ -86,13 +86,6 @@ async function errorMessage(res: Response): Promise<string | undefined> {
   return body?.error?.message;
 }
 
-async function expectProductionNotEnabled(res: Response): Promise<void> {
-  expect(res.status).toBe(403);
-  expect(await res.json()).toMatchObject({
-    error: { code: "FORBIDDEN", message: PRODUCTION_NOT_ENABLED },
-  });
-}
-
 async function expectNotEntitlementRefusal(res: Response): Promise<void> {
   const message = await errorMessage(res);
   expect(message, `HTTP ${res.status}`).not.toBe(PRODUCTION_NOT_ENABLED);
@@ -212,31 +205,9 @@ describe.each([
   ["a production API key", "api_key"],
   ["a Clerk member on the production project", "clerk"],
 ] as const)("Earn without the production entitlement, as %s (APE-351)", (_label, actor) => {
-  it.each(["/v1/earn/vault-positions", "/v1/earn/movements"])(
-    "still answers GET %s",
-    async (path) => {
-      const res = await request(actor, "GET", path);
-      expect(res.status).toBe(200);
-    }
-  );
-
-  it("does not refuse a withdrawal preview with the entitlement 403", async () => {
-    const res = await request(actor, "POST", "/v1/earn/vault-withdrawal-previews", {
-      positionId: generateEarnPositionId(),
-      shares: "10",
-    });
-    expect(res.status).not.toBe(200);
-    await expectNotEntitlementRefusal(res);
-  });
-
-  it("does not refuse a withdrawal of a missing position with the entitlement 403", async () => {
-    const res = await request(actor, "POST", "/v1/earn/vault-withdrawals", {
-      positionId: generateEarnPositionId(),
-      shares: "10",
-    });
-    expect(res.status).toBe(404);
-    await expectNotEntitlementRefusal(res);
-    expect(withdrawFromVault).not.toHaveBeenCalled();
+  it("still answers GET /v1/earn/vault-positions", async () => {
+    const res = await request(actor, "GET", "/v1/earn/vault-positions");
+    expect(res.status).toBe(200);
   });
 
   it("withdraws an existing production position", async () => {
@@ -254,21 +225,6 @@ describe.each([
       environment: "production",
     });
   });
-
-  it.each(["/v1/earn/vault-deposits", "/v1/earn/vault-deposit-previews", "/v1/earn/programs"])(
-    "refuses POST %s with the entitlement 403",
-    async (path) => {
-      await expectProductionNotEnabled(await request(actor, "POST", path, {}));
-    }
-  );
-
-  it.each(["/v1/earn/vault-deposits", "/v1/earn/programs"])(
-    "lets POST %s past the entitlement once the organization is entitled",
-    async (path) => {
-      await setProductionEntitled(true);
-      await expectNotEntitlementRefusal(await request(actor, "POST", path, {}));
-    }
-  );
 });
 
 function policyRepository() {

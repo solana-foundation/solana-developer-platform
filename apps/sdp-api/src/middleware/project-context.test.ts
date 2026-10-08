@@ -35,7 +35,8 @@ function buildApp() {
     if (error instanceof AppError) {
       return c.json(error.toResponse(), error.statusCode as 400 | 401 | 403);
     }
-    throw error;
+    // Like the real app: anything unexpected is a 500.
+    return c.json({ error: { code: "INTERNAL_ERROR" } }, 500);
   });
   return app;
 }
@@ -254,12 +255,13 @@ describe("projectContextMiddleware", () => {
       await expectProductionNotEnabled(await requestWithProductionKey());
     });
 
-    it("treats unparseable organization settings as not entitled", async () => {
+    it("fails loudly with a 500 on unparseable organization settings", async () => {
       await setOrganizationSettings("{not json");
-      await expectProductionNotEnabled(await requestWithProductionKey());
-      await expectProductionNotEnabled(
-        await buildApp().request("/probe", { headers: actor.headers(PRODUCTION_PROJECT_ID) }, env)
-      );
+      expect((await requestWithProductionKey()).status).toBe(500);
+      expect(
+        (await buildApp().request("/probe", { headers: actor.headers(PRODUCTION_PROJECT_ID) }, env))
+          .status
+      ).toBe(500);
     });
 
     it("leaves sandbox projects alone without the entitlement", async () => {
