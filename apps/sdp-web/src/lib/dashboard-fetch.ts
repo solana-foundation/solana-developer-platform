@@ -1,7 +1,7 @@
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
 import { IDEMPOTENCY_KEY_HEADER } from "./idempotency";
-import { createIdempotencyKeyStore } from "./idempotency-key-store";
+import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "./idempotency-key-store";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 
 export type DashboardFetchResult<T> =
@@ -42,7 +42,16 @@ function isStableMutationPath(path: string): boolean {
 
 const KEYED_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-const mutationKeys = createIdempotencyKeyStore("sdp:dashboard:mutation:idempotency:v1");
+let mutationKeyStore: IdempotencyKeyStore | null = null;
+
+/**
+ * Created on first use, never at import: server routes import this module, and
+ * the store is a client function that the server may not call.
+ */
+function mutationKeys(): IdempotencyKeyStore {
+  mutationKeyStore ??= createIdempotencyKeyStore("sdp:dashboard:mutation:idempotency:v1");
+  return mutationKeyStore;
+}
 const inFlightMutations = new Map<string, Promise<Response>>();
 
 /**
@@ -120,18 +129,18 @@ async function sendUnderActionKey(
   if (!sent) {
     const { signal: _callerSignal, ...shared } = init;
     const fingerprint = storageFingerprint(material);
-    headers.set(IDEMPOTENCY_KEY_HEADER, mutationKeys.claim(fingerprint));
+    headers.set(IDEMPOTENCY_KEY_HEADER, mutationKeys().claim(fingerprint));
     sent = sendWithProject(path, shared, headers).then(
       (response) => {
         if (retiresKey(response)) {
-          mutationKeys.release(fingerprint);
+          mutationKeys().release(fingerprint);
         } else {
-          mutationKeys.markUncertain(fingerprint);
+          mutationKeys().markUncertain(fingerprint);
         }
         return response;
       },
       (error: unknown) => {
-        mutationKeys.markUncertain(fingerprint);
+        mutationKeys().markUncertain(fingerprint);
         throw error;
       }
     );
