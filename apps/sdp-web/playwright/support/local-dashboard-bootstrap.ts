@@ -5,6 +5,7 @@ import type {
   CounterpartyAccountResponse,
   CounterpartyResponse,
   ListProjectsResponse,
+  OrganizationSettings,
   OrganizationTier,
   PaymentsDashboardWallet,
 } from "@sdp/types";
@@ -38,6 +39,9 @@ const PLAYWRIGHT_LOCAL_ORG_NAME_PREFIX = "E2E Dashboard Org";
 const PLAYWRIGHT_LOCAL_ORG_SLUG_PREFIX = "e2e-dashboard";
 const PLAYWRIGHT_LOCAL_USER_ID = "usr_e2e_dashboard_admin";
 const PLAYWRIGHT_LOCAL_MEMBER_ID = "mem_e2e_dashboard_admin";
+const PLAYWRIGHT_ORGANIZATION_BASE_SETTINGS = {
+  enableProductionProject: true,
+} satisfies OrganizationSettings;
 const PLAYWRIGHT_LOCAL_ORG_AUTH_ID = "aoi_e2e_dashboard";
 const PLAYWRIGHT_LOCAL_USER_AUTH_ID = "aui_e2e_dashboard";
 const DEFAULT_LOCAL_API_URL = "http://127.0.0.1:8788";
@@ -331,6 +335,7 @@ async function enableLocalCustodyForPlaywrightOrg(organizationId: string): Promi
       [
         organizationId,
         JSON.stringify({
+          ...PLAYWRIGHT_ORGANIZATION_BASE_SETTINGS,
           providerOverrides: {
             custody: {
               local: true,
@@ -693,17 +698,24 @@ export async function ensureLinkedOrg(
 
       await client.query(
         `INSERT INTO organizations
-           (id, name, slug, tier, status, onboarding_completed_at, onboarding_version)
-         VALUES ($1, $2, $3, $4, 'active', sdp_datetime_now(), 1)
+           (id, name, slug, tier, status, settings, onboarding_completed_at, onboarding_version)
+         VALUES ($1, $2, $3, $4, 'active', $5, sdp_datetime_now(), 1)
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name,
            slug = EXCLUDED.slug,
            tier = EXCLUDED.tier,
            status = EXCLUDED.status,
+           settings = EXCLUDED.settings,
            onboarding_completed_at = sdp_datetime_now(),
            onboarding_version = 1,
            updated_at = sdp_datetime_now()`,
-        [organization.id, organization.name, organization.slug, tier]
+        [
+          organization.id,
+          organization.name,
+          organization.slug,
+          tier,
+          JSON.stringify(PLAYWRIGHT_ORGANIZATION_BASE_SETTINGS),
+        ]
       );
 
       await client.query(
