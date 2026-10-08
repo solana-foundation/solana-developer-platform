@@ -28,12 +28,12 @@ function statusKey(status: IntegrationDetail["status"]): Parameters<Translate>[0
       return "Shared.integrations.statusAvailable";
     case "enabled":
       return "Shared.integrations.statusEnabled";
-    case "request_access":
-      return "Shared.integrations.statusRequestAccess";
-    case "not_configured":
-      return "Shared.integrations.statusNotConfigured";
-    default:
+    case "unknown":
       return "Shared.integrations.statusUnknown";
+    default: {
+      const exhaustive: never = status;
+      throw new Error(`Unknown integration status: ${String(exhaustive)}`);
+    }
   }
 }
 
@@ -122,15 +122,6 @@ async function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
         >
           {t("Shared.integrations.ctaConfigure")}
         </Link>
-      </Button>
-    );
-  }
-  if (detail.requestAccessUrl) {
-    return (
-      <Button asChild>
-        <a href={detail.requestAccessUrl} target="_blank" rel="noreferrer noopener">
-          {t("Shared.integrations.ctaRequestAccess")}
-        </a>
       </Button>
     );
   }
@@ -319,12 +310,10 @@ function HowItConnectsBody({ detail, t }: { detail: IntegrationDetail; t: Transl
     );
   }
 
-  // Manual providers, whether or not a request route is wired yet (HOO-775):
-  // access is granted by the SDP team, and the page must say so even when the
-  // header has no request button to offer. Everything else — generally
-  // available providers riding deployment credentials, and the deployment-wide
-  // rails — is turned on by the SDP operator.
-  const isByArrangement = entry?.availability === "manual" || detail.status === "request_access";
+  // Manual custody providers: access is granted by the SDP team. Everything
+  // else — generally available providers riding deployment credentials, and
+  // the deployment-wide rails — is turned on by the SDP operator.
+  const isByArrangement = entry?.availability === "manual";
   return (
     <p className="max-w-3xl text-sm leading-6 text-pretty text-secondary">
       {t(

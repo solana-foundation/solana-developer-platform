@@ -26,7 +26,6 @@ export interface IntegrationDetail {
   status: IntegrationStatus | "unknown";
   descriptionKey?: MessageKey;
   custodyEntry?: CustodyProviderCatalogEntry;
-  requestAccessUrl?: string;
 }
 
 /**
@@ -89,11 +88,6 @@ export function resolveIntegrationDetail(input: {
       status: custodyMatch.status,
       descriptionKey: custodyMatch.entry.descriptionKey,
       custodyEntry: custodyMatch.entry,
-      requestAccessUrl:
-        custodyMatch.status === "request_access" &&
-        custodyMatch.entry.storedCredentialSetup.mode === "request_access"
-          ? custodyMatch.entry.storedCredentialSetup.requestAccessUrl
-          : undefined,
     };
   }
 

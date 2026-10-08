@@ -735,7 +735,6 @@
     "byokCheckAgain": "Check again",
     "byokMissingFields": "Fill in every required credential field.",
     "byokSubmitFailed": "Storing the credential failed. Try again.",
-    "providerRequestAccess": "Request access",
     "byokRetrySubmit": "Retry submission",
     "connectionColumn": "Connection",
     "connectionsDescription": "Custody connections your project set up from stored provider credentials.",
@@ -904,6 +903,11 @@
     "walletSetupConnectionRequired": "Choose the account the wallet is created in.",
     "walletSetupProviderAlreadySetUp": "This provider is already set up. Add a wallet instead.",
     "walletSetupConnectionUnavailablePending": "Setup unfinished",
-    "walletSetupConnectionUnavailableFailed": "Needs attention"
+    "walletSetupConnectionUnavailableFailed": "Needs attention",
+    "walletSetupMode": "Custody mode",
+    "walletSetupModePlaceholder": "Choose a custody mode",
+    "walletSetupModeManaged": "Managed",
+    "walletSetupModeByok": "Bring your own credentials",
+    "walletSetupModeHint": "Managed wallets use this deployment's provider account. Bring your own credentials connects your own provider app."
   }
 }

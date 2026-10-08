@@ -99,20 +99,11 @@ export function isStagedProviderRefusalReason(
 }
 
 /**
- * Every provider the catalog shows is built and runnable, so the status only
- * ever answers "what is my next step" — never "does this exist". The two
- * non-actionable states are deliberately distinct (HOO-772/775 and the
- * remove-signup-waitlist decision map): `request_access` is organization
- * access the SDP team grants, `not_configured` is environment availability —
- * the deployment does not hold that provider's credentials. Presenting one as
- * the other is how both prior vocabularies went wrong.
+ * A custody provider's status on a dashboard that lists only the providers the
+ * project can use: `active` once it is set up, `available` until then. A
+ * provider the project cannot use is hidden, never shown with a status.
  */
-export const CUSTODY_PROVIDER_DISPLAY_STATUSES = [
-  "available",
-  "active",
-  "request_access",
-  "not_configured",
-] as const;
+export const CUSTODY_PROVIDER_DISPLAY_STATUSES = ["available", "active"] as const;
 export type CustodyProviderDisplayStatus = (typeof CUSTODY_PROVIDER_DISPLAY_STATUSES)[number];
 
 /**

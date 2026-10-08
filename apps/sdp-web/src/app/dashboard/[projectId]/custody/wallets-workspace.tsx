@@ -12,6 +12,7 @@ import {
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
+import type { ProjectCustodyAvailability } from "@/lib/provider-availability";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 import type { KnownCustodyProvider } from "./provider-catalog";
@@ -40,7 +41,7 @@ interface WalletsWorkspaceProps {
   apiBaseUrl: string | null;
   apiKeys: WalletsApiKeyOption[];
   connectedProviders: KnownCustodyProvider[];
-  enabledProviders: KnownCustodyProvider[];
+  custodyAvailability: ProjectCustodyAvailability[];
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
@@ -50,7 +51,7 @@ export function WalletsWorkspace({
   apiBaseUrl,
   apiKeys,
   connectedProviders,
-  enabledProviders,
+  custodyAvailability,
   configsError,
   wallets,
   walletsError,
@@ -109,7 +110,7 @@ export function WalletsWorkspace({
               <div className="contents" data-wallet-panel="overview">
                 <WalletsOverview
                   connectedProviders={connectedProviders}
-                  enabledProviders={enabledProviders}
+                  custodyAvailability={custodyAvailability}
                   configsError={configsError}
                   wallets={wallets}
                   walletsError={walletsError}

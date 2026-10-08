@@ -36,7 +36,7 @@ import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { issuance, policies, privyByok } from "@/flags";
+import { issuance, policies } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -213,14 +213,8 @@ export default async function WalletDetailPage({
 }: {
   params: Promise<{ walletId: string }>;
 }) {
-  const [
-    t,
-    { userId, orgId, orgRole },
-    { walletId },
-    issuanceEnabled,
-    policiesEnabled,
-    byokEnabled,
-  ] = await Promise.all([getTranslations(), auth(), params, issuance(), policies(), privyByok()]);
+  const [t, { userId, orgId, orgRole }, { walletId }, issuanceEnabled, policiesEnabled] =
+    await Promise.all([getTranslations(), auth(), params, issuance(), policies()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -259,7 +253,7 @@ export default async function WalletDetailPage({
   const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
   // The connection label is optional; retain the wallet and its connection id if lookup fails.
   const connection =
-    byokEnabled && canManageCustody && wallet.custodyConnectionId
+    canManageCustody && wallet.custodyConnectionId
       ? await fetchConnectionInstallation(apiClient.request, wallet.custodyConnectionId).catch(
           () => null
         )
@@ -352,7 +346,7 @@ export default async function WalletDetailPage({
                   label={t("DashboardCustody.connection")}
                   value={connection?.label ?? truncateMiddle(wallet.custodyConnectionId)}
                   href={
-                    byokEnabled && canManageCustody
+                    canManageCustody
                       ? await requestProjectHref(
                           `/dashboard/integrations/${connection?.provider ?? provider ?? "privy"}/connections/${wallet.custodyConnectionId}`
                         )

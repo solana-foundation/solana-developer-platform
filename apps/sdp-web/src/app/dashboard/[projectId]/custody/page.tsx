@@ -13,7 +13,8 @@ import {
 import { WalletsOverviewSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { fetchProviderAvailability } from "@/lib/provider-availability";
+import { availableCustodyProviders } from "@/lib/provider-availability";
+import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import { createTimedTrace } from "@/lib/request-tracing";
 import {
   createRequestScopedSdpApiClients,
@@ -97,17 +98,12 @@ export default async function CustodyPage() {
       );
     }
 
-    const [configsResult, walletsResult, apiKeysResult, providerAccessResult] = await Promise.all([
+    const [configsResult, walletsResult, apiKeysResult, providerAvailability] = await Promise.all([
       trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
       trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(projectClient.request)),
-      trace.step("fetch_provider_access", () =>
-        onboarding.organization
-          ? settle(fetchProviderAvailability(projectClient.request, onboarding.organization.id))
-          : Promise.resolve({
-              ok: false as const,
-              error: new Error("Organization is not linked"),
-            })
+      trace.step("fetch_provider_availability", () =>
+        fetchProjectProviderAvailability(projectClient)
       ),
     ]);
 
@@ -129,15 +125,13 @@ export default async function CustodyPage() {
         ? walletsResult.error.message
         : t("DashboardCustody.unableToLoadWallets");
     const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
-    const enabledProviders = providerAccessResult.ok
-      ? providerAccessResult.value.enabledCustodyProviders
-      : connectedProviders;
+    const custodyAvailability = availableCustodyProviders(providerAvailability);
 
     trace.log({
       ok: true,
       linked: true,
       connectedProviderCount: connectedProviders.length,
-      enabledProviderCount: enabledProviders.length,
+      availableProviderCount: custodyAvailability.length,
       walletCount: walletsResult.ok ? walletsResult.value.length : 0,
       apiKeyCount: apiKeys.length,
     });
@@ -148,7 +142,7 @@ export default async function CustodyPage() {
           apiBaseUrl={resolvePlaygroundApiBaseUrl()}
           apiKeys={apiKeys}
           connectedProviders={connectedProviders}
-          enabledProviders={enabledProviders}
+          custodyAvailability={custodyAvailability}
           configsError={configsError}
           wallets={walletsResult.ok ? walletsResult.value : []}
           walletsError={walletsError}

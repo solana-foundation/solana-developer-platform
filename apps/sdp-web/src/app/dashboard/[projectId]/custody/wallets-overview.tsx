@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import type { ProjectCustodyAvailability } from "@/lib/provider-availability";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useDebounce } from "@/lib/use-debounce";
 import {
@@ -45,7 +46,7 @@ type OpenCreateWallet = (provider: KnownCustodyProvider | null) => void;
 interface WalletsOverviewProps {
   canManageCustody: boolean;
   connectedProviders: KnownCustodyProvider[];
-  enabledProviders: KnownCustodyProvider[];
+  custodyAvailability: ProjectCustodyAvailability[];
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
@@ -227,7 +228,7 @@ function EmptyWallets({
 export function WalletsOverview({
   canManageCustody,
   connectedProviders,
-  enabledProviders,
+  custodyAvailability,
   configsError,
   wallets,
   walletsError,
@@ -247,10 +248,10 @@ export function WalletsOverview({
   const lastUrlSearchRef = useRef(initialSearch);
   const syncingFromUrlRef = useRef<string | null>(null);
   const providerAvailability = useMemo(
-    () => resolveCustodyProviderAvailability({ connectedProviders, enabledProviders }),
-    [connectedProviders, enabledProviders]
+    () => resolveCustodyProviderAvailability({ connectedProviders, custodyAvailability }),
+    [connectedProviders, custodyAvailability]
   );
-  const hasAvailableProvider = providerAvailability.some((provider) => provider.isSelectable);
+  const hasAvailableProvider = providerAvailability.length > 0;
   const normalizedSearch = normalizeWalletSearchQuery(effectiveSearchValue);
   const visibleWallets = useMemo(
     () => filterWallets(wallets, normalizedSearch),

@@ -1,9 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary } from "@sdp/types";
+import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types";
 import { redirect } from "next/navigation";
-import { privyByok } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { fetchProviderAvailability } from "@/lib/provider-availability";
+import { availableCustodyProviders } from "@/lib/provider-availability";
+import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import { createTimedTrace } from "@/lib/request-tracing";
 import {
   createRequestScopedSdpApiClients,
@@ -15,17 +15,8 @@ import { fetchConnectionPickerOptions } from "../connections/connections.data";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
-type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
-
 interface CustodySetupPageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
-}
-
-function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
-  return promise.then(
-    (value) => ({ ok: true, value }),
-    (error) => ({ ok: false, error })
-  );
 }
 
 function getSearchParamValue(
@@ -72,7 +63,6 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
   }
 
   const trace = createTimedTrace("dashboard.custody.setup.page");
-  const privyByokEnabled = await privyByok();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const initialProvider = parseProvider(getSearchParamValue(resolvedSearchParams, "provider"));
 
@@ -89,43 +79,38 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
   if (!onboarding.linked || !onboarding.organization) {
     redirect(await requestProjectHref("/dashboard/wallets"));
   }
-  const organizationId = onboarding.organization.id;
-
-  // Connections only exist for Privy under BYOK, so the extra request is worth
-  // making only when the flag is on; `fetchConnectionPickerOptions` already
-  // degrades to an empty list, which renders the wizard exactly as before.
-  const [configsResult, providerAccessResult, connections] = await Promise.all([
-    trace.step("fetch_custody_configs", () =>
-      settle(getConnectedCustodyProviders(projectClient.request))
+  // Connections are BYOK custody, so the flow offers them only for a provider
+  // whose modes include `byok`; they are read alongside availability rather than
+  // after it.
+  const [connectedProviders, providerAvailability, connectionsByProvider] = await Promise.all([
+    trace.step("fetch_custody_configs", () => getConnectedCustodyProviders(projectClient.request)),
+    trace.step("fetch_provider_availability", () =>
+      fetchProjectProviderAvailability(projectClient)
     ),
-    trace.step("fetch_provider_access", () =>
-      settle(fetchProviderAvailability(projectClient.request, organizationId))
-    ),
-    privyByokEnabled
-      ? trace.step("fetch_connection_picker_options", () =>
-          fetchConnectionPickerOptions(projectClient.request, "privy")
+    trace.step("fetch_connection_picker_options", () =>
+      Promise.all(
+        BYOK_CUSTODY_PROVIDERS.map((provider) =>
+          fetchConnectionPickerOptions(projectClient.request, provider)
         )
-      : Promise.resolve([]),
+      )
+    ),
   ]);
-
-  const connectedProviders = configsResult.ok ? configsResult.value : [];
-  const enabledProviders = providerAccessResult.ok
-    ? providerAccessResult.value.enabledCustodyProviders
-    : connectedProviders;
+  const custodyAvailability = availableCustodyProviders(providerAvailability);
+  const connections = connectionsByProvider.flat();
 
   trace.log({
     ok: true,
     connectedProviderCount: connectedProviders.length,
-    enabledProviderCount: enabledProviders.length,
+    availableProviderCount: custodyAvailability.length,
     connectionCount: connections.length,
   });
 
   return (
     <WalletSetupFlow
       connectedProviders={connectedProviders}
-      enabledProviders={enabledProviders}
+      custodyAvailability={custodyAvailability}
+      environment={providerAvailability.environment}
       initialProvider={initialProvider}
-      privyByokEnabled={privyByokEnabled}
       connections={connections}
     />
   );

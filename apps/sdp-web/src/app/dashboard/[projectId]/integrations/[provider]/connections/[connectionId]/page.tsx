@@ -12,9 +12,11 @@ import {
   isKnownCustodyProvider,
   providerSupportsStoredCredentialSetup,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import { custody, privyByok } from "@/flags";
+import { custody } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { offersCustodyMode } from "@/lib/provider-availability";
+import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 
 // The lifecycle view changes under other people — a rotation in a sibling
@@ -35,8 +37,7 @@ export default async function CustodyConnectionPage({
     notFound();
   }
 
-  const [custodyEnabled, byokEnabled] = await Promise.all([custody(), privyByok()]);
-  if (!custodyEnabled || !byokEnabled) {
+  if (!(await custody())) {
     notFound();
   }
 
@@ -58,6 +59,11 @@ export default async function CustodyConnectionPage({
   }
 
   const client = await createSdpApiClient();
+  // Connections are BYOK custody: while the project may not set this provider
+  // up in `byok` mode, its connections subtree is hidden like the provider page.
+  if (!offersCustodyMode(await fetchProjectProviderAvailability(client), provider, "byok")) {
+    notFound();
+  }
 
   let connection: Awaited<ReturnType<typeof fetchConnectionInstallation>>;
   try {

@@ -47,7 +47,6 @@ export const {
   custody,
   issuance,
   policies,
-  privyByok,
   assetProfiles,
   privateChannels,
   heliusRings,
