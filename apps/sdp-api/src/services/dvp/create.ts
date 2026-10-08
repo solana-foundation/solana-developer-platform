@@ -49,6 +49,7 @@ import {
   createDvpTradeRepository,
   type DvpTradeRow,
 } from "@/db/repositories";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import { badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -473,11 +474,17 @@ export async function createDvpTrade(
   // validation and after the durable claim has won the idempotency race.
   let signed = false;
   try {
-    const feePayment = await createProjectSponsorshipFeePayment(env, {
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      actor: { type: "wallet", id: settlement.custodyWalletId },
-    });
+    const feePayment = await createProjectSponsorshipFeePayment(
+      env,
+      await uncheckedLegacyMovement(
+        env,
+        { organizationId: input.organizationId, projectId: input.projectId },
+        "dvp"
+      ),
+      {
+        actor: { type: "wallet", id: settlement.custodyWalletId },
+      }
+    );
     const sponsor = await feePayment.getFeePayer();
 
     const instruction = getCreateDvpInstruction({

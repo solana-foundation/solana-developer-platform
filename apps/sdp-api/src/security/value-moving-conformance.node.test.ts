@@ -801,3 +801,245 @@ describe("value-moving authorization and replay conformance", () => {
     );
   });
 });
+
+// ── HOO-1955: one admission point, a capability token, and the sinks that require it ──
+
+const apiSourceRoot = "apps/sdp-api/src";
+
+function apiProductionFiles(): string[] {
+  return sourceFiles(path.join(repositoryRoot, apiSourceRoot)).map((file) =>
+    path.relative(repositoryRoot, file)
+  );
+}
+
+function filesMatching(pattern: RegExp, files = apiProductionFiles()): string[] {
+  return files.filter((file) => pattern.test(readSource(file))).sort();
+}
+
+/**
+ * The files that mint an `AdmittedMovement`. Adding one is a reviewed change:
+ * it is a new place that decides money may move. Slice 1 admits the `stable`
+ * modules (custody, payments, recurring_payments).
+ */
+const ADMISSION_CALLERS: string[] = [
+  "apps/sdp-api/src/routes/custody/handlers/signer-check.ts",
+  "apps/sdp-api/src/routes/pay.ts",
+  "apps/sdp-api/src/routes/payments/recurring-payments/handlers.ts",
+  "apps/sdp-api/src/routes/payments/transfer-batches/create.ts",
+  "apps/sdp-api/src/routes/payments/transfers/handlers.ts",
+  "apps/sdp-api/src/services/jobs/collect-recurring-payments.ts",
+];
+
+/**
+ * ESCAPE HATCH RATCHET. Every `uncheckedLegacyMovement(` call site, per file.
+ * These modules still move money for deleted and unentitled organizations
+ * outside HTTP. A count may only go down: each later slice (ramps, issuance,
+ * DvP, Earn, private channels, Helius Rings) replaces its calls with
+ * `admitMovement` and a real purpose, then deletes its entries here. Raising a
+ * count, or adding a file, means new code skipped admission.
+ */
+const LEGACY_MOVEMENT_CALLS: Record<string, number> = {
+  "apps/sdp-api/src/routes/issuance/handlers/authority-resolution.ts": 1,
+  "apps/sdp-api/src/services/dvp/create.ts": 1,
+  "apps/sdp-api/src/services/dvp/fund.ts": 1,
+  "apps/sdp-api/src/services/dvp/reclaim.ts": 1,
+  "apps/sdp-api/src/services/dvp/settle.ts": 1,
+  "apps/sdp-api/src/services/earn/vault-intent-execution.service.ts": 1,
+  "apps/sdp-api/src/services/earn/vault-queued-withdraw.service.ts": 2,
+  "apps/sdp-api/src/services/earn/vault-sponsorship.ts": 1,
+  "apps/sdp-api/src/services/helius-rings/signer-adapter.ts": 1,
+  "apps/sdp-api/src/services/private-channels/wallet-access.ts": 1,
+};
+const LEGACY_MOVEMENT_CALL_CEILING = 11;
+
+/** Purposes that stay open for deleted and unentitled organizations. */
+const NON_START_PURPOSES = {
+  "earn.withdraw": "exit",
+  "recurring.cancel": "exit",
+};
+
+/** Every sink, the file that defines it, and the token check it must run. */
+const MOVEMENT_SINKS = [
+  {
+    sink: "getTransactionSigner",
+    file: "apps/sdp-api/src/services/domain/signing/custody-runtime-target.ts",
+    signature: "async getTransactionSigner(\n    movement: AdmittedMovement,",
+  },
+  {
+    sink: "getTransactionSignerForWalletRecord",
+    file: "apps/sdp-api/src/services/domain/signing/custody-runtime-target.ts",
+    signature: "async getTransactionSignerForWalletRecord(\n    movement: AdmittedMovement,",
+  },
+  {
+    sink: "createProjectSponsorshipFeePayment",
+    file: "apps/sdp-api/src/services/sponsorship.service.ts",
+    signature:
+      "export function createProjectSponsorshipFeePayment(\n  env: Env,\n  movement: AdmittedMovement,",
+  },
+] as const;
+
+type JobClass = "starts" | "finishes" | "observes";
+
+/**
+ * Every cron monitor, classified (HOO-1955). A job that `starts` money names
+ * the file where it admits each movement, or the slice that will admit it
+ * while its module is on the escape hatch. One that only finishes or observes
+ * money already in flight must not mint (ADR 0002: stopping it strands funds).
+ */
+const JOB_INVENTORY: Record<
+  string,
+  { class: JobClass; admittedIn?: string; evidence?: string; escapeHatch?: string }
+> = {
+  "sdp-api-collect-recurring-payments": {
+    class: "starts",
+    admittedIn: "apps/sdp-api/src/services/jobs/collect-recurring-payments.ts",
+  },
+  "sdp-api-poll-rings-indexing": {
+    class: "starts",
+    escapeHatch: "Helius Rings slice: the signer adapter mints through uncheckedLegacyMovement",
+  },
+  // Pending transfers also runs the BVNK on-ramp payout reconcile.
+  "sdp-api-track-pending-transfers": {
+    class: "starts",
+    escapeHatch: "ramps slice: the BVNK payout is not a sink yet and needs a durable hold state",
+  },
+  // Replays re-enter the HTTP app, whose handlers mint after projectContextMiddleware.
+  "sdp-api-recover-approved-wallet-operations": {
+    class: "starts",
+    admittedIn: "apps/sdp-api/src/services/policy/approved-operation-replay.ts",
+    evidence: "createApp(",
+  },
+  "sdp-api-reconcile-dvp-trades": { class: "finishes" },
+  "sdp-api-reconcile-earn-vault-movements": { class: "finishes" },
+  "sdp-api-track-pending-withdrawals": { class: "finishes" },
+  "sdp-api-track-pending-deposits": { class: "observes" },
+  "sdp-api-detect-orphaned-earn-split-swaps": { class: "observes" },
+  "sdp-api-sync-earn-catalogue": { class: "observes" },
+  "sdp-api-refresh-earn-metrics": { class: "observes" },
+  "sdp-api-reconcile-revoked-api-key-cache": { class: "observes" },
+  "sdp-api-retire-secrets": { class: "observes" },
+  "sdp-api-cleanup-provider-credential-secrets": { class: "observes" },
+};
+
+function discoverCronMonitors(): Record<string, string> {
+  const monitors: Record<string, string> = {};
+  for (const file of sourceFiles(path.join(repositoryRoot, apiSourceRoot, "cron"))) {
+    for (const match of readFileSync(file, "utf8").matchAll(
+      /export const \w+_MONITOR =\s*"([^"]+)"/g
+    )) {
+      monitors[match[1]] = path.relative(repositoryRoot, file);
+    }
+  }
+  return monitors;
+}
+
+const ADMISSION_CALL = /\b(admitMovement|admitRequestMovement|tryAdmitMovement)\(/;
+const LEGACY_CALL = /\buncheckedLegacyMovement\(/g;
+const ADMISSION_MODULE = "apps/sdp-api/src/lib/admit-movement.ts";
+
+describe("value movement admission (HOO-1955)", () => {
+  it("pins every file that mints an AdmittedMovement", () => {
+    expect(filesMatching(ADMISSION_CALL).filter((file) => file !== ADMISSION_MODULE)).toEqual(
+      ADMISSION_CALLERS
+    );
+  });
+
+  it("only lets the escape-hatch call count go down", () => {
+    const actual = Object.fromEntries(
+      apiProductionFiles()
+        .filter((file) => file !== ADMISSION_MODULE)
+        .map((file) => [file, readSource(file).match(LEGACY_CALL)?.length ?? 0] as const)
+        .filter(([, count]) => count > 0)
+    );
+    expect(actual).toEqual(LEGACY_MOVEMENT_CALLS);
+    expect(
+      Object.values(LEGACY_MOVEMENT_CALLS).reduce((total, count) => total + count, 0)
+    ).toBeLessThanOrEqual(LEGACY_MOVEMENT_CALL_CEILING);
+  });
+
+  it("keeps admitted modules off the escape hatch", () => {
+    for (const file of [...ADMISSION_CALLERS, ...Object.keys(LEGACY_MOVEMENT_CALLS)]) {
+      const admitted = ADMISSION_CALLERS.includes(file);
+      const legacy = file in LEGACY_MOVEMENT_CALLS;
+      expect(admitted && legacy, file).toBe(false);
+    }
+    for (const file of apiProductionFiles().filter((candidate) =>
+      /\/(payments|custody|recurring-payments|compliance)\//.test(candidate)
+    )) {
+      expect(readSource(file).match(LEGACY_CALL), file).toBeNull();
+    }
+  });
+
+  it("pins which purposes are not starts", async () => {
+    const { MOVEMENT_PURPOSES } = await import("@/lib/admit-movement");
+    expect(
+      Object.fromEntries(
+        Object.entries(MOVEMENT_PURPOSES)
+          .filter(([, definition]) => definition.kind !== "start")
+          .map(([purpose, definition]) => [purpose, definition.kind])
+      )
+    ).toEqual(NON_START_PURPOSES);
+  });
+
+  it.each(MOVEMENT_SINKS)("$sink requires and checks an AdmittedMovement", (sink) => {
+    const source = readSource(sink.file);
+    expect(source).toContain(sink.signature);
+    // The check runs first thing in the sink, before any read or signer.
+    const opening = source.slice(source.indexOf(sink.signature)).slice(0, 400);
+    expect(opening).toContain("assertAdmittedMovement(movement)");
+  });
+
+  it("acquires custody signers only through the token-taking factories", () => {
+    expect(filesMatching(/\.getTransactionSigner(ForWalletRecord)?\(/)).toEqual([
+      "apps/sdp-api/src/services/domain/signing.service.ts",
+      // The provider adapter port, reached only after the token check.
+      "apps/sdp-api/src/services/domain/signing/custody-runtime-target.ts",
+      "apps/sdp-api/src/services/solana/signer.ts",
+    ]);
+  });
+
+  it("mints test tokens only from tests", () => {
+    expect(filesMatching(/mintAdmittedMovementForTests/)).toEqual([ADMISSION_MODULE]);
+  });
+
+  it("mints every admitted module's declared exit purpose", async () => {
+    const { EXIT_ROUTES } = await import("@/lib/movement-exits");
+    const { MOVEMENT_PURPOSES } = await import("@/lib/admit-movement");
+    const minting = ADMISSION_CALLERS.map(readSource).join("\n");
+    const legacyModules = ["dvp", "earn", "helius_rings", "issuance", "private_channels"];
+    for (const purpose of new Set(EXIT_ROUTES.map((route) => route.purpose))) {
+      if (legacyModules.includes(MOVEMENT_PURPOSES[purpose].module)) continue;
+      expect(minting, purpose).toContain(`"${purpose}"`);
+    }
+  });
+
+  it("opens declared exits at the edge through the shared allowlist", () => {
+    expect(readSource("apps/sdp-api/src/routes/payments/index.ts")).toContain(
+      "projectContextMiddleware({ allowUnentitledProduction: isExitRequest })"
+    );
+    expect(readSource("apps/sdp-api/src/routes/earn/exits.ts")).toContain("exitPurposeForRequest(");
+    expect(readSource("apps/sdp-api/src/routes/custody/index.ts")).toContain(
+      "exitPurposeForRequest(target.method, target.path)"
+    );
+  });
+
+  it("classifies every cron monitor as starts, finishes or observes", () => {
+    expect(Object.keys(discoverCronMonitors()).sort()).toEqual(Object.keys(JOB_INVENTORY).sort());
+  });
+
+  it.each(Object.entries(JOB_INVENTORY).filter(([, job]) => job.class === "starts"))(
+    "%s admits before it starts money, or names the slice that will",
+    (_monitor, job) => {
+      if (job.escapeHatch) {
+        expect(job.admittedIn).toBeUndefined();
+        return;
+      }
+      const source = readSource(job.admittedIn as string);
+      if (job.evidence) {
+        expect(source).toContain(job.evidence);
+      } else {
+        expect(source).toMatch(ADMISSION_CALL);
+      }
+    }
+  );
+});

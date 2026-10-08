@@ -1,5 +1,11 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories";
+import {
+  type AdmittedMovement,
+  type MovementPurpose,
+  MovementRefusedError,
+  mintAdmittedMovementForTests,
+} from "@/lib/admit-movement";
 import { AppError } from "@/lib/errors";
 import { rootLogger } from "@/runtime/logger";
 import { env } from "@/test/helpers/env";
@@ -15,6 +21,9 @@ interface MockState {
   collectRecurringPayment: ReturnType<typeof vi.fn>;
   journalAutomatedCollectionFailure: ReturnType<typeof vi.fn>;
   resumeRecurringPayment: ReturnType<typeof vi.fn>;
+  skipRefusedRecurringCollectionPeriod: ReturnType<typeof vi.fn>;
+  revertRefusedRecurringActivation: ReturnType<typeof vi.fn>;
+  tryAdmitMovement: ReturnType<typeof vi.fn>;
   findOperationalWalletById: ReturnType<typeof vi.fn>;
   listStaleLifecyclePayments: ReturnType<typeof vi.fn>;
   listStaleUpdatePayments: ReturnType<typeof vi.fn>;
@@ -34,6 +43,9 @@ const mocks = vi.hoisted<MockState>(() => ({
   collectRecurringPayment: vi.fn(),
   journalAutomatedCollectionFailure: vi.fn(),
   resumeRecurringPayment: vi.fn(),
+  skipRefusedRecurringCollectionPeriod: vi.fn(),
+  revertRefusedRecurringActivation: vi.fn(),
+  tryAdmitMovement: vi.fn(),
   findOperationalWalletById: vi.fn(),
   listStaleLifecyclePayments: vi.fn(),
   listStaleUpdatePayments: vi.fn(),
@@ -49,6 +61,13 @@ const mocks = vi.hoisted<MockState>(() => ({
 
 vi.mock("@/db", () => ({
   getDb: () => ({}),
+}));
+
+// Admission (HOO-1955) is unit-tested in admit-movement.test.ts; here it is a
+// seam so each row's purpose and refusal handling can be asserted.
+vi.mock("@/lib/admit-movement", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/admit-movement")>()),
+  tryAdmitMovement: mocks.tryAdmitMovement,
 }));
 
 vi.mock("@/db/repositories/payment-recurring-payments.repository.postgres", () => ({
@@ -72,13 +91,30 @@ vi.mock("@/services/payments/recurring-payments", () => ({
   collectRecurringPayment: mocks.collectRecurringPayment,
   journalAutomatedCollectionFailure: mocks.journalAutomatedCollectionFailure,
   resumeRecurringPayment: mocks.resumeRecurringPayment,
+  skipRefusedRecurringCollectionPeriod: mocks.skipRefusedRecurringCollectionPeriod,
+  revertRefusedRecurringActivation: mocks.revertRefusedRecurringActivation,
 }));
+
+function admitted(scope: { organizationId: string; projectId: string }, purpose: MovementPurpose) {
+  return { admitted: true, movement: mintAdmittedMovementForTests({ ...scope, purpose }) };
+}
+
+function refuseAdmission(purpose: MovementPurpose) {
+  mocks.tryAdmitMovement.mockImplementation(
+    async (_env: unknown, scope: { organizationId: string; projectId: string }, p) =>
+      p === purpose
+        ? {
+            admitted: false,
+            reason: "production_not_enabled",
+            error: new MovementRefusedError("production_not_enabled", "refused"),
+          }
+        : admitted(scope, p)
+  );
+}
 
 let collectDueRecurringPayments: typeof import("./collect-recurring-payments").collectDueRecurringPayments;
 let activateRecurringPayment: typeof import("@/services/payments/recurring-payments").activateRecurringPayment;
-let cancelRecurringPayment: typeof import("@/services/payments/recurring-payments").cancelRecurringPayment;
 let collectRecurringPayment: typeof import("@/services/payments/recurring-payments").collectRecurringPayment;
-let resumeRecurringPayment: typeof import("@/services/payments/recurring-payments").resumeRecurringPayment;
 
 function recurringRow(
   status: PaymentRecurringPaymentRow["status"],
@@ -120,12 +156,9 @@ function recurringRow(
 describe("collectDueRecurringPayments", () => {
   beforeAll(async () => {
     ({ collectDueRecurringPayments } = await import("./collect-recurring-payments"));
-    ({
-      activateRecurringPayment,
-      cancelRecurringPayment,
-      collectRecurringPayment,
-      resumeRecurringPayment,
-    } = await import("@/services/payments/recurring-payments"));
+    ({ activateRecurringPayment, collectRecurringPayment } = await import(
+      "@/services/payments/recurring-payments"
+    ));
   });
 
   beforeEach(() => {
@@ -134,6 +167,13 @@ describe("collectDueRecurringPayments", () => {
     mocks.collectRecurringPayment.mockReset();
     mocks.journalAutomatedCollectionFailure.mockReset();
     mocks.resumeRecurringPayment.mockReset();
+    mocks.skipRefusedRecurringCollectionPeriod.mockReset();
+    mocks.revertRefusedRecurringActivation.mockReset();
+    mocks.tryAdmitMovement.mockReset();
+    mocks.tryAdmitMovement.mockImplementation(
+      async (_env: unknown, scope: { organizationId: string; projectId: string }, purpose) =>
+        admitted(scope, purpose)
+    );
     mocks.findOperationalWalletById.mockReset();
     mocks.rows.due = [];
     mocks.rows.lifecycle = [];
@@ -168,12 +208,20 @@ describe("collectDueRecurringPayments", () => {
 
     expect(result).toEqual({ recovered: 2, collected: 1, failed: 0, skipped: 0 });
     expect(activateRecurringPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ recurringPayment: lifecycle })
+      expect.objectContaining({
+        recurringPayment: lifecycle,
+        movement: expect.objectContaining({ purpose: "recurring.activate" }),
+      })
     );
     expect(collectRecurringPayment).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         recurringPayment: staleCollection,
+        movement: expect.objectContaining({
+          organizationId: "org_1",
+          projectId: "proj_1",
+          purpose: "recurring.collect",
+        }),
         initiatedByKeyId: null,
         collectionSource: "automated",
       })
@@ -182,6 +230,7 @@ describe("collectDueRecurringPayments", () => {
       2,
       expect.objectContaining({
         recurringPayment: due,
+        movement: expect.objectContaining({ purpose: "recurring.collect" }),
         initiatedByKeyId: null,
         collectionSource: "automated",
       })
@@ -196,12 +245,17 @@ describe("collectDueRecurringPayments", () => {
     const result = await collectDueRecurringPayments(env, new Date());
 
     expect(result).toEqual({ recovered: 2, collected: 0, failed: 0, skipped: 0 });
-    expect(cancelRecurringPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ recurringPayment: canceling })
-    );
-    expect(resumeRecurringPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ recurringPayment: resuming })
-    );
+    const cancelInput = mocks.cancelRecurringPayment.mock.calls[0]?.[0];
+    const resumeInput = mocks.resumeRecurringPayment.mock.calls[0]?.[0];
+    expect(cancelInput).toMatchObject({ recurringPayment: canceling });
+    expect(resumeInput).toMatchObject({ recurringPayment: resuming });
+    // Admission is lazy: the lifecycle mints only when it must sign.
+    expect(mocks.tryAdmitMovement).not.toHaveBeenCalled();
+    await expect(cancelInput.admit()).resolves.toMatchObject({
+      purpose: "recurring.cancel",
+      kind: "exit",
+    });
+    await expect(resumeInput.admit()).resolves.toMatchObject({ purpose: "recurring.resume" });
   });
 
   it("recovers a canceled payment attempt without creating a future collection", async () => {
@@ -212,7 +266,10 @@ describe("collectDueRecurringPayments", () => {
 
     expect(result).toEqual({ recovered: 1, collected: 0, failed: 0, skipped: 0 });
     expect(collectRecurringPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ recurringPayment: canceled })
+      expect.objectContaining({
+        recurringPayment: canceled,
+        movement: expect.objectContaining({ purpose: "recurring.collect" }),
+      })
     );
     expect(collectRecurringPayment).toHaveBeenCalledTimes(1);
   });
@@ -266,6 +323,99 @@ describe("collectDueRecurringPayments", () => {
     expect(result).toEqual({ recovered: 0, collected: 5, failed: 0, skipped: 0 });
     expect(orgMaxInFlight).toBe(1);
     expect(globalMaxInFlight).toBeGreaterThan(1);
+  });
+
+  it("skips the period without collecting when collection is refused admission", async () => {
+    const due = recurringRow("active", { id: "prp_refused" });
+    mocks.rows.due = [due];
+    refuseAdmission("recurring.collect");
+
+    const result = await collectDueRecurringPayments(env, new Date());
+
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
+    expect(mocks.tryAdmitMovement).toHaveBeenCalledWith(
+      env,
+      { organizationId: "org_1", projectId: "proj_1" },
+      "recurring.collect",
+      { job: "collect-recurring-payments", subjectId: "prp_refused" }
+    );
+    expect(mocks.skipRefusedRecurringCollectionPeriod).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org_1",
+        projectId: "proj_1",
+        recurringPayment: due,
+      })
+    );
+    expect(collectRecurringPayment).not.toHaveBeenCalled();
+  });
+
+  it("reverts an activation that is refused admission", async () => {
+    mocks.rows.lifecycle = [recurringRow("activating", { id: "prp_activation" })];
+    refuseAdmission("recurring.activate");
+
+    const result = await collectDueRecurringPayments(env, new Date());
+
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
+    expect(mocks.revertRefusedRecurringActivation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org_1",
+        projectId: "proj_1",
+        recurringPaymentId: "prp_activation",
+      })
+    );
+    expect(activateRecurringPayment).not.toHaveBeenCalled();
+  });
+
+  it("skips a resume that is refused admission before it signs", async () => {
+    mocks.rows.lifecycle = [recurringRow("resuming", { id: "prp_resuming" })];
+    refuseAdmission("recurring.resume");
+    // The lifecycle has no submitted signature, so it asks for admission; its
+    // own failure path then resets the row to `canceled`.
+    mocks.resumeRecurringPayment.mockImplementation(
+      async (input: { admit: () => Promise<AdmittedMovement> }) => input.admit()
+    );
+
+    const result = await collectDueRecurringPayments(env, new Date());
+
+    expect(result).toEqual({ recovered: 0, collected: 0, failed: 0, skipped: 1 });
+    expect(mocks.tryAdmitMovement).toHaveBeenCalledWith(
+      env,
+      { organizationId: "org_1", projectId: "proj_1" },
+      "recurring.resume",
+      { job: "collect-recurring-payments", subjectId: "prp_resuming" }
+    );
+  });
+
+  it("confirms an already-submitted resume without asking for admission", async () => {
+    mocks.rows.lifecycle = [recurringRow("resuming", { id: "prp_resuming" })];
+    refuseAdmission("recurring.resume");
+
+    const result = await collectDueRecurringPayments(env, new Date());
+
+    expect(result).toEqual({ recovered: 1, collected: 0, failed: 0, skipped: 0 });
+    expect(mocks.tryAdmitMovement).not.toHaveBeenCalled();
+  });
+
+  it("admits a stale cancellation as the recurring.cancel exit", async () => {
+    const canceling = recurringRow("canceling", { id: "prp_canceling" });
+    mocks.rows.lifecycle = [canceling];
+    mocks.cancelRecurringPayment.mockImplementation(
+      async (input: { admit: () => Promise<AdmittedMovement> }) => {
+        await input.admit();
+        return recurringRow("canceled");
+      }
+    );
+
+    const result = await collectDueRecurringPayments(env, new Date());
+
+    expect(result).toEqual({ recovered: 1, collected: 0, failed: 0, skipped: 0 });
+    expect(mocks.tryAdmitMovement).toHaveBeenCalledOnce();
+    expect(mocks.tryAdmitMovement).toHaveBeenCalledWith(
+      env,
+      { organizationId: "org_1", projectId: "proj_1" },
+      "recurring.cancel",
+      { job: "collect-recurring-payments", subjectId: "prp_canceling" }
+    );
   });
 
   it("fails closed when a recurring payment has no exact source wallet", async () => {

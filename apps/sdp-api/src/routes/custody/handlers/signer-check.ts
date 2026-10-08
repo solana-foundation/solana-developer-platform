@@ -17,6 +17,7 @@ import {
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getDb } from "@/db";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -101,9 +102,10 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // a signer check is diagnostics, and diagnostics must not be able to spend
     // sponsorship — the transaction below is verified locally and in RPC
     // simulation, and is never broadcast.
+    const movement = await admitRequestMovement(c, "custody.signer_check");
     const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const [signer, feePayer] = await Promise.all([
-      createOrgSignerForCustodyWallet(c.env, auth.organizationId, auth.projectId, wallet.id),
+      createOrgSignerForCustodyWallet(c.env, movement, wallet.id),
       feePayment.getFeePayer(),
     ]);
 

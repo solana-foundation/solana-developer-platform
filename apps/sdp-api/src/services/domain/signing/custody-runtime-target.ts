@@ -12,6 +12,7 @@ import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient, DatabaseExecutor } from "@/db";
+import { type AdmittedMovement, assertAdmittedMovement } from "@/lib/admit-movement";
 import {
   AppError,
   badRequest,
@@ -39,6 +40,7 @@ import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provide
 import { createPrivyAdapterFromCredential } from "@/services/domain/signing/provider-adapter-factory";
 import {
   assertCustodyProviderEntitled,
+  assertCustodyProviderEntitledForTierState,
   getProviderAvailability,
   isCustodyProviderEntitled,
 } from "@/services/provider-availability.service";
@@ -654,11 +656,12 @@ export class CustodyRuntimeTargets {
   }
 
   async getTransactionSigner(
-    organizationId: string,
-    projectId: string | undefined,
+    movement: AdmittedMovement,
     walletId: string | undefined,
     getConfigAdapter: ConfigAdapterResolver
   ): Promise<TransactionSigner> {
+    assertAdmittedMovement(movement);
+    const { organizationId, projectId } = movement;
     const target = await this.resolve(
       walletId
         ? { kind: "wallet", organizationId, projectId, walletId }
@@ -673,7 +676,12 @@ export class CustodyRuntimeTargets {
     }
 
     if (target.kind === "config") {
-      await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
+      assertCustodyProviderEntitledForTierState(
+        this.env,
+        organizationId,
+        movement.organization,
+        target.provider
+      );
       const adapter = await getConfigAdapter(organizationId, target.config);
       return getTransactionSigner(adapter, target.wallet);
     }
@@ -688,7 +696,12 @@ export class CustodyRuntimeTargets {
       throw conflict("Custody Connection is unavailable");
     }
 
-    await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
+    assertCustodyProviderEntitledForTierState(
+      this.env,
+      organizationId,
+      movement.organization,
+      target.provider
+    );
     const adapter = await this.getConnectionAdapter(target);
     return getTransactionSigner(adapter, target.wallet);
   }
@@ -700,11 +713,12 @@ export class CustodyRuntimeTargets {
    * a row id must not collapse it back to `walletId` before signing.
    */
   async getTransactionSignerForWalletRecord(
-    organizationId: string,
-    projectId: string | undefined,
+    movement: AdmittedMovement,
     custodyWalletId: string,
     getConfigAdapter: ConfigAdapterResolver
   ): Promise<TransactionSigner> {
+    assertAdmittedMovement(movement);
+    const { organizationId, projectId } = movement;
     const target = await this.resolveRetainedWalletRecord(
       organizationId,
       projectId,
@@ -715,7 +729,12 @@ export class CustodyRuntimeTargets {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
     this.assertRuntimeExecutionAllowed(target, custodyWalletId);
-    await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
+    assertCustodyProviderEntitledForTierState(
+      this.env,
+      organizationId,
+      movement.organization,
+      target.provider
+    );
 
     if (target.kind === "config") {
       const adapter = await getConfigAdapter(organizationId, target.config);

@@ -31,6 +31,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -113,12 +114,15 @@ export async function reclaimDvpTradeLeg(
   const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
   const receipt = await takeoverableReceipt(claims, rpc, trade.id, side);
 
-  const signer = await createOrgSignerForCustodyWallet(
+  const movement = await uncheckedLegacyMovement(
     env,
-    params.organizationId,
-    params.projectId,
-    params.custodyWalletId
+
+    { organizationId: params.organizationId, projectId: params.projectId },
+
+    "dvp"
   );
+
+  const signer = await createOrgSignerForCustodyWallet(env, movement, params.custodyWalletId);
   // The handler matched this wallet to the party address from the database.
   // The program only accepts the party itself, so a signer that resolves to
   // anything else would be a transaction it refuses.
@@ -132,9 +136,7 @@ export async function reclaimDvpTradeLeg(
   const [destination] = await findAssociatedTokenPda({ owner: party, mint, tokenProgram });
 
   // Sponsorship only after every refusal above, as in fund and settle.
-  const feePayment = await createProjectSponsorshipFeePayment(env, {
-    organizationId: params.organizationId,
-    projectId: params.projectId,
+  const feePayment = await createProjectSponsorshipFeePayment(env, movement, {
     actor: { type: "wallet", id: params.custodyWalletId },
   });
   const sponsor = await feePayment.getFeePayer();

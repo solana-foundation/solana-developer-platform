@@ -7,6 +7,7 @@ import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
 } from "@/db/repositories/earn-movements.repository";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import { badRequest, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
@@ -170,11 +171,14 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
 
   let signed: SignedVaultTransaction;
   try {
-    const signer = await input.deadline.run(`Resolving the vault ${operation} signer`, () =>
+    const signer = await input.deadline.run(`Resolving the vault ${operation} signer`, async () =>
       solanaServices.createOrgSignerForCustodyWallet(
         env,
-        input.organizationId,
-        input.projectId,
+        await uncheckedLegacyMovement(
+          env,
+          { organizationId: input.organizationId, projectId: input.projectId },
+          "earn"
+        ),
         input.walletId
       )
     );

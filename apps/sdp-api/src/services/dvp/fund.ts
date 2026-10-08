@@ -32,6 +32,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -294,12 +295,12 @@ export async function executeDvpFunding(
   // revert the whole settlement. Funding a partly funded leg has to top it up
   // exactly.
   const outstanding = amount - held;
-  const signer = await createOrgSignerForCustodyWallet(
+  const movement = await uncheckedLegacyMovement(
     env,
-    plan.signer.organizationId,
-    plan.signer.projectId,
-    plan.signer.custodyWalletId
+    { organizationId: plan.signer.organizationId, projectId: plan.signer.projectId },
+    "dvp"
   );
+  const signer = await createOrgSignerForCustodyWallet(env, movement, plan.signer.custodyWalletId);
 
   const [source] = await findAssociatedTokenPda({
     owner: signer.address,
@@ -366,9 +367,7 @@ export async function executeDvpFunding(
     );
   }
 
-  const feePayment = await createProjectSponsorshipFeePayment(env, {
-    organizationId: plan.signer.organizationId,
-    projectId: plan.signer.projectId,
+  const feePayment = await createProjectSponsorshipFeePayment(env, movement, {
     actor: { type: "wallet", id: plan.signer.custodyWalletId },
   });
   const sponsor = await feePayment.getFeePayer();

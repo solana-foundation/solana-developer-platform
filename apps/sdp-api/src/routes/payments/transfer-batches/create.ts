@@ -6,6 +6,7 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { AppError, badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
@@ -265,11 +266,8 @@ export async function createTransferBatch(c: AppContext) {
 
   const feePayment = getFeePayment(c);
   const [signer, feePayer, lifetime] = await Promise.all([
-    solanaServices.createOrgSignerForCustodyWallet(
-      c.env,
-      resolved.scope.auth.organizationId,
-      resolved.projectId,
-      resolved.sourceWallet.id
+    admitRequestMovement(c, "payments.transfer_batch").then((movement) =>
+      solanaServices.createOrgSignerForCustodyWallet(c.env, movement, resolved.sourceWallet.id)
     ),
     feePayment.getFeePayer(),
     solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),

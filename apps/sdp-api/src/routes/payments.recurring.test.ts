@@ -1803,6 +1803,51 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(4);
   });
 
+  it("returns a refused resume to canceled without signing (HOO-1955)", async () => {
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    signAndSendMock.mockResolvedValue(
+      signature(
+        "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+      )
+    );
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(cancelRes.status).toBe(200);
+    const signaturesBeforeResume = signAndSendMock.mock.calls.length;
+    await getDb(env)
+      .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+
+    const resumeRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/resume`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(resumeRes.status).toBe(403);
+    expect(signAndSendMock).toHaveBeenCalledTimes(signaturesBeforeResume);
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+      .bind(activated.id)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("canceled");
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, signature, error
+           FROM payment_recurring_payment_lifecycle_attempts
+          WHERE recurring_payment_id = ? AND operation = 'resume'`
+      )
+      .bind(activated.id)
+      .first<{ status: string; signature: string | null; error: string | null }>();
+    expect(attempt).toMatchObject({ status: "failed", signature: null });
+    expect(attempt?.error).toMatch(/not active/i);
+  });
+
   it.each(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS)(
     "recovers submitted recurring payment $operation attempts",
     async (operation) => {
@@ -2119,8 +2164,11 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        purpose: "recurring.collect",
+      }),
       TEST_CUSTODY_WALLET_ID
     );
     expect(createOrgSignerMock).toHaveBeenCalledTimes(providerSignerCallsBeforeCollection);
@@ -3268,6 +3316,54 @@ describe("Payments routes — recurring", () => {
     });
     expect(transfer?.error).toBe(PUBLIC_INTERNAL_ERROR_MESSAGE);
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips a due period for a deleted organization without signing or catching up (HOO-1955)", async () => {
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const recurringPayment = await activateRecurringPaymentForTest(RECURRING_HEADERS);
+    const signaturesBeforeCollection = signAndSendMock.mock.calls.length;
+    const now = new Date();
+    const dueAt = new Date(now.getTime() - 60 * 1000).toISOString();
+    await setRecurringCollectionDue({
+      recurringPaymentId: recurringPayment.id,
+      subscriptionId: recurringPayment.subscriptionId,
+      dueAt,
+    });
+    await getDb(env)
+      .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+
+    expect(await collectDueRecurringPayments(env, now)).toEqual({
+      recovered: 0,
+      collected: 0,
+      failed: 0,
+      skipped: 1,
+    });
+    // The period moved past `now`, so the next tick does not select it again.
+    expect(await collectDueRecurringPayments(env, new Date(now.getTime() + 60 * 1000))).toEqual({
+      recovered: 0,
+      collected: 0,
+      failed: 0,
+      skipped: 0,
+    });
+
+    expect(signAndSendMock).toHaveBeenCalledTimes(signaturesBeforeCollection);
+    const row = await getDb(env)
+      .prepare("SELECT status, next_collection_due_at FROM payment_recurring_payments WHERE id = ?")
+      .bind(recurringPayment.id)
+      .first<{ status: string; next_collection_due_at: string | Date }>();
+    expect(row?.status).toBe("active");
+    expect(new Date(row?.next_collection_due_at as string).getTime()).toBeGreaterThan(
+      now.getTime()
+    );
+    const attempts = await getDb(env)
+      .prepare(
+        "SELECT COUNT(*)::int AS count FROM payment_subscription_collection_attempts WHERE subscription_id = ?"
+      )
+      .bind(recurringPayment.subscriptionId)
+      .first<{ count: number }>();
+    expect(attempts?.count).toBe(0);
   });
 
   it("journals an unresolved automated collection once per cooldown", async () => {

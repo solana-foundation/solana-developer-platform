@@ -7,6 +7,7 @@ import { getListConfig, inspectToken } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
 import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
 import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
@@ -426,6 +427,23 @@ export async function resolveAuthorityWallet(params: {
   return wallet;
 }
 
+/**
+ * Issuance is not admitted yet (HOO-1955 slice 1): its signers mint through
+ * the escape hatch. Issuance routes run behind `projectContextMiddleware`, so
+ * `auth.projectId` is the request's project for API keys and dashboard
+ * sessions alike.
+ */
+function legacyIssuanceMovement(env: Env, auth: ApiKeyContext) {
+  if (!auth.projectId) {
+    throw badRequest("Project scope is required");
+  }
+  return uncheckedLegacyMovement(
+    env,
+    { organizationId: auth.organizationId, projectId: auth.projectId },
+    "issuance"
+  );
+}
+
 async function loadResolvedAuthoritySigner(params: {
   env: Env;
   auth: ApiKeyContext;
@@ -434,8 +452,7 @@ async function loadResolvedAuthoritySigner(params: {
 }): Promise<TransactionSigner> {
   const signer = await solanaServices.createOrgSignerForCustodyWallet(
     params.env,
-    params.auth.organizationId,
-    params.auth.projectId,
+    await legacyIssuanceMovement(params.env, params.auth),
     params.custodyWalletId
   );
   if (signer.address !== params.currentAuthority) {
@@ -523,8 +540,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
 
   const signer = await solanaServices.createOrgSignerForCustodyWallet(
     env,
-    auth.organizationId,
-    auth.projectId,
+    await legacyIssuanceMovement(env, auth),
     wallet.id
   );
 

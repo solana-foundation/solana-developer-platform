@@ -34,6 +34,7 @@ import {
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { getAuth } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
@@ -644,11 +645,9 @@ async function executeSponsoredTransfer(
     }) => Promise<readonly Instruction[]>;
   }
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const auth = getAuth(c);
   const signer = await solanaServices.createOrgSignerForCustodyWallet(
     c.env,
-    auth.organizationId,
-    auth.projectId,
+    await admitRequestMovement(c, "payments.transfer"),
     params.sourceWallet.id
   );
 

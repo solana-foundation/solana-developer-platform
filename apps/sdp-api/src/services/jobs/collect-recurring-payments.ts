@@ -10,6 +10,12 @@ import {
   type PaymentRecurringPaymentRow,
   type RecoverableCollectionRecurringPaymentRow,
 } from "@/db/repositories";
+import {
+  type AdmittedMovement,
+  type MovementPurpose,
+  MovementRefusedError,
+  tryAdmitMovement,
+} from "@/lib/admit-movement";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
@@ -20,6 +26,8 @@ import {
   collectRecurringPayment,
   journalAutomatedCollectionFailure,
   resumeRecurringPayment,
+  revertRefusedRecurringActivation,
+  skipRefusedRecurringCollectionPeriod,
 } from "@/services/payments/recurring-payments";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -91,6 +99,26 @@ async function resolveSourceWallet(
   return wallet;
 }
 
+/** Mints the row's movement before the job changes any state for it (HOO-1955). */
+function admitRow(env: Env, row: PaymentRecurringPaymentRow, purpose: MovementPurpose) {
+  return tryAdmitMovement(
+    env,
+    { organizationId: row.organization_id, projectId: row.project_id },
+    purpose,
+    { job: "collect-recurring-payments", subjectId: row.id }
+  );
+}
+
+async function admitRowOrThrow(
+  env: Env,
+  row: PaymentRecurringPaymentRow,
+  purpose: MovementPurpose
+): Promise<AdmittedMovement> {
+  const admission = await admitRow(env, row, purpose);
+  if (!admission.admitted) throw admission.error;
+  return admission.movement;
+}
+
 function shouldSkipCollectionError(error: Error): boolean {
   return error instanceof AppError && error.code === "CONFLICT";
 }
@@ -128,8 +156,20 @@ async function collectRow(
       });
       return "failed";
     }
+    const admission = await admitRow(env, row, "recurring.collect");
+    if (!admission.admitted) {
+      await skipRefusedRecurringCollectionPeriod({
+        env,
+        organizationId: row.organization_id,
+        projectId: row.project_id,
+        recurringPayment: row,
+        now: new Date(),
+      });
+      return "skipped";
+    }
     await collectRecurringPayment({
       env,
+      movement: admission.movement,
       organizationId: row.organization_id,
       projectId: row.project_id,
       sourceWallet,
@@ -158,8 +198,19 @@ async function recoverLifecycleRow(
       return "failed";
     }
     if (isActivatingRecurringPaymentStatus(row.status)) {
+      const admission = await admitRow(env, row, "recurring.activate");
+      if (!admission.admitted) {
+        await revertRefusedRecurringActivation({
+          env,
+          organizationId: row.organization_id,
+          projectId: row.project_id,
+          recurringPaymentId: row.id,
+        });
+        return "skipped";
+      }
       await activateRecurringPayment({
         env,
+        movement: admission.movement,
         organizationId: row.organization_id,
         projectId: row.project_id,
         sourceWallet,
@@ -169,19 +220,15 @@ async function recoverLifecycleRow(
       return "ok";
     }
     const operation = recurringPaymentInFlightLifecycleOperation(row.status);
-    if (operation === "cancel") {
-      await cancelRecurringPayment({
+    if (operation === "cancel" || operation === "resume") {
+      // Admitted only if the operation still has to sign; an attempt that
+      // already submitted just confirms. Cancel is an exit, so it is admitted
+      // for deleted and unentitled organizations alike. A refused resume goes
+      // back to `canceled` through the lifecycle's own failure reset.
+      const run = operation === "cancel" ? cancelRecurringPayment : resumeRecurringPayment;
+      await run({
         env,
-        organizationId: row.organization_id,
-        projectId: row.project_id,
-        sourceWallet,
-        recurringPayment: row,
-      });
-      return "ok";
-    }
-    if (operation === "resume") {
-      await resumeRecurringPayment({
-        env,
+        admit: () => admitRowOrThrow(env, row, `recurring.${operation}`),
         organizationId: row.organization_id,
         projectId: row.project_id,
         sourceWallet,
@@ -192,7 +239,7 @@ async function recoverLifecycleRow(
     throw internalError(`Unhandled lifecycle status ${row.status}`);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
-    if (shouldSkipCollectionError(error)) {
+    if (shouldSkipCollectionError(error) || error instanceof MovementRefusedError) {
       return "skipped";
     }
     logCronFailure(

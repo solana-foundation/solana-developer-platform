@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
+import { uncheckedLegacyMovement } from "@/lib/admit-movement";
 import type { ApiKeyContext } from "@/lib/auth";
 import {
   AppError,
@@ -135,7 +136,15 @@ export async function createPrivateChannelSigner(
 ) {
   await createSigningService(env).admitRuntimeExecution(organizationId, projectId, wallet.id);
   try {
-    return await createOrgSignerForCustodyWallet(env, organizationId, projectId, wallet.id);
+    return await createOrgSignerForCustodyWallet(
+      env,
+      await uncheckedLegacyMovement(
+        env,
+        { organizationId: organizationId, projectId: projectId },
+        "private_channels"
+      ),
+      wallet.id
+    );
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw providerUnavailable("The source custody wallet is not currently signable.");

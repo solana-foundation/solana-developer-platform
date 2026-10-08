@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { isExitRequest } from "@/lib/movement-exits";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireModule } from "@/middleware/require-module";
@@ -20,7 +21,8 @@ payments.use("/ramps/*", requireModule("ramps"));
 // created earlier keep running.
 payments.use("/wallets/:walletId/policies/*", requireModule("policies"));
 payments.use("*", unifiedAuthMiddleware());
-payments.use("*", projectContextMiddleware());
+// Recurring-payment cancel is an exit (HOO-1955): open after production is revoked.
+payments.use("*", projectContextMiddleware({ allowUnentitledProduction: isExitRequest }));
 
 payments.route("/transfers", transfers);
 payments.route("/transfer-batches", transferBatches);

@@ -55,6 +55,7 @@ import {
   type RecurringPaymentCollectionCycleRow,
 } from "@/db/repositories";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import {
   AppError,
   badRequest,
@@ -636,6 +637,67 @@ async function createCollectionAttemptUnderRecurringLock(input: {
       createdAt: input.attemptedAt,
       updatedAt: input.attemptedAt,
     });
+  });
+}
+
+/**
+ * The scheduled-collection refusal (HOO-1955): the organization is deleted or
+ * lost production. An in-flight collection still finishes (recovery confirms,
+ * it never signs). Otherwise the due period is skipped, with no catch-up: the
+ * next due date moves to the first period boundary after `now`, so the job
+ * stops selecting it and a re-entitled organization resumes at the next
+ * boundary instead of charging for the gap.
+ */
+export async function skipRefusedRecurringCollectionPeriod(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  now: Date;
+}): Promise<"recovered" | "skipped" | "unchanged"> {
+  const scope = createTenantScope(input);
+  const { recurringPayment: settled } = await recoverOrBlockLifecycleCollection({
+    env: input.env,
+    recurringRepo: createPaymentRecurringPaymentsRepository(input.env, scope),
+    subscriptionsRepo: createPaymentSubscriptionsRepository(input.env, scope),
+    paymentsRepo: createPaymentsRepository(input.env, scope),
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPayment: input.recurringPayment,
+  });
+  const dueAt = settled.next_collection_due_at;
+  if (dueAt !== input.recurringPayment.next_collection_due_at) return "recovered";
+  if (!dueAt || !settled.subscription_id || !isCollectableRecurringPaymentStatus(settled.status)) {
+    return "unchanged";
+  }
+
+  let nextDueAt = dueAt;
+  while (new Date(nextDueAt).getTime() <= input.now.getTime()) {
+    nextDueAt = nextRecurringPaymentCollectionDueAt(nextDueAt, settled.period_hours);
+  }
+  const updatedAt = input.now.toISOString();
+  return getDb(input.env).transaction(async (tx) => {
+    const moved = await createPostgresPaymentRecurringPaymentsRepository(
+      tx
+    ).updateRecurringPaymentCollection({
+      recurringPaymentId: settled.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      currentCollectionDueAt: dueAt,
+      nextCollectionDueAt: nextDueAt,
+      updatedAt,
+    });
+    if (!moved) return "unchanged";
+    await createPostgresPaymentSubscriptionsRepository(tx).updateSubscription({
+      subscriptionId: settled.subscription_id as string,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      nextCollectionDueAt: nextDueAt,
+      expectedNextCollectionDueAt: dueAt,
+      expectedStatus: "active",
+      updatedAt,
+    });
+    return "skipped";
   });
 }
 
@@ -1325,6 +1387,7 @@ export async function recoverOrBlockLifecycleCollection(input: {
 
 export async function collectRecurringPayment(input: {
   env: Env;
+  movement: AdmittedMovement;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
@@ -1556,8 +1619,7 @@ export async function collectRecurringPayment(input: {
     const mint = assertValidAddress(input.recurringPayment.token, "token");
     const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
-      input.organizationId,
-      input.projectId,
+      input.movement,
       input.sourceWallet.id
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
@@ -1601,9 +1663,7 @@ export async function collectRecurringPayment(input: {
       source: sourceTokenAccount.tokenAccount,
       tokenProgram,
     });
-    const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+    const feePayment = await createProjectSponsorshipFeePayment(input.env, input.movement, {
       actor: { type: "wallet", id: input.sourceWallet.walletId },
     });
     const feePayer = await feePayment.getFeePayer();
@@ -1642,8 +1702,7 @@ export async function collectRecurringPayment(input: {
 
     const signature = await sendSubscriptionInstructions({
       env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+      movement: input.movement,
       sourceWallet: input.sourceWallet,
       sourceSigner,
       instructions: [createDestinationAtaInstruction, collectInstruction],

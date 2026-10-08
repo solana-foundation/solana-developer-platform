@@ -29,6 +29,7 @@ import type { Address, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { AppError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
@@ -1683,13 +1684,11 @@ export class SigningService {
    * - addSignersToTransactionMessage()
    */
   async getTransactionSigner(
-    orgId: string,
-    projectId?: string,
+    movement: AdmittedMovement,
     walletId?: string | null
   ): Promise<TransactionSigner> {
     return this.runtimeTargets.getTransactionSigner(
-      orgId,
-      projectId,
+      movement,
       walletId ?? undefined,
       (organizationId, config) => this.getAdapterForConfig(organizationId, config)
     );
@@ -1708,13 +1707,11 @@ export class SigningService {
   }
 
   async getTransactionSignerForWalletRecord(
-    orgId: string,
-    projectId: string | undefined,
+    movement: AdmittedMovement,
     custodyWalletId: string
   ): Promise<TransactionSigner> {
     return this.runtimeTargets.getTransactionSignerForWalletRecord(
-      orgId,
-      projectId,
+      movement,
       custodyWalletId,
       (organizationId, config) => this.getAdapterForConfig(organizationId, config)
     );
@@ -1774,6 +1771,9 @@ export class SigningService {
 // Factory Function
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Methods whose first argument is an `AdmittedMovement` rather than an organization id. */
+const SIGNER_METHODS = new Set(["getTransactionSigner", "getTransactionSignerForWalletRecord"]);
+
 /**
  * Create a SigningService instance from environment bindings.
  *
@@ -1830,11 +1830,15 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
       }
 
       return (...args: unknown[]) => {
+        // Signer acquisition takes its scope from the admitted movement.
+        const claim = SIGNER_METHODS.has(String(property))
+          ? (args[0] as AdmittedMovement)
+          : { organizationId: args[0], projectId: args[1] ?? null };
         assertTenantClaim(
           scope,
           {
-            organizationId: args[0],
-            projectId: args[1] ?? null,
+            organizationId: claim.organizationId,
+            projectId: claim.projectId ?? null,
           },
           `SigningService.${String(property)}`
         );

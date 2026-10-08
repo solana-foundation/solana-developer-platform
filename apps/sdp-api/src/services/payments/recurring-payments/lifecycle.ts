@@ -25,6 +25,7 @@ import {
   type PaymentRecurringPaymentsRepository,
   type PaymentSubscriptionRow,
 } from "@/db/repositories";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
@@ -333,6 +334,8 @@ async function finalizeRecurringPaymentLifecycle(input: {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Lifecycle recovery keeps each persisted stage explicit.
 async function runRecurringPaymentLifecycle(input: {
   env: Env;
+  /** Mints the movement; called only when a new signature is needed. */
+  admit: () => Promise<AdmittedMovement>;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
@@ -467,20 +470,25 @@ async function runRecurringPaymentLifecycle(input: {
       );
     }
 
-    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
-      input.env,
-      input.organizationId,
-      input.projectId,
-      input.sourceWallet.id
-    );
-    if (sourceSigner.address !== input.sourceWallet.publicKey) {
-      throw badRequest("Resolved signing wallet does not match source wallet");
-    }
-
     const planPda = assertValidAddress(claimed.plan_pda, "planPda");
     const subscriptionPda = assertValidAddress(claimed.subscription_pda, "subscriptionPda");
 
     if (!signature) {
+      // Admission runs only here, before a new signature (HOO-1955). An
+      // attempt that already submitted only confirms its signature below, so
+      // revocation never strands an operation that is already on chain. A
+      // refusal resets the claim like any failure before submission: a resume
+      // goes back to `canceled`, which matches the subscription on chain.
+      const movement = await input.admit();
+      const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+        input.env,
+        movement,
+        input.sourceWallet.id
+      );
+      if (sourceSigner.address !== input.sourceWallet.publicKey) {
+        throw badRequest("Resolved signing wallet does not match source wallet");
+      }
+
       currentStage = "submit";
       await recurringRepo.updateLifecycleAttempt({
         attemptId: attempt.id,
@@ -501,8 +509,7 @@ async function runRecurringPaymentLifecycle(input: {
 
       signature = await sendSubscriptionInstructions({
         env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+        movement,
         sourceWallet: input.sourceWallet,
         sourceSigner,
         instructions: [instruction],
@@ -601,6 +608,8 @@ async function runRecurringPaymentLifecycle(input: {
 
 export async function cancelRecurringPayment(input: {
   env: Env;
+  /** Mints the movement; called only when a new signature is needed. */
+  admit: () => Promise<AdmittedMovement>;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
@@ -629,6 +638,8 @@ export async function cancelRecurringPayment(input: {
 
 export async function resumeRecurringPayment(input: {
   env: Env;
+  /** Mints the movement; called only when a new signature is needed. */
+  admit: () => Promise<AdmittedMovement>;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;

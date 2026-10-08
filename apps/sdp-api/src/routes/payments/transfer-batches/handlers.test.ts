@@ -925,8 +925,11 @@ describe("payment transfer batches", () => {
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledOnce();
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        purpose: "payments.transfer_batch",
+      }),
       TEST_CUSTODY_WALLET_ID
     );
   });

@@ -465,8 +465,11 @@ describe("Custody wallet scope routes", () => {
     });
     expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        purpose: "custody.signer_check",
+      }),
       "cwlt_scope_signer_check"
     );
     expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
@@ -619,8 +622,11 @@ describe("Custody wallet scope routes", () => {
     expect(response.status).toBe(200);
     expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        purpose: "custody.signer_check",
+      }),
       "cwlt_scope_privy_a"
     );
   });
@@ -714,8 +720,11 @@ describe("Custody wallet scope routes", () => {
     expect(body.data.walletId).toBe("privy_wallet_a");
     expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        purpose: "custody.signer_check",
+      }),
       "cwlt_scope_privy_a"
     );
 
@@ -781,8 +790,11 @@ describe("Custody wallet scope routes", () => {
         });
         expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
           env,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
+          expect.objectContaining({
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            purpose: "custody.signer_check",
+          }),
           recordId
         );
       } else {
@@ -847,8 +859,11 @@ describe("Custody wallet scope routes", () => {
     expect(body.data.memo).not.toBe(callerMemo);
     expect(signerCheckMocks.createExactSigner).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        purpose: "custody.signer_check",
+      }),
       "cwlt_scope_privy_a"
     );
     expect(signerCheckMocks.createSponsorship).toHaveBeenCalledOnce();
