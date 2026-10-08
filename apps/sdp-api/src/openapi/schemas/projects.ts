@@ -133,7 +133,7 @@ export const projectProviderAvailabilityResponseSchema = withOpenApi(
   projectProviderAvailabilitySchema,
   {
     description:
-      "Every provider the deployment knows, with whether this project can use it, so an absent provider is never mistaken for an unavailable one. Custody entries list the custody modes the project can set the provider up in (empty when none); ramps, compliance and Earn entries carry `available`. A provider is available only when the deployment's release channel includes it, the organization is entitled to it, and, in a Production project, its stage is stable.",
+      "Every provider the deployment knows, with whether this project can use it, so an absent provider is never mistaken for an unavailable one. Custody entries list the custody modes the project can set the provider up in (empty when none); ramps, compliance and Earn entries carry `available`. A provider is available only when the deployment's release channel includes it, the organization is entitled to it, in a Production project its stage is stable, and the deployment holds its credentials for the project's environment. Custody `modes` include `managed` only when the deployment holds the provider's credentials; `byok` runs on the organization's own credentials.",
     example: {
       projectId: "proj_example",
       environment: "production",

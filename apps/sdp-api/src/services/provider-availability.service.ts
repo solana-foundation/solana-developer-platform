@@ -757,7 +757,8 @@ export type CustodySetupAdmission = { admitted: true } | CustodySetupRefusal;
 type ProjectProviderRefusalReason =
   | CustodySetupRefusalReason
   | "provider_not_in_release_channel"
-  | "provider_stage_not_allowed";
+  | "provider_stage_not_allowed"
+  | "provider_not_configured";
 
 /**
  * The project provider rule's refusal of one provider: its error and the
@@ -869,9 +870,10 @@ async function loadProjectProviderFacts(
  * project's environment allows the mode (Production = BYOK only); a Production
  * project runs only `stable` pairs, whatever the channel; and the organization
  * is entitled to the provider. Managed custody also needs the deployment to
- * hold the provider's credentials; BYOK needs self-service credential setup,
- * which the channel check already implies (the catalog types every
- * `BYOK_CUSTODY_PROVIDERS` entry as self-service).
+ * hold the provider's credentials, which the project provider rule checks
+ * after this one as it does for every family; BYOK needs self-service
+ * credential setup, which the channel check already implies (the catalog types
+ * every `BYOK_CUSTODY_PROVIDERS` entry as self-service).
  *
  * @param env - Process environment naming the release channel.
  * @param facts - The project's environment and its organization's provider access.
@@ -918,14 +920,6 @@ function decideCustodySetup(
       )
     );
   }
-  if (mode === "managed" && !entry.configured) {
-    return refuse(
-      new CustodySetupRefusedError(
-        getAvailabilityMessage(facts.availability.tier, "custody", provider, entry),
-        "provider_not_configured"
-      )
-    );
-  }
   return { admitted: true };
 }
 
@@ -955,23 +949,76 @@ function projectProviderRefusal(
 }
 
 /**
+ * Whether the deployment holds `provider`'s credentials for the project's
+ * environment: the same definitions the organization read's `configured` and
+ * the runtime 503 credential checks use, in the project's mode (sandbox
+ * project = sandbox credentials).
+ *
+ * @param env - Process environment holding the provider credentials.
+ * @param facts - The project's environment and its organization's provider access.
+ * @param family - The provider's family.
+ * @param provider - The provider being used.
+ * @returns Whether the deployment can operate the provider for this project.
+ */
+function isProviderConfiguredForProject<Family extends OrganizationProviderFamily>(
+  env: Env,
+  facts: ProjectProviderFacts,
+  family: Family,
+  provider: ProviderIdByFamily[Family]
+): boolean {
+  return isProviderConfigured(env, family, provider, facts.environment === "sandbox");
+}
+
+/**
+ * The refusal for a provider the deployment holds no credentials for: a 503
+ * `PROVIDER_NOT_CONFIGURED`, the status the runtime credential checks return,
+ * since the caller can fix nothing about it.
+ *
+ * @param facts - The project, its environment and its organization's provider access.
+ * @param request - The provider being used.
+ * @returns The `provider_not_configured` refusal.
+ */
+function providerNotConfiguredForProject(
+  facts: ProjectProviderFacts,
+  request: ProjectProviderRequest
+): ProjectProviderRefusal {
+  return projectProviderRefusal(
+    facts,
+    request,
+    "provider_not_configured",
+    new AppError(
+      "PROVIDER_NOT_CONFIGURED",
+      `${getProviderLabel(request.family, request.provider)} is not configured for ${facts.environment} projects in this deployment.`,
+      { reason: "provider_not_configured" }
+    )
+  );
+}
+
+/**
  * The staged-provider rule for ramps, compliance and Earn. A provider is
  * admitted for a project when, in order: the deployment's release channel
  * includes it; a Production project runs it only at `stable`, whatever the
- * channel; and the organization is entitled to it.
+ * channel; the organization is entitled to it; and the deployment holds its
+ * credentials for the project's environment.
  *
  * @param facts - The project's environment and its organization's provider access.
  * @param request - The provider being used.
- * @param checks - The provider's verdicts from its family's stage table and access entry.
+ * @param checks - The provider's verdicts from its family's stage table, access entry and credentials.
  * @param checks.inReleaseChannel - Whether the deployment's release channel includes it.
  * @param checks.stageAllowed - Whether its stage meets the project environment's bar.
  * @param checks.entry - The organization's access entry for the provider.
- * @returns Admitted, or the first failed check with its 403.
+ * @param checks.configured - Whether the deployment holds its credentials for the project's environment.
+ * @returns Admitted, or the first failed check with its 403 (503 when not configured).
  */
 function decideStagedProvider(
   facts: ProjectProviderFacts,
   request: Exclude<ProjectProviderRequest, { family: "custody" }>,
-  checks: { inReleaseChannel: boolean; stageAllowed: boolean; entry: ProviderAvailabilityEntry }
+  checks: {
+    inReleaseChannel: boolean;
+    stageAllowed: boolean;
+    entry: ProviderAvailabilityEntry;
+    configured: boolean;
+  }
 ): ProjectProviderDecision {
   const label = getProviderLabel(request.family, request.provider);
   if (!checks.inReleaseChannel) {
@@ -1011,6 +1058,9 @@ function decideStagedProvider(
       )
     );
   }
+  if (!checks.configured) {
+    return providerNotConfiguredForProject(facts, request);
+  }
   return { admitted: true };
 }
 
@@ -1020,13 +1070,15 @@ function decideStagedProvider(
  * this, so they cannot disagree. Custody follows the custody setup rule; ramps
  * are staged per provider; compliance and Earn by their module stage. Stages
  * come from the `@sdp/types` manifests, as the custody stages do, so tests
- * override them by mocking that module. Evaluating is not refusing, so nothing is logged here: reads and replays
+ * override them by mocking that module. Every family that runs on deployment
+ * credentials (all but BYOK custody) also needs the deployment to hold them
+ * for the project's environment. Evaluating is not refusing, so nothing is logged here: reads and replays
  * evaluate too.
  *
- * @param env - Process environment naming the release channel.
+ * @param env - Process environment naming the release channel and holding the provider credentials.
  * @param facts - The project, its environment and its organization's provider access.
  * @param request - The provider being used (and, for custody, its mode).
- * @returns Admitted, or the refusal carrying the first failed check's 403.
+ * @returns Admitted, or the refusal carrying the first failed check's 403 (503 when not configured).
  */
 function decideProjectProvider(
   env: Env,
@@ -1040,9 +1092,21 @@ function decideProjectProvider(
         provider: request.provider,
         mode: request.mode,
       });
-      return admission.admitted
-        ? admission
-        : projectProviderRefusal(facts, request, admission.error.details.reason, admission.error);
+      if (!admission.admitted) {
+        return projectProviderRefusal(
+          facts,
+          request,
+          admission.error.details.reason,
+          admission.error
+        );
+      }
+      if (
+        request.mode === "managed" &&
+        !isProviderConfiguredForProject(env, facts, request.family, request.provider)
+      ) {
+        return providerNotConfiguredForProject(facts, request);
+      }
+      return admission;
     }
     case "ramps":
       return decideStagedProvider(facts, request, {
@@ -1053,6 +1117,7 @@ function decideProjectProvider(
           SDP_RAMP_PROVIDER_STAGES
         ),
         entry: facts.availability.providers.ramps[request.provider],
+        configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
     case "compliance":
       return decideStagedProvider(facts, request, {
@@ -1063,6 +1128,7 @@ function decideProjectProvider(
           SDP_RAMP_PROVIDER_STAGES
         ),
         entry: facts.availability.providers.compliance[request.provider],
+        configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
     case "earn":
       return decideStagedProvider(facts, request, {
@@ -1073,6 +1139,7 @@ function decideProjectProvider(
           SDP_RAMP_PROVIDER_STAGES
         ),
         entry: facts.availability.providers.earn[request.provider],
+        configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
     default: {
       const exhaustive: never = request;
@@ -1227,8 +1294,11 @@ export async function getProjectProviderAvailability(
  * @throws 403 `FORBIDDEN` whose `details.reason` names the failed check. Custody:
  *   `CUSTODY_SETUP_REFUSAL_REASONS`. Ramps, compliance and Earn:
  *   `provider_not_in_release_channel`, `provider_stage_not_allowed` or
- *   `provider_not_entitled`. 404 when the project is not an active project of
- *   the organization.
+ *   `provider_not_entitled`. 503 `PROVIDER_NOT_CONFIGURED` with
+ *   `details.reason` `provider_not_configured` when the deployment lacks the
+ *   provider's credentials for the project's environment (any family; custody
+ *   Managed only). 404 when the project is not an active project of the
+ *   organization.
  */
 export async function assertProjectProviderAdmitted(
   env: Env,
@@ -1256,8 +1326,10 @@ export async function assertProjectProviderAdmitted(
  * @param request.provider - The custody provider being set up.
  * @param request.mode - The custody mode being set up.
  * @throws 403 `CustodySetupRefusedError` whose `details.reason` names the failed
- *   check (`CUSTODY_SETUP_REFUSAL_REASONS`); 404 when the project is not an
- *   active project of the organization.
+ *   check (`CUSTODY_SETUP_REFUSAL_REASONS`); 503 `PROVIDER_NOT_CONFIGURED`
+ *   (`details.reason` `provider_not_configured`) when Managed custody lacks
+ *   deployment credentials; 404 when the project is not an active project of
+ *   the organization.
  */
 export async function assertCustodySetupAdmitted(
   env: Env,
