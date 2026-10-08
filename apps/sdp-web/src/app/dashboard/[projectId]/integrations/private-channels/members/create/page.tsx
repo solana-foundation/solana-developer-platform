@@ -1,18 +1,13 @@
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../../private-channels-access";
 import { PrivateChannelsLoadError } from "../../private-channels-load-error";
 import { loadWalletVerification } from "../../private-channels-page.data";
 import { PrincipalCreatePage } from "./principal-create-page";
 
-export default async function PrivateChannelsPrincipalCreateRoute({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function PrivateChannelsPrincipalCreateRoute() {
   await requirePrivateChannelsAccess();
-  const { projectId } = await params;
 
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
   const wallets = await loadWalletVerification(client);
 
   if (!wallets.ok) {

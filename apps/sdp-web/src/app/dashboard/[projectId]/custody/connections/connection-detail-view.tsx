@@ -13,7 +13,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { AddWalletDialog } from "./add-wallet-dialog";
 import { CancelSetupDialog } from "./cancel-setup-dialog";
 import { ConnectionCredentialsSection } from "./connection-credentials-section";
@@ -385,7 +384,6 @@ export function ConnectionDetailView({
 }) {
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   const projectName = useSelectedProjectName();
   // One dialog at a time by construction: opening any of them closes the rest,
   // which is what a modal surface means anyway.
@@ -399,7 +397,7 @@ export function ConnectionDetailView({
   const handleRecheck = () => {
     startRecheck(async () => {
       try {
-        await recheckPrivyCredentialAction(projectId, connection.id);
+        await recheckPrivyCredentialAction(connection.id);
       } catch {
         // The completion is replay-safe and the connection survives
         // server-side, so a lost response leaves the offered step valid.

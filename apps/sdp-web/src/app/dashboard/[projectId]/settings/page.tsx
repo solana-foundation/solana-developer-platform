@@ -21,14 +21,11 @@ function resolveMembersPage(value: string | string[] | undefined): number {
  * @returns The rendered settings page.
  */
 export default async function SettingsPage({
-  params,
   searchParams,
 }: {
-  params: Promise<{ projectId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [{ projectId }, query] = await Promise.all([params, searchParams]);
-  const membersPage = resolveMembersPage(query.membersPage);
+  const membersPage = resolveMembersPage((await searchParams).membersPage);
 
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
@@ -48,7 +45,7 @@ export default async function SettingsPage({
       {/* canManageOrgSettings resolves to org:write, which is what inviting a
           member requires. */}
       {dashboardAccess.capabilities.canManageOrgSettings ? (
-        <MembersSection projectId={projectId} page={membersPage} />
+        <MembersSection page={membersPage} />
       ) : null}
     </div>
   );

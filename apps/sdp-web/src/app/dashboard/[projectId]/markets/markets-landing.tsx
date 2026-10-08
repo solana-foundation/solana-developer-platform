@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/provider-selection-card";
 import { getTranslations } from "@/i18n/server";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { projectHref } from "@/lib/dashboard-project-path";
+import { requestProjectHref } from "@/lib/sdp-api";
 import { cn } from "@/lib/utils";
 
 function MarketsPathCard({
@@ -73,7 +73,7 @@ function MarketsPathCard({
  * the segment layout enforces the markets and earn gates for every surface it
  * offers, so nothing here checks a flag or fetches data.
  */
-export async function MarketsLanding({ projectId }: { projectId: string }) {
+export async function MarketsLanding() {
   const t = await getTranslations();
 
   return (
@@ -87,14 +87,14 @@ export async function MarketsLanding({ projectId }: { projectId: string }) {
             <MarketsPathCard
               audience={t("DashboardMarkets.landing.treasuryAudience")}
               description={t("DashboardMarkets.landing.treasuryDescription")}
-              href={projectHref(projectId, DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions)}
+              href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions)}
               icon={LandmarkIcon}
               title={t("Shared.dashboardShell.treasurySolutions")}
             />
             <MarketsPathCard
               audience={t("DashboardMarkets.landing.programAudience")}
               description={t("DashboardMarkets.landing.programDescription")}
-              href={projectHref(projectId, DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram)}
+              href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram)}
               icon={UsersRoundIcon}
               title={t("Shared.dashboardShell.earnProgram")}
             />
@@ -110,7 +110,7 @@ export async function MarketsLanding({ projectId }: { projectId: string }) {
           <div className="grid gap-4 md:grid-cols-2">
             <MarketsPathCard
               description={t("DashboardMarkets.dvp.landingDescription")}
-              href={projectHref(projectId, DASHBOARD_MARKETS_SUBNAV_HREFS.dvp)}
+              href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.dvp)}
               icon={ArrowLeftRightIcon}
               title={t("DashboardMarkets.dvp.navLabel")}
             />

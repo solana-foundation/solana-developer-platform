@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
+import { createSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
 
 const PUBLIC_API_PATH_PREFIX = "/v1/";
 const INVALID_PATH_MESSAGE = "Path must start with '/v1/'";
@@ -96,10 +95,6 @@ export async function POST(request: Request) {
     if (!orgId) {
       return failureResponse(trace, 403, "Active organization required");
     }
-    const projectId = request.headers.get(PROJECT_HEADER_NAME);
-    if (projectId === null) {
-      return failureResponse(trace, 400, `${PROJECT_HEADER_NAME} header required`);
-    }
 
     const rawBody = await request.text();
     if (rawBody.length > MAX_REQUEST_BYTES) {
@@ -123,10 +118,7 @@ export async function POST(request: Request) {
       return failureResponse(trace, 400, INVALID_PATH_MESSAGE);
     }
 
-    const client = await createProjectBoundSdpApiClient(
-      projectId,
-      trace.childContext("route.playground.execute.api")
-    );
+    const client = await createSdpApiClient(trace.childContext("route.playground.execute.api"));
     const verification = await client.request("/internal/playground/api-key/verify", {
       method: "POST",
       body: JSON.stringify({ apiKey }),

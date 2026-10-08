@@ -3,15 +3,11 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsAggregate } from "../payments/payments-page.data";
 import { HoldingsWorkspace } from "./holdings-workspace";
 
-export default async function TokenHoldingsPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function TokenHoldingsPage() {
   const t = await getTranslations();
   const { userId, orgId } = await auth();
   if (!userId) {
@@ -21,10 +17,9 @@ export default async function TokenHoldingsPage({
     return null;
   }
 
-  const { projectId } = await params;
   const trace = createTimedTrace("dashboard.tokens.page");
   const apiClient = await trace.step("create_sdp_api_client", () =>
-    createProjectBoundSdpApiClient(projectId, trace.childContext("dashboard.tokens.api"))
+    createSdpApiClient(trace.childContext("dashboard.tokens.api"))
   );
   // Same aggregate the home page already reads, so this page needs no new endpoint
   // and cannot disagree with the card it was opened from.

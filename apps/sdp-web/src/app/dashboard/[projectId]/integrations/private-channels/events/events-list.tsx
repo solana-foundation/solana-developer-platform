@@ -296,7 +296,6 @@ export function EventsList({
     setFeed((prev) => ({ ...prev, selectedFamily: nextFamily }));
     startFiltering(async () => {
       const result = await loadProjectEventsAction({
-        projectId,
         limit: 50,
         ...familyParam(nextFamily),
       });
@@ -334,7 +333,6 @@ export function EventsList({
     if (!cursor || isBusy) return;
     startLoadMore(async () => {
       const result = await loadProjectEventsAction({
-        projectId,
         before: cursor,
         limit: 50,
         ...familyParam(selectedFamily),

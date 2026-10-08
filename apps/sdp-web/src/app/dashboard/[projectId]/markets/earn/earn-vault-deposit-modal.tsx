@@ -714,7 +714,7 @@ export interface EarnVaultDepositModalProps {
    * in rather than read from the workspace context so this modal stays
    * context-free and directly testable.
    */
-  projectId: string;
+  projectId: string | null;
   onClose: () => void;
   onDeposited?: (
     deposit: EarnVaultDeposit,

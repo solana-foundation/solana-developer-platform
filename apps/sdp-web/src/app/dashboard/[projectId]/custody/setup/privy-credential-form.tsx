@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 
 type CheckState =
   | { kind: "idle" }
@@ -189,7 +189,6 @@ function usePrivyCredentialSubmission({
   onSuccess?: (connectionId: string) => void;
 }) {
   const router = useRouter();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const refreshWalletInventory = useWalletInventoryRefresh();
   const [isPending, startTransition] = useTransition();
@@ -293,7 +292,7 @@ function usePrivyCredentialSubmission({
     // for a value this component already knew, and did it a render late.
     onPendingChange?.(true);
     startTransition(async () => {
-      const result = await submitSafely(projectId, formData);
+      const result = await submitSafely(formData);
       // Cleared before the result is applied, so a host that refuses to close
       // while a request is in flight is free by the time success closes it.
       onPendingChange?.(false);
@@ -307,7 +306,7 @@ function usePrivyCredentialSubmission({
     }
     onPendingChange?.(true);
     startTransition(async () => {
-      const result = await submitSafely(projectId, payload);
+      const result = await submitSafely(payload);
       onPendingChange?.(false);
       applyResult(result);
     });
@@ -320,7 +319,7 @@ function usePrivyCredentialSubmission({
     onPendingChange?.(true);
     startTransition(async () => {
       try {
-        applyResult(await recheckPrivyCredentialAction(projectId, connectionId));
+        applyResult(await recheckPrivyCredentialAction(connectionId));
       } catch {
         // The completion is replay-safe and the connection survives
         // server-side, so a lost action response leaves the current recovery
@@ -350,9 +349,9 @@ function isRecoveryStatus(status: PrivyByokSubmitResult["status"]): boolean {
  * rejection would skip every branch that settles the recovery lock; mapped to
  * `error`, the frozen payload and retained key stay the recovery path.
  */
-async function submitSafely(projectId: string, payload: FormData): Promise<PrivyByokSubmitResult> {
+async function submitSafely(payload: FormData): Promise<PrivyByokSubmitResult> {
   try {
-    return await submitPrivyCredentialAction(projectId, payload);
+    return await submitPrivyCredentialAction(payload);
   } catch {
     return { status: "error", message: "" };
   }

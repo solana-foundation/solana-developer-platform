@@ -21,7 +21,6 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
 interface WalletActionsMenuProps {
@@ -60,7 +59,6 @@ export function WalletActionsMenu({
 }: WalletActionsMenuProps) {
   const t = useTranslations();
   const { dashboardAccess, sandboxProject } = useDashboardWorkspace();
-  const projectId = useProjectId();
   const [isBusy, startTransition] = useTransition();
   const { mutate } = useSWRConfig();
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);
@@ -82,7 +80,7 @@ export function WalletActionsMenu({
 
     startTransition(() => {
       void (async () => {
-        const result = await checkWalletSignerMemoAction(projectId, walletId).catch((error) => ({
+        const result = await checkWalletSignerMemoAction(walletId).catch((error) => ({
           status: "error" as const,
           message: error instanceof Error ? error.message : t("DashboardCustody.signerCheckFailed"),
         }));
@@ -115,15 +113,13 @@ export function WalletActionsMenu({
 
     startTransition(() => {
       void (async () => {
-        const result = await requestDevnetSolanaFaucetAction(
-          projectId,
-          walletId,
-          walletAddress
-        ).catch((error) => ({
-          status: "error" as const,
-          message:
-            error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
-        }));
+        const result = await requestDevnetSolanaFaucetAction(walletId, walletAddress).catch(
+          (error) => ({
+            status: "error" as const,
+            message:
+              error instanceof Error ? error.message : t("DashboardCustody.devnetFaucetFailed"),
+          })
+        );
 
         if (result.status === "success") {
           // The action waited for confirmation, so a refetch now reads the funded balance.

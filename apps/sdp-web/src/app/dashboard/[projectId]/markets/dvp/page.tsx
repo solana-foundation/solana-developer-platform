@@ -7,13 +7,11 @@ import { DvpTradesWorkspace } from "./dvp-trades-workspace";
 export const dynamic = "force-dynamic";
 
 interface DvpTradesPageProps {
-  params: Promise<{ projectId: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default async function DvpTradesPage({ params, searchParams }: DvpTradesPageProps) {
-  const { projectId } = await params;
-  return withDashboardPageTrace("dashboard.dvp.trades.page", projectId, async ({ apiClient }) => {
+export default async function DvpTradesPage({ searchParams }: DvpTradesPageProps) {
+  return withDashboardPageTrace("dashboard.dvp.trades.page", async ({ apiClient }) => {
     // The filters live in the URL (the transactions-page pattern): the server
     // refetches on every navigation with the group mapped to the real statuses
     // behind it, because the list is capped and a client-side filter would make

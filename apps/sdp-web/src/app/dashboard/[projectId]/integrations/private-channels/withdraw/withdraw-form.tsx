@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
@@ -76,7 +76,6 @@ export function WithdrawForm({
   });
   const [isSubmitting, startTransition] = useTransition();
   const t = useTranslations();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const {
     walletId,
@@ -98,13 +97,13 @@ export function WithdrawForm({
     }
     let active = true;
     updateState({ balances: { channel: null, onChain: null } });
-    fetchWalletBalancesAction(projectId, walletId, mint || undefined).then((result) => {
+    fetchWalletBalancesAction(walletId, mint || undefined).then((result) => {
       if (active) updateState({ balances: result });
     });
     return () => {
       active = false;
     };
-  }, [projectId, walletId, mint, refetchKey]);
+  }, [walletId, mint, refetchKey]);
 
   if (withdrawal) {
     return (
@@ -172,7 +171,7 @@ export function WithdrawForm({
     const idempotencyKey = privateChannelWithdrawalIdempotencyKeyStore.claim(fingerprint);
 
     startTransition(async () => {
-      const result = await createWithdrawalAction(projectId, { ...requestPayload, idempotencyKey });
+      const result = await createWithdrawalAction({ ...requestPayload, idempotencyKey });
       applyIdempotencyKeyOutcome(
         privateChannelWithdrawalIdempotencyKeyStore,
         fingerprint,

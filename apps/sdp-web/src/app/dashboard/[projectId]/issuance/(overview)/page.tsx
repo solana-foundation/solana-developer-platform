@@ -5,7 +5,7 @@ import { getTranslations } from "@/i18n/server";
 import { readApiErrorMessage } from "@/lib/api-error";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
 import { parseIssuanceListQuery } from "../issuance-list-query";
 import {
@@ -108,19 +108,16 @@ function resolveTemplatesError(
 }
 
 interface IssuancePageProps {
-  params: Promise<{ projectId: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default async function IssuancePage({ params, searchParams }: IssuancePageProps) {
-  const [t, { userId, orgId }, { projectId }, resolvedSearchParams, assetProfilesEnabled] =
-    await Promise.all([
-      getTranslations(),
-      auth(),
-      params,
-      searchParams ?? Promise.resolve(undefined),
-      assetProfiles(),
-    ]);
+export default async function IssuancePage({ searchParams }: IssuancePageProps) {
+  const [t, { userId, orgId }, resolvedSearchParams, assetProfilesEnabled] = await Promise.all([
+    getTranslations(),
+    auth(),
+    searchParams ?? Promise.resolve(undefined),
+    assetProfiles(),
+  ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -137,7 +134,7 @@ export default async function IssuancePage({ params, searchParams }: IssuancePag
     const listQuery = parseIssuanceListQuery(resolvedSearchParams);
     const apiBaseUrl = resolvePlaygroundApiBaseUrl();
     const apiClient = await trace.step("create_sdp_api_client", () =>
-      createProjectBoundSdpApiClient(projectId, trace.childContext("dashboard.issuance.api"))
+      createSdpApiClient(trace.childContext("dashboard.issuance.api"))
     );
     const [templatesResult, tokensPage, facets, apiKeysResult] = await Promise.all([
       trace.step("fetch_templates", () => fetchTemplates(apiClient.request, t)),

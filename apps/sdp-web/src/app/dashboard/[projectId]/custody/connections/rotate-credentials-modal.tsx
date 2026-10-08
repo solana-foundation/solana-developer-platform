@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { rotateCredentialsAction } from "./connection-actions";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";
 import { CredentialImpactList } from "./credential-impact-list";
@@ -40,7 +39,6 @@ export function RotateCredentialsModal({
   canRotate: boolean;
 }) {
   const t = useTranslations();
-  const projectId = useProjectId();
   const { pending, run } = useCustodyAction();
   // Keep the attempt outside Modal's children, which unmount while it is hidden.
   const [appId, setAppId] = useState("");
@@ -67,7 +65,7 @@ export function RotateCredentialsModal({
       formData.set("appSecret", appSecret);
       setAttempt(formData);
     }
-    const result = await run(() => rotateCredentialsAction(projectId, formData, attempt !== null), {
+    const result = await run(() => rotateCredentialsAction(formData, attempt !== null), {
       successTitle: t("DashboardCustody.rotateSuccessTitle"),
       successDescription: t("DashboardCustody.rotateSuccessDescription", {
         connections: connectionCount,

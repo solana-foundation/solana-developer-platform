@@ -15,8 +15,7 @@ import {
 import { custody, privyByok } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 
 // The lifecycle view changes under other people — a rotation in a sibling
 // project retires the credential this page is showing — so it is never served
@@ -26,9 +25,9 @@ export const dynamic = "force-dynamic";
 export default async function CustodyConnectionPage({
   params,
 }: {
-  params: Promise<{ projectId: string; provider: string; connectionId: string }>;
+  params: Promise<{ provider: string; connectionId: string }>;
 }) {
-  const { projectId, provider, connectionId } = await params;
+  const { provider, connectionId } = await params;
   // Same gate as the provider page's connections section: a provider with no
   // self-service credential install has no connections, so its `/connections/`
   // subtree is not a route at all.
@@ -55,10 +54,10 @@ export default async function CustodyConnectionPage({
   // them back to the provider page, which tells them which role they need
   // rather than rendering a wall of failed reads.
   if (!dashboardAccess.capabilities.canManageCustody) {
-    redirect(projectHref(projectId, `/dashboard/integrations/${provider}`));
+    redirect(await requestProjectHref(`/dashboard/integrations/${provider}`));
   }
 
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
 
   let connection: Awaited<ReturnType<typeof fetchConnectionInstallation>>;
   try {
@@ -79,8 +78,7 @@ export default async function CustodyConnectionPage({
   if (connection.provider !== provider) {
     if (providerSupportsStoredCredentialSetup(connection.provider)) {
       redirect(
-        projectHref(
-          projectId,
+        await requestProjectHref(
           `/dashboard/integrations/${connection.provider}/connections/${encodeURIComponent(connectionId)}`
         )
       );

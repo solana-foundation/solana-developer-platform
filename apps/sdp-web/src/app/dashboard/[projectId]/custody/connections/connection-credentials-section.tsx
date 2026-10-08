@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { cancelRotationAction, completeRotationAction } from "./connection-actions";
 import type {
   CustodyCredentialLifecycle,
@@ -443,7 +442,6 @@ export function ConnectionCredentialsSection({
   canManageCustody: boolean;
 }) {
   const t = useTranslations();
-  const projectId = useProjectId();
   const { pending, run } = useCustodyAction();
   const [rotationLifecycle, setRotationLifecycle] = useState<CustodyCredentialLifecycle | null>(
     null
@@ -518,7 +516,7 @@ export function ConnectionCredentialsSection({
   // Both take the id rather than closing over `candidate`, because only the
   // branch that renders these buttons knows a candidate exists.
   const handleSettleCandidate = async (candidateId: string) => {
-    await run(() => completeRotationAction(projectId, candidateId, provider, connection.id), {
+    await run(() => completeRotationAction(candidateId, provider, connection.id), {
       successTitle: t("DashboardCustody.rotateSuccessTitle"),
       failedTitle: t("DashboardCustody.rotateFailedTitle"),
       unknownTitle: t("DashboardCustody.rotateUnknownTitle"),
@@ -526,7 +524,7 @@ export function ConnectionCredentialsSection({
   };
 
   const handleCancelCandidate = async (candidateId: string) => {
-    await run(() => cancelRotationAction(projectId, candidateId, provider, connection.id), {
+    await run(() => cancelRotationAction(candidateId, provider, connection.id), {
       successTitle: t("DashboardCustody.rotationCancelledTitle"),
       failedTitle: t("DashboardCustody.rotationCancelFailedTitle"),
       unknownTitle: t("DashboardCustody.rotationCancelUnknownTitle"),

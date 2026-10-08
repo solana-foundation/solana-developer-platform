@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
-import { createProjectBoundSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { ChannelTokensPanel } from "../../../channels/channel-tokens-panel";
 import { requirePrivateChannelsAccess } from "../../../private-channels-access";
 import { PrivateChannelsLoadError } from "../../../private-channels-load-error";
@@ -17,12 +17,13 @@ import { WalletsTable } from "../../../wallets/wallets-table";
 import { ChannelActionsMenu } from "./channel-actions-menu";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
+type SdpClient = Awaited<ReturnType<typeof createSdpApiClient>>;
 
 async function loadPrivateChannelDetail(
   instanceId: string,
   channelId: string,
   t: Translate,
-  client: SdpApiClient
+  client: SdpClient
 ) {
   const [instance, channels, wallets, tokens] = await Promise.all([
     loadInstance(client),
@@ -84,14 +85,14 @@ async function loadPrivateChannelDetail(
 export default async function PrivateChannelDetailPage({
   params,
 }: {
-  params: Promise<{ projectId: string; instanceId: string; channelId: string }>;
+  params: Promise<{ instanceId: string; channelId: string }>;
 }) {
   await requirePrivateChannelsAccess();
 
-  const { projectId, instanceId, channelId } = await params;
-  const [t, client] = await Promise.all([
+  const [{ instanceId, channelId }, t, client] = await Promise.all([
+    params,
     getTranslations(),
-    createProjectBoundSdpApiClient(projectId),
+    createSdpApiClient(),
   ]);
   const result = await loadPrivateChannelDetail(instanceId, channelId, t, client);
   if (!result.ok) return <PrivateChannelsLoadError message={result.error} />;

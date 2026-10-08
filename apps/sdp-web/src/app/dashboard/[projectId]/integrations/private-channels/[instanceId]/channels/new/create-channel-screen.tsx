@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { createChannelAction } from "../../../channels/actions";
 import { privateChannelPath, privateChannelsInstancePath } from "../../../private-channels-routes";
 
@@ -29,7 +29,6 @@ export function CreateChannelScreen({
 }) {
   const router = useRouter();
   const t = useTranslations();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -40,7 +39,7 @@ export function CreateChannelScreen({
     if (!trimmedName || isCreating) return;
 
     startCreating(async () => {
-      const result = await createChannelAction(projectId, { name: trimmedName, description });
+      const result = await createChannelAction({ name: trimmedName, description });
       if (!result.ok) {
         toast.error(result.message);
         return;

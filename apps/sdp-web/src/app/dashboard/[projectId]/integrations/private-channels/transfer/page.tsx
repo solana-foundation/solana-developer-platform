@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
-import { projectHref } from "@/lib/dashboard-project-path";
 import {
   fetchPrivateChannelPrincipals,
   fetchPrivateChannels,
@@ -9,7 +8,7 @@ import {
   fetchSignableCustodyWallets,
   fetchVerifiedWallets,
 } from "@/lib/private-channels";
-import { createProjectBoundSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
+import { createSdpApiClient, extractSdpApiErrorMessage, requestProjectHref } from "@/lib/sdp-api";
 import {
   PRIVATE_CHANNELS_SETUP_PATH,
   requirePrivateChannelsAccess,
@@ -23,22 +22,17 @@ import {
   intersectVerifiedSourceWallets,
 } from "./transfer-page-data";
 
-export default async function PrivateChannelsTransferPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function PrivateChannelsTransferPage() {
   await requirePrivateChannelsAccess();
 
-  const { projectId } = await params;
   const t = await getTranslations();
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
   const instance = await loadInstance(client);
   if (!instance.ok) {
     return <PrivateChannelsLoadError message={instance.error} />;
   }
   if (!instance.data?.isActive) {
-    redirect(projectHref(projectId, PRIVATE_CHANNELS_SETUP_PATH));
+    redirect(await requestProjectHref(PRIVATE_CHANNELS_SETUP_PATH));
   }
 
   let loadError: string | undefined;

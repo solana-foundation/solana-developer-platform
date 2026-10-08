@@ -3,13 +3,13 @@ import { fetchDashboardPaymentTransfers } from "@/app/dashboard/[projectId]/paym
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient, proxyFailure, proxyToSdpApi } from "@/lib/sdp-api";
+import { createSdpApiClient, proxyFailure, proxyToSdpApi } from "@/lib/sdp-api";
 
 /**
  * Not a pure proxy: without a direct filter this aggregates transfers via
  * fetchDashboardPaymentTransfers, so that branch builds its own client and
- * must repeat proxyToSdpApi's missing-project 400 up front from the
- * `x-project-id` header the calling tab sent.
+ * must repeat proxyToSdpApi's missing-project 400 up front — otherwise
+ * createSdpApiClient's throw would surface as a 500.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -33,14 +33,12 @@ export async function GET(request: Request) {
 
   const trace = createTimedTrace("route.dashboard.payments.transfers.get", request);
 
-  const projectId = request.headers.get(PROJECT_HEADER_NAME);
-  if (projectId === null) {
+  if (request.headers.get(PROJECT_HEADER_NAME) === null) {
     return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
   }
 
   try {
-    const apiClient = await createProjectBoundSdpApiClient(
-      projectId,
+    const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.payments.transfers.api")
     );
     const pageSize = Number.parseInt(url.searchParams.get("pageSize") ?? "20", 10);

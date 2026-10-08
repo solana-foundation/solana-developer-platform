@@ -13,8 +13,12 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import {
+  createSdpApiClient,
+  requestProjectHref,
+  requestProjectId,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
 import {
   type ApiKeyAuthoringDraft,
   type ApiKeyAuthoringMode,
@@ -42,7 +46,7 @@ function parsePositiveInt(value: FormDataEntryValue | null, fallback: number): n
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-async function setFlash(projectId: string, flash: ApiKeyFlash) {
+async function setFlash(flash: ApiKeyFlash) {
   // The flash can carry a freshly generated API key secret, so it is sealed
   // (encrypted) and bound to the Clerk session that created it. Without an
   // authenticated session there is nobody to deliver it to — fail closed
@@ -59,7 +63,7 @@ async function setFlash(projectId: string, flash: ApiKeyFlash) {
   }
 
   const jar = await cookies();
-  jar.set(API_KEY_FLASH_COOKIE, sealed, apiKeyFlashCookieOptions(projectId, maxAge));
+  jar.set(API_KEY_FLASH_COOKIE, sealed, apiKeyFlashCookieOptions(await requestProjectId(), maxAge));
 }
 
 function extractErrorMessage(error: unknown): string {
@@ -292,14 +296,11 @@ function normalizeDeactivateApiKeyInput(input: {
   };
 }
 
-async function deactivateApiKeyRequest(
-  projectId: string,
-  input: {
-    keyId: string;
-    keyName: string;
-    confirmation: string;
-  }
-): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+async function deactivateApiKeyRequest(input: {
+  keyId: string;
+  keyName: string;
+  confirmation: string;
+}): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   const t = await getTranslations();
   const { keyId, keyName, confirmation } = normalizeDeactivateApiKeyInput(input);
 
@@ -332,7 +333,7 @@ async function deactivateApiKeyRequest(
   }
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     await client.fetch(`/v1/api-keys/${keyId}`, {
       method: "DELETE",
       body: JSON.stringify({
@@ -353,7 +354,6 @@ async function deactivateApiKeyRequest(
 }
 
 export async function saveApiKeyAuthoringAction(
-  projectId: string,
   input: SaveApiKeyAuthoringInput
 ): Promise<SaveApiKeyAuthoringResult> {
   const t = await getTranslations();
@@ -380,7 +380,7 @@ export async function saveApiKeyAuthoringAction(
   const policiesInReleaseChannel = isModuleInDeploymentReleaseChannel("policies");
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
 
     if (input.mode === "create") {
       const createIntent = getPolicyBindingIntent("create", null, input.draft, {
@@ -420,14 +420,14 @@ export async function saveApiKeyAuthoringAction(
         throw error;
       }
 
-      await setFlash(projectId, {
+      await setFlash({
         level: "success",
         message: t("DashboardCustody.apiKeyCreated", { name: created.apiKey.name }),
         key: created.apiKey.key,
         apiKeyId: created.apiKey.id,
         keyPrefix: created.apiKey.keyPrefix,
       });
-      revalidatePath(projectHref(projectId, API_KEYS_PAGE_PATH), "page");
+      revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
       return {
         ok: true,
         message: t("DashboardCustody.apiKeyCreated", { name: created.apiKey.name }),
@@ -482,13 +482,13 @@ export async function saveApiKeyAuthoringAction(
       walletPayload,
     });
 
-    await setFlash(projectId, {
+    await setFlash({
       level: "success",
       message: t("DashboardCustody.apiKeyUpdated", { name: input.draft.name.trim() }),
     });
-    revalidatePath(projectHref(projectId, API_KEYS_PAGE_PATH), "page");
+    revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
     revalidatePath(
-      projectHref(projectId, `${API_KEYS_PAGE_PATH}/${encodeURIComponent(keyId)}/edit`),
+      await requestProjectHref(`${API_KEYS_PAGE_PATH}/${encodeURIComponent(keyId)}/edit`),
       "page"
     );
     return {
@@ -503,22 +503,22 @@ export async function saveApiKeyAuthoringAction(
   }
 }
 
-export async function rotateApiKeyAction(projectId: string, formData: FormData) {
+export async function rotateApiKeyAction(formData: FormData) {
   const t = await getTranslations();
   const locale = await getRequestLocale();
   const keyId = String(formData.get("keyId") ?? "").trim();
   const gracePeriodHours = Math.min(168, Math.max(0, parsePositiveInt(formData.get("grace"), 24)));
 
   if (!keyId) {
-    await setFlash(projectId, {
+    await setFlash({
       level: "error",
       message: t("DashboardCustody.missingApiKeyIdForRotation"),
     });
-    redirect(projectHref(projectId, API_KEYS_PAGE_PATH));
+    redirect(await requestProjectHref(API_KEYS_PAGE_PATH));
   }
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const response = await client.fetch<{
       apiKey: {
         id: string;
@@ -535,7 +535,7 @@ export async function rotateApiKeyAction(projectId: string, formData: FormData) 
       body: JSON.stringify({ gracePeriodHours }),
     });
 
-    await setFlash(projectId, {
+    await setFlash({
       level: "success",
       message: t("DashboardCustody.apiKeyRotated", {
         deadline: new Date(response.previousKey.rotationDeadline).toLocaleString(locale),
@@ -545,43 +545,40 @@ export async function rotateApiKeyAction(projectId: string, formData: FormData) 
       keyPrefix: response.apiKey.keyPrefix,
     });
   } catch (error) {
-    await setFlash(projectId, {
+    await setFlash({
       level: "error",
       message: t("DashboardCustody.apiKeyRotateFailed", { error: extractErrorMessage(error) }),
     });
   }
 
-  revalidatePath(projectHref(projectId, API_KEYS_PAGE_PATH), "page");
-  redirect(projectHref(projectId, API_KEYS_PAGE_PATH));
+  revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
+  redirect(await requestProjectHref(API_KEYS_PAGE_PATH));
 }
 
-export async function deactivateApiKeyAction(projectId: string, formData: FormData) {
-  const result = await deactivateApiKeyRequest(projectId, {
+export async function deactivateApiKeyAction(formData: FormData) {
+  const result = await deactivateApiKeyRequest({
     keyId: String(formData.get("keyId") ?? ""),
     keyName: String(formData.get("keyName") ?? ""),
     confirmation: String(formData.get("confirmation") ?? ""),
   });
 
-  await setFlash(projectId, {
+  await setFlash({
     level: result.ok ? "success" : "error",
     message: result.message,
   });
 
-  revalidatePath(projectHref(projectId, API_KEYS_PAGE_PATH), "page");
-  redirect(projectHref(projectId, API_KEYS_PAGE_PATH));
+  revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
+  redirect(await requestProjectHref(API_KEYS_PAGE_PATH));
 }
 
-export async function deactivateApiKeyInlineAction(
-  projectId: string,
-  input: {
-    keyId: string;
-    keyName: string;
-    confirmation: string;
-  }
-): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
-  const result = await deactivateApiKeyRequest(projectId, input);
+export async function deactivateApiKeyInlineAction(input: {
+  keyId: string;
+  keyName: string;
+  confirmation: string;
+}): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+  const result = await deactivateApiKeyRequest(input);
   if (result.ok) {
-    revalidatePath(projectHref(projectId, API_KEYS_PAGE_PATH), "page");
+    revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
   }
 
   return result;

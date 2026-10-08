@@ -20,7 +20,7 @@ import {
   filterEnabledRampProviderAccess,
 } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
-import type { SdpApiClient } from "@/lib/sdp-api";
+import { requestProjectId, type SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparties } from "./counterparty/counterparty-page.data";
 import {
   PAYMENT_COMMAND_ACTION_DESTINATIONS,
@@ -69,8 +69,8 @@ function SectionHeading({ title }: { title: string }) {
   return <h2 className="text-base font-semibold tracking-[-0.01em] text-primary">{title}</h2>;
 }
 
-async function MoveMoneyActions({ projectId }: { projectId: string }) {
-  const t = await getTranslations();
+async function MoveMoneyActions() {
+  const [t, projectId] = await Promise.all([getTranslations(), requestProjectId()]);
   const actions = [
     {
       href: PAYMENT_COMMAND_ACTION_DESTINATIONS.pay,
@@ -229,17 +229,12 @@ function compactType(transfer: PaymentTransferSummary): string {
   return "Transfer";
 }
 
-async function Activity({
-  apiClientPromise,
-  projectId,
-}: {
-  apiClientPromise: ApiClientPromise;
-  projectId: string;
-}) {
-  const [{ request }, t, locale] = await Promise.all([
+async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromise }) {
+  const [{ request }, t, locale, projectId] = await Promise.all([
     apiClientPromise,
     getTranslations(),
     getRequestLocale(),
+    requestProjectId(),
   ]);
   const trace = createTimedTrace("dashboard.payments.overview.activity");
   const [result, issuedTokenSymbolsResult] = await Promise.all([
@@ -382,14 +377,12 @@ async function Activity({
   );
 }
 
-async function UpcomingOpen({
-  apiClientPromise,
-  projectId,
-}: {
-  apiClientPromise: ApiClientPromise;
-  projectId: string;
-}) {
-  const [{ request }, t] = await Promise.all([apiClientPromise, getTranslations()]);
+async function UpcomingOpen({ apiClientPromise }: { apiClientPromise: ApiClientPromise }) {
+  const [{ request }, t, projectId] = await Promise.all([
+    apiClientPromise,
+    getTranslations(),
+    requestProjectId(),
+  ]);
   const trace = createTimedTrace("dashboard.payments.overview.upcoming");
   const [recurring, requests] = await trace.step("fetch_open_work", () =>
     Promise.all([
@@ -447,13 +440,15 @@ async function UpcomingOpen({
 async function PaymentNetwork({
   apiClientPromise,
   organizationId,
-  projectId,
 }: {
   apiClientPromise: ApiClientPromise;
   organizationId: string;
-  projectId: string;
 }) {
-  const [{ request }, t] = await Promise.all([apiClientPromise, getTranslations()]);
+  const [{ request }, t, projectId] = await Promise.all([
+    apiClientPromise,
+    getTranslations(),
+    requestProjectId(),
+  ]);
   const trace = createTimedTrace("dashboard.payments.overview.network");
   const [[result, providerAccess], enabledRampProviders] = await Promise.all([
     trace.step("fetch_network_summary", () =>
@@ -519,34 +514,28 @@ async function PaymentNetwork({
 export function PaymentsCommandCenter({
   apiClientPromise,
   organizationId,
-  projectId,
 }: {
   apiClientPromise: ApiClientPromise;
   organizationId: string;
-  projectId: string;
 }) {
   return (
     <div
       className="grid content-start gap-4 xl:grid-cols-[minmax(0,1.63fr)_minmax(20rem,1fr)]"
       data-payments-command-center
     >
-      <MoveMoneyActions projectId={projectId} />
+      <MoveMoneyActions />
       <Suspense fallback={<PaymentsBalanceSkeleton />}>
         <AvailableBalance apiClientPromise={apiClientPromise} />
       </Suspense>
       <Suspense fallback={<PaymentsActivitySkeleton />}>
-        <Activity apiClientPromise={apiClientPromise} projectId={projectId} />
+        <Activity apiClientPromise={apiClientPromise} />
       </Suspense>
       <div className="grid min-w-0 content-start gap-4">
         <Suspense fallback={<PaymentsUpcomingSkeleton />}>
-          <UpcomingOpen apiClientPromise={apiClientPromise} projectId={projectId} />
+          <UpcomingOpen apiClientPromise={apiClientPromise} />
         </Suspense>
         <Suspense fallback={<PaymentsNetworkSkeleton />}>
-          <PaymentNetwork
-            apiClientPromise={apiClientPromise}
-            organizationId={organizationId}
-            projectId={projectId}
-          />
+          <PaymentNetwork apiClientPromise={apiClientPromise} organizationId={organizationId} />
         </Suspense>
       </div>
     </div>

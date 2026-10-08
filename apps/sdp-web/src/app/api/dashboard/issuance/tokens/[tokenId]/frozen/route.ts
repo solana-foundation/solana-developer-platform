@@ -1,21 +1,15 @@
 import type { FrozenAccount } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient, proxyFailure } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 
 export async function GET(request: Request, { params }: { params: Promise<{ tokenId: string }> }) {
   const trace = createTimedTrace("route.dashboard.issuance.token.frozen", request);
   const { tokenId } = await params;
 
   try {
-    const projectId = request.headers.get(PROJECT_HEADER_NAME);
-    if (projectId === null) {
-      return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
-    }
-    const apiClient = await createProjectBoundSdpApiClient(
-      projectId,
+    const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.issuance.token.frozen.api")
     );
     const response = await apiClient.request(

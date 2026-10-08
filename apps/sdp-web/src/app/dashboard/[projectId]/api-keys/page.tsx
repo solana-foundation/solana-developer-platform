@@ -15,21 +15,16 @@ import {
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { projectHref } from "@/lib/dashboard-project-path";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../payments/payments-page.data";
 import { ApiKeyFlashSurface } from "./api-key-flash-surface";
 import { type ApiKeyRecord, ApiKeysTableClient } from "./api-keys-table-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function ApiKeysPage({ params }: { params: Promise<{ projectId: string }> }) {
-  const [{ projectId }, t, { userId, orgId, orgRole }] = await Promise.all([
-    params,
-    getTranslations(),
-    auth(),
-  ]);
+export default async function ApiKeysPage() {
+  const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -44,7 +39,7 @@ export default async function ApiKeysPage({ params }: { params: Promise<{ projec
 
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
-      createProjectBoundSdpApiClient(projectId, trace.childContext("dashboard.api_keys.api"))
+      createSdpApiClient(trace.childContext("dashboard.api_keys.api"))
     );
     const [apiKeysResponse, walletsResponse] = await Promise.all([
       trace.step("fetch_api_keys", () =>
@@ -84,7 +79,7 @@ export default async function ApiKeysPage({ params }: { params: Promise<{ projec
           {dashboardAccess.capabilities.canManageApiKeys && apiKeys.length > 0 ? (
             <CardAction>
               <Button asChild>
-                <Link href={projectHref(projectId, "/dashboard/api-keys/new")}>
+                <Link href={await requestProjectHref("/dashboard/api-keys/new")}>
                   {t("DashboardCustody.newApiKey")}
                 </Link>
               </Button>

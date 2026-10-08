@@ -16,7 +16,6 @@ import { Select, SelectItem } from "@/components/ui/select";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import {
@@ -157,7 +156,6 @@ function TransferFormState({
   tokens,
 }: Omit<TransferFormProps, "scopeKey">) {
   const t = useTranslations();
-  const projectId = useProjectId();
   const [state, updateState] = useReducer(transferFormReducer, {
     channelId: channels[0]?.id ?? "",
     walletId: sourceWallets[0]?.walletId ?? "",
@@ -219,7 +217,7 @@ function TransferFormState({
     updateState({ recipientLoad: { status: "loading" } });
     void (async () => {
       try {
-        const result = await fetchTransferRecipientsAction(projectId, channelId);
+        const result = await fetchTransferRecipientsAction(channelId);
         if (!active || request !== recipientRequest.current) {
           return;
         }
@@ -251,7 +249,7 @@ function TransferFormState({
     return () => {
       active = false;
     };
-  }, [projectId, channelId, channels.length, recipientReload, sourceWallets.length, t]);
+  }, [channelId, channels.length, recipientReload, sourceWallets.length, t]);
 
   /**
    * Switching the source wallet to the one already chosen as recipient drops that
@@ -274,13 +272,13 @@ function TransferFormState({
     }
     let active = true;
     updateState({ balances: { channel: null, onChain: null } });
-    fetchWalletBalancesAction(projectId, walletId, mint || undefined).then((result) => {
+    fetchWalletBalancesAction(walletId, mint || undefined).then((result) => {
       if (active) updateState({ balances: result });
     });
     return () => {
       active = false;
     };
-  }, [projectId, walletId, mint, balanceRefetchKey]);
+  }, [walletId, mint, balanceRefetchKey]);
 
   const selectedRecipient = recipientOptions.find(
     (recipient) => recipient.id === recipientVerifiedWalletId
@@ -361,7 +359,7 @@ function TransferFormState({
 
     startTransition(async () => {
       try {
-        const result = await createTransferAction(projectId, { ...requestPayload, idempotencyKey });
+        const result = await createTransferAction({ ...requestPayload, idempotencyKey });
         applyIdempotencyKeyOutcome(
           privateChannelTransferIdempotencyKeyStore,
           fingerprint,

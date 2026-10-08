@@ -10,7 +10,8 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import {
   createOrgSdpApiClient,
-  createProjectBoundSdpApiClient,
+  createSdpApiClient,
+  requestProjectId,
   type SdpApiClient,
 } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
@@ -144,7 +145,7 @@ export default async function WalletPolicyPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ projectId: string; walletId: string }>;
+  params: Promise<{ walletId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { userId, orgId } = await auth();
@@ -155,10 +156,11 @@ export default async function WalletPolicyPage({
     redirect("/dashboard");
   }
 
-  const [{ projectId, walletId }, resolvedSearchParams] = await Promise.all([params, searchParams]);
+  const [{ walletId }, resolvedSearchParams] = await Promise.all([params, searchParams]);
   const resolvedWalletId = decodeURIComponent(walletId);
   const initialRevisionId = firstSearchParam(resolvedSearchParams.revision);
-  const apiClient = await createProjectBoundSdpApiClient(projectId);
+  const projectId = await requestProjectId();
+  const apiClient = await createSdpApiClient();
   const [wallet, policyResult, walletAssets, issuedTokens, complianceScreeningEnabled] =
     await Promise.all([
       getWalletDetail(apiClient.request, resolvedWalletId),

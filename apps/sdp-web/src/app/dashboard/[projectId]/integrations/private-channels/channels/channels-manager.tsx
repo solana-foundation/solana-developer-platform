@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { createChannelAction, deleteChannelAction } from "./actions";
 
 interface Props {
@@ -27,7 +26,6 @@ export function ChannelsManager({ initialChannels }: Props) {
   const [isCreating, startCreate] = useTransition();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const t = useTranslations();
-  const projectId = useProjectId();
 
   const channels = initialChannels;
 
@@ -38,7 +36,7 @@ export function ChannelsManager({ initialChannels }: Props) {
       return;
     }
     startCreate(async () => {
-      const result = await createChannelAction(projectId, { name: trimmed, description });
+      const result = await createChannelAction({ name: trimmed, description });
       if (result.ok) {
         toast.success(
           t("DashboardPrivateChannels.channels.createSuccess", { name: result.channel.name })
@@ -54,7 +52,7 @@ export function ChannelsManager({ initialChannels }: Props) {
   function handleDelete(channel: PrivateChannelDto) {
     setDeletingId(channel.id);
     startCreate(async () => {
-      const result = await deleteChannelAction(projectId, channel.id);
+      const result = await deleteChannelAction(channel.id);
       if (result.ok) {
         toast.success(t("DashboardPrivateChannels.channels.deleteSuccess", { name: channel.name }));
       } else {

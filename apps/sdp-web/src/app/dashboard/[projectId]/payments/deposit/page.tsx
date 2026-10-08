@@ -4,11 +4,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { loadPaymentsActionPageData } from "../ramps/payments-action-page.server";
 import { PaymentsActionPage } from "../ramps/ramp-action-page";
 
-export default async function PaymentsDepositPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function PaymentsDepositPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -17,7 +13,6 @@ export default async function PaymentsDepositPage({
     redirect("/dashboard");
   }
 
-  const { projectId } = await params;
-  const actionPageData = await loadPaymentsActionPageData(projectId);
+  const actionPageData = await loadPaymentsActionPageData();
   return <PaymentsActionPage mode="receive" wallets={[]} walletsError={null} {...actionPageData} />;
 }

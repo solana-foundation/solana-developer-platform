@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import {
   fetchApprovalApiKeyNames,
   fetchApprovalPolicyEvaluation,
@@ -15,11 +15,11 @@ import { ApprovalRequestDetail } from "./approval-request-detail";
 export const dynamic = "force-dynamic";
 
 type PageContext = {
-  params: Promise<{ projectId: string; approvalRequestId: string }>;
+  params: Promise<{ approvalRequestId: string }>;
 };
 
 export default async function ApprovalRequestPage({ params }: PageContext) {
-  const [t, { userId, orgId, orgRole }, { projectId, approvalRequestId }] = await Promise.all([
+  const [t, { userId, orgId, orgRole }, { approvalRequestId }] = await Promise.all([
     getTranslations(),
     auth(),
     params,
@@ -41,7 +41,7 @@ export default async function ApprovalRequestPage({ params }: PageContext) {
     );
   }
 
-  const apiClient = await createProjectBoundSdpApiClient(projectId);
+  const apiClient = await createSdpApiClient();
   const apiKeyNamesPromise = fetchApprovalApiKeyNames(apiClient);
   // The primary request can exit through notFound() before this speculative
   // lookup is awaited. Keep that early exit from leaving a rejected promise

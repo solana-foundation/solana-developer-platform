@@ -1,8 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import type { ListProjectsResponse, Project } from "@sdp/types";
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
+import { projectHref } from "./dashboard-project-path";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -238,43 +240,64 @@ function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {
   };
 }
 
+const getRequestProjectId = cache(async (): Promise<string> => {
+  const projectId = (await headers()).get(PROJECT_HEADER_NAME);
+  if (projectId === null) {
+    throw new Error(
+      `${PROJECT_HEADER_NAME} missing: Project-scoped server code runs only for a /dashboard/<projectId> page or action, or a dashboardRequest call`
+    );
+  }
+  return projectId;
+});
+
+/**
+ * The Project the current request acts on: the one its tab renders. proxy.ts
+ * sets `x-project-id` from the URL for page renders and server actions (Next
+ * posts actions to the tab's URL); browser calls to `/api/*` send it through
+ * `dashboardRequest`. There is no other source and no default (HOO-1965).
+ *
+ * @returns The request's Project id.
+ */
+export function requestProjectId(): Promise<string> {
+  return getRequestProjectId();
+}
+
+/**
+ * Server-side link to a dashboard page inside the request's Project, for
+ * `redirect`, `revalidatePath` and server-rendered hrefs.
+ *
+ * @param dashboardPath - Project-less dashboard path, e.g. `/dashboard/payments`.
+ * @returns The same path under the request's Project.
+ */
+export async function requestProjectHref(dashboardPath: string): Promise<string> {
+  return projectHref(await requestProjectId(), dashboardPath);
+}
+
 /**
  * Org- and project-scoped clients for one request, built from one request-bound Clerk
  * token so the same token is not acquired twice, and without a project header on the
  * organization client.
  *
- * @param params.projectId - Project the page renders, from its route params.
- * @param params.organizationTraceContext - Trace for the organization client's requests.
- * @param params.projectTraceContext - Trace for the project client's requests.
- * @returns The organization client and the client pinned to `projectId`.
+ * @param traces.organizationTraceContext - Trace for the organization client's requests.
+ * @param traces.projectTraceContext - Trace for the project client's requests.
+ * @returns The organization client and the client scoped to the request's Project.
  */
-export async function createRequestScopedSdpApiClients({
-  projectId,
-  organizationTraceContext,
-  projectTraceContext,
-}: {
-  projectId: string;
+export async function createRequestScopedSdpApiClients(traces: {
   organizationTraceContext?: TraceContext;
   projectTraceContext?: TraceContext;
 }): Promise<{
   organizationClient: SdpApiClient;
   projectClient: SdpApiClient;
 }> {
-  const token = await getRequestClerkToken();
+  const [token, projectId] = await Promise.all([getRequestClerkToken(), requestProjectId()]);
   return {
     organizationClient: assembleSdpApiClient(
-      createSdpApiRequest(token, null, organizationTraceContext)
+      createSdpApiRequest(token, null, traces.organizationTraceContext)
     ),
-    projectClient: assembleSdpApiClient(createSdpApiRequest(token, projectId, projectTraceContext)),
+    projectClient: assembleSdpApiClient(
+      createSdpApiRequest(token, projectId, traces.projectTraceContext)
+    ),
   };
-}
-
-async function buildSdpApiClient(
-  projectId: string | null,
-  traceContext?: TraceContext
-): Promise<SdpApiClient> {
-  const token = await getRequestClerkToken();
-  return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
 }
 
 /**
@@ -286,21 +309,16 @@ export function createTokenSdpApiClient(token: string): SdpApiClient {
 }
 
 /**
- * Creates a client pinned to the project the calling tab renders, for route
- * handlers and server actions. The id is relayed upstream as `x-project-id`
- * unchecked: sdp-api's project context is the only authority on whether this
- * caller may act on it, so a project the caller cannot reach comes back as the
- * API's own refusal rather than being guessed at here (HOO-1965).
+ * Creates the SDP API client for the request's Project (see `requestProjectId`).
+ * The id is relayed upstream unchecked: sdp-api's project context is the only
+ * authority on whether this caller may act on it. Org-scoped endpoints go
+ * through `createOrgSdpApiClient` instead.
  *
- * @param projectId - Project the tab renders, from its URL or request header.
  * @param traceContext - Trace to attach the upstream requests to.
- * @returns A client whose every request carries `projectId`.
+ * @returns A client whose every request carries the request's Project.
  */
-export async function createProjectBoundSdpApiClient(
-  projectId: string,
-  traceContext?: TraceContext
-): Promise<SdpApiClient> {
-  const token = await getRequestClerkToken();
+export async function createSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
+  const [token, projectId] = await Promise.all([getRequestClerkToken(), requestProjectId()]);
   return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
 }
 
@@ -309,7 +327,9 @@ export async function createProjectBoundSdpApiClient(
  * that exist outside any project: projects, members, allowlist, organizations.
  */
 export async function createOrgSdpApiClient(traceContext?: TraceContext): Promise<SdpApiClient> {
-  return buildSdpApiClient(null, traceContext);
+  return assembleSdpApiClient(
+    createSdpApiRequest(await getRequestClerkToken(), null, traceContext)
+  );
 }
 
 export function proxyFailure(
@@ -365,16 +385,12 @@ export async function proxyToSdpApi({
   if (!orgId) {
     return proxyFailure(trace, 403, "Active organization required");
   }
-  const projectId = request.headers.get(PROJECT_HEADER_NAME);
-  if (!projectId) {
+  if (request.headers.get(PROJECT_HEADER_NAME) === null) {
     return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
   }
 
   try {
-    const apiClient = await createProjectBoundSdpApiClient(
-      projectId,
-      trace.childContext(`${traceSource}.api`)
-    );
+    const apiClient = await createSdpApiClient(trace.childContext(`${traceSource}.api`));
     const method = request.method;
     const rawBody = method === "GET" || method === "HEAD" ? "" : await request.text();
     const response = await apiClient.request(path, {

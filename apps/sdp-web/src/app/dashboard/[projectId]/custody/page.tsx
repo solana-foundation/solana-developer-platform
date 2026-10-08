@@ -13,10 +13,13 @@ import {
 import { WalletsOverviewSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { projectHref } from "@/lib/dashboard-project-path";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
+import {
+  createRequestScopedSdpApiClients,
+  requestProjectHref,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 import type { OnboardingStatusResponse } from "../onboarding-status";
 import { WalletsWorkspace } from "./wallets-workspace";
@@ -61,7 +64,7 @@ async function getCustodyWallets(
   return json.data?.wallets ?? [];
 }
 
-export default async function CustodyPage({ params }: { params: Promise<{ projectId: string }> }) {
+export default async function CustodyPage() {
   const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -70,13 +73,11 @@ export default async function CustodyPage({ params }: { params: Promise<{ projec
     redirect("/dashboard");
   }
 
-  const { projectId } = await params;
   const trace = createTimedTrace("dashboard.custody.page");
 
   try {
     const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
       createRequestScopedSdpApiClients({
-        projectId,
         organizationTraceContext: trace.childContext("dashboard.custody.org.api"),
         projectTraceContext: trace.childContext("dashboard.custody.api"),
       })
@@ -92,7 +93,7 @@ export default async function CustodyPage({ params }: { params: Promise<{ projec
       });
 
       redirect(
-        `${WORKSPACE_LOADING_PATH}?return_to=${encodeURIComponent(projectHref(projectId, "/dashboard/wallets"))}`
+        `${WORKSPACE_LOADING_PATH}?return_to=${encodeURIComponent(await requestProjectHref("/dashboard/wallets"))}`
       );
     }
 

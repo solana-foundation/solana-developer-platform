@@ -7,7 +7,6 @@ import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { privateChannelsQueryKeys } from "../private-channels-query-key";
@@ -47,11 +46,10 @@ export function DepositProgress({
 }) {
   const cluster = useSolanaCluster();
   const t = useTranslations();
-  const projectId = useProjectId();
   const { data = initial } = useSWR(
     privateChannelsQueryKeys.deposit(initial.id),
     async () => {
-      const result = await fetchDepositAction(projectId, initial.id);
+      const result = await fetchDepositAction(initial.id);
       if (result === null) throw new Error("Private channel status is unavailable");
       return result;
     },

@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 
 export function MemberActions({
   memberId,
@@ -29,7 +28,6 @@ export function MemberActions({
 }) {
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
@@ -43,7 +41,7 @@ export function MemberActions({
 
   const confirmRemove = () => {
     startTransition(async () => {
-      const result = await removeMember(projectId, memberId);
+      const result = await removeMember(memberId);
 
       if (!result.ok) {
         toast.error(t("Shared.members.removeFailed", { error: result.error }));

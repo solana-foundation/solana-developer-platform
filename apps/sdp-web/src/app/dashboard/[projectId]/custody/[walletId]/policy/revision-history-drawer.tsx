@@ -15,7 +15,6 @@ import {
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { replaceDashboardSearchParams } from "@/lib/dashboard-url-state";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { custodyQueryKeys } from "../../custody-query-key";
 import { PolicyRevisionExplorer } from "./policy-revision-explorer";
 import { fetchWalletRevisionHistoryAction } from "./revision-history.actions";
@@ -93,14 +92,13 @@ export function RevisionHistoryDrawer({
   trigger?: ReactElement;
 }) {
   const t = useTranslations();
-  const projectId = useProjectId();
   const [open, setOpen] = useState(Boolean(initialRevisionId));
   const [selectedRevisionId, setSelectedRevisionId] = useState(
     initialRevisionId && initialRevisionId !== "latest" ? initialRevisionId : defaultRevisionId
   );
   const { data } = useSWR(
     open && !preloaded ? custodyQueryKeys.walletPolicyRevisions({ walletId }) : null,
-    () => fetchWalletRevisionHistoryAction(projectId, walletId),
+    () => fetchWalletRevisionHistoryAction(walletId),
     { revalidateOnFocus: false, revalidateIfStale: false, revalidateOnReconnect: false }
   );
   const result = preloaded ? ({ ok: true, ...preloaded } as const) : data;

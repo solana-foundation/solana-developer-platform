@@ -90,7 +90,7 @@ export function CounterpartyCreateProvider({
       router.refresh();
       router.push(href("/dashboard/payments/counterparty"));
     },
-    [onCreated, router]
+    [onCreated, router, href]
   );
 
   // Saves the address on the contact just created. A failure keeps the form open on it (the

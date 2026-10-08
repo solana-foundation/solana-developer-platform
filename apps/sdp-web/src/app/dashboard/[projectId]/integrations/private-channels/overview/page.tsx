@@ -10,8 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getTranslations } from "@/i18n/server";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
 import {
@@ -26,8 +25,9 @@ import { ChannelDirectoryRow } from "./channel-directory-row";
 import { CreateChannelButton } from "./create-channel-button";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
+type SdpClient = Awaited<ReturnType<typeof createSdpApiClient>>;
 
-async function loadDirectory(client: SdpApiClient, t: Translate) {
+async function loadDirectory(client: SdpClient, t: Translate) {
   const instance = await loadInstance(client);
   if (!instance.ok) return { ok: false, error: instance.error } as const;
 
@@ -79,18 +79,10 @@ async function loadDirectory(client: SdpApiClient, t: Translate) {
   } as const;
 }
 
-export default async function PrivateChannelsOverviewPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function PrivateChannelsOverviewPage() {
   await requirePrivateChannelsAccess();
 
-  const { projectId } = await params;
-  const [t, client] = await Promise.all([
-    getTranslations(),
-    createProjectBoundSdpApiClient(projectId),
-  ]);
+  const [t, client] = await Promise.all([getTranslations(), createSdpApiClient()]);
   const result = await loadDirectory(client, t);
   if (!result.ok) return <PrivateChannelsLoadError message={result.error} />;
   const { activeInstance, rows } = result.data;
@@ -114,7 +106,7 @@ export default async function PrivateChannelsOverviewPage({
             <CreateChannelButton instanceId={activeInstance.id} />
           ) : (
             <Button asChild>
-              <Link href={projectHref(projectId, PRIVATE_CHANNELS_SETUP_PATH)}>
+              <Link href={await requestProjectHref(PRIVATE_CHANNELS_SETUP_PATH)}>
                 {t("DashboardPrivateChannels.directory.setupChannel")}
               </Link>
             </Button>

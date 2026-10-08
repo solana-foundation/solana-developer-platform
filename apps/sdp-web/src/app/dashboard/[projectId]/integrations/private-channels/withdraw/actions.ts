@@ -3,14 +3,14 @@
 import type { PrivateChannelWithdrawal } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import type { MessageKey } from "@/i18n/messages";
-import { projectHref } from "@/lib/dashboard-project-path";
 import {
   createPrivateChannelWithdrawal,
   fetchPrivateChannelWithdrawal,
 } from "@/lib/private-channels";
 import {
-  createProjectBoundSdpApiClient,
+  createSdpApiClient,
   extractSdpApiErrorMessage,
+  requestProjectHref,
   SdpApiResponseError,
 } from "@/lib/sdp-api";
 import { getAmountError } from "../amount-validation";
@@ -43,7 +43,6 @@ export type CreateWithdrawalResult =
   | { ok: false; kind: "server"; message: string; status: number | null };
 
 export async function createWithdrawalAction(
-  projectId: string,
   input: CreateWithdrawalInput
 ): Promise<CreateWithdrawalResult> {
   if (!input.walletId) {
@@ -59,7 +58,7 @@ export async function createWithdrawalAction(
   }
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const withdrawal = await createPrivateChannelWithdrawal(
       client,
       {
@@ -70,7 +69,7 @@ export async function createWithdrawalAction(
       },
       input.idempotencyKey
     );
-    revalidatePath(projectHref(projectId, "/dashboard/integrations/private-channels/withdraw"));
+    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels/withdraw"));
     return { ok: true, withdrawal };
   } catch (error) {
     return {
@@ -83,12 +82,9 @@ export async function createWithdrawalAction(
 }
 
 /** Poll target for the progress view. Returns null on transient failures. */
-export async function fetchWithdrawalAction(
-  projectId: string,
-  id: string
-): Promise<PrivateChannelWithdrawal | null> {
+export async function fetchWithdrawalAction(id: string): Promise<PrivateChannelWithdrawal | null> {
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     return await fetchPrivateChannelWithdrawal(client, id);
   } catch {
     return null;

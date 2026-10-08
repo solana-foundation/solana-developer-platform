@@ -5,7 +5,6 @@ import { Loader2Icon, Undo2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { rollbackCredentialAction } from "./connection-actions";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";
 import { rollbackHoursRemaining } from "./connection-detail.data";
@@ -36,7 +35,6 @@ export function RollbackDialog({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const projectId = useProjectId();
   const { pending, run } = useCustodyAction();
 
   const rollback = lifecycle.rollback;
@@ -59,13 +57,7 @@ export function RollbackDialog({
 
   const handleConfirm = async () => {
     const result = await run(
-      () =>
-        rollbackCredentialAction(
-          projectId,
-          lifecycle.providerCredential.id,
-          provider,
-          connectionId
-        ),
+      () => rollbackCredentialAction(lifecycle.providerCredential.id, provider, connectionId),
       {
         successTitle: t("DashboardCustody.rollbackSuccessTitle"),
         successDescription: t("DashboardCustody.rollbackSuccessDescription", {

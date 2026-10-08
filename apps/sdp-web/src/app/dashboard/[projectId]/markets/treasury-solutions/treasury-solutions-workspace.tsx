@@ -49,7 +49,7 @@ import {
 } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import type { EarnFundingWallet } from "../earn/deposit/earn-funding-wallets";
 import {
   compareUnsignedDecimals,
@@ -1981,8 +1981,7 @@ export function TreasurySolutionsWorkspace({
 }: {
   providerAccess: EarnProviderAccess | null;
 }) {
-  const { sdpEnvironment } = useDashboardWorkspace();
-  const projectId = useProjectId();
+  const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
   const {
     catalogueCluster,
     catalogueStrategies,
@@ -2234,7 +2233,7 @@ export function TreasurySolutionsWorkspace({
       {depositStrategy ? (
         <EarnVaultDepositModal
           onClose={() => setDepositStrategy(null)}
-          projectId={projectId}
+          projectId={selectedProjectId}
           onDeposited={(deposit, intent) => {
             // Two refreshes, for two different moments. This starts an
             // uncached balance read for a fast landing; the watch below reads
@@ -2311,7 +2310,7 @@ export function TreasurySolutionsWorkspace({
           onAsyncRequestSettled={refreshTreasury}
           parSource={withdrawParSource}
           position={withdrawPosition}
-          projectId={projectId}
+          projectId={selectedProjectId}
         />
       ) : null}
 

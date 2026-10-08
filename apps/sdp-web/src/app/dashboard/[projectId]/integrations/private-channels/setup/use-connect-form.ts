@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { privateChannelsInstancePath } from "../private-channels-routes";
 import {
   type ConnectPrivateChannelResult,
@@ -99,7 +99,6 @@ export function useConnectForm({
   const [isUpdating, startUpdating] = useTransition();
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const { instance, values, errors, formError, reactivatePrompt } = state;
 
@@ -166,7 +165,7 @@ export function useConnectForm({
 
   const runTest = () => {
     startTesting(async () => {
-      const result = await testConnectionAction(projectId, {
+      const result = await testConnectionAction({
         gatewayUrl: values.gatewayUrl,
         authUrl: values.authUrl,
         escrowProgramId: values.escrowProgramId,
@@ -195,7 +194,7 @@ export function useConnectForm({
 
   const runConnect = (confirmReactivate = false) => {
     startConnecting(async () => {
-      const result = await connectPrivateChannelAction(projectId, { ...values, confirmReactivate });
+      const result = await connectPrivateChannelAction({ ...values, confirmReactivate });
       applyConnectResult(result);
     });
   };
@@ -203,10 +202,7 @@ export function useConnectForm({
   const runUpdate = () => {
     if (!instance) return;
     startUpdating(async () => {
-      const result = await updatePrivateChannelAction(projectId, {
-        ...values,
-        instanceId: instance.id,
-      });
+      const result = await updatePrivateChannelAction({ ...values, instanceId: instance.id });
       if (result.ok) {
         updateState({
           instance: result.instance,

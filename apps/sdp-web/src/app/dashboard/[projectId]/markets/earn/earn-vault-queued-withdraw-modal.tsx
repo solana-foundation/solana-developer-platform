@@ -62,7 +62,7 @@ interface QueuedWithdrawalModalProps {
   onSubmissionStart?: VaultSubmissionObserver;
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
   position: EarnVaultPosition;
-  projectId: string;
+  projectId: string | null;
   terms: EarnVaultQueuedWithdrawalTerms;
 }
 
@@ -220,7 +220,7 @@ function useQueuedWithdrawalSubmission(options: {
   onSubmissionStart?: VaultSubmissionObserver;
   custodyWalletId: string;
   onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
-  projectId: string;
+  projectId: string | null;
   setError: (error: string | null) => void;
 }) {
   const t = useTranslations();

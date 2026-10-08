@@ -3,24 +3,23 @@ import { hasPermission } from "@sdp/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectId } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
 import { loadEventReferences, loadEvents } from "../private-channels-page.data";
 import { EventsList } from "./events-list";
 
-export default async function PrivateChannelsEventsPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function PrivateChannelsEventsPage() {
   await requirePrivateChannelsAccess();
 
-  const { projectId } = await params;
-  const [t, { orgRole }, client] = await Promise.all([
+  // The same request-scoped resolution the client used: the scope the initial
+  // rows were loaded under. Follow-up loads answer for the same URL Project and
+  // are checked against it, so the feed can never mix projects.
+  const [t, { orgRole }, client, projectId] = await Promise.all([
     getTranslations(),
     auth(),
-    createProjectBoundSdpApiClient(projectId),
+    createSdpApiClient(),
+    requestProjectId(),
   ]);
   const { permissions } = resolveDashboardAccess(orgRole);
   const canViewRawPayload = hasPermission(permissions, "org:admin");

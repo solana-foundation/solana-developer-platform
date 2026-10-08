@@ -40,8 +40,7 @@ import { issuance, policies, privyByok } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { formatDisplayLabel } from "@/lib/utils";
 import { collectDestinationAllowlist, resolveTransferCaps } from "@/lib/wallet-policy-rules";
@@ -212,12 +211,12 @@ async function getOwnedTokenRoutes(request: SdpApiClient["request"]): Promise<Ow
 export default async function WalletDetailPage({
   params,
 }: {
-  params: Promise<{ projectId: string; walletId: string }>;
+  params: Promise<{ walletId: string }>;
 }) {
   const [
     t,
     { userId, orgId, orgRole },
-    { projectId, walletId },
+    { walletId },
     issuanceEnabled,
     policiesEnabled,
     byokEnabled,
@@ -230,7 +229,7 @@ export default async function WalletDetailPage({
   }
 
   const resolvedWalletId = decodeURIComponent(walletId);
-  const apiClient = await createProjectBoundSdpApiClient(projectId);
+  const apiClient = await createSdpApiClient();
   const walletPromise = getWalletDetail(apiClient.request, resolvedWalletId);
   const trackedBalancesPromise = getWalletTrackedBalances(
     apiClient.request,
@@ -354,8 +353,7 @@ export default async function WalletDetailPage({
                   value={connection?.label ?? truncateMiddle(wallet.custodyConnectionId)}
                   href={
                     byokEnabled && canManageCustody
-                      ? projectHref(
-                          projectId,
+                      ? await requestProjectHref(
                           `/dashboard/integrations/${connection?.provider ?? provider ?? "privy"}/connections/${wallet.custodyConnectionId}`
                         )
                       : undefined
@@ -384,7 +382,6 @@ export default async function WalletDetailPage({
       {walletPolicyPromise ? (
         <Suspense fallback={<WalletControlsSkeleton />}>
           <WalletControlsPanel
-            projectId={projectId}
             walletId={resolvedWalletId}
             policyPromise={walletPolicyPromise}
             ownedTokensByMintPromise={ownedTokensByMintPromise}
@@ -582,13 +579,11 @@ function walletPolicyHasRestrictions(policy: PaymentWalletPolicy | null): boolea
 }
 
 async function WalletControlsPanel({
-  projectId,
   walletId,
   policyPromise,
   ownedTokensByMintPromise,
   t,
 }: {
-  projectId: string;
   walletId: string;
   policyPromise: Promise<WalletPolicyResult>;
   ownedTokensByMintPromise: Promise<OwnedTokensByMint>;
@@ -611,8 +606,7 @@ async function WalletControlsPanel({
   const transferCaps = caps
     .map((cap) => `${cap.max} ${resolveTransferTokenLabel(cap.asset, issuedSymbolsByMint)}`)
     .join(", ");
-  const policyHref = projectHref(
-    projectId,
+  const policyHref = await requestProjectHref(
     `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`
   );
 

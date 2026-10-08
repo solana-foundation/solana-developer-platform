@@ -1,9 +1,8 @@
 import type { TokenAllowlistEntry } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient, proxyFailure, proxyToSdpApi } from "@/lib/sdp-api";
+import { createSdpApiClient, proxyToSdpApi } from "@/lib/sdp-api";
 
 // Matches the API's server-side pageSize cap for the allowlist list handler.
 const MAX_PAGE_SIZE = 500;
@@ -27,12 +26,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       ? Math.min(Math.max(pageSizeRaw, 1), MAX_PAGE_SIZE)
       : DEFAULT_PAGE_SIZE;
 
-    const projectId = request.headers.get(PROJECT_HEADER_NAME);
-    if (projectId === null) {
-      return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
-    }
-    const apiClient = await createProjectBoundSdpApiClient(
-      projectId,
+    const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.issuance.token.allowlist.api")
     );
 

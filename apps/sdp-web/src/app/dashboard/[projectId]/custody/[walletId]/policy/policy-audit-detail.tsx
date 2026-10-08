@@ -28,7 +28,7 @@ import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wa
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user-avatar";
-import { projectHref } from "@/lib/dashboard-project-path";
+import { requestProjectHref } from "@/lib/sdp-api";
 import { formatDisplayLabel } from "@/lib/utils";
 import {
   buildPolicyAuditSearchParams,
@@ -50,8 +50,7 @@ import {
 import { PolicyAuditRawDetails } from "./policy-audit-raw-details";
 import { RevisionHistoryDrawer } from "./revision-history-drawer";
 
-export function PolicyAuditDetail({
-  projectId,
+export async function PolicyAuditDetail({
   wallet,
   evaluation,
   revisionHistory,
@@ -62,7 +61,6 @@ export function PolicyAuditDetail({
   locale,
   t,
 }: {
-  projectId: string;
   wallet: CustodyWalletMetadataResponse["wallet"];
   evaluation: WalletPolicyEvaluationDetail;
   revisionHistory: WalletControlProfileRevisionHistory;
@@ -74,7 +72,7 @@ export function PolicyAuditDetail({
   t: PolicyTranslate;
 }) {
   const encodedWalletId = encodeURIComponent(wallet.walletId);
-  const policyHref = projectHref(projectId, `/dashboard/wallets/${encodedWalletId}/policy`);
+  const policyHref = await requestProjectHref(`/dashboard/wallets/${encodedWalletId}/policy`);
   const auditHref = `${policyHref}/audit`;
   const detailBaseHref = `${auditHref}/${encodeURIComponent(evaluation.id)}`;
   const actor = policyActor(evaluation, apiKeyNames, userNames);
@@ -191,7 +189,6 @@ export function PolicyAuditDetail({
         </main>
 
         <EvaluationContextRail
-          projectId={projectId}
           wallet={wallet}
           evaluation={evaluation}
           history={revisionHistory}
@@ -557,8 +554,7 @@ function ContextFields({ values, t }: { values: object; t: PolicyTranslate }) {
   );
 }
 
-function EvaluationContextRail({
-  projectId,
+async function EvaluationContextRail({
   wallet,
   evaluation,
   history,
@@ -567,7 +563,6 @@ function EvaluationContextRail({
   policyHref,
   t,
 }: {
-  projectId: string;
   wallet: CustodyWalletMetadataResponse["wallet"];
   evaluation: WalletPolicyEvaluationDetail;
   history: WalletControlProfileRevisionHistory;
@@ -712,10 +707,11 @@ function EvaluationContextRail({
             {apiKeyId && apiKeyNames[apiKeyId] ? (
               <div className="mt-3 flex gap-2 pb-1">
                 <RailAction
-                  href={projectHref(
-                    projectId,
-                    `/dashboard/api-keys?apiKeyId=${encodeURIComponent(apiKeyId)}`
-                  )}
+                  href={
+                    await requestProjectHref(
+                      `/dashboard/api-keys?apiKeyId=${encodeURIComponent(apiKeyId)}`
+                    )
+                  }
                   label={t("DashboardCustody.policyAuditViewApiKey")}
                 />
               </div>
@@ -727,10 +723,11 @@ function EvaluationContextRail({
       {evaluation.approvalRequestId ? (
         <div className="mt-4 flex gap-2">
           <RailAction
-            href={projectHref(
-              projectId,
-              `/dashboard/approvals/${encodeURIComponent(evaluation.approvalRequestId)}`
-            )}
+            href={
+              await requestProjectHref(
+                `/dashboard/approvals/${encodeURIComponent(evaluation.approvalRequestId)}`
+              )
+            }
             label={t("DashboardCustody.policyAuditViewApprovalRequest")}
           />
         </div>

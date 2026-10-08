@@ -46,7 +46,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { completeQuickStartStep, quickStartKey } from "@/lib/dashboard-quick-start";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 import { saveApiKeyAuthoringAction } from "./actions";
 import {
@@ -1312,9 +1312,8 @@ export function ApiKeyAuthoringWorkspace({
 }: ApiKeyAuthoringWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   const href = useProjectHref();
-  const { sdpEnvironment, dashboardCacheScope } = useDashboardWorkspace();
+  const { sdpEnvironment, dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));
   const [walletSelectionTouched, setWalletSelectionTouched] = useState(false);
@@ -1368,7 +1367,7 @@ export function ApiKeyAuthoringWorkspace({
 
   const submit = (confirmation?: BindingConfirmation) => {
     startTransition(async () => {
-      const result = await saveApiKeyAuthoringAction(projectId, {
+      const result = await saveApiKeyAuthoringAction({
         mode,
         keyId: initialKey?.id,
         draft,
@@ -1379,7 +1378,7 @@ export function ApiKeyAuthoringWorkspace({
         return;
       }
       toast.success(result.message, { position: "bottom-right" });
-      if (mode === "create") {
+      if (mode === "create" && selectedProjectId) {
         completeQuickStartStep(quickStartKey(dashboardCacheScope), "api-key");
       }
       router.push(href(API_KEYS_PATH));

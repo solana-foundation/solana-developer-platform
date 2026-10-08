@@ -3,7 +3,11 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
-import { PROJECT_COOKIE_NAME, PROJECT_COOKIE_OPTIONS } from "@/lib/project-cookie";
+import {
+  PROJECT_COOKIE_NAME,
+  PROJECT_COOKIE_OPTIONS,
+  PROJECT_HEADER_NAME,
+} from "@/lib/project-cookie";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 
 export const isPublicRoute = createRouteMatcher([
@@ -73,6 +77,19 @@ export const proxy = clerkMiddleware(async (auth, req) => {
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-sdp-pathname", req.nextUrl.pathname);
 
+  // The request's Project is the one its tab renders: page renders and server
+  // actions (Next posts actions to the tab's URL) take it from this URL, browser
+  // calls to /api/* send it themselves (dashboardRequest). Server code reads only
+  // this header, through createSdpApiClient (HOO-1965).
+  const { projectId } = parseDashboardPathname(req.nextUrl.pathname);
+  if (!req.nextUrl.pathname.startsWith("/api/")) {
+    if (projectId === null) {
+      requestHeaders.delete(PROJECT_HEADER_NAME);
+    } else {
+      requestHeaders.set(PROJECT_HEADER_NAME, projectId);
+    }
+  }
+
   const response = NextResponse.next({
     request: {
       headers: requestHeaders,
@@ -81,7 +98,6 @@ export const proxy = clerkMiddleware(async (auth, req) => {
 
   // Last-used hint for the bare `/dashboard` landing only; nothing renders or
   // sends requests from it, and it is validated against the Project list when read.
-  const { projectId } = parseDashboardPathname(req.nextUrl.pathname);
   if (projectId !== null) {
     response.cookies.set(PROJECT_COOKIE_NAME, projectId, PROJECT_COOKIE_OPTIONS);
   }

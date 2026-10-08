@@ -20,9 +20,12 @@ import { custody, policies, privyByok } from "@/flags";
 import { isRampsEnabled } from "@/flags/ramps";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { projectHref } from "@/lib/dashboard-project-path";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
-import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
+import {
+  createRequestScopedSdpApiClients,
+  requestProjectHref,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
 import { isKnownIntegrationProvider, resolveIntegrationDetail } from "../integration-detail";
 import { isIntegrationProviderEnabled } from "../integration-feature-gates";
 import {
@@ -146,7 +149,7 @@ function resolveConnectionsProvider(
  * alongside the onboarding fetch buys nothing measurable and costs a request
  * sent on behalf of someone who is about to be redirected away.
  */
-async function resolveRequestContext(projectId: string) {
+async function resolveRequestContext() {
   const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -156,9 +159,7 @@ async function resolveRequestContext(projectId: string) {
   }
   const dashboardAccess = resolveDashboardAccess(orgRole);
 
-  const { organizationClient, projectClient } = await createRequestScopedSdpApiClients({
-    projectId,
-  });
+  const { organizationClient, projectClient } = await createRequestScopedSdpApiClients({});
   const onboarding =
     await organizationClient.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
   if (!onboarding.linked || !onboarding.organization) {
@@ -220,13 +221,13 @@ export default async function IntegrationDetailPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ projectId: string; provider: string }>;
+  params: Promise<{ provider: string }>;
   // Optional so the page stays callable without it: only the connections
   // table's `?page=` reads it, and every other caller — the feature-gate tests
   // included — has no query to pass.
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { projectId, provider } = await params;
+  const { provider } = await params;
   if (!isKnownIntegrationProvider(provider)) {
     notFound();
   }
@@ -245,7 +246,7 @@ export default async function IntegrationDetailPage({
     notFound();
   }
 
-  const { dashboardAccess, projectClient, organizationId } = await resolveRequestContext(projectId);
+  const { dashboardAccess, projectClient, organizationId } = await resolveRequestContext();
 
   const connectionsProvider = resolveConnectionsProvider(provider, custodyEnabled);
   const custodyConnectionsApply = connectionsProvider !== null && (await privyByok());
@@ -273,7 +274,7 @@ export default async function IntegrationDetailPage({
   if (connectionsRead?.kind === "out_of_range") {
     redirect(
       buildConnectionsPageUrl(
-        projectHref(projectId, `/dashboard/integrations/${provider}`),
+        await requestProjectHref(`/dashboard/integrations/${provider}`),
         resolvedSearchParams,
         connectionsRead.page
       )
@@ -292,7 +293,6 @@ export default async function IntegrationDetailPage({
 
   return (
     <IntegrationDetailView
-      projectId={projectId}
       detail={detail}
       custodyConnections={connectionsRead?.context ?? null}
       canManageCustody={dashboardAccess.capabilities.canManageCustody}

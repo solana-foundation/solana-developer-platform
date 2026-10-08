@@ -4,8 +4,7 @@ import { fetchIssuedTokensByMint } from "@/app/dashboard/[projectId]/payments/pa
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import {
   fetchPolicyAuditContext,
   fetchPolicyAuditList,
@@ -21,28 +20,27 @@ export default async function WalletPolicyAuditPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ projectId: string; walletId: string }>;
+  params: Promise<{ walletId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { userId, orgId } = await auth();
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
-  const [{ projectId, walletId }, resolvedSearchParams, locale, t] = await Promise.all([
+  const [{ walletId }, resolvedSearchParams, locale, t] = await Promise.all([
     params,
     searchParams,
     getRequestLocale(),
     getTranslations(),
   ]);
   const resolvedWalletId = decodeURIComponent(walletId);
-  const policyHref = projectHref(
-    projectId,
+  const policyHref = await requestProjectHref(
     `/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}/policy`
   );
   const filters = parsePolicyAuditFilters(resolvedSearchParams);
 
   try {
-    const apiClient = await createProjectBoundSdpApiClient(projectId);
+    const apiClient = await createSdpApiClient();
     const [context, result, issuedTokensByMint] = await Promise.all([
       fetchPolicyAuditContext(apiClient.request, resolvedWalletId),
       fetchPolicyAuditList(apiClient.request, resolvedWalletId, filters),
@@ -52,7 +50,6 @@ export default async function WalletPolicyAuditPage({
     return (
       <DashboardWorkspaceOverviewPanel className="flex flex-col">
         <PolicyAuditList
-          projectId={projectId}
           walletId={resolvedWalletId}
           walletLabel={context.wallet.label?.trim() || context.wallet.walletId}
           result={result}

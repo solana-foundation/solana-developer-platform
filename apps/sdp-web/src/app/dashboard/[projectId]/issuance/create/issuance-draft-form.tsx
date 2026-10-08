@@ -25,7 +25,7 @@ import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { shortenAddress } from "../wallet-identity";
 import { saveIssuanceDraft } from "./actions";
 import { type AuthorityKey, buildDraftPayload, type DraftState } from "./draft-model";
@@ -98,7 +98,6 @@ export function IssuanceDraftForm({
   const t = useTranslations();
   const router = useRouter();
   const pathname = usePathname();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const searchParams = useSearchParams();
   const initialStep = Math.min(4, Math.max(0, Number(searchParams.get("step") ?? 0) || 0));
@@ -150,7 +149,7 @@ export function IssuanceDraftForm({
   const saveDraft = async () => {
     setSavingDraft(true);
     try {
-      const result = await saveIssuanceDraft(projectId, draft);
+      const result = await saveIssuanceDraft(draft);
       if (result.state === "error") {
         toast.error(result.message, { position: "bottom-right" });
         return;

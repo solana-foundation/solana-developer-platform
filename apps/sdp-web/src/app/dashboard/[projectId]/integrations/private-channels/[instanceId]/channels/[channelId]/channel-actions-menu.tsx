@@ -23,7 +23,7 @@ import {
 import { Modal } from "@/components/ui/modal";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   PRIVATE_CHANNELS_INTEGRATION_PATH,
   privateChannelsInstancePath,
@@ -51,7 +51,6 @@ export function ChannelActionsMenu({
     ? CurrentPrivateChannelsConnectForm
     : LegacyPrivateChannelsConnectForm;
   const router = useRouter();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const [manageOpen, setManageOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -61,7 +60,7 @@ export function ChannelActionsMenu({
 
   function disconnect() {
     startDisconnecting(async () => {
-      const result = await disconnectPrivateChannelAction(projectId);
+      const result = await disconnectPrivateChannelAction();
       if (result.ok) {
         toast.success(t("DashboardPrivateChannels.instance.disconnectSuccess"));
         router.replace(href(privateChannelsInstancePath(result.instance.id)));
@@ -73,7 +72,7 @@ export function ChannelActionsMenu({
 
   function deleteConnection() {
     startDeleting(async () => {
-      const result = await deletePrivateChannelAction(projectId);
+      const result = await deletePrivateChannelAction();
       if (result.ok) {
         setDeleteOpen(false);
         toast.success(t("DashboardPrivateChannels.instance.deleteSuccess"));

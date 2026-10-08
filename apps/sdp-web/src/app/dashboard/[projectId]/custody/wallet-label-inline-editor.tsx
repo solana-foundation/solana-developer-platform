@@ -6,7 +6,6 @@ import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { updateWalletLabelAction } from "./actions";
 
 interface WalletLabelInlineEditorProps {
@@ -24,7 +23,6 @@ export function WalletLabelInlineEditor({
 }: WalletLabelInlineEditorProps) {
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(label ?? "");
   const [isPending, startTransition] = useTransition();
@@ -45,7 +43,7 @@ export function WalletLabelInlineEditor({
     });
 
     startTransition(async () => {
-      const result = await updateWalletLabelAction(projectId, walletId, draft).catch((error) => ({
+      const result = await updateWalletLabelAction(walletId, draft).catch((error) => ({
         status: "error" as const,
         message:
           error instanceof Error ? error.message : t("DashboardCustody.unableToUpdateWalletLabel"),

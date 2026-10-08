@@ -10,13 +10,13 @@ import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
 import { PaymentsCommandCenter } from "./payments-command-center";
 import { fetchPaymentsWallets, fetchPaymentTransfers } from "./payments-page.data";
 import { PaymentsPlaygroundWorkspace } from "./payments-workspace";
 
-type ApiClientPromise = ReturnType<typeof createProjectBoundSdpApiClient>;
+type ApiClientPromise = ReturnType<typeof createSdpApiClient>;
 type Trace = ReturnType<typeof createTimedTrace>;
 
 async function PaymentsPlaygroundData({
@@ -68,7 +68,7 @@ async function PaymentsPlaygroundData({
   );
 }
 
-export default async function PaymentsPage({ params }: { params: Promise<{ projectId: string }> }) {
+export default async function PaymentsPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -77,10 +77,9 @@ export default async function PaymentsPage({ params }: { params: Promise<{ proje
     redirect("/dashboard");
   }
 
-  const { projectId } = await params;
   const trace = createTimedTrace("dashboard.payments.page");
   const apiClientPromise = trace.step("create_sdp_api_client", () =>
-    createProjectBoundSdpApiClient(projectId, trace.childContext("dashboard.payments.api"))
+    createSdpApiClient(trace.childContext("dashboard.payments.api"))
   );
 
   return (
@@ -90,11 +89,7 @@ export default async function PaymentsPage({ params }: { params: Promise<{ proje
           id: "overview",
           className: dashboardWorkspaceOverviewPanelClassName,
           content: (
-            <PaymentsCommandCenter
-              apiClientPromise={apiClientPromise}
-              organizationId={orgId}
-              projectId={projectId}
-            />
+            <PaymentsCommandCenter apiClientPromise={apiClientPromise} organizationId={orgId} />
           ),
         },
         {

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cancelSetupAction } from "./connection-actions";
 import { useCustodyAction } from "./use-custody-action";
 
@@ -28,12 +28,11 @@ export function CancelSetupDialog({
 }) {
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const { pending, run } = useCustodyAction();
 
   const handleConfirm = async () => {
-    const result = await run(() => cancelSetupAction(projectId, connectionId, provider), {
+    const result = await run(() => cancelSetupAction(connectionId, provider), {
       successTitle: t("DashboardCustody.cancelSetupSuccessTitle"),
       successDescription: t("DashboardCustody.cancelSetupSuccessDescription"),
       failedTitle: t("DashboardCustody.cancelSetupFailedTitle"),

@@ -3,19 +3,14 @@ import { redirect } from "next/navigation";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { fetchApiKeyAuthoringWallets } from "../api-key-authoring.data";
 import { ApiKeyAuthoringWorkspace } from "../api-key-authoring-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewApiKeyPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
-  const [{ projectId }, { userId, orgId, orgRole }] = await Promise.all([params, auth()]);
+export default async function NewApiKeyPage() {
+  const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -23,10 +18,10 @@ export default async function NewApiKeyPage({
     redirect("/dashboard");
   }
   if (!resolveDashboardAccess(orgRole).capabilities.canManageApiKeys) {
-    redirect(projectHref(projectId, "/dashboard/api-keys"));
+    redirect(await requestProjectHref("/dashboard/api-keys"));
   }
 
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
   // Wallet controls follow the Policies module, as the API does, not the per-user policies flag.
   const authoringWallets = await fetchApiKeyAuthoringWallets(client, {
     policiesInReleaseChannel: isModuleInDeploymentReleaseChannel("policies"),

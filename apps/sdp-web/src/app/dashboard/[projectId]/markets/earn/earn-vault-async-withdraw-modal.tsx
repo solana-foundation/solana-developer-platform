@@ -27,7 +27,7 @@ interface EarnVaultAsyncWithdrawModalProps {
   /** A par route may redeem the position's held intermediate instead of shares. */
   parSource?: EarnVaultParRedemptionSource;
   position: EarnVaultPosition;
-  projectId: string;
+  projectId: string | null;
   route: EarnVaultAsyncWithdrawalRoute;
 }
 

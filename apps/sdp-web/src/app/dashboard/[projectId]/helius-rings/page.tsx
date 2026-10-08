@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
 import { heliusRings } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 import { HeliusRingsWorkspace } from "./helius-rings-workspace";
 
 export const dynamic = "force-dynamic";
@@ -19,12 +19,7 @@ interface CustodyWalletOption {
  * wallet options for the create form are resolved server-side. Degraded
  * upstreams render honestly: red health, pending wallets, failed operations.
  */
-export default async function HeliusRingsPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
-  const { projectId } = await params;
+export default async function HeliusRingsPage() {
   if (!(await heliusRings())) {
     notFound();
   }
@@ -40,7 +35,7 @@ export default async function HeliusRingsPage({
   // never the health card or the activity table beside it.
   let custodyWallets: CustodyWalletOption[] = [];
   try {
-    const projectClient = await createProjectBoundSdpApiClient(projectId);
+    const { projectClient } = await createRequestScopedSdpApiClients({});
     const response = await projectClient.request("/v1/wallets?view=summary", { method: "GET" });
     if (response.ok) {
       const body = (await response.json()) as {

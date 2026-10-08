@@ -2,18 +2,14 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { IssuanceDraftForm } from "./issuance-draft-form";
 
-export default async function CreateAssetPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function CreateAssetPage() {
   const t = await getTranslations();
   if (!(await assetProfiles())) notFound();
-  const client = await createProjectBoundSdpApiClient((await params).projectId);
+  const client = await createSdpApiClient();
   const result = await fetchPaymentsWallets(client.request, {
     view: "summary",
     includeBalances: false,

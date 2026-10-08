@@ -13,9 +13,8 @@ import {
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
-import { projectHref } from "@/lib/dashboard-project-path";
 import { extractPolicyDenialReason, withPolicyDenialReason } from "@/lib/policy-denial-reason";
-import { createProjectBoundSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
 
 const DEVNET_FAUCET_SOL = sol("1");
 
@@ -97,17 +96,14 @@ function parseApiActionError(error: unknown): { status: number; message: string 
   };
 }
 
-export async function initializeCustody(projectId: string, formData: FormData) {
-  await initializeCustodyWallet(projectId, formData);
-  revalidateWalletPaths(projectId);
-  redirect(projectHref(projectId, "/dashboard/wallets"));
+export async function initializeCustody(formData: FormData) {
+  await initializeCustodyWallet(formData);
+  await revalidateWalletPaths();
+  redirect(await requestProjectHref("/dashboard/wallets"));
 }
 
 /** Returns the wallet provisioned by a custody initialization request. */
-async function initializeCustodyWallet(
-  projectId: string,
-  formData: FormData
-): Promise<ProvisionedWallet> {
+async function initializeCustodyWallet(formData: FormData): Promise<ProvisionedWallet> {
   const provider = (getString(formData, "provider") || "privy") as
     | "privy"
     | "local"
@@ -137,7 +133,7 @@ async function initializeCustodyWallet(
     }
   }
 
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
 
   try {
     const initialized = await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
@@ -204,18 +200,18 @@ async function initializeCustodyWallet(
   }
 }
 
-function revalidateWalletPaths(projectId: string) {
-  revalidatePath(projectHref(projectId, "/dashboard/custody"));
-  revalidatePath(projectHref(projectId, "/dashboard/wallets"));
+async function revalidateWalletPaths() {
+  revalidatePath(await requestProjectHref("/dashboard/custody"));
+  revalidatePath(await requestProjectHref("/dashboard/wallets"));
 }
 
-export async function createCustodyWallet(projectId: string, formData: FormData) {
-  await createCustodyWalletForProvider(projectId, formData);
-  revalidateWalletPaths(projectId);
-  redirect(projectHref(projectId, "/dashboard/wallets"));
+export async function createCustodyWallet(formData: FormData) {
+  await createCustodyWalletForProvider(formData);
+  await revalidateWalletPaths();
+  redirect(await requestProjectHref("/dashboard/wallets"));
 }
 
-async function createCustodyWalletForProvider(projectId: string, formData: FormData) {
+async function createCustodyWalletForProvider(formData: FormData) {
   const provider = getOptionalString(formData, "provider") as
     | "privy"
     | "local"
@@ -235,7 +231,7 @@ async function createCustodyWalletForProvider(projectId: string, formData: FormD
   // choice wins and `provider` is dropped.
   const connectionId = getOptionalString(formData, "connectionId");
 
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
   await client.fetch("/v1/wallets", {
     method: "POST",
     body: JSON.stringify(connectionId ? { connectionId, label } : { provider, label }),
@@ -257,13 +253,12 @@ export type WalletSetupActionResult =
     };
 
 export async function initializeCustodySetupAction(
-  projectId: string,
   formData: FormData
 ): Promise<WalletSetupActionResult> {
   const t = await getTranslations();
   try {
-    await initializeCustodyWallet(projectId, formData);
-    revalidateWalletPaths(projectId);
+    await initializeCustodyWallet(formData);
+    await revalidateWalletPaths();
     return { status: "success" };
   } catch (error) {
     return {
@@ -274,13 +269,12 @@ export async function initializeCustodySetupAction(
 }
 
 export async function createCustodySetupWalletAction(
-  projectId: string,
   formData: FormData
 ): Promise<WalletSetupActionResult> {
   const t = await getTranslations();
   try {
-    await createCustodyWalletForProvider(projectId, formData);
-    revalidateWalletPaths(projectId);
+    await createCustodyWalletForProvider(formData);
+    await revalidateWalletPaths();
     return { status: "success" };
   } catch (error) {
     return {
@@ -301,7 +295,6 @@ export type UpdateWalletLabelActionResult =
     };
 
 export async function updateWalletLabelAction(
-  projectId: string,
   walletId: string,
   label: string
 ): Promise<UpdateWalletLabelActionResult> {
@@ -314,7 +307,7 @@ export async function updateWalletLabelAction(
   const nextLabel = label.trim();
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     await client.fetch(`/v1/wallets/${encodeURIComponent(resolvedWalletId)}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -322,10 +315,10 @@ export async function updateWalletLabelAction(
       }),
     });
 
-    revalidatePath(projectHref(projectId, "/dashboard/custody"));
-    revalidatePath(projectHref(projectId, "/dashboard/wallets"));
+    revalidatePath(await requestProjectHref("/dashboard/custody"));
+    revalidatePath(await requestProjectHref("/dashboard/wallets"));
     revalidatePath(
-      projectHref(projectId, `/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}`)
+      await requestProjectHref(`/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}`)
     );
 
     return {
@@ -453,7 +446,6 @@ export type WalletFaucetActionResult =
     };
 
 export async function checkWalletSignerMemoAction(
-  projectId: string,
   walletId: string
 ): Promise<WalletSignerCheckActionResult> {
   const t = await getTranslations();
@@ -463,7 +455,7 @@ export async function checkWalletSignerMemoAction(
   }
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const check = await client.fetch<WalletSignerCheckResponse>("/v1/wallets/signer-check", {
       method: "POST",
       body: JSON.stringify({ walletId: resolvedWalletId }),
@@ -483,7 +475,6 @@ export async function checkWalletSignerMemoAction(
 }
 
 export async function requestDevnetSolanaFaucetAction(
-  projectId: string,
   walletId: string,
   walletAddress: string
 ): Promise<WalletFaucetActionResult> {
@@ -503,7 +494,7 @@ export async function requestDevnetSolanaFaucetAction(
       return { status: "error", message: t("DashboardCustody.signInToRequestDevnetSol") };
     }
 
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const relay = await client.fetch<RpcRelayResponse<SolanaRpcAirdropResponse>>("/v1/rpc/proxy", {
       method: "POST",
       body: JSON.stringify({
@@ -559,13 +550,13 @@ export async function requestDevnetSolanaFaucetAction(
       };
     }
 
-    revalidatePath(projectHref(projectId, "/dashboard/custody"));
-    revalidatePath(projectHref(projectId, "/dashboard/wallets"));
+    revalidatePath(await requestProjectHref("/dashboard/custody"));
+    revalidatePath(await requestProjectHref("/dashboard/wallets"));
     revalidatePath(
-      projectHref(projectId, `/dashboard/custody/${encodeURIComponent(resolvedWalletId)}`)
+      await requestProjectHref(`/dashboard/custody/${encodeURIComponent(resolvedWalletId)}`)
     );
     revalidatePath(
-      projectHref(projectId, `/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}`)
+      await requestProjectHref(`/dashboard/wallets/${encodeURIComponent(resolvedWalletId)}`)
     );
 
     return {

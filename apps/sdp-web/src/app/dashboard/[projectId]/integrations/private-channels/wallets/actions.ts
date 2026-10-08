@@ -2,17 +2,16 @@
 
 import type { PrivateChannelVerifiedWalletDto } from "@sdp/types";
 import { revalidatePath } from "next/cache";
-import { projectHref } from "@/lib/dashboard-project-path";
 import {
   deletePrivateChannelVerifiedWallet,
   verifyPrivateChannelWallet,
 } from "@/lib/private-channels";
-import { createProjectBoundSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
+import { createSdpApiClient, extractSdpApiErrorMessage, requestProjectHref } from "@/lib/sdp-api";
 
 const PRIVATE_CHANNELS_PATH = "/dashboard/integrations/private-channels";
 
-function revalidateWalletViews(projectId: string): void {
-  revalidatePath(projectHref(projectId, PRIVATE_CHANNELS_PATH), "layout");
+async function revalidateWalletViews(): Promise<void> {
+  revalidatePath(await requestProjectHref(PRIVATE_CHANNELS_PATH), "layout");
 }
 
 export type VerifyWalletResult =
@@ -20,7 +19,6 @@ export type VerifyWalletResult =
   | { ok: false; message: string };
 
 export async function verifyWalletAction(
-  projectId: string,
   walletId: string,
   principalId?: string
 ): Promise<VerifyWalletResult> {
@@ -28,9 +26,9 @@ export async function verifyWalletAction(
     return { ok: false, message: "A wallet is required." };
   }
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const wallet = await verifyPrivateChannelWallet(client, walletId, { principalId });
-    revalidateWalletViews(projectId);
+    await revalidateWalletViews();
     return { ok: true, wallet };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
@@ -40,13 +38,12 @@ export async function verifyWalletAction(
 export type DeleteVerifiedWalletResult = { ok: true } | { ok: false; message: string };
 
 export async function deleteVerifiedWalletAction(
-  projectId: string,
   pubkey: string
 ): Promise<DeleteVerifiedWalletResult> {
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     await deletePrivateChannelVerifiedWallet(client, pubkey);
-    revalidateWalletViews(projectId);
+    await revalidateWalletViews();
     return { ok: true };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };

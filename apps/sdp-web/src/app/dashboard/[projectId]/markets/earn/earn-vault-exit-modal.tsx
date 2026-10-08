@@ -34,7 +34,7 @@ interface EarnVaultExitModalProps {
    */
   parSource?: EarnVaultParRedemptionSource;
   position: EarnVaultPosition;
-  projectId: string;
+  projectId: string | null;
 }
 
 type RouteChoice = "instant" | "async";

@@ -7,9 +7,8 @@ import {
 } from "@/app/dashboard/[projectId]/custody/wallet-activity.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient, proxyFailure, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 
 interface VisibilityResult {
@@ -98,13 +97,7 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
       return response;
     }
 
-    const projectId = request.headers.get(PROJECT_HEADER_NAME);
-    if (projectId === null) {
-      return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
-    }
-
-    const apiClient = await createProjectBoundSdpApiClient(
-      projectId,
+    const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.wallets.activity.api")
     );
 

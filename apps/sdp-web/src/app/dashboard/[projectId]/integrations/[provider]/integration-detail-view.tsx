@@ -13,8 +13,8 @@ import { docsHref } from "@/components/dashboard-nav";
 import { Button } from "@/components/ui/button";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
-import { projectHref } from "@/lib/dashboard-project-path";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
+import { requestProjectHref } from "@/lib/sdp-api";
 import { CustodyConnectionCount, CustodyConnectionsSection } from "../custody-connections-section";
 import type { IntegrationDetail } from "../integration-detail";
 
@@ -100,7 +100,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * @param t - The translator.
  * @returns The action button, or `null` when no action applies.
  */
-function resolvePrimaryAction(projectId: string, detail: IntegrationDetail, t: Translate) {
+async function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
   // With the connection state unreadable, no state-dependent action is honest.
   if (detail.status === "unknown") {
     return null;
@@ -108,7 +108,7 @@ function resolvePrimaryAction(projectId: string, detail: IntegrationDetail, t: T
   if (detail.family === "custody" && detail.status === "active") {
     return (
       <Button asChild>
-        <Link href={projectHref(projectId, "/dashboard/wallets")}>
+        <Link href={await requestProjectHref("/dashboard/wallets")}>
           {t("Shared.integrations.ctaManage")}
         </Link>
       </Button>
@@ -117,7 +117,9 @@ function resolvePrimaryAction(projectId: string, detail: IntegrationDetail, t: T
   if (detail.family === "custody" && detail.status === "available") {
     return (
       <Button asChild>
-        <Link href={projectHref(projectId, `/dashboard/wallets/setup?provider=${detail.provider}`)}>
+        <Link
+          href={await requestProjectHref(`/dashboard/wallets/setup?provider=${detail.provider}`)}
+        >
           {t("Shared.integrations.ctaConfigure")}
         </Link>
       </Button>
@@ -151,13 +153,11 @@ export type CustodyConnectionsContext =
   | "restricted"
   | null;
 
-function DetailHeader({
-  projectId,
+async function DetailHeader({
   detail,
   connectionCount,
   t,
 }: {
-  projectId: string;
   detail: IntegrationDetail;
   /** `null` on every family but custody, and on custody when unreadable. */
   connectionCount: number | null;
@@ -197,7 +197,7 @@ function DetailHeader({
           </p>
         </div>
       </div>
-      {resolvePrimaryAction(projectId, detail, t)}
+      {await resolvePrimaryAction(detail, t)}
     </header>
   );
 }
@@ -341,19 +341,16 @@ function HowItConnectsBody({ detail, t }: { detail: IntegrationDetail; t: Transl
  * about, capabilities, connection and resources sections.
  *
  * @param props - The component props.
- * @param props.projectId - The Project in the URL, which every link stays inside.
  * @param props.detail - The resolved provider detail.
  * @param props.custodyConnections - The project's custody connections, or why there are none.
  * @param props.canManageCustody - Whether the viewer may manage custody connections.
  * @returns The rendered detail page.
  */
 export async function IntegrationDetailView({
-  projectId,
   detail,
   custodyConnections = null,
   canManageCustody = false,
 }: {
-  projectId: string;
   detail: IntegrationDetail;
   custodyConnections?: CustodyConnectionsContext;
   canManageCustody?: boolean;
@@ -367,7 +364,7 @@ export async function IntegrationDetailView({
 
   return (
     <div className="w-full space-y-6 px-4 py-6 md:px-6" data-integration-detail={detail.provider}>
-      <DetailHeader projectId={projectId} detail={detail} connectionCount={connectionCount} t={t} />
+      <DetailHeader detail={detail} connectionCount={connectionCount} t={t} />
 
       <CustodyConnectionsBlock
         detail={detail}

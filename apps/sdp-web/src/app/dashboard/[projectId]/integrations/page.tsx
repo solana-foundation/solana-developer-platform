@@ -49,12 +49,8 @@ async function getPrivateChannelsActive(client: SdpApiClient): Promise<boolean |
  *
  * @returns The rendered catalog.
  */
-export default async function IntegrationsPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
-  const [{ projectId }, { userId, orgId }] = await Promise.all([params, auth()]);
+export default async function IntegrationsPage() {
+  const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -65,7 +61,6 @@ export default async function IntegrationsPage({
   const trace = createTimedTrace("dashboard.integrations.page");
   const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
     createRequestScopedSdpApiClients({
-      projectId,
       organizationTraceContext: trace.childContext("dashboard.integrations.org.api"),
       projectTraceContext: trace.childContext("dashboard.integrations.api"),
     })

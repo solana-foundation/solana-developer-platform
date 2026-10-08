@@ -5,7 +5,6 @@ import { StarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { makeDefaultConnectionAction } from "./connection-actions";
 import { useCustodyAction } from "./use-custody-action";
 
@@ -42,11 +41,10 @@ export function MakeDefaultDialog({
   currentDefaultKnown?: boolean;
 }) {
   const t = useTranslations();
-  const projectId = useProjectId();
   const { pending, run } = useCustodyAction();
 
   const handleConfirm = async () => {
-    const result = await run(() => makeDefaultConnectionAction(projectId, connectionId, provider), {
+    const result = await run(() => makeDefaultConnectionAction(connectionId, provider), {
       successTitle: t("DashboardCustody.makeDefaultSuccessTitle", { label }),
       successDescription: t("DashboardCustody.makeDefaultSuccessDescription"),
       failedTitle: t("DashboardCustody.makeDefaultFailedTitle"),

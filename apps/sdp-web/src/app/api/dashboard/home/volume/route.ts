@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { computeTodaysVolume } from "@/app/dashboard/[projectId]/home-page.data";
 import { fetchDashboardPaymentTransfers } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getTranslations } from "@/i18n/server";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient, proxyFailure } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 
 /**
  * Today's volume, apart from the activity list.
@@ -16,15 +15,10 @@ import { createProjectBoundSdpApiClient, proxyFailure } from "@/lib/sdp-api";
  */
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.home.volume", request);
-  const projectId = request.headers.get(PROJECT_HEADER_NAME);
-  if (projectId === null) {
-    return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
-  }
   const t = await getTranslations();
 
   try {
-    const apiClient = await createProjectBoundSdpApiClient(
-      projectId,
+    const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.home.volume.api")
     );
     const transfersResult = await trace.step("fetch_payment_transfers", () =>

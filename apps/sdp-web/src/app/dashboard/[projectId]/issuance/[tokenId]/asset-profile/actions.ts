@@ -4,8 +4,7 @@ import type { AssetProfile } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import {
   mergeIssuanceMetadataForUpdate,
   type UpdateAssetProfileActionInput,
@@ -22,14 +21,13 @@ import {
  * integration-written namespaces and unknown keys survive the save.
  */
 export async function updateAssetProfileAction(
-  projectId: string,
   input: UpdateAssetProfileActionInput
 ): Promise<UpdateAssetProfileActionResult> {
   const t = await getTranslations();
   const { tokenId, profileId, rebuiltMetadata, tokenPatch } = input;
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const profileResponse = await client.request(`/v1/issuance/asset-profiles/${profileId}`, {
       method: "GET",
     });
@@ -99,8 +97,8 @@ export async function updateAssetProfileAction(
       data?: { assetProfile?: AssetProfile };
     };
 
-    revalidatePath(projectHref(projectId, `/dashboard/issuance/${tokenId}`));
-    revalidatePath(projectHref(projectId, "/dashboard/issuance"));
+    revalidatePath(await requestProjectHref(`/dashboard/issuance/${tokenId}`));
+    revalidatePath(await requestProjectHref("/dashboard/issuance"));
 
     return {
       state: "success",

@@ -8,11 +8,7 @@ import { RecurringPaymentCreateWorkspace } from "../recurring-payment-create-wor
 
 export const dynamic = "force-dynamic";
 
-export default async function RecurringPaymentCreatePage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function RecurringPaymentCreatePage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -21,11 +17,8 @@ export default async function RecurringPaymentCreatePage({
     redirect("/dashboard");
   }
 
-  const { projectId } = await params;
-
   return withDashboardPageTrace(
     "dashboard.recurring-payments.create.page",
-    projectId,
     async ({ trace, apiClient }) => {
       const [walletsResult, issuedTokenSymbolsResult, counterpartiesResult] = await Promise.all([
         trace.step("fetch_wallets", () =>

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getDashboardFlags } from "@/flags/dashboard";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchIssuedTokensByMint } from "../payments-page.data";
 import { enabledTransactionModules } from "./transaction-modules";
 import { fetchTransactionsPage } from "./transactions-page.data";
@@ -11,24 +11,19 @@ import { parseTransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
 
 interface TransactionsPageProps {
-  params: Promise<{ projectId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default async function TransactionsPage({ params, searchParams }: TransactionsPageProps) {
+export default async function TransactionsPage({ searchParams }: TransactionsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
-  const { projectId } = await params;
   const modules = enabledTransactionModules(await getDashboardFlags());
   const filters = parseTransactionFilters(await searchParams, modules);
   const trace = createTimedTrace("dashboard.payments.transactions.page");
   const apiClient = await trace.step("create_sdp_api_client", () =>
-    createProjectBoundSdpApiClient(
-      projectId,
-      trace.childContext("dashboard.payments.transactions.api")
-    )
+    createSdpApiClient(trace.childContext("dashboard.payments.transactions.api"))
   );
   const [result, issuedTokensByMint] = await Promise.all([
     trace.step("fetch_transactions_page", () => fetchTransactionsPage(apiClient, filters)),

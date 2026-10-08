@@ -6,7 +6,6 @@ import { Callout } from "@/components/ui/callout";
 import { HoldButton } from "@/components/ui/hold-button";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { deactivateConnectionAction } from "./connection-actions";
 import { useCustodyAction } from "./use-custody-action";
 
@@ -40,12 +39,11 @@ export function DeactivateConnectionDialog({
   isDefault: boolean;
 }) {
   const t = useTranslations();
-  const projectId = useProjectId();
   const { pending, run } = useCustodyAction();
   const blocked = activeWalletCount > 0;
 
   const handleConfirm = async () => {
-    const result = await run(() => deactivateConnectionAction(projectId, connectionId, provider), {
+    const result = await run(() => deactivateConnectionAction(connectionId, provider), {
       successTitle: t("DashboardCustody.deactivateConnectionSuccessTitle"),
       successDescription: t("DashboardCustody.deactivateConnectionSuccessDescription"),
       failedTitle: t("DashboardCustody.deactivateConnectionFailedTitle"),

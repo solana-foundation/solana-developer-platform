@@ -24,7 +24,7 @@ import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { completeQuickStartStep, quickStartKey } from "@/lib/dashboard-quick-start";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 
 type SetupStep = "provider" | "details";
 
@@ -271,7 +271,6 @@ export function WalletSetupFlow({
 }: WalletSetupFlowProps) {
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const refreshWalletInventory = useWalletInventoryRefresh();
   const { dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
@@ -371,7 +370,7 @@ export function WalletSetupFlow({
 
     startTransition(async () => {
       try {
-        const result = await formAction(projectId, formData);
+        const result = await formAction(formData);
 
         if (result.status === "error") {
           setErrorMessage(result.message);

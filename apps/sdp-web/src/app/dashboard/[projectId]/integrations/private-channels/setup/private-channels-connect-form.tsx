@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   PRIVATE_CHANNELS_INTEGRATION_PATH,
   privateChannelsInstancePath,
@@ -97,7 +97,6 @@ export function PrivateChannelsConnectForm({
   const [isUpdating, startUpdating] = useTransition();
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const { instance, values, errors, formError, reactivatePrompt } = state;
 
@@ -164,7 +163,7 @@ export function PrivateChannelsConnectForm({
 
   const runTest = () => {
     startTesting(async () => {
-      const result = await testConnectionAction(projectId, {
+      const result = await testConnectionAction({
         gatewayUrl: values.gatewayUrl,
         authUrl: values.authUrl,
         escrowProgramId: values.escrowProgramId,
@@ -193,7 +192,7 @@ export function PrivateChannelsConnectForm({
 
   const runConnect = (confirmReactivate = false) => {
     startConnecting(async () => {
-      const result = await connectPrivateChannelAction(projectId, { ...values, confirmReactivate });
+      const result = await connectPrivateChannelAction({ ...values, confirmReactivate });
       applyConnectResult(result);
     });
   };
@@ -201,10 +200,7 @@ export function PrivateChannelsConnectForm({
   const runUpdate = () => {
     if (!instance) return;
     startUpdating(async () => {
-      const result = await updatePrivateChannelAction(projectId, {
-        ...values,
-        instanceId: instance.id,
-      });
+      const result = await updatePrivateChannelAction({ ...values, instanceId: instance.id });
       if (result.ok) {
         updateState({
           instance: result.instance,

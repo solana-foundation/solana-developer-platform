@@ -6,11 +6,7 @@ import {
   createPrivateChannelTransfer,
   fetchPrivateChannelTransferRecipients,
 } from "@/lib/private-channels";
-import {
-  createProjectBoundSdpApiClient,
-  extractSdpApiErrorMessage,
-  SdpApiResponseError,
-} from "@/lib/sdp-api";
+import { createSdpApiClient, extractSdpApiErrorMessage, SdpApiResponseError } from "@/lib/sdp-api";
 import { getAmountError } from "../amount-validation";
 
 export interface CreateTransferInput {
@@ -46,7 +42,6 @@ export type FetchTransferRecipientsResult =
   | { ok: false; message: string };
 
 export async function createTransferAction(
-  projectId: string,
   input: CreateTransferInput
 ): Promise<CreateTransferResult> {
   if (!input.channelId) {
@@ -75,7 +70,7 @@ export async function createTransferAction(
     return { ok: false, kind: "validation", messageKey: amountError };
   }
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const transfer = await createPrivateChannelTransfer(
       client,
       input.channelId,
@@ -99,7 +94,6 @@ export async function createTransferAction(
 }
 
 export async function fetchTransferRecipientsAction(
-  projectId: string,
   channelId: string
 ): Promise<FetchTransferRecipientsResult> {
   if (!channelId) {
@@ -109,7 +103,7 @@ export async function fetchTransferRecipientsAction(
     };
   }
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const recipients = await fetchPrivateChannelTransferRecipients(client, channelId);
     return { ok: true, recipients };
   } catch (error) {

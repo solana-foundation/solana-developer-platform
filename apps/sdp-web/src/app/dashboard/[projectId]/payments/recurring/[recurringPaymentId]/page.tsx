@@ -76,7 +76,7 @@ async function fetchAllCounterpartyWalletAccounts(
 export default async function RecurringPaymentDetailRoute({
   params,
 }: {
-  params: Promise<{ projectId: string; recurringPaymentId: string }>;
+  params: Promise<{ recurringPaymentId: string }>;
 }) {
   const { userId, orgId } = await auth();
   if (!userId) {
@@ -86,11 +86,10 @@ export default async function RecurringPaymentDetailRoute({
     redirect("/dashboard");
   }
 
-  const { projectId, recurringPaymentId } = await params;
+  const { recurringPaymentId } = await params;
 
   return withDashboardPageTrace(
     "dashboard.recurring-payments.detail.page",
-    projectId,
     async ({ trace, apiClient }) => {
       const t = await getTranslations();
       const [recurringPaymentResult, walletsResult, issuedTokenSymbolsResult] = await Promise.all([

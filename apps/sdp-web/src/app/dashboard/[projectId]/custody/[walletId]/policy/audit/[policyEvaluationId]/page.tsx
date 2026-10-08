@@ -3,8 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import {
   fetchPolicyAuditContext,
   fetchPolicyEvaluation,
@@ -21,7 +20,7 @@ export default async function WalletPolicyAuditDetailPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ projectId: string; walletId: string; policyEvaluationId: string }>;
+  params: Promise<{ walletId: string; policyEvaluationId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { userId, orgId } = await auth();
@@ -36,14 +35,13 @@ export default async function WalletPolicyAuditDetailPage({
   ]);
   const walletId = decodeURIComponent(resolvedParams.walletId);
   const policyEvaluationId = decodeURIComponent(resolvedParams.policyEvaluationId);
-  const policyHref = projectHref(
-    resolvedParams.projectId,
+  const policyHref = await requestProjectHref(
     `/dashboard/wallets/${encodeURIComponent(walletId)}/policy`
   );
   const filters = parsePolicyAuditFilters(resolvedSearchParams);
 
   try {
-    const apiClient = await createProjectBoundSdpApiClient(resolvedParams.projectId);
+    const apiClient = await createSdpApiClient();
     const [context, evaluation, neighbors] = await Promise.all([
       fetchPolicyAuditContext(apiClient.request, walletId),
       fetchPolicyEvaluation(apiClient.request, walletId, policyEvaluationId),
@@ -53,7 +51,6 @@ export default async function WalletPolicyAuditDetailPage({
     return (
       <DashboardWorkspaceOverviewPanel>
         <PolicyAuditDetail
-          projectId={resolvedParams.projectId}
           wallet={context.wallet}
           evaluation={evaluation}
           revisionHistory={context.revisionHistory}

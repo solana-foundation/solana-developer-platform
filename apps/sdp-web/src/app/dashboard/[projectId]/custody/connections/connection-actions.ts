@@ -2,8 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient, extractSdpApiError } from "@/lib/sdp-api";
+import { createSdpApiClient, extractSdpApiError, requestProjectHref } from "@/lib/sdp-api";
 import type { CustodyOutcomeKind } from "./verification-outcome";
 import { resolveHttpOutcome, resolveRotationOutcome } from "./verification-outcome";
 
@@ -23,17 +22,17 @@ interface RotationResponse {
   rotation: { status: "success" | "failed" | "retry_unknown"; code?: string };
 }
 
-function revalidateCustody(projectId: string, provider: string, connectionId?: string) {
-  revalidatePath(projectHref(projectId, `/dashboard/integrations/${provider}`));
+async function revalidateCustody(provider: string, connectionId?: string) {
+  revalidatePath(await requestProjectHref(`/dashboard/integrations/${provider}`));
   if (connectionId) {
     revalidatePath(
-      projectHref(projectId, `/dashboard/integrations/${provider}/connections/${connectionId}`)
+      await requestProjectHref(`/dashboard/integrations/${provider}/connections/${connectionId}`)
     );
   }
   // Wallet surfaces read the same connections, and a default switch or a new
   // wallet changes what they show.
-  revalidatePath(projectHref(projectId, "/dashboard/wallets"));
-  revalidatePath(projectHref(projectId, "/dashboard/custody"));
+  revalidatePath(await requestProjectHref("/dashboard/wallets"));
+  revalidatePath(await requestProjectHref("/dashboard/custody"));
 }
 
 /**
@@ -67,7 +66,6 @@ function classifyThrown(
  * what settles this, not the status code.
  */
 export async function rotateCredentialsAction(
-  projectId: string,
   formData: FormData,
   isRecoveryAttempt = false
 ): Promise<CustodyActionResult> {
@@ -91,7 +89,7 @@ export async function rotateCredentialsAction(
 
   let result: RotationResponse;
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     result = await client.fetch<RotationResponse>(
       `/internal/dashboard/custody/provider-credentials/${encodeURIComponent(credentialId)}/rotate`,
       {
@@ -109,13 +107,13 @@ export async function rotateCredentialsAction(
 
   const outcome = resolveRotationOutcome(result.rotation);
   if (!outcome) {
-    revalidateCustody(projectId, provider, connectionId);
+    await revalidateCustody(provider, connectionId);
     return { status: "success" };
   }
   // A candidate now exists server-side even though it did not cut over, so the
   // page must be re-read either way: the credentials card has a pending
   // rotation to offer retry or cancel on.
-  revalidateCustody(projectId, provider, connectionId);
+  await revalidateCustody(provider, connectionId);
   return outcome.kind === "unknown"
     ? { status: "unknown", message: t("DashboardCustody.rotateUnknown") }
     : { status: "failed", kind: outcome.kind, message: fallback };
@@ -123,7 +121,6 @@ export async function rotateCredentialsAction(
 
 /** Settles a rotation candidate left pending by an unknown outcome. */
 export async function completeRotationAction(
-  projectId: string,
   candidateId: string,
   provider: string,
   connectionId: string
@@ -131,7 +128,7 @@ export async function completeRotationAction(
   const t = await getTranslations();
   let result: RotationResponse;
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     result = await client.fetch<RotationResponse>(
       `/internal/dashboard/custody/provider-credentials/${encodeURIComponent(candidateId)}/complete-rotation`,
       { method: "POST", body: JSON.stringify({}) }
@@ -140,7 +137,7 @@ export async function completeRotationAction(
     return classifyThrown(error, t("DashboardCustody.rotateFailed"));
   }
 
-  revalidateCustody(projectId, provider, connectionId);
+  await revalidateCustody(provider, connectionId);
   const outcome = resolveRotationOutcome(result.rotation);
   if (!outcome) return { status: "success" };
   return outcome.kind === "unknown"
@@ -154,24 +151,22 @@ export async function completeRotationAction(
  * the two intents in its audit trail.
  */
 export async function cancelRotationAction(
-  projectId: string,
   candidateId: string,
   provider: string,
   connectionId: string
 ): Promise<CustodyActionResult> {
-  return deactivateCredentialAction(projectId, candidateId, provider, connectionId);
+  return deactivateCredentialAction(candidateId, provider, connectionId);
 }
 
 /** Restores the immediately previous credentials, inside the 24-hour window. */
 export async function rollbackCredentialAction(
-  projectId: string,
   credentialId: string,
   provider: string,
   connectionId: string
 ): Promise<CustodyActionResult> {
   const t = await getTranslations();
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     await client.fetch(
       `/internal/dashboard/custody/provider-credentials/${encodeURIComponent(credentialId)}/rollback`,
       { method: "POST", body: JSON.stringify({}) }
@@ -179,20 +174,19 @@ export async function rollbackCredentialAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.rollbackFailed"));
   }
-  revalidateCustody(projectId, provider, connectionId);
+  await revalidateCustody(provider, connectionId);
   return { status: "success" };
 }
 
 /** Deactivates credentials nothing references any more; deletes the stored secret. */
 export async function deactivateCredentialAction(
-  projectId: string,
   credentialId: string,
   provider: string,
   connectionId: string
 ): Promise<CustodyActionResult> {
   const t = await getTranslations();
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     await client.fetch(
       `/internal/dashboard/custody/provider-credentials/${encodeURIComponent(credentialId)}/deactivate`,
       { method: "POST", body: JSON.stringify({}) }
@@ -200,19 +194,18 @@ export async function deactivateCredentialAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.deactivateCredentialsFailed"));
   }
-  revalidateCustody(projectId, provider, connectionId);
+  await revalidateCustody(provider, connectionId);
   return { status: "success" };
 }
 
 /** Permanently ends a connection. Refused by the API while it has active wallets. */
 export async function deactivateConnectionAction(
-  projectId: string,
   connectionId: string,
   provider: string
 ): Promise<CustodyActionResult> {
   const t = await getTranslations();
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     await client.fetch(
       `/internal/dashboard/custody/connections/${encodeURIComponent(connectionId)}/deactivate`,
       { method: "POST", body: JSON.stringify({}) }
@@ -220,7 +213,7 @@ export async function deactivateConnectionAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.deactivateConnectionFailed"));
   }
-  revalidateCustody(projectId, provider, connectionId);
+  await revalidateCustody(provider, connectionId);
   return { status: "success" };
 }
 
@@ -229,13 +222,12 @@ export async function deactivateConnectionAction(
  * The deactivated connection remains in the list for history.
  */
 export async function cancelSetupAction(
-  projectId: string,
   connectionId: string,
   provider: string
 ): Promise<CustodyActionResult> {
   const t = await getTranslations();
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     await client.fetch(
       `/internal/dashboard/custody/connections/${encodeURIComponent(connectionId)}/cancel`,
       { method: "POST", body: JSON.stringify({}) }
@@ -243,7 +235,7 @@ export async function cancelSetupAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.cancelSetupFailed"));
   }
-  revalidateCustody(projectId, provider);
+  await revalidateCustody(provider);
   return { status: "success" };
 }
 
@@ -252,13 +244,12 @@ export async function cancelSetupAction(
  * wallets, no funds, and no already-pinned operations.
  */
 export async function makeDefaultConnectionAction(
-  projectId: string,
   connectionId: string,
   provider: string
 ): Promise<CustodyActionResult> {
   const t = await getTranslations();
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     await client.fetch("/v1/wallets/switch", {
       method: "POST",
       body: JSON.stringify({ connectionId, provider }),
@@ -266,7 +257,7 @@ export async function makeDefaultConnectionAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.makeDefaultFailed"));
   }
-  revalidateCustody(projectId, provider, connectionId);
+  await revalidateCustody(provider, connectionId);
   return { status: "success" };
 }
 
@@ -278,7 +269,6 @@ export async function makeDefaultConnectionAction(
  * tells the user to check the list first.
  */
 export async function createConnectionWalletAction(
-  projectId: string,
   formData: FormData
 ): Promise<CustodyActionResult> {
   const t = await getTranslations();
@@ -295,7 +285,7 @@ export async function createConnectionWalletAction(
   }
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     await client.fetch("/v1/wallets", {
       method: "POST",
       body: JSON.stringify({ connectionId, ...(label ? { label } : {}) }),
@@ -303,6 +293,6 @@ export async function createConnectionWalletAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.addWalletFailed"));
   }
-  revalidateCustody(projectId, provider, connectionId);
+  await revalidateCustody(provider, connectionId);
   return { status: "success" };
 }

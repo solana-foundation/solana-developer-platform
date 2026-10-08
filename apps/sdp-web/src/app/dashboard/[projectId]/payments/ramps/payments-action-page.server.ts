@@ -8,25 +8,15 @@ import {
   fetchProviderAvailability,
   filterEnabledRampProviderAccess,
 } from "@/lib/provider-availability";
-import { createOrgSdpApiClient, createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 
 const UNLINKED_ONBOARDING_STATUS = {
   linked: false,
   organization: null,
 } satisfies OnboardingStatusResponse;
 
-/**
- * Loads the data the Pay and Deposit action pages share: issued token symbols,
- * counterparties, compliance/ramp provider access, and the enabled ramp providers.
- *
- * @param projectId - Project the page renders, from its URL.
- * @returns Props spread into `PaymentsActionPage`.
- */
-export async function loadPaymentsActionPageData(projectId: string) {
-  const [orgClient, apiClient] = await Promise.all([
-    createOrgSdpApiClient(),
-    createProjectBoundSdpApiClient(projectId),
-  ]);
+export async function loadPaymentsActionPageData() {
+  const [orgClient, apiClient] = await Promise.all([createOrgSdpApiClient(), createSdpApiClient()]);
   const onboardingStatusPromise = orgClient
     .fetch<OnboardingStatusResponse>("/v1/onboarding/status")
     .catch(() => UNLINKED_ONBOARDING_STATUS);

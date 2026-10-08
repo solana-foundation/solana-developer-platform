@@ -95,7 +95,7 @@ export function CounterpartyCreateProvider({
 
     router.refresh();
     router.push(href("/dashboard/payments/counterparty"));
-  }, [onCreated, createdCounterparty, router]);
+  }, [onCreated, createdCounterparty, router, href]);
 
   const value = useMemo(
     () => ({

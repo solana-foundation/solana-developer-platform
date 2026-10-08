@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { deactivateCredentialAction } from "./connection-actions";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";
 import { useCustodyAction } from "./use-custody-action";
@@ -36,7 +35,6 @@ export function DeactivateCredentialsDialog({
   connectionId: string;
 }) {
   const t = useTranslations();
-  const projectId = useProjectId();
   const { pending, run } = useCustodyAction();
 
   const projectNames = new Map(lifecycle.impact.projects.map((p) => [p.id, p.name]));
@@ -45,13 +43,7 @@ export function DeactivateCredentialsDialog({
 
   const handleConfirm = async () => {
     const result = await run(
-      () =>
-        deactivateCredentialAction(
-          projectId,
-          lifecycle.providerCredential.id,
-          provider,
-          connectionId
-        ),
+      () => deactivateCredentialAction(lifecycle.providerCredential.id, provider, connectionId),
       {
         successTitle: t("DashboardCustody.deactivateCredentialsSuccessTitle"),
         successDescription: t("DashboardCustody.deactivateCredentialsSuccessDescription"),

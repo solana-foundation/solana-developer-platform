@@ -4,7 +4,7 @@ import {
   fetchPrivateChannelBalance,
   fetchSignableWalletsWithBalances,
 } from "@/lib/private-channels";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 
 export interface WalletBalanceView {
   /** Channel-side balance for the selected mint (SPC gateway). Null when the read failed. */
@@ -23,12 +23,11 @@ export interface WalletBalanceView {
  * on-chain side matches whatever mint it reports.
  */
 export async function fetchWalletBalancesAction(
-  projectId: string,
   walletId: string,
   mint?: string
 ): Promise<WalletBalanceView> {
   if (!walletId) return { channel: null, onChain: null };
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
   const [channelResult, walletsResult] = await Promise.allSettled([
     fetchPrivateChannelBalance(client, walletId, mint),
     fetchSignableWalletsWithBalances(client),

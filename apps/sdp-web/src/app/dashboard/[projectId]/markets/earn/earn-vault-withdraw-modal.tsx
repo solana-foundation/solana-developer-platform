@@ -496,7 +496,7 @@ export interface EarnVaultWithdrawModalProps {
   position: EarnVaultPosition;
   environment: SdpEnvironment;
   /** Part of the request fingerprint — see `vaultWithdrawalRequestFingerprint`. */
-  projectId: string;
+  projectId: string | null;
   onClose: () => void;
   onWithdrawn?: (
     withdrawal: EarnVaultWithdrawal,

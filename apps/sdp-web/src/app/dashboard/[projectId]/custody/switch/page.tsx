@@ -1,11 +1,6 @@
 import { redirect } from "next/navigation";
-import { projectHref } from "@/lib/dashboard-project-path";
+import { requestProjectHref } from "@/lib/sdp-api";
 
-export default async function CustodySwitchPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
-  const { projectId } = await params;
-  redirect(projectHref(projectId, "/dashboard/wallets/setup"));
+export default async function CustodySwitchPage() {
+  redirect(await requestProjectHref("/dashboard/wallets/setup"));
 }

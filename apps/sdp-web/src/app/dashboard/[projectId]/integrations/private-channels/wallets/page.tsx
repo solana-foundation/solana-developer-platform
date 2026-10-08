@@ -1,17 +1,12 @@
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";
 import { loadChannelBalances, loadWalletVerification } from "../private-channels-page.data";
 import { WalletsTable } from "./wallets-table";
 
-export default async function PrivateChannelsWalletsPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function PrivateChannelsWalletsPage() {
   await requirePrivateChannelsAccess();
-  const { projectId } = await params;
 
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
   const wallets = await loadWalletVerification(client);
 
   // Channel balances only exist for verified wallets — unverified reads would 403.

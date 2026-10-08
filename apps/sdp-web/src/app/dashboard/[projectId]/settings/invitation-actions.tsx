@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 
 export function InvitationActions({
   invitationId,
@@ -26,7 +25,6 @@ export function InvitationActions({
 }) {
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   const [isPending, startTransition] = useTransition();
   const [isRevoking, setIsRevoking] = useState(false);
 
@@ -46,7 +44,7 @@ export function InvitationActions({
   const revoke = () => {
     setIsRevoking(true);
     startTransition(async () => {
-      const result = await revokeInvitation(projectId, invitationId);
+      const result = await revokeInvitation(invitationId);
       setIsRevoking(false);
 
       if (!result.ok) {

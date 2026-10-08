@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTranslations } from "@/i18n/provider";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { API_KEYS_FLASH_PATH, type ApiKeyFlash } from "./api-key-flash";
 import { GeneratedApiKeyModal } from "./generated-key-modal";
 
@@ -14,11 +13,11 @@ interface ApiKeyFlashResponse {
 
 let pendingFlashRequest: Promise<ApiKeyFlash | null> | null = null;
 
-async function loadApiKeyFlash(projectId: string): Promise<ApiKeyFlash | null> {
+async function loadApiKeyFlash(flashPath: string): Promise<ApiKeyFlash | null> {
   if (!pendingFlashRequest) {
     // POST, not GET: reading the flash consumes the one-time cookie, and a
     // GET with that side effect is exposed to prefetching and CSRF.
-    pendingFlashRequest = fetch(projectHref(projectId, API_KEYS_FLASH_PATH), {
+    pendingFlashRequest = fetch(flashPath, {
       method: "POST",
       cache: "no-store",
       credentials: "same-origin",
@@ -43,7 +42,7 @@ async function loadApiKeyFlash(projectId: string): Promise<ApiKeyFlash | null> {
 
 export function ApiKeyFlashSurface() {
   const t = useTranslations();
-  const projectId = useProjectId();
+  const flashPath = useProjectHref()(API_KEYS_FLASH_PATH);
   const [flash, setFlash] = useState<ApiKeyFlash | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -51,7 +50,7 @@ export function ApiKeyFlashSurface() {
     let isActive = true;
 
     const loadFlash = async () => {
-      const nextFlash = await loadApiKeyFlash(projectId);
+      const nextFlash = await loadApiKeyFlash(flashPath);
 
       if (isActive) {
         setFlash(nextFlash);
@@ -64,7 +63,7 @@ export function ApiKeyFlashSurface() {
     return () => {
       isActive = false;
     };
-  }, [projectId]);
+  }, [flashPath]);
 
   if (!isLoaded || !flash) {
     return null;

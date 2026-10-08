@@ -15,7 +15,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { verifyWalletAction } from "../../wallets/actions";
 import { createPrincipalAction } from "../actions";
 
@@ -33,7 +33,6 @@ function walletLabel(wallet: CustodyWalletSummary): string {
 export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary[] }) {
   const router = useRouter();
   const t = useTranslations();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const workspace = useOptionalDashboardWorkspace();
   const custodyEnabled = workspace?.flags.custody ?? true;
@@ -49,7 +48,7 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
     startTransition(async () => {
       let principalId = createdPrincipalId;
       if (!principalId) {
-        const principalResult = await createPrincipalAction(projectId, trimmedName);
+        const principalResult = await createPrincipalAction(trimmedName);
         if (!principalResult.ok) {
           toast.error(principalResult.message);
           return;
@@ -58,7 +57,7 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
         setCreatedPrincipalId(principalId);
       }
 
-      const walletResult = await verifyWalletAction(projectId, walletId, principalId);
+      const walletResult = await verifyWalletAction(walletId, principalId);
       if (!walletResult.ok) {
         toast.error(walletResult.message);
         return;

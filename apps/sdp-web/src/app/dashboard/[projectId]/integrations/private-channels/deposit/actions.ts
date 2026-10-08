@@ -3,11 +3,11 @@
 import type { PrivateChannelDeposit } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import type { MessageKey } from "@/i18n/messages";
-import { projectHref } from "@/lib/dashboard-project-path";
 import { createPrivateChannelDeposit, fetchPrivateChannelDeposit } from "@/lib/private-channels";
 import {
-  createProjectBoundSdpApiClient,
+  createSdpApiClient,
   extractSdpApiErrorMessage,
+  requestProjectHref,
   SdpApiResponseError,
 } from "@/lib/sdp-api";
 import { getAmountError } from "../amount-validation";
@@ -44,10 +44,7 @@ export type CreateDepositResult =
   | { ok: false; kind: "validation"; messageKey: MessageKey }
   | { ok: false; kind: "server"; message: string; status: number | null };
 
-export async function createDepositAction(
-  projectId: string,
-  input: CreateDepositInput
-): Promise<CreateDepositResult> {
+export async function createDepositAction(input: CreateDepositInput): Promise<CreateDepositResult> {
   if (!input.walletId) {
     return {
       ok: false,
@@ -60,7 +57,7 @@ export async function createDepositAction(
     return { ok: false, kind: "validation", messageKey: amountError };
   }
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const deposit = await createPrivateChannelDeposit(
       client,
       {
@@ -71,7 +68,7 @@ export async function createDepositAction(
       },
       input.idempotencyKey
     );
-    revalidatePath(projectHref(projectId, "/dashboard/integrations/private-channels/deposit"));
+    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels/deposit"));
     return { ok: true, deposit };
   } catch (error) {
     return {
@@ -84,12 +81,9 @@ export async function createDepositAction(
 }
 
 /** Poll target for the progress view. Returns null on transient failures. */
-export async function fetchDepositAction(
-  projectId: string,
-  id: string
-): Promise<PrivateChannelDeposit | null> {
+export async function fetchDepositAction(id: string): Promise<PrivateChannelDeposit | null> {
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     return await fetchPrivateChannelDeposit(client, id);
   } catch {
     return null;

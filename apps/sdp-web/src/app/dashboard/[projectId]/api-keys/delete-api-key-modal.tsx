@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { deactivateApiKeyInlineAction } from "./actions";
 
 interface DeleteApiKeyModalProps {
@@ -29,7 +28,6 @@ export function DeleteApiKeyModal({
   onDeleted,
 }: DeleteApiKeyModalProps) {
   const t = useTranslations();
-  const projectId = useProjectId();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -74,7 +72,7 @@ export function DeleteApiKeyModal({
       position: "bottom-right",
     });
 
-    const result = await deactivateApiKeyInlineAction(projectId, {
+    const result = await deactivateApiKeyInlineAction({
       keyId,
       keyName,
       confirmation,

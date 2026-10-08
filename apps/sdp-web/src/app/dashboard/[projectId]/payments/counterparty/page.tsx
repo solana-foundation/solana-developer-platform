@@ -10,7 +10,7 @@ import RedesignCounterpartyPage from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 
-async function CounterpartyPage({ params }: { params: Promise<{ projectId: string }> }) {
+async function CounterpartyPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -19,39 +19,34 @@ async function CounterpartyPage({ params }: { params: Promise<{ projectId: strin
     redirect("/dashboard");
   }
 
-  const { projectId } = await params;
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
 
-  return withDashboardPageTrace(
-    "dashboard.counterparty.page",
-    projectId,
-    async ({ trace, apiClient }) => {
-      const [counterpartiesResult, apiKeysResult] = await Promise.all([
-        trace.step("fetch_counterparties", () => fetchCounterparties(apiClient.request)),
-        trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-      ]);
+  return withDashboardPageTrace("dashboard.counterparty.page", async ({ trace, apiClient }) => {
+    const [counterpartiesResult, apiKeysResult] = await Promise.all([
+      trace.step("fetch_counterparties", () => fetchCounterparties(apiClient.request)),
+      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+    ]);
 
-      trace.log({
-        ok: true,
-        counterpartiesOk: counterpartiesResult.ok,
-        counterpartiesCount: counterpartiesResult.data.length,
-        counterpartiesTotal: counterpartiesResult.total,
-        apiKeysOk: apiKeysResult.ok,
-        apiKeysCount: apiKeysResult.data?.length ?? 0,
-      });
+    trace.log({
+      ok: true,
+      counterpartiesOk: counterpartiesResult.ok,
+      counterpartiesCount: counterpartiesResult.data.length,
+      counterpartiesTotal: counterpartiesResult.total,
+      apiKeysOk: apiKeysResult.ok,
+      apiKeysCount: apiKeysResult.data?.length ?? 0,
+    });
 
-      return (
-        <div className="flex h-full min-h-0 w-full flex-col">
-          <CounterpartyWorkspace
-            initialCounterparties={counterpartiesResult.data}
-            initialTotal={counterpartiesResult.total}
-            apiKeys={apiKeysResult.data ?? []}
-            apiBaseUrl={apiBaseUrl}
-          />
-        </div>
-      );
-    }
-  );
+    return (
+      <div className="flex h-full min-h-0 w-full flex-col">
+        <CounterpartyWorkspace
+          initialCounterparties={counterpartiesResult.data}
+          initialTotal={counterpartiesResult.total}
+          apiKeys={apiKeysResult.data ?? []}
+          apiBaseUrl={apiBaseUrl}
+        />
+      </div>
+    );
+  });
 }
 
 export default withLegacyDesign(RedesignCounterpartyPage, CounterpartyPage, "contacts");

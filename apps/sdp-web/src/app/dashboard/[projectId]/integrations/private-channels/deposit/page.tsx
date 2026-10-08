@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import {
   PRIVATE_CHANNELS_SETUP_PATH,
   requirePrivateChannelsAccess,
@@ -15,23 +14,18 @@ import {
 } from "../private-channels-page.data";
 import { DepositForm } from "./deposit-form";
 
-export default async function PrivateChannelsDepositPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function PrivateChannelsDepositPage() {
   await requirePrivateChannelsAccess();
-  const { projectId } = await params;
 
   const t = await getTranslations();
 
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
   const instance = await loadInstance(client);
   if (!instance.ok) {
     return <PrivateChannelsLoadError message={instance.error} />;
   }
   if (!instance.data?.isActive) {
-    redirect(projectHref(projectId, PRIVATE_CHANNELS_SETUP_PATH));
+    redirect(await requestProjectHref(PRIVATE_CHANNELS_SETUP_PATH));
   }
 
   const [wallets, tokenEligibility] = await Promise.all([

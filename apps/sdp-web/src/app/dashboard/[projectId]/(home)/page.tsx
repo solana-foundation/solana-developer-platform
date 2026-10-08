@@ -4,7 +4,7 @@ import { custody, issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { HomeWorkspace } from "../home-workspace";
 import { resolveTotalBalance } from "../payments/payments-overview.utils";
 import {
@@ -13,13 +13,8 @@ import {
   fetchPaymentsWallets,
 } from "../payments/payments-page.data";
 
-export default async function DashboardPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
-  const [{ projectId }, t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
-    params,
+export default async function DashboardPage() {
+  const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
     custody(),
@@ -48,7 +43,7 @@ export default async function DashboardPage({
   const trace = createTimedTrace("dashboard.home.page");
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
-      createProjectBoundSdpApiClient(projectId, trace.childContext("dashboard.home.api"))
+      createSdpApiClient(trace.childContext("dashboard.home.api"))
     );
     const [aggregateResult, walletsResult, issuedTokensResult] = await Promise.all([
       trace.step("fetch_payments_aggregate", () => fetchPaymentsAggregate(apiClient.request)),

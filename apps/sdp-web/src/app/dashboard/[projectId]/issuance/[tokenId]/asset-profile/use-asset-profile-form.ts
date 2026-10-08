@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { buildIssuanceMetadata, getAssetDetailsErrors } from "../../create/draft-mapping";
 import type { DraftState } from "../../create/issuance-draft-wizard.types";
 import {
@@ -41,7 +40,6 @@ export function useAssetProfileForm({
 }) {
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   // The save action returns the updated profile; keep the freshest copy so the
   // baseline re-derives without waiting for a server re-render.
   const [assetProfile, setAssetProfile] = useState(initialAssetProfile);
@@ -158,7 +156,7 @@ export function useAssetProfileForm({
     setSaving(true);
     try {
       const isDeployed = Boolean(token.mintAddress);
-      const result = await updateAssetProfileAction(projectId, {
+      const result = await updateAssetProfileAction({
         tokenId: token.id,
         profileId: assetProfile.id,
         rebuiltMetadata: buildIssuanceMetadata(draft),

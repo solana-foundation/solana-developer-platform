@@ -7,27 +7,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 
 type InviteState = InviteMemberResult | null;
 
 const ROLE_LABEL_ID = "invite-role-label";
 
-async function submitInvite(
-  projectId: string,
-  _previous: InviteState,
-  formData: FormData
-): Promise<InviteState> {
-  return inviteMember(projectId, formData);
+async function submitInvite(_previous: InviteState, formData: FormData): Promise<InviteState> {
+  return inviteMember(formData);
 }
 
 export function InviteMemberForm() {
   const t = useTranslations();
-  const projectId = useProjectId();
-  const [state, formAction, isPending] = useActionState<InviteState, FormData>(
-    submitInvite.bind(null, projectId),
-    null
-  );
+  const [state, formAction, isPending] = useActionState<InviteState, FormData>(submitInvite, null);
   const [role, setRole] = useState<"admin" | "member">("member");
   const formRef = useRef<HTMLFormElement>(null);
   // useActionState keeps the last result, so react to identity changes rather

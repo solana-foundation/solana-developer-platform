@@ -6,13 +6,12 @@ import { getTranslations } from "@/i18n/server";
 import { readApiErrorMessage } from "@/lib/api-error";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { IssuanceDetailSkeleton } from "../issuance-detail-skeleton";
 import { AssetManagementWorkspace } from "./asset-profile/asset-management-workspace";
 
 interface TokenManagementPageProps {
   params: Promise<{
-    projectId: string;
     tokenId: string;
   }>;
 }
@@ -87,7 +86,7 @@ function mapAssetProfile(payload: unknown): AssetProfile | null {
 }
 
 export default async function IssuanceTokenManagementPage({ params }: TokenManagementPageProps) {
-  const [t, { userId, orgId }, { projectId, tokenId }] = await Promise.all([
+  const [t, { userId, orgId }, { tokenId }] = await Promise.all([
     getTranslations(),
     auth(),
     params,
@@ -103,7 +102,7 @@ export default async function IssuanceTokenManagementPage({ params }: TokenManag
 
   try {
     const apiClient = await trace.step("create_sdp_api_client", () =>
-      createProjectBoundSdpApiClient(projectId, trace.childContext("dashboard.issuance.token.api"))
+      createSdpApiClient(trace.childContext("dashboard.issuance.token.api"))
     );
 
     const [tokenResult, profileResult] = await Promise.all([

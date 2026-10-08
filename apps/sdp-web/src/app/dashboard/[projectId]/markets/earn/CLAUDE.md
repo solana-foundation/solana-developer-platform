@@ -42,7 +42,7 @@ api/dashboard/markets/earn/
                                      fronts it. The allowlist is resolved
                                      from `/v1/earn/strategies` (provider
                                      kamino, mainnet-beta) through
-                                     `createProjectBoundSdpApiClient`, cached beside the
+                                     `createSdpApiClient`, cached beside the
                                      allocations cache, and a failed catalogue
                                      read fails closed into the same generic
                                      502 — a refused vault is

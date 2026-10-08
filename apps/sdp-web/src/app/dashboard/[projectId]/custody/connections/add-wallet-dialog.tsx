@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { createConnectionWalletAction } from "./connection-actions";
 import { useCustodyAction } from "./use-custody-action";
 
@@ -76,7 +75,6 @@ function AddWalletForm({
   run: ReturnType<typeof useCustodyAction>["run"];
   t: ReturnType<typeof useTranslations>;
 }) {
-  const projectId = useProjectId();
   const [label, setLabel] = useState("");
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -86,7 +84,7 @@ function AddWalletForm({
     formData.set("provider", provider);
     formData.set("label", label);
 
-    const result = await run(() => createConnectionWalletAction(projectId, formData), {
+    const result = await run(() => createConnectionWalletAction(formData), {
       successTitle: t("DashboardCustody.addWalletSuccessTitle"),
       successDescription: t("DashboardCustody.addWalletSuccessDescription"),
       failedTitle: t("DashboardCustody.addWalletFailedTitle"),

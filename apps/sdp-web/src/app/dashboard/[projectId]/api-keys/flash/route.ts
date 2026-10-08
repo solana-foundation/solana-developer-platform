@@ -1,15 +1,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { requestProjectId } from "@/lib/sdp-api";
 import { API_KEY_FLASH_COOKIE, type ApiKeyFlash, apiKeyFlashCookieOptions } from "../api-key-flash";
 import { unsealApiKeyFlash } from "../api-key-flash-seal";
 
-function clearFlashCookie(response: NextResponse, projectId: string) {
-  response.cookies.set(API_KEY_FLASH_COOKIE, "", apiKeyFlashCookieOptions(projectId, 0));
-}
-
-interface FlashRouteContext {
-  params: Promise<{ projectId: string }>;
+async function clearFlashCookie(response: NextResponse) {
+  response.cookies.set(
+    API_KEY_FLASH_COOKIE,
+    "",
+    apiKeyFlashCookieOptions(await requestProjectId(), 0)
+  );
 }
 
 /**
@@ -25,12 +26,8 @@ interface FlashRouteContext {
  * prefetched, and the strict-SameSite cookie stays home on cross-site
  * requests.
  */
-export async function POST(_request: Request, context: FlashRouteContext) {
-  const [{ projectId }, { sessionId, userId }, jar] = await Promise.all([
-    context.params,
-    auth(),
-    cookies(),
-  ]);
+export async function POST() {
+  const [{ sessionId, userId }, jar] = await Promise.all([auth(), cookies()]);
   const raw = jar.get(API_KEY_FLASH_COOKIE)?.value;
 
   if (!sessionId || !userId) {
@@ -38,7 +35,7 @@ export async function POST(_request: Request, context: FlashRouteContext) {
     // whoever signs in on this browser next.
     const response = NextResponse.json({ flash: null }, { status: 401 });
     if (raw) {
-      clearFlashCookie(response, projectId);
+      await clearFlashCookie(response);
     }
     return response;
   }
@@ -50,14 +47,13 @@ export async function POST(_request: Request, context: FlashRouteContext) {
 
   const response = NextResponse.json({ flash });
   if (raw) {
-    clearFlashCookie(response, projectId);
+    await clearFlashCookie(response);
   }
   return response;
 }
 
-export async function DELETE(_request: Request, context: FlashRouteContext) {
-  const { projectId } = await context.params;
+export async function DELETE() {
   const response = NextResponse.json({ ok: true });
-  clearFlashCookie(response, projectId);
+  await clearFlashCookie(response);
   return response;
 }

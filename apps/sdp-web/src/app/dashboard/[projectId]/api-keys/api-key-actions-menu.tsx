@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { rotateApiKeyAction } from "./actions";
 import { DeleteApiKeyModal } from "./delete-api-key-modal";
 
@@ -32,18 +32,13 @@ export function ApiKeyActionsMenu({
 }: ApiKeyActionsMenuProps) {
   const t = useTranslations();
   const router = useRouter();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const rotateFormRef = useRef<HTMLFormElement | null>(null);
 
   return (
     <>
-      <form
-        ref={rotateFormRef}
-        action={rotateApiKeyAction.bind(null, projectId)}
-        className="hidden"
-      >
+      <form ref={rotateFormRef} action={rotateApiKeyAction} className="hidden">
         <input type="hidden" name="keyId" value={keyId} />
         <input type="hidden" name="grace" value={String(DEFAULT_ROTATION_GRACE_HOURS)} />
       </form>

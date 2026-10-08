@@ -22,7 +22,8 @@ export const vaultWithdrawalIdempotencyKeyStore = createIdempotencyKeyStore(
  * organization-level custody-config reason the deposit fingerprint documents.
  */
 export function vaultWithdrawalRequestFingerprint(input: {
-  projectId: string;
+  /** `null` only before a project resolves; it still discriminates. */
+  projectId: string | null;
   positionId: string;
   shares: string;
   /**

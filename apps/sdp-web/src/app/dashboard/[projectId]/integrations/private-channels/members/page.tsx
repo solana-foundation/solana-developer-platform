@@ -1,23 +1,15 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../private-channels-access";
 import { PrivateChannelsLoadError } from "../private-channels-load-error";
 import { loadPrincipals } from "../private-channels-page.data";
 import { MembersTable } from "./members-table";
 
-export default async function PrivateChannelsMembersPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function PrivateChannelsMembersPage() {
   await requirePrivateChannelsAccess();
-  const { projectId } = await params;
 
-  const [t, client] = await Promise.all([
-    getTranslations(),
-    createProjectBoundSdpApiClient(projectId),
-  ]);
+  const [t, client] = await Promise.all([getTranslations(), createSdpApiClient()]);
   const principals = await loadPrincipals(client);
 
   return (

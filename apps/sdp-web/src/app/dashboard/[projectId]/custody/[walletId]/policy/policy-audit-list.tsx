@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
-import { projectHref } from "@/lib/dashboard-project-path";
+import { requestProjectHref } from "@/lib/sdp-api";
 import { formatDisplayLabel } from "@/lib/utils";
 import {
   buildPolicyAuditSearchParams,
@@ -40,8 +40,7 @@ import {
 import { PolicyAuditFilterBar, PolicyAuditPaginatedFooter } from "./policy-audit-filter-bar";
 import { RevisionHistoryDrawer } from "./revision-history-drawer";
 
-export function PolicyAuditList({
-  projectId,
+export async function PolicyAuditList({
   walletId,
   walletLabel,
   result,
@@ -53,7 +52,6 @@ export function PolicyAuditList({
   locale,
   t,
 }: {
-  projectId: string;
   walletId: string;
   walletLabel: string;
   result: PolicyAuditListResult;
@@ -66,7 +64,7 @@ export function PolicyAuditList({
   t: PolicyTranslate;
 }) {
   const encodedWalletId = encodeURIComponent(walletId);
-  const policyHref = projectHref(projectId, `/dashboard/wallets/${encodedWalletId}/policy`);
+  const policyHref = await requestProjectHref(`/dashboard/wallets/${encodedWalletId}/policy`);
   const auditHref = `${policyHref}/audit`;
   const pageCount = Math.max(1, Math.ceil(result.total / result.pageSize));
   const rangeStart = result.total === 0 ? 0 : (result.page - 1) * result.pageSize + 1;

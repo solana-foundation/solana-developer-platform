@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/table";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import type { WalletChannelBalance } from "../private-channels-page.data";
 import { deleteVerifiedWalletAction, verifyWalletAction } from "./actions";
 
@@ -84,7 +84,6 @@ export function WalletsTable({
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [selectedWalletId, setSelectedWalletId] = useState<string | null>(null);
   const t = useTranslations();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const workspace = useOptionalDashboardWorkspace();
   const custodyEnabled = workspace?.flags.custody ?? true;
@@ -99,7 +98,7 @@ export function WalletsTable({
   function handleVerify(walletId: string, pubkey: string) {
     setPendingKey(walletId);
     startTransition(async () => {
-      const result = await verifyWalletAction(projectId, walletId);
+      const result = await verifyWalletAction(walletId);
       if (result.ok) {
         toast.success(
           t("DashboardPrivateChannels.verifiedWallets.verifySuccess", { key: shortKey(pubkey) })
@@ -121,7 +120,7 @@ export function WalletsTable({
   function handleDelete(pubkey: string) {
     setPendingKey(pubkey);
     startTransition(async () => {
-      const result = await deleteVerifiedWalletAction(projectId, pubkey);
+      const result = await deleteVerifiedWalletAction(pubkey);
       if (result.ok) {
         toast.success(
           t("DashboardPrivateChannels.verifiedWallets.revokeSuccess", { key: shortKey(pubkey) })

@@ -22,7 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useTranslations } from "@/i18n/provider";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 import {
   addPrincipalToChannelAction,
@@ -100,21 +100,20 @@ function PrincipalRow({
 }) {
   const [pending, startTransition] = useTransition();
   const t = useTranslations();
-  const projectId = useProjectId();
   const disabled = principal.status === "disabled";
   const channelIds = new Set(principal.channels.map((channel) => channel.id));
   const availableChannels = allChannels.filter((channel) => !channelIds.has(channel.id));
 
   const addToChannel = (channelId: string) => {
     startTransition(async () => {
-      const result = await addPrincipalToChannelAction(projectId, channelId, principal.id);
+      const result = await addPrincipalToChannelAction(channelId, principal.id);
       if (!result.ok) toast.error(result.message);
     });
   };
 
   const removeFromChannel = (channelId: string) => {
     startTransition(async () => {
-      const result = await removePrincipalFromChannelAction(projectId, channelId, principal.id);
+      const result = await removePrincipalFromChannelAction(channelId, principal.id);
       if (!result.ok) toast.error(result.message);
     });
   };
@@ -277,12 +276,11 @@ function DisablePrincipalDialog({
 }) {
   const [pending, startTransition] = useTransition();
   const t = useTranslations();
-  const projectId = useProjectId();
 
   const confirm = () => {
     if (!target) return;
     startTransition(async () => {
-      const result = await disablePrincipalAction(projectId, target.id);
+      const result = await disablePrincipalAction(target.id);
       if (result.ok) {
         toast.success(t("DashboardPrivateChannels.members.disableSuccess"));
         onClose();

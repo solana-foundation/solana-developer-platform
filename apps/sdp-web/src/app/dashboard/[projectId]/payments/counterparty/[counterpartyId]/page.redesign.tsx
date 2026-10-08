@@ -3,14 +3,14 @@ import { redirect } from "next/navigation";
 import { isRampsEnabled } from "@/flags/ramps";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { projectHref } from "@/lib/dashboard-project-path";
+import { requestProjectHref } from "@/lib/sdp-api";
 import { fetchCounterpartyDetail, fetchCounterpartyPayouts } from "../counterparty-detail.data";
 import { CounterpartyDetailWorkspace } from "../counterparty-detail-workspace.redesign";
 
 async function CounterpartyDetailRoute({
   params,
 }: {
-  params: Promise<{ projectId: string; counterpartyId: string }>;
+  params: Promise<{ counterpartyId: string }>;
 }) {
   const { userId, orgId } = await auth();
   if (!userId) {
@@ -20,11 +20,10 @@ async function CounterpartyDetailRoute({
     redirect("/dashboard");
   }
 
-  const { projectId, counterpartyId } = await params;
+  const { counterpartyId } = await params;
 
   return withDashboardPageTrace(
     "dashboard.counterparty.detail.page",
-    projectId,
     async ({ trace, apiClient }) => {
       const [detail, payouts, rampsEnabled] = await Promise.all([
         trace.step("fetch_counterparty_detail", () =>
@@ -48,7 +47,7 @@ async function CounterpartyDetailRoute({
       });
 
       if (!detail.counterparty) {
-        redirect(projectHref(projectId, "/dashboard/payments/counterparty"));
+        redirect(await requestProjectHref("/dashboard/payments/counterparty"));
       }
 
       return (

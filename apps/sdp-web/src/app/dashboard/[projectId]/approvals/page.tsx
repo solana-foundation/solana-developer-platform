@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import {
   fetchPaymentsIssuedTokenSymbols,
   type PaymentsIssuedTokenSymbol,
@@ -14,11 +14,7 @@ import { fetchApprovalApiKeyNames, fetchApprovalRequests } from "./approval-requ
 
 export const dynamic = "force-dynamic";
 
-export default async function ApprovalsPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function ApprovalsPage() {
   const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
@@ -43,8 +39,7 @@ export default async function ApprovalsPage({
   let loadError = false;
 
   try {
-    const { projectId } = await params;
-    const apiClient = await createProjectBoundSdpApiClient(projectId);
+    const apiClient = await createSdpApiClient();
     // Issued tokens are absent from the well-known catalogue, so without this
     // map every token this org minted renders as a shortened mint address.
     const [fetchedRequests, fetchedApiKeyNames, issuedTokenSymbolsResult] = await Promise.all([

@@ -3,8 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
 import { readApiErrorMessage } from "@/lib/api-error";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 
 interface SafeProviderCredential {
   id: string;
@@ -87,12 +86,9 @@ function completionFailureMessage(
   return t("DashboardCustody.byokInvalidCredentials");
 }
 
-async function runCompletion(
-  projectId: string,
-  connectionId: string
-): Promise<PrivyByokSubmitResult> {
+async function runCompletion(connectionId: string): Promise<PrivyByokSubmitResult> {
   const t = await getTranslations();
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
 
   let result: ProviderCredentialCompletionResult;
   try {
@@ -127,11 +123,11 @@ async function runCompletion(
   }
 
   if (result.completion.status === "success") {
-    revalidatePath(projectHref(projectId, "/dashboard/custody"));
-    revalidatePath(projectHref(projectId, "/dashboard/wallets"));
+    revalidatePath(await requestProjectHref("/dashboard/custody"));
+    revalidatePath(await requestProjectHref("/dashboard/wallets"));
     // The provider page now owns the connections list, so it has to see the
     // new row too.
-    revalidatePath(projectHref(projectId, "/dashboard/integrations/privy"));
+    revalidatePath(await requestProjectHref("/dashboard/integrations/privy"));
     return { status: "success", connectionId };
   }
   if (result.completion.status === "failed") {
@@ -168,7 +164,6 @@ async function runCompletion(
  * repeated key instead of creating a duplicate credential.
  */
 export async function submitPrivyCredentialAction(
-  projectId: string,
   formData: FormData
 ): Promise<PrivyByokSubmitResult> {
   const t = await getTranslations();
@@ -186,7 +181,7 @@ export async function submitPrivyCredentialAction(
     return { status: "invalid", message: t("DashboardCustody.byokMissingFields") };
   }
 
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const client = await createSdpApiClient();
 
   const path = replaceConnectionId
     ? `/internal/dashboard/custody/connections/${encodeURIComponent(replaceConnectionId)}/provider-credentials`
@@ -234,17 +229,16 @@ export async function submitPrivyCredentialAction(
     };
   }
 
-  return runCompletion(projectId, submitted.connectionId);
+  return runCompletion(submitted.connectionId);
 }
 
 /** Re-runs the connection completion after a `retry_unknown` or `refused` outcome. */
 export async function recheckPrivyCredentialAction(
-  projectId: string,
   connectionId: string
 ): Promise<PrivyByokSubmitResult> {
   if (!connectionId.trim()) {
     const t = await getTranslations();
     return { status: "error", message: t("DashboardCustody.byokMissingFields") };
   }
-  return runCompletion(projectId, connectionId);
+  return runCompletion(connectionId);
 }

@@ -3,10 +3,13 @@ import type { CustodyConfigSummary } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { privyByok } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { projectHref } from "@/lib/dashboard-project-path";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
+import {
+  createRequestScopedSdpApiClients,
+  requestProjectHref,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
 import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { fetchConnectionPickerOptions } from "../connections/connections.data";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
@@ -15,7 +18,6 @@ import { WalletSetupFlow } from "./wallet-setup-flow";
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
 
 interface CustodySetupPageProps {
-  params: Promise<{ projectId: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
@@ -60,8 +62,8 @@ async function getConnectedCustodyProviders(
     .filter(isKnownCustodyProvider);
 }
 
-export default async function CustodySetupPage({ params, searchParams }: CustodySetupPageProps) {
-  const [{ userId, orgId }, { projectId }] = await Promise.all([auth(), params]);
+export default async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
+  const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -76,7 +78,6 @@ export default async function CustodySetupPage({ params, searchParams }: Custody
 
   const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
     createRequestScopedSdpApiClients({
-      projectId,
       organizationTraceContext: trace.childContext("dashboard.custody.setup.org.api"),
       projectTraceContext: trace.childContext("dashboard.custody.setup.api"),
     })
@@ -86,7 +87,7 @@ export default async function CustodySetupPage({ params, searchParams }: Custody
   );
 
   if (!onboarding.linked || !onboarding.organization) {
-    redirect(projectHref(projectId, "/dashboard/wallets"));
+    redirect(await requestProjectHref("/dashboard/wallets"));
   }
   const organizationId = onboarding.organization.id;
 

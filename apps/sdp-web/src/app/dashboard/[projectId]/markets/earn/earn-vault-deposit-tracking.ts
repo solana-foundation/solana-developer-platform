@@ -49,7 +49,8 @@ export function resetVaultDepositTrackingStateForTests(): void {
  * reachable when the key started outliving the component.
  */
 export function vaultDepositRequestFingerprint(input: {
-  projectId: string;
+  /** `null` only before a project resolves; it still discriminates. */
+  projectId: string | null;
   strategyId: string;
   custodyWalletId: string;
   amount: string;

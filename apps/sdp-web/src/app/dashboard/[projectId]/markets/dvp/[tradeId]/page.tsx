@@ -9,10 +9,10 @@ export const dynamic = "force-dynamic";
 export default async function DvpTradeDetailPage({
   params,
 }: {
-  params: Promise<{ projectId: string; tradeId: string }>;
+  params: Promise<{ tradeId: string }>;
 }) {
-  const { projectId, tradeId } = await params;
-  return withDashboardPageTrace("dashboard.dvp.trade.page", projectId, async ({ apiClient }) => {
+  const { tradeId } = await params;
+  return withDashboardPageTrace("dashboard.dvp.trade.page", async ({ apiClient }) => {
     const result = await fetchDvpTrade(apiClient.request, tradeId);
     const { trade, error } = result;
 

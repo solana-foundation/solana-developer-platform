@@ -59,7 +59,7 @@ interface EarnVaultParRedemptionModalProps {
   onSubmissionStart?: VaultSubmissionObserver;
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
   position: EarnVaultPosition;
-  projectId: string;
+  projectId: string | null;
   source?: EarnVaultParRedemptionSource;
   terms: EarnVaultParRedemptionTerms;
 }
@@ -249,7 +249,7 @@ function useParRedemptionSubmission(options: {
   onSubmissionStart?: VaultSubmissionObserver;
   custodyWalletId: string;
   onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
-  projectId: string;
+  projectId: string | null;
   setError: (error: string | null) => void;
 }) {
   const t = useTranslations();

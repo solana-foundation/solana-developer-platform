@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { requirePrivateChannelsAccess } from "../../private-channels-access";
 import { PrivateChannelsLoadError } from "../../private-channels-load-error";
 import { loadInstance } from "../../private-channels-page.data";
@@ -8,12 +8,11 @@ import { PrivateChannelsSetupScreen } from "../../setup/private-channels-setup-s
 export default async function PrivateChannelsInstanceSetupPage({
   params,
 }: {
-  params: Promise<{ projectId: string; instanceId: string }>;
+  params: Promise<{ instanceId: string }>;
 }) {
   await requirePrivateChannelsAccess();
 
-  const { projectId, instanceId } = await params;
-  const client = await createProjectBoundSdpApiClient(projectId);
+  const [{ instanceId }, client] = await Promise.all([params, createSdpApiClient()]);
   const instance = await loadInstance(client);
 
   if (!instance.ok) return <PrivateChannelsLoadError message={instance.error} />;

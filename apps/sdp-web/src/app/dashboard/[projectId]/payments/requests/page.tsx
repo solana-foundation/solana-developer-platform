@@ -10,11 +10,7 @@ import { PaymentRequestsWorkspace } from "./payment-requests-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentRequestsPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function PaymentRequestsPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -23,37 +19,32 @@ export default async function PaymentRequestsPage({
     redirect("/dashboard");
   }
 
-  const { projectId } = await params;
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
 
-  return withDashboardPageTrace(
-    "dashboard.payment-requests.page",
-    projectId,
-    async ({ trace, apiClient }) => {
-      const [result, walletsResult, counterpartiesResult, apiKeysResult] = await Promise.all([
-        trace.step("fetch_payment_requests", () => fetchPaymentRequests(apiClient.request)),
-        trace.step("fetch_wallets", () => fetchPaymentsWallets(apiClient.request)),
-        trace.step("fetch_counterparties", () => fetchCounterparties(apiClient.request)),
-        trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-      ]);
+  return withDashboardPageTrace("dashboard.payment-requests.page", async ({ trace, apiClient }) => {
+    const [result, walletsResult, counterpartiesResult, apiKeysResult] = await Promise.all([
+      trace.step("fetch_payment_requests", () => fetchPaymentRequests(apiClient.request)),
+      trace.step("fetch_wallets", () => fetchPaymentsWallets(apiClient.request)),
+      trace.step("fetch_counterparties", () => fetchCounterparties(apiClient.request)),
+      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+    ]);
 
-      trace.log({ ok: result.ok, count: result.data.length, total: result.total });
+    trace.log({ ok: result.ok, count: result.data.length, total: result.total });
 
-      const wallets = walletsResult.ok && walletsResult.data ? walletsResult.data : [];
+    const wallets = walletsResult.ok && walletsResult.data ? walletsResult.data : [];
 
-      return (
-        <div className="flex h-full min-h-0 w-full flex-col">
-          <PaymentRequestsWorkspace
-            initialPaymentRequests={result.data}
-            initialError={result.error}
-            initialLocalErrorCode={result.localErrorCode}
-            apiBaseUrl={apiBaseUrl}
-            apiKeys={apiKeysResult.data ?? []}
-            wallets={wallets}
-            counterparties={counterpartiesResult.data}
-          />
-        </div>
-      );
-    }
-  );
+    return (
+      <div className="flex h-full min-h-0 w-full flex-col">
+        <PaymentRequestsWorkspace
+          initialPaymentRequests={result.data}
+          initialError={result.error}
+          initialLocalErrorCode={result.localErrorCode}
+          apiBaseUrl={apiBaseUrl}
+          apiKeys={apiKeysResult.data ?? []}
+          wallets={wallets}
+          counterparties={counterpartiesResult.data}
+        />
+      </div>
+    );
+  });
 }

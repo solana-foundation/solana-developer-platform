@@ -3,7 +3,7 @@
 import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
 
 export type EarnVaultAsyncWithdrawalIntent = {
-  projectId: string;
+  projectId: string | null;
   positionId: string;
   route:
     | {

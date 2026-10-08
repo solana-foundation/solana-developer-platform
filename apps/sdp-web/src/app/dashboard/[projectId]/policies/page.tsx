@@ -8,7 +8,7 @@ import { redirect } from "next/navigation";
 import { custody } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 import { PoliciesOverview, type PoliciesTab, type PoliciesUrlState } from "./policies-overview";
 
 export const dynamic = "force-dynamic";
@@ -55,14 +55,15 @@ function inventoryTarget(tab: PoliciesTab): PolicyControlInventoryTarget {
 }
 
 export default async function PoliciesPage({
-  params,
   searchParams,
 }: {
-  params: Promise<{ projectId: string }>;
   searchParams?: Promise<RawSearchParams>;
 }) {
-  const [{ userId, orgId }, { projectId }, resolvedSearchParams, custodyEnabled] =
-    await Promise.all([auth(), params, searchParams ?? Promise.resolve({}), custody()]);
+  const [{ userId, orgId }, resolvedSearchParams, custodyEnabled] = await Promise.all([
+    auth(),
+    searchParams ?? Promise.resolve({}),
+    custody(),
+  ]);
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
@@ -80,7 +81,7 @@ export default async function PoliciesPage({
   let error = false;
   try {
     const client = await trace.step("create_sdp_api_client", () =>
-      createProjectBoundSdpApiClient(projectId, trace.childContext("dashboard.policies.api"))
+      createSdpApiClient(trace.childContext("dashboard.policies.api"))
     );
     inventory = await trace.step("fetch_policy_controls", () =>
       client.fetch<PolicyControlInventoryResponse>(`/v1/policies?${query.toString()}`)

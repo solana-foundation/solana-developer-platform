@@ -32,7 +32,7 @@ function roleLabel(role: string, t: Translate): string {
   return role === "admin" ? t("Shared.members.roleAdmin") : t("Shared.members.roleMember");
 }
 
-export async function MembersSection({ projectId, page }: { projectId: string; page: number }) {
+export async function MembersSection({ page = 1 }: { page?: number }) {
   const t = await getTranslations();
 
   let members: Member[] = [];
@@ -43,7 +43,7 @@ export async function MembersSection({ projectId, page }: { projectId: string; p
   // A failed list must not take the invite form down with it — an admin whose
   // org list is erroring can still need to add someone.
   try {
-    const directory = await listMembers(projectId, page);
+    const directory = await listMembers(page);
     members = directory.members;
     invitations = directory.invitations;
     meta = directory.meta;

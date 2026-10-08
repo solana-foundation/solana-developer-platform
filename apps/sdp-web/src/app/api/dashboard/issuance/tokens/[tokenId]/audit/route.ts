@@ -1,9 +1,8 @@
 import type { AssetAuditEvent } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient, proxyFailure } from "@/lib/sdp-api";
+import { createSdpApiClient } from "@/lib/sdp-api";
 
 // Matches the API's server-side pageSize cap (the parsePositiveInteger max in
 // the issuance audit handler). The dashboard pages with a fixed size under this;
@@ -26,12 +25,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       ? Math.min(Math.max(pageSizeRaw, 1), MAX_PAGE_SIZE)
       : 50;
 
-    const projectId = request.headers.get(PROJECT_HEADER_NAME);
-    if (projectId === null) {
-      return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
-    }
-    const apiClient = await createProjectBoundSdpApiClient(
-      projectId,
+    const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.issuance.token.audit.api")
     );
 

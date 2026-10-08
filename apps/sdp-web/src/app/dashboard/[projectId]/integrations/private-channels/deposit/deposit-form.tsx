@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
-import { useProjectHref, useProjectId } from "@/lib/use-dashboard-project";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AmountField } from "../amount-field";
 import { getAmountError } from "../amount-validation";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "../private-channels-routes";
@@ -73,7 +73,6 @@ export function DepositForm({
   });
   const [isSubmitting, startTransition] = useTransition();
   const t = useTranslations();
-  const projectId = useProjectId();
   const href = useProjectHref();
   const {
     walletId,
@@ -95,13 +94,13 @@ export function DepositForm({
     }
     let active = true;
     updateState({ balances: { channel: null, onChain: null } });
-    fetchWalletBalancesAction(projectId, walletId, mint || undefined).then((result) => {
+    fetchWalletBalancesAction(walletId, mint || undefined).then((result) => {
       if (active) updateState({ balances: result });
     });
     return () => {
       active = false;
     };
-  }, [projectId, walletId, mint, refetchKey]);
+  }, [walletId, mint, refetchKey]);
 
   if (deposit) {
     return (
@@ -170,7 +169,7 @@ export function DepositForm({
     const idempotencyKey = privateChannelDepositIdempotencyKeyStore.claim(fingerprint);
 
     startTransition(async () => {
-      const result = await createDepositAction(projectId, { ...requestPayload, idempotencyKey });
+      const result = await createDepositAction({ ...requestPayload, idempotencyKey });
       // Retire the key only on an answer that proves what happened. A transport
       // failure or a 5xx keeps it, so the retry replays rather than depositing
       // twice; a validation error retires it because nothing was ever sent.

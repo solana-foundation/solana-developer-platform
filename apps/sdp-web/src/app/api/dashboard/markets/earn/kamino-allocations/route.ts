@@ -1,9 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
-import { createTimedTrace } from "@/lib/request-tracing";
-import { proxyFailure } from "@/lib/sdp-api";
 import { readVaultAllocations } from "./kamino-allocations-store";
 
 /**
@@ -44,11 +41,6 @@ export async function GET(request: Request) {
   if (!userId) {
     return jsonError(401, "Authentication required");
   }
-  const trace = createTimedTrace("route.dashboard.markets.earn.kamino_allocations", request);
-  const projectId = request.headers.get(PROJECT_HEADER_NAME);
-  if (projectId === null) {
-    return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
-  }
 
   const cluster = new URL(request.url).searchParams.get("cluster") ?? "";
   if (cluster !== "mainnet-beta") {
@@ -67,7 +59,7 @@ export async function GET(request: Request) {
     // The body IS the contract, with no envelope around it: `dashboardFetch`
     // hands the parsed JSON straight to the SWR hook, which re-parses it with
     // the same schema this route parsed upstream.
-    const payload = await readVaultAllocations(projectId, vault);
+    const payload = await readVaultAllocations(vault);
     return NextResponse.json(payload, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     // The reason (network, status, schema) is deliberately not surfaced: the

@@ -14,14 +14,10 @@ import { RecurringPaymentsWorkspace } from "./recurring-payments-workspace";
 export const dynamic = "force-dynamic";
 
 interface RecurringPaymentsPageProps {
-  params: Promise<{ projectId: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default async function RecurringPaymentsPage({
-  params,
-  searchParams,
-}: RecurringPaymentsPageProps) {
+export default async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -30,12 +26,10 @@ export default async function RecurringPaymentsPage({
     redirect("/dashboard");
   }
 
-  const { projectId } = await params;
   const listState = parseRecurringPaymentsListParams((await searchParams) ?? {});
 
   return withDashboardPageTrace(
     "dashboard.recurring-payments.page",
-    projectId,
     async ({ trace, apiClient }) => {
       const t = await getTranslations();
       const [recurringPaymentsResult, walletsResult, issuedTokenSymbolsResult] = await Promise.all([

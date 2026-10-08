@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createProjectBoundSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
+import { createSdpApiClient, getSdpAuth } from "@/lib/sdp-api";
 
 /**
  * Resolves pasted key material to the key it is, so the playground can drop its
@@ -53,10 +52,6 @@ export async function POST(request: Request) {
     if (!orgId) {
       return failureResponse(trace, 403, "Active organization required");
     }
-    const projectId = request.headers.get(PROJECT_HEADER_NAME);
-    if (projectId === null) {
-      return failureResponse(trace, 400, `${PROJECT_HEADER_NAME} header required`);
-    }
 
     const rawBody = await request.text();
     if (rawBody.length > MAX_REQUEST_BYTES) {
@@ -76,10 +71,7 @@ export async function POST(request: Request) {
     }
     const { apiKey } = parsed.data;
 
-    const client = await createProjectBoundSdpApiClient(
-      projectId,
-      trace.childContext("route.playground.api-key.api")
-    );
+    const client = await createSdpApiClient(trace.childContext("route.playground.api-key.api"));
     const response = await client.request("/internal/playground/api-key/verify", {
       method: "POST",
       body: JSON.stringify({ apiKey }),

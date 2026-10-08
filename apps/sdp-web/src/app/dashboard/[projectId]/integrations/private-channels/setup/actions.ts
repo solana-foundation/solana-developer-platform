@@ -9,8 +9,7 @@ import type {
 } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { createProjectBoundSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
+import { createSdpApiClient, extractSdpApiErrorMessage, requestProjectHref } from "@/lib/sdp-api";
 import { summarizeProbeFailure } from "./probe-error";
 
 const privateChannelInstanceSchema = privateChannelInstanceInputSchema.extend({
@@ -69,15 +68,12 @@ export type TestConnectionResult =
 
 // Routes through the API so the probe runs in the same runtime as Connect's
 // re-probe — a success here means Connect will not fail on the probe.
-export async function testConnectionAction(
-  projectId: string,
-  input: {
-    gatewayUrl: string;
-    authUrl: string;
-    escrowProgramId: string;
-    escrowInstanceAddr: string;
-  }
-): Promise<TestConnectionResult> {
+export async function testConnectionAction(input: {
+  gatewayUrl: string;
+  authUrl: string;
+  escrowProgramId: string;
+  escrowInstanceAddr: string;
+}): Promise<TestConnectionResult> {
   const parsed = privateChannelInstanceInputSchema
     .pick({ gatewayUrl: true, authUrl: true, escrowProgramId: true, escrowInstanceAddr: true })
     .safeParse(input);
@@ -86,7 +82,7 @@ export async function testConnectionAction(
   }
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const probe = await client.fetch<PrivateChannelProbeResult>("/v1/private-channels/probe", {
       method: "POST",
       body: JSON.stringify(parsed.data),
@@ -115,7 +111,6 @@ export type ConnectPrivateChannelResult =
   | { ok: false; kind: "server"; message: string };
 
 export async function connectPrivateChannelAction(
-  projectId: string,
   input: unknown
 ): Promise<ConnectPrivateChannelResult> {
   const parsed = privateChannelInstanceInputSchema.safeParse(input);
@@ -129,7 +124,7 @@ export async function connectPrivateChannelAction(
   const { chainRpcUrl: _legacyChainRpcUrl, ...connectInput } = parsed.data;
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const response = await client.fetch<{ instance: PrivateChannelInstance }>(
       "/v1/private-channels/instance",
       {
@@ -139,8 +134,8 @@ export async function connectPrivateChannelAction(
     );
     // Connecting flips the active instance, which changes the provider detail,
     // workspace tabs, and catalog status. Revalidate both the segment and catalog.
-    revalidatePath(projectHref(projectId, "/dashboard/integrations/private-channels"), "layout");
-    revalidatePath(projectHref(projectId, "/dashboard/integrations"));
+    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels"), "layout");
+    revalidatePath(await requestProjectHref("/dashboard/integrations"));
     return { ok: true, instance: response.instance };
   } catch (error) {
     return interpretApiError("connect", error);
@@ -149,7 +144,6 @@ export async function connectPrivateChannelAction(
 
 /** Re-probe and save changed endpoints/program addresses for the active instance. */
 export async function updatePrivateChannelAction(
-  projectId: string,
   input: unknown
 ): Promise<ConnectPrivateChannelResult> {
   const parsed = privateChannelInstanceInputSchema.safeParse(input);
@@ -172,7 +166,7 @@ export async function updatePrivateChannelAction(
   const { chainRpcUrl: _legacyChainRpcUrl, ...updateInput } = parsed.data;
 
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const response = await client.fetch<{ instance: PrivateChannelInstance }>(
       "/v1/private-channels/instance",
       {
@@ -180,8 +174,8 @@ export async function updatePrivateChannelAction(
         body: JSON.stringify({ ...updateInput, instanceId }),
       }
     );
-    revalidatePath(projectHref(projectId, "/dashboard/integrations/private-channels"), "layout");
-    revalidatePath(projectHref(projectId, "/dashboard/integrations"));
+    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels"), "layout");
+    revalidatePath(await requestProjectHref("/dashboard/integrations"));
     return { ok: true, instance: response.instance };
   } catch (error) {
     return interpretApiError("update", error);
@@ -192,15 +186,15 @@ export type DisconnectResult =
   | { ok: true; instance: PrivateChannelInstance }
   | { ok: false; message: string };
 
-export async function disconnectPrivateChannelAction(projectId: string): Promise<DisconnectResult> {
+export async function disconnectPrivateChannelAction(): Promise<DisconnectResult> {
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     const response = await client.fetch<{ instance: PrivateChannelInstance }>(
       "/v1/private-channels/instance/disconnect",
       { method: "POST", body: "{}" }
     );
-    revalidatePath(projectHref(projectId, "/dashboard/integrations/private-channels"), "layout");
-    revalidatePath(projectHref(projectId, "/dashboard/integrations"));
+    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels"), "layout");
+    revalidatePath(await requestProjectHref("/dashboard/integrations"));
     return { ok: true, instance: response.instance };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
@@ -209,12 +203,12 @@ export async function disconnectPrivateChannelAction(projectId: string): Promise
 
 export type DeleteResult = { ok: true } | { ok: false; message: string };
 
-export async function deletePrivateChannelAction(projectId: string): Promise<DeleteResult> {
+export async function deletePrivateChannelAction(): Promise<DeleteResult> {
   try {
-    const client = await createProjectBoundSdpApiClient(projectId);
+    const client = await createSdpApiClient();
     await client.fetch<{ deleted: true }>("/v1/private-channels/instance", { method: "DELETE" });
-    revalidatePath(projectHref(projectId, "/dashboard/integrations/private-channels/setup"));
-    revalidatePath(projectHref(projectId, "/dashboard/integrations"));
+    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels/setup"));
+    revalidatePath(await requestProjectHref("/dashboard/integrations"));
     return { ok: true };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
