@@ -40,7 +40,7 @@ WITH unique_matches AS (
       ON wallet.organization_id = token.organization_id
      AND (
           (wallet.owner_kind = 'config'
-           AND (wallet.project_id = token.project_id OR wallet.project_id IS NULL))
+           AND wallet.project_id = token.project_id)
           OR
           (wallet.owner_kind = 'connection' AND wallet.project_id = token.project_id)
      )

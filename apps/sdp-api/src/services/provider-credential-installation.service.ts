@@ -200,7 +200,11 @@ export async function deactivateCustodyConnection(
       return projectConnection({
         target: deactivated,
         decisions: decideInstallation(
-          installationFactsFromConnection(deactivated, await store.getDatabaseNowMs(), false)
+          // A deactivated connection can neither complete nor take replacement
+          // credentials, so custody setup admission cannot change its projection.
+          installationFactsFromConnection(deactivated, await store.getDatabaseNowMs(), {
+            admitted: true,
+          })
         ),
       });
     });
@@ -285,7 +289,7 @@ export async function completeProviderCredentialInstallation(
     return completionResult(loaded);
   }
   if (loaded.decisions.complete.kind === "disabled") {
-    throw forbidden(INSTALLATION_UNAVAILABLE_MESSAGE);
+    throw loaded.decisions.complete.error;
   }
   if (loaded.decisions.complete.kind === "conflict") {
     throw installationConflict(loaded.decisions.complete.reason);
@@ -546,16 +550,16 @@ async function loadInstallation(
     if (!target) {
       throw notFound("Custody Connection");
     }
-    const fullCompletionEnabled = await isPersistedCustodyCompletionEnabled(
+    const completionAdmission = await isPersistedCustodyCompletionEnabled(
       context.c.env,
       context.db,
-      context.organizationId,
+      { organizationId: context.organizationId, projectId: context.projectId },
       target.provider
     );
     return {
       target,
       decisions: decideInstallation(
-        installationFactsFromConnection(target, nowMs, fullCompletionEnabled)
+        installationFactsFromConnection(target, nowMs, completionAdmission)
       ),
     };
   } catch (error) {
@@ -885,7 +889,7 @@ async function resolveCompletionRace(
     throw installationConflict(current.decisions.complete.reason);
   }
   if (current.decisions.complete.kind === "disabled") {
-    throw forbidden(INSTALLATION_UNAVAILABLE_MESSAGE);
+    throw current.decisions.complete.error;
   }
   throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
 }

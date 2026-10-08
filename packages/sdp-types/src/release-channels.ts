@@ -11,6 +11,7 @@
  */
 
 import { z } from "zod";
+import type { SdpEnvironment } from "./api-keys";
 import {
   BYOK_CUSTODY_PROVIDERS,
   type ByokCustodyProvider,
@@ -170,6 +171,34 @@ export function isCustodyProviderInReleaseChannel(
     default: {
       const exhaustive: never = mode;
       throw new Error(`Unknown custody mode: ${String(exhaustive)}`);
+    }
+  }
+}
+
+/**
+ * Whether a project in `environment` may run custody `provider` in `mode` at the
+ * pair's stage. A Production project runs only `stable` pairs, whatever the
+ * deployment's release channel (ADR 0006); a Sandbox project runs whatever the
+ * channel offers.
+ *
+ * @param environment - The project's environment.
+ * @param provider - The custody provider.
+ * @param mode - The custody mode the provider is used in.
+ * @returns True when the pair's stage meets the environment's bar.
+ */
+export function isCustodyProviderStageAllowedInEnvironment(
+  environment: SdpEnvironment,
+  provider: CustodyProvider,
+  mode: CustodyMode
+): boolean {
+  switch (environment) {
+    case "sandbox":
+      return true;
+    case "production":
+      return isCustodyProviderInReleaseChannel("stable", provider, mode);
+    default: {
+      const exhaustive: never = environment;
+      throw new Error(`Unknown SDP environment: ${String(exhaustive)}`);
     }
   }
 }

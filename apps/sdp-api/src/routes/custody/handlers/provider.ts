@@ -17,10 +17,7 @@ import {
   parseConfigRecord,
 } from "@/services/domain/signing/provider-config";
 import { createSigningService } from "@/services/domain/signing.service";
-import {
-  assertCustodyProviderAvailable,
-  assertProviderAvailable,
-} from "@/services/provider-availability.service";
+import { assertCustodySetupAdmitted } from "@/services/provider-availability.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { type AppContext, resolveActor } from "../context";
 import type {
@@ -50,7 +47,6 @@ export const initializeSigning = async (
   const signingService = createSigningService(c.env, getRequestTenantScope(c));
 
   try {
-    await assertProviderInitializationAllowed(c, actor.organizationId, body.provider);
     const result = await initializeProviderConnection(
       c,
       signingService,
@@ -81,15 +77,6 @@ export const initializeSigning = async (
   }
 };
 
-async function assertProviderInitializationAllowed(
-  c: AppContext,
-  organizationId: string,
-  provider: CustodyProvider
-): Promise<void> {
-  assertCustodyProviderAvailable(c.env, provider, "managed");
-  await assertProviderAvailable(c.env, getDb(c.env), organizationId, "custody", provider);
-}
-
 async function initializeProviderConnection(
   c: AppContext,
   signingService: ReturnType<typeof createSigningService>,
@@ -99,6 +86,12 @@ async function initializeProviderConnection(
   projectId: string,
   request: InitializeSigningRequest
 ): Promise<SigningInitializationResult> {
+  await assertCustodySetupAdmitted(env, getDb(env), {
+    organizationId,
+    projectId,
+    provider: request.provider,
+    mode: "managed",
+  });
   switch (request.provider) {
     case "local":
       return signingService.initializeLocalSigning(organizationId, projectId, {

@@ -20,7 +20,7 @@ WITH wallet_scope AS (
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = transfer.organization_id
             AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = transfer.project_id OR wallet.project_id IS NULL))
+                  AND wallet.project_id = transfer.project_id)
               OR (wallet.owner_kind = 'connection' AND wallet.project_id = transfer.project_id))
             AND wallet.wallet_id = transfer.wallet_id
             AND wallet.public_key = CASE WHEN transfer.direction = 'inbound'
@@ -33,7 +33,7 @@ WITH wallet_scope AS (
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = batch.organization_id
             AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = batch.project_id OR wallet.project_id IS NULL))
+                  AND wallet.project_id = batch.project_id)
               OR (wallet.owner_kind = 'connection' AND wallet.project_id = batch.project_id))
             AND wallet.wallet_id = batch.source_wallet_id
             AND wallet.public_key = batch.source_address)
@@ -44,7 +44,7 @@ WITH wallet_scope AS (
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = request.organization_id
             AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = request.project_id OR wallet.project_id IS NULL))
+                  AND wallet.project_id = request.project_id)
               OR (wallet.owner_kind = 'connection' AND wallet.project_id = request.project_id))
             AND wallet.wallet_id = request.wallet_id
             AND wallet.public_key = request.destination_address)
@@ -76,7 +76,7 @@ WITH wallet_scope AS (
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = transfer.organization_id
             AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = transfer.project_id OR wallet.project_id IS NULL))
+                  AND wallet.project_id = transfer.project_id)
               OR (wallet.owner_kind = 'connection' AND wallet.project_id = transfer.project_id))
             AND wallet.wallet_id = transfer.wallet_id
             AND wallet.public_key = CASE WHEN transfer.direction = 'inbound'
@@ -88,7 +88,7 @@ WITH wallet_scope AS (
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = batch.organization_id
             AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = batch.project_id OR wallet.project_id IS NULL))
+                  AND wallet.project_id = batch.project_id)
               OR (wallet.owner_kind = 'connection' AND wallet.project_id = batch.project_id))
             AND wallet.wallet_id = batch.source_wallet_id
             AND wallet.public_key = batch.source_address)
@@ -98,7 +98,7 @@ WITH wallet_scope AS (
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = request.organization_id
             AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = request.project_id OR wallet.project_id IS NULL))
+                  AND wallet.project_id = request.project_id)
               OR (wallet.owner_kind = 'connection' AND wallet.project_id = request.project_id))
             AND wallet.wallet_id = request.wallet_id
             AND wallet.public_key = request.destination_address)
@@ -130,7 +130,7 @@ WITH wallet_scope AS (
       WHERE wallet.id = transfer.custody_wallet_id
         AND wallet.organization_id = transfer.organization_id
         AND ((wallet.owner_kind = 'config'
-              AND (wallet.project_id = transfer.project_id OR wallet.project_id IS NULL))
+              AND wallet.project_id = transfer.project_id)
           OR (wallet.owner_kind = 'connection' AND wallet.project_id = transfer.project_id))
         AND wallet.wallet_id = transfer.wallet_id
         AND wallet.public_key = CASE WHEN transfer.direction = 'inbound'
@@ -146,7 +146,7 @@ WITH wallet_scope AS (
       WHERE wallet.id = batch.source_custody_wallet_id
         AND wallet.organization_id = batch.organization_id
         AND ((wallet.owner_kind = 'config'
-              AND (wallet.project_id = batch.project_id OR wallet.project_id IS NULL))
+              AND wallet.project_id = batch.project_id)
           OR (wallet.owner_kind = 'connection' AND wallet.project_id = batch.project_id))
         AND wallet.wallet_id = batch.source_wallet_id
         AND wallet.public_key = batch.source_address
@@ -160,7 +160,7 @@ WITH wallet_scope AS (
       WHERE wallet.id = request.custody_wallet_id
         AND wallet.organization_id = request.organization_id
         AND ((wallet.owner_kind = 'config'
-              AND (wallet.project_id = request.project_id OR wallet.project_id IS NULL))
+              AND wallet.project_id = request.project_id)
           OR (wallet.owner_kind = 'connection' AND wallet.project_id = request.project_id))
         AND wallet.wallet_id = request.wallet_id
         AND wallet.public_key = request.destination_address
@@ -216,7 +216,7 @@ WITH wallet_scope AS (
            WHERE wallet.id = operation.custody_wallet_id
              AND wallet.organization_id = operation.organization_id
              AND ((wallet.owner_kind = 'config'
-                   AND (wallet.project_id = operation.project_id OR wallet.project_id IS NULL))
+                   AND wallet.project_id = operation.project_id)
                OR (wallet.owner_kind = 'connection'
                    AND wallet.project_id = operation.project_id))
              AND wallet.wallet_id = operation.wallet_id

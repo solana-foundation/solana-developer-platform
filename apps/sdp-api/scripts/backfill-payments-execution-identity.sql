@@ -42,7 +42,7 @@ WITH unique_matches AS (
       ON wallet.organization_id = transfer.organization_id
      AND (
           (wallet.owner_kind = 'config'
-           AND (wallet.project_id = transfer.project_id OR wallet.project_id IS NULL))
+           AND wallet.project_id = transfer.project_id)
           OR
           (wallet.owner_kind = 'connection' AND wallet.project_id = transfer.project_id)
      )
@@ -68,7 +68,7 @@ WITH unique_matches AS (
       ON wallet.organization_id = batch.organization_id
      AND (
           (wallet.owner_kind = 'config'
-           AND (wallet.project_id = batch.project_id OR wallet.project_id IS NULL))
+           AND wallet.project_id = batch.project_id)
           OR
           (wallet.owner_kind = 'connection' AND wallet.project_id = batch.project_id)
      )
@@ -91,7 +91,7 @@ WITH unique_matches AS (
       ON wallet.organization_id = request.organization_id
      AND (
           (wallet.owner_kind = 'config'
-           AND (wallet.project_id = request.project_id OR wallet.project_id IS NULL))
+           AND wallet.project_id = request.project_id)
           OR
           (wallet.owner_kind = 'connection' AND wallet.project_id = request.project_id)
      )

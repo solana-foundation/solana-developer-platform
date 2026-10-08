@@ -4,14 +4,7 @@ import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import {
-  AppError,
-  conflict,
-  forbidden,
-  internalError,
-  notFound,
-  providerUnavailable,
-} from "@/lib/errors";
+import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
@@ -41,7 +34,6 @@ import type { Env } from "@/types/env";
 const UNFINISHED_INSTALLATION_MESSAGE =
   "A Privy custody installation is already in progress for this project";
 const REPLACEMENT_CONFLICT_MESSAGE = "Custody Connection cannot accept replacement credentials";
-const PROVISIONING_DISABLED_MESSAGE = "Custody Connection setup is disabled for this provider";
 
 interface PrivyCredentialFields {
   credentialLabel: string;
@@ -272,24 +264,24 @@ async function loadReplay(context: SubmissionContext): Promise<ProviderCredentia
 }
 
 /**
- * Admits a BYOK submission for this deployment and organization, or serves the
- * idempotent replay a refused retry is entitled to. A first submission that is
- * not admitted is refused.
+ * Admits a BYOK submission under the custody setup rule for the request's
+ * project, or serves the idempotent replay a refused retry is entitled to. A
+ * first submission that is not admitted gets the rule's refusal.
  *
  * @param context - The submission being admitted.
  * @returns `admitted`, or the replayed result of an earlier identical submission.
+ * @throws 403 `FORBIDDEN` naming the failed custody setup check when there is no replay.
  */
 async function admitSubmission(
   context: SubmissionContext
 ): Promise<{ kind: "admitted" } | { kind: "replay"; result: ProviderCredentialSubmissionResult }> {
-  if (
-    await isPersistedCustodyCompletionEnabled(
-      context.c.env,
-      context.db,
-      context.organizationId,
-      context.input.provider
-    )
-  ) {
+  const admission = await isPersistedCustodyCompletionEnabled(
+    context.c.env,
+    context.db,
+    { organizationId: context.organizationId, projectId: context.projectId },
+    context.input.provider
+  );
+  if (admission.admitted) {
     return { kind: "admitted" };
   }
 
@@ -304,7 +296,7 @@ async function admitSubmission(
       ),
     };
   }
-  throw forbidden(PROVISIONING_DISABLED_MESSAGE);
+  throw admission.error;
 }
 
 async function prepareSetup(
@@ -947,8 +939,9 @@ async function classifySetup(
     throw notFound("Custody Connection");
   }
   const nowMs = await context.store.getDatabaseNowMs();
+  // `admitSubmission` admitted this request before any setup is classified.
   const decision = decideInstallation(
-    installationFactsFromConnection(connection, nowMs, true)
+    installationFactsFromConnection(connection, nowMs, { admitted: true })
   ).replace;
   if (decision.kind !== "execute") {
     throw new SetupConflict(

@@ -20,7 +20,7 @@ WITH wallet_scope AS (
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = token.organization_id
             AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = token.project_id OR wallet.project_id IS NULL))
+                  AND wallet.project_id = token.project_id)
               OR (wallet.owner_kind = 'connection'
                   AND wallet.project_id = token.project_id))
             AND wallet.wallet_id = token.signing_wallet_id) AS match_count
@@ -51,7 +51,7 @@ WITH wallet_scope AS (
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = token.organization_id
             AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = token.project_id OR wallet.project_id IS NULL))
+                  AND wallet.project_id = token.project_id)
               OR (wallet.owner_kind = 'connection'
                   AND wallet.project_id = token.project_id))
             AND wallet.wallet_id = token.signing_wallet_id) AS match_count
@@ -83,7 +83,7 @@ WITH wallet_scope AS (
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = token.organization_id
             AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = token.project_id OR wallet.project_id IS NULL))
+                  AND wallet.project_id = token.project_id)
               OR (wallet.owner_kind = 'connection'
                   AND wallet.project_id = token.project_id))
             AND wallet.wallet_id = token.signing_wallet_id) AS match_count
@@ -121,7 +121,7 @@ WHERE token.signing_custody_wallet_id IS NOT NULL
     WHERE wallet.id = token.signing_custody_wallet_id
       AND wallet.organization_id = token.organization_id
       AND ((wallet.owner_kind = 'config'
-            AND (wallet.project_id = token.project_id OR wallet.project_id IS NULL))
+            AND wallet.project_id = token.project_id)
         OR (wallet.owner_kind = 'connection' AND wallet.project_id = token.project_id))
       AND wallet.wallet_id = token.signing_wallet_id
   )
@@ -144,10 +144,9 @@ WITH legacy_config_wallets AS (
            SELECT wallet.id
            FROM legacy_config_wallets wallet
            WHERE wallet.organization_id = token.organization_id
-             AND (wallet.project_id = token.project_id OR wallet.project_id IS NULL)
+             AND wallet.project_id = token.project_id
              AND wallet.wallet_id = token.signing_wallet_id
-           ORDER BY CASE WHEN wallet.project_id = token.project_id THEN 0 ELSE 1 END,
-                    wallet.config_updated_at DESC,
+           ORDER BY wallet.config_updated_at DESC,
                     wallet.config_id DESC
            LIMIT 1
          ) AS legacy_custody_wallet_id
@@ -196,7 +195,7 @@ WHERE transaction.custody_wallet_id IS NOT NULL
       WHERE wallet.id = transaction.custody_wallet_id
         AND wallet.organization_id = token.organization_id
         AND ((wallet.owner_kind = 'config'
-              AND (wallet.project_id = token.project_id OR wallet.project_id IS NULL))
+              AND wallet.project_id = token.project_id)
           OR (wallet.owner_kind = 'connection' AND wallet.project_id = token.project_id))
     )
   )

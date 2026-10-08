@@ -1,3 +1,5 @@
+import type { AppError } from "@/lib/errors";
+import type { CustodySetupAdmission } from "@/services/provider-availability.service";
 import type {
   CustodyConnectionStatus,
   InstallationConnectionState,
@@ -19,7 +21,7 @@ type ExecuteDecision<Mode extends string = never> = [Mode] extends [never]
 export type InstallationDecision<Mode extends string = never> =
   | ExecuteDecision<Mode>
   | { kind: "replay" }
-  | { kind: "disabled" }
+  | { kind: "disabled"; error: AppError }
   | { kind: "conflict"; reason?: InstallationConflictReason };
 
 export interface InstallationFacts {
@@ -33,7 +35,7 @@ export interface InstallationFacts {
   lastCheckAt: string | null;
   lastCheckFailureCode: string | null;
   hasSiblingUnfinished: boolean;
-  fullCompletionEnabled: boolean;
+  completionAdmission: CustodySetupAdmission;
   nowMs: number;
 }
 
@@ -48,7 +50,7 @@ export interface InstallationDecisions {
 export function installationFactsFromConnection(
   connection: InstallationConnectionState,
   nowMs: number,
-  fullCompletionEnabled: boolean
+  completionAdmission: CustodySetupAdmission
 ): InstallationFacts {
   return {
     connectionStatus: connection.status,
@@ -64,7 +66,7 @@ export function installationFactsFromConnection(
     lastCheckAt: connection.last_check_at,
     lastCheckFailureCode: connection.last_check_failure_code,
     hasSiblingUnfinished: connection.has_sibling_unfinished,
-    fullCompletionEnabled,
+    completionAdmission,
     nowMs,
   };
 }
@@ -107,12 +109,12 @@ function decideComplete(
   if (leaseCurrent) {
     return { kind: "conflict", reason: "completion_in_progress" };
   }
-  if (facts.fullCompletionEnabled) {
+  if (facts.completionAdmission.admitted) {
     return { kind: "execute", mode: "full" };
   }
   return facts.providerAccountFingerprint
     ? { kind: "execute", mode: "reconcile_only" }
-    : { kind: "disabled" };
+    : { kind: "disabled", error: facts.completionAdmission.error };
 }
 
 function decideCancel(facts: InstallationFacts, leaseCurrent: boolean): InstallationDecision {
@@ -131,8 +133,8 @@ function decideCancel(facts: InstallationFacts, leaseCurrent: boolean): Installa
 }
 
 function decideReplace(facts: InstallationFacts): InstallationDecision {
-  if (!facts.fullCompletionEnabled) {
-    return { kind: "disabled" };
+  if (!facts.completionAdmission.admitted) {
+    return { kind: "disabled", error: facts.completionAdmission.error };
   }
   if (facts.hasSiblingUnfinished) {
     return { kind: "conflict", reason: "unfinished_installation_exists" };

@@ -235,8 +235,22 @@ interface CustodyProviderCatalogEntryShape {
   storedCredentialSetup: CustodyProviderStoredCredentialSetup;
 }
 
+/**
+ * A BYOK custody provider takes self-service credentials by type, so the custody
+ * setup gate's release-channel check (which admits `byok` only for
+ * `BYOK_CUSTODY_PROVIDERS`) already implies self-service setup.
+ */
 type CustodyProviderCatalogByIdShape = {
-  [Provider in CustodyProvider]: CustodyProviderCatalogEntryShape & { id: Provider };
+  [Provider in CustodyProvider]: CustodyProviderCatalogEntryShape & {
+    id: Provider;
+  } & (Provider extends ByokCustodyProvider
+      ? {
+          storedCredentialSetup: Extract<
+            CustodyProviderStoredCredentialSetup,
+            { mode: "self_service" }
+          >;
+        }
+      : unknown);
 };
 
 const DEFAULT_CUSTODY_PROVIDER_USE_CASES = CUSTODY_PROVIDER_USE_CASES;
