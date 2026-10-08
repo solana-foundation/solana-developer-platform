@@ -12,6 +12,7 @@ import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-k
 import { clerkHeadersWithoutProject } from "@/test/helpers/clerk";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
+import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
 import { type SeededDefaultProjects, seedDefaultProjects } from "@/test/helpers/projects";
 import { providerStages } from "@/test/helpers/provider-stages";
@@ -165,7 +166,7 @@ const PROJECT_NOT_FOUND_BODY = {
 let otherProjects: SeededDefaultProjects;
 
 function deploymentEnv(overrides: Partial<Env>): Env {
-  return { ...env, ...DEPLOYMENT_CREDENTIALS, ...overrides };
+  return { ...env, ...DEPLOYMENT_CREDENTIALS, ...EARN_ENABLED_FLAGS, ...overrides };
 }
 
 function apiKeyHeaders(key: TestApiKeyMaterial): Record<string, string> {
@@ -348,6 +349,20 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       available: false,
     });
   });
+
+  it.for(EARN_FLAG_OFF_CASES)(
+    "reports every Earn provider as unavailable while $flag is off",
+    async ({ flags }) => {
+      const availability = await readAvailability("sandbox", deploymentEnv(flags));
+
+      expect(availability).toEqual({
+        ...SANDBOX_AVAILABILITY,
+        providers: SANDBOX_AVAILABILITY.providers.map((entry) =>
+          entry.family === "earn" ? { ...entry, available: false } : entry
+        ),
+      });
+    }
+  );
 
   it("reports providers the organization is not entitled to as unavailable", async () => {
     await setProviderOverrides({

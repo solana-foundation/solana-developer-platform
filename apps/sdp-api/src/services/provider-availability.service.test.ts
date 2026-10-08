@@ -24,6 +24,7 @@ import {
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
+import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
 import {
   type SeededDefaultProjects,
@@ -94,6 +95,8 @@ const providerEnvKeys = [
   "JUPITER_SWAP_API_KEY",
   "WISDOMTREE_API_KEY",
   "WISDOMTREE_SANDBOX_API_KEY",
+  "MARKETS_ENABLED",
+  "EARN_ENABLED",
 ] as const;
 
 type ProviderEnvKey = (typeof providerEnvKeys)[number];
@@ -127,6 +130,7 @@ function setBaseProviderEnv(): void {
     TURNKEY_API_PUBLIC_KEY: "turnkey_test_public_key",
     TURNKEY_API_PRIVATE_KEY: "turnkey_test_private_key",
     TURNKEY_ORGANIZATION_ID: "turnkey_test_org",
+    ...EARN_ENABLED_FLAGS,
   });
 }
 
@@ -747,6 +751,30 @@ describe("provider-availability.service", () => {
       enabled: false,
     });
   });
+
+  it.for(EARN_FLAG_OFF_CASES)(
+    "reports an entitled, configured earn provider as not enabled while $flag is off",
+    async ({ flags }) => {
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ providerOverrides: { earn: { upshift: true } } }), TEST_ORG_ID)
+        .run();
+      env.UPSHIFT_API_KEY = "upshift_test_key";
+
+      const availability = await getProviderAvailability(
+        { ...env, ...flags },
+        getDb(env),
+        TEST_ORG_ID,
+        MANIFEST_STAGES
+      );
+
+      expect(availability.providers.earn.upshift).toEqual({
+        entitled: true,
+        configured: true,
+        enabled: false,
+      });
+    }
+  );
 
   /**
    * Veda reaches its vaults on-chain through `@sdp/veda`, so it has no provider

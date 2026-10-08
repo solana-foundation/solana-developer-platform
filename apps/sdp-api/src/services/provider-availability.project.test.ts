@@ -8,6 +8,7 @@ import {
   type ProjectProviderRequest,
 } from "@/services/provider-availability.service";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
+import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
 import {
   type SeededDefaultProjects,
@@ -199,33 +200,46 @@ describe("assertProjectProviderAdmitted", () => {
   });
 
   it("checks an Earn provider's channel, surfacing, stage, entitlement and credentials in that order", async () => {
+    await expect(admit(projects.production, deploymentEnv({}), UPSHIFT)).rejects.toMatchObject(
+      refusal(
+        "Upshift is not available in this release channel.",
+        "provider_not_in_release_channel"
+      )
+    );
     await expect(
-      admit(projects.production, deploymentEnv(BETA_CHANNEL), UPSHIFT)
+      admit(projects.production, deploymentEnv({ ...BETA_CHANNEL, ...EARN_ENABLED_FLAGS }), UPSHIFT)
     ).rejects.toMatchObject(
       refusal(
         "Upshift is not available in this release channel.",
         "provider_not_in_release_channel"
       )
     );
-    await expect(admit(projects.production, deploymentEnv({}), UPSHIFT)).rejects.toMatchObject(
-      refusal("Upshift is not currently offered.", "provider_not_offered")
-    );
+    await expect(
+      admit(projects.production, deploymentEnv(EARN_ENABLED_FLAGS), UPSHIFT)
+    ).rejects.toMatchObject(refusal("Upshift is not currently offered.", "provider_not_offered"));
     providerStages.surfacedEarnProvider = "upshift";
-    await expect(admit(projects.production, deploymentEnv({}), UPSHIFT)).rejects.toMatchObject(
+    await expect(
+      admit(projects.production, deploymentEnv(EARN_ENABLED_FLAGS), UPSHIFT)
+    ).rejects.toMatchObject(
       refusal(
         "Upshift is not stable yet, so a production project cannot use it.",
         "provider_stage_not_allowed"
       )
     );
     providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
-    await expect(admit(projects.production, deploymentEnv({}), UPSHIFT)).rejects.toMatchObject(
+    await expect(
+      admit(projects.production, deploymentEnv(EARN_ENABLED_FLAGS), UPSHIFT)
+    ).rejects.toMatchObject(
       refusal("Upshift requires manual activation for this organization.", "provider_not_entitled")
     );
     await setProviderOverrides({ earn: { upshift: true } });
     await expect(
       admit(
         projects.production,
-        deploymentEnv({ UPSHIFT_SANDBOX_API_KEY: "upshift_sandbox_project_provider_rule_key" }),
+        deploymentEnv({
+          ...EARN_ENABLED_FLAGS,
+          UPSHIFT_SANDBOX_API_KEY: "upshift_sandbox_project_provider_rule_key",
+        }),
         UPSHIFT
       )
     ).rejects.toMatchObject(
@@ -234,11 +248,36 @@ describe("assertProjectProviderAdmitted", () => {
     await expect(
       admit(
         projects.production,
-        deploymentEnv({ UPSHIFT_API_KEY: "upshift_project_provider_rule_key" }),
+        deploymentEnv({
+          ...EARN_ENABLED_FLAGS,
+          UPSHIFT_API_KEY: "upshift_project_provider_rule_key",
+        }),
         UPSHIFT
       )
     ).resolves.toBeUndefined();
   });
+
+  it.for(EARN_FLAG_OFF_CASES)(
+    "refuses an otherwise admissible Earn provider as outside the release channel while $flag is off",
+    async ({ flags }) => {
+      providerStages.surfacedEarnProvider = "upshift";
+      providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
+      await setProviderOverrides({ earn: { upshift: true } });
+
+      await expect(
+        admit(
+          projects.production,
+          deploymentEnv({ ...flags, UPSHIFT_API_KEY: "upshift_project_provider_rule_key" }),
+          UPSHIFT
+        )
+      ).rejects.toMatchObject(
+        refusal(
+          "Upshift is not available in this release channel.",
+          "provider_not_in_release_channel"
+        )
+      );
+    }
+  );
 
   it("checks Managed custody's channel, environment mode, entitlement and credentials in that order", async () => {
     custodyReleaseChannel.outOfChannelMode = "managed";
