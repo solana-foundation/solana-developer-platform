@@ -14,7 +14,7 @@ import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as TokenAclSdk from "@solana/token-acl-sdk";
 import * as Token2022 from "@solana-program/token-2022";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
@@ -273,17 +273,11 @@ describe("Issuance Routes", () => {
   let apiKeyHash: string;
 
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-
     // Pre-compute API key hash
     apiKeyHash = await hashString(
       TEST_PROJECT_API_KEY.raw,
       (env as { API_KEY_PEPPER: string }).API_KEY_PEPPER
     );
-  });
-
-  afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {
@@ -296,51 +290,7 @@ describe("Issuance Routes", () => {
       await kv.rateLimits.delete(key.name);
     }
 
-    // Clear token-related tables
-    await db
-      .prepare("DELETE FROM wallet_operations")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM frozen_accounts")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM token_allowlist_statuses")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM token_allowlists")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issuance_transaction_statuses")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issuance_transactions")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issued_token_extensions")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issued_tokens")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM project_members")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM projects")
-      .run()
-      .catch(() => {});
+    await seedTestDatabase(env);
 
     // Seed organization
     await db
