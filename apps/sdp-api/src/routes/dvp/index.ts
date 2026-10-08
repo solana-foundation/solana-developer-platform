@@ -1,6 +1,7 @@
 import { type Context, Hono, type Next } from "hono";
 import { forbidden } from "@/lib/errors";
 import { isDvpEnabled } from "@/lib/feature-flags";
+import { isExitRequest } from "@/lib/movement-exits";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { type MeteredQuotaConfig, meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
@@ -59,7 +60,8 @@ function callerMeteredQuota(config: MeteredQuotaConfig) {
 
 dvp.use("*", requireDvpFeature);
 dvp.use("*", unifiedAuthMiddleware());
-dvp.use("*", projectContextMiddleware());
+// Declared exits stay open after production is revoked (HOO-1955).
+dvp.use("*", projectContextMiddleware({ allowUnentitledProduction: isExitRequest }));
 
 // Every route below pairs `wallets:read` with its own scope, the way Payments
 // does (`routes/payments/index.ts:131`). These routes all resolve a custody

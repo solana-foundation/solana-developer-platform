@@ -32,6 +32,7 @@ import type {
 import { createPostgresBvnkOnrampTransfersRepository } from "@/db/repositories/bvnk-onramp-transfers.repository.postgres";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
+import { type AdmittedMovement, tryAdmitMovement } from "@/lib/admit-movement";
 import { internalError } from "@/lib/errors";
 import { isRampProviderAvailable } from "@/lib/feature-flags";
 import { buildBvnkOnrampPayout } from "@/routes/payments/ramps/providers/bvnk";
@@ -40,6 +41,7 @@ import {
   recordBvnkPayoutCreation,
 } from "@/routes/payments/ramps/providers/bvnk-settlement";
 import { getLogger } from "@/runtime/logger";
+import { createAdmittedBvnkOnrampPayout } from "@/services/payments/admitted-provider-payouts";
 import type { Env } from "@/types/env";
 
 export const BVNK_PAYOUT_RECOVERY_GRACE_MS = 5 * 60 * 1000;
@@ -88,12 +90,12 @@ export async function reconcileBvnkOnrampPayouts(
   });
   let touched = 0;
   for (const candidate of unclaimed) {
-    if (await reconcileUnclaimedPayout(repo, env, candidate)) {
+    if (await reconcileUnclaimedPayout(repo, env, candidate, rampProviderStages)) {
       touched += 1;
     }
   }
   for (const candidate of recoverable) {
-    if (await reconcileRecoverablePayout(repo, env, candidate)) {
+    if (await reconcileRecoverablePayout(repo, env, candidate, rampProviderStages)) {
       touched += 1;
     }
   }
@@ -103,6 +105,35 @@ export async function reconcileBvnkOnrampPayouts(
     }
   }
   return touched;
+}
+
+/**
+ * Admits one payout (HOO-1955). The customer's fiat already arrived, so a
+ * revoked production entitlement still pays out; a deleted organization holds
+ * the payout for an operator to refund or release. A hold leaves the row where
+ * it is, so it is re-selected (and re-refused) every tick until an operator
+ * acts: holding durably needs a state the candidate queries exclude.
+ */
+async function admitBvnkPayout(
+  env: Env,
+  candidate: BvnkOnrampTransferCandidateRow,
+  rampProviderStages: SdpRampProviderStages
+): Promise<AdmittedMovement | null> {
+  if (candidate.project_id === null) {
+    getLogger().error(
+      { transfer_id: candidate.id },
+      "[bvnk onramp] payout candidate has no project; holding it"
+    );
+    return null;
+  }
+  const admission = await tryAdmitMovement(
+    env,
+    { organizationId: candidate.organization_id, projectId: candidate.project_id },
+    "ramps.bvnk_onramp_payout",
+    { job: "reconcile-bvnk-onramp-payouts", subjectId: candidate.id },
+    { rampProviderStages }
+  );
+  return admission.admitted ? admission.movement : null;
 }
 
 function candidateRampContext(
@@ -134,11 +165,16 @@ function candidateRampContext(
 async function reconcileUnclaimedPayout(
   repo: BvnkOnrampTransfersRepository,
   env: Env,
-  candidate: BvnkOnrampTransferCandidateRow
+  candidate: BvnkOnrampTransferCandidateRow,
+  rampProviderStages: SdpRampProviderStages
 ): Promise<boolean> {
   const logger = getLogger();
   let claimLanded = false;
   let claimedAt = "";
+  const movement = await admitBvnkPayout(env, candidate, rampProviderStages);
+  if (movement === null) {
+    return false;
+  }
   try {
     const data = readBvnkOnrampTransferData(candidate.provider_data);
     const payin = data.payin;
@@ -209,7 +245,8 @@ async function reconcileUnclaimedPayout(
     }
     claimLanded = true;
     claimedAt = claimTimestamp;
-    const created = await RAMP_PROVIDER_CLIENTS.bvnk.createOnrampPayout(
+    const created = await createAdmittedBvnkOnrampPayout(
+      movement,
       ctx,
       buildBvnkOnrampPayout({
         transferId: candidate.id,
@@ -487,9 +524,16 @@ async function reissueRecoveryPayout(
   ctx: RampRuntimeContext,
   claimTimestamp: string,
   intent: BvnkOnrampPayoutIntent,
-  fundingWalletReference: string
+  fundingWalletReference: string,
+  rampProviderStages: SdpRampProviderStages
 ): Promise<boolean> {
   const logger = getLogger();
+  // Minted after the recovery lease and lookup, which only observe: a held
+  // payout keeps its lease and is retried after the recovery grace.
+  const movement = await admitBvnkPayout(env, candidate, rampProviderStages);
+  if (movement === null) {
+    return false;
+  }
   const payin = readBvnkOnrampTransferData(candidate.provider_data).payin;
   if (payin === undefined) {
     throw internalError(
@@ -498,7 +542,8 @@ async function reissueRecoveryPayout(
   }
   const { customerLink, customer } = await resolveBvnkOnrampCustomer(env, candidate);
   try {
-    const created = await RAMP_PROVIDER_CLIENTS.bvnk.createOnrampPayout(
+    const created = await createAdmittedBvnkOnrampPayout(
+      movement,
       ctx,
       buildBvnkOnrampPayout({
         transferId: candidate.id,
@@ -561,7 +606,8 @@ async function reissueRecoveryPayout(
 async function reconcileRecoverablePayout(
   repo: BvnkOnrampTransfersRepository,
   env: Env,
-  candidate: BvnkOnrampTransferCandidateRow
+  candidate: BvnkOnrampTransferCandidateRow,
+  rampProviderStages: SdpRampProviderStages
 ): Promise<boolean> {
   const logger = getLogger();
   let leaseLanded = false;
@@ -618,7 +664,8 @@ async function reconcileRecoverablePayout(
       ctx,
       claimTimestamp,
       intent,
-      fundingWalletReference
+      fundingWalletReference,
+      rampProviderStages
     );
     return true;
   } catch (error) {

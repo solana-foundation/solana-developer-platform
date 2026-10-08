@@ -32,6 +32,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -89,6 +90,8 @@ export interface DvpFundingPlan {
   leg: DvpSdpLeg;
   /** Whose wallet authorizes the transfer. Not necessarily the trade's author. */
   signer: { organizationId: string; projectId: string; custodyWalletId: string };
+  /** `dvp.fund`, admitted for the funding organization and project (HOO-1955). */
+  movement: AdmittedMovement;
   /** Takes the lock on this leg. False when somebody else already holds it. */
   claim(signature: Signature, expiryHeight: string): Promise<boolean>;
   /** Replaces the wallet-signature lock key with the sponsored transaction signature. */
@@ -110,12 +113,21 @@ export function fundingPlan(
   env: Env,
   trade: DvpTradeRow,
   side: DvpTradeSide,
-  signer: { organizationId: string; projectId: string; custodyWalletId: string }
+  movement: AdmittedMovement,
+  custodyWalletId: string
 ): DvpFundingPlan {
   const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
+  // The claim is owned by whoever the movement was admitted for, so the lock
+  // and the signer can never name different tenants.
+  const signer = {
+    organizationId: movement.organizationId,
+    projectId: movement.projectId,
+    custodyWalletId,
+  };
   return {
     leg: legOfSide(trade, side),
     signer,
+    movement,
     claim: (signature, expiryHeight) =>
       claims.claim({
         tradeId: trade.id,
@@ -151,6 +163,8 @@ export async function fundDvpTradeLeg(
     custodyWalletId: string;
     organizationId: string;
     projectId: string;
+    /** `dvp.fund`, admitted by the handler for `organizationId`/`projectId`. */
+    movement: AdmittedMovement;
     /** Writes the signed transfer to the request's idempotency record before broadcast. */
     recordAttempt: RecordDvpLegActionAttempt;
   }
@@ -158,11 +172,7 @@ export async function fundDvpTradeLeg(
   return executeDvpFunding(
     c,
     trade,
-    fundingPlan(c.env, trade, params.side, {
-      organizationId: params.organizationId,
-      projectId: params.projectId,
-      custodyWalletId: params.custodyWalletId,
-    }),
+    fundingPlan(c.env, trade, params.side, params.movement, params.custodyWalletId),
     params.recordAttempt
   );
 }
@@ -296,8 +306,7 @@ export async function executeDvpFunding(
   const outstanding = amount - held;
   const signer = await createOrgSignerForCustodyWallet(
     env,
-    plan.signer.organizationId,
-    plan.signer.projectId,
+    plan.movement,
     plan.signer.custodyWalletId
   );
 
@@ -366,9 +375,7 @@ export async function executeDvpFunding(
     );
   }
 
-  const feePayment = await createProjectSponsorshipFeePayment(env, {
-    organizationId: plan.signer.organizationId,
-    projectId: plan.signer.projectId,
+  const feePayment = createProjectSponsorshipFeePayment(env, plan.movement, {
     actor: { type: "wallet", id: plan.signer.custodyWalletId },
   });
   const sponsor = await feePayment.getFeePayer();

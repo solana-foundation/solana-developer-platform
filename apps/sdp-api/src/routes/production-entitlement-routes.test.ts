@@ -3,6 +3,7 @@ import { inspectRoutes } from "hono/dev";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
+import { exitPurposeForRequest } from "@/lib/movement-exits";
 import { noopObservability } from "@/runtime/observability";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { authenticateTestClerkUser, ensureTestClerkIssuer } from "@/test/helpers/clerk";
@@ -20,16 +21,13 @@ import { isEarnExitOrRead } from "./earn/exits";
 const NO_PROJECT_ROUTES: readonly (readonly [RegExp, string])[] = [
   [/^\/(health|docs|openapi\.json|llms\.txt)?(\/|$)/, "public metadata"],
   [/^\/webhooks\//, "provider- or Clerk-signed inbound events; they finish money already moving"],
-  [
-    /^\/pay(\/|$)/,
-    "public payment page; checks the entitlement itself (assertProjectProductionAllowed)",
-  ],
+  [/^\/pay(\/|$)/, "public payment page; checks the entitlement itself (admitMovement)"],
   [/^\/admin\//, "operator routes behind their own credential"],
   [/^\/v1\/(organizations|onboarding|places)(\/|$)/, "organization-scoped, no project"],
   [/^\/v1\/projects$/, "lists projects; hides production without the entitlement"],
   [
     /^\/v1\/wallets\/approval-requests(\/:approvalRequestId(\/(reject|cancel))?)?$/,
-    "approval reads, rejects and cancels stop money; approve opens only for a stored Earn exit",
+    "approval reads, rejects and cancels stop money; approve opens only for a stored exit",
   ],
   [
     /^\/v1\/issuance\/tokens\/:tokenId\/metadata\.json$/,
@@ -56,6 +54,9 @@ function exemption(method: string, path: string): string | undefined {
   if (reason) return reason;
   if (path.startsWith("/v1/earn/") && isEarnExitOrRead(probeMethod(method), concretePath(path))) {
     return "Earn read or exit (ADR 0002)";
+  }
+  if (exitPurposeForRequest(probeMethod(method), concretePath(path)) !== null) {
+    return "declared exit (lib/movement-exits.ts, HOO-1955)";
   }
   return undefined;
 }

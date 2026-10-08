@@ -25,6 +25,7 @@ import {
   type PaymentRecurringPaymentsRepository,
   type PaymentSubscriptionRow,
 } from "@/db/repositories";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
@@ -333,6 +334,7 @@ async function finalizeRecurringPaymentLifecycle(input: {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Lifecycle recovery keeps each persisted stage explicit.
 async function runRecurringPaymentLifecycle(input: {
   env: Env;
+  movement: AdmittedMovement;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
@@ -469,8 +471,7 @@ async function runRecurringPaymentLifecycle(input: {
 
     const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
-      input.organizationId,
-      input.projectId,
+      input.movement,
       input.sourceWallet.id
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
@@ -501,8 +502,7 @@ async function runRecurringPaymentLifecycle(input: {
 
       signature = await sendSubscriptionInstructions({
         env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+        movement: input.movement,
         sourceWallet: input.sourceWallet,
         sourceSigner,
         instructions: [instruction],
@@ -599,8 +599,33 @@ async function runRecurringPaymentLifecycle(input: {
   }
 }
 
+/**
+ * The scheduled-resume refusal (HOO-1955): a stale `resuming` row whose
+ * organization is deleted or lost production moves to `paused`, which the job
+ * does not select and which needs an explicit reactivation.
+ */
+export async function pauseRefusedRecurringResume(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+}): Promise<void> {
+  await createPaymentRecurringPaymentsRepository(
+    input.env,
+    createTenantScope(input)
+  ).updateRecurringPaymentLifecycle({
+    recurringPaymentId: input.recurringPaymentId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    status: "paused",
+    expectedStatus: "resuming",
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export async function cancelRecurringPayment(input: {
   env: Env;
+  movement: AdmittedMovement;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
@@ -629,6 +654,7 @@ export async function cancelRecurringPayment(input: {
 
 export async function resumeRecurringPayment(input: {
   env: Env;
+  movement: AdmittedMovement;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;

@@ -1,4 +1,5 @@
 import type { TransactionSigner } from "@solana/kit";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { Env } from "@/types/env";
 
@@ -14,31 +15,24 @@ import type { Env } from "@/types/env";
  * per-organization signing keys with explicit DB-backed provider selection.
  *
  * @param env - API process environment
- * @param orgId - Organization ID from auth context
- * @param projectId - Optional project ID for project-specific signing keys
+ * @param movement - Admission for this organization, project and purpose (HOO-1955)
  * @returns TransactionSigner compatible with @solana/kit
  */
 export async function createOrgSigner(
   env: Env,
-  orgId: string,
-  projectId?: string | null,
+  movement: AdmittedMovement,
   walletId?: string | null
 ): Promise<TransactionSigner> {
   const signingService = createSigningService(env);
-  return signingService.getTransactionSigner(orgId, projectId ?? undefined, walletId ?? undefined);
+  return signingService.getTransactionSigner(movement, walletId ?? undefined);
 }
 
 /** Resolve the signer for one already-authorized custody-wallet database row. */
 export async function createOrgSignerForCustodyWallet(
   env: Env,
-  orgId: string,
-  projectId: string | null | undefined,
+  movement: AdmittedMovement,
   custodyWalletId: string
 ): Promise<TransactionSigner> {
   const signingService = createSigningService(env);
-  return signingService.getTransactionSignerForWalletRecord(
-    orgId,
-    projectId ?? undefined,
-    custodyWalletId
-  );
+  return signingService.getTransactionSignerForWalletRecord(movement, custodyWalletId);
 }

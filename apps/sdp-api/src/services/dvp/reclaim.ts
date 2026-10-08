@@ -31,6 +31,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import type { DvpTradeRow, DvpTradeSide, DvpTradeStatus } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -86,6 +87,8 @@ export async function reclaimDvpTradeLeg(
     custodyWalletId: string;
     organizationId: string;
     projectId: string;
+    /** `dvp.reclaim` (an exit), admitted by the handler for `organizationId`/`projectId`. */
+    movement: AdmittedMovement;
     /** Writes the signed reclaim to the request's idempotency record before broadcast. */
     recordAttempt: RecordDvpLegActionAttempt;
   }
@@ -115,8 +118,7 @@ export async function reclaimDvpTradeLeg(
 
   const signer = await createOrgSignerForCustodyWallet(
     env,
-    params.organizationId,
-    params.projectId,
+    params.movement,
     params.custodyWalletId
   );
   // The handler matched this wallet to the party address from the database.
@@ -132,9 +134,7 @@ export async function reclaimDvpTradeLeg(
   const [destination] = await findAssociatedTokenPda({ owner: party, mint, tokenProgram });
 
   // Sponsorship only after every refusal above, as in fund and settle.
-  const feePayment = await createProjectSponsorshipFeePayment(env, {
-    organizationId: params.organizationId,
-    projectId: params.projectId,
+  const feePayment = createProjectSponsorshipFeePayment(env, params.movement, {
     actor: { type: "wallet", id: params.custodyWalletId },
   });
   const sponsor = await feePayment.getFeePayer();

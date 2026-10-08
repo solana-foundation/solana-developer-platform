@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import type { ApiKeyContext } from "@/lib/auth";
 import {
   AppError,
@@ -126,16 +127,24 @@ export async function resolvePrivateChannelCustodyWallet(
   return wallet;
 }
 
-/** Admit and prepare the same exact wallet before a new SPC session or intent. */
+/**
+ * Admit and prepare the same exact wallet before a new SPC session or intent.
+ *
+ * @param movement - Admitted by the caller for the purpose it signs for
+ *   (`private_channels.deposit`, `.transfer`, `.withdraw` or `.wallet_setup`).
+ */
 export async function createPrivateChannelSigner(
   env: Env,
-  organizationId: string,
-  projectId: string,
+  movement: AdmittedMovement,
   wallet: CustodyWallet
 ) {
-  await createSigningService(env).admitRuntimeExecution(organizationId, projectId, wallet.id);
+  await createSigningService(env).admitRuntimeExecution(
+    movement.organizationId,
+    movement.projectId,
+    wallet.id
+  );
   try {
-    return await createOrgSignerForCustodyWallet(env, organizationId, projectId, wallet.id);
+    return await createOrgSignerForCustodyWallet(env, movement, wallet.id);
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw providerUnavailable("The source custody wallet is not currently signable.");

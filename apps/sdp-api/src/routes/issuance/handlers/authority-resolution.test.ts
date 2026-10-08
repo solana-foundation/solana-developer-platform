@@ -1,6 +1,7 @@
 import type { Token } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import type { ApiKeyContext } from "@/lib/auth";
 import * as solanaServices from "@/services/solana";
 import { env as testEnv } from "@/test/helpers/env";
@@ -38,6 +39,14 @@ vi.mock("@solana/token-acl-sdk", async (importOriginal) => ({
 
 const AUTHORITY = "AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9";
 const OTHER_AUTHORITY = "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod";
+
+function createMovement() {
+  return mintAdmittedMovementForTests({
+    organizationId: "org_test",
+    projectId: "proj_test",
+    purpose: "issuance.execute",
+  });
+}
 
 function createAuth(overrides: Partial<ApiKeyContext> = {}): ApiKeyContext {
   return {
@@ -603,11 +612,20 @@ describe("authority-resolution", () => {
       resolveAuthoritySigner({
         env: testEnv,
         auth: createAuth(),
+        movement: createMovement(),
         currentAuthority: AUTHORITY,
         requiredWalletPermissions: ["tokens:write"],
       })
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
-    expect(exactSigner).toHaveBeenCalledWith(testEnv, "org_test", "proj_test", "cwlt_inactive");
+    expect(exactSigner).toHaveBeenCalledWith(
+      testEnv,
+      expect.objectContaining({
+        organizationId: "org_test",
+        projectId: "proj_test",
+        purpose: "issuance.execute",
+      }),
+      "cwlt_inactive"
+    );
   });
 
   it("resolves an exact draft wallet without performing runtime admission", async () => {
@@ -775,6 +793,7 @@ describe("authority-resolution", () => {
       createResolvedAuthoritySigner({
         env: testEnv,
         auth: createAuth(),
+        movement: createMovement(),
         custodyWalletId: "cwlt_other",
         currentAuthority: AUTHORITY,
         requiredWalletPermissions: ["tokens:admin"],
@@ -794,6 +813,7 @@ describe("authority-resolution", () => {
       createResolvedAuthoritySigner({
         env: testEnv,
         auth: createAuth(),
+        movement: createMovement(),
         custodyWalletId: "cwlt_authority",
         currentAuthority: AUTHORITY,
         requiredWalletPermissions: ["tokens:admin"],
@@ -810,6 +830,7 @@ describe("authority-resolution", () => {
       createLegacyResolvedAuthoritySigner({
         env: testEnv,
         auth: createAuth(),
+        movement: createMovement(),
         walletId: "wal_connection",
         expectedCustodyWalletId: "cwlt_connection",
       })
@@ -826,6 +847,7 @@ describe("authority-resolution", () => {
       createLegacyResolvedAuthoritySigner({
         env: testEnv,
         auth: createAuth(),
+        movement: createMovement(),
         walletId: "wal_other",
         expectedCustodyWalletId: "cwlt_pinned",
       })

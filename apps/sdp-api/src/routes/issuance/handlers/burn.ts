@@ -2,6 +2,7 @@ import { createRpcForSdk } from "@sdp/rpc/solana";
 import { type Address, assertValidAddress } from "@sdp/solana/address";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import { getDb } from "@/db";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { AppError, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
@@ -167,6 +168,7 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   const signer = await createResolvedAuthoritySigner({
     env: c.env,
     auth,
+    movement: await admitRequestMovement(c, "issuance.execute"),
     custodyWalletId: wallet.custodyWalletId,
     currentAuthority: wallet.publicKey,
     requiredWalletPermissions: ["tokens:write"],
@@ -381,6 +383,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     const signer = await createResolvedAuthoritySigner({
       env: c.env,
       auth,
+      movement: await admitRequestMovement(c, "issuance.execute"),
       custodyWalletId: wallet.custodyWalletId,
       currentAuthority: wallet.publicKey,
       requiredWalletPermissions: ["tokens:write"],

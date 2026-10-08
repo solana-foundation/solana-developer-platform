@@ -20,6 +20,7 @@ import {
   type TransactionSigner,
 } from "@solana/signers";
 import { getDb } from "@/db";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import type { SigningProviderType } from "@/services/adapters/signing";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -88,8 +89,8 @@ const RAW_MESSAGE_SIGNING_PROVIDERS: ReadonlySet<SigningProviderType> = new Set(
 
 export interface SignRingsOuterTransactionInput {
   env: Env;
-  organizationId: string;
-  projectId: string;
+  /** Admission for this tenant (HOO-1955); the custody signer requires it. */
+  movement: AdmittedMovement;
   /**
    * The address the transaction requires a signature from — the Rings wallet's
    * owner, which is also the fee payer of every outer transaction.
@@ -188,7 +189,7 @@ function equalBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean 
 
 /** The test-seam signer, or the owner's custody signer with failures mapped once. */
 async function ownerSigner(
-  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner"> & {
+  input: Pick<SignRingsOuterTransactionInput, "env" | "movement" | "owner"> & {
     signer?: TransactionSigner;
   }
 ): Promise<TransactionSigner> {
@@ -235,8 +236,7 @@ export async function signRingsOuterTransaction(
 
 export interface SignRingsMessageInput {
   env: Env;
-  organizationId: string;
-  projectId: string;
+  movement: AdmittedMovement;
   /** Base58 address of the key the message requires a signature from. */
   owner: string;
   messageBase64: string;
@@ -287,12 +287,16 @@ export async function signRingsMessage(input: SignRingsMessageInput): Promise<st
  * custody no longer controls fails here rather than at the chain.
  */
 async function resolveOwnerSigner(
-  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner">
+  input: Pick<SignRingsOuterTransactionInput, "env" | "movement" | "owner">
 ): Promise<TransactionSigner> {
   const wallet = await new CustodyConfigStore(
     getDb(input.env),
     input.env
-  ).findActiveWalletByPublicKey(input.organizationId, input.projectId, input.owner);
+  ).findActiveWalletByPublicKey(
+    input.movement.organizationId,
+    input.movement.projectId,
+    input.owner
+  );
   if (!wallet) {
     throw new SigningError(`custody does not control ${input.owner}`, "WALLET_NOT_FOUND");
   }
@@ -309,12 +313,7 @@ async function resolveOwnerSigner(
     );
   }
 
-  const signer = await createOrgSignerForCustodyWallet(
-    input.env,
-    input.organizationId,
-    input.projectId,
-    wallet.id
-  );
+  const signer = await createOrgSignerForCustodyWallet(input.env, input.movement, wallet.id);
 
   // Unreachable via the public-key lookup, but the cost of being wrong is
   // signing someone else's transfer. Names the row so an operator can find the

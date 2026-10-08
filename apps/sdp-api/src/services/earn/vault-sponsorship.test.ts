@@ -1,5 +1,6 @@
 import type { Address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import type { Env } from "@/types/env";
 import { createVaultDeadline } from "./vault-deadline";
 
@@ -23,8 +24,11 @@ function scope(env: Partial<Env> = {}) {
       ...env,
     } as Env,
     input: {
-      organizationId: "org_1",
-      projectId: "prj_1",
+      movement: mintAdmittedMovementForTests({
+        organizationId: "org_1",
+        projectId: "prj_1",
+        purpose: "earn.withdraw",
+      }),
       walletId: "cwlt_1",
       deadline: createVaultDeadline(),
     },
@@ -33,7 +37,7 @@ function scope(env: Partial<Env> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  createProjectSponsorshipFeePayment.mockResolvedValue({
+  createProjectSponsorshipFeePayment.mockReturnValue({
     getFeePayer: vi.fn().mockResolvedValue(SPONSOR),
   });
 });
@@ -97,6 +101,7 @@ describe("resolveVaultSponsorship", () => {
     // budget is charged, not the process default's.
     expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
       env,
+      expect.objectContaining({ purpose: "earn.withdraw" }),
       expect.objectContaining({ cluster: "mainnet-beta" })
     );
   });
@@ -109,17 +114,20 @@ describe("resolveVaultSponsorship", () => {
 
     await resolveVaultSponsorship(env, { ...input, cluster: "devnet" });
 
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(env, {
-      organizationId: "org_1",
-      projectId: "prj_1",
-      actor: { type: "wallet", id: "cwlt_1" },
-      cluster: "devnet",
-    });
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        organizationId: "org_1",
+        projectId: "prj_1",
+        purpose: "earn.withdraw",
+      }),
+      { actor: { type: "wallet", id: "cwlt_1" }, cluster: "devnet" }
+    );
   });
 
   it("bounds sponsor resolution with the caller's deadline", async () => {
     vi.useFakeTimers();
-    createProjectSponsorshipFeePayment.mockResolvedValue({
+    createProjectSponsorshipFeePayment.mockReturnValue({
       getFeePayer: vi.fn(() => new Promise(() => undefined)),
     });
     const { env, input } = scope();

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -57,6 +58,11 @@ function input(overrides: Partial<VaultWithdrawalInput> = {}): VaultWithdrawalIn
   return {
     organizationId: ORG,
     projectId: PROJECT,
+    movement: mintAdmittedMovementForTests({
+      organizationId: ORG,
+      projectId: PROJECT,
+      purpose: "earn.withdraw",
+    }),
     environment: "sandbox",
     provider: "kamino",
     positionId,

@@ -29,6 +29,7 @@ import {
   type PrivateChannelUserRow,
   type PrivateChannelVerifiedWalletRow,
 } from "@/db/repositories";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, forbidden, notFound, providerNotConfigured } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
@@ -160,10 +161,12 @@ export async function verifyPrivateChannelWallet(
   auth: ApiKeyContext,
   projectId: string,
   walletId: string,
+  /** `private_channels.wallet_setup`, admitted by the handler for this project. */
+  movement: AdmittedMovement,
   principalId?: string
 ): Promise<{ row: PrivateChannelVerifiedWalletRow; instance: PrivateChannelInstanceRow }> {
   const wallet = await resolvePrivateChannelCustodyWallet(env, auth, projectId, walletId);
-  const signer = await createPrivateChannelSigner(env, auth.organizationId, projectId, wallet);
+  const signer = await createPrivateChannelSigner(env, movement, wallet);
   if (!isMessagePartialSigner(signer)) {
     throw new AppError("SIGNING_FAILED", "This wallet cannot sign verification messages.");
   }

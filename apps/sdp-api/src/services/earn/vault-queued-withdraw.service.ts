@@ -22,6 +22,7 @@ import {
   generateEarnVaultWithdrawalRequestId,
   generateEarnVaultWithdrawalRequestReservationId,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnVaultParRedemptionFingerprint,
@@ -392,6 +393,7 @@ async function prepareCustodyTransaction(
   env: Env,
   input: {
     actor: CustodyQueuedWithdrawalActor;
+    movement: AdmittedMovement;
     position: QueuedWithdrawalPosition;
     plan: EarnVaultTransactionPlan;
   }
@@ -400,8 +402,7 @@ async function prepareCustodyTransaction(
   const cluster = earnClusterFor(input.actor.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const fee = await resolveVaultSponsorship(env, {
-    organizationId: input.actor.organizationId,
-    projectId: input.actor.projectId,
+    movement: input.movement,
     walletId: input.actor.custodyWalletId,
     cluster,
     deadline,
@@ -426,12 +427,7 @@ async function prepareCustodyTransaction(
     );
   }
   const signer = await deadline.run("Resolving the queued withdrawal signer", () =>
-    solanaServices.createOrgSignerForCustodyWallet(
-      env,
-      input.actor.organizationId,
-      input.actor.projectId,
-      input.actor.custodyWalletId
-    )
+    solanaServices.createOrgSignerForCustodyWallet(env, input.movement, input.actor.custodyWalletId)
   );
   if (signer.address !== input.actor.custodyWalletPublicKey) {
     throw badRequest("Resolved signing wallet does not match the queued withdrawal position");
@@ -484,6 +480,8 @@ export async function createCustodyQueuedWithdrawal(
   env: Env,
   input: {
     actor: CustodyQueuedWithdrawalActor;
+    /** `earn.withdraw`, admitted by the handler for the actor's organization and project. */
+    movement: AdmittedMovement;
     position: QueuedWithdrawalPosition;
     terms: AsyncWithdrawalTermsInput;
     clientRequestId: string;
@@ -520,8 +518,7 @@ export async function createCustodyQueuedWithdrawal(
   const actionId = generateEarnVaultWithdrawalRequestActionId();
   const deadline = createVaultDeadline();
   const fee = await resolveVaultSponsorship(env, {
-    organizationId: input.actor.organizationId,
-    projectId: input.actor.projectId,
+    movement: input.movement,
     walletId: input.actor.custodyWalletId,
     cluster: earnClusterFor(input.actor.environment),
     deadline,
@@ -577,8 +574,7 @@ export async function createCustodyQueuedWithdrawal(
     const signer = await executionDeadline.run("Resolving the queued withdrawal signer", () =>
       solanaServices.createOrgSignerForCustodyWallet(
         env,
-        input.actor.organizationId,
-        input.actor.projectId,
+        input.movement,
         input.actor.custodyWalletId
       )
     );
@@ -723,6 +719,8 @@ export async function cancelCustodyQueuedWithdrawal(
   env: Env,
   input: {
     actor: CustodyQueuedWithdrawalActor;
+    /** `earn.withdraw`, admitted by the handler: cancellation is the custody recovery path. */
+    movement: AdmittedMovement;
     position: QueuedWithdrawalPosition;
     request: EarnVaultWithdrawalRequestRow;
     clientRequestId: string;
@@ -785,6 +783,7 @@ export async function cancelCustodyQueuedWithdrawal(
   }
   const { signed } = await prepareCustodyTransaction(env, {
     actor: input.actor,
+    movement: input.movement,
     position: input.position,
     plan,
   });

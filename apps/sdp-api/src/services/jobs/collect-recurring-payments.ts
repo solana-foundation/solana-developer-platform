@@ -10,6 +10,7 @@ import {
   type PaymentRecurringPaymentRow,
   type RecoverableCollectionRecurringPaymentRow,
 } from "@/db/repositories";
+import { type MovementPurpose, tryAdmitMovement } from "@/lib/admit-movement";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
@@ -19,7 +20,10 @@ import {
   cancelRecurringPayment,
   collectRecurringPayment,
   journalAutomatedCollectionFailure,
+  pauseRefusedRecurringResume,
   resumeRecurringPayment,
+  revertRefusedRecurringActivation,
+  skipRefusedRecurringCollectionPeriod,
 } from "@/services/payments/recurring-payments";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -91,6 +95,16 @@ async function resolveSourceWallet(
   return wallet;
 }
 
+/** Mints the row's movement before the job changes any state for it (HOO-1955). */
+function admitRow(env: Env, row: PaymentRecurringPaymentRow, purpose: MovementPurpose) {
+  return tryAdmitMovement(
+    env,
+    { organizationId: row.organization_id, projectId: row.project_id },
+    purpose,
+    { job: "collect-recurring-payments", subjectId: row.id }
+  );
+}
+
 function shouldSkipCollectionError(error: Error): boolean {
   return error instanceof AppError && error.code === "CONFLICT";
 }
@@ -128,8 +142,20 @@ async function collectRow(
       });
       return "failed";
     }
+    const admission = await admitRow(env, row, "recurring.collect");
+    if (!admission.admitted) {
+      await skipRefusedRecurringCollectionPeriod({
+        env,
+        organizationId: row.organization_id,
+        projectId: row.project_id,
+        recurringPayment: row,
+        now: new Date(),
+      });
+      return "skipped";
+    }
     await collectRecurringPayment({
       env,
+      movement: admission.movement,
       organizationId: row.organization_id,
       projectId: row.project_id,
       sourceWallet,
@@ -158,8 +184,19 @@ async function recoverLifecycleRow(
       return "failed";
     }
     if (isActivatingRecurringPaymentStatus(row.status)) {
+      const admission = await admitRow(env, row, "recurring.activate");
+      if (!admission.admitted) {
+        await revertRefusedRecurringActivation({
+          env,
+          organizationId: row.organization_id,
+          projectId: row.project_id,
+          recurringPaymentId: row.id,
+        });
+        return "skipped";
+      }
       await activateRecurringPayment({
         env,
+        movement: admission.movement,
         organizationId: row.organization_id,
         projectId: row.project_id,
         sourceWallet,
@@ -170,8 +207,12 @@ async function recoverLifecycleRow(
     }
     const operation = recurringPaymentInFlightLifecycleOperation(row.status);
     if (operation === "cancel") {
+      // An exit: admitted for deleted and unentitled organizations alike.
+      const admission = await admitRow(env, row, "recurring.cancel");
+      if (!admission.admitted) throw admission.error;
       await cancelRecurringPayment({
         env,
+        movement: admission.movement,
         organizationId: row.organization_id,
         projectId: row.project_id,
         sourceWallet,
@@ -180,8 +221,19 @@ async function recoverLifecycleRow(
       return "ok";
     }
     if (operation === "resume") {
+      const admission = await admitRow(env, row, "recurring.resume");
+      if (!admission.admitted) {
+        await pauseRefusedRecurringResume({
+          env,
+          organizationId: row.organization_id,
+          projectId: row.project_id,
+          recurringPaymentId: row.id,
+        });
+        return "skipped";
+      }
       await resumeRecurringPayment({
         env,
+        movement: admission.movement,
         organizationId: row.organization_id,
         projectId: row.project_id,
         sourceWallet,

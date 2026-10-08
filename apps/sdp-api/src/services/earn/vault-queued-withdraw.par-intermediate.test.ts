@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import { buildEarnVaultParRedemptionFingerprint } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -192,6 +193,11 @@ describe("a par request over held intermediate", () => {
         custodyWalletPublicKey: WALLET_ADDRESS,
         userId: USER,
       },
+      movement: mintAdmittedMovementForTests({
+        organizationId: ORG,
+        projectId: PROJECT,
+        purpose: "earn.withdraw",
+      }),
       position: position(CUSTODY_POSITION, WALLET_ADDRESS, WALLET_ROW_ID),
       terms,
       clientRequestId: "par-intermediate-custody-key",
@@ -231,6 +237,11 @@ describe("a par request over held intermediate", () => {
           custodyWalletPublicKey: WALLET_ADDRESS,
           userId: USER,
         },
+        movement: mintAdmittedMovementForTests({
+          organizationId: ORG,
+          projectId: PROJECT,
+          purpose: "earn.withdraw",
+        }),
         position: position(CUSTODY_POSITION, WALLET_ADDRESS, WALLET_ROW_ID),
         terms,
         clientRequestId: "par-intermediate-drift-key",

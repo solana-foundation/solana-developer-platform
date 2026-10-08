@@ -24,6 +24,7 @@ import {
 import { generateKeyPairSigner } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import { type AppError, conflict } from "@/lib/errors";
 import {
   acceptTransaction,
@@ -104,6 +105,11 @@ const FUNDER_A = {
   custodyWalletId: "cwlt_a",
   organizationId: "org_x",
   projectId: "prj_x",
+  movement: mintAdmittedMovementForTests({
+    organizationId: "org_x",
+    projectId: "prj_x",
+    purpose: "dvp.fund",
+  }),
   recordAttempt,
 };
 
@@ -143,7 +149,7 @@ describe("fundDvpTradeLeg", () => {
     readMintDecimals.mockResolvedValue(6);
     fetchMaybeToken.mockResolvedValue({ exists: true, data: { amount: 10_000n } });
     prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
-    createProjectSponsorshipFeePayment.mockResolvedValue({
+    createProjectSponsorshipFeePayment.mockReturnValue({
       getFeePayer: async () => sponsor.address,
       prepareOwnedSubmission,
     });
@@ -186,6 +192,11 @@ describe("fundDvpTradeLeg", () => {
       custodyWalletId: "cwlt_b",
       organizationId: "org_x",
       projectId: "prj_x",
+      movement: mintAdmittedMovementForTests({
+        organizationId: "org_x",
+        projectId: "prj_x",
+        purpose: "dvp.fund",
+      }),
       recordAttempt,
     });
 
@@ -577,6 +588,11 @@ describe("fundDvpTradeLeg", () => {
         custodyWalletId: "cwlt_b_of_org_b",
         organizationId: "org_b",
         projectId: "prj_b",
+        movement: mintAdmittedMovementForTests({
+          organizationId: "org_b",
+          projectId: "prj_b",
+          purpose: "dvp.fund",
+        }),
         recordAttempt,
       });
 
@@ -599,6 +615,11 @@ describe("fundDvpTradeLeg", () => {
         custodyWalletId: "cwlt_a",
         organizationId: "org_a",
         projectId: "prj_a",
+        movement: mintAdmittedMovementForTests({
+          organizationId: "org_a",
+          projectId: "prj_a",
+          purpose: "dvp.fund",
+        }),
         recordAttempt,
       });
       await fundDvpTradeLeg(context, trade(), {
@@ -606,6 +627,11 @@ describe("fundDvpTradeLeg", () => {
         custodyWalletId: "cwlt_b",
         organizationId: "org_b",
         projectId: "prj_b",
+        movement: mintAdmittedMovementForTests({
+          organizationId: "org_b",
+          projectId: "prj_b",
+          purpose: "dvp.fund",
+        }),
         recordAttempt,
       });
 

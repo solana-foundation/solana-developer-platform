@@ -24,6 +24,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { createDvpTradeRepository, type DvpTradeRow, type DvpTradeStatus } from "@/db/repositories";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
+import { type AdmittedMovement, assertAdmittedMovement } from "@/lib/admit-movement";
 import { badRequest, conflict, transactionFailed } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -103,6 +104,8 @@ function assertInsideSettlementWindow(
  * Settles or cancels a trade using the wallet already authorized by the handler.
  *
  * @param c - Request context.
+ * @param movement - `dvp.settle` for settle, `dvp.reclaim` (an exit) for
+ *   cancel, admitted by the handler for the trade's organization and project.
  * @param trade - The trade to close.
  * @param action - Settle or cancel.
  * @param settlement - The settlement wallet the handler authorized.
@@ -112,6 +115,7 @@ function assertInsideSettlementWindow(
  */
 export async function closeDvpTrade(
   c: Context<{ Bindings: Env }>,
+  movement: AdmittedMovement,
   trade: DvpTradeRow,
   action: DvpCloseAction,
   settlement: DvpSettlementWallet,
@@ -163,12 +167,11 @@ export async function closeDvpTrade(
     assertInsideSettlementWindow(trade, snapshot.clusterUnixTimestamp);
   }
 
-  const signer = await createOrgSignerForCustodyWallet(
-    env,
-    trade.organizationId,
-    trade.projectId,
-    settlement.custodyWalletId
-  );
+  assertAdmittedMovement(movement, {
+    organizationId: trade.organizationId,
+    projectId: trade.projectId,
+  });
+  const signer = await createOrgSignerForCustodyWallet(env, movement, settlement.custodyWalletId);
   if (signer.address !== trade.settlementAuthority) {
     throw badRequest("DvP settlement wallet no longer matches the trade's authority");
   }

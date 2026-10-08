@@ -17,6 +17,7 @@ import {
   createPostgresDvpLegTransferRepository,
   type DvpTradeLegTransfers,
 } from "@/db/repositories/dvp-leg-transfer.repository";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, forbidden, notFound, solanaRpcError } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -516,9 +517,13 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, walletId, ["payments:write"]);
   }
 
+  // Admitted after the request-shape refusals above and before create claims
+  // its idempotency row or provisions anything (HOO-1955).
+  const movement = await admitRequestMovement(c, "dvp.create");
   const trade = await createDvpTrade(c.env, c, {
     organizationId: auth.organizationId,
     projectId,
+    movement,
     partyA: body.partyA,
     partyB: body.partyB,
     mintA: body.mintA,
@@ -585,6 +590,10 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     await assertApprovedWalletOperationCustodyWallet(c, settlement.custodyWalletId);
   }
 
+  // Cancel returns escrowed funds, so it is the `dvp.cancel` exit (open after
+  // revocation, lib/movement-exits.ts); settle is a start.
+  const movement = await admitRequestMovement(c, action === "settle" ? "dvp.settle" : "dvp.cancel");
+
   const { result, replayed } = await runDvpCloseOnce(
     c.env,
     c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
@@ -596,7 +605,7 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
       custodyWalletId: settlement.custodyWalletId,
     },
     (recordAttempt) =>
-      closeDvpTrade(c, trade, action, settlement, async (attempt) => {
+      closeDvpTrade(c, movement, trade, action, settlement, async (attempt) => {
         // Record first, fence second. Both happen before the submission, and
         // in this order a failed record aborts while the approval's lease is
         // still unspent, so the operation can be executed again. Fencing first
@@ -661,6 +670,10 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
   assertJudgedDvpCustodyWallet(c, params.custodyWalletId);
   await assertApprovedWalletOperationCustodyWallet(c, params.custodyWalletId);
 
+  // Admission before the audit intent, the first state this request writes
+  // (HOO-1955).
+  const movement = await admitRequestMovement(c, "dvp.fund");
+
   // Money IN to the escrow, so the intent is fail-closed and admitted after
   // the refusals resolveLegAction makes (which move nothing and are not worth
   // an event) and before anything is signed. PRO-1992.
@@ -681,6 +694,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
       (recordAttempt) =>
         fundDvpTradeLeg(c, trade, {
           ...params,
+          movement,
           recordAttempt: async (attempt) => {
             // Record first, fence second: see the close above. The fence is a
             // no-op on an ordinary request and is the last thing before the
@@ -724,11 +738,12 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
  */
 export const reclaimTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
   const { trade, actor, params } = await resolveLegAction(c, c.req.valid("json"));
+  const movement = await admitRequestMovement(c, "dvp.reclaim");
   const { result, replayed } = await runDvpLegActionOnce(
     c.env,
     c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
     { action: "reclaim", tradeId: trade.id, ...params },
-    (recordAttempt) => reclaimDvpTradeLeg(c, trade, { ...params, recordAttempt })
+    (recordAttempt) => reclaimDvpTradeLeg(c, trade, { ...params, movement, recordAttempt })
   );
 
   // An exit, so the record is written after the effect and cannot refuse it.

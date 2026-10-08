@@ -20,6 +20,7 @@ import {
   type TransactionPartialSigner,
 } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
@@ -35,6 +36,11 @@ const env = {} as Env;
 // Only the resolution path uses these; a test that passes `signer` does not.
 const findActiveWalletByPublicKey = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
+const MOVEMENT = mintAdmittedMovementForTests({
+  organizationId: "org_1",
+  projectId: "prj_1",
+  purpose: "rings.operation",
+});
 
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/services/stores/custody-config.store", () => ({
@@ -83,8 +89,7 @@ function partialSigner(
 function signInput(overrides: Partial<Parameters<typeof signRingsOuterTransaction>[0]> = {}) {
   return {
     env,
-    organizationId: "org_1",
-    projectId: "prj_1",
+    movement: MOVEMENT,
     owner: FEE_PAYER as string,
     unsignedTxBase64: unsignedTxBase64(),
     ...overrides,
@@ -151,12 +156,7 @@ describe("signRingsOuterTransaction", () => {
       // Looked up by key: a signature is only valid from the key the
       // transaction names.
       expect(findActiveWalletByPublicKey).toHaveBeenCalledWith("org_1", "prj_1", FEE_PAYER);
-      expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
-        env,
-        "org_1",
-        "prj_1",
-        "cw_owner"
-      );
+      expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(env, MOVEMENT, "cw_owner");
       expect(getTransactionDecoder().decode(base64.encode(signed)).signatures[FEE_PAYER]).toEqual(
         signature
       );
@@ -286,8 +286,7 @@ describe("signRingsMessage", () => {
   function messageInput(overrides: Partial<Parameters<typeof signRingsMessage>[0]> = {}) {
     return {
       env,
-      organizationId: "org_1",
-      projectId: "prj_1",
+      movement: MOVEMENT,
       owner: FEE_PAYER as string,
       messageBase64: base64.decode(new Uint8Array([1, 2, 3])),
       ...overrides,

@@ -4,6 +4,7 @@ import type { FrozenAccount, FrozenAccountResponse, TokenTransaction } from "@sd
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { created, paginated, success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
@@ -378,6 +379,7 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
   const signer = await createResolvedAuthoritySigner({
     env: c.env,
     auth,
+    movement: await admitRequestMovement(c, "issuance.execute"),
     custodyWalletId,
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],
@@ -627,6 +629,7 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
   const signer = await createResolvedAuthoritySigner({
     env: c.env,
     auth,
+    movement: await admitRequestMovement(c, "issuance.execute"),
     custodyWalletId,
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],

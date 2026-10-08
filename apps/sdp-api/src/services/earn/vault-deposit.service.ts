@@ -11,6 +11,7 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { badRequest, internalError } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
@@ -51,6 +52,8 @@ import { resolveVaultSponsorship, type VaultFeeMode, vaultRentPayer } from "./va
 export interface VaultDepositInput {
   organizationId: string;
   projectId: string;
+  /** `earn.deposit`, admitted by the caller for this organization and project (HOO-1955). */
+  movement: AdmittedMovement;
   environment: SdpEnvironment;
   provider: EarnProviderId;
   /** Vault address — the strategy's providerReference. */
@@ -238,8 +241,7 @@ export async function depositIntoVault(
   const fee: VaultFeeMode = input.swap
     ? { kind: "wallet-pays" }
     : await resolveVaultSponsorship(env, {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+        movement: input.movement,
         walletId: input.wallet.id,
         cluster,
         deadline,
@@ -340,6 +342,7 @@ export async function depositIntoVault(
       env,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      movement: input.movement,
       walletId: input.wallet.id,
       walletPublicKey: input.wallet.publicKey,
       signerMismatchMessage: "Resolved signing wallet does not match the deposit wallet",

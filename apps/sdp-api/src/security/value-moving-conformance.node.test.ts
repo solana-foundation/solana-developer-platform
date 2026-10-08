@@ -801,3 +801,226 @@ describe("value-moving authorization and replay conformance", () => {
     );
   });
 });
+
+// ── HOO-1955: one admission point, a capability token, and the sinks that require it ──
+
+const apiSourceRoot = "apps/sdp-api/src";
+
+function apiProductionFiles(): string[] {
+  return sourceFiles(path.join(repositoryRoot, apiSourceRoot)).map((file) =>
+    path.relative(repositoryRoot, file)
+  );
+}
+
+function filesMatching(pattern: RegExp, files = apiProductionFiles()): string[] {
+  return files.filter((file) => pattern.test(readSource(file))).sort();
+}
+
+/**
+ * The files that mint an `AdmittedMovement`. Adding one is a reviewed change:
+ * it is a new place that decides money may move.
+ */
+const ADMISSION_CALLERS: string[] = [
+  "apps/sdp-api/src/routes/custody/handlers/signer-check.ts",
+  "apps/sdp-api/src/routes/dvp/handlers.ts",
+  "apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts",
+  "apps/sdp-api/src/routes/earn/handlers/vault.ts",
+  "apps/sdp-api/src/routes/issuance/handlers/allowlist.ts",
+  "apps/sdp-api/src/routes/issuance/handlers/authority.ts",
+  "apps/sdp-api/src/routes/issuance/handlers/burn.ts",
+  "apps/sdp-api/src/routes/issuance/handlers/deploy.ts",
+  "apps/sdp-api/src/routes/issuance/handlers/force-burn.ts",
+  "apps/sdp-api/src/routes/issuance/handlers/freeze.ts",
+  "apps/sdp-api/src/routes/issuance/handlers/mint.ts",
+  "apps/sdp-api/src/routes/issuance/handlers/pause.ts",
+  "apps/sdp-api/src/routes/issuance/handlers/seize.ts",
+  "apps/sdp-api/src/routes/issuance/handlers/tokens.ts",
+  "apps/sdp-api/src/routes/pay.ts",
+  "apps/sdp-api/src/routes/payments/recurring-payments/handlers.ts",
+  "apps/sdp-api/src/routes/payments/transfer-batches/create.ts",
+  "apps/sdp-api/src/routes/payments/transfers/handlers.ts",
+  "apps/sdp-api/src/routes/private-channels/handlers/deposits.ts",
+  "apps/sdp-api/src/routes/private-channels/handlers/transfers.ts",
+  "apps/sdp-api/src/routes/private-channels/handlers/wallets.ts",
+  "apps/sdp-api/src/routes/private-channels/handlers/withdrawals.ts",
+  "apps/sdp-api/src/services/helius-rings/gateway.ts",
+  "apps/sdp-api/src/services/helius-rings/service.ts",
+  "apps/sdp-api/src/services/jobs/collect-recurring-payments.ts",
+  "apps/sdp-api/src/services/jobs/reconcile-bvnk-onramp-payouts.ts",
+];
+
+/** Purposes that stay open for deleted and unentitled organizations. */
+const NON_START_PURPOSES = {
+  "dvp.cancel": "exit",
+  "dvp.reclaim": "exit",
+  "earn.withdraw": "exit",
+  "private_channels.withdraw": "exit",
+  "ramps.bvnk_onramp_payout": "funded_payout",
+  "recurring.cancel": "exit",
+};
+
+/** Every sink, the file that defines it, and the token check it must run. */
+const MOVEMENT_SINKS = [
+  {
+    sink: "getTransactionSigner",
+    file: "apps/sdp-api/src/services/domain/signing/custody-runtime-target.ts",
+    signature: "async getTransactionSigner(\n    movement: AdmittedMovement,",
+  },
+  {
+    sink: "getTransactionSignerForWalletRecord",
+    file: "apps/sdp-api/src/services/domain/signing/custody-runtime-target.ts",
+    signature: "async getTransactionSignerForWalletRecord(\n    movement: AdmittedMovement,",
+  },
+  {
+    sink: "createProjectSponsorshipFeePayment",
+    file: "apps/sdp-api/src/services/sponsorship.service.ts",
+    signature:
+      "export function createProjectSponsorshipFeePayment(\n  env: Env,\n  movement: AdmittedMovement,",
+  },
+  {
+    sink: "createAdmittedBvnkOnrampPayout",
+    file: "apps/sdp-api/src/services/payments/admitted-provider-payouts.ts",
+    signature: "export function createAdmittedBvnkOnrampPayout(\n  movement: AdmittedMovement,",
+  },
+] as const;
+
+type JobClass = "starts" | "finishes" | "observes";
+
+/**
+ * Every cron monitor, classified (HOO-1955). A job that `starts` money must
+ * name the file where it admits each movement; one that only finishes or
+ * observes money already in flight must not mint (ADR 0002: stopping it
+ * strands funds).
+ */
+const JOB_INVENTORY: Record<string, { class: JobClass; admittedIn?: string; evidence?: string }> = {
+  "sdp-api-collect-recurring-payments": {
+    class: "starts",
+    admittedIn: "apps/sdp-api/src/services/jobs/collect-recurring-payments.ts",
+  },
+  "sdp-api-poll-rings-indexing": {
+    class: "starts",
+    admittedIn: "apps/sdp-api/src/services/helius-rings/service.ts",
+  },
+  // Pending transfers also runs the BVNK on-ramp payout reconcile.
+  "sdp-api-track-pending-transfers": {
+    class: "starts",
+    admittedIn: "apps/sdp-api/src/services/jobs/reconcile-bvnk-onramp-payouts.ts",
+  },
+  // Replays re-enter the HTTP app, whose handlers mint after projectContextMiddleware.
+  "sdp-api-recover-approved-wallet-operations": {
+    class: "starts",
+    admittedIn: "apps/sdp-api/src/services/policy/approved-operation-replay.ts",
+    evidence: "createApp(",
+  },
+  "sdp-api-reconcile-dvp-trades": { class: "finishes" },
+  "sdp-api-reconcile-earn-vault-movements": { class: "finishes" },
+  "sdp-api-track-pending-withdrawals": { class: "finishes" },
+  "sdp-api-track-pending-deposits": { class: "observes" },
+  "sdp-api-detect-orphaned-earn-split-swaps": { class: "observes" },
+  "sdp-api-sync-earn-catalogue": { class: "observes" },
+  "sdp-api-refresh-earn-metrics": { class: "observes" },
+  "sdp-api-reconcile-revoked-api-key-cache": { class: "observes" },
+  "sdp-api-retire-secrets": { class: "observes" },
+  "sdp-api-cleanup-provider-credential-secrets": { class: "observes" },
+};
+
+function discoverCronMonitors(): Record<string, string> {
+  const monitors: Record<string, string> = {};
+  for (const file of sourceFiles(path.join(repositoryRoot, apiSourceRoot, "cron"))) {
+    for (const match of readFileSync(file, "utf8").matchAll(
+      /export const \w+_MONITOR =\s*"([^"]+)"/g
+    )) {
+      monitors[match[1]] = path.relative(repositoryRoot, file);
+    }
+  }
+  return monitors;
+}
+
+const ADMISSION_CALL = /\b(admitMovement|admitRequestMovement|tryAdmitMovement)\(/;
+
+describe("value movement admission (HOO-1955)", () => {
+  it("pins every file that mints an AdmittedMovement", () => {
+    expect(
+      filesMatching(ADMISSION_CALL).filter(
+        (file) => file !== "apps/sdp-api/src/lib/admit-movement.ts"
+      )
+    ).toEqual(ADMISSION_CALLERS);
+  });
+
+  it("pins which purposes are not starts", async () => {
+    const { MOVEMENT_PURPOSES } = await import("@/lib/admit-movement");
+    expect(
+      Object.fromEntries(
+        Object.entries(MOVEMENT_PURPOSES)
+          .filter(([, definition]) => definition.kind !== "start")
+          .map(([purpose, definition]) => [purpose, definition.kind])
+      )
+    ).toEqual(NON_START_PURPOSES);
+  });
+
+  it.each(MOVEMENT_SINKS)("$sink requires and checks an AdmittedMovement", (sink) => {
+    const source = readSource(sink.file);
+    expect(source).toContain(sink.signature);
+    // The check runs first thing in the sink, before any read or signer.
+    const opening = source.slice(source.indexOf(sink.signature)).slice(0, 400);
+    expect(opening).toContain("assertAdmittedMovement(movement)");
+  });
+
+  it("reaches the BVNK payout only through the admitted sink", () => {
+    expect(filesMatching(/\.createOnrampPayout\(/)).toEqual([
+      "apps/sdp-api/src/services/payments/admitted-provider-payouts.ts",
+    ]);
+  });
+
+  it("acquires custody signers only through the token-taking factories", () => {
+    expect(filesMatching(/\.getTransactionSigner(ForWalletRecord)?\(/)).toEqual([
+      "apps/sdp-api/src/services/domain/signing.service.ts",
+      // The provider adapter port, reached only after the token check.
+      "apps/sdp-api/src/services/domain/signing/custody-runtime-target.ts",
+      "apps/sdp-api/src/services/solana/signer.ts",
+    ]);
+  });
+
+  it("mints test tokens only from tests", () => {
+    expect(filesMatching(/mintAdmittedMovementForTests/)).toEqual([
+      "apps/sdp-api/src/lib/admit-movement.ts",
+    ]);
+  });
+
+  it("mints every declared exit route's purpose in a handler", async () => {
+    const { EXIT_ROUTES } = await import("@/lib/movement-exits");
+    const minting = ADMISSION_CALLERS.map(readSource).join("\n");
+    for (const purpose of new Set(EXIT_ROUTES.map((route) => route.purpose))) {
+      expect(minting, purpose).toContain(`"${purpose}"`);
+    }
+  });
+
+  it("opens declared exits at the edge through the shared allowlist", () => {
+    for (const router of [
+      "apps/sdp-api/src/routes/payments/index.ts",
+      "apps/sdp-api/src/routes/dvp/index.ts",
+      "apps/sdp-api/src/routes/private-channels/index.ts",
+    ]) {
+      expect(readSource(router), router).toContain(
+        "projectContextMiddleware({ allowUnentitledProduction: isExitRequest })"
+      );
+    }
+    expect(readSource("apps/sdp-api/src/routes/earn/exits.ts")).toContain("exitPurposeForRequest(");
+  });
+
+  it("classifies every cron monitor as starts, finishes or observes", () => {
+    expect(Object.keys(discoverCronMonitors()).sort()).toEqual(Object.keys(JOB_INVENTORY).sort());
+  });
+
+  it.each(Object.entries(JOB_INVENTORY).filter(([, job]) => job.class === "starts"))(
+    "%s admits before it starts money",
+    (_monitor, job) => {
+      const source = readSource(job.admittedIn as string);
+      if (job.evidence) {
+        expect(source).toContain(job.evidence);
+      } else {
+        expect(source).toMatch(ADMISSION_CALL);
+      }
+    }
+  );
+});

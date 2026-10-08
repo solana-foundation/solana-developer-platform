@@ -2,6 +2,7 @@ import {
   mapPrivateChannelWithdrawalRow,
   type PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { isAbandonedReservation } from "@/lib/idempotency";
@@ -87,12 +88,8 @@ export async function createPrivateChannelWithdrawal(
       walletId: body.walletId,
       destination: body.destination,
     });
-    const signer = await createPrivateChannelSigner(
-      c.env,
-      context.auth.organizationId,
-      context.projectId,
-      context.wallet
-    );
+    const movement = await admitRequestMovement(c, "private_channels.withdraw");
+    const signer = await createPrivateChannelSigner(c.env, movement, context.wallet);
     const projectRpc = await loadPrivateChannelProjectRpcClient(c);
 
     // Auth-enabled instances JWT-gate the burn broadcast (write) + confirm (read).

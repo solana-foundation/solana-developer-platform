@@ -1,4 +1,5 @@
 import { mapPrivateChannelTransferRow, type PrivateChannelTransferRow } from "@/db/repositories";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import { isAbandonedReservation } from "@/lib/idempotency";
@@ -99,12 +100,8 @@ export async function createPrivateChannelTransfer(
       walletId: body.walletId,
       recipientVerifiedWalletId: body.recipientVerifiedWalletId,
     });
-    const signer = await createPrivateChannelSigner(
-      c.env,
-      context.auth.organizationId,
-      context.projectId,
-      context.wallet
-    );
+    const movement = await admitRequestMovement(c, "private_channels.transfer");
+    const signer = await createPrivateChannelSigner(c.env, movement, context.wallet);
     const gatewayAuth = await resolveGatewayAuth(c.env, {
       instance: context.instance,
       organizationId: context.auth.organizationId,

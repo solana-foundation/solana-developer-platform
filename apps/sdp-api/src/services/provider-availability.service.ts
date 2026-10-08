@@ -397,7 +397,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function parseOrganizationSettings(raw: string | null): OrganizationSettings | null {
+export function parseOrganizationSettings(raw: string | null): OrganizationSettings | null {
   if (!raw) {
     return null;
   }
@@ -589,7 +589,19 @@ export async function getProviderAvailability(
   organizationId: string,
   options: ProviderAvailabilityOptions
 ): Promise<OrganizationProviderAvailabilityResponse> {
-  const organization = await getOrganizationTierState(db, organizationId);
+  return getProviderAvailabilityForTierState(
+    env,
+    await getOrganizationTierState(db, organizationId),
+    options
+  );
+}
+
+/** {@link getProviderAvailability} from an organization row the caller already read. */
+export function getProviderAvailabilityForTierState(
+  env: Env,
+  organization: { tier: OrganizationTier; settings: OrganizationSettings | null },
+  options: ProviderAvailabilityOptions
+): OrganizationProviderAvailabilityResponse {
   const resolved = resolveOrganizationProviderEntitlements({
     tier: organization.tier,
     providerOverrides: organization.settings?.providerOverrides,
@@ -635,7 +647,26 @@ export async function assertCustodyProviderEntitled(
   organizationId: string,
   provider: CustodyProvider
 ): Promise<void> {
-  const availability = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_STAGES);
+  assertCustodyProviderEntitledForTierState(
+    env,
+    organizationId,
+    await getOrganizationTierState(db, organizationId),
+    provider
+  );
+}
+
+/**
+ * {@link assertCustodyProviderEntitled} from the organization row admission
+ * already read (`AdmittedMovement.organization`), so signer acquisition costs
+ * no second organization read.
+ */
+export function assertCustodyProviderEntitledForTierState(
+  env: Env,
+  organizationId: string,
+  organization: { tier: OrganizationTier; settings: OrganizationSettings | null },
+  provider: CustodyProvider
+): void {
+  const availability = getProviderAvailabilityForTierState(env, organization, MANIFEST_RAMP_STAGES);
   const entry = availability.providers.custody[provider];
   if (!isCustodyProviderEntitled(availability, provider)) {
     logEvent("warn", {

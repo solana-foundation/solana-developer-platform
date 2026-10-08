@@ -25,6 +25,7 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
@@ -239,6 +240,10 @@ export async function createEarnVaultDeposit(
       throw internalError("Vault deposit execution reached the handler without an idempotency key");
     }
 
+    // Value admission before the audit intent, the first state this request
+    // writes (HOO-1955).
+    const movement = await admitRequestMovement(c, "earn.deposit");
+
     // Fail-closed audit admission (PRO-1866): no durable intent, no deposit.
     const auditIntent = await beginEarnDepositAudit(
       c,
@@ -266,6 +271,7 @@ export async function createEarnVaultDeposit(
         {
           organizationId: auth.organizationId,
           projectId,
+          movement,
           environment,
           provider,
           providerReference: strategy.provider_reference,
@@ -1515,11 +1521,14 @@ export async function createEarnVaultWithdrawal(
       );
     }
 
+    // An exit (ADR 0002): admitted even after production access is revoked.
+    const movement = await admitRequestMovement(c, "earn.withdraw");
     const result = await withdrawFromVault(
       c.env,
       {
         organizationId: auth.organizationId,
         projectId,
+        movement,
         environment,
         provider: position.provider,
         positionId: position.id,

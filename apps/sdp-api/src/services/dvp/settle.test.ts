@@ -25,6 +25,7 @@ import { generateKeyPairSigner } from "@solana/signers";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpCloseClaim, DvpTradeRow } from "@/db/repositories";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import { type AppError, conflict, solanaRpcError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import { buildFundedDvpTradeRow, DVP_TEST_AUTHORITY, DVP_TEST_USER_B } from "@/test/fixtures/dvp";
@@ -119,12 +120,18 @@ type CloseArgs = Parameters<typeof closeDvpTradeWithRecorder>;
  */
 function closeDvpTrade(
   c: CloseArgs[0],
-  trade: CloseArgs[1],
-  action: CloseArgs[2],
-  settlement: CloseArgs[3],
-  recordAttempt: CloseArgs[4] = async () => {}
+  trade: CloseArgs[2],
+  action: CloseArgs[3],
+  settlement: CloseArgs[4],
+  recordAttempt: CloseArgs[5] = async () => {}
 ) {
-  return closeDvpTradeWithRecorder(c, trade, action, settlement, recordAttempt);
+  // The handler admits settle as `dvp.settle` and cancel as the `dvp.reclaim` exit.
+  const movement = mintAdmittedMovementForTests({
+    organizationId: trade.organizationId,
+    projectId: trade.projectId,
+    purpose: action === "settle" ? "dvp.settle" : "dvp.reclaim",
+  });
+  return closeDvpTradeWithRecorder(c, movement, trade, action, settlement, recordAttempt);
 }
 
 let SETTLEMENT_AUTHORITY = DVP_TEST_AUTHORITY;
@@ -231,8 +238,11 @@ describe("closeDvpTrade", () => {
 
     expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
       env,
-      "org_x",
-      "prj_x",
+      expect.objectContaining({
+        organizationId: "org_x",
+        projectId: "prj_x",
+        purpose: "dvp.settle",
+      }),
       "cwlt_settlement"
     );
   });

@@ -53,6 +53,7 @@ import {
   mapHeliusRingsProjectRingRow,
   mapHeliusRingsWalletRow,
 } from "@/db/repositories";
+import { tryAdmitMovement } from "@/lib/admit-movement";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
@@ -1351,6 +1352,23 @@ export class HeliusRingsService {
       return resumed ?? (await this.requireOperation(current.id));
     }
 
+    // Admission before anything is built or signed (HOO-1955). A deleted or
+    // unentitled organization fails the row instead of proving: `failed` is a
+    // state neither the poll nor a resume selects, so nothing loops.
+    const admission = await tryAdmitMovement(this.env, this.tenant, "rings.operation", {
+      job: "helius-rings-pipeline",
+      subjectId: current.id,
+    });
+    if (!admission.admitted) {
+      const failed = await this.fail(current.id, current.state, {
+        code: "policy_denied",
+        message: admission.error.message,
+        retryable: false,
+      });
+      return failed ?? (await this.requireOperation(current.id));
+    }
+    const movement = admission.movement;
+
     // proving: build the outer tx and request the proof.
     try {
       // The one address involved in both halves of this pipeline: it is what
@@ -1441,8 +1459,7 @@ export class HeliusRingsService {
 
       const signed = await this.signOuterTransaction({
         env: this.env,
-        organizationId: this.tenant.organizationId,
-        projectId: this.tenant.projectId,
+        movement,
         owner,
         unsignedTxBase64: built.outerUnsignedTxBase64,
       });

@@ -2119,8 +2119,11 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
       env,
-      TEST_ORG.id,
-      TEST_PROJECT.id,
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        purpose: "recurring.collect",
+      }),
       TEST_CUSTODY_WALLET_ID
     );
     expect(createOrgSignerMock).toHaveBeenCalledTimes(providerSignerCallsBeforeCollection);

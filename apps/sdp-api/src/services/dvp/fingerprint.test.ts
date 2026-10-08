@@ -10,6 +10,7 @@
 
 import { type Address, address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import type { CreateDvpTradeInput, DvpPartyInput } from "./create";
 import { dvpCreateFingerprint, type ResolvedParty } from "./fingerprint";
 
@@ -25,6 +26,11 @@ function baseInput(partyA: DvpPartyInput, partyB: DvpPartyInput): CreateDvpTrade
   return {
     organizationId: "org_x",
     projectId: "prj_x",
+    movement: mintAdmittedMovementForTests({
+      organizationId: "org_x",
+      projectId: "prj_x",
+      purpose: "dvp.create",
+    }),
     partyA,
     partyB,
     mintA: MINT_A,

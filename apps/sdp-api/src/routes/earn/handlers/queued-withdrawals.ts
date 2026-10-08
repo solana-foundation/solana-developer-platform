@@ -15,6 +15,7 @@ import {
   type EarnVaultWithdrawalRequestRow,
   type EarnVaultWithdrawalRequestStatus,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
@@ -607,10 +608,13 @@ export async function createEarnVaultWithdrawalRequest(
         "Asynchronous withdrawal execution reached the handler without an idempotency key"
       );
     }
+    // Admission scope is the request's project, which is also the actor's.
+    const movement = await admitRequestMovement(c, "earn.withdraw");
     const result = await createCustodyQueuedWithdrawal(
       c.env,
       {
         actor: resolved.actor,
+        movement,
         position: resolved.position,
         terms: queuedTerms(body),
         clientRequestId: resolved.requestId,
@@ -723,8 +727,12 @@ export async function cancelEarnVaultWithdrawalRequest(
   if (request.custody_wallet_id !== target.actor.custodyWalletId) {
     throw notFound("Earn vault withdrawal request");
   }
+  // Cancellation is the custody recovery path, so it is admitted as the
+  // `earn.withdraw` exit (open after revocation, ADR 0002).
+  const movement = await admitRequestMovement(c, "earn.withdraw");
   const result = await cancelCustodyQueuedWithdrawal(c.env, {
     actor: target.actor,
+    movement,
     position: target.position,
     request,
     clientRequestId,

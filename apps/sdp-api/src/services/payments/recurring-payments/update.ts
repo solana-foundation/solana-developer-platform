@@ -44,6 +44,7 @@ import {
   type PaymentSubscriptionRow,
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import {
   AppError,
   badRequest,
@@ -703,6 +704,7 @@ async function finalizeMetadataScheduleUpdate(input: {
 
 async function runMetadataScheduleUpdate(input: {
   env: Env;
+  movement: AdmittedMovement;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
@@ -747,8 +749,7 @@ async function runMetadataScheduleUpdate(input: {
     const planPda = assertValidAddress(input.claimed.plan_pda, "planPda");
     const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
-      input.organizationId,
-      input.projectId,
+      input.movement,
       input.sourceWallet.id
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
@@ -786,8 +787,7 @@ async function runMetadataScheduleUpdate(input: {
       });
       planUpdateSignature = await sendSubscriptionInstructions({
         env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+        movement: input.movement,
         sourceWallet: input.sourceWallet,
         sourceSigner,
         instructions: [instruction],
@@ -825,6 +825,7 @@ async function runMetadataScheduleUpdate(input: {
 
 async function prepareSubscriptionAuthorityForUpdate(input: {
   env: Env;
+  movement: AdmittedMovement;
   recurringRepo: PaymentRecurringPaymentsRepository;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   organizationId: string;
@@ -867,8 +868,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
       });
   const initSignature = await sendSubscriptionInstructions({
     env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
+    movement: input.movement,
     sourceWallet: input.sourceWallet,
     sourceSigner: input.sourceSigner,
     instructions: [
@@ -1159,6 +1159,7 @@ async function finalizeReplacementUpdate(input: {
 
 async function runReplacementUpdate(input: {
   env: Env;
+  movement: AdmittedMovement;
   organizationId: string;
   projectId: string;
   oldSourceWallet: CustodyWallet;
@@ -1213,8 +1214,7 @@ async function runReplacementUpdate(input: {
 
   const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
     input.env,
-    input.organizationId,
-    input.projectId,
+    input.movement,
     input.resolved.sourceWallet.id
   );
   if (sourceSigner.address !== input.resolved.sourceWallet.publicKey) {
@@ -1287,8 +1287,7 @@ async function runReplacementUpdate(input: {
     });
     planCreationSignature = await sendSubscriptionInstructions({
       env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+      movement: input.movement,
       sourceWallet: input.resolved.sourceWallet,
       sourceSigner,
       instructions: [createPlanInstruction],
@@ -1373,15 +1372,14 @@ async function runReplacementUpdate(input: {
       subscriptionAuthorityAddress,
       { commitment: "confirmed" }
     );
-    const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+    const feePayment = await createProjectSponsorshipFeePayment(input.env, input.movement, {
       actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
     });
     const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
     subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
       env: input.env,
+      movement: input.movement,
       recurringRepo,
       attempt,
       organizationId: input.organizationId,
@@ -1414,8 +1412,7 @@ async function runReplacementUpdate(input: {
     });
     authorizationSignature = await sendSubscriptionInstructions({
       env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+      movement: input.movement,
       sourceWallet: input.resolved.sourceWallet,
       sourceSigner,
       instructions: [subscribeInstruction],
@@ -1450,8 +1447,7 @@ async function runReplacementUpdate(input: {
     );
     const oldSourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
-      input.organizationId,
-      input.projectId,
+      input.movement,
       input.oldSourceWallet.id
     );
     if (oldSourceSigner.address !== input.oldSourceWallet.publicKey) {
@@ -1465,8 +1461,7 @@ async function runReplacementUpdate(input: {
       });
     oldCancelSignature = await sendSubscriptionInstructions({
       env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+      movement: input.movement,
       sourceWallet: input.oldSourceWallet,
       sourceSigner: oldSourceSigner,
       instructions: [cancelInstruction],
@@ -1630,6 +1625,7 @@ async function claimSourceChangingRecurringPaymentUpdate(input: {
 
 export async function updateRecurringPayment(input: {
   env: Env;
+  movement: AdmittedMovement;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
@@ -1782,6 +1778,7 @@ export async function updateRecurringPayment(input: {
     if (mode === "metadata_schedule") {
       return await runMetadataScheduleUpdate({
         env: input.env,
+        movement: input.movement,
         organizationId: input.organizationId,
         projectId: input.projectId,
         sourceWallet: input.sourceWallet,
@@ -1796,6 +1793,7 @@ export async function updateRecurringPayment(input: {
 
     return await runReplacementUpdate({
       env: input.env,
+      movement: input.movement,
       organizationId: input.organizationId,
       projectId: input.projectId,
       oldSourceWallet: input.sourceWallet,
