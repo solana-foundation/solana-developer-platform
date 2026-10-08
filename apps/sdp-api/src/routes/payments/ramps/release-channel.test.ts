@@ -31,6 +31,8 @@ function buildApp(stages: SdpRampProviderStages) {
       environment: "sandbox",
       signingWalletId: null,
     });
+    // projectContextMiddleware sets this for every actor in the real app.
+    c.set("projectEnvironment", "sandbox");
     await next();
   });
   app.get("/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);

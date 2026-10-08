@@ -61,6 +61,7 @@ describe("projectContextMiddleware", () => {
       createdBy: TEST_USER.id,
       members: [TEST_USER.id],
       ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+      productionEntitled: false,
     });
     actor = await authenticateTestClerkUser(env, db, {
       userId: TEST_USER.id,
@@ -158,6 +159,116 @@ describe("projectContextMiddleware", () => {
         code: "FORBIDDEN",
         message: "Requested project is not accessible",
       },
+    });
+  });
+  describe("production entitlement (APE-351)", () => {
+    const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
+    const PRODUCTION_CACHED_API_KEY = {
+      ...TEST_CACHED_API_KEY,
+      projectId: PRODUCTION_PROJECT_ID,
+      environment: "production" as const,
+    };
+
+    async function setOrganizationSettings(settings: string | null) {
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(settings, TEST_ORG.id)
+        .run();
+    }
+
+    const entitled = JSON.stringify({ enableProductionProject: true });
+
+    async function expectProductionNotEnabled(res: Response) {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({
+        error: { code: "FORBIDDEN", message: "Production is not enabled for this organization" },
+      });
+    }
+
+    function requestWithProductionKey() {
+      return buildApp().request(
+        "/probe",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+    }
+
+    beforeEach(async () => {
+      await seedCachedApiKey(
+        env,
+        await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER),
+        PRODUCTION_CACHED_API_KEY
+      );
+    });
+
+    it("refuses a Clerk member selecting a production project without the entitlement", async () => {
+      const res = await buildApp().request(
+        "/probe",
+        { headers: actor.headers(PRODUCTION_PROJECT_ID) },
+        env
+      );
+      await expectProductionNotEnabled(res);
+    });
+
+    it("resolves a production project for a Clerk member once the organization is entitled", async () => {
+      await setOrganizationSettings(entitled);
+      const res = await buildApp().request(
+        "/probe",
+        { headers: actor.headers(PRODUCTION_PROJECT_ID) },
+        env
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        projectId: PRODUCTION_PROJECT_ID,
+        projectEnvironment: "production",
+      });
+    });
+
+    it("fences a stale production selector on the next request after revocation", async () => {
+      await setOrganizationSettings(entitled);
+      const before = await buildApp().request(
+        "/probe",
+        { headers: actor.headers(PRODUCTION_PROJECT_ID) },
+        env
+      );
+      expect(before.status).toBe(200);
+
+      await setOrganizationSettings(JSON.stringify({ enableProductionProject: false }));
+      const after = await buildApp().request(
+        "/probe",
+        { headers: actor.headers(PRODUCTION_PROJECT_ID) },
+        env
+      );
+      await expectProductionNotEnabled(after);
+    });
+
+    it("refuses a production API key without the entitlement", async () => {
+      await expectProductionNotEnabled(await requestWithProductionKey());
+    });
+
+    it("fences a cached production API key on the next request after revocation", async () => {
+      await setOrganizationSettings(entitled);
+      expect((await requestWithProductionKey()).status).toBe(200);
+
+      await setOrganizationSettings(null);
+      await expectProductionNotEnabled(await requestWithProductionKey());
+    });
+
+    it("treats unparseable organization settings as not entitled", async () => {
+      await setOrganizationSettings("{not json");
+      await expectProductionNotEnabled(await requestWithProductionKey());
+      await expectProductionNotEnabled(
+        await buildApp().request("/probe", { headers: actor.headers(PRODUCTION_PROJECT_ID) }, env)
+      );
+    });
+
+    it("leaves sandbox projects alone without the entitlement", async () => {
+      const res = await buildApp().request(
+        "/probe",
+        { headers: actor.headers(TEST_PROJECT.id) },
+        env
+      );
+      expect(res.status).toBe(200);
     });
   });
 });

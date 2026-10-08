@@ -35,6 +35,8 @@ function buildApp(environment: "sandbox" | "production" = "sandbox") {
       environment,
       signingWalletId: null,
     });
+    // projectContextMiddleware sets this for every actor in the real app.
+    c.set("projectEnvironment", environment);
     await next();
   });
 

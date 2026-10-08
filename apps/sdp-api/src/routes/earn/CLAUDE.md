@@ -1632,6 +1632,13 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   and that does not violate the asymmetry: nothing about an EXISTING position
   is ever answered through it, so refusing it can never trap funds.
 - **The ledger list**: no provider gate at all (see route map).
+- **The production entitlement** (`enableProductionProject`, APE-351) follows
+  the same asymmetry. `projectContextMiddleware` refuses a production project
+  whose organization lacks it, except on the reads and exits
+  `isEarnExitOrRead` (index.ts) allows: every GET plus an explicit list of
+  withdrawal POSTs. It is an allowlist, so a new route is refused until filed;
+  `production-exits.test.ts` forces every state-changing route to be filed as
+  an exit or an entry.
 - Route tests in `../earn-program.test.ts` encode the asymmetry: the money-in
   half (create and re-target both refused when the organization is not entitled
   or credentials are missing) and the money-out half (the "withdrawals (ADR 0002

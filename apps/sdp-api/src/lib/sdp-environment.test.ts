@@ -50,9 +50,20 @@ describe("resolveSdpEnvironment", () => {
     await clearKVStores(env);
   });
 
-  it("returns the API key's environment for key callers", async () => {
+  it("fails closed for an API key whose request skipped projectContextMiddleware (APE-351)", async () => {
     for (const environment of ["sandbox", "production"] as const) {
       const res = await probe((c) => c.set("apiKey", apiKeyContext(environment)));
+
+      expect(res.status).toBe(500);
+    }
+  });
+
+  it("returns the environment projectContextMiddleware settled for key callers", async () => {
+    for (const environment of ["sandbox", "production"] as const) {
+      const res = await probe((c) => {
+        c.set("apiKey", apiKeyContext(environment));
+        c.set("projectEnvironment", environment);
+      });
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ environment });

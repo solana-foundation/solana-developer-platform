@@ -28,6 +28,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest, notFound, rateLimited } from "@/lib/errors";
+import { assertProjectProductionAllowed } from "@/lib/production-entitlement";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -105,6 +106,9 @@ pay.post(
     if (!request.project_id) {
       throw badRequest("Payment request is not eligible for sponsored fees");
     }
+    // A production request stops being sponsored once its organization loses
+    // the production entitlement (APE-351).
+    await assertProjectProductionAllowed(c.env, request.organization_id, request.project_id);
 
     const payer = assertValidAddress(c.req.valid("json").account, "account");
     const recipient = assertValidAddress(request.destination_address, "destinationAddress");

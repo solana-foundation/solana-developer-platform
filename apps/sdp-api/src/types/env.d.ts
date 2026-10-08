@@ -364,6 +364,9 @@ declare module "hono" {
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;
+    // Set during authentication from the organizations row it already reads;
+    // see lib/production-entitlement.ts
+    productionEntitlement?: { organizationId: string; entitled: boolean };
     approvedWalletOperationId?: string;
     approvedWalletOperationAttemptId?: string;
     // Set by policyGate middleware for gated routes
