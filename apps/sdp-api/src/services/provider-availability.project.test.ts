@@ -100,6 +100,7 @@ describe("assertProjectProviderAdmitted", () => {
     custodyReleaseChannel.stageOverride = null;
     providerStages.rampStageOverride = null;
     providerStages.moduleStageOverride = null;
+    providerStages.surfacedEarnProvider = null;
     await seedTestDatabase(env);
     const db = getDb(env);
     await db.execute(
@@ -197,7 +198,7 @@ describe("assertProjectProviderAdmitted", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("checks an Earn provider's channel, stage, entitlement and credentials in that order", async () => {
+  it("checks an Earn provider's channel, surfacing, stage, entitlement and credentials in that order", async () => {
     await expect(
       admit(projects.production, deploymentEnv(BETA_CHANNEL), UPSHIFT)
     ).rejects.toMatchObject(
@@ -206,6 +207,10 @@ describe("assertProjectProviderAdmitted", () => {
         "provider_not_in_release_channel"
       )
     );
+    await expect(admit(projects.production, deploymentEnv({}), UPSHIFT)).rejects.toMatchObject(
+      refusal("Upshift is not currently offered.", "provider_not_offered")
+    );
+    providerStages.surfacedEarnProvider = "upshift";
     await expect(admit(projects.production, deploymentEnv({}), UPSHIFT)).rejects.toMatchObject(
       refusal(
         "Upshift is not stable yet, so a production project cannot use it.",

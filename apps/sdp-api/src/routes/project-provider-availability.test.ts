@@ -284,6 +284,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     custodyReleaseChannel.stageOverride = null;
     providerStages.rampStageOverride = null;
     providerStages.moduleStageOverride = null;
+    providerStages.surfacedEarnProvider = null;
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedFixture();
@@ -430,6 +431,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   });
 
   it("reports providers the deployment holds no credentials for as unavailable, except BYOK custody", async () => {
+    providerStages.surfacedEarnProvider = "upshift";
     await setProviderOverrides({
       ...FIXTURE_PROVIDER_OVERRIDES,
       earn: { veda: true, upshift: true },

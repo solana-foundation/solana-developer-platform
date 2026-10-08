@@ -1,5 +1,6 @@
 import type * as SdpTypes from "@sdp/types";
 import type {
+  EarnProviderId,
   RampProviderId,
   SdpModule,
   SdpRampProviderStages,
@@ -28,30 +29,34 @@ export interface ModuleStageOverride {
 export interface ProviderStageToggle {
   rampStageOverride: RampStageOverride | null;
   moduleStageOverride: ModuleStageOverride | null;
+  surfacedEarnProvider: EarnProviderId | null;
 }
 
 /**
  * Per-file toggle read by {@link mockProviderStages}. A test file sets
  * `rampStageOverride` to give one ramp provider another stage, or
- * `moduleStageOverride` to give one module another stage, and resets whichever
- * it sets to `null` in its `beforeEach`.
+ * `moduleStageOverride` to give one module another stage, or
+ * `surfacedEarnProvider` to surface one Earn provider the real surfacing table
+ * hides, and resets whichever it sets to `null` in its `beforeEach`.
  */
 export const providerStages: ProviderStageToggle = {
   rampStageOverride: null,
   moduleStageOverride: null,
+  surfacedEarnProvider: null,
 };
 
 /**
  * Build the `@sdp/types` mock whose `SDP_RAMP_PROVIDER_STAGES` reads the
  * overridden provider's stage from `providerStages.rampStageOverride`, and whose
  * module predicates read the overridden module's stage from
- * `providerStages.moduleStageOverride`; everything else is the real module. The
+ * `providerStages.moduleStageOverride`, and whose `isEarnProviderSurfaced` also
+ * surfaces `providerStages.surfacedEarnProvider`; everything else is the real module. The
  * environment stage predicate keeps the real rule but asks the mocked module
  * predicate, since its in-module call is out of a module mock's reach. Load it
  * with `await import()` inside the test file's `vi.mock` factory, so the factory
  * and the test share this module's toggle.
  * @param original - The real module, from the factory's `importOriginal`.
- * @returns The module with its ramp stage manifest and module predicates overridden.
+ * @returns The module with its ramp stage manifest, module predicates and Earn surfacing overridden.
  */
 export function mockProviderStages(original: SdpTypesModule): ProviderStagesModule {
   const rampProviderStages: SdpRampProviderStages = { ...original.SDP_RAMP_PROVIDER_STAGES };
@@ -84,6 +89,8 @@ export function mockProviderStages(original: SdpTypesModule): ProviderStagesModu
     ...original,
     SDP_RAMP_PROVIDER_STAGES: rampProviderStages,
     isModuleInReleaseChannel,
+    isEarnProviderSurfaced: (provider) =>
+      provider === providerStages.surfacedEarnProvider || original.isEarnProviderSurfaced(provider),
     isModuleStageAllowedInEnvironment: (environment, module, stages) =>
       environment === "production"
         ? isModuleInReleaseChannel("stable", module, stages)
