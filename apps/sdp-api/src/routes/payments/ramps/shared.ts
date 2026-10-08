@@ -386,7 +386,12 @@ export async function estimateAcrossProviders(
             organization_id: scope.auth.organizationId,
             reason: decision.reason,
           });
-          return { provider, status: "error", error: decision.error.message };
+          return {
+            provider,
+            status: "error",
+            error: decision.error.message,
+            reason: decision.reason,
+          };
         }
         const estimate = await runProvider(provider, ctx);
         return { provider, status: "ok", estimate };

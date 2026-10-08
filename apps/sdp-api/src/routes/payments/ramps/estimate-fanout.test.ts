@@ -19,8 +19,8 @@ vi.mock("../wallets", async (importOriginal) => ({
   resolveScope: vi.fn().mockResolvedValue({ auth: { organizationId: "org_fanout_test" } }),
 }));
 
-import type { PaymentRampEstimate } from "@sdp/types";
-import { AppError } from "@/lib/errors";
+import { type PaymentRampEstimate, STAGED_PROVIDER_REFUSAL_REASONS } from "@sdp/types";
+import { AppError, forbidden } from "@/lib/errors";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
 import {
@@ -104,6 +104,37 @@ describe("estimateAcrossProviders", () => {
       })
     );
   });
+
+  it.each(STAGED_PROVIDER_REFUSAL_REASONS)(
+    "answers a %s refusal with its reason, logged at info, without calling the provider",
+    async (reason) => {
+      const refusal: ProjectProviderRefusal = {
+        ...MOONPAY_NOT_CONFIGURED,
+        reason,
+        error: forbidden("MoonPay is refused for this project.", { reason }),
+      };
+      vi.mocked(loadProjectProviderVerdict).mockResolvedValue(() => refusal);
+      const runProvider = vi.fn();
+
+      const results = await estimateAcrossProviders(buildContext(), ["moonpay"], runProvider);
+
+      expect(results).toEqual([
+        {
+          provider: "moonpay",
+          status: "error",
+          error: "MoonPay is refused for this project.",
+          reason,
+        },
+      ]);
+      expect(runProvider).not.toHaveBeenCalled();
+      expect(logEvent).toHaveBeenCalledExactlyOnceWith("info", {
+        event: "sdp_api_ramp_provider_refused",
+        provider: "moonpay",
+        organization_id: "org_fanout_test",
+        reason,
+      });
+    }
+  );
 
   it("does not log when a provider succeeds or is merely unsupported", async () => {
     const estimate = { provider: "moonpay" } as unknown as PaymentRampEstimate;

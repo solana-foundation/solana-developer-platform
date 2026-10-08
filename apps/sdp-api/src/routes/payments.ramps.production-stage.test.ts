@@ -129,7 +129,7 @@ describe("Payments routes — ramps in a Production project", () => {
     createOnrampQuote.mockRestore();
   });
 
-  it("answers a Production estimate's non-stable provider as an error logged once at info, from one facts load", async () => {
+  it("answers a Production estimate's non-stable provider as a reasoned error logged once at info, from one facts load", async () => {
     const loadProjectProviderVerdict = vi.spyOn(providerAvailability, "loadProjectProviderVerdict");
     const logEvent = vi.spyOn(moneyPathEvents, "logEvent");
     const estimateOnramp = vi.spyOn(RAMP_PROVIDER_CLIENTS.moonpay, "estimateOnramp");
@@ -146,6 +146,7 @@ describe("Payments routes — ramps in a Production project", () => {
       provider: "moonpay",
       status: "error",
       error: MOONPAY_NOT_STABLE_MESSAGE,
+      reason: "provider_stage_not_allowed",
     });
     expect(estimateOnramp).not.toHaveBeenCalled();
     expect(loadProjectProviderVerdict).toHaveBeenCalledTimes(1);
