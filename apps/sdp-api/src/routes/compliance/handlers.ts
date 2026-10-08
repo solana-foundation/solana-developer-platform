@@ -1,14 +1,15 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import { getAuth } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { createComplianceService } from "@/services/compliance";
 import {
-  assertProjectProviderAdmitted,
   getEnabledProviders,
+  loadProjectProviderVerdict,
+  refuseProjectProvider,
 } from "@/services/provider-availability.service";
 import type { screenAddressSchema } from "./schemas";
 
@@ -23,7 +24,9 @@ import type { screenAddressSchema } from "./schemas";
  * @returns One result per enabled compliance provider.
  * @throws 403 `FORBIDDEN` when no provider is enabled, or whose `details.reason`
  *   is `provider_not_in_release_channel`, `provider_stage_not_allowed` or
- *   `provider_not_entitled` when the project may not use an enabled provider.
+ *   `provider_not_entitled` when the project may not use an enabled provider;
+ *   503 `PROVIDER_NOT_CONFIGURED` when the deployment lacks an enabled
+ *   provider's credentials for the project's environment.
  */
 export async function screenAddress(c: ValidatedBodyContext<typeof screenAddressSchema>) {
   const body = c.req.valid("json");
@@ -40,9 +43,8 @@ export async function screenAddress(c: ValidatedBodyContext<typeof screenAddress
   }
 
   const auth = getAuth(c);
-  const db = getDb(c.env);
   const enabledComplianceProviders = (
-    await getEnabledProviders(c.env, db, auth.organizationId, {
+    await getEnabledProviders(c.env, getDb(c.env), auth.organizationId, {
       rampProviderStages: c.get("rampProviderStages"),
     })
   ).compliance;
@@ -56,9 +58,12 @@ export async function screenAddress(c: ValidatedBodyContext<typeof screenAddress
     );
   }
 
-  const scope = { organizationId: auth.organizationId, projectId: requireProjectId(c) };
+  const verdict = await loadProjectProviderVerdict(c);
   for (const provider of enabledComplianceProviders) {
-    await assertProjectProviderAdmitted(c.env, db, scope, { family: "compliance", provider });
+    const decision = verdict({ family: "compliance", provider });
+    if (!decision.admitted) {
+      throw refuseProjectProvider(decision);
+    }
   }
 
   const complianceService = createComplianceService(c.env, enabledComplianceProviders);

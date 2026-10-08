@@ -75,6 +75,31 @@ export const CUSTODY_SETUP_REFUSAL_REASONS = [
 export type CustodySetupRefusalReason = (typeof CUSTODY_SETUP_REFUSAL_REASONS)[number];
 
 /**
+ * Why the staged-provider rule refused a ramps, compliance or Earn provider
+ * for a project, carried as `details.reason` on its 403: a policy outcome, not
+ * a fault.
+ */
+export const STAGED_PROVIDER_REFUSAL_REASONS = [
+  "provider_not_in_release_channel",
+  "provider_not_offered",
+  "provider_stage_not_allowed",
+  "provider_not_entitled",
+] as const;
+export type StagedProviderRefusalReason = (typeof STAGED_PROVIDER_REFUSAL_REASONS)[number];
+
+/**
+ * Whether `reason` is one of the staged-provider rule's refusal reasons.
+ *
+ * @param reason - A project provider refusal reason.
+ * @returns True for a `STAGED_PROVIDER_REFUSAL_REASONS` member.
+ */
+export function isStagedProviderRefusalReason(
+  reason: string
+): reason is StagedProviderRefusalReason {
+  return STAGED_PROVIDER_REFUSAL_REASONS.some((stagedReason) => stagedReason === reason);
+}
+
+/**
  * Every provider the catalog shows is built and runnable, so the status only
  * ever answers "what is my next step" — never "does this exist". The two
  * non-actionable states are deliberately distinct (HOO-772/775 and the

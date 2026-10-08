@@ -843,15 +843,13 @@ export async function createEarnExternalWalletDepositTransaction(
   // Surfacing, entitlement, catalogue admission and the SDP-wide exposure cap
   // (ADR 0004 layer 1), in the custody deposit's order and from the same
   // function, so the two money-in paths cannot drift. Entitlement applies
-  // only when optional auth supplied an organization. The deposit style and
+  // only when optional auth supplied an organization; an anonymous build gets
+  // Earn's Production stage bar from the strategy's environment. The deposit style and
   // provider registration were already asserted above with this route's own
   // wording; the shared predicate re-checks them for free. `body.amount` is
   // the SOURCE stablecoin's units on a swap-funded build, which the cap treats
   // dollar-for-dollar by design.
-  await assertVaultDepositAdmissible(c, strategy, body.amount, {
-    environment,
-    organizationId: authenticated?.auth.organizationId ?? null,
-  });
+  await assertVaultDepositAdmissible(c, strategy, body.amount, { environment });
 
   const swap = resolveDepositSwapRequest(
     {

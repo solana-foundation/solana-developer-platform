@@ -483,9 +483,7 @@ export const createEarnProgram = async (
   await assertProviderAvailable(c, { family: "earn", provider: client.provider });
   await assertKnownYieldSources(c, client.provider, body.allocations);
 
-  if (!auth.projectId) {
-    throw internalError("Could not resolve project scope");
-  }
+  const projectId = requireProjectId(c);
 
   // Key resolution runs LAST on purpose: an unentitled caller still gets 403 and
   // a provider without the portfolio capability still gets 501, rather than a
@@ -508,7 +506,7 @@ export const createEarnProgram = async (
   try {
     row = await repo.insertProviderWallet({
       organizationId: auth.organizationId,
-      projectId: auth.projectId,
+      projectId,
       environment,
       provider: client.provider,
       providerWalletRef: createdWallet.providerWalletRef,
@@ -535,7 +533,7 @@ export const createEarnProgram = async (
       // and linking it would expose their funds. Refuse rather than adopt it.
       throw conflict("Earn program wallet is already linked to another account");
     }
-    if (row.project_id !== auth.projectId) {
+    if (row.project_id !== projectId) {
       // Same organization, different project. The derivation is deliberately
       // organization-wide (see `resolveProgramCreateRequestId`), so a sibling
       // project reusing a caller key lands on the first project's program —

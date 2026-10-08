@@ -2,7 +2,12 @@ import { SdpPaymentsError } from "@sdp/payments";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction";
-import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
+import {
+  isStagedProviderRefusalReason,
+  type PaymentRampEstimate,
+  type PaymentRampQuote,
+  type RampProviderEstimateResult,
+} from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
@@ -41,7 +46,7 @@ import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import {
   assertProviderAvailable,
   assertRampProviderSurfaced,
-  isStagedProviderRefusal,
+  loadProjectProviderVerdict,
 } from "@/services/provider-availability.service";
 import {
   type AppContext,
@@ -363,27 +368,31 @@ export async function estimateAcrossProviders(
 ): Promise<RampProviderEstimateResult[]> {
   const scope = await resolveScope(c);
   const ctx = rampRuntime(c);
+  const verdict = await loadProjectProviderVerdict(c);
 
   const settled = await mapSettledWithConcurrency(
     [...providers],
     RAMP_ESTIMATE_PROVIDER_CONCURRENCY,
     async (provider): Promise<RampProviderEstimateResult> => {
       try {
-        await assertProviderAvailable(c, { family: "ramps", provider: provider });
+        const decision = verdict({ family: "ramps", provider });
+        if (!decision.admitted) {
+          if (!isStagedProviderRefusalReason(decision.reason)) {
+            throw decision.error;
+          }
+          logEvent("info", {
+            event: "sdp_api_ramp_provider_refused",
+            provider,
+            organization_id: scope.auth.organizationId,
+            reason: decision.reason,
+          });
+          return { provider, status: "error", error: decision.error.message };
+        }
         const estimate = await runProvider(provider, ctx);
         return { provider, status: "ok", estimate };
       } catch (error) {
         if (error instanceof SdpPaymentsError && error.code === "ESTIMATE_NOT_AVAILABLE") {
           return { provider, status: "unsupported" };
-        }
-        if (isStagedProviderRefusal(error)) {
-          logEvent("info", {
-            event: "sdp_api_ramp_provider_refused",
-            provider,
-            organization_id: scope.auth.organizationId,
-            reason: error.details.reason,
-          });
-          return { provider, status: "error", error: error.message };
         }
         const cause = error instanceof Error ? error : new Error(String(error));
         logEvent("error", {

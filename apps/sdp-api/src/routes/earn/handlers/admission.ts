@@ -1,13 +1,19 @@
 import { isEarnProviderId, providerNotConfigured } from "@sdp/earn";
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
-import { isVaultDirectDepositEnabled, type SdpEnvironment, type SolanaCluster } from "@sdp/types";
+import {
+  isModuleStageAllowedInEnvironment,
+  isVaultDirectDepositEnabled,
+  SDP_RAMP_PROVIDER_STAGES,
+  type SdpEnvironment,
+  type SolanaCluster,
+} from "@sdp/types";
 import {
   type EarnProviderId,
   earnDepositSlippagePolicy,
   earnDepositStyle,
 } from "@sdp/types/provider-access";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
-import { getAuth } from "@/lib/auth";
+import { getOptionalAuth } from "@/lib/auth";
 import { badRequest, forbidden } from "@/lib/errors";
 import { assertVaultExposureWithinCap } from "@/services/earn/vault-exposure";
 import {
@@ -85,13 +91,33 @@ export function assertVaultDepositEnvironmentOpen(
 }
 
 /**
+ * The Production `stable` bar for an anonymous Earn deposit build, which has
+ * no project for the project provider rule to decide from: the strategy's
+ * environment stands in for the project's, so a Production strategy takes
+ * anonymous deposits only while Earn is `stable`.
+ *
+ * @param environment - The strategy's environment.
+ * @throws 403 `FORBIDDEN` with `details.reason` `provider_stage_not_allowed`
+ *   when Earn's stage does not meet the environment's bar.
+ */
+function assertAnonymousEarnDepositStageAllowed(environment: SdpEnvironment): void {
+  if (!isModuleStageAllowedInEnvironment(environment, "earn", SDP_RAMP_PROVIDER_STAGES)) {
+    throw forbidden(`Earn is not stable yet, so a ${environment} strategy cannot take deposits.`, {
+      reason: "provider_stage_not_allowed",
+    });
+  }
+}
+
+/**
  * The ONE vault money-in gate sequence for every handler that commits a
  * strategy to the vault-deposit path: `POST /vault-deposits` (custody) and
  * `POST /external-wallet/deposit-transactions` (caller-signed). Runs, in
  * order: deposit-style shape, provider registration, environment capability,
- * surfacing, entitlement/credentials, catalogue admission, and LAST, when the caller
- * passes the deposit `amount`, the SDP-wide vault exposure cap (ADR 0004
- * layer 1, `services/earn/vault-exposure.ts`). Keep it shared: a second copy
+ * surfacing, the project provider rule for an authenticated caller (an
+ * anonymous caller has no project, so it gets the Production `stable` bar
+ * for Earn from the strategy's environment instead), catalogue admission,
+ * and LAST, when the caller passes the deposit `amount`, the SDP-wide vault
+ * exposure cap (ADR 0004 layer 1, `services/earn/vault-exposure.ts`). Keep it shared: a second copy
  * is a second thing that can drift toward permissive.
  *
  * The cap runs last on purpose: it is the only step that reads the ledger,
@@ -113,7 +139,6 @@ export async function assertVaultDepositAdmissible(
   amount?: string,
   options: {
     environment?: SdpEnvironment;
-    organizationId?: string | null;
   } = {}
 ): Promise<EarnProviderId> {
   const environment = options.environment ?? resolveSdpEnvironment(c);
@@ -132,10 +157,10 @@ export async function assertVaultDepositAdmissible(
 
   assertVaultDepositEnvironmentOpen(environment, provider);
   assertEarnProviderSurfaced(provider);
-  const organizationId =
-    options.organizationId === undefined ? getAuth(c).organizationId : options.organizationId;
-  if (organizationId !== null) {
+  if (getOptionalAuth(c)) {
     await assertProviderAvailable(c, { family: "earn", provider });
+  } else {
+    assertAnonymousEarnDepositStageAllowed(environment);
   }
   assertStrategyDepositable(strategy, environment);
 

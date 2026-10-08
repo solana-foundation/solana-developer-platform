@@ -755,33 +755,6 @@ export interface CustodySetupRefusal {
 /** The custody setup rule's verdict on one (provider, mode) pair for a project. */
 export type CustodySetupAdmission = { admitted: true } | CustodySetupRefusal;
 
-const STAGED_PROVIDER_REFUSAL_REASONS = [
-  "provider_not_in_release_channel",
-  "provider_not_offered",
-  "provider_stage_not_allowed",
-  "provider_not_entitled",
-] as const;
-
-type StagedProviderRefusalReason = (typeof STAGED_PROVIDER_REFUSAL_REASONS)[number];
-
-/**
- * Whether `error` is the staged-provider rule refusing a ramps, compliance or
- * Earn provider for a project (release channel, surfacing, Production stage
- * bar or entitlement): a policy outcome, not a fault.
- *
- * @param error - Any thrown value.
- * @returns True for a 403 carrying one of the staged-provider refusal reasons.
- */
-export function isStagedProviderRefusal(
-  error: unknown
-): error is AppError & { details: { reason: StagedProviderRefusalReason } } {
-  if (!(error instanceof AppError) || error.code !== "FORBIDDEN" || error.details === undefined) {
-    return false;
-  }
-  const reason = error.details.reason;
-  return STAGED_PROVIDER_REFUSAL_REASONS.some((refusalReason) => refusalReason === reason);
-}
-
 /**
  * The project provider rule's refusal of one provider: its error and the
  * project, environment and request it was decided for, so whoever refuses the
@@ -1538,6 +1511,30 @@ export type StagedProviderGateRequest = Extract<
   { family: "ramps" | "earn" }
 >;
 
+/** The project provider rule for one request's project, deciding without logging. */
+export type ProjectProviderVerdict = (request: ProjectProviderRequest) => ProjectProviderDecision;
+
+/**
+ * Loads the request's project facts once (its active project row and its
+ * organization's provider access) and returns the project provider rule over
+ * them, so a request deciding several providers reads the database once.
+ * Evaluating is not refusing: a caller that refuses the request with a
+ * refusal throws `refuseProjectProvider(decision)`.
+ *
+ * @param c - Request context carrying the authenticated project scope.
+ * @returns The rule's non-logging verdict for any provider of the project.
+ * @throws 404 when the project is not an active project of the organization.
+ */
+export async function loadProjectProviderVerdict(
+  c: Context<{ Bindings: Env }>
+): Promise<ProjectProviderVerdict> {
+  const facts = await loadProjectProviderFacts(c.env, getDb(c.env), {
+    organizationId: getAuth(c).organizationId,
+    projectId: requireProjectId(c),
+  });
+  return (request) => decideProjectProvider(c.env, facts, request);
+}
+
 /**
  * The provider gate for ramps and Earn money-in: every path that starts
  * provider work for a project calls this before any provider call, claim or
@@ -1560,12 +1557,11 @@ export async function assertProviderAvailable(
   c: Context<{ Bindings: Env }>,
   request: StagedProviderGateRequest
 ): Promise<void> {
-  await assertProjectProviderAdmitted(
-    c.env,
-    getDb(c.env),
-    { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) },
-    request
-  );
+  const verdict = await loadProjectProviderVerdict(c);
+  const decision = verdict(request);
+  if (!decision.admitted) {
+    throw refuseProjectProvider(decision);
+  }
 }
 
 /**
