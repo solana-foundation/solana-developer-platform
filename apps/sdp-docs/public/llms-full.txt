@@ -3705,7 +3705,7 @@ A parameter that doesn't apply to the provider and direction returns `400`, for 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl "https://api.solana.com/v1/counterparties/cpty_123/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_123" \
+curl "https://api.solana.com/v1/counterparties/cpty_123/requirements?provider=moonpay&direction=onramp&assetRail=sol.solana&fiatCurrency=USD&destinationCustodyWalletId=cwlt_123" \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
@@ -3716,7 +3716,7 @@ const url = new URL(
 );
 url.searchParams.set("provider", "moonpay");
 url.searchParams.set("direction", "onramp");
-url.searchParams.set("assetRail", "usdc.solana");
+url.searchParams.set("assetRail", "sol.solana");
 url.searchParams.set("fiatCurrency", "USD");
 url.searchParams.set("destinationCustodyWalletId", "cwlt_123");
 
@@ -3732,7 +3732,7 @@ const { data } = await response.json();
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create(
         "https://api.solana.com/v1/counterparties/cpty_123/requirements"
-            + "?provider=moonpay&direction=onramp&assetRail=usdc.solana"
+            + "?provider=moonpay&direction=onramp&assetRail=sol.solana"
             + "&fiatCurrency=USD&destinationCustodyWalletId=cwlt_123"))
     .header("Authorization", "Bearer sk_test_...")
     .GET()
