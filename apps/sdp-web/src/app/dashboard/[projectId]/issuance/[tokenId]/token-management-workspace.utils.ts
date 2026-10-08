@@ -898,9 +898,16 @@ export function getSignerSelectionForAction({
       };
     }
 
+    let deployWalletId = "";
+    if (preferredWallet) {
+      deployWalletId = preferredWallet.id;
+    } else if (availableWallets.length === 1) {
+      deployWalletId = availableWallets[0].id;
+    }
+
     return {
       wallets: availableWallets,
-      defaultWalletId: preferredWallet ? preferredWallet.id : "",
+      defaultWalletId: deployWalletId,
       unavailableReason: availableWallets.some(
         (wallet) => wallet.isRuntimeExecutionAllowed === true
       )
