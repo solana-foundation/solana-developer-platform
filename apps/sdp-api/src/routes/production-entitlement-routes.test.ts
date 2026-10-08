@@ -9,7 +9,7 @@ import { authenticateTestClerkUser, ensureTestClerkIssuer } from "@/test/helpers
 import { env as baseEnv } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { isEarnExitOrRead } from "./earn/index";
+import { isEarnExitOrRead } from "./earn/exits";
 
 /**
  * Routes that act on no project, so the production entitlement has nothing
@@ -27,6 +27,10 @@ const NO_PROJECT_ROUTES: readonly (readonly [RegExp, string])[] = [
   [/^\/admin\//, "operator routes behind their own credential"],
   [/^\/v1\/(organizations|onboarding|places)(\/|$)/, "organization-scoped, no project"],
   [/^\/v1\/projects$/, "lists projects; hides production without the entitlement"],
+  [
+    /^\/v1\/wallets\/approval-requests(\/:approvalRequestId(\/(reject|cancel))?)?$/,
+    "approval reads, rejects and cancels stop money; approve opens only for a stored Earn exit",
+  ],
   [
     /^\/v1\/issuance\/tokens\/:tokenId\/metadata\.json$/,
     "public token metadata that issued tokens point to on chain; serves, never acts",

@@ -16,7 +16,7 @@ export interface ProjectContextOptions {
    * already deployed (Earn withdrawals and reads, ADR 0002); never for anything
    * that starts new exposure.
    */
-  allowUnentitledProduction?: (c: Context<{ Bindings: Env }>) => boolean;
+  allowUnentitledProduction?: (c: Context<{ Bindings: Env }>) => boolean | Promise<boolean>;
   /**
    * Take the project from this path parameter instead of the `x-project-id`
    * header, for routes that address a project in their URL (`/v1/projects/:projectId`).
@@ -45,7 +45,7 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
     if (
       scope.environment === "production" &&
       !(await isOrganizationProductionEntitled(c, scope.organizationId)) &&
-      !options.allowUnentitledProduction?.(c)
+      !(await options.allowUnentitledProduction?.(c))
     ) {
       throw productionNotEnabled();
     }

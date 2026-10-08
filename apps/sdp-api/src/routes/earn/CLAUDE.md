@@ -1635,7 +1635,7 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 - **The production entitlement** (`enableProductionProject`, APE-351) follows
   the same asymmetry. `projectContextMiddleware` refuses a production project
   whose organization lacks it, except on the reads and exits
-  `isEarnExitOrRead` (index.ts) allows: every GET plus an explicit list of
+  `isEarnExitOrRead` (exits.ts) allows: every GET plus an explicit list of
   withdrawal POSTs. It is an allowlist, so a new route is refused until filed;
   `production-exits.test.ts` forces every state-changing route to be filed as
   an exit or an entry.

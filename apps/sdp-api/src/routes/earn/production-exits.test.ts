@@ -3,7 +3,7 @@ import { inspectRoutes } from "hono/dev";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { noopObservability } from "@/runtime/observability";
-import { isEarnExitOrRead } from "./index";
+import { isEarnExitOrRead } from "./exits";
 
 /**
  * Every Earn route that changes state and is NOT an exit. A production
