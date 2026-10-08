@@ -227,12 +227,14 @@ describe("draft deployment authorities", () => {
       result.current.deployToken({ "metadata-authority": "cwlt_metadata", "freeze-authority": "" })
     );
     expect(result.current.deployWalletDialogOpen).toBe(true);
+    expect(result.current.deployCustodyWalletId).toBe("");
+    act(() => result.current.setDeployCustodyWalletId("cwlt_new_mint"));
     act(() => result.current.confirmDeployWallet());
     expect(mocks.runAction).toHaveBeenCalledWith(
       expect.objectContaining({
         body: {
           feePayment: "sponsored",
-          signingCustodyWalletId: "cwlt_test",
+          signingCustodyWalletId: "cwlt_new_mint",
           authorityCustodyWalletIds: { metadata: "cwlt_metadata" },
         },
       }),
