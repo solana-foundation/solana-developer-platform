@@ -3,6 +3,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -104,60 +105,77 @@ async function seedAuthAndWallets(): Promise<void> {
         JSON.stringify(["*"]),
         "active"
       ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_CONFIG_ID,
-        TEST_ORG.id,
-        null,
-        "local",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "wal_scope_a",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind("csd_api_key_wallet_scope", TEST_ORG.id, null, TEST_CONFIG_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_scope_a",
-        TEST_CONFIG_ID,
-        "wal_scope_a",
-        "pub_scope_a",
-        "Wallet Scope A",
-        "transfer",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_scope_b",
-        TEST_CONFIG_ID,
-        "wal_scope_b",
-        "pub_scope_b",
-        "Wallet Scope B",
-        "transfer",
-        "active"
-      ),
   ]);
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: TEST_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "local",
+        configEncrypted: "test-config",
+        defaultWalletId: "wal_scope_a",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: "cwlt_scope_a",
+        owner: { kind: "config", custodyConfigId: TEST_CONFIG_ID },
+        walletId: "wal_scope_a",
+        publicKey: "pub_scope_a",
+        label: "Wallet Scope A",
+        purpose: "transfer",
+        status: "active",
+      },
+      {
+        id: "cwlt_scope_b",
+        owner: { kind: "config", custodyConfigId: TEST_CONFIG_ID },
+        walletId: "wal_scope_b",
+        publicKey: "pub_scope_b",
+        label: "Wallet Scope B",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    scopeDefaults: [
+      {
+        id: "csd_api_key_wallet_scope",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        defaultCustodyConfigId: TEST_CONFIG_ID,
+        defaultCustodyConnectionId: null,
+      },
+    ],
+  });
+}
+
+async function seedDuplicateScopeAWallet(): Promise<void> {
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: "cust_cfg_api_key_wallet_scope_duplicate",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "privy",
+        configEncrypted: "test-config",
+        defaultWalletId: null,
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: "cwlt_scope_a_duplicate",
+        owner: { kind: "config", custodyConfigId: "cust_cfg_api_key_wallet_scope_duplicate" },
+        walletId: "wal_scope_a",
+        publicKey: "pub_scope_a_duplicate",
+        label: "Duplicate Wallet Scope A",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    scopeDefaults: [],
+  });
 }
 
 function authenticatedJsonHeaders() {
@@ -405,37 +423,7 @@ describe("API key wallet scope routes", () => {
   });
 
   it("rejects a newly authored wallet binding when its provider wallet ID is ambiguous", async () => {
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, status)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "cust_cfg_api_key_wallet_scope_duplicate",
-          TEST_ORG.id,
-          TEST_PROJECT.id,
-          "privy",
-          "test-config",
-          "active"
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "cwlt_scope_a_duplicate",
-          "cust_cfg_api_key_wallet_scope_duplicate",
-          "wal_scope_a",
-          "pub_scope_a_duplicate",
-          "Duplicate Wallet Scope A",
-          "transfer",
-          "active"
-        ),
-    ]);
+    await seedDuplicateScopeAWallet();
 
     const response = await app.request(
       "/v1/api-keys",
@@ -1014,37 +1002,7 @@ describe("API key wallet scope routes", () => {
     });
     const { profileId } = await createAndActivateApiKeyPolicy(apiKeyId);
 
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, status)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "cust_cfg_api_key_wallet_scope_duplicate",
-          TEST_ORG.id,
-          TEST_PROJECT.id,
-          "privy",
-          "test-config",
-          "active"
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "cwlt_scope_a_duplicate",
-          "cust_cfg_api_key_wallet_scope_duplicate",
-          "wal_scope_a",
-          "pub_scope_a_duplicate",
-          "Duplicate Wallet Scope A",
-          "transfer",
-          "active"
-        ),
-    ]);
+    await seedDuplicateScopeAWallet();
 
     const response = await app.request(
       `/v1/api-keys/${apiKeyId}/policy-bindings`,

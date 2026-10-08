@@ -486,7 +486,6 @@ describe("PolicyRepository (postgres)", () => {
         FOREIGN_PROJECT_CUSTODY_WALLET.id,
       ]);
     const walletBefore = await readForeignWallet();
-    const service = policyStores(repo);
 
     await expect(
       repo.createWalletControlProfile({
@@ -512,7 +511,7 @@ describe("PolicyRepository (postgres)", () => {
       })
     ).resolves.toBeNull();
     await expect(
-      service.recordWalletOperation({
+      repo.createWalletOperation({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
         custodyWalletId: FOREIGN_PROJECT_CUSTODY_WALLET.id,
@@ -520,7 +519,6 @@ describe("PolicyRepository (postgres)", () => {
         apiKeyId: TEST_API_KEY.id,
         operationFamily: "payment",
         operationType: "payment_transfer_execute",
-        legs: [],
       })
     ).resolves.toBeNull();
 

@@ -34,6 +34,7 @@ import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
@@ -317,6 +318,47 @@ async function seedUnboundWallet(): Promise<void> {
     )
     .bind(UNBOUND_CUSTODY_WALLET_ID, TEST_CONFIG_ID, UNBOUND_WALLET_ID, unboundWallet.address)
     .run();
+}
+
+/**
+ * Seed a wallet sharing the primary wallet's Provider ID under another provider's config in the
+ * project, since a project holds one config per provider.
+ * @param params - The replacement wallet's rows.
+ * @param params.custodyConfigId - Id of the owning config.
+ * @param params.custodyWalletId - Id of the replacement wallet record.
+ * @param params.publicKey - The replacement wallet's address.
+ * @returns Resolves once the config and wallet are written.
+ */
+async function seedReplacementCustodyWallet(params: {
+  custodyConfigId: string;
+  custodyWalletId: string;
+  publicKey: string;
+}): Promise<void> {
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: params.custodyConfigId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "privy",
+        configEncrypted: "test-config",
+        defaultWalletId: null,
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: params.custodyWalletId,
+        owner: { kind: "config", custodyConfigId: params.custodyConfigId },
+        walletId: TEST_WALLET_ID,
+        publicKey: params.publicKey,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+    scopeDefaults: [],
+  });
 }
 
 async function bindApiKeyToWallet(walletId: string, custodyWalletId: string): Promise<void> {
@@ -990,24 +1032,11 @@ describe("Payments routes — recurring", () => {
   it("replaces active recurring payment records for term changes and cancels the old subscription", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const replacementCustodyWalletId = "cwlt_recurring_replacement";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              encryption_version, status)
-           VALUES ('cust_cfg_recurring_replacement', ?, ?, 'local', 'test-config',
-                   'sdp-custody-encryption-v1', 'active')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES (?, 'cust_cfg_recurring_replacement', ?, ?, 'active')`
-        )
-        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
-    ]);
+    await seedReplacementCustodyWallet({
+      custodyConfigId: "cust_cfg_recurring_replacement",
+      custodyWalletId: replacementCustodyWalletId,
+      publicKey: sourceSigner.address,
+    });
     const replacementPlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
     );
@@ -1203,24 +1232,11 @@ describe("Payments routes — recurring", () => {
   it("lets a collection claim win over a concurrent source-wallet change", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const replacementCustodyWalletId = "cwlt_recurring_race_replacement";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              encryption_version, status)
-           VALUES ('cust_cfg_recurring_race_replacement', ?, ?, 'local', 'test-config',
-                   'sdp-custody-encryption-v1', 'active')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES (?, 'cust_cfg_recurring_race_replacement', ?, ?, 'active')`
-        )
-        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
-    ]);
+    await seedReplacementCustodyWallet({
+      custodyConfigId: "cust_cfg_recurring_race_replacement",
+      custodyWalletId: replacementCustodyWalletId,
+      publicKey: sourceSigner.address,
+    });
     const signAndSendMock = recurringExecution
       .signAndSendMock()
       .mockResolvedValueOnce(

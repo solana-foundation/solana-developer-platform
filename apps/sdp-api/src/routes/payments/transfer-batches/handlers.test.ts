@@ -37,6 +37,7 @@ import { recoverApprovedWalletOperations } from "@/services/policy/approved-oper
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   sendTransactionMock,
@@ -215,45 +216,40 @@ async function seedAuthAndWallet(): Promise<void> {
         JSON.stringify(["*"]),
         "active"
       ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_CONFIG_ID,
-        TEST_ORG.id,
-        null,
-        "local",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        TEST_WALLET_ID,
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, null, TEST_CONFIG_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_CUSTODY_WALLET_ID,
-        TEST_CONFIG_ID,
-        TEST_WALLET_ID,
-        TEST_SOLANA_ADDRESSES.wallet1,
-        "Batch Payments Wallet",
-        "transfer",
-        "active"
-      ),
   ]);
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: TEST_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "local",
+        configEncrypted: "test-config",
+        defaultWalletId: TEST_WALLET_ID,
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: TEST_CUSTODY_WALLET_ID,
+        owner: { kind: "config", custodyConfigId: TEST_CONFIG_ID },
+        walletId: TEST_WALLET_ID,
+        publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+        label: "Batch Payments Wallet",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    scopeDefaults: [
+      {
+        id: `csd_${TEST_CONFIG_ID}`,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        defaultCustodyConfigId: TEST_CONFIG_ID,
+        defaultCustodyConnectionId: null,
+      },
+    ],
+  });
 }
 
 async function updateSeededWalletPublicKey(publicKey: string): Promise<void> {
@@ -322,28 +318,31 @@ async function seedConnectionOwnedDuplicateProviderWallet(): Promise<void> {
 
 async function seedConfigOwnedDuplicateProviderWallet(): Promise<void> {
   const configId = "cust_cfg_batch_exact_duplicate_test";
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted,
-            encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', ?, 'active')`
-      )
-      .bind(configId, TEST_ORG.id, TEST_PROJECT.id, TEST_WALLET_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, 'Config duplicate', 'transfer', 'active')`
-      )
-      .bind(
-        TEST_DUPLICATE_CUSTODY_WALLET_ID,
-        configId,
-        TEST_WALLET_ID,
-        TEST_SOLANA_ADDRESSES.wallet3
-      ),
-  ]);
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: configId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "privy",
+        configEncrypted: "test-config",
+        defaultWalletId: TEST_WALLET_ID,
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: TEST_DUPLICATE_CUSTODY_WALLET_ID,
+        owner: { kind: "config", custodyConfigId: configId },
+        walletId: TEST_WALLET_ID,
+        publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+        label: "Config duplicate",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    scopeDefaults: [],
+  });
 }
 
 async function seedSelectedApiKeyWalletBinding(custodyWalletId: string): Promise<void> {
@@ -1472,10 +1471,6 @@ describe("payment transfer batches", () => {
   });
 
   it("stops a denied transfer batch before signer and batch side effects", async () => {
-    await getDb(env)
-      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
-      .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
-      .run();
     const policyResponse = await app.request(
       `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
       {
