@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { dashboardFetch, dashboardRequest } from "./dashboard-fetch";
+import { resetIdempotencyKeyStoresForTests } from "./idempotency-key-store";
 
 function noContentFetchMock() {
   return vi.fn(
@@ -17,6 +18,7 @@ function sentHeaders(fetchMock: ReturnType<typeof noContentFetchMock>): Headers 
 afterEach(() => {
   restoreWindowLocation();
   vi.unstubAllGlobals();
+  resetIdempotencyKeyStoresForTests();
 });
 
 describe("dashboardFetch", () => {
@@ -89,5 +91,80 @@ describe("dashboardRequest", () => {
     await dashboardRequest("/api/dashboard/payments/transfers", {});
 
     expect(sentHeaders(fetchMock).has("x-project-id")).toBe(false);
+  });
+});
+
+describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
+  const PATH = "/api/dashboard/payments/recurring-payments";
+
+  function statusFetchMock(...statuses: number[]) {
+    return vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response("{}", { status: statuses.shift() ?? 201 })
+    );
+  }
+
+  function keyOfCall(fetchMock: ReturnType<typeof statusFetchMock>, index: number) {
+    return new Headers(fetchMock.mock.calls[index]?.[1]?.headers).get("Idempotency-Key");
+  }
+
+  function submit(body = '{"amount":"1"}') {
+    return dashboardRequest(PATH, { method: "POST", body });
+  }
+
+  it("reuses the key across a retry after a 5xx, and retires it after success", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = statusFetchMock(502, 201, 201);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submit();
+    await submit();
+    await submit();
+
+    const [failed, retried, next] = [0, 1, 2].map((index) => keyOfCall(fetchMock, index));
+    expect(failed).toMatch(/^[0-9a-f-]{36}$/);
+    expect(retried).toBe(failed);
+    expect(next).not.toBe(retried);
+  });
+
+  it("joins a double submit of the same action into one request", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = statusFetchMock(201);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [first, second] = await Promise.all([submit(), submit()]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await first.text()).toBe("{}");
+    expect(await second.text()).toBe("{}");
+  });
+
+  it("gives a different action its own key", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = statusFetchMock(502, 502);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submit('{"amount":"1"}');
+    await submit('{"amount":"2"}');
+
+    expect(keyOfCall(fetchMock, 0)).not.toBe(keyOfCall(fetchMock, 1));
+  });
+
+  it("leaves a caller-chosen key, reads and other modules alone", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = statusFetchMock(201, 200, 201);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await dashboardRequest(PATH, {
+      method: "POST",
+      headers: { "Idempotency-Key": "own-key" },
+      body: "{}",
+    });
+    await dashboardRequest(PATH, { method: "GET" });
+    await dashboardRequest("/api/dashboard/markets/earn/programs", { method: "POST", body: "{}" });
+
+    expect(keyOfCall(fetchMock, 0)).toBe("own-key");
+    expect(keyOfCall(fetchMock, 1)).toBeNull();
+    expect(keyOfCall(fetchMock, 2)).toBeNull();
   });
 });

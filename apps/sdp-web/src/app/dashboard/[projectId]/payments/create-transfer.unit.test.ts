@@ -40,7 +40,7 @@ describe("createTransfer", () => {
     expect(JSON.parse(String(init?.body))).not.toHaveProperty("idempotencyKey");
   });
 
-  it("carries no key header for a caller whose request is already single-shot", async () => {
+  it("gives a caller without its own key a per-action key", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
     );
@@ -50,7 +50,9 @@ describe("createTransfer", () => {
 
     const init = fetchMock.mock.calls[0][1];
     expect(init).toBeDefined();
-    expect(new Headers(init?.headers).get("Idempotency-Key")).toBeNull();
+    // Transfers require a key (HOO-1918), so a single-shot caller gets one for
+    // its action from dashboardRequest.
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
     expect(JSON.parse(String(init?.body)).transferId).toBe("xfr_ramp");
   });
 
