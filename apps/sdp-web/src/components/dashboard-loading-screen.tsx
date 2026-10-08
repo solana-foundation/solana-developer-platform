@@ -1,8 +1,7 @@
 "use client";
 
-import { usePathname } from "next/navigation";
 import type { ComponentProps } from "react";
-import { enabledTransactionModules } from "@/app/dashboard/payments/transactions/transaction-modules";
+import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
 import { getDashboardPageConfig } from "@/components/dashboard-header";
 import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
 import { FullscreenLoadingIndicator } from "@/components/fullscreen-loading-indicator";
@@ -11,6 +10,7 @@ import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
 import { resolveDashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 import { isNewDesignPage } from "@/lib/design-modules";
+import { useDashboardPathname } from "@/lib/use-dashboard-project";
 
 // Preparation, scope reconciliation, and client auth all paint the same destination.
 export function DashboardLoadingScreen({
@@ -55,7 +55,7 @@ export function DashboardLoadingScreen({
 }
 
 export function DashboardScopeLoadingScreen() {
-  const pathname = usePathname();
+  const pathname = useDashboardPathname();
   const { flags, isSidebarOpen } = useDashboardWorkspace();
   return (
     <DashboardLoadingScreen

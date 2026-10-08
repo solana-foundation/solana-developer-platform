@@ -53,7 +53,7 @@ export function auditFlowMatrix({ dashboardDir, specsDir, matrixPath }) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = path.resolve(import.meta.dirname, "..");
   const problems = auditFlowMatrix({
-    dashboardDir: path.join(root, "apps/sdp-web/src/app/dashboard"),
+    dashboardDir: path.join(root, "apps/sdp-web/src/app/dashboard/[projectId]"),
     specsDir: path.join(root, "apps/sdp-web/playwright/tests"),
     matrixPath: path.join(root, "docs/testing/ui-flow-matrix.md"),
   });

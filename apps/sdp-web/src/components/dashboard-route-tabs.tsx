@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
 export interface DashboardRouteTab {
@@ -26,6 +27,7 @@ export function DashboardRouteTabs({
   pathname,
   tabs,
 }: DashboardRouteTabsConfig & { pathname: string }) {
+  const projectHref = useProjectHref();
   const currentPathname = normalizePathname(pathname);
 
   return (
@@ -45,7 +47,7 @@ export function DashboardRouteTabs({
               isActive &&
                 "font-[number:var(--tab-weight-active)] text-[var(--tab-text-active)] after:absolute after:inset-x-[var(--tab-padding-x-md)] after:bottom-0 after:h-[var(--tab-indicator-height)] after:bg-[var(--tab-indicator-color)]"
             )}
-            href={tab.href}
+            href={projectHref(tab.href)}
             key={tab.href}
           >
             {tab.label}

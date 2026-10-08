@@ -95,20 +95,7 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
     )
     .toBe(identity.organizationId);
 
-  if (env.useExternalApi) {
-    await target.context().addCookies([
-      {
-        name: "sdp_selected_project_id",
-        value: env.expectedProjectId,
-        url: env.baseURL,
-        httpOnly: true,
-        sameSite: "Lax",
-        secure: false,
-      },
-    ]);
-  }
-
-  await target.goto(env.useExternalApi ? "/dashboard" : "/dashboard/issuance");
+  await target.goto("/dashboard");
   // Local suites seed the SDP organization in beforeAll, after this auth-only
   // setup. A Clerk session without that mapping must stop at the sync gate.
   await expect(target).toHaveURL(

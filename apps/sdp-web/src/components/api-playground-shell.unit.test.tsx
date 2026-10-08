@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { clearStoredApiKeySecrets, storeApiKeySecret } from "@/lib/playground-api-keys";
+import { PRODUCTION_PROJECT } from "@/test/projects";
+import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
 
 const mocks = vi.hoisted(() => ({
@@ -33,7 +35,7 @@ const endpoint: ApiPlaygroundEndpointConfig = {
   expectedResponse: {},
 };
 
-describe("ApiPlaygroundShell secret redaction", () => {
+describe("ApiPlaygroundShell", () => {
   beforeEach(() => {
     clearStoredApiKeySecrets();
     mocks.replaceSearchParams.mockReset();
@@ -44,13 +46,18 @@ describe("ApiPlaygroundShell secret redaction", () => {
   afterEach(() => {
     cleanup();
     clearStoredApiKeySecrets();
+    restoreWindowLocation();
     vi.unstubAllGlobals();
   });
 
-  it("does not render a submitted secret from a rejected client request", async () => {
+  it("sends the request with the tab's Project and never renders the secret it rejects", async () => {
     const secret = ["sk", "test", "client", "error", "fixture"].join("_");
     storeApiKeySecret({ value: secret, apiKeyId: "key-test" });
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error(`Rejected Bearer ${secret}`)));
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/api-keys`);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init: RequestInit) => {
+      throw new Error(`Rejected Bearer ${secret}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApiPlaygroundShell apiKeyId="key-test" endpoints={[endpoint]} productName="Test product" />
@@ -61,5 +68,8 @@ describe("ApiPlaygroundShell secret redaction", () => {
 
     await waitFor(() => expect(view.container.textContent).toContain("Request execution failed."));
     expect(view.container.textContent).not.toContain(secret);
+    const [proxyPath, proxyInit] = fetchMock.mock.calls[0];
+    expect(proxyPath).toBe("/api/playground/execute");
+    expect(new Headers(proxyInit.headers).get("x-project-id")).toBe(PRODUCTION_PROJECT.id);
   });
 });

@@ -1,0 +1,1666 @@
+"use client";
+
+import { decimalScale } from "@sdp/solana/amount";
+import {
+  EARN_SWAP_DEFAULT_SLIPPAGE_BPS,
+  type EarnStrategy,
+  type EarnStrategySlippagePolicy,
+  type EarnSwapSourceToken,
+  earnProviderDepositSettlement,
+  earnSwapSourceTokens,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
+import { ArrowRightLeftIcon, Loader2Icon } from "lucide-react";
+import Link from "next/link";
+import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Modal } from "@/components/ui/modal";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
+import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useModalFocus } from "@/lib/use-modal-focus";
+import { cn } from "@/lib/utils";
+import {
+  type EarnFundingWallet,
+  useEarnFundingWallets,
+  walletDisplayName,
+} from "./deposit/earn-funding-wallets";
+import { EarnAmountMaxButton } from "./earn-amount-max-button";
+import {
+  compareUnsignedDecimals,
+  isPositiveDecimal,
+  MAX_AMOUNT_LENGTH,
+  parseUnsignedDecimal,
+  sortByOptionalDecimal,
+} from "./earn-decimal";
+import { EarnErrorNote } from "./earn-error-note";
+import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
+import { formatTokenValue, shortenMarketAddress, tokenSymbol } from "./earn-format";
+import { sumDecimalStrings, TransactionLink } from "./earn-market-presentation";
+import {
+  createEarnVaultDeposit,
+  type EarnVaultDeposit,
+  type EarnVaultDepositPreview,
+  type EarnVaultDepositRecord,
+  fetchEarnVaultDepositByRequestId,
+  fetchEarnVaultDepositPreview,
+  useEarnVaultDepositOutcome,
+} from "./earn-program-data";
+import type { VaultSubmissionObserver } from "./earn-vault-movement";
+
+export { EarnVaultDepositOutcomeTracker } from "./earn-outcome-trackers";
+
+import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
+import {
+  forgetVaultDepositFloor,
+  recallVaultDepositFloor,
+  rememberVaultDepositFloor,
+  vaultDepositIdempotencyKeyStore,
+  vaultDepositRequestFingerprint,
+} from "./earn-vault-deposit-tracking";
+import {
+  mergeObservedVaultMovement,
+  observableVaultMovement,
+  vaultApprovalPending,
+  vaultMovementPanelKey,
+  vaultMovementProcessing,
+  vaultMovementProgressStep,
+  vaultMovementProgressSteps,
+} from "./earn-vault-movement";
+import {
+  atomsToDecimalString,
+  derivedMinOut,
+  floorToReplay,
+  initialSlippageInput,
+  isExpiredQuote,
+  isSlippageExceededRefusal,
+  parseSlippageToleranceState,
+  quoteForKey,
+  useDebouncedVaultQuote,
+  type VaultFloorReplay,
+  type VaultQuoteState,
+} from "./earn-vault-slippage";
+import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
+import {
+  earnVaultDepositUiState,
+  earnVaultPositionStatusLabels,
+  vaultOutcomeTone,
+} from "./earn-vault-ui-state";
+
+export type VaultDepositAmountValidation =
+  | { kind: "valid"; canonicalAmount: string }
+  | { kind: "invalid" }
+  | { kind: "unknown_scale" }
+  | { kind: "over_precision"; decimals: number };
+
+/**
+ * Validate a vault amount without converting it through a JavaScript number.
+ * Trailing zeroes beyond the mint scale are harmless; any non-zero digit below
+ * one mint atom is rejected rather than rounded before a value-moving request.
+ */
+export function validateVaultDepositAmount(
+  value: string,
+  decimals: number | undefined
+): VaultDepositAmountValidation {
+  const amount = parseUnsignedDecimal(value, { maxLength: MAX_AMOUNT_LENGTH });
+  if (!amount || !isPositiveDecimal(amount.canonical)) {
+    return { kind: "invalid" };
+  }
+  if (decimals === undefined) return { kind: "unknown_scale" };
+
+  if (decimalScale(amount.canonical) > decimals) {
+    return { kind: "over_precision", decimals };
+  }
+
+  return { kind: "valid", canonicalAmount: amount.canonical };
+}
+
+/**
+ * Exact balance for one mint. `undefined` means the RPC observation was absent
+ * or malformed; a successful observation with no row for the mint is real zero.
+ */
+export function walletBalanceForMint(
+  wallet: EarnFundingWallet,
+  mint: string,
+  decimals: number
+): string | undefined {
+  if (wallet.balances === undefined) return undefined;
+  const balances = wallet.balances.filter((balance) => balance.mint === mint);
+  if (balances.length === 0) return "0";
+
+  let atoms = 0n;
+  for (const balance of balances) {
+    if (balance.decimals !== decimals || !/^\d+$/.test(balance.amount)) return undefined;
+    atoms += BigInt(balance.amount);
+  }
+  return atomsToDecimalString(atoms, decimals);
+}
+
+/** The quote's own rows in the confirm summary: expected shares and the floor. */
+function DepositQuoteSummaryRows({
+  quote,
+  minSharesOut,
+}: {
+  quote: VaultQuoteState<EarnVaultDepositPreview>;
+  minSharesOut: string | undefined;
+}) {
+  const t = useTranslations();
+  return (
+    <>
+      {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
+        <div className="flex items-baseline justify-between gap-5 py-1">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultExpectedShares")}</dt>
+          <dd className="text-right tabular-nums text-primary">{quote.preview.sharesOut}</dd>
+        </div>
+      ) : null}
+      {minSharesOut !== undefined ? (
+        <div className="flex items-baseline justify-between gap-5 py-1">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultMinShares")}</dt>
+          <dd className="text-right tabular-nums text-primary">{minSharesOut}</dd>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The confirm-step note. Names the actual fee payer: SDP when the STRATEGY says
+ * a movement on it is sponsored, the wallet otherwise. A swap-funded
+ * deposit is always wallet-pays, whatever the strategy said, because
+ * sponsorship refuses swap routes.
+ *
+ * Read from the strategy, never from the quote: a quote is only fetched for
+ * providers with a deposit floor, so a flag riding on it was unreadable for
+ * Kamino and the note claimed wallet-pays on every sponsored Kamino deposit.
+ */
+function DepositConfirmNote({
+  feeSponsored,
+  swapActive,
+}: {
+  feeSponsored: boolean;
+  swapActive: boolean;
+}) {
+  const t = useTranslations();
+  const sponsored = feeSponsored && !swapActive;
+  return (
+    <p id="earn-vault-deposit-note" className="mt-3 text-xs leading-5 text-tertiary">
+      {sponsored
+        ? t("DashboardEarn.deposit.vaultConfirmNoteSponsored")
+        : t("DashboardEarn.deposit.vaultConfirmNote")}
+    </p>
+  );
+}
+
+type DepositOutcome =
+  | {
+      kind: "approval_pending";
+      approvalRequestId?: string;
+      walletOperationId?: string;
+    }
+  | {
+      kind: "deposit";
+      movement: EarnVaultDeposit;
+      amount: string;
+      walletName: string;
+      /**
+       * The approval executor won the race: it executed this exact intent
+       * between the held-key pre-flight and this POST, so the server absorbed
+       * the submission as a replay of the approval's movement. Real money DID
+       * move — once, via the approval — but THIS submission moved nothing, and
+       * saying "deposit submitted" would leave the customer believing two
+       * deposits happened, or none.
+       */
+      absorbedByApproval?: true;
+    };
+
+type DepositSubmissionResolution =
+  | { kind: "error"; message: string; slippageExceeded?: true }
+  | { kind: "outcome"; outcome: DepositOutcome; deposited?: EarnVaultDeposit };
+
+function depositProgressStep(outcome: DepositOutcome | null, step: "details" | "review"): number {
+  if (
+    outcome?.kind === "deposit" &&
+    earnProviderDepositSettlement(outcome.movement.strategy.provider) === "provider_order" &&
+    outcome.movement.status === "confirmed"
+  ) {
+    return 3;
+  }
+  return vaultMovementProgressStep(outcome, step, earnVaultDepositUiState);
+}
+
+function depositAssetMetadata(strategy: EarnStrategy) {
+  const depositMint = strategy.depositMints[0];
+  const mintMetadata = depositMint ? WELL_KNOWN_TOKEN_BY_MINT.get(depositMint) : undefined;
+  const routedToken = strategyToken(strategy);
+  const fallbackSymbol = depositMint ? tokenSymbol(depositMint) : "—";
+  return {
+    decimals: mintMetadata?.decimals,
+    depositMint,
+    symbol: mintMetadata?.symbol ?? routedToken?.toUpperCase() ?? fallbackSymbol,
+  };
+}
+
+function deriveDepositFormState(input: {
+  amountInput: string;
+  fundingDecimals: number | undefined;
+  selectedWallet: EarnFundingWallet | undefined;
+  selectedWalletBalance: string | undefined;
+  slippageInput: string;
+  slippagePolicy: EarnStrategySlippagePolicy | null;
+  strategyId: string;
+  t: Translation;
+}) {
+  const {
+    amountInput,
+    fundingDecimals,
+    selectedWallet,
+    selectedWalletBalance,
+    slippageInput,
+    slippagePolicy,
+    strategyId,
+    t,
+  } = input;
+  const amountValidation = validateVaultDepositAmount(amountInput, fundingDecimals);
+  const overKnownBalance =
+    amountValidation.kind === "valid" && selectedWalletBalance !== undefined
+      ? compareUnsignedDecimals(amountValidation.canonicalAmount, selectedWalletBalance) === 1
+      : false;
+  const amountError = amountValidationMessage(amountInput, amountValidation, t);
+  const { slippageBps, slippageInvalid } = parseSlippageToleranceState(
+    slippagePolicy,
+    slippageInput
+  );
+  const quoteAmount =
+    slippagePolicy !== null && amountValidation.kind === "valid"
+      ? amountValidation.canonicalAmount
+      : null;
+  const quoteKey = quoteAmount === null ? null : JSON.stringify([strategyId, quoteAmount]);
+  const continueBlocked = !selectedWallet || amountValidation.kind !== "valid";
+
+  return {
+    amountError,
+    amountValidation,
+    continueBlocked,
+    overKnownBalance,
+    quoteAmount,
+    quoteKey,
+    slippageBps,
+    slippageInvalid,
+  };
+}
+
+function resolveDepositSubmission(
+  result: Awaited<ReturnType<typeof createEarnVaultDeposit>>,
+  amount: string,
+  walletName: string,
+  fallbackError: string,
+  keyWasHeld: boolean,
+  slippageExceededMessage: string
+): DepositSubmissionResolution {
+  if (!result.ok) {
+    if (isSlippageExceededRefusal(result.body)) {
+      return { kind: "error", message: slippageExceededMessage, slippageExceeded: true };
+    }
+    return { kind: "error", message: result.error || fallbackError };
+  }
+  if (result.data.kind === "approval_pending") {
+    return { kind: "outcome", outcome: vaultApprovalPending(result.data) };
+  }
+
+  const deposit = result.data.deposit;
+  if (deposit.status === "failed") {
+    return { kind: "error", message: deposit.failureReason || fallbackError };
+  }
+  // A replay of a HELD key can only be the approval's own execution: the key is
+  // client-minted, so the executor replaying the original Idempotency-Key is
+  // the sole other writer under it. The pre-flight said "absent", the answer
+  // says "already recorded" — the approval landed in between, and no client
+  // read could have closed that window. Announce what actually happened rather
+  // than crediting this submission; the caller still refreshes and watches the
+  // movement, because it is real and may still be settling. Deliberately NOT
+  // retried with a fresh key: auto-resubmitting money after a race is the
+  // double-deposit hazard, so making a second deposit stays a human decision.
+  if (deposit.replayed && keyWasHeld) {
+    return {
+      kind: "outcome",
+      outcome: { kind: "deposit", amount, movement: deposit, walletName, absorbedByApproval: true },
+      deposited: deposit,
+    };
+  }
+  return {
+    kind: "outcome",
+    outcome: { kind: "deposit", amount, movement: deposit, walletName },
+    deposited: deposit,
+  };
+}
+
+type ExpiredFloorVerdict = "still_satisfiable" | "floor_exceeded" | "quote_unavailable" | "aborted";
+
+/**
+ * EXPIRY BACKSTOP (PRO-1691), the read half: the floor on screen came from a
+ * quote that aged past the TTL, so ask the vault again before sending it. The
+ * floor the user REVIEWED is what a passing verdict submits, never a weaker
+ * floor re-derived from the fresh rate (that would accept up to double the
+ * chosen tolerance).
+ */
+async function revalidateExpiredFloor(
+  strategyId: string,
+  amount: string,
+  floor: string,
+  signal: AbortSignal
+): Promise<ExpiredFloorVerdict> {
+  const fresh = await fetchEarnVaultDepositPreview({ strategyId, amount }, signal);
+  if (signal.aborted) return "aborted";
+  if (fresh.kind !== "quoted" || fresh.preview.blockingIssues.length > 0) {
+    return "quote_unavailable";
+  }
+  return compareUnsignedDecimals(fresh.preview.sharesOut, floor) === -1
+    ? "floor_exceeded"
+    : "still_satisfiable";
+}
+
+type Translation = ReturnType<typeof useTranslations>;
+
+function amountValidationMessage(
+  amountInput: string,
+  validation: VaultDepositAmountValidation,
+  t: Translation
+): string | null {
+  if (amountInput.trim() === "" || validation.kind === "valid") return null;
+  if (validation.kind === "over_precision") {
+    return t("DashboardEarn.deposit.vaultAmountPrecision", { decimals: validation.decimals });
+  }
+  if (validation.kind === "unknown_scale") {
+    return t("DashboardEarn.deposit.strategyAssetUnavailable");
+  }
+  return t("DashboardEarn.withdraw.errorAmountRequired");
+}
+
+interface DepositWalletPickerProps {
+  wallets: readonly EarnFundingWallet[] | undefined;
+  walletsError: unknown;
+  walletsLoading: boolean;
+  selectedWalletId: string | null;
+  depositMint: string | undefined;
+  decimals: number | undefined;
+  submitting: boolean;
+  onSelect: (walletId: string) => void;
+}
+
+function DepositWalletPicker({
+  wallets,
+  walletsError,
+  walletsLoading,
+  selectedWalletId,
+  depositMint,
+  decimals,
+  submitting,
+  onSelect,
+}: DepositWalletPickerProps) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const href = useProjectHref();
+  const workspace = useOptionalDashboardWorkspace();
+  const custodyEnabled = workspace?.flags.custody ?? true;
+  const canManageCustody = workspace?.dashboardAccess.capabilities.canManageCustody ?? true;
+
+  let walletContent: ReactNode;
+  if (walletsLoading && wallets === undefined) {
+    walletContent = (
+      <div className="flex items-center gap-2 rounded-lg border border-border-default p-4 text-sm text-secondary">
+        <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
+        {t("DashboardEarn.withdraw.availableChecking")}
+      </div>
+    );
+  } else if (walletsError) {
+    walletContent = (
+      <p
+        className="rounded-lg border border-destructive-border bg-destructive-bg p-4 text-sm text-error"
+        role="alert"
+      >
+        {t("DashboardEarn.deposit.walletsLoadError")}
+      </p>
+    );
+  } else if ((wallets?.length ?? 0) === 0) {
+    walletContent = (
+      <div className="rounded-lg border border-border-default bg-fill-subtle p-4">
+        <p className="text-sm font-medium text-primary">
+          {t("DashboardEarn.deposit.walletsEmptyTitle")}
+        </p>
+        <p className="mt-1 text-sm leading-5 text-secondary">
+          {t("DashboardEarn.deposit.walletsEmptyBody")}
+        </p>
+        {custodyEnabled && canManageCustody ? (
+          <Button asChild className="mt-3" size="sm" variant="outline">
+            <Link href={href("/dashboard/wallets/setup")}>
+              {t("DashboardCustody.createWallet")}
+            </Link>
+          </Button>
+        ) : null}
+      </div>
+    );
+  } else {
+    walletContent = wallets?.map((wallet) => {
+      const executable = wallet.isRuntimeExecutionAllowed;
+      const checked = executable && wallet.id === selectedWalletId;
+      const balance =
+        depositMint && decimals !== undefined
+          ? walletBalanceForMint(wallet, depositMint, decimals)
+          : undefined;
+      return (
+        <label
+          aria-disabled={!executable}
+          className={cn(
+            "flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors",
+            executable ? "cursor-pointer" : "cursor-not-allowed opacity-60",
+            checked
+              ? "border-primary bg-fill-subtle"
+              : executable
+                ? "border-border-default hover:border-border-strong"
+                : "border-border-default bg-fill-subtle"
+          )}
+          key={wallet.id}
+        >
+          <input
+            checked={checked}
+            className="size-4 shrink-0 accent-primary"
+            disabled={!executable}
+            name="earn-vault-deposit-wallet"
+            onChange={() => onSelect(wallet.id)}
+            type="radio"
+            value={wallet.id}
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-primary">
+              {walletDisplayName(wallet, t("DashboardEarn.deposit.walletUnnamed"))}
+            </span>
+            <span className="mt-0.5 block text-xs text-tertiary">
+              {shortenMarketAddress(wallet.publicKey)}
+            </span>
+          </span>
+          <span className="shrink-0 text-right text-xs tabular-nums text-secondary">
+            {!executable
+              ? t("DashboardEarn.deposit.vaultWalletUnavailable")
+              : balance === undefined
+                ? t("DashboardEarn.deposit.vaultBalanceUnknown")
+                : t("DashboardEarn.deposit.vaultBalanceAvailable", {
+                    amount: formatTokenValue(balance, depositMint, locale),
+                  })}
+          </span>
+        </label>
+      );
+    });
+  }
+
+  return (
+    <fieldset className="mt-5" disabled={submitting}>
+      <legend className="text-sm font-medium text-primary">
+        {t("DashboardEarn.deposit.vaultWalletTitle")}
+      </legend>
+      <div className="mt-2 flex max-h-52 flex-col gap-1.5 overflow-y-auto">{walletContent}</div>
+    </fieldset>
+  );
+}
+
+function DepositApprovalResult({
+  outcome,
+  onClose,
+}: {
+  outcome: Extract<DepositOutcome, { kind: "approval_pending" }>;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+
+  return (
+    <>
+      <EarnOutcomeMark tone="warning" />
+      <h2
+        className="text-base font-medium text-primary outline-none"
+        data-modal-focus-target
+        tabIndex={-1}
+      >
+        {t("DashboardEarn.deposit.vaultApprovalTitle")}
+      </h2>
+      <p className="mt-1 text-sm leading-6 text-secondary">
+        {t("DashboardEarn.deposit.vaultApprovalBody")}
+      </p>
+      {outcome.approvalRequestId || outcome.walletOperationId ? (
+        <dl className="mt-5 rounded-lg border border-border-default bg-fill-subtle p-4 text-sm">
+          {outcome.approvalRequestId ? (
+            <div className="flex items-start justify-between gap-5 py-1">
+              <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultApprovalRequest")}</dt>
+              <dd className="max-w-64 break-all text-right text-primary">
+                {outcome.approvalRequestId}
+              </dd>
+            </div>
+          ) : null}
+          {outcome.walletOperationId ? (
+            <div className="flex items-start justify-between gap-5 py-1">
+              <dt className="text-tertiary">{t("DashboardEarn.withdraw.referenceLabel")}</dt>
+              <dd className="max-w-64 break-all text-right text-primary">
+                {outcome.walletOperationId}
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+      <div className="mt-6 flex justify-end">
+        <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
+      </div>
+    </>
+  );
+}
+
+type DepositMovementOutcome = Extract<DepositOutcome, { kind: "deposit" }>;
+
+function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
+  if (outcome.absorbedByApproval) {
+    return {
+      title: t("DashboardEarn.deposit.vaultAbsorbedTitle"),
+      body: t("DashboardEarn.deposit.vaultAbsorbedBody"),
+      note: t("DashboardEarn.deposit.vaultAbsorbedNote"),
+      status: t("DashboardEarn.deposit.vaultAbsorbedStatus"),
+      statusVariant: "info" as const,
+    };
+  }
+
+  if (outcome.movement.status === "failed") {
+    return {
+      title: t("DashboardEarn.deposit.vaultFailedTitle"),
+      body: t("DashboardEarn.deposit.vaultFailedBody"),
+      note: t("DashboardEarn.deposit.vaultFailedNote"),
+      status: t("DashboardEarn.deposit.vaultFailedStatus"),
+      statusVariant: "danger" as const,
+    };
+  }
+
+  if (
+    earnProviderDepositSettlement(outcome.movement.strategy.provider) === "provider_order" &&
+    outcome.movement.status === "confirmed"
+  ) {
+    return {
+      title: t("DashboardEarn.deposit.providerOrderConfirmedTitle"),
+      body: t("DashboardEarn.deposit.providerOrderConfirmedBody"),
+      note: t("DashboardEarn.deposit.providerOrderConfirmedNote"),
+      status: t("DashboardEarn.deposit.providerOrderConfirmedStatus"),
+      statusVariant: "info" as const,
+    };
+  }
+
+  switch (outcome.movement.status) {
+    case "confirmed":
+      return {
+        title: t("DashboardEarn.deposit.vaultConfirmedTitle"),
+        body: t("DashboardEarn.deposit.vaultConfirmedBody"),
+        note: t("DashboardEarn.deposit.vaultConfirmedNote"),
+        status: t("DashboardEarn.deposit.vaultConfirmedStatus"),
+        statusVariant: "success" as const,
+      };
+    case "pending":
+      return {
+        title: t("DashboardEarn.deposit.vaultPendingTitle"),
+        body: t("DashboardEarn.deposit.vaultPendingBody"),
+        note: t("DashboardEarn.deposit.vaultSettlingNote"),
+        status: t("DashboardEarn.deposit.vaultPendingStatus"),
+        statusVariant: "warning" as const,
+      };
+    default:
+      return {
+        title: t("DashboardEarn.deposit.vaultDoneTitle"),
+        body: t("DashboardEarn.deposit.vaultDoneBody"),
+        note: t("DashboardEarn.deposit.vaultSettlingNote"),
+        status: t("DashboardEarn.deposit.vaultDoneStatus"),
+        statusVariant: "default" as const,
+      };
+  }
+}
+
+function DepositMovementResult({
+  fundingMint,
+  outcome,
+  onClose,
+}: {
+  fundingMint: string | undefined;
+  outcome: DepositMovementOutcome;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+
+  const { movement: deposit } = outcome;
+  // The absorbed case overrides the status copy: whatever state the movement is
+  // in, the headline is that THIS submission moved nothing.
+  const copy = depositMovementCopy(outcome, t);
+  const sharedStatus = outcome.absorbedByApproval
+    ? null
+    : earnProviderDepositSettlement(deposit.strategy.provider) === "provider_order"
+      ? null
+      : earnVaultPositionStatusLabels(earnVaultDepositUiState(deposit.status).positionStatus, t);
+  const status = sharedStatus?.label ?? copy.status;
+  const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
+  const processing =
+    !outcome.absorbedByApproval && (deposit.status === "pending" || deposit.status === "submitted");
+
+  return (
+    <>
+      {processing ? null : <EarnOutcomeMark tone={vaultOutcomeTone(statusVariant)} />}
+      <div className="flex items-center gap-2 pr-8">
+        <h2
+          className="text-base font-medium text-primary outline-none"
+          data-modal-focus-target
+          tabIndex={-1}
+        >
+          {copy.title}
+        </h2>
+        <Badge variant={statusVariant}>{status}</Badge>
+      </div>
+      <p className="mt-2 text-sm leading-5 text-secondary">{copy.body}</p>
+
+      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
+          <dd className="max-w-64 text-right text-primary">{deposit.strategy.name}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.withdraw.amountLabel")}</dt>
+          <dd className="text-right tabular-nums text-primary">
+            {formatTokenValue(outcome.amount, fundingMint, locale)}
+          </dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultFrom")}</dt>
+          <dd className="max-w-64 text-right text-primary">{outcome.walletName}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultTransaction")}</dt>
+          <dd className="text-right">
+            <TransactionLink cluster={deposit.strategy.hostCluster} signature={deposit.signature} />
+          </dd>
+        </div>
+      </dl>
+      <p className="mt-4 text-xs leading-5 text-tertiary">{copy.note}</p>
+      <div className="mt-5 flex justify-end">
+        <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
+      </div>
+    </>
+  );
+}
+
+function DepositResult({
+  fundingMint,
+  outcome,
+  onClose,
+}: {
+  fundingMint: string | undefined;
+  outcome: DepositOutcome;
+  onClose: () => void;
+}) {
+  if (outcome.kind === "approval_pending") {
+    return <DepositApprovalResult onClose={onClose} outcome={outcome} />;
+  }
+  return <DepositMovementResult fundingMint={fundingMint} onClose={onClose} outcome={outcome} />;
+}
+
+export interface EarnVaultDepositModalProps {
+  onSubmissionStart?: VaultSubmissionObserver;
+  strategy: EarnStrategy;
+  /**
+   * The project this deposit belongs to, which is part of what makes two
+   * submissions the same request — see `vaultDepositRequestFingerprint`. Passed
+   * in rather than read from the workspace context so this modal stays
+   * context-free and directly testable.
+   */
+  projectId: string | null;
+  onClose: () => void;
+  onDeposited?: (
+    deposit: EarnVaultDeposit,
+    intent: {
+      amount: string;
+      custodyWalletId: string;
+      /** Client clock when the POST began; a positions read that landed earlier cannot contain this deposit. */
+      submittedAt: number;
+    }
+  ) => void;
+  onMovementUpdated?: (deposit: EarnVaultDepositRecord) => void;
+}
+
+function useVaultFundingToken(input: {
+  strategy: EarnStrategy;
+  depositMint: string | undefined;
+  decimals: number | undefined;
+  symbol: string;
+  wallets: readonly EarnFundingWallet[] | undefined;
+}) {
+  const { strategy, depositMint, decimals, symbol, wallets } = input;
+  const supportedFundingTokens = useMemo<EarnSwapSourceToken[]>(() => {
+    const own: EarnSwapSourceToken[] =
+      depositMint && decimals !== undefined
+        ? [{ symbol: symbol as EarnSwapSourceToken["symbol"], mint: depositMint, decimals }]
+        : [];
+    return [
+      ...own,
+      ...earnSwapSourceTokens(strategy.hostCluster).filter((token) => token.mint !== depositMint),
+    ];
+  }, [decimals, depositMint, strategy.hostCluster, symbol]);
+  const fundingTokens = useMemo(() => {
+    if (wallets === undefined) return supportedFundingTokens;
+
+    // Keep every supported stable visible for demo selection. Balance only
+    // controls ranking and the default selection, not visibility.
+    const balanceFor = (token: EarnSwapSourceToken): string | undefined => {
+      const knownBalances: string[] = [];
+      let hasUnknownBalance = false;
+      for (const wallet of wallets) {
+        const balance = walletBalanceForMint(wallet, token.mint, token.decimals);
+        if (balance === undefined) {
+          hasUnknownBalance = true;
+        } else {
+          knownBalances.push(balance);
+        }
+      }
+      return hasUnknownBalance ? undefined : sumDecimalStrings(knownBalances);
+    };
+    return sortByOptionalDecimal(supportedFundingTokens, balanceFor, "descending");
+  }, [supportedFundingTokens, wallets]);
+  const [fundingMint, setFundingMint] = useState<string | null>(null);
+  // Ranked order already covers "nothing selected": its first row is the
+  // default. With wallets loaded the ranking is a full permutation of the
+  // supported tokens, so the two arrays are the same length and there is no
+  // third fallback behind `fundingTokens[0]`.
+  const fundingToken =
+    fundingTokens.find((token) => token.mint === fundingMint) ?? fundingTokens[0];
+  const swapActive = fundingToken !== undefined && fundingToken.mint !== depositMint;
+
+  return {
+    fundingDecimals: swapActive ? fundingToken.decimals : decimals,
+    fundingSymbol: swapActive ? fundingToken.symbol : symbol,
+    fundingToken,
+    fundingTokens,
+    setFundingMint,
+    swapActive,
+  };
+}
+
+function walletFundingBalance(
+  wallet: EarnFundingWallet | undefined,
+  token: EarnSwapSourceToken | undefined,
+  decimals: number | undefined
+): string | undefined {
+  if (!wallet || !token || decimals === undefined) return undefined;
+  return walletBalanceForMint(wallet, token.mint, decimals);
+}
+
+function DepositFundingTokenPicker({
+  disabled,
+  onSelect,
+  selectedMint,
+  tokens,
+  title,
+}: {
+  disabled: boolean;
+  onSelect: (mint: string) => void;
+  selectedMint: string | undefined;
+  tokens: EarnSwapSourceToken[];
+  title: string;
+}) {
+  return (
+    <fieldset className="mt-4" disabled={disabled}>
+      <legend className="text-sm font-medium text-primary">{title}</legend>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {tokens.map((token) => {
+          const checked = token.mint === selectedMint;
+          return (
+            <label
+              className={cn(
+                "cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors",
+                checked
+                  ? "border-primary bg-fill-subtle text-primary"
+                  : "border-border-default text-secondary hover:border-border-strong"
+              )}
+              key={token.mint}
+            >
+              <input
+                checked={checked}
+                className="sr-only"
+                name="earn-vault-deposit-funding-token"
+                onChange={() => onSelect(token.mint)}
+                type="radio"
+                value={token.mint}
+              />
+              {token.symbol}
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+function DepositSwapSummaryRow({
+  active,
+  label,
+  value,
+}: {
+  active: boolean;
+  label: string;
+  value: string;
+}) {
+  if (!active) return null;
+  return (
+    <div className="flex items-baseline justify-between gap-5 py-1">
+      <dt className="text-tertiary">{label}</dt>
+      <dd className="text-right text-primary">{value}</dd>
+    </div>
+  );
+}
+
+function DepositSwapReviewNotice({
+  active,
+  fundingSymbol,
+  symbol,
+}: {
+  active: boolean;
+  fundingSymbol: string;
+  symbol: string;
+}) {
+  const t = useTranslations();
+  if (!active) return null;
+
+  return (
+    <div
+      className="mt-5 flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3"
+      data-earn-swap-review="true"
+      role="note"
+    >
+      <ArrowRightLeftIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-primary">
+          {t("DashboardEarn.deposit.vaultSwapReviewTitle")}
+        </p>
+        <p className="mt-1 text-xs leading-5 text-secondary">
+          {t("DashboardEarn.deposit.vaultSwapReviewBody", {
+            source: fundingSymbol,
+            target: symbol,
+          })}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function DepositReviewDetails({
+  amount,
+  backing,
+  fundingMint,
+  fundingSymbol,
+  minSharesOut,
+  quote,
+  selectedWallet,
+  strategyName,
+  swapActive,
+  symbol,
+}: {
+  amount: string;
+  backing: string | undefined;
+  fundingMint: string | undefined;
+  fundingSymbol: string;
+  minSharesOut: string | undefined;
+  quote: VaultQuoteState<EarnVaultDepositPreview>;
+  selectedWallet: EarnFundingWallet | undefined;
+  strategyName: string;
+  swapActive: boolean;
+  symbol: string;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+
+  return (
+    <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
+      <div className="flex items-baseline justify-between gap-5">
+        <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultAmount")}</dt>
+        <dd className="text-right tabular-nums text-primary">
+          {formatTokenValue(amount, fundingMint, locale)}
+        </dd>
+      </div>
+      {selectedWallet ? (
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultFrom")}</dt>
+          <dd className="text-right text-primary">
+            {walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))}
+          </dd>
+        </div>
+      ) : null}
+      <div className="flex items-baseline justify-between gap-5">
+        <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultPayWith")}</dt>
+        <dd className="text-right text-primary">{fundingSymbol}</dd>
+      </div>
+      <div className="flex items-baseline justify-between gap-5">
+        <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
+        <dd className="max-w-64 text-right text-primary">{strategyName}</dd>
+      </div>
+      {backing ? (
+        <div className="flex items-baseline justify-between gap-5">
+          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultBacking")}</dt>
+          <dd className="text-right text-primary">{backing}</dd>
+        </div>
+      ) : null}
+      <DepositSwapSummaryRow
+        active={swapActive}
+        label={t("DashboardEarn.deposit.vaultSwapRow")}
+        value={t("DashboardEarn.deposit.vaultSwapVia", {
+          source: fundingSymbol,
+          target: symbol,
+        })}
+      />
+      <DepositQuoteSummaryRows minSharesOut={minSharesOut} quote={quote} />
+    </dl>
+  );
+}
+
+interface DepositDetailsStepProps {
+  amountError: string | null;
+  amountInput: string;
+  continueBlocked: boolean;
+  decimals: number | undefined;
+  depositMint: string | undefined;
+  fundingDecimals: number | undefined;
+  fundingToken: EarnSwapSourceToken | undefined;
+  fundingTokens: EarnSwapSourceToken[];
+  onAmountChange: (value: string) => void;
+  onContinue: () => void;
+  onFundingSelect: (mint: string) => void;
+  onMax: () => void;
+  onWalletSelect: (walletId: string) => void;
+  overKnownBalance: boolean;
+  selectedWallet: EarnFundingWallet | undefined;
+  selectedWalletBalance: string | undefined;
+  submitting: boolean;
+  wallets: readonly EarnFundingWallet[] | undefined;
+  walletsError: unknown;
+  walletsLoading: boolean;
+}
+
+function DepositDetailsStep(props: DepositDetailsStepProps) {
+  const {
+    amountError,
+    amountInput,
+    continueBlocked,
+    decimals,
+    depositMint,
+    fundingDecimals,
+    fundingToken,
+    fundingTokens,
+    onAmountChange,
+    onContinue,
+    onFundingSelect,
+    onMax,
+    onWalletSelect,
+    overKnownBalance,
+    selectedWallet,
+    selectedWalletBalance,
+    submitting,
+    wallets,
+    walletsError,
+    walletsLoading,
+  } = props;
+  const locale = useLocale();
+  const t = useTranslations();
+
+  return (
+    <>
+      <DepositWalletPicker
+        decimals={fundingDecimals}
+        depositMint={fundingToken?.mint ?? depositMint}
+        onSelect={onWalletSelect}
+        selectedWalletId={selectedWallet?.id ?? null}
+        submitting={submitting}
+        wallets={wallets}
+        walletsError={walletsError}
+        walletsLoading={walletsLoading}
+      />
+
+      <DepositFundingTokenPicker
+        disabled={submitting}
+        onSelect={onFundingSelect}
+        selectedMint={fundingToken?.mint ?? depositMint}
+        title={t("DashboardEarn.deposit.vaultPayWith")}
+        tokens={fundingTokens}
+      />
+
+      <div className="mt-4 flex flex-col gap-2">
+        <Label htmlFor="earn-vault-deposit-amount">{t("DashboardEarn.deposit.vaultAmount")}</Label>
+        <Input
+          aria-describedby="earn-vault-deposit-balance"
+          aria-invalid={amountError ? true : undefined}
+          disabled={submitting || !selectedWallet || decimals === undefined}
+          id="earn-vault-deposit-amount"
+          inputMode="decimal"
+          leadingAddon={<span aria-hidden="true">$</span>}
+          maxLength={MAX_AMOUNT_LENGTH}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => onAmountChange(event.target.value)}
+          placeholder="0.00"
+          action={
+            <EarnAmountMaxButton
+              disabled={
+                submitting ||
+                !selectedWallet ||
+                selectedWalletBalance === undefined ||
+                !isPositiveDecimal(selectedWalletBalance)
+              }
+              label={t("DashboardEarn.vaultWithdraw.max")}
+              onClick={onMax}
+            />
+          }
+          value={amountInput}
+        />
+        <div id="earn-vault-deposit-balance" className="sr-only">
+          {selectedWallet
+            ? selectedWalletBalance === undefined
+              ? t("DashboardEarn.deposit.vaultBalanceUnknown")
+              : t("DashboardEarn.deposit.vaultBalanceAvailable", {
+                  amount: formatTokenValue(
+                    selectedWalletBalance,
+                    fundingToken?.mint ?? depositMint,
+                    locale
+                  ),
+                })
+            : null}
+        </div>
+        {amountError ? (
+          <p className="text-xs text-error" role="alert">
+            {amountError}
+          </p>
+        ) : null}
+        {overKnownBalance ? (
+          <p className="text-xs text-warning" role="status">
+            {t("DashboardEarn.deposit.vaultOverBalance")}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="mt-6">
+        <Button className="!w-full" disabled={continueBlocked} onClick={onContinue}>
+          {t("DashboardEarn.deposit.continueAction")}
+        </Button>
+      </div>
+    </>
+  );
+}
+
+interface DepositReviewStepProps {
+  amount: string;
+  backing: string | undefined;
+  fundingMint: string | undefined;
+  fundingSymbol: string;
+  minSharesOut: string | undefined;
+  onBack: () => void;
+  onSlippageChange: (value: string) => void;
+  onSlippageToggle: () => void;
+  onSubmit: () => void;
+  quote: VaultQuoteState<EarnVaultDepositPreview>;
+  selectedWallet: EarnFundingWallet | undefined;
+  slippageBps: number | null;
+  slippageInput: string;
+  slippageInvalid: boolean;
+  slippageOpen: boolean;
+  slippagePolicy: EarnStrategySlippagePolicy | null;
+  strategy: EarnStrategy;
+  submitBlocked: boolean;
+  submitError: string | null;
+  submitting: boolean;
+  swapActive: boolean;
+  symbol: string;
+}
+
+function DepositReviewStep(props: DepositReviewStepProps) {
+  const {
+    amount,
+    backing,
+    fundingMint,
+    fundingSymbol,
+    minSharesOut,
+    onBack,
+    onSlippageChange,
+    onSlippageToggle,
+    onSubmit,
+    quote,
+    selectedWallet,
+    slippageBps,
+    slippageInput,
+    slippageInvalid,
+    slippageOpen,
+    slippagePolicy,
+    strategy,
+    submitBlocked,
+    submitError,
+    submitting,
+    swapActive,
+    symbol,
+  } = props;
+  const t = useTranslations();
+
+  return (
+    <>
+      <p className="mt-1 text-sm text-secondary">{t("DashboardEarn.deposit.progressReview")}</p>
+      <DepositSwapReviewNotice active={swapActive} fundingSymbol={fundingSymbol} symbol={symbol} />
+      <DepositReviewDetails
+        amount={amount}
+        backing={backing}
+        fundingMint={fundingMint}
+        fundingSymbol={fundingSymbol}
+        minSharesOut={minSharesOut}
+        quote={quote}
+        selectedWallet={selectedWallet}
+        strategyName={strategy.name}
+        swapActive={swapActive}
+        symbol={symbol}
+      />
+
+      <VaultQuoteNotices
+        decimals={(preview) => preview.shareDecimals}
+        keys={{
+          blocked: "DashboardEarn.deposit.vaultQuoteBlocked",
+          loading: "DashboardEarn.deposit.vaultQuoteLoading",
+          unavailable: "DashboardEarn.deposit.vaultQuoteUnavailable",
+          zero: "DashboardEarn.deposit.vaultQuoteZeroShares",
+        }}
+        quantity={(preview) => preview.sharesOut}
+        quote={quote}
+      />
+
+      {slippagePolicy ? (
+        <VaultSlippageSection
+          help={t("DashboardEarn.deposit.vaultSlippageHelp")}
+          idPrefix="earn-vault-deposit"
+          input={slippageInput}
+          invalid={slippageInvalid}
+          onChange={onSlippageChange}
+          onToggle={onSlippageToggle}
+          open={slippageOpen}
+          submitting={submitting}
+          toleranceBps={slippageBps}
+        />
+      ) : null}
+
+      <DepositConfirmNote feeSponsored={strategy.feeSponsored} swapActive={swapActive} />
+      {submitError ? <EarnErrorNote message={submitError} /> : null}
+
+      <div className="mt-6 flex gap-2">
+        <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
+          {t("DashboardEarn.deposit.back")}
+        </Button>
+        <Button className="flex-[2]" disabled={submitting || submitBlocked} onClick={onSubmit}>
+          {submitting ? (
+            <span className="inline-flex items-center gap-2">
+              <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
+              {t("DashboardEarn.deposit.vaultSubmitting")}
+            </span>
+          ) : (
+            t("DashboardEarn.deposit.vaultSubmit")
+          )}
+        </Button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Deposit from one SDP custody wallet into one non-custodial strategy. The
+ * chosen wallet signs and holds the shares; no vault address is ever presented
+ * as a funding address.
+ */
+export function EarnVaultDepositModal({
+  strategy,
+  projectId,
+  onClose,
+  onDeposited,
+  onSubmissionStart,
+  onMovementUpdated,
+}: EarnVaultDepositModalProps) {
+  const t = useTranslations();
+  const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
+  const [walletId, setWalletId] = useState<string | null>(null);
+  const [amountInput, setAmountInput] = useState("");
+  // The catalogue row's own answer, published per environment by the API
+  // (`earnDepositSlippagePolicy` in @sdp/types): non-null means the build
+  // REQUIRES an explicit share floor, which the dashboard derives from a LIVE
+  // quote and never from the deposit amount. Most production rows are non-null;
+  // a next-NAV provider order publishes null because its later settlement
+  // cannot be bounded by the Solana payment leg. Null renders no slippage
+  // control at all.
+  const slippagePolicy = strategy.depositSlippage;
+  const [slippageInput, setSlippageInput] = useState(() => initialSlippageInput(slippagePolicy));
+  const [slippageOpen, setSlippageOpen] = useState(false);
+  const [step, setStep] = useState<"details" | "review">("details");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<DepositOutcome | null>(null);
+  const submittingRef = useRef(false);
+  const requestControllerRef = useRef<AbortController | null>(null);
+  const observedDeposit = useEarnVaultDepositOutcome(
+    observableVaultMovement(outcome)?.movementId,
+    undefined,
+    onMovementUpdated
+  );
+  const visibleOutcome = mergeObservedVaultMovement(outcome, observedDeposit);
+  const progressStep = depositProgressStep(visibleOutcome, step);
+  const providerOrder = earnProviderDepositSettlement(strategy.provider) === "provider_order";
+  const progressSteps = vaultMovementProgressSteps(
+    {
+      complete: t("DashboardEarn.deposit.flowComplete"),
+      details: t("DashboardEarn.deposit.flowDetails"),
+      processing: t("DashboardEarn.deposit.flowProcessing"),
+      providerSettlement: t("DashboardEarn.deposit.flowProviderSettlement"),
+      review: t("DashboardEarn.deposit.flowReview"),
+    },
+    providerOrder
+  );
+  const movementProcessing = vaultMovementProcessing(visibleOutcome, ["pending", "submitted"]);
+  const panelKey = vaultMovementPanelKey(visibleOutcome, step, "deposit");
+  const contentRef = useModalFocus({
+    focusKey: panelKey,
+    initialFocusSelector: "[data-modal-focus-target]",
+    fallbackAttribute: "data-earn-vault-deposit-focus-fallback",
+    fallbackValue: strategy.id,
+    contentDataKey: "panel",
+  });
+
+  // Unmount "aborts" the SUBMISSION, not the request: the signal gates state
+  // updates and the outcome screen, while the POST itself runs to completion so
+  // its answer still reaches the key store (see the submit path).
+  useEffect(
+    () => () => {
+      requestControllerRef.current?.abort();
+    },
+    []
+  );
+
+  const { decimals, depositMint, symbol } = depositAssetMetadata(strategy);
+  const executableWallets = useMemo(
+    () => wallets?.filter((wallet) => wallet.isRuntimeExecutionAllowed),
+    [wallets]
+  );
+  const selectedWallet = useMemo(() => {
+    const explicitlySelected = executableWallets?.find((wallet) => wallet.id === walletId);
+    if (explicitlySelected) return explicitlySelected;
+    return executableWallets?.length === 1 ? executableWallets[0] : undefined;
+  }, [executableWallets, walletId]);
+  const fundingWallets = useMemo(
+    () => (selectedWallet ? [selectedWallet] : executableWallets),
+    [executableWallets, selectedWallet]
+  );
+  // What the deposit may be PAID in: every supported swap-source stablecoin
+  // held by the selected wallet (or across selectable wallets until one is
+  // chosen), ranked by observed balance so the largest is the default. Unknown
+  // balances remain visible after known holdings rather than being guessed
+  // absent. Paying in a token other than the vault's own sends
+  // `sourceTokenMint`, and the API prepends a Jupiter swap in the transaction.
+  const {
+    fundingDecimals,
+    fundingSymbol,
+    fundingToken,
+    fundingTokens,
+    setFundingMint,
+    swapActive,
+  } = useVaultFundingToken({
+    strategy,
+    depositMint,
+    decimals,
+    symbol,
+    wallets: fundingWallets,
+  });
+  const selectedWalletBalance = walletFundingBalance(selectedWallet, fundingToken, fundingDecimals);
+  const backing = strategySourceLabel(strategy, t);
+  const {
+    amountError,
+    amountValidation,
+    continueBlocked,
+    overKnownBalance,
+    quoteAmount,
+    quoteKey,
+    slippageBps,
+    slippageInvalid,
+  } = deriveDepositFormState({
+    amountInput,
+    fundingDecimals,
+    selectedWallet,
+    selectedWalletBalance,
+    slippageInput,
+    slippagePolicy,
+    strategyId: strategy.id,
+    t,
+  });
+  const [quoteRefreshKey, setQuoteRefreshKey] = useState(0);
+  const rawQuote = useDebouncedVaultQuote<EarnVaultDepositPreview>(
+    quoteKey,
+    (signal) =>
+      fetchEarnVaultDepositPreview({ strategyId: strategy.id, amount: quoteAmount ?? "" }, signal),
+    quoteRefreshKey
+  );
+  const quote = quoteForKey(rawQuote, quoteKey);
+  const minSharesOut = derivedMinOut(
+    slippageBps,
+    quote,
+    (preview) => preview.sharesOut,
+    (preview) => preview.shareDecimals
+  );
+  const submitBlocked = continueBlocked || (slippagePolicy !== null && minSharesOut === undefined);
+
+  /**
+   * EXPIRY BACKSTOP (PRO-1691), the state half. The quote hook re-quotes on
+   * its own, but timers throttle in background tabs, so the floor on screen
+   * can be older than the TTL at submit. A replayed floor — a held or kept
+   * key's minted floor, which must go out verbatim — or a fresh one passes
+   * straight through. An expired one is revalidated first; a rate that moved
+   * beyond it stops the submission on THIS side of the API, through the same
+   * copy and control as a blown floor, and either way the displayed quote
+   * re-syncs. Returns whether to proceed.
+   */
+  async function floorSafeToSubmit(
+    controller: AbortController,
+    amount: string,
+    replay: VaultFloorReplay,
+    floor: string | null
+  ): Promise<boolean> {
+    if (replay.kind !== "fresh" || floor === null || !isExpiredQuote(quote)) return true;
+    const verdict = await revalidateExpiredFloor(strategy.id, amount, floor, controller.signal);
+    if (verdict === "still_satisfiable") return true;
+    if (verdict === "aborted") return false;
+    if (verdict === "floor_exceeded") setSlippageOpen(true);
+    setQuoteRefreshKey((refresh) => refresh + 1);
+    setSubmitError(
+      verdict === "floor_exceeded"
+        ? t("DashboardEarn.deposit.vaultSlippageExceeded")
+        : t("DashboardEarn.deposit.vaultQuoteUnavailable")
+    );
+    return false;
+  }
+
+  async function submitResolvedIntent(
+    controller: AbortController,
+    wallet: EarnFundingWallet,
+    amount: string
+  ) {
+    // Keyed by the request itself and persisted per tab, so re-pressing submit
+    // after a timeout — or after a reload that lost this component entirely —
+    // replays the same key instead of signing a second transfer. A swap-funded
+    // deposit keys on the funding mint too: paying in a different token is a
+    // different request.
+    const fingerprint = vaultDepositRequestFingerprint({
+      projectId,
+      strategyId: strategy.id,
+      custodyWalletId: wallet.id,
+      amount,
+      toleranceBps: slippagePolicy === null ? null : slippageBps,
+      ...(swapActive ? { sourceTokenMint: fundingToken.mint } : {}),
+    });
+    const resolvedKey = await resolveHeldIdempotencyKey(
+      vaultDepositIdempotencyKeyStore,
+      fingerprint,
+      controller.signal,
+      fetchEarnVaultDepositByRequestId
+    );
+    if (resolvedKey.kind === "aborted") return;
+    if (resolvedKey.kind === "unavailable") {
+      setSubmitError(t("DashboardEarn.deposit.vaultHeldKeyUnavailable"));
+      return;
+    }
+
+    // A HELD key must replay the floor it was MINTED with, verbatim: the API's
+    // idempotency fingerprint includes `minSharesOut`, so pairing the held key
+    // with a freshly quoted floor would be refused as a changed request —
+    // stranding the approval the hold exists to wait on. A KEPT key — one a
+    // prior ambiguous attempt (a 5xx, a lost answer) left live — must replay
+    // its minted floor too, and worse: the changed-request refusal is a 409,
+    // which retires the key and lets the next submit mint a fresh one while
+    // the first attempt may already have executed. The floor memo answers for
+    // both; a fresh key takes the freshly derived floor, and records it for
+    // exactly that future replay. A reuse whose memo LOST the floor cannot
+    // re-floor safely at all — it stops here, submitting nothing, rather than
+    // pair the live key with a changed request.
+    const replay = floorToReplay(
+      resolvedKey,
+      recallVaultDepositFloor,
+      fingerprint,
+      minSharesOut ?? null
+    );
+    if (replay.kind === "unavailable") {
+      setSubmitError(t("DashboardEarn.deposit.vaultFloorUnavailable"));
+      return;
+    }
+
+    if (!(await floorSafeToSubmit(controller, amount, replay, replay.floor))) return;
+    rememberVaultDepositFloor(fingerprint, replay.floor);
+
+    // The value-moving POST deliberately takes NO abort signal. The server
+    // processes the request whether or not this component survives it, so
+    // aborting on unmount only blinds the client to an answer it needs: a
+    // 202 approval hold whose key was never PINNED stays on the 15-minute
+    // TTL while the approval itself lives for hours, and the eventual
+    // resubmit mints a fresh key — a second approval request for one intent.
+    // The controller still exists, but it gates the UI below, never the
+    // request or the key bookkeeping.
+    const submittedAt = Date.now();
+    const submission = vaultDepositIdempotencyKeyStore.beginSubmission(fingerprint);
+    if (!submission) {
+      setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
+      return;
+    }
+    const result = await createEarnVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: wallet.id,
+        amount,
+        ...(replay.floor === null ? {} : { minSharesOut: replay.floor }),
+        ...(swapActive
+          ? {
+              sourceTokenMint: fundingToken.mint,
+              swapSlippageBps: EARN_SWAP_DEFAULT_SLIPPAGE_BPS,
+            }
+          : {}),
+      },
+      resolvedKey.key
+    );
+    // Key bookkeeping FIRST and unconditionally: the store outlives the
+    // component, so an unmount mid-flight must not skip recording what the
+    // server just answered.
+    const disposition = applyIdempotencyKeyOutcome(
+      vaultDepositIdempotencyKeyStore,
+      fingerprint,
+      result,
+      submission.wasUncertain
+    );
+    // A retired key can never be replayed, so its remembered floor is dead
+    // weight the next fresh derivation must not inherit.
+    if (disposition === "retired") forgetVaultDepositFloor(fingerprint);
+    if (controller.signal.aborted) return;
+    const resolution = resolveDepositSubmission(
+      result,
+      amount,
+      walletDisplayName(wallet, t("DashboardEarn.deposit.walletUnnamed")),
+      t("DashboardEarn.deposit.vaultSubmitError"),
+      resolvedKey.wasHeld,
+      // A blown floor gets THIS surface's own words and the control that
+      // fixes it, not a relayed simulation log.
+      t("DashboardEarn.deposit.vaultSlippageExceeded")
+    );
+    if (resolution.kind === "error") {
+      if (resolution.slippageExceeded) {
+        // Open the control that fixes it, and re-quote: the retry's floor must
+        // come from the rate that refused, not the one that preceded it.
+        setSlippageOpen(true);
+        setQuoteRefreshKey((key) => key + 1);
+      }
+      setSubmitError(resolution.message);
+      return;
+    }
+    setOutcome(resolution.outcome);
+    if (resolution.deposited) {
+      onDeposited?.(resolution.deposited, {
+        amount,
+        custodyWalletId: wallet.id,
+        submittedAt,
+      });
+    }
+  }
+
+  async function submit() {
+    if (
+      submittingRef.current ||
+      submitBlocked ||
+      !selectedWallet ||
+      amountValidation.kind !== "valid"
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = controller;
+    // Locked BEFORE the first await below, so the spent-key check cannot be
+    // raced by a second press.
+    submittingRef.current = true;
+    setSubmitting(true);
+    const finishSubmission = onSubmissionStart?.(selectedWallet.id);
+    setSubmitError(null);
+
+    try {
+      await submitResolvedIntent(controller, selectedWallet, amountValidation.canonicalAmount);
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        setSubmitError(
+          cause instanceof Error && cause.message
+            ? cause.message
+            : t("DashboardEarn.deposit.vaultSubmitError")
+        );
+      }
+    } finally {
+      if (requestControllerRef.current === controller) requestControllerRef.current = null;
+      finishSubmission?.();
+      submittingRef.current = false;
+      if (!controller.signal.aborted) setSubmitting(false);
+    }
+  }
+
+  const modalLabel = t("DashboardEarn.deposit.vaultDepositTitle", {
+    strategy: strategy.name,
+  });
+
+  if (visibleOutcome) {
+    return (
+      <Modal
+        isOpen
+        ariaLabel={modalLabel}
+        contentClassName={movementProcessing ? "earn-processing-modal" : undefined}
+        onClose={onClose}
+        size="sm"
+      >
+        <div className="p-6" ref={contentRef}>
+          <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
+          <EarnFlowTransition stepKey={panelKey}>
+            <DepositResult
+              fundingMint={fundingToken?.mint}
+              outcome={visibleOutcome}
+              onClose={onClose}
+            />
+          </EarnFlowTransition>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="sm">
+      <div aria-busy={submitting} className="p-6" ref={contentRef}>
+        <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
+        <EarnFlowTransition stepKey={step}>
+          <h2
+            className="pr-8 text-lg font-medium leading-6 text-primary outline-none"
+            data-modal-focus-target
+            tabIndex={-1}
+          >
+            {modalLabel}
+          </h2>
+
+          {step === "details" ? (
+            <DepositDetailsStep
+              amountError={amountError}
+              amountInput={amountInput}
+              continueBlocked={continueBlocked}
+              decimals={decimals}
+              depositMint={depositMint}
+              fundingDecimals={fundingDecimals}
+              fundingToken={fundingToken}
+              fundingTokens={fundingTokens}
+              onAmountChange={(value) => {
+                setAmountInput(value);
+                setSubmitError(null);
+              }}
+              onContinue={() => {
+                setSubmitError(null);
+                setStep("review");
+              }}
+              onFundingSelect={(mint) => {
+                setFundingMint(mint);
+                setSubmitError(null);
+              }}
+              onMax={() => {
+                if (selectedWalletBalance === undefined) return;
+                setAmountInput(selectedWalletBalance);
+                setSubmitError(null);
+              }}
+              onWalletSelect={(selectedWalletId) => {
+                setWalletId(selectedWalletId);
+                setSubmitError(null);
+              }}
+              overKnownBalance={overKnownBalance}
+              selectedWallet={selectedWallet}
+              selectedWalletBalance={selectedWalletBalance}
+              submitting={submitting}
+              wallets={wallets}
+              walletsError={walletsError}
+              walletsLoading={walletsLoading}
+            />
+          ) : (
+            <DepositReviewStep
+              amount={
+                amountValidation.kind === "valid" ? amountValidation.canonicalAmount : amountInput
+              }
+              backing={backing}
+              fundingMint={fundingToken?.mint}
+              fundingSymbol={fundingSymbol}
+              minSharesOut={minSharesOut}
+              onBack={() => {
+                setSubmitError(null);
+                setStep("details");
+              }}
+              onSlippageChange={(value) => {
+                setSlippageInput(value);
+                setSubmitError(null);
+              }}
+              onSlippageToggle={() => setSlippageOpen((open) => !open)}
+              onSubmit={() => void submit()}
+              quote={quote}
+              selectedWallet={selectedWallet}
+              slippageBps={slippageBps}
+              slippageInput={slippageInput}
+              slippageInvalid={slippageInvalid}
+              slippageOpen={slippageOpen}
+              slippagePolicy={slippagePolicy}
+              strategy={strategy}
+              submitBlocked={submitBlocked}
+              submitError={submitError}
+              submitting={submitting}
+              swapActive={swapActive}
+              symbol={symbol}
+            />
+          )}
+        </EarnFlowTransition>
+      </div>
+    </Modal>
+  );
+}

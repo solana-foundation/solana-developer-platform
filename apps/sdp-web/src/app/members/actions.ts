@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
 
 // createSdpApiClient is project-scoped rather than org-scoped on purpose:
@@ -58,7 +58,7 @@ export async function removeMember(memberId: string): Promise<RemoveMemberResult
     return { ok: false, error: readableApiError(error) };
   }
 
-  revalidatePath("/dashboard/settings");
+  revalidatePath(await requestProjectHref("/dashboard/settings"));
   return { ok: true };
 }
 
@@ -72,7 +72,7 @@ export async function revokeInvitation(invitationId: string): Promise<RevokeInvi
     return { ok: false, error: readableApiError(error) };
   }
 
-  revalidatePath("/dashboard/settings");
+  revalidatePath(await requestProjectHref("/dashboard/settings"));
   return { ok: true };
 }
 
@@ -130,6 +130,6 @@ export async function inviteMember(formData: FormData): Promise<InviteMemberResu
   }
 
   // Members render inside the settings page; /members only redirects there.
-  revalidatePath("/dashboard/settings");
+  revalidatePath(await requestProjectHref("/dashboard/settings"));
   return { ok: true, email };
 }

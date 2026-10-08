@@ -2,13 +2,10 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { type UrlTableQueryAdapter, useUrlTableFilters } from "./use-url-table-filters";
 
-const replaceMock = vi.fn();
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: replaceMock }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 interface TestFilters {
   status: "all" | "open" | "closed";
@@ -32,7 +29,7 @@ function href(state: TestFilters): string {
 
 afterEach(() => {
   vi.useRealTimers();
-  replaceMock.mockClear();
+  resetDashboardNavigation();
   window.history.replaceState(null, "", "/");
 });
 
@@ -52,12 +49,14 @@ describe("useUrlTableFilters", () => {
       result.current.updateFilters({ status: "open" });
     });
 
-    expect(replaceMock).toHaveBeenCalledTimes(1);
-    expect(replaceMock).toHaveBeenLastCalledWith("/trades?status=open&q=ab", { scroll: false });
+    expect(dashboardRouter.replace).toHaveBeenCalledTimes(1);
+    expect(dashboardRouter.replace).toHaveBeenLastCalledWith("/trades?status=open&q=ab", {
+      scroll: false,
+    });
     expect(result.current.state).toEqual({ status: "open", query: "ab" });
 
     act(() => vi.advanceTimersByTime(400));
-    expect(replaceMock).toHaveBeenCalledTimes(1);
+    expect(dashboardRouter.replace).toHaveBeenCalledTimes(1);
   });
 
   it("builds a later debounced query update from the latest filter state", () => {
@@ -76,7 +75,7 @@ describe("useUrlTableFilters", () => {
     });
     act(() => vi.advanceTimersByTime(400));
 
-    expect(replaceMock).toHaveBeenLastCalledWith("/trades?status=closed&q=needle", {
+    expect(dashboardRouter.replace).toHaveBeenLastCalledWith("/trades?status=closed&q=needle", {
       scroll: false,
     });
   });
@@ -106,6 +105,6 @@ describe("useUrlTableFilters", () => {
 
     expect(view.result.current.queryInput).toBe("history");
     act(() => vi.advanceTimersByTime(400));
-    expect(replaceMock).not.toHaveBeenCalledWith("/trades?q=abc", { scroll: false });
+    expect(dashboardRouter.replace).not.toHaveBeenCalledWith("/trades?q=abc", { scroll: false });
   });
 });

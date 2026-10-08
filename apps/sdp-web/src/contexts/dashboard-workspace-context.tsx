@@ -2,7 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import type { Project, SdpEnvironment } from "@sdp/types";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   createContext,
   type ReactNode,
@@ -18,11 +18,13 @@ import { SWRConfig } from "swr";
 import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
+import { projectSwitchDestination } from "@/lib/dashboard-navigation-loading";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { isNewDesignPage } from "@/lib/design-modules";
 import { clearStoredApiKeySecrets, syncStoredApiKeySecretScope } from "@/lib/playground-api-keys";
-import { reconcileProjectCookieAction, selectProjectAction } from "@/lib/project-cookie-action";
+import { useDashboardPathname, useProjectId } from "@/lib/use-dashboard-project";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
 export type IssuanceWorkspaceTab = "tokens" | "playground";
@@ -43,14 +45,14 @@ type DashboardWorkspaceContextValue = {
   projects: Project[];
   sandboxProject: Project | null;
   productionProject: Project | null;
-  selectedProjectId: string | null;
+  selectedProjectId: string;
   sdpEnvironment: SdpEnvironment;
   isSidebarOpen: boolean;
   issuanceTab: IssuanceWorkspaceTab;
   playgroundApiKeys: DashboardPlaygroundApiKeyOption[];
   selectedPlaygroundApiKeyId: string | null;
   isProjectSwitching: boolean;
-  selectProject: (projectId: string | null) => void;
+  selectProject: (projectId: string) => void;
   setPlaygroundApiKeys: (keys: DashboardPlaygroundApiKeyOption[]) => void;
   setSelectedPlaygroundApiKeyId: (id: string | null) => void;
   setSidebarOpen: (open: boolean) => void;
@@ -69,8 +71,6 @@ type DashboardWorkspaceProviderProps = {
   flags: DashboardFlags;
   serverDashboardCacheScope: DashboardCacheScope;
   projects: Project[];
-  initialSelectedProjectId: string | null;
-  shouldRepairInitialProjectCookie: boolean;
   initialSidebarOpen?: boolean;
 };
 
@@ -82,13 +82,11 @@ export function DashboardWorkspaceProvider({
   flags,
   serverDashboardCacheScope,
   projects,
-  initialSelectedProjectId,
-  shouldRepairInitialProjectCookie,
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = useDashboardPathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const [isSidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen);
   const sandboxProject = useMemo(
@@ -100,11 +98,9 @@ export function DashboardWorkspaceProvider({
     [projects]
   );
 
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    initialSelectedProjectId
-  );
+  const selectedProjectId = useProjectId();
   const sdpEnvironment: SdpEnvironment =
-    selectedProjectId && selectedProjectId === productionProject?.id ? "production" : "sandbox";
+    selectedProjectId === productionProject?.id ? "production" : "sandbox";
   const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
     DashboardPlaygroundApiKeyOption[]
   >([]);
@@ -160,37 +156,26 @@ export function DashboardWorkspaceProvider({
   );
 
   const selectProject = useCallback(
-    (projectId: string | null) => {
+    (projectId: string) => {
       if (projectId !== selectedProjectId) {
         clearStoredApiKeySecrets();
       }
-      startProjectSwitchTransition(async () => {
-        await selectProjectAction(projectId);
-        setSelectedProjectId(projectId);
-        router.replace(pathnameRef.current);
+      startProjectSwitchTransition(() => {
+        router.push(projectHref(projectId, projectSwitchDestination(pathnameRef.current)));
       });
     },
     [router, selectedProjectId]
   );
 
-  const initialCookieRepairStarted = useRef(false);
-  useEffect(() => {
-    if (!shouldRepairInitialProjectCookie || initialCookieRepairStarted.current) return;
-
-    initialCookieRepairStarted.current = true;
-    void selectProjectAction(initialSelectedProjectId).catch(() => {
-      initialCookieRepairStarted.current = false;
-    });
-  }, [initialSelectedProjectId, shouldRepairInitialProjectCookie]);
-
+  // An Organization switched in Clerk leaves this URL naming the previous
+  // Organization's Project; the bare landing resolves the new one's.
   useEffect(() => {
     if (!auth.isLoaded || liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
       return;
     }
 
-    startProjectSwitchTransition(async () => {
-      const ok = await reconcileProjectCookieAction();
-      if (!ok) router.refresh();
+    startProjectSwitchTransition(() => {
+      router.replace("/dashboard");
     });
   }, [auth.isLoaded, liveDashboardCacheScopeKey, serverDashboardCacheScopeKey, router]);
 
