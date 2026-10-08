@@ -11,6 +11,7 @@
  */
 
 import { z } from "zod";
+import type { SdpEnvironment } from "./api-keys";
 import {
   BYOK_CUSTODY_PROVIDERS,
   type ByokCustodyProvider,
@@ -170,6 +171,92 @@ export function isCustodyProviderInReleaseChannel(
     default: {
       const exhaustive: never = mode;
       throw new Error(`Unknown custody mode: ${String(exhaustive)}`);
+    }
+  }
+}
+
+/**
+ * Whether a project in `environment` may run custody `provider` in `mode` at the
+ * pair's stage. A Production project runs only `stable` pairs, whatever the
+ * deployment's release channel (ADR 0006); a Sandbox project runs whatever the
+ * channel offers.
+ *
+ * @param environment - The project's environment.
+ * @param provider - The custody provider.
+ * @param mode - The custody mode the provider is used in.
+ * @returns True when the pair's stage meets the environment's bar.
+ */
+export function isCustodyProviderStageAllowedInEnvironment(
+  environment: SdpEnvironment,
+  provider: CustodyProvider,
+  mode: CustodyMode
+): boolean {
+  return meetsEnvironmentStageBar(environment, (releaseChannel) =>
+    isCustodyProviderInReleaseChannel(releaseChannel, provider, mode)
+  );
+}
+
+/**
+ * Whether a project in `environment` may use ramp `provider` at its stage. A
+ * Production project runs only `stable` providers, whatever the deployment's
+ * release channel; a Sandbox project runs whatever the channel offers.
+ *
+ * @param environment - The project's environment.
+ * @param provider - The ramp provider.
+ * @param rampProviderStages - `SDP_RAMP_PROVIDER_STAGES`; tests pass their own table.
+ * @returns True when the provider's stage meets the environment's bar.
+ */
+export function isRampProviderStageAllowedInEnvironment(
+  environment: SdpEnvironment,
+  provider: RampProviderId,
+  rampProviderStages: SdpRampProviderStages
+): boolean {
+  return meetsEnvironmentStageBar(environment, (releaseChannel) =>
+    isRampProviderInReleaseChannel(releaseChannel, provider, rampProviderStages)
+  );
+}
+
+/**
+ * Whether a project in `environment` may use `module` at its stage. A
+ * Production project runs only `stable` modules, whatever the deployment's
+ * release channel; a Sandbox project runs whatever the channel offers.
+ *
+ * @param environment - The project's environment.
+ * @param module - The module.
+ * @param rampProviderStages - `SDP_RAMP_PROVIDER_STAGES`; tests pass their own table.
+ * @returns True when the module's stage meets the environment's bar.
+ */
+export function isModuleStageAllowedInEnvironment(
+  environment: SdpEnvironment,
+  module: SdpModule,
+  rampProviderStages: SdpRampProviderStages
+): boolean {
+  return meetsEnvironmentStageBar(environment, (releaseChannel) =>
+    isModuleInReleaseChannel(releaseChannel, module, rampProviderStages)
+  );
+}
+
+/**
+ * The environment stage bar, the one place it lives: a Production project runs
+ * only what the `stable` release channel holds (ADR 0006); a Sandbox project has
+ * no bar beyond the deployment's channel.
+ *
+ * @param environment - The project's environment.
+ * @param isInReleaseChannel - Whether the thing being used is in a given release channel.
+ * @returns True when the environment's bar is met.
+ */
+function meetsEnvironmentStageBar(
+  environment: SdpEnvironment,
+  isInReleaseChannel: (releaseChannel: SdpReleaseChannel) => boolean
+): boolean {
+  switch (environment) {
+    case "sandbox":
+      return true;
+    case "production":
+      return isInReleaseChannel("stable");
+    default: {
+      const exhaustive: never = environment;
+      throw new Error(`Unknown SDP environment: ${String(exhaustive)}`);
     }
   }
 }

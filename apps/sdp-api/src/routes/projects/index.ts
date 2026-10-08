@@ -17,6 +17,7 @@ import {
 } from "./handlers/members";
 import { getProject, listProjects, updateProject } from "./handlers/projects";
 import { apiKeyProjectAccessMiddleware } from "./project-access";
+import projectProviderAvailability from "./provider-availability";
 import { addMemberSchema, updateMemberSchema, updateProjectSchema } from "./schemas";
 
 const projects = new Hono<{ Bindings: Env }>();
@@ -81,5 +82,11 @@ projects.post(
   validateBody(apiKeyCreateSchema),
   createProjectApiKey
 );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Project Provider Availability
+// ═══════════════════════════════════════════════════════════════════════════
+
+projects.route("/:projectId/provider-availability", projectProviderAvailability);
 
 export default projects;

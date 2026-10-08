@@ -77,6 +77,7 @@ import {
   prepareSeizeResponseSchema,
   prepareUpdateAuthorityResponseSchema,
   projectMemberResponseSchema,
+  projectProviderAvailabilityResponseSchema,
   projectResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
@@ -164,6 +165,9 @@ export const listProjectsResponse = successResponseSchema(listProjectsResponseSc
 export const listProjectMembersResponse = successResponseSchema(listProjectMembersResponseSchema);
 export const projectMemberResponse = successResponseSchema(projectMemberResponseSchema);
 export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKeysResponseSchema);
+export const projectProviderAvailabilityResponse = successResponseSchema(
+  projectProviderAvailabilityResponseSchema
+);
 export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);

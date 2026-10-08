@@ -1,3 +1,4 @@
+import { projectProviderAvailabilitySchema } from "@sdp/types";
 import {
   addMemberSchema as addMemberSchemaBase,
   updateMemberSchema as updateMemberSchemaBase,
@@ -127,6 +128,25 @@ export const listProjectApiKeysResponseSchema = z
     apiKeys: z.array(apiKeyListItemSchema).openapi({ description: "Project API keys." }),
   })
   .openapi({ description: "List of project API keys." });
+
+export const projectProviderAvailabilityResponseSchema = withOpenApi(
+  projectProviderAvailabilitySchema,
+  {
+    description:
+      "Every provider the deployment knows, with whether this project can use it, so an absent provider is never mistaken for an unavailable one. Custody entries list the custody modes the project can set the provider up in (empty when none); ramps, compliance and Earn entries carry `available`. A provider is available only when the deployment's release channel includes it, the organization is entitled to it, and, in a Production project, its stage is stable.",
+    example: {
+      projectId: "proj_example",
+      environment: "production",
+      providers: [
+        { family: "custody", provider: "privy", modes: ["byok"] },
+        { family: "custody", provider: "fireblocks", modes: [] },
+        { family: "compliance", provider: "range", available: true },
+        { family: "ramps", provider: "moonpay", available: false },
+        { family: "earn", provider: "kamino", available: false },
+      ],
+    },
+  }
+);
 
 export const updateProjectRequestSchema = updateProjectSchemaBase
   .extend({

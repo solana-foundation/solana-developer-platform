@@ -18,6 +18,7 @@ import {
   listProjectMembersResponse,
   listProjectsResponse,
   projectMemberResponse,
+  projectProviderAvailabilityResponse,
   projectResponse,
 } from "./responses";
 
@@ -87,6 +88,29 @@ export function registerProjectPaths(registry: OpenAPIRegistry) {
       200: {
         description: "Project updated",
         content: jsonContent(projectResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/projects/{projectId}/provider-availability",
+    tags: ["Projects"],
+    summary: "Get project provider availability",
+    operationId: "getProjectProviderAvailability",
+    description:
+      "Lists every provider the deployment knows across custody, compliance, ramps and Earn, with whether this project can use it. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403. A project outside the caller's organization, or another project for a project-bound API key, returns 404.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      params: z.object({
+        projectId: projectIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "Project provider availability",
+        content: jsonContent(projectProviderAvailabilityResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },

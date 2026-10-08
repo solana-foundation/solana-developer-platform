@@ -1,5 +1,6 @@
-import type { SdpEnvironment } from "./api-keys";
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
+import { z } from "zod";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "./api-keys";
+import { CUSTODY_MODES, CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
 import { EARN_EXECUTION_MODELS, type EarnPortfolioToken } from "./earn";
 import { HASTRA_DEPLOYMENTS } from "./hastra-programs";
 import { JUPITER_LEND_EARN_PROGRAM_IDS } from "./jupiter-lend-programs";
@@ -593,6 +594,51 @@ export interface OrganizationProviderAvailabilityResponse {
   tier: OrganizationTier;
   providers: OrganizationProviderAvailability;
 }
+
+/**
+ * One provider's availability for a project. Custody entries carry the custody
+ * modes the project may set the provider up in (`[]` = none); every other
+ * family carries whether the project may use the provider.
+ */
+export const projectProviderAvailabilityEntrySchema = z.discriminatedUnion("family", [
+  z.object({
+    family: z.literal("custody"),
+    provider: z.enum(CUSTODY_PROVIDERS),
+    modes: z.array(z.enum(CUSTODY_MODES)),
+  }),
+  z.object({
+    family: z.literal("compliance"),
+    provider: z.enum(COMPLIANCE_PROVIDERS),
+    available: z.boolean(),
+  }),
+  z.object({
+    family: z.literal("ramps"),
+    provider: z.enum(RAMP_PROVIDERS),
+    available: z.boolean(),
+  }),
+  z.object({
+    family: z.literal("earn"),
+    provider: z.enum(EARN_PROVIDERS),
+    available: z.boolean(),
+  }),
+]);
+
+export type ProjectProviderAvailabilityEntry = z.infer<
+  typeof projectProviderAvailabilityEntrySchema
+>;
+
+/**
+ * Which providers a project can use: every provider the deployment knows, in
+ * `ORGANIZATION_PROVIDER_FAMILIES` order and each family's provider tuple order,
+ * so a missing provider is never mistaken for an unavailable one.
+ */
+export const projectProviderAvailabilitySchema = z.object({
+  projectId: z.string(),
+  environment: z.enum(SDP_ENVIRONMENTS),
+  providers: z.array(projectProviderAvailabilityEntrySchema),
+});
+
+export type ProjectProviderAvailability = z.infer<typeof projectProviderAvailabilitySchema>;
 
 function createBooleanRecord<const T extends readonly string[]>(
   values: T,
