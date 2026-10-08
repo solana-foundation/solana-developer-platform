@@ -1,25 +1,21 @@
-import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, CustodyProvider } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
-  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
-    releaseChannel,
-    provider,
-    mode
-  ) =>
-    mode !== "managed" &&
-    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
-  return { ...original, isCustodyProviderInReleaseChannel };
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
 });
 
 const ORGANIZATION_ID = "org_managed_release_channel";
@@ -53,6 +49,7 @@ const PUBLIC_KEYS = {
 
 describe("Managed custody out of the release channel", () => {
   beforeEach(async () => {
+    custodyReleaseChannel.outOfChannelMode = "managed";
     vi.stubGlobal("fetch", vi.fn());
     await seedTestDatabase(env);
     await clearKVStores(env);
@@ -162,6 +159,7 @@ function channelRefusalBody(provider: CustodyProvider) {
     error: {
       code: "FORBIDDEN",
       message: custodyProviderNotInReleaseChannel(provider, "managed").message,
+      details: { reason: "custody_provider_not_in_release_channel" },
     },
     meta: { requestId: expect.any(String) },
   };
@@ -193,8 +191,6 @@ async function auditRows() {
 
 async function seedFixture(): Promise<void> {
   const db = getDb(env);
-  const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
   await db.execute(
     `INSERT INTO organizations (id, name, slug, tier, status)
      VALUES (?, 'Managed release channel', 'managed-release-channel', 'enterprise', 'active')`,
@@ -211,13 +207,15 @@ async function seedFixture(): Promise<void> {
     members: [],
     ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
   });
-  await db.execute(
-    `INSERT INTO api_keys
-       (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-        role, permissions, status)
-     VALUES (?, ?, ?, ?, 'Admin', ?, ?, 'api_admin', '["*"]', 'active')`,
-    [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash]
-  );
+  const keyHash = await seedProjectApiKey(db, env, {
+    key: API_KEY,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    createdBy: USER_ID,
+    role: "api_admin",
+    permissions: ["*"],
+  });
+  await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
   await seedTestCustodyRows(env, {
     configs: [
       {

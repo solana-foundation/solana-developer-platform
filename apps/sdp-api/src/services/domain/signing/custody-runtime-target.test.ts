@@ -21,26 +21,21 @@ import {
   insertTestCustodyScopeDefault,
   insertTestCustodyWalletRow,
   seedTestCustodyRows,
-  seedTestPrivyConnection,
 } from "@/test/helpers/custody";
+import {
+  seedTestPrivyConnection,
+  type TestPrivyConnectionSeed,
+} from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
-const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
-  outOfChannelMode: null,
-}));
-
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
-  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
-    releaseChannel,
-    provider,
-    mode
-  ) =>
-    mode !== custodyReleaseChannel.outOfChannelMode &&
-    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
-  return { ...original, isCustodyProviderInReleaseChannel };
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
 });
 
 const ORGANIZATION_ID = "org_runtime_targets";
@@ -53,7 +48,7 @@ const SECOND_CONNECTION_PUBLIC_KEY = "Stake1111111111111111111111111111111111111
 interface ConnectionSeed {
   id: string;
   credentialId: string;
-  lastCheckStatus: "success" | "retry_unknown";
+  lastCheckStatus: TestPrivyConnectionSeed["lastCheckStatus"];
 }
 
 const DEFAULT_CONNECTION: ConnectionSeed = {
@@ -1287,6 +1282,7 @@ function channelRefusal(mode: CustodyMode) {
     code: "FORBIDDEN",
     statusCode: 403,
     message: custodyProviderNotInReleaseChannel("privy", mode).message,
+    details: { reason: "custody_provider_not_in_release_channel" },
   };
 }
 

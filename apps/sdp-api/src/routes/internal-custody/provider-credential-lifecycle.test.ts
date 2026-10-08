@@ -13,9 +13,9 @@ import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-cre
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { scanGcpCredentialContainers } from "@/services/jobs/provider-credential-container-cleanup";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
+import { insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import {
   activateTestCustodyConnection,
-  insertTestConnectionWallet,
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
   type TestStoredProviderCredential,
@@ -179,11 +179,13 @@ async function seedActiveSharedCredential(): Promise<void> {
       createdBy: USER_ID,
       createdAt: new Date().toISOString(),
     });
-    await insertTestConnectionWallet(db, {
+    await insertTestCustodyWalletRow(db, {
       id: walletId,
-      connectionId,
+      owner: { kind: "connection", custodyConnectionId: connectionId },
       walletId: `provider-${walletId}`,
       publicKey: `address-${walletId}`,
+      label: null,
+      purpose: null,
       status: "active",
     });
     await activateTestCustodyConnection(db, {
@@ -3102,11 +3104,13 @@ describe("provider credential lifecycle", () => {
       createdBy: USER_ID,
       createdAt: new Date().toISOString(),
     });
-    await insertTestConnectionWallet(db, {
+    await insertTestCustodyWalletRow(db, {
       id: "cwlt_candidate_invariant",
-      connectionId: "cconn_candidate_invariant",
+      owner: { kind: "connection", custodyConnectionId: "cconn_candidate_invariant" },
       walletId: "provider-candidate-invariant",
       publicKey: "address-candidate-invariant",
+      label: null,
+      purpose: null,
       status: "active",
     });
 

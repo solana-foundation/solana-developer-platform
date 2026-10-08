@@ -37,14 +37,24 @@ import { AuditService } from "@/services/audit.service";
 import { SigningService } from "@/services/domain/signing.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
-import { writeTestPrivyCredentialSecret } from "@/test/helpers/custody";
-import { insertTestStoredProviderCredential } from "@/test/helpers/custody-connections";
+import {
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const depositIntoVault = vi.hoisted(() => vi.fn());
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 vi.mock("@/services/earn/vault-deposit.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/vault-deposit.service")>()),
@@ -140,53 +150,32 @@ async function seedWallet(params: {
 
 async function seedConnectionWallet(): Promise<void> {
   env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 43).toString("base64");
-  await insertTestStoredProviderCredential(getDb(env), {
-    id: "pcred_earn_vault",
+  await seedTestPrivyConnection(getDb(env), {
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
-    provider: "privy",
-    label: "Vault BYOK",
+    connectionId: "cconn_earn_vault",
+    credentialId: "pcred_earn_vault",
+    createdBy: TEST_USER.id,
     stored: await writeTestPrivyCredentialSecret(env, {
       organizationId: TEST_ORG.id,
       credentialId: "pcred_earn_vault",
       appId: "earn-vault-connection-app",
       appSecret: "earn-vault-connection-secret",
     }),
-    displayMetadata: {},
-    status: "active",
-    credentialVersion: 1,
-    rotatedFromProviderCredentialId: null,
-    lastValidatedAt: null,
-    deactivatedAt: null,
-    createdBy: TEST_USER.id,
+    providerAccountFingerprint: "sha256:test",
+    lastCheckStatus: "success",
+    wallets: [
+      {
+        id: "cwlt_earn_vault_connection",
+        walletId: "privy_earn_vault_connection",
+        publicKey: WALLET_ADDRESS,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+    defaultCustodyWalletId: "cwlt_earn_vault_connection",
   });
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_connections (
-           id, organization_id, project_id, provider, scope,
-           provider_credential_id, provider_credential_scope_key, status,
-           provider_account_fingerprint, created_by
-         ) VALUES ('cconn_earn_vault', ?, ?, 'privy', 'project',
-                   'pcred_earn_vault', ?, 'pending', 'sha256:test', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_connection_id, wallet_id, public_key, status
-         ) VALUES ('cwlt_earn_vault_connection', 'cconn_earn_vault',
-                   'privy_earn_vault_connection', ?, 'active')`
-      )
-      .bind(WALLET_ADDRESS),
-    getDb(env).prepare(
-      `UPDATE custody_connections
-         SET default_custody_wallet_id = 'cwlt_earn_vault_connection',
-             status = 'active', last_check_status = 'success',
-             last_check_at = sdp_iso_now(), activated_at = sdp_iso_now()
-         WHERE id = 'cconn_earn_vault'`
-    ),
-  ]);
 }
 
 async function requireDepositApproval() {
@@ -396,6 +385,7 @@ beforeEach(async () => {
   originalJupiterSwapApiKey = env.JUPITER_SWAP_API_KEY;
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
+  custodyReleaseChannel.outOfChannelMode = null;
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
@@ -754,6 +744,26 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
     ).toEqual([]);
     expect(depositIntoVault).not.toHaveBeenCalled();
     expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("returns an ordinary recorded deposit while the BYOK pair is out of channel", async () => {
+    await seedAuth();
+    await seedConnectionWallet();
+    const strategy = await seedStrategy({});
+    const recorded = await recordConnectionDeposit(strategy, "recorded-deposit");
+    custodyReleaseChannel.outOfChannelMode = "byok";
+
+    const response = await postVaultDeposit(
+      { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
+      "recorded-deposit",
+      TEST_API_KEY.raw
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { movementId: recorded.movement.id, replayed: true, signature: "sig_recorded_deposit" },
+    });
+    expect(depositIntoVault).not.toHaveBeenCalled();
   });
 });
 

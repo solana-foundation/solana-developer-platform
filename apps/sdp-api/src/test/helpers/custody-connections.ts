@@ -5,7 +5,12 @@ import type {
   ProviderCredentialStatus,
 } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
-import type { StoredCredentialSecret } from "@/services/credential-secret-store";
+import {
+  createCredentialSecretStore,
+  type StoredCredentialSecret,
+} from "@/services/credential-secret-store";
+import { insertTestCustodyWalletRow, type TestCustodyWalletRow } from "@/test/helpers/custody";
+import type { Env } from "@/types/env";
 
 const ORGANIZATION_CREDENTIAL_SCOPE_KEY = "__organization__";
 
@@ -43,14 +48,6 @@ export interface TestCustodyConnection {
   deactivatedAt: string | null;
   createdBy: string | null;
   createdAt: string;
-}
-
-export interface TestConnectionWallet {
-  id: string;
-  connectionId: string;
-  walletId: string;
-  publicKey: string;
-  status: "active" | "inactive";
 }
 
 interface StoredSecretColumns {
@@ -175,23 +172,6 @@ export async function insertTestCustodyConnection(
 }
 
 /**
- * Insert a connection-owned custody wallet.
- * @param db - Executor the insert runs on.
- * @param wallet - Wallet row to insert.
- * @returns Resolves once the row is written.
- */
-export async function insertTestConnectionWallet(
-  db: DatabaseExecutor,
-  wallet: TestConnectionWallet
-): Promise<void> {
-  await db.execute(
-    `INSERT INTO custody_wallets (id, custody_connection_id, wallet_id, public_key, status)
-     VALUES (?, ?, ?, ?, ?)`,
-    [wallet.id, wallet.connectionId, wallet.walletId, wallet.publicKey, wallet.status]
-  );
-}
-
-/**
  * Point a connection's default wallet at one of its own wallets, leaving its
  * lifecycle untouched; use {@link activateTestCustodyConnection} to activate.
  * @param db - Executor the update runs on.
@@ -241,24 +221,104 @@ export async function activateTestCustodyConnection(
   }
 }
 
+export interface TestPrivyConnectionSeed {
+  organizationId: string;
+  projectId: string;
+  connectionId: string;
+  credentialId: string;
+  createdBy: string;
+  stored: StoredCredentialSecret;
+  providerAccountFingerprint: string;
+  lastCheckStatus: Extract<CustodyConnectionCheckStatus, "success" | "retry_unknown">;
+  wallets: readonly Omit<TestCustodyWalletRow, "owner">[];
+  defaultCustodyWalletId: string;
+}
+
 /**
- * Make a connection its project's default custody target.
- * @param db - Executor the insert runs on.
- * @param selection - Scope default row to insert.
- * @param selection.id - `custody_scope_defaults.id`.
- * @param selection.organizationId - Organization owning the project.
- * @param selection.projectId - Project whose default is set.
- * @param selection.connectionId - Connection the project defaults to.
- * @returns Resolves once the row is written.
+ * Write a Privy app credential through the `encrypted_db` secret store, so the
+ * runtime reads it back exactly as a submitted BYOK credential. Needs
+ * `CUSTODY_ENCRYPTION_KEY` on `env`.
+ * @param env - Test environment bindings.
+ * @param params - Credential owner and secret.
+ * @param params.organizationId - Organization the secret is encrypted for.
+ * @param params.credentialId - Provider credential id.
+ * @param params.appId - Privy app id.
+ * @param params.appSecret - Privy app secret.
+ * @returns The stored secret location for the credential row.
  */
-export async function selectTestCustodyConnection(
+export async function writeTestPrivyCredentialSecret(
+  env: Env,
+  params: { organizationId: string; credentialId: string; appId: string; appSecret: string }
+): Promise<StoredCredentialSecret> {
+  return createCredentialSecretStore(env, "encrypted_db").write({
+    orgId: params.organizationId,
+    provider: "privy",
+    providerCredentialId: params.credentialId,
+    payload: { appId: params.appId, appSecret: params.appSecret },
+  });
+}
+
+/**
+ * Seed a project BYOK Privy connection over an active stored credential, with its
+ * wallets and default wallet. `success` leaves it `active`; `retry_unknown` leaves
+ * it `pending` with that last check.
+ * @param db - Executor the writes run on; pass a transaction to seed atomically.
+ * @param seed - The connection, credential and wallets.
+ * @returns Resolves once the connection is in its final lifecycle state.
+ */
+export async function seedTestPrivyConnection(
   db: DatabaseExecutor,
-  selection: { id: string; organizationId: string; projectId: string; connectionId: string }
+  seed: TestPrivyConnectionSeed
 ): Promise<void> {
-  await db.execute(
-    `INSERT INTO custody_scope_defaults
-       (id, organization_id, project_id, default_custody_connection_id)
-     VALUES (?, ?, ?, ?)`,
-    [selection.id, selection.organizationId, selection.projectId, selection.connectionId]
-  );
+  const isActive = seed.lastCheckStatus === "success";
+  await insertTestStoredProviderCredential(db, {
+    id: seed.credentialId,
+    organizationId: seed.organizationId,
+    projectId: seed.projectId,
+    provider: "privy",
+    label: "Privy",
+    stored: seed.stored,
+    displayMetadata: {},
+    status: "active",
+    credentialVersion: 1,
+    rotatedFromProviderCredentialId: null,
+    lastValidatedAt: null,
+    deactivatedAt: null,
+    createdBy: seed.createdBy,
+  });
+  await insertTestCustodyConnection(db, {
+    id: seed.connectionId,
+    organizationId: seed.organizationId,
+    projectId: seed.projectId,
+    provider: "privy",
+    credential: { id: seed.credentialId, projectId: seed.projectId },
+    status: "pending",
+    setupMetadata: {},
+    providerAccountFingerprint: seed.providerAccountFingerprint,
+    lastCheckStatus: isActive ? null : seed.lastCheckStatus,
+    lastCheckAt: isActive ? null : new Date().toISOString(),
+    lastCheckFailureCode: null,
+    activatedAt: null,
+    deactivatedAt: null,
+    createdBy: seed.createdBy,
+    createdAt: new Date().toISOString(),
+  });
+  for (const wallet of seed.wallets) {
+    await insertTestCustodyWalletRow(db, {
+      ...wallet,
+      owner: { kind: "connection", custodyConnectionId: seed.connectionId },
+    });
+  }
+  if (isActive) {
+    await activateTestCustodyConnection(db, {
+      connectionId: seed.connectionId,
+      custodyWalletId: seed.defaultCustodyWalletId,
+      providerAccountFingerprint: seed.providerAccountFingerprint,
+    });
+  } else {
+    await setTestConnectionDefaultWallet(db, {
+      connectionId: seed.connectionId,
+      custodyWalletId: seed.defaultCustodyWalletId,
+    });
+  }
 }

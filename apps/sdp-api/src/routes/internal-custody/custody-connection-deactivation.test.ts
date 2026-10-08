@@ -1,3 +1,8 @@
+import type {
+  CustodyConnectionCheckStatus,
+  CustodyConnectionLifecycle,
+  CustodyWalletStatus,
+} from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -9,20 +14,27 @@ import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { setupTestAuth } from "@/test/helpers/auth";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { insertTestCustodyScopeDefault, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import {
   activateTestCustodyConnection,
-  insertTestConnectionWallet,
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
-  selectTestCustodyConnection,
   type TestStoredProviderCredential,
 } from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 const ORG = "org_test_connection_deactivation";
 const USER = "usr_test_connection_deactivation";
@@ -59,7 +71,29 @@ function request(
   );
 }
 
-async function seedConnection(status: "pending" | "checking" | "failed") {
+type SeededConnectionStatus = Extract<
+  CustodyConnectionLifecycle,
+  "pending" | "checking" | "failed"
+>;
+
+function seededLastCheckStatus(
+  status: SeededConnectionStatus
+): Extract<CustodyConnectionCheckStatus, "running" | "failed"> | null {
+  switch (status) {
+    case "pending":
+      return null;
+    case "checking":
+      return "running";
+    case "failed":
+      return "failed";
+    default: {
+      const exhaustive: never = status;
+      throw new Error(`Unknown seeded Connection status: ${String(exhaustive)}`);
+    }
+  }
+}
+
+async function seedConnection(status: SeededConnectionStatus) {
   const db = getDb(env);
   const credential: TestStoredProviderCredential = {
     id: CREDENTIAL,
@@ -86,7 +120,7 @@ async function seedConnection(status: "pending" | "checking" | "failed") {
     status,
     setupMetadata: {},
     providerAccountFingerprint: null,
-    lastCheckStatus: status === "checking" ? "running" : status === "failed" ? "failed" : null,
+    lastCheckStatus: seededLastCheckStatus(status),
     lastCheckAt: status === "pending" ? null : "2026-01-01T00:00:00.000Z",
     lastCheckFailureCode: null,
     activatedAt: null,
@@ -104,15 +138,17 @@ async function lifecycleAudits() {
   );
 }
 
-async function seedActiveConnection(walletStatus: "active" | "inactive") {
+async function seedActiveConnection(walletStatus: CustodyWalletStatus) {
   await seedConnection("pending");
   const db = getDb(env);
   await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [CREDENTIAL]);
-  await insertTestConnectionWallet(db, {
+  await insertTestCustodyWalletRow(db, {
     id: "cwlt_connection_deactivation",
-    connectionId: CONNECTION,
+    owner: { kind: "connection", custodyConnectionId: CONNECTION },
     walletId: "provider-wallet-deactivation",
     publicKey: "address-deactivation",
+    label: null,
+    purpose: null,
     status: walletStatus,
   });
   await activateTestCustodyConnection(db, {
@@ -120,11 +156,12 @@ async function seedActiveConnection(walletStatus: "active" | "inactive") {
     custodyWalletId: "cwlt_connection_deactivation",
     providerAccountFingerprint: "retained-fingerprint",
   });
-  await selectTestCustodyConnection(db, {
+  await insertTestCustodyScopeDefault(db, {
     id: "csd_connection_deactivation",
     organizationId: ORG,
     projectId: PROJECT,
-    connectionId: CONNECTION,
+    defaultCustodyConfigId: null,
+    defaultCustodyConnectionId: CONNECTION,
   });
 }
 
@@ -144,6 +181,7 @@ async function persistedState() {
 
 describe("custody Connection deactivation", () => {
   beforeEach(async () => {
+    custodyReleaseChannel.outOfChannelMode = null;
     await seedTestDatabase(env);
     const db = getDb(env);
     await db.execute(
@@ -372,40 +410,56 @@ describe("custody Connection deactivation", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("preserves inactive wallets, the current Credential, and the selected default while the Provider is not entitled", async () => {
-    await seedActiveConnection("inactive");
-    await getDb(env).execute("UPDATE organizations SET settings = ?::jsonb WHERE id = ?", [
-      JSON.stringify({ providerOverrides: { custody: { privy: false } } }),
-      ORG,
-    ]);
-    const before = await persistedState();
-    const result = await request(`/connections/${CONNECTION}/deactivate`, {
-      authenticated: true,
-      method: "POST",
-      projectId: PROJECT,
-      ...{},
-    });
-    expect(result.status).toBe(200);
-    expect((await result.json()).data.custodyConnection).toMatchObject({
-      id: CONNECTION,
-      status: "deactivated",
-      canComplete: false,
-      canCancel: false,
-      canReplaceCredentials: false,
-    });
-    const after = await persistedState();
-    expect(after.credential).toEqual(before.credential);
-    expect(after.wallets).toEqual(before.wallets);
-    expect(after.selection).toEqual(before.selection);
-    expect(after.connection).toMatchObject({
-      ...before.connection,
-      status: "deactivated",
-      deactivated_at: expect.any(String),
-      updated_at: expect.any(String),
-    });
-    expect(await lifecycleAudits()).toMatchObject([{ action: "deactivate", status: "success" }]);
-    expect(fetch).not.toHaveBeenCalled();
-  });
+  it.each([
+    {
+      withheld: "the BYOK pair is out of channel",
+      withhold: async () => {
+        custodyReleaseChannel.outOfChannelMode = "byok";
+      },
+    },
+    {
+      withheld: "the Provider is not entitled",
+      withhold: async () => {
+        await getDb(env).execute("UPDATE organizations SET settings = ?::jsonb WHERE id = ?", [
+          JSON.stringify({ providerOverrides: { custody: { privy: false } } }),
+          ORG,
+        ]);
+      },
+    },
+  ])(
+    "preserves inactive wallets, the current Credential, and the selected default while $withheld",
+    async ({ withhold }) => {
+      await seedActiveConnection("inactive");
+      await withhold();
+      const before = await persistedState();
+      const result = await request(`/connections/${CONNECTION}/deactivate`, {
+        authenticated: true,
+        method: "POST",
+        projectId: PROJECT,
+        ...{},
+      });
+      expect(result.status).toBe(200);
+      expect((await result.json()).data.custodyConnection).toMatchObject({
+        id: CONNECTION,
+        status: "deactivated",
+        canComplete: false,
+        canCancel: false,
+        canReplaceCredentials: false,
+      });
+      const after = await persistedState();
+      expect(after.credential).toEqual(before.credential);
+      expect(after.wallets).toEqual(before.wallets);
+      expect(after.selection).toEqual(before.selection);
+      expect(after.connection).toMatchObject({
+        ...before.connection,
+        status: "deactivated",
+        deactivated_at: expect.any(String),
+        updated_at: expect.any(String),
+      });
+      expect(await lifecycleAudits()).toMatchObject([{ action: "deactivate", status: "success" }]);
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  );
 
   it("serializes simultaneous requests to one transition and one lifecycle audit", async () => {
     await seedConnection("failed");
@@ -497,11 +551,13 @@ describe("custody Connection deactivation", () => {
       await tx.queryOne("SELECT id FROM projects WHERE id = ? FOR UPDATE", [PROJECT]);
       signalLocked();
       await released;
-      await insertTestConnectionWallet(tx, {
+      await insertTestCustodyWalletRow(tx, {
         id: "cwlt_racing_creation",
-        connectionId: CONNECTION,
+        owner: { kind: "connection", custodyConnectionId: CONNECTION },
         walletId: "racing-provider-wallet",
         publicKey: "racing-address",
+        label: null,
+        purpose: null,
         status: "active",
       });
     });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, CustodyMode } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -15,13 +15,14 @@ import {
   insertTestCustodyConfigRow,
   insertTestCustodyScopeDefault,
   insertTestCustodyWalletRow,
-  seedTestPrivyConnection,
-  writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -29,20 +30,11 @@ import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { provisionApiKeyWallet } from "./api-key-wallet-provisioning.service";
 
-const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
-  outOfChannelMode: null,
-}));
-
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
-  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
-    releaseChannel,
-    provider,
-    mode
-  ) =>
-    mode !== custodyReleaseChannel.outOfChannelMode &&
-    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
-  return { ...original, isCustodyProviderInReleaseChannel };
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
 });
 
 const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
@@ -401,6 +393,7 @@ describe("provisionApiKeyWallet", () => {
           error: {
             code: "FORBIDDEN",
             message: custodyProviderNotInReleaseChannel("privy", outOfChannelMode).message,
+            details: { reason: "custody_provider_not_in_release_channel" },
           },
           meta: { requestId: expect.any(String) },
         });

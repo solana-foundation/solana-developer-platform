@@ -1,35 +1,24 @@
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { CachedApiKey, CustodyMode } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import {
-  insertTestCustodyWalletRow,
-  seedTestCustodyRows,
-  seedTestPrivyConnection,
-} from "@/test/helpers/custody";
+import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
-  outOfChannelMode: null,
-}));
-
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
-  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
-    releaseChannel,
-    provider,
-    mode
-  ) =>
-    mode !== custodyReleaseChannel.outOfChannelMode &&
-    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
-  return { ...original, isCustodyProviderInReleaseChannel };
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
 });
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
@@ -232,14 +221,23 @@ describe("Custody wallet by ID route", () => {
       env
     );
     expect(update.status).toBe(200);
-    expect(await update.json()).toMatchObject({
+    expect(await update.json()).toEqual({
       data: {
         wallet: {
+          id: connection.walletRecordId,
           custodyConnectionId: connection.connectionId,
+          provider: "privy",
+          isDefaultProvider: false,
           isRuntimeExecutionAllowed: false,
+          walletId: connection.walletId,
+          publicKey: connection.publicKey,
           label: "Connection treasury",
+          purpose: null,
+          status: "active",
+          createdAt: expect.any(String),
         },
       },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
   });
 
@@ -256,8 +254,9 @@ describe("Custody wallet by ID route", () => {
       env
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    expect(await response.json()).toEqual({
       data: { publicKey: connection.publicKey },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
 
     const alias = await app.request(

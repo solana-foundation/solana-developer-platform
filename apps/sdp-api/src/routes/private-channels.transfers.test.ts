@@ -7,11 +7,17 @@ import { createPrivateChannelTransferRepository } from "@/db/repositories";
 import app from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { buildPrivateChannelTransferFingerprint } from "@/lib/idempotency";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
-import { writeTestPrivyCredentialSecret } from "@/test/helpers/custody";
-import { insertTestStoredProviderCredential } from "@/test/helpers/custody-connections";
+import {
+  activateTestCustodyConnection,
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
@@ -26,6 +32,13 @@ const createProviderSigner = PrivySigner.create;
 const createOrgSignerMock = vi.spyOn(PrivySigner, "create");
 const providerFetch = vi.fn<typeof fetch>();
 const originalPrivy = { appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET };
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 vi.mock("@/services/private-channels", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/private-channels")>();
@@ -112,22 +125,37 @@ async function useConnectionSource() {
     deactivatedAt: null,
     createdBy: ACTOR_USER_ID,
   });
-  await db.batch([
-    db
-      .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = 'cust-pct'")
-      .bind(OTHER_USER_WALLET_ID),
-    db
-      .prepare(`INSERT INTO custody_connections
-      (id, organization_id, project_id, provider, scope, provider_credential_id, provider_credential_scope_key, status, created_by)
-      VALUES ('conn-pct', ?, ?, 'privy', 'project', 'pcred-pct', ?, 'pending', ?)`)
-      .bind(ORGANIZATION_ID, PROJECT_ID, PROJECT_ID, ACTOR_USER_ID),
-    db.prepare(
+  await db
+    .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = 'cust-pct'")
+    .bind(OTHER_USER_WALLET_ID)
+    .run();
+  await insertTestCustodyConnection(db, {
+    id: "conn-pct",
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    provider: "privy",
+    credential: { id: "pcred-pct", projectId: PROJECT_ID },
+    status: "pending",
+    setupMetadata: {},
+    providerAccountFingerprint: null,
+    lastCheckStatus: null,
+    lastCheckAt: null,
+    lastCheckFailureCode: null,
+    activatedAt: null,
+    deactivatedAt: null,
+    createdBy: ACTOR_USER_ID,
+    createdAt: new Date().toISOString(),
+  });
+  await db
+    .prepare(
       "UPDATE custody_wallets SET custody_config_id = NULL, custody_connection_id = 'conn-pct' WHERE id = 'cw-pct-actor'"
-    ),
-    db.prepare(`UPDATE custody_connections SET default_custody_wallet_id = 'cw-pct-actor', status = 'active',
-      provider_account_fingerprint = 'sha256:pc-transfer', activated_at = sdp_iso_now(), last_check_status = 'success', last_check_at = sdp_iso_now()
-      WHERE id = 'conn-pct'`),
-  ]);
+    )
+    .run();
+  await activateTestCustodyConnection(db, {
+    connectionId: "conn-pct",
+    custodyWalletId: "cw-pct-actor",
+    providerAccountFingerprint: "sha256:pc-transfer",
+  });
 }
 
 async function keyTransfer(id: string, pending: boolean) {
@@ -490,6 +518,7 @@ describe("Private Channels — transfer access and routes", () => {
   });
 
   beforeEach(async () => {
+    custodyReleaseChannel.outOfChannelMode = null;
     originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
     originalPrivateChannelsEnabled = env.PRIVATE_CHANNELS_ENABLED;
     env.PRIVATE_CHANNELS_ENABLED = "true";
@@ -619,11 +648,36 @@ describe("Private Channels — transfer access and routes", () => {
     expect(resolveGatewayAuthMock).toHaveBeenCalledOnce();
   });
 
+  it("refuses an explicitly chosen nondefault Connection before transfer setup while BYOK is out of channel", async () => {
+    await useConnectionSource();
+    custodyReleaseChannel.outOfChannelMode = "byok";
+    const response = await postTransfer(
+      {
+        walletId: ACTOR_WALLET_ID,
+        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
+        amount: "1.5",
+      },
+      humanHeaders({ "Idempotency-Key": "idem_route_transfer_out_of_channel" })
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(createOrgSignerMock).not.toHaveBeenCalled();
+    expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
+  });
+
   it.each([true, false])(
     "requires write for abandoned transfer recovery without a signer (write=%s)",
     async (write) => {
       await keyTransfer("pct_abandoned", true);
       await useConnectionSource();
+      custodyReleaseChannel.outOfChannelMode = "byok";
       await getDb(env)
         .prepare("UPDATE api_keys SET permissions = ? WHERE id = ?")
         .bind(

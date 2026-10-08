@@ -1,5 +1,4 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CustodyMode } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -12,27 +11,19 @@ import {
   insertTestCustodyConfigRow,
   insertTestCustodyScopeDefault,
   insertTestCustodyWalletRow,
-  seedTestPrivyConnection,
 } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
-  outOfChannelMode: null,
-}));
-
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
-  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
-    releaseChannel,
-    provider,
-    mode
-  ) =>
-    mode !== custodyReleaseChannel.outOfChannelMode &&
-    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
-  return { ...original, isCustodyProviderInReleaseChannel };
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
 });
 
 vi.mock("@/services/domain/signing/provider-config", async (importOriginal) => ({
@@ -55,6 +46,8 @@ const apiKey = "key_default_audit";
 const rawKey = "sk_test_default_audit";
 const config = "cust_default_audit";
 const connection = "cconn_default_audit";
+const originalAppId = env.PRIVY_APP_ID;
+const originalAppSecret = env.PRIVY_APP_SECRET;
 const walletPublicKeys = {
   a: "11111111111111111111111111111111",
   b: "So11111111111111111111111111111111111111112",
@@ -122,6 +115,8 @@ async function readDefault(owner: "connection" | "config") {
 describe("default wallet audit admission", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
+    env.PRIVY_APP_ID = "default-audit-app";
+    env.PRIVY_APP_SECRET = "default-audit-secret";
     await seedTestDatabase(env);
     await clearKVStores(env);
     const db = getDb(env);
@@ -210,6 +205,8 @@ describe("default wallet audit admission", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    env.PRIVY_APP_ID = originalAppId;
+    env.PRIVY_APP_SECRET = originalAppSecret;
     await clearKVStores(env);
   });
 
@@ -266,6 +263,7 @@ describe("default wallet audit admission", () => {
         },
       });
       expect(JSON.stringify(rows)).not.toContain(rawKey);
+      expect(JSON.stringify(rows)).not.toContain("default-audit-secret");
     }
   );
 
@@ -547,6 +545,7 @@ function managedChannelRefusalBody() {
     error: {
       code: "FORBIDDEN",
       message: custodyProviderNotInReleaseChannel("privy", "managed").message,
+      details: { reason: "custody_provider_not_in_release_channel" },
     },
     meta: { requestId: "req_default_wallet_audit" },
   };

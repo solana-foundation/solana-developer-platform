@@ -3,25 +3,10 @@
  */
 
 import type { CustodyProvider } from "@sdp/custody";
-import type {
-  CustodyConfigStatus,
-  CustodyConnectionCheckStatus,
-  CustodyWalletPurpose,
-  CustodyWalletStatus,
-} from "@sdp/types";
+import type { CustodyConfigStatus, CustodyWalletPurpose, CustodyWalletStatus } from "@sdp/types";
 import { type DatabaseExecutor, getDb } from "@/db";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
-import {
-  createCredentialSecretStore,
-  type StoredCredentialSecret,
-} from "@/services/credential-secret-store";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
-import {
-  activateTestCustodyConnection,
-  insertTestCustodyConnection,
-  insertTestStoredProviderCredential,
-  setTestConnectionDefaultWallet,
-} from "@/test/helpers/custody-connections";
 import type { Env } from "@/types/env";
 
 /**
@@ -274,108 +259,6 @@ export async function seedTestCustodyRows(env: Env, rows: TestCustodyRows): Prom
       await insertTestCustodyScopeDefault(tx, scopeDefault);
     }
   });
-}
-
-export interface TestPrivyConnectionSeed {
-  organizationId: string;
-  projectId: string;
-  connectionId: string;
-  credentialId: string;
-  createdBy: string;
-  stored: StoredCredentialSecret;
-  providerAccountFingerprint: string;
-  lastCheckStatus: Extract<CustodyConnectionCheckStatus, "success" | "retry_unknown">;
-  wallets: readonly Omit<TestCustodyWalletRow, "owner">[];
-  defaultCustodyWalletId: string;
-}
-
-/**
- * Write a Privy app credential through the `encrypted_db` secret store, so the
- * runtime reads it back exactly as a submitted BYOK credential. Needs
- * `CUSTODY_ENCRYPTION_KEY` on `env`.
- * @param env - Test environment bindings.
- * @param params - Credential owner and secret.
- * @param params.organizationId - Organization the secret is encrypted for.
- * @param params.credentialId - Provider credential id.
- * @param params.appId - Privy app id.
- * @param params.appSecret - Privy app secret.
- * @returns The stored secret location for the credential row.
- */
-export async function writeTestPrivyCredentialSecret(
-  env: Env,
-  params: { organizationId: string; credentialId: string; appId: string; appSecret: string }
-): Promise<StoredCredentialSecret> {
-  return createCredentialSecretStore(env, "encrypted_db").write({
-    orgId: params.organizationId,
-    provider: "privy",
-    providerCredentialId: params.credentialId,
-    payload: { appId: params.appId, appSecret: params.appSecret },
-  });
-}
-
-/**
- * Seed a project BYOK Privy connection over an active stored credential, with its
- * wallets and default wallet. `success` leaves it `active`; `retry_unknown` leaves
- * it `pending` with that last check.
- * @param db - Executor the writes run on; pass a transaction to seed atomically.
- * @param seed - The connection, credential and wallets.
- * @returns Resolves once the connection is in its final lifecycle state.
- */
-export async function seedTestPrivyConnection(
-  db: DatabaseExecutor,
-  seed: TestPrivyConnectionSeed
-): Promise<void> {
-  const isActive = seed.lastCheckStatus === "success";
-  await insertTestStoredProviderCredential(db, {
-    id: seed.credentialId,
-    organizationId: seed.organizationId,
-    projectId: seed.projectId,
-    provider: "privy",
-    label: "Privy",
-    stored: seed.stored,
-    displayMetadata: {},
-    status: "active",
-    credentialVersion: 1,
-    rotatedFromProviderCredentialId: null,
-    lastValidatedAt: null,
-    deactivatedAt: null,
-    createdBy: seed.createdBy,
-  });
-  await insertTestCustodyConnection(db, {
-    id: seed.connectionId,
-    organizationId: seed.organizationId,
-    projectId: seed.projectId,
-    provider: "privy",
-    credential: { id: seed.credentialId, projectId: seed.projectId },
-    status: "pending",
-    setupMetadata: {},
-    providerAccountFingerprint: seed.providerAccountFingerprint,
-    lastCheckStatus: isActive ? null : seed.lastCheckStatus,
-    lastCheckAt: isActive ? null : new Date().toISOString(),
-    lastCheckFailureCode: null,
-    activatedAt: null,
-    deactivatedAt: null,
-    createdBy: seed.createdBy,
-    createdAt: new Date().toISOString(),
-  });
-  for (const wallet of seed.wallets) {
-    await insertTestCustodyWalletRow(db, {
-      ...wallet,
-      owner: { kind: "connection", custodyConnectionId: seed.connectionId },
-    });
-  }
-  if (isActive) {
-    await activateTestCustodyConnection(db, {
-      connectionId: seed.connectionId,
-      custodyWalletId: seed.defaultCustodyWalletId,
-      providerAccountFingerprint: seed.providerAccountFingerprint,
-    });
-  } else {
-    await setTestConnectionDefaultWallet(db, {
-      connectionId: seed.connectionId,
-      custodyWalletId: seed.defaultCustodyWalletId,
-    });
-  }
 }
 
 /**

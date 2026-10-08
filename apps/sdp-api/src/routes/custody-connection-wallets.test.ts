@@ -10,32 +10,23 @@ import { getLogger } from "@/runtime/logger";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { insertTestCustodyConfigRow, insertTestCustodyScopeDefault } from "@/test/helpers/custody";
 import {
-  insertTestCustodyConfigRow,
-  insertTestCustodyScopeDefault,
+  insertTestStoredProviderCredential,
   seedTestPrivyConnection,
   writeTestPrivyCredentialSecret,
-} from "@/test/helpers/custody";
-import { insertTestStoredProviderCredential } from "@/test/helpers/custody-connections";
+} from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
-  outOfChannelMode: null,
-}));
-
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
-  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
-    releaseChannel,
-    provider,
-    mode
-  ) =>
-    mode !== custodyReleaseChannel.outOfChannelMode &&
-    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
-  return { ...original, isCustodyProviderInReleaseChannel };
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
 });
 
 const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
@@ -159,6 +150,7 @@ function channelRefusalBody(mode: CustodyMode) {
     error: {
       code: "FORBIDDEN",
       message: custodyProviderNotInReleaseChannel("privy", mode).message,
+      details: { reason: "custody_provider_not_in_release_channel" },
     },
     meta: { requestId: expect.any(String) },
   };

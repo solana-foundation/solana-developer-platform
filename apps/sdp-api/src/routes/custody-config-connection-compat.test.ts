@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, CustodyMode } from "@sdp/types";
+import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -7,27 +7,19 @@ import {
   insertTestCustodyConfigRow,
   insertTestCustodyScopeDefault,
   insertTestCustodyWalletRow,
-  seedTestPrivyConnection,
 } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
-const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
-  outOfChannelMode: null,
-}));
-
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
-  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
-    releaseChannel,
-    provider,
-    mode
-  ) =>
-    mode !== custodyReleaseChannel.outOfChannelMode &&
-    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
-  return { ...original, isCustodyProviderInReleaseChannel };
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
 });
 
 const ORGANIZATION_ID = "org_custody_config_connection_compat";
@@ -90,12 +82,7 @@ describe("custody Config compatibility with an effective Connection", () => {
 
     const configs = await request("/v1/wallets/configs");
     expect(configs.status).toBe(200);
-    expect(await configs.json()).toMatchObject({
-      data: {
-        configs: [{ id: CONFIG_ID, provider: "para", isDefault: false }],
-        defaultConfigId: null,
-      },
-    });
+    expect(await configs.json()).toEqual(nonDefaultConfigsBody());
 
     const options = await request("/v1/wallets/switch-options");
     expect(options.status).toBe(200);
@@ -135,12 +122,7 @@ describe("custody Config compatibility with an effective Connection", () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
 
     expect((await request("/v1/wallets/config")).status).toBe(404);
-    expect(await (await request("/v1/wallets/configs")).json()).toMatchObject({
-      data: {
-        configs: [{ id: CONFIG_ID, provider: "para", isDefault: false }],
-        defaultConfigId: null,
-      },
-    });
+    expect(await (await request("/v1/wallets/configs")).json()).toEqual(nonDefaultConfigsBody());
     const publicKey = await request("/v1/wallets/public-key");
     expect(publicKey.status).toBe(200);
     expect(await publicKey.json()).toEqual({
@@ -149,6 +131,28 @@ describe("custody Config compatibility with an effective Connection", () => {
     });
   });
 });
+
+function nonDefaultConfigsBody() {
+  return {
+    data: {
+      configs: [
+        {
+          id: CONFIG_ID,
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          provider: "para",
+          publicKey: CONFIG_PUBLIC_KEY,
+          defaultWalletId: CONFIG_WALLET_ID,
+          status: "active",
+          createdAt: expect.any(String),
+          isDefault: false,
+        },
+      ],
+      defaultConfigId: null,
+    },
+    meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+  };
+}
 
 async function request(path: string): Promise<Response> {
   return app.request(

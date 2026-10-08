@@ -1,16 +1,15 @@
-import type { CustodyProvider } from "@sdp/types";
+import type { CustodyConnectionLifecycle, CustodyProvider } from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { insertTestCustodyScopeDefault, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import {
   activateTestCustodyConnection,
-  insertTestConnectionWallet,
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
-  selectTestCustodyConnection,
   type TestStoredProviderCredential,
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
@@ -110,7 +109,7 @@ async function seedCredentialAndConnection(input: {
   connectionId: string;
   provider: CustodyProvider;
   label: string;
-  status: "pending" | "failed";
+  status: Extract<CustodyConnectionLifecycle, "pending" | "failed">;
   createdAt: string;
   failureCode: string | null;
   pendingWalletLabel: string | null;
@@ -157,11 +156,13 @@ async function makeConnectionRuntimeReady(
   custodyWalletId: string
 ): Promise<void> {
   const db = getDb(env);
-  await insertTestConnectionWallet(db, {
+  await insertTestCustodyWalletRow(db, {
     id: custodyWalletId,
-    connectionId,
+    owner: { kind: "connection", custodyConnectionId: connectionId },
     walletId: `provider-${custodyWalletId}`,
     publicKey: `address-${custodyWalletId}`,
+    label: null,
+    purpose: null,
     status: "active",
   });
   await activateTestCustodyConnection(db, {
@@ -186,11 +187,12 @@ async function seedRuntimeReadyConnection(connectionId: string, createdAt: strin
 }
 
 async function selectConnection(connectionId: string): Promise<void> {
-  await selectTestCustodyConnection(getDb(env), {
+  await insertTestCustodyScopeDefault(getDb(env), {
     id: "csd_connections_read",
     organizationId: ORG.id,
     projectId: PROJECT.id,
-    connectionId,
+    defaultCustodyConfigId: null,
+    defaultCustodyConnectionId: connectionId,
   });
 }
 

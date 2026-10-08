@@ -306,7 +306,7 @@ export const approveApprovalRequest = async (c: AppContext) => {
       if (
         !(error instanceof AppError) ||
         (error.code !== "NOT_FOUND" &&
-          error.details?.reason !== "runtime_execution_paused" &&
+          error.details?.reason !== "custody_provider_not_in_release_channel" &&
           error.details?.reason !== "runtime_execution_unavailable" &&
           error.details?.reason !== "provider_not_entitled")
       ) {

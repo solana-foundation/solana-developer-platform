@@ -6,8 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as repositories from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { writeTestPrivyCredentialSecret } from "@/test/helpers/custody";
-import { insertTestStoredProviderCredential } from "@/test/helpers/custody-connections";
+import {
+  activateTestCustodyConnection,
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import * as gatewayAuth from "./auth/gateway-auth";
@@ -252,17 +256,31 @@ describe("verifyPrivateChannelWallet", () => {
       deactivatedAt: null,
       createdBy: "usr_test_pc_wallet",
     });
-    await db.batch([
-      db.prepare(`INSERT INTO custody_connections
-        (id, organization_id, project_id, provider, scope, provider_credential_id, provider_credential_scope_key, status, created_by)
-        VALUES ('conn_verify', 'org_test_pc_wallet', 'prj_1', 'privy', 'project', 'pcred_verify', 'prj_1', 'pending', 'usr_test_pc_wallet')`),
-      db.prepare(
-        "UPDATE custody_wallets SET custody_config_id = NULL, custody_connection_id = 'conn_verify' WHERE id = 'cw_verify'"
-      ),
-      db.prepare(`UPDATE custody_connections SET default_custody_wallet_id = 'cw_verify', status = 'active',
-        provider_account_fingerprint = 'sha256:pc-verify', activated_at = sdp_iso_now(), last_check_status = 'success', last_check_at = sdp_iso_now()
-        WHERE id = 'conn_verify'`),
-    ]);
+    await insertTestCustodyConnection(db, {
+      id: "conn_verify",
+      organizationId: "org_test_pc_wallet",
+      projectId: "prj_1",
+      provider: "privy",
+      credential: { id: "pcred_verify", projectId: "prj_1" },
+      status: "pending",
+      setupMetadata: {},
+      providerAccountFingerprint: null,
+      lastCheckStatus: null,
+      lastCheckAt: null,
+      lastCheckFailureCode: null,
+      activatedAt: null,
+      deactivatedAt: null,
+      createdBy: "usr_test_pc_wallet",
+      createdAt: new Date().toISOString(),
+    });
+    await db.execute(
+      "UPDATE custody_wallets SET custody_config_id = NULL, custody_connection_id = 'conn_verify' WHERE id = 'cw_verify'"
+    );
+    await activateTestCustodyConnection(db, {
+      connectionId: "conn_verify",
+      custodyWalletId: "cw_verify",
+      providerAccountFingerprint: "sha256:pc-verify",
+    });
 
     expect((await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).row.pubkey).toBe(
       PUBKEY

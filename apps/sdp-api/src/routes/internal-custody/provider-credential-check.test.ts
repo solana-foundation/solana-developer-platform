@@ -8,20 +8,27 @@ import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
-import { seedTestCustodySetup } from "@/test/helpers/custody";
+import { insertTestCustodyWalletRow, seedTestCustodySetup } from "@/test/helpers/custody";
 import {
   activateTestCustodyConnection,
-  insertTestConnectionWallet,
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
   type TestStoredProviderCredential,
 } from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 let clerkToken: string;
 
@@ -252,11 +259,13 @@ async function seedActiveFingerprintConnection(options: {
     createdBy: USER_ID,
     createdAt: SEEDED_AT,
   });
-  await insertTestConnectionWallet(db, {
+  await insertTestCustodyWalletRow(db, {
     id: custodyWalletId,
-    connectionId: options.connectionId,
+    owner: { kind: "connection", custodyConnectionId: options.connectionId },
     walletId: `existing-wallet-${options.connectionId}`,
     publicKey: `existing-address-${options.connectionId}`,
+    label: null,
+    purpose: null,
     status: "active",
   });
   await activateTestCustodyConnection(db, {
@@ -383,6 +392,7 @@ describe("exact Custody Connection installation routes", () => {
   };
 
   beforeEach(async () => {
+    custodyReleaseChannel.outOfChannelMode = null;
     await seedTestDatabase(env);
     await clearKVStores(env);
     env.SDP_DEPLOYMENT_MODE = "managed";
@@ -417,7 +427,7 @@ describe("exact Custody Connection installation routes", () => {
     await clearKVStores(env);
   });
 
-  it("completes an exact Connection and replays terminal success without changing the Config target", async () => {
+  it("completes an exact Connection and replays terminal success out of channel without changing the Config target", async () => {
     await seedManagedDefault();
     const providerFetch = successfulPrivyFetch(CONNECTION_ID);
     const { app, token } = buildApp();
@@ -500,6 +510,7 @@ describe("exact Custody Connection installation routes", () => {
       wallet_count: 2,
     });
 
+    custodyReleaseChannel.outOfChannelMode = "byok";
     providerFetch.mockClear();
     const auditAdmission = vi
       .spyOn(AuditService.prototype, "beginCritical")
@@ -943,7 +954,7 @@ describe("exact Custody Connection installation routes", () => {
     ]);
   });
 
-  it("stores invalid credentials as a redacted terminal failure and replays it", async () => {
+  it("stores invalid credentials as a redacted terminal failure and replays it while BYOK is out of channel", async () => {
     const providerFetch = vi
       .fn()
       .mockResolvedValue(privyJson({ error: "raw provider credential detail" }, 401));
@@ -983,6 +994,7 @@ describe("exact Custody Connection installation routes", () => {
       last_check_failure_code: "invalid_credentials",
     });
 
+    custodyReleaseChannel.outOfChannelMode = "byok";
     providerFetch.mockClear();
     const secretFactory = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
     const replay = await installationRequest(app, token, "complete", {
@@ -1452,7 +1464,8 @@ describe("exact Custody Connection installation routes", () => {
     expect(unauthenticatedMissing.status).toBe(401);
   });
 
-  it("cancels a pre-fingerprint installation without Provider I/O and is idempotent", async () => {
+  it("cancels a pre-fingerprint installation while BYOK is out of channel without Provider I/O and is idempotent", async () => {
+    custodyReleaseChannel.outOfChannelMode = "byok";
     const providerFetch = vi.fn();
     vi.stubGlobal("fetch", providerFetch);
     const { app, token } = buildApp();
@@ -1498,6 +1511,7 @@ describe("exact Custody Connection installation routes", () => {
   });
 
   it("keeps cancellation successful and replayable when its audit outcome cannot be persisted", async () => {
+    custodyReleaseChannel.outOfChannelMode = "byok";
     const completeCritical = vi
       .spyOn(AuditService.prototype, "completeCritical")
       .mockResolvedValue(false);
@@ -1525,6 +1539,7 @@ describe("exact Custody Connection installation routes", () => {
   });
 
   it("keeps cancellation replayable after a lost COMMIT response", async () => {
+    custodyReleaseChannel.outOfChannelMode = "byok";
     const db = getDb(env);
     const runTransaction = db.transaction.bind(db);
     vi.spyOn(db, "transaction").mockImplementationOnce(async (callback) => {

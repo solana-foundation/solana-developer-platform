@@ -673,7 +673,8 @@ export function custodyProviderNotInReleaseChannel(
   mode: CustodyMode
 ): AppError {
   return forbidden(
-    `The ${provider} custody provider is not available in this release channel for ${mode} custody.`
+    `The ${provider} custody provider is not available in this release channel for ${mode} custody.`,
+    { reason: "custody_provider_not_in_release_channel" }
   );
 }
 

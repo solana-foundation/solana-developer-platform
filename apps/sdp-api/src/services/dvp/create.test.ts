@@ -22,13 +22,20 @@ import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { testClerkContext } from "@/test/helpers/clerk-context";
-import { writeTestPrivyCredentialSecret } from "@/test/helpers/custody";
-import { insertTestStoredProviderCredential } from "@/test/helpers/custody-connections";
+import { insertTestCustodyScopeDefault } from "@/test/helpers/custody";
+import {
+  activateTestCustodyConnection,
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -37,6 +44,13 @@ import type { Env } from "@/types/env";
 import * as mintInspector from "./inspect-mint";
 import * as mints from "./mints";
 import * as observation from "./observe-now";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 const auditContext = new Context<{
   Bindings: Env;
@@ -138,6 +152,7 @@ describe("createDvpTrade", () => {
   let originalSettlementAuthority: string | undefined;
   let originalEncryptionKey: string | undefined;
   beforeEach(async () => {
+    custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
     vi.spyOn(sponsorshipService, "createProjectSponsorshipFeePayment").mockImplementation(
       createProjectSponsorshipFeePayment
@@ -258,18 +273,38 @@ describe("createDvpTrade", () => {
       deactivatedAt: null,
       createdBy: TEST_USER.id,
     });
-    await db.execute(
-      `INSERT INTO custody_connections
-       (id, organization_id, project_id, provider, scope, provider_credential_id,
-        provider_credential_scope_key, status, provider_account_fingerprint, created_by)
-       VALUES ('cconn_dvp', ?, ?, 'privy', 'project', 'pcred_dvp', ?, 'pending', 'sha256:dvp', ?)`,
-      [TEST_ORG.id, TEST_PROJECT_ID, TEST_PROJECT_ID, TEST_USER.id]
-    );
+    await insertTestCustodyConnection(db, {
+      id: "cconn_dvp",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      provider: "privy",
+      credential: { id: "pcred_dvp", projectId: TEST_PROJECT_ID },
+      status: "pending",
+      setupMetadata: {},
+      providerAccountFingerprint: "sha256:dvp",
+      lastCheckStatus: null,
+      lastCheckAt: null,
+      lastCheckFailureCode: null,
+      activatedAt: null,
+      deactivatedAt: null,
+      createdBy: TEST_USER.id,
+      createdAt: new Date().toISOString(),
+    });
     await db.execute(`UPDATE custody_wallets SET custody_config_id = NULL,
       custody_connection_id = 'cconn_dvp' WHERE id = 'cwlt_settlement'`);
-    await db.execute(`UPDATE custody_connections SET default_custody_wallet_id = 'cwlt_settlement',
-      status = 'active', last_check_status = 'success', last_check_at = sdp_iso_now(),
-      activated_at = sdp_iso_now() WHERE id = 'cconn_dvp'`);
+    await activateTestCustodyConnection(db, {
+      connectionId: "cconn_dvp",
+      custodyWalletId: "cwlt_settlement",
+      providerAccountFingerprint: "sha256:dvp",
+    });
+  }
+  function byokChannelRefusal() {
+    return {
+      code: "FORBIDDEN",
+      statusCode: 403,
+      message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+      details: { reason: "custody_provider_not_in_release_channel" },
+    };
   }
   it("keeps the BYOK wallet creation audit when the later trade creation fails", async () => {
     const provider = vi.spyOn(custodyProvisioning, "provisionPrivyWallet").mockResolvedValueOnce({
@@ -286,10 +321,13 @@ describe("createDvpTrade", () => {
       await db.execute("DELETE FROM dvp_settlement_wallets WHERE project_id = ?", [
         TEST_PROJECT_ID,
       ]);
-      await db.execute(
-        `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_connection_id) VALUES ('csd_dvp_audit', ?, ?, 'cconn_dvp')`,
-        [TEST_ORG.id, TEST_PROJECT_ID]
-      );
+      await insertTestCustodyScopeDefault(db, {
+        id: "csd_dvp_audit",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        defaultCustodyConfigId: null,
+        defaultCustodyConnectionId: "cconn_dvp",
+      });
       createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
       await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(
         "Sponsor unavailable"
@@ -329,6 +367,20 @@ describe("createDvpTrade", () => {
       await clearKVStores(env);
     }
   });
+  it("refuses an out-of-channel authority before creating a trade, replacement or sponsor request", async () => {
+    await seedConnectionAuthority();
+    custodyReleaseChannel.outOfChannelMode = "byok";
+    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toMatchObject(
+      byokChannelRefusal()
+    );
+    expect(await rowsInDb()).toEqual([]);
+    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+    expect(
+      await getDb(env).queryMany("SELECT custody_wallet_id FROM dvp_settlement_wallets")
+    ).toEqual([{ custody_wallet_id: "cwlt_settlement" }]);
+    expect(await getDb(env).queryMany("SELECT id FROM custody_wallets")).toHaveLength(2);
+  });
   it.each(["connection", "credential", "entitlement"] as const)(
     "refuses an authority with unavailable %s before recording or sponsoring a trade",
     async (unavailable) => {
@@ -360,12 +412,13 @@ describe("createDvpTrade", () => {
   );
   it("creates with an admitted nondefault Connection authority", async () => {
     await seedConnectionAuthority();
-    await getDb(env).execute(
-      `INSERT INTO custody_scope_defaults
-       (id, organization_id, project_id, default_custody_config_id)
-       VALUES ('csd_dvp', ?, ?, ?)`,
-      [TEST_ORG.id, TEST_PROJECT_ID, CUSTODY_CONFIG_ID]
-    );
+    await insertTestCustodyScopeDefault(getDb(env), {
+      id: "csd_dvp",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      defaultCustodyConfigId: CUSTODY_CONFIG_ID,
+      defaultCustodyConnectionId: null,
+    });
     const trade = await createDvpTrade(env, auditContext, tradeInput());
     expect(trade.settlementAuthority).toBe(SETTLEMENT_AUTHORITY);
     expect(sendTransaction).toHaveBeenCalledOnce();
@@ -373,6 +426,34 @@ describe("createDvpTrade", () => {
       env,
       expect.objectContaining({ actor: { type: "wallet", id: "cwlt_settlement" } })
     );
+  });
+  it("replays the recorded create after BYOK leaves the release channel without sponsoring again", async () => {
+    await seedConnectionAuthority();
+    const input = { ...tradeInput(), idempotencyKey: "byok-replay" };
+    const original = await createDvpTrade(env, auditContext, input);
+    custodyReleaseChannel.outOfChannelMode = "byok";
+    expect((await createDvpTrade(env, auditContext, input)).id).toBe(original.id);
+    await expect(
+      createDvpTrade(env, auditContext, { ...input, amountA: 2000n })
+    ).rejects.toMatchObject({
+      statusCode: 409,
+    });
+    expect(await rowsInDb()).toHaveLength(1);
+    expect(sendTransaction).toHaveBeenCalledOnce();
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledOnce();
+  });
+  it("admits a new attempt after a failed create instead of replaying through an out-of-channel authority", async () => {
+    await seedConnectionAuthority();
+    const input = { ...tradeInput(), idempotencyKey: "byok-failed-retry" };
+    createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow("Sponsor unavailable");
+    custodyReleaseChannel.outOfChannelMode = "byok";
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toMatchObject(
+      byokChannelRefusal()
+    );
+    expect(await rowsInDb()).toMatchObject([{ status: "create_failed" }]);
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledOnce();
+    expect(sendTransaction).not.toHaveBeenCalled();
   });
   it("has the trade durably recorded at `creating` before the bytes go out", async () => {
     let rowsAtSendTime: Awaited<ReturnType<typeof rowsInDb>> = [];

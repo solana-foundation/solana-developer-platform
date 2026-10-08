@@ -1,6 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type { CachedApiKey, CustodyMode, SignerCheckRequest } from "@sdp/types";
+import type { CachedApiKey, SignerCheckRequest } from "@sdp/types";
 import { address, blockhash, generateKeyPairSigner, signature } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -17,8 +17,9 @@ import {
   insertTestCustodyConfigRow,
   insertTestCustodyWalletRow,
   seedTestCustodyRows,
-  seedTestPrivyConnection,
 } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
@@ -32,20 +33,11 @@ const signerCheckMocks = vi.hoisted(() => ({
   signAndSend: vi.fn(),
 }));
 
-const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
-  outOfChannelMode: null,
-}));
-
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
-  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
-    releaseChannel,
-    provider,
-    mode
-  ) =>
-    mode !== custodyReleaseChannel.outOfChannelMode &&
-    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
-  return { ...original, isCustodyProviderInReleaseChannel };
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
 });
 
 vi.mock("@/services/solana", async (importOriginal) => ({
@@ -385,6 +377,7 @@ describe("Custody wallet scope routes", () => {
       error: {
         code: "FORBIDDEN",
         message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
       },
       meta: { requestId: expect.any(String) },
     });

@@ -8,7 +8,6 @@ vi.mock(import("@sdp/types/release-channels"), async (importOriginal) => {
   const original = await importOriginal();
   return {
     ...original,
-    isCustodyProviderInReleaseChannel: () => false,
     isModuleInReleaseChannel: (releaseChannel, module, rampProviderStages) =>
       module !== "custody" &&
       original.isModuleInReleaseChannel(releaseChannel, module, rampProviderStages),
@@ -28,7 +27,7 @@ function nextClientHeaders() {
   return { "x-forwarded-for": `10.2.${Math.floor(clientAddress / 256)}.${clientAddress % 256}` };
 }
 
-describe("custody routes with every custody (provider, mode) pair out of channel", () => {
+describe("custody routes with the custody module out of channel", () => {
   describe.each(SDP_RELEASE_CHANNEL_NAMES)("on the %s release channel", (releaseChannel) => {
     it.each(CUSTODY_PROBE_PATHS)("refuses an anonymous GET %s before auth", async (path) => {
       const response = await app.request(

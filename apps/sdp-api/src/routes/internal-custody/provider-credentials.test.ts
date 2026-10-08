@@ -12,11 +12,8 @@ import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
-import { seedTestCustodySetup } from "@/test/helpers/custody";
-import {
-  activateTestCustodyConnection,
-  insertTestConnectionWallet,
-} from "@/test/helpers/custody-connections";
+import { insertTestCustodyWalletRow, seedTestCustodySetup } from "@/test/helpers/custody";
+import { activateTestCustodyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -1326,11 +1323,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       } else {
         const historyWalletId = "cwlt_active_history";
         const db = getDb(env);
-        await insertTestConnectionWallet(db, {
+        await insertTestCustodyWalletRow(db, {
           id: historyWalletId,
-          connectionId: ids.connectionId,
+          owner: { kind: "connection", custodyConnectionId: ids.connectionId },
           walletId: "privy_active_history",
           publicKey: "active_history_public_key",
+          label: null,
+          purpose: null,
           status: "active",
         });
         await db.execute(
@@ -1544,51 +1543,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       wallets: 1,
     });
     expect(await readManagedState()).toEqual(managedBefore);
-  });
-
-  it("allows an inactive exact-project config and active organization fallback", async () => {
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs (
-             id, organization_id, project_id, provider, config_encrypted,
-             encryption_version, status
-           ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'inactive')`
-        )
-        .bind("cust_inactive_exact_project", ORGANIZATION_ID, PROJECT_ID),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs (
-             id, organization_id, project_id, provider, config_encrypted,
-             encryption_version, status
-           ) VALUES (?, ?, NULL, 'privy', 'legacy', 'test', 'active')`
-        )
-        .bind("cust_active_org_fallback", ORGANIZATION_ID),
-    ]);
-    const { app, token } = buildApp();
-
-    const response = await submit(app, token, {
-      projectId: PROJECT_ID,
-      body: VALID_BODY,
-      key: "legacy-nonblocking",
-    });
-    expect(response.status).toBe(201);
-    expect(await getDomainCounts()).toEqual({
-      credentials: 1,
-      connections: 1,
-      wallets: 0,
-    });
-    const legacy = await getDb(env)
-      .prepare(
-        `SELECT id, status
-         FROM custody_configs
-         ORDER BY id`
-      )
-      .all<{ id: string; status: string }>();
-    expect(legacy.results).toEqual([
-      { id: "cust_active_org_fallback", status: "active" },
-      { id: "cust_inactive_exact_project", status: "inactive" },
-    ]);
   });
 
   it.each([

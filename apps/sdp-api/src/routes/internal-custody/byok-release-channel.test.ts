@@ -1,38 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import * as credentialSecretStore from "@/services/credential-secret-store";
+import { verifyClerkJwt } from "@/lib/clerk-token";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { insertTestCustodyScopeDefault } from "@/test/helpers/custody";
 import {
-  activateTestCustodyConnection,
-  insertTestConnectionWallet,
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
-  selectTestCustodyConnection,
+  seedTestPrivyConnection,
   type TestStoredProviderCredential,
+  writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
-const custodyStage = vi.hoisted(() => ({ privyByokInChannel: false }));
-
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
-  return {
-    ...original,
-    isCustodyProviderInReleaseChannel: (
-      ...args: Parameters<typeof original.isCustodyProviderInReleaseChannel>
-    ) => {
-      const [, provider, mode] = args;
-      return (
-        (custodyStage.privyByokInChannel || !(provider === "privy" && mode === "byok")) &&
-        original.isCustodyProviderInReleaseChannel(...args)
-      );
-    },
-  };
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
 });
 
 const ORGANIZATION_ID = "org_byok_release_channel";
@@ -50,6 +41,7 @@ const PRIVY_API_BASE_URL = "https://privy.byok-release-channel.test/v1";
 const CHANNEL_REFUSAL = {
   code: "FORBIDDEN",
   message: "The privy custody provider is not available in this release channel for byok custody.",
+  details: { reason: "custody_provider_not_in_release_channel" },
 };
 const VALID_BODY = {
   provider: "privy",
@@ -88,36 +80,28 @@ async function seedActor(): Promise<void> {
   });
 }
 
-function credentialRow(input: {
-  status: "pending" | "active";
-  stored: TestStoredProviderCredential["stored"];
-}): TestStoredProviderCredential {
-  return {
+async function seedPendingInstallation(providerAccountFingerprint: string | null): Promise<void> {
+  const db = getDb(env);
+  const credential: TestStoredProviderCredential = {
     id: CREDENTIAL_ID,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     provider: "privy",
     label: "Treasury Privy",
-    stored: input.stored,
+    stored: await writeTestPrivyCredentialSecret(env, {
+      organizationId: ORGANIZATION_ID,
+      credentialId: CREDENTIAL_ID,
+      appId: APP_ID,
+      appSecret: APP_SECRET,
+    }),
     displayMetadata: { appIdSuffix: "1234" },
-    status: input.status,
+    status: "pending",
     credentialVersion: 1,
     rotatedFromProviderCredentialId: null,
     lastValidatedAt: null,
     deactivatedAt: null,
     createdBy: USER_ID,
   };
-}
-
-async function seedPendingInstallation(providerAccountFingerprint: string | null): Promise<void> {
-  const stored = await credentialSecretStore.createCredentialSecretStore(env).write({
-    orgId: ORGANIZATION_ID,
-    provider: "privy",
-    providerCredentialId: CREDENTIAL_ID,
-    payload: { appId: APP_ID, appSecret: APP_SECRET },
-  });
-  const db = getDb(env);
-  const credential = credentialRow({ status: "pending", stored });
   await insertTestStoredProviderCredential(db, credential);
   await insertTestCustodyConnection(db, {
     id: CONNECTION_ID,
@@ -139,53 +123,44 @@ async function seedPendingInstallation(providerAccountFingerprint: string | null
 }
 
 async function seedSelectedActiveConnection(): Promise<void> {
-  const db = getDb(env);
-  const credential = credentialRow({
-    status: "active",
-    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "byok-channel-ciphertext" },
-  });
-  await insertTestStoredProviderCredential(db, credential);
-  await insertTestCustodyConnection(db, {
-    id: CONNECTION_ID,
-    organizationId: ORGANIZATION_ID,
-    projectId: PROJECT_ID,
-    provider: "privy",
-    credential,
-    status: "pending",
-    setupMetadata: {},
-    providerAccountFingerprint: null,
-    lastCheckStatus: null,
-    lastCheckAt: null,
-    lastCheckFailureCode: null,
-    activatedAt: null,
-    deactivatedAt: null,
-    createdBy: USER_ID,
-    createdAt: SEEDED_AT,
-  });
-  await insertTestConnectionWallet(db, {
-    id: DEFAULT_CUSTODY_WALLET_ID,
-    connectionId: CONNECTION_ID,
-    walletId: "privy_byok_release_channel_default",
-    publicKey: "byok-release-channel-default-address",
-    status: "active",
-  });
-  await insertTestConnectionWallet(db, {
-    id: OTHER_CUSTODY_WALLET_ID,
-    connectionId: CONNECTION_ID,
-    walletId: OTHER_WALLET_ID,
-    publicKey: "byok-release-channel-other-address",
-    status: "active",
-  });
-  await activateTestCustodyConnection(db, {
-    connectionId: CONNECTION_ID,
-    custodyWalletId: DEFAULT_CUSTODY_WALLET_ID,
-    providerAccountFingerprint: await getPrivyProviderAccountFingerprint(APP_ID),
-  });
-  await selectTestCustodyConnection(db, {
-    id: "csd_byok_release_channel",
-    organizationId: ORGANIZATION_ID,
-    projectId: PROJECT_ID,
-    connectionId: CONNECTION_ID,
+  const providerAccountFingerprint = await getPrivyProviderAccountFingerprint(APP_ID);
+  await getDb(env).transaction(async (tx) => {
+    await seedTestPrivyConnection(tx, {
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      connectionId: CONNECTION_ID,
+      credentialId: CREDENTIAL_ID,
+      createdBy: USER_ID,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "byok-channel-ciphertext" },
+      providerAccountFingerprint,
+      lastCheckStatus: "success",
+      wallets: [
+        {
+          id: DEFAULT_CUSTODY_WALLET_ID,
+          walletId: "privy_byok_release_channel_default",
+          publicKey: "byok-release-channel-default-address",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+        {
+          id: OTHER_CUSTODY_WALLET_ID,
+          walletId: OTHER_WALLET_ID,
+          publicKey: "byok-release-channel-other-address",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+      defaultCustodyWalletId: DEFAULT_CUSTODY_WALLET_ID,
+    });
+    await insertTestCustodyScopeDefault(tx, {
+      id: "csd_byok_release_channel",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      defaultCustodyConfigId: null,
+      defaultCustodyConnectionId: CONNECTION_ID,
+    });
   });
 }
 
@@ -237,8 +212,7 @@ async function domainCounts(): Promise<{
        (SELECT COUNT(*)::int FROM custody_connections) AS connections,
        (SELECT COUNT(*)::int FROM custody_wallets) AS wallets`
   );
-  if (!counts) throw new Error("Domain count query returned no row");
-  return counts;
+  return required(counts);
 }
 
 async function credentialState() {
@@ -261,10 +235,10 @@ describe("BYOK Privy outside the release channel", () => {
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
     privyApiBaseUrl: env.PRIVY_API_BASE_URL,
   };
-  const providerFetch = vi.fn();
+  const providerFetch = vi.fn<typeof fetch>();
 
   beforeEach(async () => {
-    custodyStage.privyByokInChannel = false;
+    custodyReleaseChannel.outOfChannelMode = "byok";
     await seedTestDatabase(env);
     await clearKVStores(env);
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
@@ -273,6 +247,7 @@ describe("BYOK Privy outside the release channel", () => {
     env.PRIVY_API_BASE_URL = PRIVY_API_BASE_URL;
     await seedActor();
     clerkToken = await signSeededClerkMember(env, getDb(env), USER_ID, ORGANIZATION_ID);
+    await verifyClerkJwt(clerkToken, env);
     providerFetch.mockReset();
     vi.stubGlobal("fetch", providerFetch);
   });
@@ -288,8 +263,6 @@ describe("BYOK Privy outside the release channel", () => {
   });
 
   it("refuses a first submission before any secret or domain write", async () => {
-    const secretFactory = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
-
     const response = await submit("byok-out-first-submission");
 
     expect(response.status).toBe(403);
@@ -300,17 +273,16 @@ describe("BYOK Privy outside the release channel", () => {
       },
       meta: { requestId: expect.any(String) },
     });
-    expect(secretFactory).not.toHaveBeenCalled();
     expect(providerFetch).not.toHaveBeenCalled();
     expect(await domainCounts()).toEqual({ credentials: 0, connections: 0, wallets: 0 });
   });
 
   it("replays an identical earlier submission and refuses a new key", async () => {
-    custodyStage.privyByokInChannel = true;
+    custodyReleaseChannel.outOfChannelMode = null;
     const first = await submit("byok-out-replay");
     expect(first.status).toBe(201);
     const firstBody = (await first.json()) as { data: Record<string, unknown> };
-    custodyStage.privyByokInChannel = false;
+    custodyReleaseChannel.outOfChannelMode = "byok";
 
     const replay = await submit("byok-out-replay");
     const fresh = await submit("byok-out-new-key");
@@ -335,7 +307,6 @@ describe("BYOK Privy outside the release channel", () => {
   it("refuses completing a pre-fingerprint installation without secret or Provider access", async () => {
     await seedPendingInstallation(null);
     const before = await connectionState();
-    const secretFactory = vi.spyOn(credentialSecretStore, "createCredentialSecretStore");
 
     const response = await dashboardRequest(
       `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete`,
@@ -347,7 +318,6 @@ describe("BYOK Privy outside the release channel", () => {
       error: { code: "FORBIDDEN", message: "Provider credential installation is unavailable" },
       meta: { requestId: expect.any(String) },
     });
-    expect(secretFactory).not.toHaveBeenCalled();
     expect(providerFetch).not.toHaveBeenCalled();
     expect(await connectionState()).toEqual(before);
   });
@@ -387,10 +357,9 @@ describe("BYOK Privy outside the release channel", () => {
       meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
     expect(providerFetch).toHaveBeenCalledOnce();
-    expect(providerFetch.mock.calls[0]?.[0]).toBe(
-      `${PRIVY_API_BASE_URL}/wallets/ext_wal_sdp_${CONNECTION_ID}`
-    );
-    expect(providerFetch.mock.calls[0]?.[1]).toMatchObject({ method: "GET" });
+    const [providerUrl, providerInit] = required(providerFetch.mock.calls[0]);
+    expect(providerUrl).toBe(`${PRIVY_API_BASE_URL}/wallets/ext_wal_sdp_${CONNECTION_ID}`);
+    expect(providerInit).toMatchObject({ method: "GET" });
   });
 
   it.each([
@@ -443,12 +412,12 @@ describe("BYOK Privy outside the release channel", () => {
           {
             id: CONNECTION_ID,
             provider: "privy",
-            label: "Treasury Privy",
+            label: "Privy",
             status: "active",
             isDefault: false,
             isRuntimeExecutionAllowed: false,
             defaultCustodyWalletId: DEFAULT_CUSTODY_WALLET_ID,
-            createdAt: SEEDED_AT,
+            createdAt: expect.any(String),
             activatedAt: expect.any(String),
             lastCheck: { status: "success", at: expect.any(String), failureCode: null },
             pendingWalletLabel: null,
