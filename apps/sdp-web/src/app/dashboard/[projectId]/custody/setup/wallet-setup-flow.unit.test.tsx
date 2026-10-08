@@ -339,7 +339,6 @@ describe("WalletSetupFlow connection picker", () => {
   function renderInteractiveInstalledPrivy() {
     return renderInteractiveFlow({
       ...SANDBOX_FLOW,
-      connectedProviders: ["privy"],
       initialProvider: "privy",
       connections: [connection({})],
     });
@@ -428,18 +427,9 @@ describe("WalletSetupFlow connection picker", () => {
   });
 
   it("offers no connections for a provider whose modes leave out byok", () => {
-    const managedOnly = availableCustodyProviders(
-      projectProviderAvailability({
-        project: SANDBOX_PROJECT,
-        custody: [{ provider: "privy", modes: ["managed"] }],
-        compliance: [],
-        ramps: [],
-        earn: [],
-      })
-    );
     const markup = renderFlow({
       ...SANDBOX_FLOW,
-      custodyAvailability: managedOnly,
+      custodyAvailability: SANDBOX_MANAGED_PRIVY_AVAILABILITY,
       initialProvider: "privy",
       connections: [connection({})],
     });
