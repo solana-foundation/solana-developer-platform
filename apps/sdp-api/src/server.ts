@@ -9,9 +9,11 @@
 
 import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 
 import { createApp } from "@/app";
 import { startCron, startEarnCatalogueBootSync } from "@/cron/runner";
+import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { createNodeHttpApp } from "@/runtime/http-node";
@@ -82,7 +84,7 @@ function shouldShutdownOnUnhandledRejection(): boolean {
 // and reach branches that gate dev-only behaviour on `ENVIRONMENT === "production"`.
 const ALLOWED_ENVIRONMENTS: ReadonlySet<string> = new Set(["development", "production"]);
 
-function assertRequiredEnv(env: Env): void {
+export function assertRequiredEnv(env: Env): void {
   if (!env.ENVIRONMENT) {
     throw new Error("ENVIRONMENT is required (set to 'development' or 'production')");
   }
@@ -102,6 +104,7 @@ function assertRequiredEnv(env: Env): void {
   }
   assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);
+  assertSdpReleaseChannelConfigured(env);
 }
 
 async function main(): Promise<void> {
@@ -114,7 +117,9 @@ async function main(): Promise<void> {
   const shutdownTimeoutMs = resolveShutdownTimeoutMs();
   const fatalOnUnhandledRejection = shouldShutdownOnUnhandledRejection();
 
-  const app = createNodeHttpApp(createApp({ observability: noopObservability }));
+  const app = createNodeHttpApp(
+    createApp({ observability: noopObservability, rampProviderStages: SDP_RAMP_PROVIDER_STAGES })
+  );
   const bg = new NodeBackgroundRunner();
   const cron = startCron({ env, bg });
   startEarnCatalogueBootSync({ env, bg });

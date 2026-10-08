@@ -29,7 +29,6 @@ export const DASHBOARD_PAYMENTS_SUBNAV_HREFS = {
 
 export const DASHBOARD_INTEGRATIONS_SUBNAV_HREFS = {
   custody: "/dashboard/integrations?tab=custody",
-  rpc: "/dashboard/integrations?tab=rpc",
   ramps: "/dashboard/integrations?tab=ramps",
   compliance: "/dashboard/integrations?tab=compliance",
   privacy: "/dashboard/integrations?tab=privacy",
@@ -233,4 +232,26 @@ export function isDashboardNavItemActive(pathname: string, href: string): boolea
     );
   }
   return pathnameOnly === href || pathnameOnly.startsWith(`${href}/`);
+}
+
+const PROJECT_SWITCH_DESTINATIONS = [
+  ...Object.values(DASHBOARD_MARKETS_SUBNAV_HREFS),
+  ...Object.values(DASHBOARD_PAYMENTS_SUBNAV_HREFS),
+  ...Object.values(DASHBOARD_SIDE_NAV_HREFS),
+];
+
+/**
+ * Where switching Project lands from the current page: the root of the module
+ * (or sub-module) the page belongs to, never the page itself, because ids in
+ * the path (wallets, tokens, trades) belong to the Project being left.
+ *
+ * @param dashboardPath - Project-less path of the current page, e.g. `/dashboard/custody/cwlt_1`.
+ * @returns The module root to open under the other Project, e.g. `/dashboard/wallets`.
+ */
+export function projectSwitchDestination(dashboardPath: string): string {
+  const destination = PROJECT_SWITCH_DESTINATIONS.find(
+    (href) =>
+      href !== DASHBOARD_SIDE_NAV_HREFS.home && isDashboardNavItemActive(dashboardPath, href)
+  );
+  return destination === undefined ? DASHBOARD_SIDE_NAV_HREFS.home : destination;
 }

@@ -1,4 +1,9 @@
-import { resolveOrganizationProviderEntitlements } from "@sdp/types";
+import {
+  EARN_PROVIDERS,
+  RAMP_PROVIDERS,
+  resolveOrganizationProviderEntitlements,
+  SDP_RAMP_PROVIDER_STAGES,
+} from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { getLogger } from "@/runtime/logger";
@@ -9,10 +14,13 @@ import {
   getProviderAvailability,
   isPersistedCustodyCompletionEnabled,
   parseClerkOrganizationTierMetadata,
+  parseProviderOverridesFromClerkMetadata,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
+
+const MANIFEST_STAGES = { rampProviderStages: SDP_RAMP_PROVIDER_STAGES };
 
 const TEST_ORG_ID = "org_provider_availability_test";
 
@@ -39,14 +47,6 @@ const providerEnvKeys = [
   "UTILA_SERVICE_ACCOUNT_EMAIL",
   "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY",
   "UTILA_VAULT_ID",
-  "SOLANA_RPC_URL",
-  "SOLANA_RPC_ALCHEMY_URL",
-  "SOLANA_RPC_HELIUS_URL",
-  "SOLANA_RPC_QUICKNODE_URL",
-  "SOLANA_RPC_TRITON_URL",
-  "SOLANA_RPC_VALIDATIONCLOUD_URL",
-  "SOLANA_RPC_NODIT_URL",
-  "SOLANA_RPC_NODIT_API_KEY",
   "RANGE_API_KEY",
   "ELLIPTIC_API_TOKEN",
   "ELLIPTIC_API_KEY",
@@ -91,12 +91,6 @@ function setBaseProviderEnv(): void {
   writeProviderEnv({
     PRIVY_APP_ID: "privy_test_app",
     PRIVY_APP_SECRET: "privy_test_secret",
-    SOLANA_RPC_URL: "https://rpc.default.test",
-    SOLANA_RPC_HELIUS_URL: "https://rpc.helius.test",
-    SOLANA_RPC_TRITON_URL: "https://rpc.triton.test",
-    SOLANA_RPC_VALIDATIONCLOUD_URL: "https://rpc.validationcloud.test/v1/{API_KEY}",
-    SOLANA_RPC_NODIT_URL: "https://solana-devnet.nodit.io/{API_KEY}",
-    SOLANA_RPC_NODIT_API_KEY: "nodit_test_key",
     RANGE_API_KEY: "range_test_key",
     MOONPAY_API_KEY: "moonpay_test_key",
     MOONPAY_SECRET_KEY: "moonpay_test_secret",
@@ -198,9 +192,6 @@ describe("provider-availability.service", () => {
         custody: {
           local: true,
         },
-        rpc: {
-          helius: true,
-        },
         compliance: {
           range: true,
         },
@@ -216,18 +207,18 @@ describe("provider-availability.service", () => {
     expect(resolved.providers.custody.turnkey).toBe(true);
     expect(resolved.providers.custody.local).toBe(true);
     expect(resolved.providers.custody.para).toBe(true);
-    expect(resolved.providers.rpc.default).toBe(true);
-    expect(resolved.providers.rpc.helius).toBe(true);
-    expect(resolved.providers.rpc.triton).toBe(true);
-    expect(resolved.providers.rpc.validationcloud).toBe(true);
-    expect(resolved.providers.rpc.nodit).toBe(true);
     expect(resolved.providers.compliance.range).toBe(true);
     expect(resolved.providers.ramps.moonpay).toBe(true);
     expect(resolved.providers.ramps.lightspark).toBe(true);
   });
 
   it("marks providers available only when the organization is entitled and the environment is configured", async () => {
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.privy).toEqual({
@@ -238,19 +229,6 @@ describe("provider-availability.service", () => {
     expect(availability.providers.custody.coinbase_cdp.enabled).toBe(true);
     expect(availability.providers.custody.turnkey.enabled).toBe(true);
     expect(availability.providers.custody.para.enabled).toBe(true);
-    expect(availability.providers.rpc.default.enabled).toBe(true);
-    expect(availability.providers.rpc.helius.enabled).toBe(true);
-    expect(availability.providers.rpc.triton.enabled).toBe(true);
-    expect(availability.providers.rpc.validationcloud).toEqual({
-      entitled: true,
-      configured: true,
-      enabled: true,
-    });
-    expect(availability.providers.rpc.nodit).toEqual({
-      entitled: true,
-      configured: true,
-      enabled: true,
-    });
     expect(availability.providers.compliance.range).toEqual({
       entitled: false,
       configured: true,
@@ -288,57 +266,75 @@ describe("provider-availability.service", () => {
     });
   });
 
+  it("reports providers the release channel leaves out as not enabled", async () => {
+    await setOrganizationTier("enterprise");
+
+    const onExperimental = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
+    const onStable = await getProviderAvailability(
+      { ...env, SDP_RELEASE_CHANNEL: "stable" },
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
+
+    const enabledRamps = RAMP_PROVIDERS.filter((p) => onExperimental.providers.ramps[p]?.enabled);
+    expect(enabledRamps.length).toBeGreaterThan(0);
+    for (const provider of enabledRamps) {
+      expect(onStable.providers.ramps[provider]).toEqual({
+        ...onExperimental.providers.ramps[provider],
+        enabled: false,
+      });
+    }
+    for (const provider of EARN_PROVIDERS) {
+      if (!onExperimental.providers.earn[provider]?.enabled) continue;
+      expect(onStable.providers.earn[provider]?.enabled).toBe(false);
+    }
+    // Stable modules are unchanged.
+    expect(onStable.providers.custody).toEqual(onExperimental.providers.custody);
+    expect(onStable.providers.compliance).toEqual(onExperimental.providers.compliance);
+  });
+
+  it("follows injected ramp provider stages", async () => {
+    await setOrganizationTier("enterprise");
+    const onBeta = { ...env, SDP_RELEASE_CHANNEL: "beta" };
+    const onExperimental = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
+    expect(onExperimental.providers.ramps.moonpay?.enabled).toBe(true);
+
+    const availability = await getProviderAvailability(onBeta, getDb(env), TEST_ORG_ID, {
+      rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
+    });
+
+    expect(availability.providers.ramps.moonpay?.enabled).toBe(true);
+    expect(availability.providers.ramps.bvnk?.enabled).toBe(false);
+  });
+
   it("treats partially configured multi-secret providers as not configured", async () => {
     await setOrganizationTier("enterprise");
     env.BVNK_WALLET_ID = "bvnk_wallet";
     env.BVNK_HAWK_AUTH_ID = "bvnk_hawk_auth_id";
     env.BVNK_HAWK_SECRET_KEY = undefined;
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.providers.ramps.bvnk).toEqual({
       entitled: true,
       configured: false,
       enabled: false,
-    });
-  });
-
-  it.each(["individual", "enterprise"] as const)(
-    "treats configured Nodit as general for the legacy %s tier and honors an explicit disable",
-    async (tier) => {
-      await setOrganizationTier(tier);
-
-      const enabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-      expect(enabled.providers.rpc.nodit).toEqual({
-        entitled: true,
-        configured: true,
-        enabled: true,
-      });
-
-      await getDb(env)
-        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-        .bind(JSON.stringify({ providerOverrides: { rpc: { nodit: false } } }), TEST_ORG_ID)
-        .run();
-
-      const disabled = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-      expect(disabled.providers.rpc.nodit).toEqual({
-        entitled: false,
-        configured: true,
-        enabled: false,
-      });
-    }
-  );
-
-  it("treats Nodit as configured when its URL is present like other RPC providers", async () => {
-    env.SOLANA_RPC_NODIT_URL = "https://rpc.proxy.test/nodit";
-    env.SOLANA_RPC_NODIT_API_KEY = undefined;
-
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
-
-    expect(availability.providers.rpc.nodit).toEqual({
-      entitled: true,
-      configured: true,
-      enabled: true,
     });
   });
 
@@ -360,7 +356,7 @@ describe("provider-availability.service", () => {
       },
     });
 
-    const withoutKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const withoutKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
     expect(withoutKey.providers.custody.local).toEqual({
       entitled: true,
       configured: false,
@@ -370,7 +366,12 @@ describe("provider-availability.service", () => {
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
 
-    const managedWithKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const managedWithKey = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
     expect(managedWithKey.providers.custody.local).toEqual({
       entitled: true,
       configured: false,
@@ -378,7 +379,12 @@ describe("provider-availability.service", () => {
     });
 
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    const selfHostedWithKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const selfHostedWithKey = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
     expect(selfHostedWithKey.providers.custody.local).toEqual({
       entitled: true,
       configured: true,
@@ -399,9 +405,6 @@ describe("provider-availability.service", () => {
                 local: true,
                 para: false,
               },
-              rpc: {
-                helius: true,
-              },
             },
           },
         },
@@ -420,9 +423,6 @@ describe("provider-availability.service", () => {
           local: true,
           para: false,
         },
-        rpc: {
-          helius: true,
-        },
       },
     });
   });
@@ -432,7 +432,12 @@ describe("provider-availability.service", () => {
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
@@ -530,7 +535,12 @@ describe("provider-availability.service", () => {
       )
       .run();
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.providers.custody.local).toEqual({
       entitled: false,
@@ -545,7 +555,12 @@ describe("provider-availability.service", () => {
     env.CUSTODY_PRIVATE_KEY =
       "3QpWV8xk4hs7vmQhSLAQWNi2KskuSVSpmR75QGqSuxaKcdA9XJkq8VBihspJddBWVfEybTWLKqHJ19N64DNuwSNd";
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
@@ -567,7 +582,7 @@ describe("provider-availability.service", () => {
               local: true,
             },
           },
-          rpcProvider: "helius",
+          defaultEnvironment: "sandbox",
         }),
         TEST_ORG_ID
       )
@@ -587,7 +602,7 @@ describe("provider-availability.service", () => {
 
     expect(organization?.tier).toBe("enterprise");
     expect(organization?.settings ? JSON.parse(organization.settings) : null).toEqual({
-      rpcProvider: "helius",
+      defaultEnvironment: "sandbox",
     });
   });
 
@@ -612,12 +627,22 @@ describe("provider-availability.service", () => {
     }
   });
 
+  it("parseProviderOverridesFromClerkMetadata drops a stale rpc family and keeps the families it knows", () => {
+    expect(
+      parseProviderOverridesFromClerkMetadata({
+        rpc: { helius: true },
+        custody: { privy: true },
+      })
+    ).toEqual({ custody: { privy: true } });
+    expect(parseProviderOverridesFromClerkMetadata({ rpc: { helius: true } })).toBeUndefined();
+  });
+
   it("syncs enableProductionProject into settings when true and strips it when absent, preserving unrelated keys", async () => {
     await getDb(env)
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(
         JSON.stringify({
-          rpcProvider: "helius",
+          defaultEnvironment: "sandbox",
           enableProductionProject: true,
         }),
         TEST_ORG_ID
@@ -637,7 +662,7 @@ describe("provider-availability.service", () => {
       .bind(TEST_ORG_ID)
       .first<{ settings: string | null }>();
     expect(stripped?.settings ? JSON.parse(stripped.settings) : null).toEqual({
-      rpcProvider: "helius",
+      defaultEnvironment: "sandbox",
     });
   });
 
@@ -722,7 +747,12 @@ describe("provider-availability.service", () => {
       .run();
     env.UPSHIFT_API_KEY = "upshift_test_key";
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.providers.earn.upshift).toEqual({
       entitled: true,
@@ -748,7 +778,12 @@ describe("provider-availability.service", () => {
       .bind(JSON.stringify({ providerOverrides: { earn: { veda: true } } }), TEST_ORG_ID)
       .run();
 
-    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const availability = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
 
     expect(availability.providers.earn.veda).toEqual({
       entitled: true,
@@ -770,7 +805,7 @@ describe("provider-availability.service", () => {
       .run();
 
     env.JUPITER_SWAP_API_KEY = undefined;
-    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
     expect(without.providers.earn.ondo).toEqual({
       entitled: true,
       configured: false,
@@ -781,7 +816,7 @@ describe("provider-availability.service", () => {
     );
 
     env.JUPITER_SWAP_API_KEY = "jup_test_key";
-    const withKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const withKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
     expect(withKey.providers.earn.ondo).toEqual({
       entitled: true,
       configured: true,
@@ -799,7 +834,7 @@ describe("provider-availability.service", () => {
 
     env.JUPITER_SWAP_API_KEY = undefined;
     env.EARN_HASTRA_DEX_EXIT_ENABLED = undefined;
-    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
     expect(without.providers.earn.hastra).toEqual({
       entitled: true,
       configured: true,
@@ -810,7 +845,12 @@ describe("provider-availability.service", () => {
     // Enabling the optional DEX rail without its Jupiter prerequisite must not
     // disable the native provider. The rail's resolver fails closed instead.
     env.EARN_HASTRA_DEX_EXIT_ENABLED = "true";
-    const dexMisconfigured = await getProviderAvailability(env, getDb(env), TEST_ORG_ID);
+    const dexMisconfigured = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_STAGES
+    );
     expect(dexMisconfigured.providers.earn.hastra).toEqual({
       entitled: true,
       configured: true,

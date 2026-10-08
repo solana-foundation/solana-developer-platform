@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { buildWalletsPlaygroundEndpointConfigs } from "@/app/dashboard/custody/wallets-playground-config";
-import { buildIssuancePlaygroundEndpointConfigs } from "@/app/dashboard/issuance/issuance-playground-config";
-import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/dashboard/payments/counterparty/counterparty-playground-config";
-import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/dashboard/payments/payments-playground-config";
+import { buildWalletsPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/custody/wallets-playground-config";
+import { buildIssuancePlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/issuance/issuance-playground-config";
+import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-playground-config";
+import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/payments/payments-playground-config";
 import type { ApiPlaygroundEndpointConfig } from "@/components/api-playground-shell";
 import { getMessages, translate } from "@/i18n/messages";
 import { getOpenApiPlaygroundEndpoints } from "./api-playground-openapi-catalog";

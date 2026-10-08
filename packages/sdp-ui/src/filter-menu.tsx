@@ -1,11 +1,12 @@
 "use client";
 
 import { ListFilterIcon, SearchIcon } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useState, useSyncExternalStore } from "react";
 import { cn } from "./cn";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSub,
@@ -28,9 +29,22 @@ export interface FilterMenuSection {
 // it instead of triggering the menu's typeahead.
 const MENU_KEYS = new Set(["Escape", "ArrowDown", "ArrowUp", "Tab"]);
 
+const COMPACT_VIEWPORT = "(width < 40rem)";
+
+function subscribeToCompactViewport(onChange: () => void) {
+  const mediaQuery = window.matchMedia(COMPACT_VIEWPORT);
+  mediaQuery.addEventListener("change", onChange);
+  return () => mediaQuery.removeEventListener("change", onChange);
+}
+
+function getCompactViewport() {
+  return window.matchMedia(COMPACT_VIEWPORT).matches;
+}
+
 /**
  * A single "Filter" button that opens every filter a list supports as a searchable menu of
- * submenus (State ›, Type ›, …). The list owns the values; each section renders its own body.
+ * submenus (State ›, Type ›, …), or inline groups on phones where adjacent panels do not fit.
+ * The list owns the values; each section renders its own body.
  */
 export function FilterMenu({
   label,
@@ -44,6 +58,7 @@ export function FilterMenu({
   className?: string;
 }) {
   const [query, setQuery] = useState("");
+  const compact = useSyncExternalStore(subscribeToCompactViewport, getCompactViewport, () => false);
   const needle = query.trim().toLowerCase();
   const visible = needle
     ? sections.filter((section) => section.label.toLowerCase().includes(needle))
@@ -66,7 +81,11 @@ export function FilterMenu({
           </span>
         ) : null}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72 p-0">
+      <DropdownMenuContent
+        align="start"
+        collisionPadding={8}
+        className="max-h-[var(--radix-dropdown-menu-content-available-height)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto p-0"
+      >
         <div className="flex items-center gap-2 border-b border-border-default px-3">
           <SearchIcon className="size-4 shrink-0 text-tertiary" aria-hidden="true" />
           <input
@@ -81,19 +100,33 @@ export function FilterMenu({
           />
         </div>
         <div className="p-1.5">
-          {visible.map((section) => (
-            <DropdownMenuSub key={section.id}>
-              <DropdownMenuSubTrigger className="gap-3 py-2.5 text-body font-normal">
-                <span className="min-w-0 flex-1 truncate">{section.label}</span>
-                {section.value === undefined ? null : (
-                  <span className="max-w-32 truncate text-meta text-tertiary">{section.value}</span>
-                )}
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-80 min-w-56 overflow-y-auto">
+          {visible.map((section) =>
+            compact ? (
+              <div
+                key={section.id}
+                className="border-b border-border-default pb-1.5 last:border-0 last:pb-0"
+              >
+                <DropdownMenuLabel className="text-meta font-normal tracking-normal text-secondary normal-case">
+                  {section.label}
+                </DropdownMenuLabel>
                 {section.content}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          ))}
+              </div>
+            ) : (
+              <DropdownMenuSub key={section.id}>
+                <DropdownMenuSubTrigger className="gap-3 py-2.5 text-body font-normal">
+                  <span className="min-w-0 flex-1 truncate">{section.label}</span>
+                  {section.value === undefined ? null : (
+                    <span className="max-w-32 truncate text-meta text-tertiary">
+                      {section.value}
+                    </span>
+                  )}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="max-h-80 min-w-56 overflow-y-auto">
+                  {section.content}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )
+          )}
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

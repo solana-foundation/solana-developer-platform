@@ -22,7 +22,3 @@ export const rpcRelayPayloadSchema = z.union([
   rpcRequestSchema,
   z.array(rpcRequestSchema).min(1).max(RPC_RELAY_MAX_BATCH),
 ]);
-
-export const rpcProjectQuerySchema = z.object({
-  projectId: z.string().min(1).optional(),
-});

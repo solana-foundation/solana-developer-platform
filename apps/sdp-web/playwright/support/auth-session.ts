@@ -33,7 +33,7 @@ function isInterruptedNavigation(error: unknown): boolean {
 export async function getClerkBearerToken(page: Page): Promise<string> {
   // The proxy's workspace-loading bounce (307 + client return) can land while
   // this goto is still in flight; Clerk is readable from either page.
-  await page.goto("/dashboard/issuance", { waitUntil: "domcontentloaded" }).catch((error) => {
+  await page.goto("/dashboard", { waitUntil: "domcontentloaded" }).catch((error) => {
     if (!isInterruptedNavigation(error)) throw error;
   });
   await page.waitForLoadState("domcontentloaded");

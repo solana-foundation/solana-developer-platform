@@ -9,23 +9,27 @@ import {
   isEarnProviderSurfaced,
   isRampProviderSurfaced,
   normalizeOrganizationTier,
-  ORGANIZATION_RPC_PROVIDERS,
   type OrganizationProviderAvailabilityResponse,
   type OrganizationProviderFamily,
   type OrganizationProviderOverrides,
-  type OrganizationRpcProvider,
   type OrganizationSettings,
   type OrganizationTier,
   type ProviderAvailabilityEntry,
   RAMP_PROVIDERS,
   type RampProviderId,
   resolveOrganizationProviderEntitlements,
+  SDP_RAMP_PROVIDER_STAGES,
   type SdpEnvironment,
+  type SdpRampProviderStages,
 } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { AppError } from "@/lib/errors";
-import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
+import {
+  isCustodyConnectionRuntimeEnabled,
+  isModuleAvailable,
+  isRampProviderAvailable,
+} from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
@@ -56,7 +60,6 @@ type ProviderAvailabilityDefinition = {
 
 type ProviderAvailabilityDefinitions = {
   custody: Record<CustodyProvider, ProviderAvailabilityDefinition>;
-  rpc: Record<OrganizationRpcProvider, ProviderAvailabilityDefinition>;
   compliance: Record<ComplianceProviderId, ProviderAvailabilityDefinition>;
   ramps: Record<RampProviderId, ProviderAvailabilityDefinition>;
   earn: Record<EarnProviderId, ProviderAvailabilityDefinition>;
@@ -64,7 +67,6 @@ type ProviderAvailabilityDefinitions = {
 
 type ProviderIdByFamily = {
   custody: CustodyProvider;
-  rpc: OrganizationRpcProvider;
   compliance: ComplianceProviderId;
   ramps: RampProviderId;
   earn: EarnProviderId;
@@ -199,36 +201,6 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
           "UTILA_SERVICE_ACCOUNT_PRIVATE_KEY",
           "UTILA_VAULT_ID",
         ]),
-    },
-  },
-  rpc: {
-    default: {
-      label: "SDP/default",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_URL"),
-    },
-    alchemy: {
-      label: "Alchemy",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_ALCHEMY_URL"),
-    },
-    helius: {
-      label: "Helius",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_HELIUS_URL"),
-    },
-    nodit: {
-      label: "Nodit",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_NODIT_URL"),
-    },
-    quicknode: {
-      label: "QuickNode",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_QUICKNODE_URL"),
-    },
-    triton: {
-      label: "Triton",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_TRITON_URL"),
-    },
-    validationcloud: {
-      label: "Validation Cloud",
-      isConfigured: (env) => hasEnv(env, "SOLANA_RPC_VALIDATIONCLOUD_URL"),
     },
   },
   compliance: {
@@ -487,11 +459,6 @@ export function parseProviderOverridesFromClerkMetadata(
     next.custody = custody;
   }
 
-  const rpc = parseBooleanOverrides(record.rpc, ORGANIZATION_RPC_PROVIDERS);
-  if (rpc) {
-    next.rpc = rpc;
-  }
-
   const compliance = parseBooleanOverrides(record.compliance, COMPLIANCE_PROVIDERS);
   if (compliance) {
     next.compliance = compliance;
@@ -563,16 +530,20 @@ function buildConfiguredProviderEntries<T extends string>(
 function getConfiguredProviders(env: Env) {
   return {
     custody: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.custody, env),
-    rpc: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.rpc, env),
     compliance: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.compliance, env),
     ramps: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.ramps, env),
     earn: buildConfiguredProviderEntries(PROVIDER_AVAILABILITY_DEFINITIONS.earn, env),
   };
 }
 
+/**
+ * `inReleaseChannel` caps `enabled`: a provider the deployment's release channel
+ * leaves out is never reported as usable, whatever the organization is entitled to.
+ */
 function buildAvailabilityEntries<T extends string>(
   entitled: Record<T, boolean>,
-  configured: Record<T, boolean>
+  configured: Record<T, boolean>,
+  inReleaseChannel: (provider: T) => boolean
 ): Record<T, ProviderAvailabilityEntry> {
   return Object.fromEntries(
     Object.keys(entitled).map((key) => {
@@ -584,7 +555,7 @@ function buildAvailabilityEntries<T extends string>(
         {
           entitled: isEntitled,
           configured: isConfigured,
-          enabled: isEntitled && isConfigured,
+          enabled: isEntitled && isConfigured && inReleaseChannel(key as T),
         },
       ];
     })
@@ -599,10 +570,24 @@ function getProviderLabel(family: OrganizationProviderFamily, providerId: string
   return familyDefinitions[providerId]?.label ?? providerId;
 }
 
+/** The ramp provider stages to evaluate: the request's `rampProviderStages`, else `SDP_RAMP_PROVIDER_STAGES`. */
+export interface ProviderAvailabilityOptions {
+  rampProviderStages: SdpRampProviderStages;
+}
+
+/**
+ * For callers that never read a ramp entry (custody, Earn, compliance checks).
+ * Ramp provider stages only change the ramps entries, so the manifest is exact here.
+ */
+const MANIFEST_RAMP_STAGES: ProviderAvailabilityOptions = {
+  rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+};
+
 export async function getProviderAvailability(
   env: Env,
   db: DatabaseExecutor,
-  organizationId: string
+  organizationId: string,
+  options: ProviderAvailabilityOptions
 ): Promise<OrganizationProviderAvailabilityResponse> {
   const organization = await getOrganizationTierState(db, organizationId);
   const resolved = resolveOrganizationProviderEntitlements({
@@ -614,11 +599,20 @@ export async function getProviderAvailability(
   return {
     tier: resolved.tier,
     providers: {
-      custody: buildAvailabilityEntries(resolved.providers.custody, configured.custody),
-      rpc: buildAvailabilityEntries(resolved.providers.rpc, configured.rpc),
-      compliance: buildAvailabilityEntries(resolved.providers.compliance, configured.compliance),
-      ramps: buildAvailabilityEntries(resolved.providers.ramps, configured.ramps),
-      earn: buildAvailabilityEntries(resolved.providers.earn, configured.earn),
+      custody: buildAvailabilityEntries(resolved.providers.custody, configured.custody, () =>
+        isModuleAvailable(env, "custody", options.rampProviderStages)
+      ),
+      compliance: buildAvailabilityEntries(
+        resolved.providers.compliance,
+        configured.compliance,
+        () => isModuleAvailable(env, "compliance", options.rampProviderStages)
+      ),
+      ramps: buildAvailabilityEntries(resolved.providers.ramps, configured.ramps, (provider) =>
+        isRampProviderAvailable(env, provider, options.rampProviderStages)
+      ),
+      earn: buildAvailabilityEntries(resolved.providers.earn, configured.earn, () =>
+        isModuleAvailable(env, "earn", options.rampProviderStages)
+      ),
     },
   };
 }
@@ -641,7 +635,7 @@ export async function assertCustodyProviderEntitled(
   organizationId: string,
   provider: CustodyProvider
 ): Promise<void> {
-  const availability = await getProviderAvailability(env, db, organizationId);
+  const availability = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_STAGES);
   const entry = availability.providers.custody[provider];
   if (!isCustodyProviderEntitled(availability, provider)) {
     logEvent("warn", {
@@ -681,7 +675,7 @@ export async function isPersistedCustodyCompletionEnabled(
     return false;
   }
 
-  const availability = await getProviderAvailability(env, db, organizationId);
+  const availability = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_STAGES);
   const providerAvailability = availability.providers.custody[provider];
   return source === "runtime"
     ? providerAvailability?.enabled === true
@@ -718,13 +712,6 @@ export async function assertProviderAvailable(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
-  family: "rpc",
-  providerId: OrganizationRpcProvider
-): Promise<void>;
-export async function assertProviderAvailable(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
   family: "compliance",
   providerId: ComplianceProviderId
 ): Promise<void>;
@@ -734,7 +721,8 @@ export async function assertProviderAvailable(
   organizationId: string,
   family: "ramps",
   providerId: RampProviderId,
-  testMode: boolean
+  testMode: boolean,
+  options: ProviderAvailabilityOptions
 ): Promise<void>;
 export async function assertProviderAvailable(
   env: Env,
@@ -750,9 +738,11 @@ export async function assertProviderAvailable(
   organizationId: string,
   family: OrganizationProviderFamily,
   providerId: string,
-  testMode?: boolean
+  testMode?: boolean,
+  // Only the ramps overload takes options; the other families never read a ramp entry.
+  options: ProviderAvailabilityOptions = MANIFEST_RAMP_STAGES
 ): Promise<void> {
-  const access = await getProviderAvailability(env, db, organizationId);
+  const access = await getProviderAvailability(env, db, organizationId, options);
   const entry = access.providers[family][
     providerId as keyof (typeof access.providers)[typeof family]
   ] as ProviderAvailabilityEntry | undefined;
@@ -852,13 +842,17 @@ export function assertEarnProviderConfigured(
   }
 }
 
-export async function getEnabledProviders(env: Env, db: DatabaseClient, organizationId: string) {
-  const access = await getProviderAvailability(env, db, organizationId);
+export async function getEnabledProviders(
+  env: Env,
+  db: DatabaseClient,
+  organizationId: string,
+  options: ProviderAvailabilityOptions
+) {
+  const access = await getProviderAvailability(env, db, organizationId, options);
 
   return {
     tier: access.tier,
     custody: CUSTODY_PROVIDERS.filter((provider) => access.providers.custody[provider]?.enabled),
-    rpc: ORGANIZATION_RPC_PROVIDERS.filter((provider) => access.providers.rpc[provider]?.enabled),
     compliance: COMPLIANCE_PROVIDERS.filter(
       (provider) => access.providers.compliance[provider]?.enabled
     ),

@@ -1,6 +1,7 @@
 export { isIsoDuration, parseIsoDurationMs } from "./duration";
 export {
   enforceWalletOperationPolicy,
+  recordPoliciesExcludedWalletOperation,
   type WalletOperationPolicyEnforcement,
 } from "./enforce";
 export {
@@ -10,6 +11,7 @@ export {
   evaluateCandidatePolicies,
   evaluateWalletOperationPolicies,
   IMPLICIT_DEFAULT_ALLOW_POLICY,
+  POLICIES_EXCLUDED_DRY_RUN_RESULT,
 } from "./evaluate";
 export type {
   CreateApprovalRequestInput,

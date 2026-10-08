@@ -19,19 +19,18 @@ import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
 import { type Address, address, createNoopSigner } from "@solana/kit";
 import { SdpKaminoError } from "./errors";
 import { permittedPlanPrograms } from "./guards";
-import { createKaminoRpc } from "./rpc";
+import { createKaminoReadRpc, createKaminoRpc } from "./rpc";
 import {
   buildKaminoDepositPlan,
   buildKaminoWithdrawPlan,
   discoverKaminoPositionVaults,
   quoteKaminoDeposit,
   quoteKaminoWithdraw,
-  readKaminoPosition,
+  readKaminoPositions,
 } from "./sdk";
 import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
 
-/** One portfolio request may fan out over many vaults; never fan out the RPCs without a bound. */
-export const KAMINO_POSITION_READ_CONCURRENCY = 4;
+export { KAMINO_POSITION_READ_CONCURRENCY } from "./concurrency";
 
 /**
  * API-owned execution guard for one provider operation. The API injects its
@@ -42,36 +41,6 @@ export type KaminoVaultOperationRunner = <T>(
   label: string,
   operation: (assertActive: () => void) => Promise<T>
 ) => Promise<T>;
-
-async function mapSettledWithConcurrency<T, U>(
-  items: readonly T[],
-  concurrency: number,
-  assertActive: () => void,
-  mapper: (item: T) => Promise<U>
-): Promise<Array<PromiseSettledResult<U>>> {
-  const results = new Array<PromiseSettledResult<U>>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < items.length) {
-        // A timed-out aggregate read cannot cancel an in-flight SDK request,
-        // but it must never dequeue another vault after the budget expires.
-        assertActive();
-        const index = nextIndex;
-        nextIndex += 1;
-        try {
-          results[index] = { status: "fulfilled", value: await mapper(items[index] as T) };
-        } catch (reason) {
-          results[index] = { status: "rejected", reason };
-        }
-      }
-    })
-  );
-
-  return results;
-}
 
 /** Convert the kit-native plan to the dependency-free Earn wire contract. */
 export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVaultTransactionPlan {
@@ -357,15 +326,13 @@ export class KaminoVaultDirectClient
 
       // One shared slot makes the page internally consistent. The client carries
       // the same transport deadline as every nested Kamino SDK read below.
-      const slot = await createKaminoRpc(runtime.rpcUrl).getSlot().send();
+      const slot = await createKaminoReadRpc(runtime.rpcUrl).getSlot().send();
       assertActive();
 
-      const results = await mapSettledWithConcurrency(
-        providerReferences,
-        KAMINO_POSITION_READ_CONCURRENCY,
-        assertActive,
-        (reference) =>
-          readKaminoPosition(runtime, { vault: address(reference), owner, slot }, assertActive)
+      const results = await readKaminoPositions(
+        runtime,
+        { vaults: providerReferences, owner, slot },
+        assertActive
       );
 
       const failures = results.flatMap((result, index) =>

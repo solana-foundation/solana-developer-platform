@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import type { Project } from "@sdp/types";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -11,74 +10,43 @@ import {
   getStoredApiKeySecret,
   storeApiKeySecret,
 } from "@/lib/playground-api-keys";
+import {
+  dashboardRouter,
+  resetDashboardNavigation,
+  setDashboardUrl,
+} from "@/test/dashboard-navigation";
+import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { DashboardWorkspaceProvider, useDashboardWorkspace } from "./dashboard-workspace-context";
 
-const mocks = vi.hoisted(() => ({
-  auth: { isLoaded: true, userId: "user-a", orgId: "org-a" } as {
-    isLoaded: boolean;
-    userId: string | null;
-    orgId: string | null;
-  },
-  replace: vi.fn(),
-  replaceSearchParams: vi.fn(),
-  reconcileProjectCookie: vi.fn(),
-  selectProject: vi.fn(),
-}));
+const clerk = vi.hoisted(() => {
+  const auth: { isLoaded: boolean; userId: string | null; orgId: string | null } = {
+    isLoaded: true,
+    userId: "user_test",
+    orgId: "org_test",
+  };
+  return { auth };
+});
 
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => mocks.auth }));
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/issuance",
-  useRouter: () => ({ replace: mocks.replace, refresh: vi.fn() }),
-}));
+vi.mock("@clerk/nextjs", () => ({ useAuth: () => clerk.auth }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/dashboard-url-state", () => ({
   readDashboardTabFromUrl: () => null,
   useDashboardUrlState: () => ({
-    replaceSearchParams: mocks.replaceSearchParams,
+    replaceSearchParams: vi.fn(),
     searchParams: new URLSearchParams(),
   }),
 }));
-vi.mock("@/lib/project-cookie-action", () => ({
-  reconcileProjectCookieAction: mocks.reconcileProjectCookie,
-  selectProjectAction: mocks.selectProject,
-}));
-
-const projects = [
-  {
-    id: "project-a",
-    organizationId: "org-a",
-    name: "Project A",
-    slug: "default-sandbox",
-    description: null,
-    environment: "sandbox",
-    settings: null,
-    status: "active",
-    createdBy: "user-a",
-    createdAt: "2026-09-17T00:00:00.000Z",
-    updatedAt: "2026-09-17T00:00:00.000Z",
-  },
-  {
-    id: "project-b",
-    organizationId: "org-a",
-    name: "Project B",
-    slug: "project-b",
-    description: null,
-    environment: "production",
-    settings: null,
-    status: "active",
-    createdBy: "user-a",
-    createdAt: "2026-09-17T00:00:00.000Z",
-    updatedAt: "2026-09-17T00:00:00.000Z",
-  },
-] satisfies Project[];
 
 function Probe() {
-  const { selectProject } = useDashboardWorkspace();
+  const { selectProject, selectedProjectId, sdpEnvironment } = useDashboardWorkspace();
   return (
     <>
-      <button type="button" onClick={() => selectProject("project-a")}>
+      <output aria-label="selected project">{selectedProjectId}</output>
+      <output aria-label="environment">{sdpEnvironment}</output>
+      <button type="button" onClick={() => selectProject(SANDBOX_PROJECT.id)}>
         Keep project
       </button>
-      <button type="button" onClick={() => selectProject("project-b")}>
+      <button type="button" onClick={() => selectProject(PRODUCTION_PROJECT.id)}>
         Switch project
       </button>
     </>
@@ -98,6 +66,7 @@ function WorkspaceFixture() {
         dashboardAccess={resolveDashboardAccess("org:admin")}
         flags={{
           assetProfiles: false,
+          compliance: false,
           custody: false,
           dvp: false,
           earn: false,
@@ -108,11 +77,10 @@ function WorkspaceFixture() {
           policies: false,
           privateChannels: false,
           newDesign: true,
+          ramps: false,
         }}
-        serverDashboardCacheScope={{ orgId: "org-a", userId: "user-a" }}
-        projects={projects}
-        initialSelectedProjectId="project-a"
-        shouldRepairInitialProjectCookie={false}
+        serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
+        projects={[SANDBOX_PROJECT, PRODUCTION_PROJECT]}
       >
         <Probe />
       </DashboardWorkspaceProvider>
@@ -120,61 +88,95 @@ function WorkspaceFixture() {
   );
 }
 
-function renderWorkspace() {
-  return render(<WorkspaceFixture />);
-}
+beforeEach(() => {
+  cleanup();
+  clearStoredApiKeySecrets();
+  resetDashboardNavigation();
+  setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, {});
+  clerk.auth = { isLoaded: true, userId: "user_test", orgId: "org_test" };
+});
+
+afterEach(() => {
+  cleanup();
+  clearStoredApiKeySecrets();
+});
+
+describe("DashboardWorkspaceProvider project selection", () => {
+  it("takes the selected project and its environment from the URL", () => {
+    setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}/issuance`, {});
+    render(<WorkspaceFixture />);
+
+    expect(screen.getByLabelText("selected project").textContent).toBe(PRODUCTION_PROJECT.id);
+    expect(screen.getByLabelText("environment").textContent).toBe("production");
+  });
+
+  it("is in the sandbox environment on the sandbox project's URL", () => {
+    render(<WorkspaceFixture />);
+
+    expect(screen.getByLabelText("selected project").textContent).toBe(SANDBOX_PROJECT.id);
+    expect(screen.getByLabelText("environment").textContent).toBe("sandbox");
+  });
+
+  it("switches project to the module root under the other project, dropping entity ids", async () => {
+    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/custody/cwlt_test_1`, {
+      walletId: "cwlt_test_1",
+    });
+    const user = userEvent.setup();
+    render(<WorkspaceFixture />);
+
+    await user.click(screen.getByRole("button", { name: "Switch project" }));
+
+    await waitFor(() =>
+      expect(dashboardRouter.push).toHaveBeenCalledWith(
+        `/dashboard/${PRODUCTION_PROJECT.id}/wallets`
+      )
+    );
+  });
+
+  it("lands on the bare dashboard when Clerk switches organization under the page", async () => {
+    const view = render(<WorkspaceFixture />);
+
+    clerk.auth = { isLoaded: true, userId: "user_test", orgId: "org_test_other" };
+    view.rerender(<WorkspaceFixture />);
+
+    await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledWith("/dashboard"));
+    expect(screen.getByText("Refreshing scope")).toBeTruthy();
+  });
+});
 
 describe("DashboardWorkspaceProvider playground secret boundaries", () => {
-  beforeEach(() => {
-    cleanup();
-    clearStoredApiKeySecrets();
-    mocks.auth = { isLoaded: true, userId: "user-a", orgId: "org-a" };
-    mocks.replace.mockReset();
-    mocks.replaceSearchParams.mockReset();
-    mocks.reconcileProjectCookie.mockReset();
-    mocks.reconcileProjectCookie.mockResolvedValue(true);
-    mocks.selectProject.mockReset();
-    mocks.selectProject.mockResolvedValue(undefined);
-  });
-
-  afterEach(() => {
-    cleanup();
-    clearStoredApiKeySecrets();
-  });
-
   it("clears only playground secrets when the project changes", async () => {
     const user = userEvent.setup();
-    renderWorkspace();
-    storeApiKeySecret({ value: "sk_test_project_a", apiKeyId: "key-a" });
+    render(<WorkspaceFixture />);
+    storeApiKeySecret({ value: "sk_test_project_sandbox", apiKeyId: "key_test_sandbox" });
     await user.click(screen.getByRole("button", { name: "Increment unrelated state" }));
 
     await user.click(screen.getByRole("button", { name: "Switch project" }));
 
-    expect(getStoredApiKeySecret({ apiKeyId: "key-a" })).toBeNull();
+    expect(getStoredApiKeySecret({ apiKeyId: "key_test_sandbox" })).toBeNull();
     expect(screen.getByLabelText("unrelated state").textContent).toBe("1");
-    await waitFor(() => expect(mocks.selectProject).toHaveBeenCalledWith("project-b"));
   });
 
   it("keeps the secret when the current project is selected again", async () => {
     const user = userEvent.setup();
-    renderWorkspace();
-    storeApiKeySecret({ value: "sk_test_project_a", apiKeyId: "key-a" });
+    render(<WorkspaceFixture />);
+    storeApiKeySecret({ value: "sk_test_project_sandbox", apiKeyId: "key_test_sandbox" });
 
     await user.click(screen.getByRole("button", { name: "Keep project" }));
 
-    expect(getStoredApiKeySecret({ apiKeyId: "key-a" })).toBe("sk_test_project_a");
+    expect(getStoredApiKeySecret({ apiKeyId: "key_test_sandbox" })).toBe("sk_test_project_sandbox");
   });
 
   it("clears playground secrets on sign-out without resetting sibling state", async () => {
     const user = userEvent.setup();
-    const view = renderWorkspace();
-    storeApiKeySecret({ value: "sk_test_user_a", apiKeyId: "key-a" });
+    const view = render(<WorkspaceFixture />);
+    storeApiKeySecret({ value: "sk_test_user", apiKeyId: "key_test_sandbox" });
     await user.click(screen.getByRole("button", { name: "Increment unrelated state" }));
 
-    mocks.auth = { isLoaded: true, userId: null, orgId: null };
+    clerk.auth = { isLoaded: true, userId: null, orgId: null };
     view.rerender(<WorkspaceFixture />);
 
-    await waitFor(() => expect(getStoredApiKeySecret({ apiKeyId: "key-a" })).toBeNull());
+    await waitFor(() => expect(getStoredApiKeySecret({ apiKeyId: "key_test_sandbox" })).toBeNull());
     expect(screen.getByLabelText("unrelated state").textContent).toBe("1");
   });
 });

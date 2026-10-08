@@ -41,7 +41,6 @@ import {
   notFound,
 } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampRuntime } from "@/routes/payments/context";
 import {
@@ -56,6 +55,7 @@ import { resolveMuralRequirements } from "@/routes/payments/ramps/providers/mura
 import {
   advanceCounterpartyRequirements,
   assertRampProviderAvailable,
+  assertRampProviderOffered,
 } from "@/routes/payments/ramps/shared";
 import {
   assertPaymentWalletExactAccess,
@@ -65,7 +65,6 @@ import {
 import { AuditService } from "@/services/audit.service";
 import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
 import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
-import { assertRampProviderSurfaced } from "@/services/provider-availability.service";
 import {
   type AppContext,
   getCounterpartiesRepository,
@@ -267,7 +266,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     });
   }
 
-  assertRampProviderSurfaced(query.data.provider, resolveSdpEnvironment(c));
+  assertRampProviderOffered(c, query.data.provider);
 
   const repo = getCounterpartiesRepository(c);
   const counterparty = await repo.getCounterpartyById({
@@ -435,7 +434,7 @@ export const submitCounterpartyRequirements = async (
 
   const body = c.req.valid("json");
 
-  assertRampProviderSurfaced(body.provider, resolveSdpEnvironment(c));
+  assertRampProviderOffered(c, body.provider);
   await assertRampProviderAvailable(c, body.provider, auth.organizationId);
 
   const repo = getCounterpartiesRepository(c);

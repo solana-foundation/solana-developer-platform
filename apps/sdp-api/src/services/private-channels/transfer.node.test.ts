@@ -137,7 +137,6 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
           send: async () => ({ value: { owner: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } }),
         }),
       } as never,
-      target: {} as never,
       probe: vi.fn(),
     },
     ...overrides,

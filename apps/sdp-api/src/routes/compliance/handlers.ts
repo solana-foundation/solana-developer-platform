@@ -25,7 +25,9 @@ export async function screenAddress(c: ValidatedBodyContext<typeof screenAddress
 
   const auth = getAuth(c);
   const enabledComplianceProviders = (
-    await getEnabledProviders(c.env, getDb(c.env), auth.organizationId)
+    await getEnabledProviders(c.env, getDb(c.env), auth.organizationId, {
+      rampProviderStages: c.get("rampProviderStages"),
+    })
   ).compliance;
 
   if (enabledComplianceProviders.length === 0) {

@@ -146,6 +146,31 @@ event before exposing a non-production deployment. Outside Cloud Run, forwarded
 client addresses are ignored unless `TRUST_PROXY_HEADERS=true`; enable it only
 behind an ingress that replaces caller-supplied `X-Forwarded-For` values.
 
+### Release Channel (which modules run)
+
+`SDP_RELEASE_CHANNEL` is required. It sets the least mature module stage a
+deployment runs: `experimental` (every module), `beta` or `stable`. Each
+module's stage lives in `packages/sdp-types/src/release-channels.ts`; see
+[ADR 0005](../../docs/decisions/0005-release-channels.md). The API, its jobs and
+the dashboard all read it and refuse to start without it.
+
+**Run locally on stable:** set `SDP_RELEASE_CHANNEL=stable` in
+`apps/sdp-api/.env.local` (the example file has the line) and restart `pnpm dev`.
+The root `pnpm dev` loads that file for both the API and the dashboard, and it
+beats Doppler. Check with `curl -s localhost:8787/health`, which reports
+`releaseChannel`.
+
+- Without the line, Doppler `dev` (and the personal and CI configs that inherit
+  from it) supplies `experimental`; `pnpm -C apps/sdp-api dev` alone defaults to
+  `experimental` too.
+- One run without editing the file, when the file does not set it:
+  `DOPPLER_PRESERVE_ENV=SDP_RELEASE_CHANNEL SDP_RELEASE_CHANNEL=stable pnpm dev`.
+  A plain shell value is ignored, because Doppler sets the key.
+- Docker Compose: `SDP_RELEASE_CHANNEL=stable docker compose up` (both compose
+  files default to `experimental`).
+- Modules outside the channel answer 403 "The <module> module is not available
+  in this release channel." and are hidden in the dashboard.
+
 ### Optional: Custody Integrations
 
 To test with specific custody providers, add their credentials:

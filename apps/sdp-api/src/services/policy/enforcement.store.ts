@@ -30,7 +30,7 @@ import { z } from "zod";
 import type { PolicyEvaluationRow, PolicyRepository, WalletOperationRow } from "@/db/repositories";
 import { internalError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
-import { ApiKeyPolicyStore } from "./api-key-policy.store";
+import { type ApiKeyOperationScope, ApiKeyPolicyStore } from "./api-key-policy.store";
 import { WalletPolicyStore } from "./wallet-policy.store";
 
 /** Velocity window sums in flight at once, per operation evaluation. */
@@ -114,22 +114,7 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
     >
   ): Promise<EffectiveOperationPolicies> {
     assertTenantClaim(this.scope, candidate, "PolicyEnforcementStore.loadEffectivePolicies");
-    const apiKeyScope =
-      candidate.apiKeyId !== null && candidate.custodyWalletId !== null
-        ? await this.apiKeyPolicies.resolveOperationScope({
-            apiKeyId: candidate.apiKeyId,
-            custodyWalletId: candidate.custodyWalletId,
-          })
-        : null;
-
-    let apiKeyPolicy: EffectiveApiKeyPolicy | null = null;
-    if (apiKeyScope !== null) {
-      apiKeyPolicy = apiKeyScope.apiKeyPolicy;
-    } else if (candidate.apiKeyId !== null) {
-      apiKeyPolicy = await this.apiKeyPolicies.resolveOperationPolicyWithoutCustodyWallet(
-        candidate.apiKeyId
-      );
-    }
+    const { apiKeyScope, apiKeyPolicy } = await this.resolveApiKeyOperationScope(candidate);
 
     if (apiKeyScope !== null && apiKeyScope.walletPolicy !== null) {
       return { walletPolicy: apiKeyScope.walletPolicy, apiKeyPolicy };
@@ -148,6 +133,60 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
       walletPolicy,
       apiKeyPolicy,
     };
+  }
+
+  /**
+   * Refuse an operation the API key's wallet policy bindings do not cover,
+   * without loading any policy for evaluation. Bindings restrict which wallets
+   * a key may act on, which is access control rather than a spend rule, so a
+   * release channel that excludes Policies still enforces them. Runs the same
+   * resolvers as {@link loadEffectivePolicies} and discards what they return.
+   *
+   * @param candidate - The candidate whose API key and custody wallet are checked.
+   * @throws FORBIDDEN when the key's bindings do not cover the requested wallet.
+   */
+  async assertApiKeyBindingScope(
+    candidate: Pick<
+      PolicyCandidate,
+      "organizationId" | "projectId" | "apiKeyId" | "custodyWalletId"
+    >
+  ): Promise<void> {
+    assertTenantClaim(this.scope, candidate, "PolicyEnforcementStore.assertApiKeyBindingScope");
+    await this.resolveApiKeyOperationScope(candidate);
+  }
+
+  /**
+   * Resolve the API-key side of an operation's scope. A key with wallet policy
+   * bindings is refused for a custody wallet outside them, and for an
+   * operation with no custody wallet at all.
+   *
+   * @param candidate - The candidate whose API key and custody wallet resolve the scope.
+   * @returns The binding-derived scope (null without a key and custody wallet) and the API-key policy.
+   */
+  private async resolveApiKeyOperationScope(
+    candidate: Pick<PolicyCandidate, "apiKeyId" | "custodyWalletId">
+  ): Promise<{
+    apiKeyScope: ApiKeyOperationScope | null;
+    apiKeyPolicy: EffectiveApiKeyPolicy | null;
+  }> {
+    const apiKeyScope =
+      candidate.apiKeyId !== null && candidate.custodyWalletId !== null
+        ? await this.apiKeyPolicies.resolveOperationScope({
+            apiKeyId: candidate.apiKeyId,
+            custodyWalletId: candidate.custodyWalletId,
+          })
+        : null;
+
+    let apiKeyPolicy: EffectiveApiKeyPolicy | null = null;
+    if (apiKeyScope !== null) {
+      apiKeyPolicy = apiKeyScope.apiKeyPolicy;
+    } else if (candidate.apiKeyId !== null) {
+      apiKeyPolicy = await this.apiKeyPolicies.resolveOperationPolicyWithoutCustodyWallet(
+        candidate.apiKeyId
+      );
+    }
+
+    return { apiKeyScope, apiKeyPolicy };
   }
 
   /**

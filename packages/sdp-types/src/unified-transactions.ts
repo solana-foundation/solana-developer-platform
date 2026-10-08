@@ -3,6 +3,7 @@ import { EARN_MOVEMENT_STATUSES } from "./earn";
 import { HELIUS_RINGS_OPERATION_STATUSES, HELIUS_RINGS_OPERATION_TYPES } from "./helius-rings";
 import { PAYMENT_TRANSFER_STATUSES } from "./payments";
 import { PRIVATE_CHANNEL_TRANSACTION_STATUSES } from "./private-channels";
+import type { SdpModule } from "./release-channels";
 import { TOKEN_TRANSACTION_STATUSES, TOKEN_TRANSACTION_TYPES } from "./tokens";
 
 export const UNIFIED_TRANSACTION_MODULES = [
@@ -14,6 +15,16 @@ export const UNIFIED_TRANSACTION_MODULES = [
   "rings",
 ] as const;
 export type UnifiedTransactionModule = (typeof UNIFIED_TRANSACTION_MODULES)[number];
+
+/** The product module that owns each transaction module, for release-channel checks. */
+export const UNIFIED_TRANSACTION_SDP_MODULES = {
+  payments: "payments",
+  earn: "earn",
+  dvp: "dvp",
+  private_channels: "private_channels",
+  issuance: "issuance",
+  rings: "helius_rings",
+} as const satisfies Record<UnifiedTransactionModule, SdpModule>;
 
 export const UNIFIED_TRANSACTION_STATUSES = ["pending", "succeeded", "failed", "canceled"] as const;
 export type UnifiedTransactionStatus = (typeof UNIFIED_TRANSACTION_STATUSES)[number];

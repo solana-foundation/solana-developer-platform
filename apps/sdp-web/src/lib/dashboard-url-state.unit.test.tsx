@@ -3,18 +3,13 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { memo } from "react";
 import { afterEach, expect, it, vi } from "vitest";
+import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
+import { SANDBOX_PROJECT } from "@/test/projects";
 
-const router = vi.hoisted(() => ({ pathname: "/dashboard", search: "" }));
-
-vi.mock("next/navigation", () => ({
-  usePathname: () => router.pathname,
-  useSearchParams: () => new URLSearchParams(router.search),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 import { useDashboardTab, useSyncDashboardUrlStateWithRouter } from "./dashboard-url-state";
 
-// Memoized so it re-renders only when the URL store notifies it, like a page
-// that mounted before App Router wrote the new URL to history.
 const TabReader = memo(function TabReader() {
   return <p>{useDashboardTab() ?? "hub"}</p>;
 });
@@ -24,28 +19,24 @@ function SyncedShell() {
   return <TabReader />;
 }
 
-/** What a `<Link>` does: history moves, but no popstate or store event fires. */
 function navigateWithLink(path: string) {
   window.history.pushState(null, "", path);
-  const url = new URL(path, window.location.origin);
-  router.pathname = url.pathname;
-  router.search = url.search;
+  setDashboardUrl(path, {});
 }
 
 afterEach(() => {
   cleanup();
   window.history.replaceState(null, "", "/");
-  router.pathname = "/dashboard";
-  router.search = "";
+  resetDashboardNavigation();
 });
 
 it("shows the tab a `?tab=` link opened on the first navigation", () => {
-  window.history.replaceState(null, "", "/dashboard");
+  window.history.replaceState(null, "", `/dashboard/${SANDBOX_PROJECT.id}`);
   const { rerender } = render(<SyncedShell />);
   expect(screen.getByText("hub")).toBeTruthy();
 
   act(() => {
-    navigateWithLink("/dashboard/integrations?tab=rpc");
+    navigateWithLink(`/dashboard/${SANDBOX_PROJECT.id}/integrations?tab=rpc`);
     rerender(<SyncedShell />);
   });
 

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS } from "@sdp/types/earn";
 import { isVedaDepositMint } from "@sdp/types/veda-programs";
 import { type Address, address, type Instruction } from "@solana/kit";
@@ -12,13 +13,13 @@ import { acceptPositiveAtMintScale, mintDecimals } from "./amounts";
 import { SdpVedaError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { readMintDecimals } from "./mint";
-import type { VedaClusterConfig } from "./programs";
+import { type VedaClusterConfig, vedaShareAccountAddress } from "./programs";
 import {
   queuedWithdrawalOwnerFundedAccountSizes,
   queuedWithdrawalRequestAddress,
 } from "./queue-rent";
 import { chargeAtaCreationRentTo, createdAtaAddressForMint } from "./rent";
-import { createVedaRpc } from "./rpc";
+import { createVedaReadRpc, createVedaRpc } from "./rpc";
 import type {
   VedaDepositInput,
   VedaDepositQuote,
@@ -97,11 +98,11 @@ export function resetVedaCompatibilityCache(): void {
 function client(
   runtime: VedaRuntime,
   config: VedaClusterConfig,
-  commitment: "confirmed" | "finalized" = "confirmed"
-) {
+  commitment: "confirmed" | "finalized" = "confirmed",
   // The transport deadline covers both our direct reads and every nested vault,
   // asset, oracle and mint request the SDK performs with this same client.
-  const rpc = createVedaRpc(runtime.rpcUrl) as Kit7;
+  rpc: Kit7 = createVedaRpc(runtime.rpcUrl)
+) {
   return createVedaClient({
     rpc,
     deployment: {
@@ -114,6 +115,161 @@ function client(
     },
     commitment,
   });
+}
+
+/**
+ * How long a position read trusts its shared SDK client and a vault's static
+ * facts (share mint, share decimals, the fronted asset's mint). READS ONLY:
+ * builds and quotes never consult these caches. Same window as the deposit
+ * compatibility verdict, for the same reason: a URL can be repointed.
+ */
+export const VEDA_READ_CACHE_TTL_MS = VEDA_COMPATIBILITY_TTL_MS;
+
+interface CachedRead<T> {
+  promise: Promise<T>;
+  /** Null while the shared read is still in flight. */
+  expiresAt: number | null;
+}
+
+interface VaultShareFacts {
+  shareMint: Kit7;
+  shareDecimals: unknown;
+}
+
+/**
+ * Runs a SHARED fill in the async context captured at module load, outside any
+ * caller's. The memoised facts are static, so no caller's minimum-slot read
+ * scope (`withMinimumRpcSlot`) applies to them, and one scoped caller's
+ * slot-lag failure must not fail an unscoped caller that joined the same fill.
+ * Each caller's live holding and quote reads still run in its own scope.
+ */
+const outsideCallerScopes = AsyncLocalStorage.snapshot();
+
+const readClients = new Map<string, { veda: Kit7; expiresAt: number }>();
+const vaultShareFacts = new Map<string, CachedRead<VaultShareFacts>>();
+const vaultAssetMints = new Map<string, CachedRead<Address>>();
+
+/** Most position-read clients kept at once, one per (cluster, endpoint, deployment). */
+const VEDA_READ_CLIENT_CAPACITY = 32;
+/** Most entries kept in each vault-facts cache, one per (cluster, endpoint, vault). */
+const VEDA_READ_FACTS_CAPACITY = 256;
+
+/** Test seam: forget the shared position-read client and memoised vault facts. */
+export function resetVedaReadCaches(): void {
+  readClients.clear();
+  vaultShareFacts.clear();
+  vaultAssetMints.clear();
+}
+
+/** Test seam: how many entries each position-read cache holds. */
+export function vedaReadCacheSizes(): { clients: number; shareFacts: number; assetMints: number } {
+  return {
+    clients: readClients.size,
+    shareFacts: vaultShareFacts.size,
+    assetMints: vaultAssetMints.size,
+  };
+}
+
+/**
+ * Store `value` as the newest entry for `key`, after dropping every expired
+ * entry and then the oldest past `capacity`, so distinct endpoints and vaults
+ * cannot grow a cache for the process's lifetime.
+ */
+function storeBounded<V extends { expiresAt: number | null }>(
+  cache: Map<string, V>,
+  key: string,
+  value: V,
+  capacity: number
+): void {
+  const now = Date.now();
+  for (const [stored, entry] of cache) {
+    if (entry.expiresAt !== null && entry.expiresAt <= now) cache.delete(stored);
+  }
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > capacity) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
+
+/**
+ * One SDK client per (cluster, endpoint, deployment) for position reads.
+ *
+ * The SDK validates all three programs in its CONSTRUCTOR (six requests) and
+ * memoises that verdict per instance, so a client per read paid them on every
+ * holding. Sharing one client also shares its de-duplicating transport
+ * (`createVedaReadRpc`) across concurrent owners. The SDK keeps a rejected
+ * validation forever, so a client whose validation rejects is evicted at once;
+ * the reads that observed it fail exactly as they did before.
+ */
+function readClient(runtime: VedaRuntime, config: VedaClusterConfig): Kit7 {
+  const key = [
+    config.cluster,
+    runtime.rpcUrl,
+    config.vaultProgramAddress,
+    config.hookProgramAddress,
+    config.queueProgramAddress ?? "",
+  ].join("\n");
+  const cached = readClients.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.veda;
+
+  // The constructor fires the program validations, so it runs unscoped too.
+  const entry = {
+    veda: outsideCallerScopes(() =>
+      client(runtime, config, "confirmed", createVedaReadRpc(runtime.rpcUrl))
+    ),
+    expiresAt: Date.now() + VEDA_READ_CACHE_TTL_MS,
+  };
+  storeBounded(readClients, key, entry, VEDA_READ_CLIENT_CAPACITY);
+  void Promise.resolve()
+    .then(() => entry.veda.validateDeployment())
+    .catch(() => {
+      if (readClients.get(key) === entry) readClients.delete(key);
+    });
+  return entry.veda;
+}
+
+function vaultFactsKey(runtime: VedaRuntime, config: VedaClusterConfig, vault: Address): string {
+  return [config.cluster, runtime.rpcUrl, config.vaultProgramAddress, vault].join("\n");
+}
+
+/** Shared in-flight, kept for the TTL on success, never kept on failure. */
+async function cachedRead<T>(
+  cache: Map<string, CachedRead<T>>,
+  key: string,
+  load: () => Promise<T>
+): Promise<T> {
+  let entry = cache.get(key);
+  if (entry && entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    entry = undefined;
+  }
+  if (!entry) {
+    entry = { promise: outsideCallerScopes(load), expiresAt: null };
+    storeBounded(cache, key, entry, VEDA_READ_FACTS_CAPACITY);
+  }
+  const current = entry;
+  try {
+    const value = await current.promise;
+    if (cache.get(key) === current && current.expiresAt === null) {
+      current.expiresAt = Date.now() + VEDA_READ_CACHE_TTL_MS;
+    }
+    return value;
+  } catch (cause) {
+    if (cache.get(key) === current) cache.delete(key);
+    throw cause;
+  }
+}
+
+async function holdsShareAccount(
+  owner: Address,
+  shareMint: Kit7,
+  shareAccount: Kit7
+): Promise<boolean> {
+  const expected = await vedaShareAccountAddress(owner, address(String(shareMint)));
+  return String(expected) === String(shareAccount);
 }
 
 /**
@@ -218,6 +374,20 @@ async function resolveVaultAsset(
   vaultClient: Kit7,
   vault: Address
 ): Promise<{ mint: Address; decimals: number; allowDeposits: boolean }> {
+  const { mint, allowDeposits } = await resolveVaultAssetMint(config, vaultClient, vault);
+  return {
+    mint,
+    decimals: await readMintDecimals(runtime.rpcUrl, mint),
+    allowDeposits,
+  };
+}
+
+/** `resolveVaultAsset` without the mint's decimals, for position reads. */
+async function resolveVaultAssetMint(
+  config: VedaClusterConfig,
+  vaultClient: Kit7,
+  vault: Address
+): Promise<{ mint: Address; allowDeposits: boolean }> {
   let assets: { mint: Kit7; allowDeposits: boolean }[];
   try {
     assets = await vaultClient.listAssets();
@@ -246,12 +416,7 @@ async function resolveVaultAsset(
     );
   }
 
-  const mint = address(String(only.mint));
-  return {
-    mint,
-    decimals: await readMintDecimals(runtime.rpcUrl, mint),
-    allowDeposits: only.allowDeposits,
-  };
+  return { mint: address(String(only.mint)), allowDeposits: only.allowDeposits };
 }
 
 /**
@@ -1115,24 +1280,68 @@ function queueInteger(field: string, value: number, maximum: number): number {
  * oracle and any withdraw premium — rather than arithmetic this package invents
  * on top of a raw exchange rate. That makes it a REDEEMABLE value, which is the
  * conservative one to show a holder.
+ *
+ * Only the holding and its value are read per call. The vault's static facts
+ * (share mint, share decimals, the fronted asset's mint) and the validated SDK
+ * client are reused for `VEDA_READ_CACHE_TTL_MS`; see `readClient`.
  */
 export async function readVedaPosition(
   runtime: VedaRuntime,
   config: VedaClusterConfig,
   input: VedaPositionInput
 ): Promise<VedaPosition> {
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  const vaultClient = readClient(runtime, config).vault(input.vault as Kit7);
+  const factsKey = vaultFactsKey(runtime, config, input.vault);
 
-  let state: { shareMint: Kit7; shareDecimals: unknown };
-  let position: { shares: bigint; unlockTimestamp: bigint | undefined };
-  try {
-    state = await vaultClient.getState();
-    position = await vaultClient.getUserPosition(input.owner as Kit7);
-  } catch (cause) {
-    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+  // Started together, so the vault-state read each SDK method repeats is one
+  // shared request on a cold cache. Settled in the original order, so the first
+  // failure reported is the one the sequential version reported.
+  const [stateRead, positionRead, assetRead] = await Promise.allSettled([
+    cachedRead(vaultShareFacts, factsKey, async (): Promise<VaultShareFacts> => {
+      // No instruction rewrites the share mint after deploy and a mint's
+      // decimals never change. The live share account below re-checks the mint.
+      const state: VaultShareFacts = await vaultClient.getState();
+      return { shareMint: state.shareMint, shareDecimals: state.shareDecimals };
+    }),
+    vaultClient.getUserPosition(input.owner as Kit7) as Promise<{
+      shareAccount: Kit7;
+      shares: bigint;
+      unlockTimestamp: bigint | undefined;
+    }>,
+    cachedRead(
+      vaultAssetMints,
+      factsKey,
+      async () => (await resolveVaultAssetMint(config, vaultClient, input.vault)).mint
+    ),
+  ]);
+  if (stateRead.status === "rejected") {
+    throw vaultUnreadable(String(input.vault), config.cluster, stateRead.reason);
   }
-
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
+  if (positionRead.status === "rejected") {
+    throw vaultUnreadable(String(input.vault), config.cluster, positionRead.reason);
+  }
+  if (assetRead.status === "rejected") throw assetRead.reason;
+  const position = positionRead.value;
+  let state = stateRead.value;
+  // The SDK derived the share account from LIVE vault state, so a mismatch
+  // means the cached share mint is stale: drop it and read the state again.
+  if (!(await holdsShareAccount(input.owner, state.shareMint, position.shareAccount))) {
+    vaultShareFacts.delete(factsKey);
+    try {
+      const fresh: VaultShareFacts = await vaultClient.getState();
+      state = { shareMint: fresh.shareMint, shareDecimals: fresh.shareDecimals };
+    } catch (cause) {
+      throw vaultUnreadable(String(input.vault), config.cluster, cause);
+    }
+    if (!(await holdsShareAccount(input.owner, state.shareMint, position.shareAccount))) {
+      throw vaultUnreadable(
+        String(input.vault),
+        config.cluster,
+        new Error("The holder's share account does not belong to the vault's share mint")
+      );
+    }
+  }
+  const asset = { mint: assetRead.value };
   const shareDecimals = shareMintDecimals(state.shareDecimals, input.vault);
 
   // The Boring vault share lock covers the WHOLE account until its unlock
@@ -1159,12 +1368,13 @@ export async function readVedaPosition(
 
 async function valuation(
   vaultClient: Kit7,
-  asset: { mint: Address; decimals: number },
+  asset: { mint: Address },
   shares: bigint
 ): Promise<{ tokenValue?: string }> {
   // The SDK refuses a zero-share quote, and there is nothing to ask: zero shares
-  // are worth zero of anything, exactly.
-  if (shares === 0n) return { tokenValue: formatAtomic(0n, asset.decimals) };
+  // are worth zero of anything, exactly. `formatAtomic(0n, d)` is "0" for every
+  // d, so saying so needs no mint read.
+  if (shares === 0n) return { tokenValue: "0" };
   try {
     const quote = await vaultClient.previewWithdraw({ asset: asset.mint as Kit7, shares });
     return {

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireModule } from "@/middleware/require-module";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import counterpartyAccounts from "../counterparty-accounts";
@@ -24,6 +25,10 @@ import {
 
 const counterparties = new Hono<{ Bindings: Env }>();
 
+// Ramp onboarding (provider KYC requirements, provider-owned accounts) lives here,
+// not under /payments/ramps, so the ramps release channel gate has to cover it too.
+counterparties.use("/:counterpartyId/requirements", requireModule("ramps"));
+counterparties.use("/:counterpartyId/provider-accounts/*", requireModule("ramps"));
 counterparties.use("*", unifiedAuthMiddleware());
 counterparties.use("*", projectContextMiddleware());
 

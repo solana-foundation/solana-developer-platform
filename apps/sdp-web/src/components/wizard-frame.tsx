@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useThemeScope } from "@/components/theme-scope";
 import { Modal } from "@/components/ui/modal";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
@@ -182,6 +182,17 @@ export function WizardFrame({
   const t = useTranslations();
   const refresh = useThemeScope() === "refresh";
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const scrollRegionRef = useRef<HTMLDivElement>(null);
+  const lastStepRef = useRef(currentStep);
+  // A new step opens at its top. The column keeps its own scroll offset otherwise, so a tall
+  // step after a scrolled one would open mid-form with its heading out of view.
+  useEffect(() => {
+    if (lastStepRef.current === currentStep) return;
+    lastStepRef.current = currentStep;
+    // Assigning scrollTop works in every environment, jsdom included; scrollTo does not.
+    const region = scrollRegionRef.current;
+    if (region !== null) region.scrollTop = 0;
+  }, [currentStep]);
   const activeStep = steps[currentStep];
   const showSummaryButton = summary !== undefined && currentStep > 0;
 
@@ -222,7 +233,9 @@ export function WizardFrame({
     return (
       <div className="flex h-full min-h-0 w-full flex-col" data-wizard-frame>
         <div
-          className="min-h-0 flex-1 overflow-y-auto px-4 pt-9 pb-10 md:px-6"
+          ref={scrollRegionRef}
+          // Scrolled content fades out under the title and tabs instead of being cut mid-line.
+          className="min-h-0 flex-1 overflow-y-auto px-4 pt-9 pb-10 [mask-image:linear-gradient(to_bottom,transparent,black_1.25rem)] md:px-6"
           data-wizard-scroll-region
         >
           <div
@@ -274,7 +287,11 @@ export function WizardFrame({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6" data-wizard-scroll-region>
+      <div
+        ref={scrollRegionRef}
+        className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6"
+        data-wizard-scroll-region
+      >
         <div className={cn("mx-auto w-full pb-8", maxWidthClassName)}>{stepContent}</div>
       </div>
 

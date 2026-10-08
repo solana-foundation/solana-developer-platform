@@ -18,10 +18,7 @@ import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
-import {
-  assertProviderAvailable,
-  getProviderAvailability,
-} from "@/services/provider-availability.service";
+import { getProviderAvailability } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import type { updateOrgSchema } from "./schemas";
 
@@ -149,11 +146,6 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
 
   assertAllowlistAdmitsCaller(c, settingsPatch?.allowedIpAddresses);
 
-  // Checked outside the transaction so the row is not held while it runs.
-  if (settingsPatch?.rpcProvider) {
-    await assertProviderAvailable(c.env, getDb(c.env), orgId, "rpc", settingsPatch.rpcProvider);
-  }
-
   // Settings are one JSON column patched by read-merge-write. Unsynchronized,
   // the second commit silently drops the first — an unrelated edit could revert
   // a just-installed allowlist. The row lock makes concurrent merges compose.
@@ -231,7 +223,9 @@ export const getOrganizationProviderAccess = async (c: AppContext) => {
     throw new AppError("FORBIDDEN", "Access denied to this organization");
   }
 
-  const response = await getProviderAvailability(c.env, getDb(c.env), orgId);
+  const response = await getProviderAvailability(c.env, getDb(c.env), orgId, {
+    rampProviderStages: c.get("rampProviderStages"),
+  });
   return success(c, response);
 };
 

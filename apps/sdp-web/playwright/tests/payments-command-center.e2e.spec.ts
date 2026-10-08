@@ -1,28 +1,16 @@
 import { expect, test } from "@playwright/test";
-import {
-  ensureLinkedOrg,
-  getBootstrapApiBaseUrl,
-  provisionWithAdminSession,
-  resolvePlaywrightProjectId,
-  seedProjectCookie,
-} from "../support/local-dashboard-bootstrap";
+import { projectHref } from "@/lib/dashboard-project-path";
+import { gotoProjectPage, provisionLinkedOrgProjects } from "../support/local-dashboard-bootstrap";
 
 test.describe("payments command center and transaction ledger", () => {
   let projectId = "";
 
   test.beforeAll(async ({ browser }) => {
-    projectId = await provisionWithAdminSession(browser, async (session) => {
-      await ensureLinkedOrg(session.identity, { tier: "enterprise" });
-      return resolvePlaywrightProjectId(getBootstrapApiBaseUrl(), session.getBearerToken);
-    });
-  });
-
-  test.beforeEach(async ({ page }) => {
-    await seedProjectCookie(page, projectId);
+    projectId = (await provisionLinkedOrgProjects(browser)).sandbox;
   });
 
   test("renders the fast action surface and independently settled summaries", async ({ page }) => {
-    await page.goto("/dashboard/payments", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, projectId, "/dashboard/payments");
 
     const commandCenter = page.locator("[data-payments-command-center]");
     await expect(commandCenter).toBeVisible();
@@ -35,7 +23,7 @@ test.describe("payments command center and transaction ledger", () => {
     for (const [name, href] of destinations) {
       await expect(
         commandCenter.getByRole("link", { name: new RegExp(`^${name}`) })
-      ).toHaveAttribute("href", href);
+      ).toHaveAttribute("href", projectHref(projectId, href));
     }
 
     for (const section of ["balance", "activity", "upcoming", "network"]) {
@@ -47,7 +35,7 @@ test.describe("payments command center and transaction ledger", () => {
     }
     await expect(
       commandCenter.getByRole("link", { name: "View all transactions" })
-    ).toHaveAttribute("href", "/dashboard/payments/transactions");
+    ).toHaveAttribute("href", projectHref(projectId, "/dashboard/payments/transactions"));
   });
 
   test("keeps transaction filters responsive, shareable, and stable on mobile", async ({
@@ -55,7 +43,7 @@ test.describe("payments command center and transaction ledger", () => {
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto("/dashboard/payments/transactions", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, projectId, "/dashboard/payments/transactions");
 
     const search = page.getByRole("textbox", { name: /search transactions/i });
     await expect(search).toBeVisible();

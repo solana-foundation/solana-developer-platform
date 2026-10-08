@@ -959,8 +959,9 @@ transaction signed by the organization custody wallet or external owner.
   only requests stamped after the caller's floor (`packages/sdp-rpc/CLAUDE.md`,
   "Read floors"), so no read reuses a provider request sent before its rows
   were read. Close-out trusts the rows' `updated_at`, and an earlier request
-  could return a stale zero for a holding a deposit refilled since. It is not
-  a cache: entries are removed on
+  could return a stale zero for a holding a deposit refilled since. Owners on
+  one page share one floor, so they still share provider requests across
+  waves. It is not a cache: entries are removed on
   settlement. The read runs on the first caller's deadline; each caller
   validates the snapshots itself and stops waiting at its own deadline.
 

@@ -321,7 +321,9 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
   const projectId = c.get("projectId");
   const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const [enabled, reuseState, configurations, effectiveTarget] = await Promise.all([
-    getEnabledProviders(c.env, getDb(c.env), actor.organizationId),
+    getEnabledProviders(c.env, getDb(c.env), actor.organizationId, {
+      rampProviderStages: c.get("rampProviderStages"),
+    }),
     signingService.getProviderReuseState(actor.organizationId, projectId),
     signingService.getConfigurations(actor.organizationId, projectId),
     new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
@@ -530,7 +532,9 @@ async function assertFreshPrivyLegacySetupAllowed(
     return;
   }
 
-  const availability = await getProviderAvailability(c.env, getDb(c.env), organizationId);
+  const availability = await getProviderAvailability(c.env, getDb(c.env), organizationId, {
+    rampProviderStages: c.get("rampProviderStages"),
+  });
   if (availability.providers.custody.privy.entitled) {
     throw forbidden("New Privy setup must use stored credentials");
   }

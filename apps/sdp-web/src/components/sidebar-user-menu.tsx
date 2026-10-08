@@ -42,6 +42,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { clearStoredApiKeySecrets } from "@/lib/playground-api-keys";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
 // The sidebar footer: one profile row that carries the signed-in identity and
@@ -61,6 +62,7 @@ export function SidebarUserMenu({
   menuSide: "right" | "top";
 }) {
   const t = useTranslations();
+  const projectHref = useProjectHref();
   const newDesign = useNewDesign();
   const { user } = useUser();
   const { openUserProfile, signOut } = useClerk();
@@ -122,7 +124,7 @@ export function SidebarUserMenu({
         </DropdownMenuItem>
         {canManageOrgSettings ? (
           <DropdownMenuItem asChild className="gap-2.5">
-            <Link href={DASHBOARD_SIDE_NAV_HREFS.settings}>
+            <Link href={projectHref(DASHBOARD_SIDE_NAV_HREFS.settings)}>
               <Settings2Icon className="size-4 shrink-0 text-secondary" />
               {t("Shared.dashboardShell.settings")}
             </Link>

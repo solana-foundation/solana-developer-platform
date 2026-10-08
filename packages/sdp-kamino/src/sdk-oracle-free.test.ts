@@ -109,8 +109,14 @@ vi.mock("@kamino-finance/klend-sdk", async (importOriginal) => {
   };
 });
 
-vi.mock("./lookup-table", () => ({ loadVaultLookupTableAddresses: vi.fn(async () => ({})) }));
-vi.mock("./rpc", () => ({ createKaminoRpc: mocks.createKaminoRpc }));
+vi.mock("./lookup-table", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./lookup-table")>()),
+  loadVaultLookupTableAddresses: vi.fn(async () => ({})),
+}));
+vi.mock("./rpc", () => ({
+  createKaminoReadRpc: mocks.createKaminoRpc,
+  createKaminoRpc: mocks.createKaminoRpc,
+}));
 
 function integer(value: number) {
   return {
@@ -124,6 +130,7 @@ function integer(value: number) {
 
 const state = {
   baseVaultAuthority: VAULT,
+  firstLossCapitalFarm: "11111111111111111111111111111111",
   managementFeeBps: integer(0),
   pendingFeesSf: integer(0),
   performanceFeeBps: integer(0),
@@ -136,6 +143,7 @@ const state = {
   tokenProgram: TOKEN_PROGRAM_ADDRESS,
   tokenVault: VAULT,
   vaultAllocationStrategy: [{ ctokenAllocation: integer(0), reserve: RESERVE }],
+  vaultFarm: "11111111111111111111111111111111",
   withdrawalPenaltyBps: "0",
   withdrawalPenaltyLamports: "0",
 };
@@ -165,6 +173,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.stateOnlyOracles.length = 0;
   mocks.rpc = {
+    getMultipleAccounts: vi.fn((keys: unknown[]) => ({
+      send: async () => ({ context: { slot: 1n }, value: keys.map(() => null) }),
+    })),
     getTokenAccountsByOwner: vi.fn(() => ({ send: mocks.sendTokenAccounts })),
   };
   mocks.createKaminoRpc.mockReturnValue(mocks.rpc);

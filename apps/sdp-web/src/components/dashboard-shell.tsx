@@ -3,8 +3,9 @@
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
 import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import {
   DashboardHeaderAction,
@@ -43,6 +44,7 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
+import { dashboardRequest } from "@/lib/dashboard-fetch";
 import {
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
@@ -53,6 +55,7 @@ import {
 } from "@/lib/dashboard-url-state";
 import { isNewDesignPage } from "@/lib/design-modules";
 import { themeScopeForPath } from "@/lib/theme-scope-routes";
+import { useDashboardPathname, useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
 // On NEW DESIGN the sidebar is the refresh design's on every route, whatever the page beside it
@@ -107,6 +110,7 @@ function SidebarGroup({
   variant: "desktop" | "mobile";
 }) {
   const t = useTranslations();
+  const projectHref = useProjectHref();
   const search = useSearchParams().toString();
   const navigationLocation = search ? `${pathname}?${search}` : pathname;
   return (
@@ -139,7 +143,7 @@ function SidebarGroup({
             <div key={item.label}>
               <div className="relative flex items-center">
                 <Link
-                  href={item.href}
+                  href={projectHref(item.href)}
                   onClick={() => {
                     // The chevron still toggles. This only ever opens, so a
                     // second click on the section you are already in does not
@@ -242,7 +246,7 @@ function SidebarGroup({
                           </span>
                         ) : (
                           <Link
-                            href={child.href}
+                            href={projectHref(child.href)}
                             onClick={onNavigate}
                             className={cn(
                               childNavItemBase,
@@ -408,6 +412,7 @@ export function DashboardShell({
 }) {
   const {
     assetProfiles: assetProfilesEnabled,
+    compliance: complianceEnabled,
     custody: custodyEnabled,
     dvp: dvpEnabled,
     earn: earnEnabled,
@@ -418,10 +423,11 @@ export function DashboardShell({
     payments: paymentsEnabled,
     policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
+    ramps: rampsEnabled,
   } = flags;
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
-  const pathname = usePathname();
+  const pathname = useDashboardPathname();
   useSyncDashboardUrlStateWithRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
@@ -461,6 +467,7 @@ export function DashboardShell({
     t,
     assetProfilesEnabled,
     privateChannelsEnabled,
+    enabledTransactionModules(flags),
     custodyEnabled,
     paymentsEnabled,
     policiesEnabled,
@@ -469,6 +476,7 @@ export function DashboardShell({
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
+    complianceEnabled,
     custodyEnabled,
     dvpEnabled,
     earnEnabled,
@@ -479,6 +487,9 @@ export function DashboardShell({
     pendingApprovalCount,
     policiesEnabled,
     privateChannelsEnabled,
+    newDesign: newDesignEnabled,
+    newDesignModules: flags.newDesignModules,
+    rampsEnabled,
   });
   const pageTitle =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname
@@ -584,8 +595,9 @@ export function DashboardShell({
     }
   }, [pathname]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-fetch pending approvals when the URL's Project changes; the request reads it from the URL.
   useEffect(() => {
-    if (!policiesEnabled || !dashboardAccess.capabilities.canReadApprovals || !selectedProjectId) {
+    if (!policiesEnabled || !dashboardAccess.capabilities.canReadApprovals) {
       setPendingApprovalCount(null);
       return;
     }
@@ -594,9 +606,10 @@ export function DashboardShell({
     setPendingApprovalCount(null);
     const refreshPendingCount = async () => {
       try {
-        const response = await fetch("/api/dashboard/approval-requests?status=pending&limit=100", {
-          cache: "no-store",
-        });
+        const response = await dashboardRequest(
+          "/api/dashboard/approval-requests?status=pending&limit=100",
+          { cache: "no-store" }
+        );
         const body = (await response.json().catch(() => null)) as {
           data?: { approvalRequests?: unknown[] };
         } | null;

@@ -2,6 +2,7 @@
 
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import type { SdpRampProviderStages } from "@sdp/types";
 import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
@@ -60,6 +61,10 @@ export interface Env {
   // provider env vars are present. Per-org providerOverrides still apply as
   // a disable-only mechanism.
   SDP_DEPLOYMENT_MODE?: "managed" | "self_hosted";
+
+  // Release channel: which modules this deployment can run at all (`@sdp/types`
+  // release channels). Required: a missing or unknown name fails at boot.
+  SDP_RELEASE_CHANNEL?: string;
 
   // Credential secret store selection for BYO custody credentials.
   // Managed SDP should use GCP Secret Manager. Self-hosted deployments default
@@ -354,6 +359,8 @@ declare module "hono" {
   interface ContextVariableMap {
     // Injected by createApp so handlers use the same implementation as tests
     observability?: Observability;
+    // Set by createApp on every request; see AppDeps.rampProviderStages
+    rampProviderStages: SdpRampProviderStages;
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;

@@ -23,7 +23,7 @@ import {
   createPostgresDvpLegTransferRepository,
   type DvpLegTransferRepository,
 } from "@/db/repositories/dvp-leg-transfer.repository";
-import { isMarketsEnabled } from "@/lib/feature-flags";
+import { isDvpEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { resolveDvpClose } from "@/services/dvp/closing-transaction";
 import { classifyDvpFundingReceipt } from "@/services/dvp/funding-receipt";
@@ -63,7 +63,7 @@ const MILLISECONDS_PER_MINUTE = 60_000;
  * @param env - API process environment.
  */
 export async function reconcileDvpTrades(env: Env): Promise<void> {
-  if (!isMarketsEnabled(env)) {
+  if (!isDvpEnabled(env)) {
     return;
   }
 

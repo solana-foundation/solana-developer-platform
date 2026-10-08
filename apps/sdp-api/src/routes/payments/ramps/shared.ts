@@ -2,12 +2,7 @@ import { SdpPaymentsError } from "@sdp/payments";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction";
-import type {
-  PaymentRampEstimate,
-  PaymentRampQuote,
-  RampProviderEstimateResult,
-  SdpEnvironment,
-} from "@sdp/types";
+import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
@@ -39,6 +34,7 @@ import {
   redactErrorForCapture,
   unsupportedRampCorridor,
 } from "@/lib/errors";
+import { assertRampProviderInChannel, isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -78,16 +74,41 @@ type ScopedSubmitCounterpartyRequirementsInput = SubmitCounterpartyRequirementsI
   projectId: string;
 };
 
+/**
+ * Whether SDP offers ramp `provider` on this request: the release channel
+ * includes it and it is surfaced for the request's environment.
+ */
+function isRampProviderOffered(c: AppContext, provider: RampProviderId): boolean {
+  return (
+    isRampProviderInChannel(c, provider) &&
+    isRampProviderSurfaced(provider, resolveSdpEnvironment(c))
+  );
+}
+
+/**
+ * Refuses a request that names a ramp provider SDP does not offer: outside the
+ * release channel, or not surfaced for the request's environment.
+ */
+export function assertRampProviderOffered(c: AppContext, provider: RampProviderId): void {
+  assertRampProviderInChannel(c, provider);
+  assertRampProviderSurfaced(provider, resolveSdpEnvironment(c));
+}
+
+/**
+ * The offered providers among `providers`, narrowed to `provider` when the
+ * request names one. A request naming a provider outside the release channel is
+ * refused before this (`assertRampProviderInChannel`), not answered with nothing.
+ */
 export function filterProviders(
+  c: AppContext,
   providers: readonly RampProviderId[],
-  environment: SdpEnvironment,
   provider?: RampProviderId
 ): RampProviderId[] {
-  const surfaced = providers.filter((p) => isRampProviderSurfaced(p, environment));
+  const offered = providers.filter((p) => isRampProviderOffered(c, p));
   if (provider) {
-    return surfaced.includes(provider) ? [provider] : [];
+    return offered.includes(provider) ? [provider] : [];
   }
-  return surfaced;
+  return offered;
 }
 
 export function uniqueSorted<T extends string>(values: readonly T[]): T[] {
@@ -123,7 +144,8 @@ export async function assertRampProviderAvailable(
     organizationId,
     "ramps",
     providerId,
-    resolveSdpEnvironment(c) === "sandbox"
+    resolveSdpEnvironment(c) === "sandbox",
+    { rampProviderStages: c.get("rampProviderStages") }
   );
 }
 
@@ -136,9 +158,9 @@ type RampQuoteDirection = "onramp" | "offramp";
  * provider), the provider must support the crypto rail for at least one fiat.
  */
 function assertRampCorridorSupported(
+  c: AppContext,
   direction: RampQuoteDirection,
-  input: { provider: RampProviderId; assetRail: CryptoRailId; fiatCurrency?: RampFiatCurrency },
-  environment: SdpEnvironment
+  input: { provider: RampProviderId; assetRail: CryptoRailId; fiatCurrency?: RampFiatCurrency }
 ): void {
   const { assetRail } = input;
   const pairs: readonly (OnrampPairSupport | OfframpPairSupport)[] =
@@ -149,9 +171,7 @@ function assertRampCorridorSupported(
     const fiatSide = direction === "onramp" ? pair.source : pair.dest;
     return railSide === assetRail && (fiat === undefined || fiatSide === fiat);
   });
-  const supportedProviders = providersFromPairs(matched).filter((p) =>
-    isRampProviderSurfaced(p, environment)
-  );
+  const supportedProviders = providersFromPairs(matched).filter((p) => isRampProviderOffered(c, p));
   if (!supportedProviders.includes(input.provider)) {
     throw unsupportedRampCorridor(input.provider, direction, {
       assetRail,
@@ -208,8 +228,8 @@ export async function resolveRampQuoteRequest(
   input: CreateOnrampQuoteBody | CreateOfframpQuoteBody,
   custodyWalletId: string
 ): Promise<RampQuotePolicyResolved> {
-  assertRampProviderSurfaced(input.provider, resolveSdpEnvironment(c));
-  assertRampCorridorSupported(direction, input, resolveSdpEnvironment(c));
+  assertRampProviderOffered(c, input.provider);
+  assertRampCorridorSupported(c, direction, input);
   const scope = await resolveScope(c);
   await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
 

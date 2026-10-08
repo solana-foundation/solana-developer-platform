@@ -1,26 +1,22 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { projectHref } from "@/lib/dashboard-project-path";
+import { setDashboardUrl } from "@/test/dashboard-navigation";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { getDashboardPageConfig } from "./dashboard-header";
 import { DashboardLoadingScreen } from "./dashboard-loading-screen";
 import { DashboardShell } from "./dashboard-shell";
 
-const pathnameMock = vi.hoisted(() => ({ value: "/dashboard" }));
 const authMock = vi.hoisted(() => ({ isLoaded: false }));
 
 vi.mock("@clerk/nextjs", () => ({
-  // The cold load this suite covers is the window before the client session
-  // resolves, so isLoaded drives which branch of the shell renders.
   useAuth: () => ({ isLoaded: authMock.isLoaded, isSignedIn: true, orgId: "org-cold-load" }),
   useUser: () => ({ isLoaded: authMock.isLoaded, isSignedIn: true, user: null }),
   SignInButton: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => pathnameMock.value,
-  useRouter: () => ({ push: () => undefined, replace: () => undefined }),
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
@@ -33,7 +29,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
     dashboardAccess: {
       capabilities: { canReadApprovals: true, canManageOrgSettings: true },
     },
-    selectedProjectId: "project-cold-load",
+    selectedProjectId: "prj_test_sandbox",
     isSidebarOpen: true,
     setSidebarOpen: () => undefined,
     isProjectSwitching: false,
@@ -41,11 +37,12 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 }));
 
 function renderColdLoad(pathname: string): string {
-  pathnameMock.value = pathname;
+  setDashboardUrl(projectHref(SANDBOX_PROJECT.id, pathname), {});
   return renderToStaticMarkup(
     <DashboardShell
       flags={{
         assetProfiles: false,
+        compliance: false,
         custody: false,
         dvp: false,
         earn: false,
@@ -55,8 +52,8 @@ function renderColdLoad(pathname: string): string {
         payments: true,
         policies: false,
         privateChannels: false,
-        // The preparation screen has no flags and draws the previous design; the shell matches it.
         newDesign: false,
+        ramps: true,
       }}
     >
       <div>settled route content</div>
@@ -64,17 +61,13 @@ function renderColdLoad(pathname: string): string {
   );
 }
 
-// SAFETY: the page config only ever calls t(key) and uses the returned string,
-// so an identity function stands in for the translator in these assertions.
 const identityTranslate = ((key: string) => key) as Parameters<typeof getDashboardPageConfig>[1];
 
-/** What the settled shell puts on its centred content column, per dashboard-shell.tsx. */
 function settledContentWidthClassFor(pathname: string): string {
-  const config = getDashboardPageConfig(pathname, identityTranslate, false, false);
+  const config = getDashboardPageConfig(pathname, identityTranslate, false, false, []);
   return config.contentWidthClass ?? "max-w-5xl";
 }
 
-/** The `max-w-*` the shell puts on its centred content column. */
 function contentWidthClassOf(markup: string): string {
   const widths = [...markup.matchAll(/mx-auto[^"]*?\s(max-w-[\w-]+)/g)].map((match) => match[1]);
   return widths[0] ?? "none found";
@@ -110,8 +103,6 @@ describe("dashboard cold load", () => {
   });
 
   it("holds the skeleton to the same content width the settled route uses", () => {
-    // A hardcoded width here paints the skeleton at a different measure from the
-    // page that follows, which is the layout jump wearing a different costume.
     for (const pathname of [
       "/dashboard",
       "/dashboard/policies",
@@ -134,18 +125,19 @@ describe("dashboard cold load", () => {
   it("titles Helius Rings and the Members redirect instead of falling through to Home", () => {
     const t = identityTranslate;
 
-    expect(getDashboardPageConfig("/dashboard/helius-rings", t, false, false).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/helius-rings", t, false, false, []).title).toBe(
       "Shared.dashboardShell.heliusRings"
     );
-    expect(getDashboardPageConfig("/dashboard/members", t, false, false).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/members", t, false, false, []).title).toBe(
       "Shared.dashboardShell.settings"
     );
   });
 
   it("uses identical frames during preparation and client authentication", () => {
     for (const pathname of ["/dashboard", "/dashboard/payments/transactions"]) {
+      const coldLoad = renderColdLoad(pathname);
       const preparation = renderToStaticMarkup(<DashboardLoadingScreen pathname={pathname} />);
-      expect(preparation).toBe(renderColdLoad(pathname));
+      expect(preparation).toBe(coldLoad);
     }
   });
 

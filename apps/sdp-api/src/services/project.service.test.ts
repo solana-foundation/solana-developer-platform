@@ -13,7 +13,14 @@ import {
   DEFAULT_PROJECT_SLUG,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
+
+const STORED_SETTINGS_WITH_REMOVED_KEYS = JSON.stringify({
+  webhookUrl: "https://hooks.example.com/x",
+  rpcProvider: "helius",
+  rpcEndpoint: "https://rpc.example.com",
+});
 
 describe("ProjectService", () => {
   let projectService: ProjectService;
@@ -80,6 +87,17 @@ describe("ProjectService", () => {
 
       expect(project).toBeNull();
     });
+
+    it("strips removed keys from the stored settings", async () => {
+      await db
+        .prepare("UPDATE projects SET settings = ? WHERE id = ?")
+        .bind(STORED_SETTINGS_WITH_REMOVED_KEYS, TEST_PROJECT.id)
+        .run();
+
+      const project = await projectService.getProject(TEST_PROJECT.id);
+
+      expect(required(project).settings).toEqual({ webhookUrl: "https://hooks.example.com/x" });
+    });
   });
 
   describe("getProjectBySlug", () => {
@@ -143,45 +161,71 @@ describe("ProjectService", () => {
       expect(updated.settings?.webhookUrl).toBe("https://new.example.com/webhook");
     });
 
-    it("defaults rpc provider to round robin when settings are omitted", async () => {
-      const updated = await projectService.updateProject(TEST_PROJECT.id, {
-        name: "Default RPC Provider Renamed",
-      });
-
-      expect(updated.settings?.rpcProvider).toBe("default");
-    });
-
-    it("preserves existing rpc provider when settings update omits it", async () => {
+    it("returns null settings when none are stored", async () => {
       await db
-        .prepare("UPDATE projects SET settings = ? WHERE id = ?")
-        .bind(JSON.stringify({ rpcProvider: "triton" }), TEST_PROJECT.id)
+        .prepare("UPDATE projects SET settings = NULL WHERE id = ?")
+        .bind(TEST_PROJECT.id)
         .run();
 
       const updated = await projectService.updateProject(TEST_PROJECT.id, {
-        settings: { webhookUrl: "https://updated.example.com/webhook" },
+        name: "Unset Settings Renamed",
       });
 
-      expect(updated.settings?.rpcProvider).toBe("triton");
+      expect(updated.settings).toBeNull();
     });
 
-    it("switches provider to default and clears custom endpoint", async () => {
+    it("merges a settings update over the stored settings", async () => {
       await db
         .prepare("UPDATE projects SET settings = ? WHERE id = ?")
         .bind(
           JSON.stringify({
-            rpcProvider: "custom",
-            rpcEndpoint: "https://rpc.custom.example.com",
+            webhookUrl: "https://old.example.com/webhook",
+            metadata: { team: "payments" },
           }),
           TEST_PROJECT.id
         )
         .run();
 
       const updated = await projectService.updateProject(TEST_PROJECT.id, {
-        settings: { rpcProvider: "default" },
+        settings: { webhookUrl: "https://updated.example.com/webhook" },
       });
 
-      expect(updated.settings?.rpcProvider).toBe("default");
-      expect(updated.settings?.rpcEndpoint).toBeUndefined();
+      expect(updated.settings).toEqual({
+        webhookUrl: "https://updated.example.com/webhook",
+        metadata: { team: "payments" },
+      });
+    });
+
+    it("does not write removed stored keys back when merging a settings update", async () => {
+      await db
+        .prepare("UPDATE projects SET settings = ? WHERE id = ?")
+        .bind(STORED_SETTINGS_WITH_REMOVED_KEYS, TEST_PROJECT.id)
+        .run();
+
+      await projectService.updateProject(TEST_PROJECT.id, {
+        settings: { metadata: { team: "payments" } },
+      });
+
+      const row = await db
+        .prepare("SELECT settings FROM projects WHERE id = ?")
+        .bind(TEST_PROJECT.id)
+        .first<{ settings: string }>();
+      const persisted: unknown = JSON.parse(required(row).settings);
+      expect(persisted).toEqual({
+        webhookUrl: "https://hooks.example.com/x",
+        metadata: { team: "payments" },
+      });
+    });
+
+    it("clears stored settings when the update sets them to null", async () => {
+      await db
+        .prepare("UPDATE projects SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ webhookUrl: "https://old.example.com/webhook" }), TEST_PROJECT.id)
+        .run();
+
+      const updated = await projectService.updateProject(TEST_PROJECT.id, { settings: null });
+
+      expect(updated.settings).toBeNull();
     });
 
     it("throws for non-existent project", async () => {

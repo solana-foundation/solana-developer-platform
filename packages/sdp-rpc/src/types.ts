@@ -22,17 +22,6 @@ export interface RpcEnv {
   SDP_DEPLOYMENT_MODE?: string;
 }
 
-export interface PreparedStatement {
-  bind(...values: unknown[]): PreparedStatement;
-  first<T = Record<string, unknown>>(columnName?: string): Promise<T | null>;
-  all<T = Record<string, unknown>>(): Promise<{ results: T[]; rows: T[] }>;
-  run(): Promise<number>;
-}
-
-export interface DatabaseClient {
-  prepare(query: string): PreparedStatement;
-}
-
 export interface KVPutOptions {
   expirationTtl?: number;
 }

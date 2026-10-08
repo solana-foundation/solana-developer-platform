@@ -1,6 +1,6 @@
 "use client";
 
-import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
+import type { UnifiedTransactionModule } from "@sdp/types";
 import {
   ArrowLeftIcon,
   ChevronLeftIcon,
@@ -14,8 +14,8 @@ import type { ReactNode } from "react";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
-} from "@/app/dashboard/custody/provider-catalog";
-import { privateChannelsInstancePath } from "@/app/dashboard/integrations/private-channels/private-channels-routes";
+} from "@/app/dashboard/[projectId]/custody/provider-catalog";
+import { privateChannelsInstancePath } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
@@ -25,6 +25,7 @@ import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { type DesignModuleFlags, isNewDesignPage } from "@/lib/design-modules";
 import { PAYMENT_REQUESTS_HREF, PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
@@ -79,8 +80,10 @@ export function DashboardHeaderAction({
   action: DashboardHeaderActionConfig;
   search: string;
 }) {
+  const projectHref = useProjectHref();
   const Icon = action.icon === undefined ? null : action.icon === "plus" ? PlusIcon : DownloadIcon;
-  const href = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
+  const target = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
+  const href = action.download ? target : projectHref(target);
   const content = (
     <>
       {Icon === null ? null : <Icon className="size-4" aria-hidden="true" />}
@@ -135,9 +138,10 @@ export function HeaderBackAction({
   label: string;
   compactOnMobile?: boolean;
 }) {
+  const projectHref = useProjectHref();
   return (
     <Link
-      href={href}
+      href={projectHref(href)}
       className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:h-5 refresh:gap-1"
     >
       <ArrowLeftIcon className="h-4 w-4 refresh:hidden" />
@@ -438,6 +442,27 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
   };
 }
 
+/**
+ * A refresh-design payments flow (Pay, Deposit): the title sits left above the flow's own tabs,
+ * both in the flow's column, and the content box stays full width so the flow's footer band
+ * can span the card. No back action: the footer's Cancel returns to Payments.
+ */
+function refreshFlowPageConfig(config: {
+  title: string;
+  tabs: readonly { id: string; label: string }[];
+}): DashboardPageConfig {
+  return {
+    title: config.title,
+    titlePosition: "left",
+    headerTabs: { tabs: config.tabs, hideOnMobile: false },
+    contentWidthClass: "max-w-none",
+    headerWidthClass: "max-w-flow",
+  };
+}
+
+/** Width of the refresh Payments overview and list pages: the design's 900px column. */
+const REFRESH_PAGE_WIDTH = "max-w-page";
+
 function actionPageConfig(config: {
   title: string;
   backHref: string;
@@ -572,6 +597,44 @@ function getPrivateChannelsRoutePageConfig(
       label: t("Shared.dashboardShell.backToPrivateChannels"),
     },
   };
+}
+
+function getCounterpartyRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/payments/counterparty/create") {
+    // A refresh flow: the way back over the title in the form's column; the footer band spans
+    // the page.
+    return {
+      title: t("Shared.dashboardShell.newDesign.newCounterparty"),
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: "/dashboard/payments/counterparty",
+        label: t("Shared.dashboardShell.contactList"),
+      },
+    };
+  }
+  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
+    // A detail page reads in the page column; at full width it would lose the shell's gutter.
+    // The page titles itself with the contact's name; "Contact" holds the place until it does.
+    const counterpartyId = pathname.split("/")[4] ?? "";
+    return {
+      title: t("Shared.dashboardShell.contact"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      backAction: {
+        href: "/dashboard/payments/counterparty",
+        label: t("Shared.dashboardShell.contactList"),
+      },
+      headerAction: {
+        label: t("Shared.dashboardShell.pay"),
+        href: `/dashboard/payments/pay?counterpartyId=${encodeURIComponent(counterpartyId)}`,
+        variant: "primary",
+      },
+    };
+  }
+  return null;
 }
 
 function getMarketsRoutePageConfig(
@@ -871,6 +934,48 @@ function getWalletSectionPageConfig(
 }
 
 /**
+ * Header config for the Payments pages built on the refresh design so far: Contacts and the two
+ * flows. Returns null for every other route.
+ */
+function getRefreshPaymentsPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/payments/counterparty") {
+    return {
+      title: t("Shared.dashboardShell.contactList"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardPayments.counterparty.add"),
+        href: "/dashboard/payments/counterparty/create",
+        icon: "plus",
+        variant: "primary",
+      },
+    };
+  }
+  if (pathname === "/dashboard/payments/pay") {
+    return refreshFlowPageConfig({
+      title: t("Shared.dashboardShell.pay"),
+      tabs: [
+        { id: "single", label: t("DashboardPayments.sendMode.single") },
+        { id: "batch", label: t("DashboardPayments.sendMode.batch") },
+      ],
+    });
+  }
+  if (pathname === "/dashboard/payments/deposit") {
+    return refreshFlowPageConfig({
+      title: t("Shared.dashboardShell.deposit"),
+      tabs: [
+        { id: "address", label: t("DashboardPayments.depositMethod.address") },
+        { id: "provider", label: t("DashboardPayments.depositMethod.provider") },
+      ],
+    });
+  }
+  return null;
+}
+
+/**
  * Header config for the routes NEW DESIGN redesigns, as the previous design draws them: Payments
  * and the Privacy connect form. Returns null for every other route, and for the new design's own
  * routes, which send the previous design back to their list.
@@ -878,7 +983,8 @@ function getWalletSectionPageConfig(
 function getLegacyDesignPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
-  privateChannelsEnabled: boolean
+  privateChannelsEnabled: boolean,
+  transactionModules: readonly UnifiedTransactionModule[]
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/integrations/private-channels/setup") {
     return actionPageConfig({
@@ -943,7 +1049,7 @@ function getLegacyDesignPageConfig(
       headerTabs: {
         tabs: [
           { id: "all", label: t("DashboardPayments.transactions.all") },
-          ...UNIFIED_TRANSACTION_MODULES.map((module) => ({
+          ...transactionModules.map((module) => ({
             id: module,
             label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
           })),
@@ -984,7 +1090,7 @@ function getLegacyDesignPageConfig(
       },
     };
   }
-  const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
+  const action = getPaymentsActions(t, privateChannelsEnabled, { newDesign: false }).find((item) =>
     pathname.startsWith(item.href)
   );
   const title = action
@@ -1005,6 +1111,8 @@ export function getDashboardPageConfig(
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean,
   privateChannelsEnabled: boolean,
+  // Transactions tabs, from `enabledTransactionModules`.
+  transactionModules: readonly UnifiedTransactionModule[],
   custodyEnabled = true,
   _paymentsEnabled = true,
   _policiesEnabled = true,
@@ -1062,10 +1170,18 @@ export function getDashboardPageConfig(
   // A Payments page no design module has redesigned keeps the previous design's header under
   // NEW DESIGN too.
   const legacyDesignConfig = !newDesignPage
-    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled)
+    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled, transactionModules)
     : null;
   if (legacyDesignConfig) {
     return legacyDesignConfig;
+  }
+  const refreshPaymentsConfig = getRefreshPaymentsPageConfig(pathname, t);
+  if (refreshPaymentsConfig) {
+    return refreshPaymentsConfig;
+  }
+  const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname, t);
+  if (counterpartyRouteConfig) {
+    return counterpartyRouteConfig;
   }
   const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
   if (marketsRouteConfig) {
@@ -1074,6 +1190,26 @@ export function getDashboardPageConfig(
   const privateChannelsConfig = getPrivateChannelsRoutePageConfig(pathname, t);
   if (privateChannelsConfig) {
     return privateChannelsConfig;
+  }
+  if (pathname.startsWith("/dashboard/payments/")) {
+    const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
+      pathname.startsWith(item.href)
+    );
+    const title = action
+      ? action.label
+      : pathname.endsWith("/receive")
+        ? t("Shared.dashboardShell.receive")
+        : t("Shared.dashboardShell.send");
+
+    return {
+      title,
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: "/dashboard/payments",
+        label: t("Shared.dashboardShell.backToPayments"),
+      },
+    };
   }
   const integrationsConfig = getIntegrationsPageConfig(pathname, t);
   if (integrationsConfig) {
@@ -1086,7 +1222,7 @@ export function getDashboardPageConfig(
   if (pathname.startsWith("/dashboard/settings") || pathname === "/dashboard/members") {
     // Settings was the only route left on the `max-w-5xl` default, which stranded a
     // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
-    // the members table and the RPC form are label/value rows, and letting them span
+    // the members table rows are label/value pairs, and letting them span
     // an ultrawide display pushes each value far from its label.
     return {
       title: t("Shared.dashboardShell.settings"),

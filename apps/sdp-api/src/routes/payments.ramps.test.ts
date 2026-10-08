@@ -16,14 +16,17 @@ import {
   type PaymentTransferStatus,
   type PaymentTransferType,
   type RampProviderId,
+  SDP_RAMP_PROVIDER_STAGES,
 } from "@sdp/types";
 import type { Address } from "@solana/addresses";
 import type { RpcTransport } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createApp } from "@/app";
 import { getDb } from "@/db";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import app from "@/index";
+import { noopObservability } from "@/runtime/observability";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   bvnkSeedCustomerReference,
@@ -182,6 +185,15 @@ async function seedRampEventTransfer(params: {
     .run();
   return counterpartyId;
 }
+
+// Today every ramp provider is `experimental`; these stages put only MoonPay in
+// `beta`, so a `beta` deployment runs Ramps without BVNK or Lightspark.
+const moonpayOnlyBetaApp = createApp({
+  observability: noopObservability,
+  rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
+});
+const betaEnv = () => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
+
 describe("Payments routes — ramps", () => {
   installPaymentsRouteTestHooks();
 
@@ -1637,6 +1649,66 @@ describe("Payments routes — ramps", () => {
       .first<{ status: string }>();
     expect(required(row).status).toBe("settling");
   });
+  it("refuses to cancel a transfer at a provider outside the release channel", async () => {
+    await seedRampTransfer({
+      id: "xfr_cancel_excluded",
+      provider: "bvnk",
+      providerReference: "bvnk_ref_cancel_excluded",
+      status: "awaiting_payment",
+    });
+
+    const res = await moonpayOnlyBetaApp.request(
+      "/v1/payments/ramps/transfers/cancel",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ transferId: "xfr_cancel_excluded" }),
+      },
+      betaEnv()
+    );
+
+    expect(res.status).toBe(403);
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_cancel_excluded")
+      .first<{ status: string }>();
+    expect(required(row).status).toBe("awaiting_payment");
+  });
+  it("fails a ramp transfer with no provider instead of skipping the release channel gate", async () => {
+    await seedRampTransfer({
+      id: "xfr_cancel_no_provider",
+      provider: "bvnk",
+      providerReference: "bvnk_ref_cancel_no_provider",
+      status: "awaiting_payment",
+    });
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET provider = NULL WHERE id = ?")
+      .bind("xfr_cancel_no_provider")
+      .run();
+
+    const res = await moonpayOnlyBetaApp.request(
+      "/v1/payments/ramps/transfers/cancel",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ transferId: "xfr_cancel_no_provider" }),
+      },
+      betaEnv()
+    );
+
+    expect(res.status).toBe(500);
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind("xfr_cancel_no_provider")
+      .first<{ status: string }>();
+    expect(required(row).status).toBe("awaiting_payment");
+  });
   it("cancels an awaiting BVNK on-ramp transfer after the custody-wallet authz without touching BVNK", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "d1b_cancel_onramp" });
     await seedBvnkOnrampTransfer(getDb(env), {
@@ -1905,6 +1977,28 @@ describe("Payments routes — ramps", () => {
       expect(required(transfer).status).toBe("awaiting_payment");
       expect(required(required(transfer).provider_data.sandboxSimulation).requestedAt).toBeTruthy();
 
+      simulateSpy.mockRestore();
+    });
+
+    it("refuses to simulate a transfer at a provider outside the release channel", async () => {
+      await seedBvnkSimulatableTransfer();
+      const simulateSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin");
+
+      const res = await moonpayOnlyBetaApp.request(
+        "/v1/payments/ramps/sandbox/simulate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ transferId: SIMULATE_TRANSFER_ID }),
+        },
+        betaEnv()
+      );
+
+      expect(res.status).toBe(403);
+      expect(simulateSpy).not.toHaveBeenCalled();
       simulateSpy.mockRestore();
     });
 

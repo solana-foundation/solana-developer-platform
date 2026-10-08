@@ -10,11 +10,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/flags", () => ({ issuance: mocks.issuance }));
-vi.mock("@/app/dashboard/home-page.data", () => ({
+vi.mock("@/app/dashboard/[projectId]/home-page.data", () => ({
   buildHomeActivityRows: mocks.buildHomeActivityRows,
   fetchOrgIssuanceActivity: mocks.fetchOrgIssuanceActivity,
 }));
-vi.mock("@/app/dashboard/payments/payments-page.data", () => ({
+vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
   fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols: mocks.fetchPaymentsIssuedTokenSymbols,
   WALLET_TRANSFERS_DEADLINE_MS: 2_500,

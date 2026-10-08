@@ -1,3 +1,4 @@
+import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types";
 import { isoDateTimeSchema, z } from "./base";
 
 export const healthResponseSchema = z
@@ -9,6 +10,10 @@ export const healthResponseSchema = z
     }),
     version: z.string().openapi({ description: "Service version.", example: "0.1.0" }),
     environment: z.string().openapi({ description: "Runtime environment.", example: "production" }),
+    releaseChannel: z.enum(SDP_RELEASE_CHANNEL_NAMES).openapi({
+      description: "Release channel: which modules this deployment runs.",
+      example: "experimental",
+    }),
   })
   .openapi({ description: "Health check response payload." });
 

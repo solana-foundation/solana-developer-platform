@@ -13,7 +13,7 @@ import {
   SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
 } from "@solana/kit";
-import { createRpcTransportForTarget } from "@/services/rpc-egress";
+import { createCustomerRpcTransport } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 import { RingsAdapterError, type RingsAdapterFailureCode } from "./adapter-error";
 import { requireRingsHeliusRpcUrl } from "./rpc-config";
@@ -57,12 +57,7 @@ export async function submitRingsOuterTransaction(
     rpc =
       input.env.ENVIRONMENT === "development"
         ? createRpc(input.env, { rpcUrl: input.rpcUrl })
-        : createRpcFromTransport(
-            createRpcTransportForTarget({
-              endpoint: input.rpcUrl,
-              connectionId: "rings-connection",
-            })
-          );
+        : createRpcFromTransport(createCustomerRpcTransport(input.rpcUrl));
   } else {
     const configuredRpc = createRingsHeliusRpc(input.env);
     rpc = configuredRpc.rpc;

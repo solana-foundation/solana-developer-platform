@@ -28,6 +28,7 @@ import {
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
 } from "@/lib/dashboard-navigation-loading";
+import { type DesignFlags, type DesignModuleFlags, isDesignModuleOn } from "@/lib/design-modules";
 import { resolveDocsUrl } from "@/lib/docs-url";
 
 export type SubNavItem = {
@@ -105,7 +106,8 @@ export function withSubnavToggled(
 
 export function getPaymentsActions(
   t: ReturnType<typeof useTranslations>,
-  _privateChannelsEnabled: boolean
+  _privateChannelsEnabled: boolean,
+  design: DesignFlags = { newDesign: true }
 ): SubNavItem[] {
   return [
     {
@@ -114,7 +116,9 @@ export function getPaymentsActions(
       icon: ReceiptTextIcon,
     },
     {
-      label: t("Shared.dashboardShell.counterparty"),
+      label: isDesignModuleOn(design, "contacts")
+        ? t("Shared.dashboardShell.contacts")
+        : t("Shared.dashboardShell.counterparty"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
       icon: UsersIcon,
     },
@@ -187,7 +191,7 @@ export function getIntegrationActions(
   t: ReturnType<typeof useTranslations>,
   options: Pick<
     Parameters<typeof getNavSections>[1],
-    "custodyEnabled" | "paymentsEnabled" | "policiesEnabled" | "privateChannelsEnabled"
+    "complianceEnabled" | "custodyEnabled" | "privateChannelsEnabled" | "rampsEnabled"
   >
 ): SubNavItem[] {
   return [
@@ -200,12 +204,7 @@ export function getIntegrationActions(
           },
         ]
       : []),
-    {
-      label: t("Shared.integrations.rpcTitle"),
-      href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.rpc,
-      icon: CircleDotDashedIcon,
-    },
-    ...(options.paymentsEnabled
+    ...(options.rampsEnabled
       ? [
           {
             label: t("Shared.integrations.rampsTitle"),
@@ -214,7 +213,7 @@ export function getIntegrationActions(
           },
         ]
       : []),
-    ...(options.policiesEnabled
+    ...(options.complianceEnabled
       ? [
           {
             label: t("Shared.integrations.complianceTitle"),
@@ -239,6 +238,7 @@ export function getNavSections(
   t: ReturnType<typeof useTranslations>,
   options: {
     canReadApprovals: boolean;
+    complianceEnabled: boolean;
     custodyEnabled: boolean;
     dvpEnabled: boolean;
     earnEnabled: boolean;
@@ -249,6 +249,11 @@ export function getNavSections(
     pendingApprovalCount: number | null;
     policiesEnabled: boolean;
     privateChannelsEnabled: boolean;
+    /** NEW DESIGN; the previous design's labels when off. */
+    newDesign?: boolean;
+    /** Each design module's own flag: a redesigned area's labels follow it. */
+    newDesignModules?: DesignModuleFlags;
+    rampsEnabled: boolean;
   }
 ): NavSection[] {
   const marketsActions = getMarketsActions(t, options.earnEnabled, options.dvpEnabled);
@@ -292,7 +297,10 @@ export function getNavSections(
                 label: t("Shared.dashboardShell.payments"),
                 href: DASHBOARD_SIDE_NAV_HREFS.payments,
                 icon: ArrowLeftRightIcon,
-                children: getPaymentsActions(t, options.privateChannelsEnabled),
+                children: getPaymentsActions(t, options.privateChannelsEnabled, {
+                  newDesign: options.newDesign ?? true,
+                  newDesignModules: options.newDesignModules,
+                }),
                 subnavKey: "payments" as const,
               },
             ]

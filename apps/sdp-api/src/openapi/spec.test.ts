@@ -724,9 +724,16 @@ describe("OpenAPI spec", () => {
     }
   });
 
+  it("does not promise webhook delivery for project settings", () => {
+    // webhookUrl is stored but nothing delivers to it; the schema must not promise events.
+    const updateProject = JSON.stringify(
+      createPublicOpenApiDocument().paths?.["/v1/projects/{projectId}"]?.patch
+    );
+    expect(updateProject).toContain("SDP does not deliver webhooks to this URL");
+  });
+
   it("limits the public document to supported public API families", () => {
     const doc = createPublicOpenApiDocument();
-    const updateProject = JSON.stringify(doc.paths?.["/v1/projects/{projectId}"]?.patch);
 
     expect(doc.tags?.map((tag) => tag.name)).toEqual([
       "Health",
@@ -746,14 +753,9 @@ describe("OpenAPI spec", () => {
 
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();
     expect(doc.paths?.["/v1/members"]).toBeUndefined();
-    expect(doc.paths?.["/v1/rpc/providers"]).toBeUndefined();
     expect(doc.paths?.["/admin/allowlist"]).toBeUndefined();
     expect(doc.paths?.["/v1/onboarding/status"]).toBeUndefined();
     expect(doc.components?.securitySchemes?.adminKey).toBeUndefined();
-    expect(updateProject).toContain('"rpcProvider"');
-    expect(updateProject).toContain('"nodit"');
-    // webhookUrl is stored but nothing delivers to it; the schema must not promise events.
-    expect(updateProject).toContain("SDP does not deliver webhooks to this URL");
 
     expect(doc.paths?.["/health"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
@@ -795,14 +797,5 @@ describe("OpenAPI spec", () => {
     const createBody = JSON.stringify(doc.paths?.["/v1/dvp/trades"]?.post?.requestBody);
     expect(createBody).not.toContain('"type":"number"');
     expect(createBody).not.toContain('"type":"integer"');
-  });
-
-  it("documents the managed RPC round-robin order", () => {
-    const doc = createOpenApiDocument();
-    const rpcProviders = JSON.stringify(doc.paths?.["/v1/rpc/providers"]?.get);
-
-    expect(rpcProviders).toContain(
-      '"example":["triton","helius","alchemy","quicknode","validationcloud","nodit","default"]'
-    );
   });
 });
