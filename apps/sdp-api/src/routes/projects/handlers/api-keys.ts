@@ -182,7 +182,6 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
         creationReason: "api_key",
         organizationId: auth.organizationId,
         projectId,
-        legacyConfigProjectId: projectId,
         connectionId,
         label: walletLabel,
         purpose: walletPurpose,

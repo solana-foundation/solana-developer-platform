@@ -20,6 +20,8 @@ const mockedProvisionPrivyWallet = vi.mocked(provisionPrivyWallet);
 const mockedProvisionCoinbaseCdpAccount = vi.mocked(provisionCoinbaseCdpAccount);
 const mockedProvisionUtilaWallet = vi.mocked(provisionUtilaWallet);
 
+const PROJECT_ID = "prj_signing_reuse";
+
 describe("signing.service provider reuse", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -45,7 +47,7 @@ describe("signing.service provider reuse", () => {
       },
     });
 
-    const result = await service.initializePrivySigning(orgId, undefined, {});
+    const result = await service.initializePrivySigning(orgId, PROJECT_ID, {});
 
     expect(result.walletId).toBe(wallet.walletId);
     expect(result.publicKey).toBe(wallet.publicKey);
@@ -55,12 +57,12 @@ describe("signing.service provider reuse", () => {
     expect(configStore.upsert).not.toHaveBeenCalled();
     expect(configStore.saveProviderConfig).toHaveBeenCalledWith({
       orgId,
-      projectId: undefined,
+      projectId: PROJECT_ID,
       provider: "privy",
       configJson: expect.objectContaining({ provider: "privy" }),
       defaultWalletId: wallet.walletId,
     });
-    expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, configId);
+    expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, PROJECT_ID, configId);
   });
 
   it("reuses the existing Coinbase root wallet when switching back to Coinbase", async () => {
@@ -88,7 +90,7 @@ describe("signing.service provider reuse", () => {
       },
     });
 
-    const result = await service.initializeCoinbaseCdpSigning(orgId, undefined, {});
+    const result = await service.initializeCoinbaseCdpSigning(orgId, PROJECT_ID, {});
 
     expect(result.walletId).toBe(wallet.walletId);
     expect(result.publicKey).toBe(wallet.publicKey);
@@ -98,12 +100,12 @@ describe("signing.service provider reuse", () => {
     expect(configStore.upsert).not.toHaveBeenCalled();
     expect(configStore.saveProviderConfig).toHaveBeenCalledWith({
       orgId,
-      projectId: undefined,
+      projectId: PROJECT_ID,
       provider: "coinbase_cdp",
       configJson: expect.objectContaining({ provider: "coinbase_cdp" }),
       defaultWalletId: wallet.walletId,
     });
-    expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, configId);
+    expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, PROJECT_ID, configId);
   });
 
   it("reuses the existing Utila root wallet when switching back to Utila", async () => {
@@ -127,7 +129,7 @@ describe("signing.service provider reuse", () => {
       },
     });
 
-    const result = await service.initializeUtilaSigning(orgId, undefined, {});
+    const result = await service.initializeUtilaSigning(orgId, PROJECT_ID, {});
 
     expect(result.walletId).toBe(wallet.walletId);
     expect(result.publicKey).toBe(wallet.publicKey);
@@ -137,12 +139,12 @@ describe("signing.service provider reuse", () => {
     expect(configStore.upsert).not.toHaveBeenCalled();
     expect(configStore.saveProviderConfig).toHaveBeenCalledWith({
       orgId,
-      projectId: undefined,
+      projectId: PROJECT_ID,
       provider: "utila",
       configJson: expect.objectContaining({ provider: "utila" }),
       defaultWalletId: wallet.walletId,
     });
-    expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, configId);
+    expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, PROJECT_ID, configId);
   });
 
   it("does not promote lifecycle-only providers to the default signer", async () => {
@@ -161,7 +163,7 @@ describe("signing.service provider reuse", () => {
 
     configStore.upsert.mockResolvedValue(anchorageConfigId);
 
-    await service.configureProvider(orgId, undefined, {
+    await service.configureProvider(orgId, PROJECT_ID, {
       provider: "anchorage",
       defaultWalletId: "anchorage_wallet_1",
     });
@@ -191,29 +193,12 @@ describe("signing.service provider reuse", () => {
 
     configStore.upsert.mockResolvedValue(signingConfigId);
 
-    await service.configureProvider(orgId, undefined, {
+    await service.configureProvider(orgId, PROJECT_ID, {
       provider: "privy",
       defaultWalletId: "privy_wallet_1",
     });
 
-    expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, undefined, signingConfigId);
-  });
-
-  it("does not let a project create wallets in an organization-scoped fallback config", async () => {
-    const orgId = "org_shared_wallet_guard";
-    const configRecord = createConfigRecord({
-      id: "cust_shared_wallet_guard",
-      orgId,
-      provider: "privy",
-      defaultWalletId: "privy_shared_default",
-    });
-    const { service, configStore } = createService({ configRecord, wallets: [] });
-    configStore.getDefaultConfig.mockResolvedValue(configRecord);
-
-    await expect(service.createWallet(orgId, "prj_attacker", {})).rejects.toMatchObject({
-      code: "NOT_FOUND",
-    });
-    expect(configStore.createWallet).not.toHaveBeenCalled();
+    expect(configStore.setDefaultConfig).toHaveBeenCalledWith(orgId, PROJECT_ID, signingConfigId);
   });
 });
 
@@ -279,7 +264,7 @@ function createConfigRecord(params: {
   return {
     id: params.id,
     organizationId: params.orgId,
-    projectId: null,
+    projectId: PROJECT_ID,
     provider: params.provider,
     config: "encrypted-placeholder",
     encryptionVersion: "sdp-custody-encryption-v1",

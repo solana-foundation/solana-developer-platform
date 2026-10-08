@@ -104,7 +104,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       {
         id: PRIVY_CONFIG_ID,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT.id,
         provider: "privy",
         configEncrypted: "test-config",
         defaultWalletId: "privy_wallet_a",
@@ -113,7 +113,7 @@ async function seedAuthAndConfigs(): Promise<void> {
       {
         id: PARA_CONFIG_ID,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT.id,
         provider: "para",
         configEncrypted: "test-config",
         defaultWalletId: "para_wallet_a",
@@ -142,9 +142,9 @@ async function seedAuthAndConfigs(): Promise<void> {
     ],
     scopeDefaults: [
       {
-        id: "csd_wallet_by_id_org_default",
+        id: "csd_wallet_by_id_project_default",
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT.id,
         defaultCustodyConfigId: PRIVY_CONFIG_ID,
         defaultCustodyConnectionId: null,
       },

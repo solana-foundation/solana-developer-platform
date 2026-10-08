@@ -92,7 +92,7 @@ async function seedAuthAndActiveConfig(): Promise<void> {
       {
         id: TEST_CONFIG_ID,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT.id,
         provider: "privy",
         configEncrypted: "test-config",
         defaultWalletId: "privy_wallet_test",
@@ -114,7 +114,7 @@ async function seedAuthAndActiveConfig(): Promise<void> {
       {
         id: `csd_${TEST_CONFIG_ID}`,
         organizationId: TEST_ORG.id,
-        projectId: null,
+        projectId: TEST_PROJECT.id,
         defaultCustodyConfigId: TEST_CONFIG_ID,
         defaultCustodyConnectionId: null,
       },
@@ -165,46 +165,36 @@ describe("Custody switch rollback", () => {
     const body = (await res.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("BAD_REQUEST");
 
-    const configs = await getDb(env)
-      .prepare(
-        `SELECT id, provider, status
+    expect(
+      await getDb(env).queryMany(
+        `SELECT id, project_id, provider, status
            FROM custody_configs
-           WHERE organization_id = ? AND project_id IS NULL
-           ORDER BY id`
+           WHERE organization_id = ?
+           ORDER BY id`,
+        [TEST_ORG.id]
       )
-      .bind(TEST_ORG.id)
-      .all<{ id: string; provider: string; status: string }>();
-
-    expect(configs.results).toEqual([
+    ).toEqual([
       {
         id: TEST_CONFIG_ID,
+        project_id: TEST_PROJECT.id,
         provider: "privy",
         status: "active",
       },
     ]);
-
-    const paraConfigCount = await getDb(env)
-      .prepare(
-        `SELECT COUNT(*) as count
-           FROM custody_configs
-           WHERE organization_id = ? AND provider = 'para'`
+    expect(
+      await getDb(env).queryMany(
+        `SELECT project_id, default_custody_config_id, default_custody_connection_id
+           FROM custody_scope_defaults
+           WHERE organization_id = ?`,
+        [TEST_ORG.id]
       )
-      .bind(TEST_ORG.id)
-      .first<{ count: number }>();
-
-    expect(Number(paraConfigCount?.count ?? 0)).toBe(0);
-
-    const scopeDefault = await getDb(env)
-      .prepare(
-        `SELECT default_custody_config_id
-         FROM custody_scope_defaults
-         WHERE organization_id = ? AND project_id IS NULL
-         LIMIT 1`
-      )
-      .bind(TEST_ORG.id)
-      .first<{ default_custody_config_id: string }>();
-
-    expect(scopeDefault?.default_custody_config_id).toBe(TEST_CONFIG_ID);
+    ).toEqual([
+      {
+        project_id: TEST_PROJECT.id,
+        default_custody_config_id: TEST_CONFIG_ID,
+        default_custody_connection_id: null,
+      },
+    ]);
   });
 
   it("rejects client endpoints outright when switching providers", async () => {

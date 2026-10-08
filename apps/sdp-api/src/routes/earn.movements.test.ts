@@ -31,9 +31,6 @@ const WALLET_A = "cwlt_earn_feed_a";
 // An ORGANIZATION-level config, so this wallet is reachable from PROJECT_A —
 // which is what makes the API-key wallet binding the only thing that can
 // exclude its movements.
-const CONFIG_ORG = "cfg_earn_feed_org";
-const WALLET_ORG = "cwlt_earn_feed_org";
-const PUBLIC_KEY_ORG = "6dNVeCP6YQ9GDDLLQrNqzKPfSHfmybEqMcaWEqMTBRvR";
 const PUBLIC_KEY_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "So11111111111111111111111111111111111111112";
@@ -154,20 +151,6 @@ async function seedScope(): Promise<void> {
          VALUES (?, ?, ?, ?, ?, ?, ?, 'api_admin', '["*"]'::jsonb, 'active')`
       )
       .bind(API_KEY.id, ORG, PROJECT_A, USER, "Feed key", "sk_test_ear", keyHash),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, status)
-         VALUES (?, ?, NULL, 'privy', 'encrypted', 'active')`
-      )
-      .bind(CONFIG_ORG, ORG),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, 'privy_feed_org', ?, 'active')`
-      )
-      .bind(WALLET_ORG, CONFIG_ORG, PUBLIC_KEY_ORG),
     ...[[CONFIG_A, PROJECT_A, WALLET_A, "privy_feed_a", PUBLIC_KEY_A]].flatMap(
       ([configId, projectId, walletId, providerWalletId, publicKey]) => [
         getDb(env)

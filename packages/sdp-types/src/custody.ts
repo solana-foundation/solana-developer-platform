@@ -435,9 +435,29 @@ export type CustodyWalletPurpose =
    * tokens around.
    */
   | "dvp_settlement_authority";
-/** Legacy Config lifecycle states; an absent Config is not a stored status. */
-export const CUSTODY_CONFIG_STATUSES = ["active", "inactive"] as const;
+/**
+ * Legacy Config lifecycle states; an absent Config is not a stored status. An
+ * `archived` Config is retired for good: it never resolves, never re-activates,
+ * and never arbitrates the per-scope provider uniqueness.
+ */
+export const CUSTODY_CONFIG_STATUSES = ["active", "inactive", "archived"] as const;
 export type CustodyConfigStatus = (typeof CUSTODY_CONFIG_STATUSES)[number];
+
+/** Whether each status keeps a Config eligible for provider lookup and re-activation. */
+export const CUSTODY_CONFIG_STATUS_UNARCHIVED = {
+  active: true,
+  inactive: true,
+  archived: false,
+} as const satisfies Record<CustodyConfigStatus, boolean>;
+
+/** Reports whether a Config in the given status can still be found by provider and re-activated. */
+export function isUnarchivedCustodyConfigStatus(status: CustodyConfigStatus): boolean {
+  return CUSTODY_CONFIG_STATUS_UNARCHIVED[status];
+}
+
+/** Config statuses a provider lookup may return; archived rows are skipped. */
+export const UNARCHIVED_CUSTODY_CONFIG_STATUSES: readonly CustodyConfigStatus[] =
+  CUSTODY_CONFIG_STATUSES.filter(isUnarchivedCustodyConfigStatus);
 export type CustodyWalletStatus = "active" | "inactive";
 
 export interface FireblocksCustodyOptions {

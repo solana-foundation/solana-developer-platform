@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { CustodyProvider } from "@sdp/custody";
 import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
@@ -37,6 +38,7 @@ import { AuditService } from "@/services/audit.service";
 import { SigningService } from "@/services/domain/signing.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import {
   seedTestPrivyConnection,
   writeTestPrivyCredentialSecret,
@@ -125,27 +127,37 @@ let originalJupiterSwapApiKey: string | undefined;
 
 async function seedWallet(params: {
   configId: string;
+  provider: CustodyProvider;
   custodyWalletId: string;
   providerWalletId: string;
   publicKey: string;
-  projectId: string | null;
+  projectId: string;
 }): Promise<void> {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, status)
-         VALUES (?, ?, ?, 'privy', 'encrypted', 'active')`
-      )
-      .bind(params.configId, TEST_ORG.id, params.projectId),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(params.custodyWalletId, params.configId, params.providerWalletId, params.publicKey),
-  ]);
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: params.configId,
+        organizationId: TEST_ORG.id,
+        projectId: params.projectId,
+        provider: params.provider,
+        configEncrypted: "encrypted",
+        defaultWalletId: null,
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: params.custodyWalletId,
+        owner: { kind: "config", custodyConfigId: params.configId },
+        walletId: params.providerWalletId,
+        publicKey: params.publicKey,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+    scopeDefaults: [],
+  });
 }
 
 async function seedConnectionWallet(): Promise<void> {
@@ -520,6 +532,7 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
         publicKey: WALLET_ADDRESS,
         projectId: TEST_PROJECT.id,
         configId: "cust_approval_legacy",
+        provider: "privy",
         custodyWalletId: "cwlt_approval_legacy",
         providerWalletId: "privy_approval_legacy",
       });
@@ -602,6 +615,7 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cust_approval_new_default",
+      provider: "privy",
       custodyWalletId: "cwlt_approval_new_default",
       providerWalletId: "privy_approval_new_default",
     });
@@ -642,6 +656,7 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
       await seedWallet({
         publicKey: WALLET_ADDRESS,
         configId: "cust_approval_foreign",
+        provider: "privy",
         custodyWalletId: "cwlt_approval_foreign",
         providerWalletId: "privy_earn_vault_connection",
         projectId: TEST_PRODUCTION_PROJECT.id,
@@ -773,6 +788,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     await seedWallet({
       publicKey: WALLET_ADDRESS,
       configId: "cfg_earn_vault_kamino_prod",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_kamino_prod",
       providerWalletId: "privy_earn_vault_kamino_prod",
       projectId: TEST_PRODUCTION_PROJECT.id,
@@ -824,6 +840,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     await seedWallet({
       publicKey: WALLET_ADDRESS,
       configId: "cfg_earn_vault_veda_prod",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_veda_prod",
       providerWalletId: "privy_earn_vault_veda_prod",
       projectId: TEST_PRODUCTION_PROJECT.id,
@@ -856,6 +873,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     await seedWallet({
       publicKey: WALLET_ADDRESS,
       configId: "cfg_earn_vault_jupiter",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_jupiter",
       providerWalletId: "privy_earn_vault_jupiter",
       projectId: TEST_PRODUCTION_PROJECT.id,
@@ -912,6 +930,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     await seedWallet({
       publicKey: WALLET_ADDRESS,
       configId: "cfg_earn_vault_ondo",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_ondo",
       providerWalletId: "privy_earn_vault_ondo",
       projectId: TEST_PRODUCTION_PROJECT.id,
@@ -1308,6 +1327,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_raw_address",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_raw_address",
       providerWalletId: "privy_earn_vault_raw_address",
     });
@@ -1334,15 +1354,17 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_first",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_first",
       providerWalletId: "privy_earn_vault_first",
     });
     await seedWallet({
       publicKey: WALLET_ADDRESS,
       configId: "cfg_earn_vault_second",
+      provider: "para",
       custodyWalletId: "cwlt_earn_vault_second",
       providerWalletId: "privy_earn_vault_second",
-      projectId: null,
+      projectId: TEST_PROJECT.id,
     });
 
     const res = await postVaultDeposit(
@@ -1405,6 +1427,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_pending",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_pending",
       providerWalletId: "privy_earn_vault_pending",
     });
@@ -1468,15 +1491,17 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_duplicate_a",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_duplicate_a",
       providerWalletId: "privy_earn_vault_duplicate",
     });
     await seedWallet({
       configId: "cfg_earn_vault_duplicate_b",
+      provider: "para",
       custodyWalletId: "cwlt_earn_vault_duplicate_b",
       providerWalletId: "privy_earn_vault_duplicate",
       publicKey: "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF",
-      projectId: null,
+      projectId: TEST_PROJECT.id,
     });
 
     const res = await postVaultDeposit(
@@ -1501,15 +1526,17 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_bound_project",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_bound_project",
       providerWalletId: "privy_earn_vault_bound_duplicate",
     });
     await seedWallet({
       publicKey: WALLET_ADDRESS,
-      configId: "cfg_earn_vault_bound_org",
-      custodyWalletId: "cwlt_earn_vault_bound_org",
+      configId: "cfg_earn_vault_bound_second",
+      provider: "para",
+      custodyWalletId: "cwlt_earn_vault_bound_second",
       providerWalletId: "privy_earn_vault_bound_duplicate",
-      projectId: null,
+      projectId: TEST_PROJECT.id,
     });
     const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
     await seedCachedApiKey(env, keyHash, {
@@ -1526,7 +1553,7 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     const res = await postVaultDeposit(
       {
         strategyId: strategy.id,
-        custodyWalletId: "cwlt_earn_vault_bound_org",
+        custodyWalletId: "cwlt_earn_vault_bound_second",
         amount: "10",
         requestId: crypto.randomUUID(),
       },
@@ -1564,6 +1591,7 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_unsurfaced_gate",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_unsurfaced_gate",
       providerWalletId: "privy_earn_vault_unsurfaced_gate",
     });
@@ -1591,6 +1619,7 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_veda",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_veda",
       providerWalletId: "privy_earn_vault_veda",
     });
@@ -1634,6 +1663,7 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_unknown",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_unknown",
       providerWalletId: "privy_earn_vault_unknown",
     });
@@ -1817,6 +1847,7 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_audit",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_audit",
       providerWalletId: "privy_earn_vault_audit",
     });
@@ -1859,6 +1890,7 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_audit_down",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_audit_down",
       providerWalletId: "privy_earn_vault_audit_down",
     });
@@ -1886,6 +1918,7 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_audit_fail",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_audit_fail",
       providerWalletId: "privy_earn_vault_audit_fail",
     });
@@ -1920,6 +1953,7 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
       configId: "cfg_earn_vault_audit_ambig",
+      provider: "privy",
       custodyWalletId: "cwlt_earn_vault_audit_ambig",
       providerWalletId: "privy_earn_vault_audit_ambig",
     });

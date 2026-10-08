@@ -1,3 +1,4 @@
+import type { CustodyProvider } from "@sdp/custody";
 import { hashString } from "@sdp/payments/hash";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -20,6 +21,7 @@ import {
   clerkHeadersWithoutProject,
   ensureTestClerkIssuer,
 } from "@/test/helpers/clerk";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -482,24 +484,12 @@ describe("Auth Middleware", () => {
           validKeyHash
         )
         .run();
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              encryption_version, status)
-           VALUES ('cust_auth_resolved', ?, ?, 'local', 'test-config',
-                   'sdp-custody-encryption-v1', 'active')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id)
-        .run();
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES ('cwlt_auth_resolved', 'cust_auth_resolved', 'wallet_resolved',
-                   'wallet_resolved_public_key', 'active')`
-        )
-        .run();
+      await seedAuthCustodyWallet({
+        configId: "cust_auth_resolved",
+        provider: "local",
+        custodyWalletId: "cwlt_auth_resolved",
+        publicKey: "wallet_resolved_public_key",
+      });
       await getDb(env)
         .prepare(
           `INSERT INTO api_key_wallet_permissions
@@ -542,24 +532,12 @@ describe("Auth Middleware", () => {
         ],
       });
 
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              encryption_version, status)
-           VALUES ('cust_auth_ambiguous', ?, NULL, 'local', 'test-config',
-                   'sdp-custody-encryption-v1', 'active')`
-        )
-        .bind(TEST_ORG.id)
-        .run();
-      await getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES ('cwlt_auth_ambiguous', 'cust_auth_ambiguous', 'wallet_resolved',
-                   'wallet_ambiguous_public_key', 'active')`
-        )
-        .run();
+      await seedAuthCustodyWallet({
+        configId: "cust_auth_ambiguous",
+        provider: "privy",
+        custodyWalletId: "cwlt_auth_ambiguous",
+        publicKey: "wallet_ambiguous_public_key",
+      });
       await clearKVStores(env);
 
       const unresolved = await app.request(
@@ -682,3 +660,36 @@ describe("Auth Middleware", () => {
     });
   });
 });
+
+async function seedAuthCustodyWallet(params: {
+  configId: string;
+  provider: CustodyProvider;
+  custodyWalletId: string;
+  publicKey: string;
+}): Promise<void> {
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: params.configId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: params.provider,
+        configEncrypted: "test-config",
+        defaultWalletId: null,
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: params.custodyWalletId,
+        owner: { kind: "config", custodyConfigId: params.configId },
+        walletId: "wallet_resolved",
+        publicKey: params.publicKey,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+    scopeDefaults: [],
+  });
+}

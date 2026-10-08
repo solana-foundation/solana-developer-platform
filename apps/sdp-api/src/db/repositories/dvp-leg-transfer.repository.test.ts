@@ -11,6 +11,7 @@ import { address, getBase58Decoder, type Signature, signature } from "@solana/ki
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -110,20 +111,31 @@ async function seed(): Promise<void> {
   }
   // The party holds side A's address in a custody wallet of its own; that is
   // what makes it a party (0089).
-  await db
-    .prepare(
-      `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-       VALUES (?, ?, 'local', 'x', 'active') ON CONFLICT (id) DO NOTHING`
-    )
-    .bind(`cust_${PARTY_ORG}`, PARTY_ORG)
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-       VALUES (?, ?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING`
-    )
-    .bind(`cwlt_${PARTY_ORG}`, `cust_${PARTY_ORG}`, `w_${PARTY_ORG}`, PARTY_ADDRESS)
-    .run();
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: `cust_${PARTY_ORG}`,
+        organizationId: PARTY_ORG,
+        projectId: `prj_${PARTY_ORG}`,
+        provider: "local",
+        configEncrypted: "x",
+        defaultWalletId: null,
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: `cwlt_${PARTY_ORG}`,
+        owner: { kind: "config", custodyConfigId: `cust_${PARTY_ORG}` },
+        walletId: `w_${PARTY_ORG}`,
+        publicKey: PARTY_ADDRESS,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+    scopeDefaults: [],
+  });
   await insertTrade(TRADE_ID, "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po");
   await insertTrade(OTHER_TRADE_ID, "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU");
 }

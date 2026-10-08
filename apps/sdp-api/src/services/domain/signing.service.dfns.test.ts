@@ -7,6 +7,7 @@ import { createEncryptionService } from "@/services/encryption.service";
 import type { Env } from "@/types/env";
 
 const TEST_ORG_ID = "org_dfns_legacy";
+const TEST_PROJECT_ID = "prj_dfns";
 
 describe("signing.service dfns compatibility", () => {
   it("resolves DFNS adapter when encrypted config omits provider field", async () => {
@@ -84,7 +85,7 @@ function createRecord(params: {
   return {
     id: "cust_dfns_legacy_test",
     organizationId: TEST_ORG_ID,
-    projectId: null,
+    projectId: TEST_PROJECT_ID,
     provider: "dfns",
     config: params.config,
     encryptionVersion: "sdp-custody-encryption-v1",

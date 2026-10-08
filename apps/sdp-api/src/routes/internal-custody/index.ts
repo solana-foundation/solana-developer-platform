@@ -134,7 +134,7 @@ internalCustody.get("/providers", async (c) => {
   const auth = getAuth(c);
   return success(
     c,
-    await getCustodySetupStatus(getDb(c.env), auth.organizationId, c.get("projectId"))
+    await getCustodySetupStatus(getDb(c.env), auth.organizationId, requireProjectId(c))
   );
 });
 

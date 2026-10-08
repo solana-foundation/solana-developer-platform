@@ -1,4 +1,5 @@
 import { getDb } from "@/db";
+import { requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -9,7 +10,7 @@ import type { CustodyConfigResponse, CustodyConfigsResponse } from "../schemas";
 
 export const getConfig = async (c: AppContext) => {
   const actor = resolveActor(c);
-  const projectId = c.get("projectId");
+  const projectId = requireProjectId(c);
 
   const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
     kind: "effective",
@@ -45,7 +46,7 @@ export const getConfig = async (c: AppContext) => {
 
 export const getConfigs = async (c: AppContext) => {
   const actor = resolveActor(c);
-  const projectId = c.get("projectId");
+  const projectId = requireProjectId(c);
   const signingService = createSigningService(c.env, getRequestTenantScope(c));
   const [{ configs }, target] = await Promise.all([
     signingService.getConfigurations(actor.organizationId, projectId),

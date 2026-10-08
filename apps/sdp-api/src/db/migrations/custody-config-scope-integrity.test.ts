@@ -1,12 +1,16 @@
+import type { CustodyProvider } from "@sdp/custody";
+import type { CustodyConfigStatus } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
+import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_custody_config_scope_integrity";
 const PROJECT_ID = "prj_custody_config_scope_integrity";
+const OTHER_PROJECT_ID = "prj_custody_config_scope_integrity_other";
 const USER_ID = "usr_custody_config_scope_integrity";
 
 async function seedScope(): Promise<void> {
@@ -29,34 +33,36 @@ async function seedScope(): Promise<void> {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,
     members: [],
-    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    ids: { sandbox: PROJECT_ID, production: OTHER_PROJECT_ID },
   });
 }
 
 async function insertConfig(
   id: string,
-  projectId: string | null,
-  provider = "privy"
+  projectId: string,
+  provider: CustodyProvider
 ): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_configs (
-         id, organization_id, project_id, provider, config_encrypted,
-         encryption_version, status
-       ) VALUES (?, ?, ?, ?, 'test-config', 'test', 'active')`
-    )
-    .bind(id, ORGANIZATION_ID, projectId, provider)
-    .run();
+  await insertTestCustodyConfigRow(getDb(env), {
+    id,
+    organizationId: ORGANIZATION_ID,
+    projectId,
+    provider,
+    configEncrypted: "test-config",
+    defaultWalletId: null,
+    status: "active",
+  });
 }
 
 async function insertWallet(id: string, configId: string, walletId: string): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-       VALUES (?, ?, ?, ?, 'active')`
-    )
-    .bind(id, configId, walletId, `public_${id}`)
-    .run();
+  await insertTestCustodyWalletRow(getDb(env), {
+    id,
+    owner: { kind: "config", custodyConfigId: configId },
+    walletId,
+    publicKey: `public_${id}`,
+    label: null,
+    purpose: null,
+    status: "active",
+  });
 }
 
 async function setDefaultWallet(configId: string, walletId: string | null): Promise<void> {
@@ -72,46 +78,35 @@ describe("custody Config scope integrity constraints", () => {
     await seedScope();
   });
 
-  it("enforces one org-level config per provider", async () => {
-    await insertConfig("cust_scope_org_a", null);
-
-    await expect(insertConfig("cust_scope_org_b", null)).rejects.toThrow(
-      /custody_configs_org_project_provider_key/
-    );
-  });
-
   it("enforces one project-level config per provider", async () => {
-    await insertConfig("cust_scope_prj_a", PROJECT_ID);
+    await insertConfig("cust_scope_prj_a", PROJECT_ID, "privy");
 
-    await expect(insertConfig("cust_scope_prj_b", PROJECT_ID)).rejects.toThrow(
+    await expect(insertConfig("cust_scope_prj_b", PROJECT_ID, "privy")).rejects.toThrow(
       /custody_configs_org_project_provider_key/
     );
   });
 
-  it("allows the same provider at distinct scopes and distinct providers per scope", async () => {
-    await insertConfig("cust_scope_mix_org", null);
-    await insertConfig("cust_scope_mix_prj", PROJECT_ID);
-    await insertConfig("cust_scope_mix_para", null, "para");
+  it("allows the same provider in distinct projects and distinct providers per project", async () => {
+    await insertConfig("cust_scope_mix_prj", PROJECT_ID, "privy");
+    await insertConfig("cust_scope_mix_other", OTHER_PROJECT_ID, "privy");
+    await insertConfig("cust_scope_mix_para", PROJECT_ID, "para");
 
-    // The positive control for the two "enforces" tests above: the rows must
-    // actually persist with the scopes this test names, or the allows-side of
-    // the constraint is never really exercised.
     const rows = await getDb(env)
       .prepare(
         "SELECT id, project_id, provider FROM custody_configs WHERE id IN (?, ?, ?) ORDER BY id"
       )
-      .bind("cust_scope_mix_org", "cust_scope_mix_para", "cust_scope_mix_prj")
-      .all<{ id: string; project_id: string | null; provider: string }>();
+      .bind("cust_scope_mix_other", "cust_scope_mix_para", "cust_scope_mix_prj")
+      .all<{ id: string; project_id: string; provider: string }>();
     expect(rows.results).toEqual([
-      { id: "cust_scope_mix_org", project_id: null, provider: "privy" },
-      { id: "cust_scope_mix_para", project_id: null, provider: "para" },
+      { id: "cust_scope_mix_other", project_id: OTHER_PROJECT_ID, provider: "privy" },
+      { id: "cust_scope_mix_para", project_id: PROJECT_ID, provider: "para" },
       { id: "cust_scope_mix_prj", project_id: PROJECT_ID, provider: "privy" },
     ]);
   });
 
   it("requires the default wallet to belong to the same config", async () => {
-    await insertConfig("cust_scope_fk_a", null);
-    await insertConfig("cust_scope_fk_b", PROJECT_ID);
+    await insertConfig("cust_scope_fk_a", OTHER_PROJECT_ID, "privy");
+    await insertConfig("cust_scope_fk_b", PROJECT_ID, "privy");
     await insertWallet("cwlt_scope_fk_a", "cust_scope_fk_a", "wallet_fk_a");
     await insertWallet("cwlt_scope_fk_b", "cust_scope_fk_b", "wallet_fk_b");
 
@@ -126,7 +121,7 @@ describe("custody Config scope integrity constraints", () => {
   });
 
   it("cascade-deletes a config together with its wallets despite the default pointer", async () => {
-    await insertConfig("cust_scope_cascade", null);
+    await insertConfig("cust_scope_cascade", PROJECT_ID, "privy");
     await insertWallet("cwlt_scope_cascade", "cust_scope_cascade", "wallet_cascade");
     await setDefaultWallet("cust_scope_cascade", "wallet_cascade");
 
@@ -154,28 +149,6 @@ describe("custody Config scoped upsert concurrency", () => {
     env.CUSTODY_ENCRYPTION_KEY = originalCustodyEncryptionKey;
   });
 
-  it("resolves concurrent org-level upserts to a single config row", async () => {
-    const store = new CustodyConfigStore(getDb(env), env);
-
-    const configIds = await Promise.all(
-      Array.from({ length: 8 }, () =>
-        store.upsert(ORGANIZATION_ID, undefined, { provider: "privy" })
-      )
-    );
-
-    expect(new Set(configIds).size).toBe(1);
-
-    const rows = await getDb(env)
-      .prepare(
-        `SELECT id FROM custody_configs
-         WHERE organization_id = ? AND project_id IS NULL AND provider = 'privy'`
-      )
-      .bind(ORGANIZATION_ID)
-      .all<{ id: string }>();
-    expect(rows.results).toHaveLength(1);
-    expect(rows.results[0]?.id).toBe(configIds[0]);
-  });
-
   it("resolves concurrent project-level upserts to a single config row", async () => {
     const store = new CustodyConfigStore(getDb(env), env);
 
@@ -186,6 +159,12 @@ describe("custody Config scoped upsert concurrency", () => {
     );
 
     expect(new Set(configIds).size).toBe(1);
+    const rows = await getDb(env).queryMany<{ id: string; status: CustodyConfigStatus }>(
+      `SELECT id, status FROM custody_configs
+       WHERE organization_id = ? AND project_id = ? AND provider = 'para'`,
+      [ORGANIZATION_ID, PROJECT_ID]
+    );
+    expect(rows).toEqual([{ id: configIds[0], status: "active" }]);
   });
 
   it("persists the config payload, wallet, and default pointer atomically", async () => {
@@ -193,7 +172,7 @@ describe("custody Config scoped upsert concurrency", () => {
 
     const { configId } = await store.saveProviderConfig({
       orgId: ORGANIZATION_ID,
-      projectId: undefined,
+      projectId: PROJECT_ID,
       provider: "privy",
       configJson: { provider: "privy", privyAppId: "app_test" },
       defaultWalletId: "wallet_atomic",
@@ -223,18 +202,16 @@ describe("custody Config scoped upsert concurrency", () => {
   it("rolls back the config upsert when the wallet insert fails", async () => {
     const store = new CustodyConfigStore(getDb(env), env);
 
-    await insertConfig("cust_scope_rollback", null, "para");
+    await insertConfig("cust_scope_rollback", PROJECT_ID, "para");
     await insertWallet("cwlt_scope_rollback", "cust_scope_rollback", "wallet_rollback");
 
     await expect(
       store.saveProviderConfig({
         orgId: ORGANIZATION_ID,
-        projectId: undefined,
+        projectId: PROJECT_ID,
         provider: "para",
         configJson: { provider: "para" },
         defaultWalletId: "wallet_rollback",
-        // Duplicate (config, wallet_id) pair: the wallet insert violates
-        // custody_wallets uniqueness and must roll the config update back.
         wallet: {
           walletId: "wallet_rollback",
           publicKey: "public_rollback_dup",

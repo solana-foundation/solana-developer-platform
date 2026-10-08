@@ -5,7 +5,7 @@ import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, serviceUnavailable } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -62,7 +62,7 @@ export function clearWalletCaches() {
 
 function buildWalletBalanceCacheScope(c: AppContext): string {
   const auth = getAuth(c);
-  return `${auth.organizationId}:${auth.projectId ?? "org"}`;
+  return `${auth.organizationId}:${requireProjectId(c)}`;
 }
 
 function logWalletStep(
@@ -109,7 +109,7 @@ export async function findAuthorizedOperationalWallet(
 ) {
   const auth = getAuth(c);
   const actor = resolveActor(c);
-  const projectId = c.get("projectId");
+  const projectId = requireProjectId(c);
   const targets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
   const custodyWalletId = resolveApiKeyCustodyWalletId(
     auth,
@@ -170,7 +170,7 @@ function resolveWalletFilters(
   c: AppContext,
   options: { defaultIncludeAllProviders?: boolean } = {}
 ) {
-  const projectId = c.get("projectId");
+  const projectId = requireProjectId(c);
   const providerQuery = c.req.query("provider");
   const includeAllProviders = c.req.query("includeAllProviders");
   const includeBalances = parseBooleanQueryParam(c.req.query("includeBalances"));
@@ -230,7 +230,7 @@ async function getBalancesByWalletId(
 
 export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSchema>) => {
   const actor = resolveActor(c);
-  const projectId = c.get("projectId");
+  const projectId = requireProjectId(c);
 
   // A freshly created wallet is by definition outside a wallet-scoped key's
   // bindings (and setDefault would re-point the scope's default signer).
@@ -243,14 +243,12 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
   try {
     const runtimeTargets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
     const target = body.connectionId
-      ? projectId
-        ? await runtimeTargets.resolve({
-            kind: "connection",
-            organizationId: actor.organizationId,
-            projectId,
-            connectionId: body.connectionId,
-          })
-        : null
+      ? await runtimeTargets.resolve({
+          kind: "connection",
+          organizationId: actor.organizationId,
+          projectId,
+          connectionId: body.connectionId,
+        })
       : await runtimeTargets.resolve(
           body.provider
             ? {
@@ -322,7 +320,6 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
 
 export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSchema>) => {
   const actor = resolveActor(c);
-  const auth = getAuth(c);
 
   const body = c.req.valid("json");
 
@@ -338,7 +335,7 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
     throw error;
   }
 
-  const projectId = c.get("projectId");
+  const projectId = requireProjectId(c);
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {
@@ -348,14 +345,10 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
       body.provider
     );
     const targets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
-    const lookupProjectId =
-      authorizedCustodyWalletId && auth.authType === "api_key"
-        ? (auth.projectId ?? undefined)
-        : projectId;
     const ownedWallet = authorizedCustodyWalletId
       ? await targets.findOperationalWalletById({
           organizationId: actor.organizationId,
-          projectId: lookupProjectId,
+          projectId,
           custodyWalletId: authorizedCustodyWalletId,
         })
       : await targets.findOwnedWalletForMutation({
@@ -404,7 +397,7 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
         event: "wallet_deleted",
         walletId: body.walletId,
         provider: body.provider ?? null,
-        projectId: projectId ?? null,
+        projectId,
       },
     });
 
@@ -442,7 +435,7 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
     throw error;
   }
 
-  const projectId = c.get("projectId");
+  const projectId = requireProjectId(c);
   if (!wallet) {
     throw badRequest("Unknown walletId for this wallet signing configuration");
   }
@@ -492,7 +485,7 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
       provider: wallet.provider,
       custodyWalletId: wallet.id,
       walletId: wallet.walletId,
-      projectId: projectId ?? null,
+      projectId,
     },
   });
 
@@ -512,9 +505,9 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
              FROM custody_configs c
              LEFT JOIN custody_wallets w
                ON w.custody_config_id = c.id AND w.wallet_id = c.default_wallet_id
-             WHERE c.id = ? AND c.organization_id = ? AND c.project_id IS NOT DISTINCT FROM ?
+             WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
              FOR UPDATE OF c`,
-        [ownerId, actor.organizationId, projectId ?? null]
+        [ownerId, actor.organizationId, projectId]
       );
       if (!current) throw conflict("Wallet signing is not initialized");
 
@@ -555,7 +548,7 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
         event: "custody_default_wallet_audit_unresolved",
         auditIntentId: intent.id,
         organizationId: actor.organizationId,
-        projectId: projectId ?? null,
+        projectId,
         ownerId,
         reason: "persistence_result_unknown",
       });
@@ -580,7 +573,7 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
 };
 
 export const updateWallet = async (c: ValidatedBodyContext<typeof updateWalletSchema>) => {
-  const projectId = c.get("projectId");
+  const projectId = requireProjectId(c);
   const walletId = c.req.param("walletId")?.trim();
 
   if (!walletId) {
@@ -623,7 +616,7 @@ export const updateWallet = async (c: ValidatedBodyContext<typeof updateWalletSc
       walletId: wallet.walletId,
       previousLabel: wallet.label ?? null,
       label: nextLabel,
-      projectId: projectId ?? null,
+      projectId,
       provider: wallet.provider ?? null,
     },
   });
@@ -821,7 +814,7 @@ function assertWalletInReleaseChannel(c: AppContext, wallet: CustodyRuntimeWalle
 export const getPublicKey = async (c: AppContext) => {
   const actor = resolveActor(c);
   const auth = getAuth(c);
-  const projectId = c.get("projectId");
+  const projectId = requireProjectId(c);
   const requestedWalletId = c.req.query("walletId");
 
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));

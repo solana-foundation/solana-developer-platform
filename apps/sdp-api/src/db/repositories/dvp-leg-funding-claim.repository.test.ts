@@ -16,6 +16,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -68,20 +69,31 @@ async function seed(): Promise<void> {
     if (address === null) {
       continue;
     }
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-         VALUES (?, ?, 'local', 'x', 'active') ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(`cust_${org}`, org)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(walletId(org), `cust_${org}`, `w_${org}`, address)
-      .run();
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: `cust_${org}`,
+          organizationId: org,
+          projectId: `prj_${org}`,
+          provider: "local",
+          configEncrypted: "x",
+          defaultWalletId: null,
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: walletId(org),
+          owner: { kind: "config", custodyConfigId: `cust_${org}` },
+          walletId: `w_${org}`,
+          publicKey: address,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+      scopeDefaults: [],
+    });
   }
 
   await db

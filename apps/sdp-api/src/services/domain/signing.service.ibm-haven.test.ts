@@ -12,6 +12,7 @@ import { createEncryptionService } from "@/services/encryption.service";
 import type { Env } from "@/types/env";
 
 const TEST_ORG_ID = "org_ibm_haven";
+const TEST_PROJECT_ID = "prj_ibm_haven";
 
 describe("signing.service ibm_haven (IBM Digital Asset Haven)", () => {
   it("resolves the IBM Haven adapter with a distinct provider id", async () => {
@@ -135,7 +136,7 @@ function createRecord(params: {
   return {
     id: "cust_ibm_haven_test",
     organizationId: TEST_ORG_ID,
-    projectId: null,
+    projectId: TEST_PROJECT_ID,
     provider: "ibm_haven",
     config: params.config,
     encryptionVersion: "sdp-custody-encryption-v1",

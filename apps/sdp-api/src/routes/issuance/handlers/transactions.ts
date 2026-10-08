@@ -9,7 +9,7 @@ import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-prog
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, badRequestQuery, notFound, walletNotFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
 import {
@@ -99,7 +99,7 @@ async function resolveWalletFilter(
     new Map()
   ).findOperationalWallet({
     organizationId: auth.organizationId,
-    projectId: auth.projectId ?? undefined,
+    projectId: requireProjectId(c),
     walletId,
   });
 
@@ -220,7 +220,7 @@ async function resolveWalletTransactionScope(
   const allowedWalletIdSet = new Set(allowedCustodyWalletIds);
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
-    projectId: auth.projectId ?? undefined,
+    projectId: requireProjectId(c),
     includeAllProviders: true,
   });
   const publicKeys = wallets

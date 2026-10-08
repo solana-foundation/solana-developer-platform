@@ -872,8 +872,8 @@ transaction signed by the organization custody wallet or external owner.
     and the server fingerprint (`buildEarnVaultDepositFingerprint`) omits the
     project, so a key first used by a SIBLING project matched on both and its
     movement was returned as a replay — the wrong deposit, plus its amount and
-    signature. Reachable because an organization-level custody config gives two
-    projects the same `custody_wallets` row. The rule is ONE exported function —
+    signature. Reachable because the key is unique per organization, not per
+    project. The rule is ONE exported function —
     `assertMovementIsOwnReplay` (`db/repositories/earn-movements.repository.ts`) —
     enforced at EVERY site that resolves a replay: the route guard
     (`findEarnVaultDepositIdempotentKeyReplay`), `depositIntoVault`'s fast
@@ -924,8 +924,8 @@ transaction signed by the organization custody wallet or external owner.
     vault-withdraw path before there is anything to leak through it), and
     PROJECT (an EXACT match — `project_id` is nullable only through
     `ON DELETE SET NULL`, so a null means the project was DELETED, and accepting
-    it would hand that project's deposits to every sibling project sharing an
-    organization-level custody wallet).
+    it would make a deleted project's deposits addressable through sibling
+    projects' reads).
   - Wallet-binding scope comes from `listReadableEarnVaultWallets`, **shared with
     `/vault-positions`**. Keep it shared: a binding that hides a position has to
     hide that position's deposits too, and two copies of that rule is how they

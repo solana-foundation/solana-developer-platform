@@ -19,7 +19,7 @@ import {
   createPolicyRepository,
   type PolicyRepository,
 } from "@/db/repositories";
-import type { ApiKeyContext } from "@/lib/auth";
+import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, conflict } from "@/lib/errors";
 import { isModuleAvailable } from "@/lib/feature-flags";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
@@ -380,7 +380,7 @@ export async function resolvePolicyCustodyWallet(
   const store = new CustodyConfigStore(getDb(env), env);
   return store.findActiveWalletByIdentifier(
     auth.organizationId,
-    auth.projectId === null ? undefined : auth.projectId,
+    requireAuthProjectId(auth),
     walletId
   );
 }

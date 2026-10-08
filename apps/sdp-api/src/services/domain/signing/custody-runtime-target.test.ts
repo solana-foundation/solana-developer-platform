@@ -17,7 +17,6 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import {
-  insertTestCustodyConfigRow,
   insertTestCustodyScopeDefault,
   insertTestCustodyWalletRow,
   seedTestCustodyRows,
@@ -40,6 +39,7 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
 
 const ORGANIZATION_ID = "org_runtime_targets";
 const PROJECT_ID = "prj_runtime_targets";
+const OTHER_PROJECT_ID = "prj_runtime_targets_other";
 const USER_ID = "usr_runtime_targets";
 const CONFIG_PUBLIC_KEY = "Vote111111111111111111111111111111111111111";
 const CONNECTION_PUBLIC_KEY = "11111111111111111111111111111111";
@@ -646,28 +646,6 @@ describe("CustodyRuntimeTargets", () => {
     }
   );
 
-  it("does not fall back to an Organization Config when matching Connection state is unusable", async () => {
-    const effectiveConfig = await seedConfig({ provider: "turnkey", projectId: PROJECT_ID });
-    const organizationConfig = await seedConfig({ provider: "privy", projectId: null });
-    await seedConnection({ ...DEFAULT_CONNECTION, lastCheckStatus: "retry_unknown" });
-    await setOrganizationDefault(organizationConfig.id);
-    await setProjectDefault(effectiveConfig.id, null);
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.resolve({
-        kind: "provider",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        provider: "privy",
-      })
-    ).rejects.toMatchObject({
-      code: "CONFLICT",
-      statusCode: 409,
-      message: "Custody Connection is unavailable",
-    });
-  });
-
   it("keeps a selected unusable Connection ahead of an active matching Config", async () => {
     const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
     const connection = await seedConnection({
@@ -922,34 +900,91 @@ describe("CustodyRuntimeTargets", () => {
     expect(getConfigAdapter).not.toHaveBeenCalled();
   });
 
-  it("does not resolve a default Config owned by another scope", async () => {
-    const foreignOrganizationId = "org_runtime_targets_foreign";
-    const foreignConfigId = "cust_runtime_targets_foreign";
-    await getDb(env).transaction(async (tx) => {
-      await tx.execute(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, 'Foreign runtime targets', 'foreign-runtime-targets', 'individual', 'active')`,
-        [foreignOrganizationId]
-      );
-      await insertTestCustodyConfigRow(tx, {
-        id: foreignConfigId,
-        organizationId: foreignOrganizationId,
-        projectId: null,
-        provider: "privy",
-        configEncrypted: "encrypted",
-        defaultWalletId: null,
-        status: "active",
-      });
-    });
-    await setProjectDefault(foreignConfigId, null);
+  it("does not resolve a default Config owned by another project", async () => {
+    const foreignConfig = await seedConfig({ provider: "privy", projectId: OTHER_PROJECT_ID });
+    await setProjectDefault(foreignConfig.id, null);
     const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
+      targets.resolve({ kind: "effective", organizationId: ORGANIZATION_ID, projectId: PROJECT_ID })
+    ).resolves.toBeNull();
+    await expect(
       targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(getConfigAdapter).not.toHaveBeenCalled();
+    expect(await getProjectDefault()).toEqual({
+      default_custody_config_id: foreignConfig.id,
+      default_custody_connection_id: null,
+    });
   });
+
+  it.each(["config", "connection"] as const)(
+    "never resolves a %s wallet from another project of the organization",
+    async (owner) => {
+      const wallet =
+        owner === "config"
+          ? await seedConfig({ provider: "privy", projectId: PROJECT_ID })
+          : await seedConnection(DEFAULT_CONNECTION);
+      const custodyWalletId = `cwlt_${wallet.id}`;
+      const walletRowBefore = await getCustodyWalletRow(custodyWalletId);
+      const read = mockStoredCredentialRead();
+      const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
+      vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.resolve({
+          kind: "wallet_record",
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          custodyWalletId,
+        })
+      ).resolves.toMatchObject({ kind: owner });
+      await expect(
+        targets.resolve({
+          kind: "wallet_record",
+          organizationId: ORGANIZATION_ID,
+          projectId: OTHER_PROJECT_ID,
+          custodyWalletId,
+        })
+      ).resolves.toBeNull();
+      await expect(
+        targets.resolve({
+          kind: "wallet",
+          organizationId: ORGANIZATION_ID,
+          projectId: OTHER_PROJECT_ID,
+          walletId: wallet.walletId,
+        })
+      ).resolves.toBeNull();
+      await expect(
+        targets.admitRuntimeExecution({
+          organizationId: ORGANIZATION_ID,
+          projectId: OTHER_PROJECT_ID,
+          custodyWalletId,
+        })
+      ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
+      await expect(
+        targets.getTransactionSignerForWalletRecord(
+          ORGANIZATION_ID,
+          OTHER_PROJECT_ID,
+          custodyWalletId,
+          getConfigAdapter
+        )
+      ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
+      await expect(
+        targets.getTransactionSigner(
+          ORGANIZATION_ID,
+          OTHER_PROJECT_ID,
+          wallet.walletId,
+          getConfigAdapter
+        )
+      ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
+      expect(getConfigAdapter).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(await getCustodyWalletRow(custodyWalletId)).toEqual(walletRowBefore);
+    }
+  );
 
   it("misses the stored adapter cache after Credential version rotation", async () => {
     const connection = await seedConnection(DEFAULT_CONNECTION);
@@ -1196,39 +1231,28 @@ describe("CustodyRuntimeTargets", () => {
     }
   );
 
-  it.each(["project", "organization"] as const)(
-    "never resolves the %s Config in place of a selected out-of-channel Connection",
-    async (configScope) => {
-      const config = await seedConfig({
-        provider: "privy",
-        projectId: configScope === "project" ? PROJECT_ID : null,
-      });
-      const connection = await seedConnection(DEFAULT_CONNECTION);
-      if (configScope === "project") {
-        await setProjectDefault(config.id, connection.id);
-      } else {
-        await setOrganizationDefault(config.id);
-        await setProjectDefault(null, connection.id);
-      }
-      custodyReleaseChannel.outOfChannelMode = "byok";
-      const read = mockStoredCredentialRead();
-      const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
-      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+  it("never resolves the project Config in place of a selected out-of-channel Connection", async () => {
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+    const connection = await seedConnection(DEFAULT_CONNECTION);
+    await setProjectDefault(config.id, connection.id);
+    custodyReleaseChannel.outOfChannelMode = "byok";
+    const read = mockStoredCredentialRead();
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
-      await expect(
-        targets.resolve({
-          kind: "effective",
-          organizationId: ORGANIZATION_ID,
-          projectId: PROJECT_ID,
-        })
-      ).resolves.toMatchObject({ kind: "connection", connectionId: connection.id });
-      await expect(
-        targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-      ).rejects.toMatchObject(channelRefusal("byok"));
-      expect(getConfigAdapter).not.toHaveBeenCalled();
-      expect(read).not.toHaveBeenCalled();
-    }
-  );
+    await expect(
+      targets.resolve({
+        kind: "effective",
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+      })
+    ).resolves.toMatchObject({ kind: "connection", connectionId: connection.id });
+    await expect(
+      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+    ).rejects.toMatchObject(channelRefusal("byok"));
+    expect(getConfigAdapter).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
 
   it.each(["managed", "byok"] as const)(
     "lists wallets whose pair is out of channel as not executable (%s out)",
@@ -1305,17 +1329,16 @@ async function seedScope(): Promise<void> {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,
     members: [],
-    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    ids: { sandbox: PROJECT_ID, production: OTHER_PROJECT_ID },
   });
 }
 
 async function seedConfig(params: {
   provider: CustodyProvider;
-  projectId: string | null;
+  projectId: string;
 }): Promise<{ id: string; walletId: string }> {
-  const scopeSuffix = params.projectId === null ? "org" : params.projectId;
-  const id = `cust_runtime_${params.provider}_${scopeSuffix}`;
-  const walletId = `wallet_${params.provider}_${scopeSuffix}`;
+  const id = `cust_runtime_${params.provider}_${params.projectId}`;
+  const walletId = `wallet_${params.provider}_${params.projectId}`;
   await seedTestCustodyRows(env, {
     configs: [
       {
@@ -1387,16 +1410,6 @@ async function setProjectDefault(
   });
 }
 
-async function setOrganizationDefault(configId: string): Promise<void> {
-  await insertTestCustodyScopeDefault(getDb(env), {
-    id: "csd_runtime_targets_org",
-    organizationId: ORGANIZATION_ID,
-    projectId: null,
-    defaultCustodyConfigId: configId,
-    defaultCustodyConnectionId: null,
-  });
-}
-
 async function setPrivyEntitlement(entitled: boolean): Promise<void> {
   await getDb(env)
     .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
@@ -1415,6 +1428,15 @@ async function getProjectDefault(): Promise<{
        WHERE organization_id = ? AND project_id = ?`
     )
     .bind(ORGANIZATION_ID, PROJECT_ID)
+    .first();
+}
+
+async function getCustodyWalletRow(
+  custodyWalletId: string
+): Promise<Record<string, unknown> | null> {
+  return getDb(env)
+    .prepare("SELECT * FROM custody_wallets WHERE id = ?")
+    .bind(custodyWalletId)
     .first();
 }
 
