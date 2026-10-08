@@ -39,10 +39,8 @@ function isKnownProvider(value: string): value is CustodyProvider {
  *
  * Per provider, not per scope: `config` means "operations that target this
  * provider resolve through its config" (`getConfigurationByProvider`), so a
- * scope with several active configs reports `config` for each of them. Which
- * single provider default signing falls through to is a different question and
- * already answered by `isDefault` on the configs resource — restating it here
- * would make two endpoints disagree about the same fact.
+ * scope with several active configs reports `config` for each of them. There is
+ * no default provider to report: every operation names its custody wallet.
  *
  * An active Connection deliberately does NOT make this `connection`: signing
  * resolves exclusively through custody configs today (`signing.service.ts` never

@@ -12,7 +12,6 @@ import {
   notFound,
   providerUnavailable,
 } from "@/lib/errors";
-import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
@@ -70,7 +69,6 @@ export interface SafeInstallationConnection {
   status: InstallationConnectionState["status"];
   completion: SafeCompletion | null;
   walletLabel?: string;
-  isDefault: boolean;
   canComplete: boolean;
   canReplaceCredentials: boolean;
   canCancel: boolean;
@@ -112,7 +110,7 @@ export async function getProviderCredentialInstallation(
 ): Promise<{ connection: SafeInstallationConnection }> {
   const context = createInstallationContext(c);
   const loaded = await loadInstallation(context, connectionId);
-  return { connection: projectConnection(c.env, loaded) };
+  return { connection: projectConnection(loaded) };
 }
 
 export async function deactivateCustodyConnection(
@@ -122,7 +120,7 @@ export async function deactivateCustodyConnection(
   const context = createInstallationContext(c);
   const loaded = await loadInstallation(context, connectionId);
   if (loaded.target.status === "deactivated") {
-    return { custodyConnection: projectConnection(c.env, loaded) };
+    return { custodyConnection: projectConnection(loaded) };
   }
   if (loaded.target.status !== "failed" && loaded.target.status !== "active") {
     await auditConnectionDeactivationRefusal(context, loaded.target, "invalid_state");
@@ -199,7 +197,7 @@ export async function deactivateCustodyConnection(
         changed = true;
       }
       const deactivated = { ...target, status: "deactivated" as const };
-      return projectConnection(c.env, {
+      return projectConnection({
         target: deactivated,
         decisions: decideInstallation(
           installationFactsFromConnection(deactivated, await store.getDatabaseNowMs(), false)
@@ -419,7 +417,7 @@ export async function cancelProviderCredentialInstallation(
   const loaded = await loadInstallation(context, connectionId);
   if (loaded.decisions.cancel.kind === "replay") {
     await destroyGcpVersionBestEffort(c, loaded.target);
-    return { connection: projectConnection(c.env, loaded) };
+    return { connection: projectConnection(loaded) };
   }
   if (loaded.decisions.cancel.kind !== "execute") {
     throw installationConflict(
@@ -469,7 +467,7 @@ export async function cancelProviderCredentialInstallation(
       await destroyGcpVersionBestEffort(c, current.target);
       // The row proves cancellation, but not which concurrent request committed it.
       // Keep this intent unresolved instead of emitting a duplicate domain outcome.
-      return { connection: projectConnection(c.env, current) };
+      return { connection: projectConnection(current) };
     }
     if (!canceled) {
       const current = await loadInstallation(context, connectionId);
@@ -481,7 +479,7 @@ export async function cancelProviderCredentialInstallation(
           "provider_credential_installation_cancellation_replayed"
         );
         await destroyGcpVersionBestEffort(c, current.target);
-        return { connection: projectConnection(c.env, current) };
+        return { connection: projectConnection(current) };
       }
       if (current.target.provider_account_fingerprint) {
         throw installationConflict("installation_completion_required");
@@ -502,7 +500,7 @@ export async function cancelProviderCredentialInstallation(
     await context.audit.completeCritical(c, auditIntent, {
       metadata: { event: "provider_credential_installation_canceled" },
     });
-    return { connection: projectConnection(c.env, result) };
+    return { connection: projectConnection(result) };
   } catch (error) {
     if (canRecordFailureOutcome) {
       await context.audit.completeCritical(c, auditIntent, {
@@ -568,7 +566,7 @@ async function loadInstallation(
   }
 }
 
-function projectConnection(env: Env, loaded: LoadedInstallation): SafeInstallationConnection {
+function projectConnection(loaded: LoadedInstallation): SafeInstallationConnection {
   const walletLabel = getPendingWalletLabel(loaded.target.setup_metadata);
   return {
     id: loaded.target.id,
@@ -577,8 +575,6 @@ function projectConnection(env: Env, loaded: LoadedInstallation): SafeInstallati
     status: loaded.target.status,
     completion: projectCompletion(loaded),
     ...(walletLabel ? { walletLabel } : {}),
-    isDefault:
-      isCustodyProviderAvailable(env, loaded.target.provider, "byok") && loaded.target.is_selected,
     canComplete: loaded.decisions.complete.kind === "execute",
     canReplaceCredentials: loaded.decisions.replace.kind === "execute",
     canCancel: loaded.decisions.cancel.kind === "execute",

@@ -374,7 +374,7 @@ interface EarnVaultDepositResolved {
  * Everything the handler needs is resolved HERE, before the gate enforces, for
  * one reason: policy has to be decided from trusted, fully-resolved context —
  * the real custody wallet, the real amount, the real target — and it has to be
- * decided BEFORE `createOrgSigner` is reached. A gate that ran on the raw body
+ * decided BEFORE `createOrgSignerForCustodyWallet` is reached. A gate that ran on the raw body
  * could be argued out of a denial by a caller who names a wallet it does not
  * hold; a gate that ran after resolution but inside the handler would already
  * have touched custody.
@@ -398,7 +398,6 @@ export async function extractEarnVaultDepositPolicyCandidate(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
     projectId,
-    includeAllProviders: true,
   });
 
   // Resolve the strategy first: the caller names a catalogue row, never a raw
@@ -726,7 +725,6 @@ export async function listReadableEarnVaultWallets(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
     projectId,
-    includeAllProviders: true,
   });
 
   const allowedProviderWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["earn:read"]);
@@ -1280,7 +1278,6 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
     projectId,
-    includeAllProviders: true,
   });
   const wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
   assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);

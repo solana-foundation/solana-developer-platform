@@ -108,7 +108,7 @@ import {
  * WHY NO POLICY GATE, stated here because its absence looks like the deposit
  * route's cautionary tale: wallet policy governs the organization's own
  * custody — every rule scopes to a custody wallet, and enforcement exists to
- * stand between a request and `createOrgSigner`. This path never resolves a
+ * stand between a request and `createOrgSignerForCustodyWallet`. This path never resolves a
  * signer, never touches custody, and moves the OWNER's money on the OWNER's
  * signature, which IS the authorization. There is no signing sink here
  * for the value-moving conformance inventory to find.

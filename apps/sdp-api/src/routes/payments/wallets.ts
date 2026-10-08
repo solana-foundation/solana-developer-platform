@@ -73,7 +73,6 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
     new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
       organizationId: auth.organizationId,
       projectId: requireProjectId(c),
-      includeAllProviders: true,
     }),
     retainedCustodyWalletId
       ? findRetainedPaymentWallet(c, retainedCustodyWalletId)

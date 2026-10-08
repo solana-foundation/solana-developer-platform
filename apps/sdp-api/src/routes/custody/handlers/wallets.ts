@@ -32,11 +32,7 @@ import {
   attachUsdValuesToBalanceMap,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
-import {
-  assertCustodyProviderAvailable,
-  assertCustodyProviderEntitled,
-  assertProviderAvailable,
-} from "@/services/provider-availability.service";
+import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "../context";
 import type {
   CustodyWalletAggregateResponse,
@@ -47,7 +43,6 @@ import type {
   createWalletSchema,
   DeleteWalletResponse,
   deleteWalletSchema,
-  setDefaultWalletSchema,
   updateWalletSchema,
 } from "../schemas";
 import {
@@ -94,7 +89,6 @@ async function queryWalletSummaries(
     organizationId: actor.organizationId,
     projectId: filters.projectId,
     provider: filters.provider,
-    includeAllProviders: filters.includeAllProviders,
   });
   return allowedWalletIds === null
     ? wallets
@@ -166,13 +160,9 @@ async function getWalletSummaries(
   return wallets;
 }
 
-function resolveWalletFilters(
-  c: AppContext,
-  options: { defaultIncludeAllProviders?: boolean } = {}
-) {
+function resolveWalletFilters(c: AppContext) {
   const projectId = requireProjectId(c);
   const providerQuery = c.req.query("provider");
-  const includeAllProviders = c.req.query("includeAllProviders");
   const includeBalances = parseBooleanQueryParam(c.req.query("includeBalances"));
   const view = c.req.query("view") === "summary" ? "summary" : "default";
 
@@ -190,10 +180,6 @@ function resolveWalletFilters(
     provider,
     view,
     includeBalances,
-    includeAllProviders:
-      includeAllProviders === undefined
-        ? options.defaultIncludeAllProviders === true
-        : parseBooleanQueryParam(includeAllProviders),
   };
 }
 
@@ -232,8 +218,7 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
-  // A freshly created wallet is by definition outside a wallet-scoped key's
-  // bindings (and setDefault would re-point the scope's default signer).
+  // A freshly created wallet is by definition outside a wallet-scoped key's bindings.
   assertApiKeyNotWalletScoped(getAuth(c), "create custody wallets");
 
   const body = c.req.valid("json");
@@ -241,42 +226,19 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {
-    const runtimeTargets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
-    const target = body.connectionId
-      ? await runtimeTargets.resolve({
-          kind: "connection",
-          organizationId: actor.organizationId,
-          projectId,
-          connectionId: body.connectionId,
-        })
-      : await runtimeTargets.resolve(
-          body.provider
-            ? {
-                kind: "provider",
-                organizationId: actor.organizationId,
-                projectId,
-                provider: body.provider,
-              }
-            : {
-                kind: "effective",
-                organizationId: actor.organizationId,
-                projectId,
-              }
-        );
-    if (body.connectionId && !target) {
-      throw new AppError("NOT_FOUND", "Custody Connection not found");
-    }
-    if (target?.kind === "connection") {
-      const wallet = await runtimeTargets.createConnectionWallet({
+    if (body.connectionId !== undefined) {
+      const wallet = await new CustodyRuntimeTargets(
+        getDb(c.env),
+        c.env,
+        new Map()
+      ).createConnectionWallet({
         auditContext: c,
         creationReason: "wallet_api",
         organizationId: actor.organizationId,
-        projectId: target.projectId,
-        connectionId: target.connectionId,
-        provider: body.provider,
+        projectId,
+        connectionId: body.connectionId,
         label: body.label,
         purpose: body.purpose,
-        setDefault: body.setDefault,
       });
       clearWalletCaches();
       return created(c, { wallet } satisfies CustodyWalletResponse);
@@ -286,8 +248,6 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
       provider: body.provider,
       label: body.label,
       purpose: body.purpose,
-      setDefault: body.setDefault,
-      auditContext: c,
     });
 
     const response: CustodyWalletResponse = {
@@ -339,11 +299,6 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
 
   try {
-    const selectedConfig = await signingService.getConfigurationForMutation(
-      actor.organizationId,
-      projectId,
-      body.provider
-    );
     const targets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
     const ownedWallet = authorizedCustodyWalletId
       ? await targets.findOperationalWalletById({
@@ -357,24 +312,9 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
           walletId: body.walletId,
         });
     if (!ownedWallet) {
-      const config = await signingService.getConfigurationForMutation(
-        actor.organizationId,
-        projectId,
-        body.provider
-      );
-      throw new AppError(
-        "NOT_FOUND",
-        config
-          ? "Custody wallet not found"
-          : body.provider
-            ? `Custody not initialized for provider: ${body.provider}`
-            : "Custody not initialized"
-      );
-    }
-    if (ownedWallet.custodyConfigId && selectedConfig?.id !== ownedWallet.custodyConfigId) {
       throw new AppError("NOT_FOUND", "Custody wallet not found");
     }
-    if (ownedWallet.custodyConnectionId) {
+    if (ownedWallet.custodyConfigId === undefined) {
       if (body.provider && body.provider !== ownedWallet.provider) {
         throw badRequest("Provider does not match custody wallet");
       }
@@ -418,158 +358,6 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
     }
     throw error;
   }
-};
-
-export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefaultWalletSchema>) => {
-  const actor = resolveActor(c);
-
-  const body = c.req.valid("json");
-
-  let wallet: Awaited<ReturnType<typeof findAuthorizedOperationalWallet>>;
-  try {
-    wallet = await findAuthorizedOperationalWallet(c, body.walletId, ["wallets:write"]);
-  } catch (error) {
-    if (error instanceof AppError && error.code === "FORBIDDEN") {
-      throw badRequest("Unknown walletId for this wallet signing configuration");
-    }
-    throw error;
-  }
-
-  const projectId = requireProjectId(c);
-  if (!wallet) {
-    throw badRequest("Unknown walletId for this wallet signing configuration");
-  }
-  if (body.provider && body.provider !== wallet.provider) {
-    throw badRequest("Provider does not match custody wallet");
-  }
-
-  if (wallet.custodyConnectionId) {
-    assertCustodyProviderAvailable(c.env, wallet.provider, "byok");
-    await assertCustodyProviderEntitled(c.env, getDb(c.env), actor.organizationId, wallet.provider);
-    if (!wallet.isRuntimeExecutionAllowed) {
-      throw new AppError("CONFLICT", "Custody Connection is unavailable");
-    }
-  } else {
-    assertCustodyProviderAvailable(c.env, wallet.provider, "managed");
-    const signingService = signingServiceModule.createSigningService(
-      c.env,
-      getRequestTenantScope(c)
-    );
-    const config = await signingService.getConfigurationForMutation(
-      actor.organizationId,
-      projectId,
-      wallet.provider
-    );
-    if (!config?.id || config.id !== wallet.custodyConfigId) {
-      throw new AppError("CONFLICT", "Wallet signing is not initialized");
-    }
-    await assertProviderAvailable(
-      c.env,
-      getDb(c.env),
-      actor.organizationId,
-      "custody",
-      config.provider
-    );
-  }
-
-  const db = getDb(c.env);
-  const auditService = new AuditService(db);
-  const ownerId = wallet.custodyConnectionId ?? wallet.custodyConfigId;
-  const intent = await auditService.beginCritical(c, {
-    action: "update",
-    resourceType: wallet.custodyConnectionId ? "custody_connection" : "custody_config",
-    resourceId: ownerId,
-    metadata: {
-      event: "default_wallet_change_started",
-      ownerKind: wallet.custodyConnectionId ? "connection" : "config",
-      provider: wallet.provider,
-      custodyWalletId: wallet.id,
-      walletId: wallet.walletId,
-      projectId,
-    },
-  });
-
-  let previous: { custody_wallet_id: string | null; wallet_id: string | null };
-  try {
-    previous = await db.transaction(async (tx) => {
-      // Lock the owner before reading its previous default so concurrent
-      // selections cannot be attributed to this request in the audit outcome.
-      const current = await tx.queryOne<typeof previous>(
-        wallet.custodyConnectionId
-          ? `SELECT c.default_custody_wallet_id AS custody_wallet_id, w.wallet_id
-             FROM custody_connections c
-             LEFT JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
-             WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
-             FOR UPDATE OF c`
-          : `SELECT w.id AS custody_wallet_id, c.default_wallet_id AS wallet_id
-             FROM custody_configs c
-             LEFT JOIN custody_wallets w
-               ON w.custody_config_id = c.id AND w.wallet_id = c.default_wallet_id
-             WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
-             FOR UPDATE OF c`,
-        [ownerId, actor.organizationId, projectId]
-      );
-      if (!current) throw conflict("Wallet signing is not initialized");
-
-      // Keep the membership guard on the UPDATE: a wallet may have become
-      // inactive after the request's authorization lookup.
-      const updated = wallet.custodyConnectionId
-        ? await tx.execute(
-            `UPDATE custody_connections
-             SET default_custody_wallet_id = ?, updated_at = sdp_iso_now()
-             WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
-               AND EXISTS (SELECT 1 FROM custody_wallets w WHERE w.id = ?
-                 AND w.custody_connection_id = custody_connections.id AND w.status = 'active')`,
-            [wallet.id, ownerId, actor.organizationId, projectId, wallet.id]
-          )
-        : await tx.execute(
-            `UPDATE custody_configs
-             SET default_wallet_id = ?, updated_at = datetime('now')
-             WHERE id = ? AND EXISTS (SELECT 1 FROM custody_wallets w
-               WHERE w.custody_config_id = custody_configs.id AND w.wallet_id = ? AND w.status = 'active')`,
-            [wallet.walletId, ownerId, wallet.walletId]
-          );
-      if (updated !== 1) {
-        if (wallet.custodyConnectionId) throw conflict("Custody Connection is unavailable");
-        throw badRequest("Unknown walletId for this wallet signing configuration");
-      }
-      return current;
-    });
-  } catch (error) {
-    if (error instanceof AppError) {
-      await auditService.completeCritical(c, intent, {
-        status: "failure",
-        metadata: { event: "default_wallet_change_failed", reason: "selection_unavailable" },
-      });
-    } else {
-      // A lost COMMIT acknowledgement cannot be attributed by rereading the
-      // current pointer: another request may already have selected it.
-      getLogger().error({
-        event: "custody_default_wallet_audit_unresolved",
-        auditIntentId: intent.id,
-        organizationId: actor.organizationId,
-        projectId,
-        ownerId,
-        reason: "persistence_result_unknown",
-      });
-    }
-    throw error;
-  }
-  const changed = previous.custody_wallet_id !== wallet.id;
-  await auditService.completeCritical(c, intent, {
-    action: changed ? "update" : "maintenance",
-    resourceType: changed ? intent.entry.resourceType : "audit_ledger",
-    resourceId: changed ? ownerId : intent.id,
-    metadata: {
-      event: changed ? "default_wallet_changed" : "default_wallet_selection_unchanged",
-      previousCustodyWalletId: previous.custody_wallet_id,
-      previousWalletId: previous.wallet_id,
-    },
-  });
-
-  clearWalletCaches();
-
-  return success(c, { defaultWalletId: wallet.walletId });
 };
 
 export const updateWallet = async (c: ValidatedBodyContext<typeof updateWalletSchema>) => {
@@ -634,7 +422,7 @@ export const updateWallet = async (c: ValidatedBodyContext<typeof updateWalletSc
 };
 
 export const listWallets = async (c: AppContext) => {
-  const filters = resolveWalletFilters(c, { defaultIncludeAllProviders: true });
+  const filters = resolveWalletFilters(c);
   const wallets = await getWalletSummaries(c, filters, "list_wallets");
   const balancesStartedAt = performance.now();
   const balancesByWalletId = filters.includeBalances
@@ -668,7 +456,7 @@ export const listWallets = async (c: AppContext) => {
 };
 
 export const getWalletAggregate = async (c: AppContext) => {
-  const filters = resolveWalletFilters(c, { defaultIncludeAllProviders: true });
+  const filters = resolveWalletFilters(c);
   const wallets = await getWalletSummaries(c, filters, "aggregate_wallets");
   const balancesStartedAt = performance.now();
   const balancesByWalletId = await getBalancesByWalletId(
@@ -837,48 +625,26 @@ export const getPublicKey = async (c: AppContext) => {
       assertWalletInReleaseChannel(c, wallet);
       return success(c, { publicKey: wallet.publicKey });
     }
-    if (walletId) {
-      const wallet = await runtimeTargets.findOperationalWallet({
-        organizationId: actor.organizationId,
-        projectId,
-        walletId,
-      });
-      if (!wallet) {
-        throw new AppError("NOT_FOUND", "Wallet not found");
-      }
-      if (wallet.custodyConnectionId) {
-        assertWalletInReleaseChannel(c, wallet);
-        return success(c, { publicKey: wallet.publicKey });
-      }
-      const publicKey = await signingService.getPublicKey(
-        actor.organizationId,
-        projectId,
-        wallet.walletId
-      );
-      return success(c, { publicKey });
+    if (!walletId) {
+      throw badRequest("walletId is required");
     }
-
-    const effective = await runtimeTargets.resolve({
-      kind: "effective",
+    const wallet = await runtimeTargets.findOperationalWallet({
       organizationId: actor.organizationId,
       projectId,
+      walletId,
     });
-    if (effective?.kind === "connection") {
-      const wallet = effective.wallet
-        ? await runtimeTargets.findOperationalWallet({
-            organizationId: actor.organizationId,
-            projectId,
-            walletId: effective.wallet.walletId,
-          })
-        : null;
-      if (!wallet || wallet.custodyConnectionId !== effective.connectionId) {
-        throw new AppError("NOT_FOUND", "Wallet not found");
-      }
+    if (!wallet) {
+      throw new AppError("NOT_FOUND", "Wallet not found");
+    }
+    if (wallet.custodyConnectionId) {
       assertWalletInReleaseChannel(c, wallet);
       return success(c, { publicKey: wallet.publicKey });
     }
-    const publicKey = await signingService.getPublicKey(actor.organizationId, projectId, undefined);
-
+    const publicKey = await signingService.getPublicKey(
+      actor.organizationId,
+      projectId,
+      wallet.walletId
+    );
     return success(c, { publicKey });
   } catch (error) {
     if (error instanceof AppError && error.code === "FORBIDDEN") {

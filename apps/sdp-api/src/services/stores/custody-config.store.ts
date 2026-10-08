@@ -3,11 +3,7 @@ import type { PreparedStatement } from "@/db";
 import { buildInClause } from "@/db/postgres-utils";
 import type { SigningConfigRecord, SigningProviderType } from "@/services/adapters/signing";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
-import {
-  type CustodyScopeSelection,
-  selectCustodyConfigTarget,
-} from "@/services/domain/signing/custody-runtime-target";
-import type { SigningConfigStore, SigningConfiguration } from "@/services/domain/signing.service";
+import type { SigningConfigStore } from "@/services/domain/signing.service";
 import type { Env } from "@/types/env";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -55,11 +51,6 @@ export interface CreateWalletParams {
   purpose?: WalletPurpose;
 }
 
-export interface PreviousDefaultWallet {
-  custody_wallet_id: string | null;
-  wallet_id: string | null;
-}
-
 export type DeactivateWalletResult = "deactivated" | "wallet_not_found" | "last_wallet";
 
 // Database row types (snake_case)
@@ -93,16 +84,6 @@ interface CustodyWalletLookupRow extends CustodyWalletRow {
   project_id: string | null;
 }
 
-interface CustodyScopeDefaultRow {
-  id: string;
-  organization_id: string;
-  project_id: string | null;
-  default_custody_config_id: string | null;
-  default_custody_connection_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Custody Config Store Implementation
 // ═══════════════════════════════════════════════════════════════════════════
@@ -114,19 +95,6 @@ export class CustodyConfigStore implements SigningConfigStore {
     private db: DatabaseClient,
     private env: Env
   ) {}
-
-  /**
-   * Find the project's default active custody config: the config its scope
-   * default points at, when that config is still active. A project with no
-   * default of its own resolves nothing.
-   *
-   * @param orgId - The organization that owns the project.
-   * @param projectId - The project whose default config is wanted.
-   * @returns The default active config, or null.
-   */
-  async findActive(orgId: string, projectId: string): Promise<SigningConfigRecord | null> {
-    return this.getDefaultConfig(orgId, projectId);
-  }
 
   /**
    * List active custody configs for a project.
@@ -190,43 +158,6 @@ export class CustodyConfigStore implements SigningConfigStore {
   }
 
   /**
-   * Get the default config for a project.
-   */
-  async getDefaultConfig(orgId: string, projectId: string): Promise<SigningConfigRecord | null> {
-    const scopeDefault = await this.getScopeDefaultRow(orgId, projectId);
-    if (!scopeDefault?.default_custody_config_id) {
-      return null;
-    }
-
-    const config = await this.db
-      .prepare(
-        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
-         FROM custody_configs
-         WHERE id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
-         LIMIT 1`
-      )
-      .bind(scopeDefault.default_custody_config_id, orgId, projectId)
-      .first<CustodyConfigRow>();
-
-    return config ? this.mapConfigRow(config) : null;
-  }
-
-  /**
-   * Set the default config pointer for a project.
-   */
-  async setDefaultConfig(
-    orgId: string,
-    projectId: string,
-    configId: string
-  ): Promise<CustodyScopeSelection> {
-    return selectCustodyConfigTarget(this.db, {
-      organizationId: orgId,
-      projectId,
-      configId,
-    });
-  }
-
-  /**
    * Get a custody config by ID.
    */
   async getById(configId: string): Promise<SigningConfigRecord | null> {
@@ -243,53 +174,15 @@ export class CustodyConfigStore implements SigningConfigStore {
   }
 
   /**
-   * Create or update a project's custody config for the configuration's
-   * provider. Updates the project's unarchived row for that provider when one
-   * exists, otherwise inserts.
-   *
-   * @param orgId - Organization ID
-   * @param projectId - The project that owns the config
-   * @param config - Configuration to store
-   * @returns The config ID
-   */
-  async upsert(orgId: string, projectId: string, config: SigningConfiguration): Promise<string> {
-    const { encryptedConfig, encryptionVersion } = await this.encryptConfigJson(
-      orgId,
-      JSON.stringify(config)
-    );
-
-    const row = await this.db
-      .prepare(this.buildConfigUpsertSql())
-      .bind(
-        `cust_${crypto.randomUUID()}`,
-        orgId,
-        projectId,
-        config.provider,
-        encryptedConfig,
-        encryptionVersion,
-        config.defaultWalletId ?? null
-      )
-      .first<{ id: string }>();
-
-    if (!row) {
-      throw new Error("Failed to upsert custody config");
-    }
-
-    return row.id;
-  }
-
-  /**
    * Persist a provider configuration and (optionally) its wallet record in a
    * single transaction: the config row never becomes readable with a partial
-   * payload, and the default-wallet pointer lands together with the wallet it
-   * references.
+   * payload, and the wallet lands together with the config that owns it.
    */
   async saveProviderConfig(params: {
     orgId: string;
     projectId: string;
     provider: SigningProviderType;
     configJson: object;
-    defaultWalletId: string | null;
     wallet?: CreateWalletParams;
   }): Promise<{ configId: string }> {
     const { encryptedConfig, encryptionVersion } = await this.encryptConfigJson(
@@ -306,8 +199,7 @@ export class CustodyConfigStore implements SigningConfigStore {
           params.projectId,
           params.provider,
           encryptedConfig,
-          encryptionVersion,
-          params.defaultWalletId
+          encryptionVersion
         )
         .first<{ id: string }>();
 
@@ -346,13 +238,12 @@ export class CustodyConfigStore implements SigningConfigStore {
    * against the index predicate.
    */
   private buildConfigUpsertSql(): string {
-    return `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+    return `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'active')
        ON CONFLICT (organization_id, project_id, provider) WHERE status <> 'archived'
        DO UPDATE SET
          config_encrypted = EXCLUDED.config_encrypted,
          encryption_version = EXCLUDED.encryption_version,
-         default_wallet_id = EXCLUDED.default_wallet_id,
          status = 'active',
          updated_at = datetime('now')
        RETURNING id`;
@@ -433,72 +324,15 @@ export class CustodyConfigStore implements SigningConfigStore {
   }
 
   /**
-   * Create a wallet record and promote it to the config's default in one
-   * transaction, returning the default it replaced. Returns null without
-   * writing when the config no longer exists.
-   */
-  async createDefaultWallet(
-    configId: string,
-    orgId: string,
-    projectId: string,
-    params: CreateWalletParams & { id: string }
-  ): Promise<{ wallet: CustodyConfigWallet; previous: PreviousDefaultWallet } | null> {
-    const result = await this.db.transaction(async (tx) => {
-      const current = await tx.queryOne<PreviousDefaultWallet>(
-        `SELECT w.id AS custody_wallet_id, c.default_wallet_id AS wallet_id
-         FROM custody_configs c
-         LEFT JOIN custody_wallets w
-           ON w.custody_config_id = c.id AND w.wallet_id = c.default_wallet_id
-         WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
-         FOR UPDATE OF c`,
-        [configId, orgId, projectId]
-      );
-      if (!current) return null;
-
-      const row = await tx.queryOne<CustodyWalletRow>(
-        `INSERT INTO custody_wallets (
-           id,
-           custody_config_id,
-           wallet_id,
-           public_key,
-           label,
-           purpose,
-           status,
-           updated_at
-         )
-         VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))
-         RETURNING *`,
-        [
-          params.id,
-          configId,
-          params.walletId,
-          params.publicKey,
-          params.label ?? null,
-          params.purpose ?? null,
-        ]
-      );
-      if (!row) {
-        throw new Error("Failed to create wallet");
-      }
-      await tx.execute(
-        `UPDATE custody_configs
-         SET default_wallet_id = ?, updated_at = datetime('now')
-         WHERE id = ?`,
-        [params.walletId, configId]
-      );
-      return { row, previous: current };
-    });
-    if (!result) return null;
-
-    return { wallet: this.mapWalletRow(result.row), previous: result.previous };
-  }
-
-  /**
-   * Get all wallets for a custody config.
+   * Get all active wallets for a custody config, oldest first with ID as a tie-break.
    */
   async getWallets(configId: string): Promise<CustodyConfigWallet[]> {
     const { results } = await this.db
-      .prepare(`SELECT * FROM custody_wallets WHERE custody_config_id = ? AND status = 'active'`)
+      .prepare(
+        `SELECT * FROM custody_wallets
+         WHERE custody_config_id = ? AND status = 'active'
+         ORDER BY created_at ASC, id ASC`
+      )
       .bind(configId)
       .all<CustodyWalletRow>();
 
@@ -815,21 +649,6 @@ export class CustodyConfigStore implements SigningConfigStore {
       this.custodyCipher = createCustodyCipher(this.env);
     }
     return this.custodyCipher;
-  }
-
-  private async getScopeDefaultRow(
-    orgId: string,
-    projectId: string
-  ): Promise<CustodyScopeDefaultRow | null> {
-    return this.db
-      .prepare(
-        `SELECT id, organization_id, project_id, default_custody_config_id, default_custody_connection_id, created_at, updated_at
-         FROM custody_scope_defaults
-         WHERE organization_id = ? AND project_id = ?
-         LIMIT 1`
-      )
-      .bind(orgId, projectId)
-      .first<CustodyScopeDefaultRow>();
   }
 
   private mapWalletRow(row: CustodyWalletRow): CustodyConfigWallet {

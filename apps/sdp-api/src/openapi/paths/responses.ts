@@ -17,7 +17,6 @@ import {
   counterpartyFieldOptionsResponseSchema,
   counterpartyRequirementsResponseSchema,
   counterpartyResponseSchema,
-  custodyConfigResponseSchema,
   custodyConfigsResponseSchema,
   custodyWalletAggregateResponseSchema,
   custodyWalletByIdResponseSchema,
@@ -84,7 +83,6 @@ import {
   rpcRelayResponseSchema,
   signerCheckResponseSchema,
   successResponseSchema,
-  switchProviderOptionsResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
   tokenResponseSchema,
@@ -259,7 +257,6 @@ export const executeUpdateAuthorityResponse = successResponseSchema(
 export const executePauseResponse = successResponseSchema(executePauseResponseSchema);
 export const executeUnpauseResponse = successResponseSchema(executeUnpauseResponseSchema);
 
-export const custodyConfigResponse = successResponseSchema(custodyConfigResponseSchema);
 export const custodyConfigsResponse = successResponseSchema(custodyConfigsResponseSchema);
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
 export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
@@ -269,9 +266,6 @@ export const custodyWalletAggregateResponse = successResponseSchema(
 export const custodyWalletByIdResponse = successResponseSchema(custodyWalletByIdResponseSchema);
 export const custodyDeleteWalletResponse = successResponseSchema(deleteWalletResponseSchema);
 export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
-export const custodySwitchOptionsResponse = successResponseSchema(
-  switchProviderOptionsResponseSchema
-);
 export const walletApprovalRequestResponse = successResponseSchema(
   walletApprovalRequestResponseSchema
 );

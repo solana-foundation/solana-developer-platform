@@ -39,7 +39,6 @@ export type ParsedWalletBindingPatch = {
 type WalletScopeInput = WalletBindingPatchInput & {
   walletScope?: ApiKeyWalletScope;
   provisionWallet?: boolean;
-  connectionId?: string;
 };
 
 function trimWalletId(walletId: string): string {
@@ -186,9 +185,6 @@ export function resolveCreateWalletScope(input: WalletScopeInput): {
   const walletScope = input.walletScope;
   if (!walletScope) {
     throw badRequest("walletScope is required");
-  }
-  if (input.connectionId && !input.provisionWallet) {
-    throw badRequest("connectionId requires provisionWallet");
   }
 
   const walletBindingPatch = parseWalletBindingPatch(input);

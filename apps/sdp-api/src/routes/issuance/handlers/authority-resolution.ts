@@ -468,6 +468,20 @@ export async function createResolvedAuthoritySigner(params: {
   return loadResolvedAuthoritySigner(params);
 }
 
+/**
+ * Load the Config signer for the legacy client-signed issuance flows (deploy
+ * prepare, confirm, prepare-metadata). Every call names its signing wallet: the
+ * request's or token's `signingWalletId`, or the API key's own binding.
+ *
+ * @param params - The legacy signer request.
+ * @param params.env - API process environment.
+ * @param params.auth - The authenticated API key context.
+ * @param params.walletId - The resolved provider signing wallet ID, or null when none was named.
+ * @param params.currentAuthority - When set, the authority the signer must control.
+ * @param params.expectedCustodyWalletId - The exact Config wallet row pinned on the token, if any.
+ * @returns The signer for the named Config wallet.
+ * @throws 400 when no signing wallet was named.
+ */
 export async function createLegacyResolvedAuthoritySigner(params: {
   env: Env;
   auth: ApiKeyContext;
@@ -476,6 +490,9 @@ export async function createLegacyResolvedAuthoritySigner(params: {
   expectedCustodyWalletId?: string | null;
 }): Promise<TransactionSigner> {
   const { env, auth, walletId, currentAuthority, expectedCustodyWalletId } = params;
+  if (walletId === null) {
+    throw badRequest("signingWalletId is required for the legacy issuance prepare flow");
+  }
   const custodyStore = new CustodyConfigStore(getDb(env), env);
   const projectId = requireAuthProjectId(auth);
   const expectedWallet = expectedCustodyWalletId
@@ -494,19 +511,9 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     throw conflict("Legacy issuance provider wallet does not match its exact Config wallet");
   }
 
-  const defaultConfig = walletId
-    ? null
-    : await custodyStore.findActive(auth.organizationId, projectId);
-  const walletIdentifier = walletId ?? defaultConfig?.defaultWalletId;
   const wallet =
     expectedWallet ??
-    (walletIdentifier
-      ? await custodyStore.findActiveWalletByIdentifier(
-          auth.organizationId,
-          projectId,
-          walletIdentifier
-        )
-      : null);
+    (await custodyStore.findActiveWalletByIdentifier(auth.organizationId, projectId, walletId));
 
   if (!wallet) {
     throw walletNotFound();

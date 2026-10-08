@@ -587,7 +587,7 @@ transaction signed by the organization custody wallet or external owner.
   admission gates still bound this path.
   - **POLICY-GATED.** `policyGate({ extract:
     extractEarnVaultDepositPolicyCandidate })` resolves everything (strategy,
-    wallet, amount) and enforces wallet policy BEFORE `createOrgSigner` is
+    wallet, amount) and enforces wallet policy BEFORE `createOrgSignerForCustodyWallet` is
     reached. The extractor owns all the gates below; the handler only ledgers.
     Registered as the `earn` family in
     `src/security/value-moving-conformance.node.test.ts`, whose
@@ -1335,7 +1335,7 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   be submitted because no tenant build row exists.
 - **NO policyGate and no `wallets:read`, deliberately** — this is not the
   vault-deposit cautionary tale repeating. Wallet policy governs the org's own
-  custody and stands between a request and `createOrgSigner`; these routes
+  custody and stands between a request and `createOrgSignerForCustodyWallet`; these routes
   never resolve a signer and never touch custody. The owner's own signature
   IS the authorization, and there is no signing sink here for
   `value-moving-conformance.node.test.ts` to inventory.

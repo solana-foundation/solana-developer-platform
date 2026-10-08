@@ -13,15 +13,8 @@ import type {
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
-import type { DatabaseClient, DatabaseExecutor } from "@/db";
-import {
-  AppError,
-  badRequest,
-  conflict,
-  internalError,
-  notFound,
-  providerUnavailable,
-} from "@/lib/errors";
+import type { DatabaseClient } from "@/db";
+import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters";
@@ -35,7 +28,6 @@ import { provisionPrivyWallet } from "@/services/custody/provisioning";
 import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provider-lifecycle.service";
 import { createPrivyAdapterFromCredential } from "@/services/domain/signing/provider-adapter-factory";
 import {
-  assertCustodyProviderAvailable,
   assertCustodyProviderEntitled,
   custodyProviderNotInReleaseChannel,
   getProviderAvailability,
@@ -76,7 +68,6 @@ export type CustodyRuntimeTarget = ConfigRuntimeTarget | ConnectionRuntimeTarget
 export type CustodyRuntimeWalletProjection = {
   id: string;
   provider: CustodyProvider;
-  isDefaultProvider: boolean;
   isRuntimeExecutionAllowed: boolean;
   walletId: string;
   publicKey: string;
@@ -91,11 +82,6 @@ export type CustodyRuntimeWalletProjection = {
 
 export type CustodyRuntimeTargetQuery =
   | {
-      kind: "effective";
-      organizationId: string;
-      projectId: string;
-    }
-  | {
       kind: "wallet";
       organizationId: string;
       projectId: string;
@@ -106,12 +92,6 @@ export type CustodyRuntimeTargetQuery =
       organizationId: string;
       projectId: string;
       custodyWalletId: string;
-    }
-  | {
-      kind: "provider";
-      organizationId: string;
-      projectId: string;
-      provider: CustodyProvider;
     }
   | {
       kind: "connection";
@@ -165,20 +145,19 @@ export interface CustodyConnectionRuntimeAvailabilityFacts {
   last_check_status: CustodyConnectionCheckStatus | null;
   credential_status: ProviderCredentialStatus;
   provider_account_fingerprint: string | null;
-  default_custody_wallet_id: string | null;
-  default_wallet_id: string | null;
-  default_wallet_public_key: string | null;
-  default_wallet_status: CustodyWalletStatus | null;
 }
 
-interface ConnectionTargetRow extends CustodyConnectionRuntimeAvailabilityFacts {
+interface ConnectionOwnerRow extends CustodyConnectionRuntimeAvailabilityFacts {
   connection_id: string;
   organization_id: string;
   project_id: string;
   provider: string;
-  wallet_id: string | null;
-  wallet_public_key: string | null;
-  wallet_status: string | null;
+}
+
+interface ConnectionWalletRow extends ConnectionOwnerRow {
+  wallet_id: string;
+  wallet_public_key: string;
+  wallet_status: CustodyWalletStatus;
 }
 
 interface OperationalConfigWalletRow {
@@ -192,11 +171,8 @@ interface OperationalConfigWalletRow {
   wallet_created_at: string;
 }
 
-interface OperationalConnectionWalletRow extends ConnectionTargetRow {
+interface OperationalConnectionWalletRow extends ConnectionWalletRow {
   wallet_record_id: string;
-  wallet_id: string;
-  wallet_public_key: string;
-  wallet_status: "active";
   wallet_label: string | null;
   wallet_purpose: string | null;
   wallet_created_at: string;
@@ -207,8 +183,6 @@ interface ConnectionCredentialRow {
   provider: string;
   connection_status: string;
   last_check_status: string | null;
-  default_wallet_id: string | null;
-  default_wallet_status: string | null;
   provider_credential_id: string;
   credential_status: string;
   provider_account_fingerprint: string | null;
@@ -226,7 +200,6 @@ interface LockedConnectionWalletCreationRow {
   status: string;
   last_check_status: string | null;
   provider_account_fingerprint: string | null;
-  default_custody_wallet_id: string | null;
 }
 
 interface LockedCredentialWalletCreationRow {
@@ -242,62 +215,18 @@ interface CreatedConnectionWalletRow {
   created_at: string;
 }
 
-interface ScopeDefaultRow {
-  id: string;
-  default_custody_config_id: string | null;
-  default_custody_connection_id: string | null;
-}
-
-interface SelectableConnectionRow {
-  id: string;
-  provider: string;
-  status: string;
-  last_check_status: string | null;
-  credential_status: string;
-  provider_account_fingerprint: string | null;
-  default_custody_wallet_id: string | null;
-}
-
-export interface CustodyScopeSelection {
-  previousConfigId: string | null;
-  previousConnectionId: string | null;
-  selectedConfigId: string | null;
-  selectedConnectionId: string | null;
-}
-
-export interface CustodyConnectionSelectionResult {
-  connectionId: string;
-  provider: CustodyProvider;
-  walletId: string;
-  publicKey: string;
-  selection: CustodyScopeSelection;
-}
-
 /**
  * Whether a custody connection can sign right now: its (provider, byok) pair is in
- * the release channel, the connection and credential are active, and it holds an
- * active default wallet.
+ * the release channel, the connection itself is active with a successful check and
+ * a reserved provider account, and its credential is active. No wallet of the
+ * connection is privileged; each wallet adds only its own status on top.
  *
  * @param env - Process environment naming the release channel.
  * @param provider - The connection's custody provider.
- * @param row - The connection's lifecycle and default-wallet facts.
- * @returns True when the connection's default wallet can execute.
+ * @param row - The connection's lifecycle and credential facts.
+ * @returns True when the connection's wallets may execute.
  */
 export function isCustodyConnectionRuntimeAvailable(
-  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
-  provider: CustodyProvider,
-  row: CustodyConnectionRuntimeAvailabilityFacts
-): boolean {
-  return (
-    isCustodyConnectionOwnerRuntimeAvailable(env, provider, row) &&
-    row.default_custody_wallet_id !== null &&
-    row.default_wallet_id !== null &&
-    row.default_wallet_public_key !== null &&
-    row.default_wallet_status === "active"
-  );
-}
-
-function isCustodyConnectionOwnerRuntimeAvailable(
   env: Pick<Env, "SDP_RELEASE_CHANNEL">,
   provider: CustodyProvider,
   row: CustodyConnectionRuntimeAvailabilityFacts
@@ -321,19 +250,22 @@ export class CustodyRuntimeTargets {
   ) {}
 
   async resolve(query: CustodyRuntimeTargetQuery): Promise<CustodyRuntimeTarget | null> {
-    if (query.kind === "wallet") {
-      return this.resolveWallet(query.organizationId, query.projectId, query.walletId);
+    switch (query.kind) {
+      case "wallet":
+        return this.resolveWallet(query.organizationId, query.projectId, query.walletId);
+      case "wallet_record":
+        return this.resolveWalletRecord(
+          query.organizationId,
+          query.projectId,
+          query.custodyWalletId
+        );
+      case "connection":
+        return this.resolveConnection(query.organizationId, query.projectId, query.connectionId);
+      default: {
+        const unhandled: never = query;
+        return unhandled;
+      }
     }
-    if (query.kind === "wallet_record") {
-      return this.resolveWalletRecord(query.organizationId, query.projectId, query.custodyWalletId);
-    }
-    if (query.kind === "provider") {
-      return this.resolveProvider(query.organizationId, query.projectId, query.provider);
-    }
-    if (query.kind === "connection") {
-      return this.resolveConnection(query.organizationId, query.projectId, query.connectionId);
-    }
-    return this.resolveEffective(query.organizationId, query.projectId);
   }
 
   async admitRuntimeExecution(params: {
@@ -354,13 +286,21 @@ export class CustodyRuntimeTargets {
     await assertCustodyProviderEntitled(this.env, this.db, params.organizationId, target.provider);
   }
 
+  /**
+   * Every operational wallet of the project across both owner kinds, oldest first
+   * with ID as a tie-break, optionally narrowed to one provider.
+   *
+   * @param params - The project scope and optional provider filter.
+   * @param params.organizationId - The organization that owns the project.
+   * @param params.projectId - The project whose wallets are listed.
+   * @param params.provider - Narrows the list to one custody provider when set.
+   * @returns The project's active wallets with their runtime-execution flags.
+   */
   async listWallets(params: {
     organizationId: string;
     projectId: string;
     provider?: CustodyProvider;
-    includeAllProviders: boolean;
   }): Promise<CustodyRuntimeWalletProjection[]> {
-    const effective = await this.resolveEffective(params.organizationId, params.projectId);
     const [configRows, connectionRows, availability] = await Promise.all([
       this.findOperationalConfigWallets(params.organizationId, params.projectId),
       this.findOperationalConnectionWallets(params.organizationId, params.projectId),
@@ -370,24 +310,11 @@ export class CustodyRuntimeTargets {
       }),
     ]);
     const wallets = [
-      ...configRows.map((row) => this.mapOperationalConfigWallet(row, effective, availability)),
-      ...connectionRows.map((row) =>
-        this.mapOperationalConnectionWallet(row, effective, availability)
-      ),
+      ...configRows.map((row) => this.mapOperationalConfigWallet(row, availability)),
+      ...connectionRows.map((row) => this.mapOperationalConnectionWallet(row, availability)),
     ].filter((wallet) => !params.provider || wallet.provider === params.provider);
 
-    if (params.includeAllProviders) {
-      return sortRuntimeWallets(wallets);
-    }
-
-    const target = params.provider
-      ? await this.resolveProvider(params.organizationId, params.projectId, params.provider)
-      : effective;
-    if (!target) {
-      return [];
-    }
-
-    return sortRuntimeWallets(wallets.filter((wallet) => walletBelongsToTarget(wallet, target)));
+    return sortRuntimeWallets(wallets);
   }
 
   async findOperationalWallet(params: {
@@ -399,7 +326,6 @@ export class CustodyRuntimeTargets {
     const wallets = await this.listWallets({
       organizationId: params.organizationId,
       projectId: params.projectId,
-      includeAllProviders: true,
     });
     const matches = wallets.filter(
       (wallet) =>
@@ -420,7 +346,6 @@ export class CustodyRuntimeTargets {
     const wallets = await this.listWallets({
       organizationId: params.organizationId,
       projectId: params.projectId,
-      includeAllProviders: true,
     });
     return wallets.find((wallet) => wallet.id === params.custodyWalletId) ?? null;
   }
@@ -551,10 +476,8 @@ export class CustodyRuntimeTargets {
     organizationId: string;
     projectId: string;
     connectionId: string;
-    provider?: CustodyProvider;
     label?: string;
     purpose?: CustodyWalletPurpose;
-    setDefault?: boolean;
   }): Promise<CreatedCustodyConnectionWallet> {
     const target = await this.resolveConnection(
       params.organizationId,
@@ -563,9 +486,6 @@ export class CustodyRuntimeTargets {
     );
     if (!target) {
       throw notFound("Custody Connection");
-    }
-    if (params.provider && params.provider !== target.provider) {
-      throw badRequest("Provider does not match Custody Connection");
     }
     assertCustodyProviderCanCreateWallet(target.provider);
     this.assertTargetInReleaseChannel(target);
@@ -576,7 +496,7 @@ export class CustodyRuntimeTargets {
     await assertCustodyProviderEntitled(this.env, this.db, params.organizationId, target.provider);
 
     const credential = await this.loadConnectionCredential(target);
-    if (!credential || !isUsableCredentialConnection(credential)) {
+    if (!credential || !isUsableCredentialOwner(credential)) {
       throw conflict("Custody Connection is unavailable");
     }
     if (target.provider !== "privy") {
@@ -597,7 +517,6 @@ export class CustodyRuntimeTargets {
         connectionId: target.connectionId,
         custodyWalletId,
         creationReason: params.creationReason,
-        setDefault: params.setDefault ?? false,
       },
     });
     let provisioned: { walletId: string; address: string };
@@ -621,7 +540,7 @@ export class CustodyRuntimeTargets {
     }
 
     const providerWalletId = normalizePrivyWalletId(provisioned.walletId);
-    let persisted: Awaited<ReturnType<CustodyRuntimeTargets["persistConnectionWallet"]>>;
+    let persisted: CreatedCustodyConnectionWallet;
     try {
       persisted = await this.persistConnectionWallet(target, credential, {
         id: custodyWalletId,
@@ -629,7 +548,6 @@ export class CustodyRuntimeTargets {
         publicKey: provisioned.address,
         label: params.label,
         purpose: params.purpose,
-        setDefault: params.setDefault,
       });
     } catch (error) {
       // A failed/ambiguous commit cannot prove the Provider wallet was persisted.
@@ -642,50 +560,10 @@ export class CustodyRuntimeTargets {
     await audit.completeCritical(params.auditContext, intent, {
       metadata: {
         result: "created",
-        walletId: persisted.wallet.walletId,
-        previousDefaultWalletId: persisted.previousDefaultWalletId,
-        newDefaultWalletId: params.setDefault
-          ? persisted.wallet.id
-          : persisted.previousDefaultWalletId,
+        walletId: persisted.walletId,
       },
     });
-    return persisted.wallet;
-  }
-
-  async getTransactionSigner(
-    organizationId: string,
-    projectId: string,
-    walletId: string | undefined,
-    getConfigAdapter: ConfigAdapterResolver
-  ): Promise<TransactionSigner> {
-    const target = await this.resolve(
-      walletId
-        ? { kind: "wallet", organizationId, projectId, walletId }
-        : { kind: "effective", organizationId, projectId }
-    );
-
-    if (!target) {
-      throw new SigningError(
-        walletId ? "Custody wallet not found" : "Custody not initialized",
-        walletId ? "WALLET_NOT_FOUND" : "NOT_FOUND"
-      );
-    }
-
-    this.assertTargetInReleaseChannel(target);
-    if (target.kind === "config") {
-      await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
-      const adapter = await getConfigAdapter(organizationId, target.config);
-      return getTransactionSigner(adapter, target.wallet);
-    }
-
-    if (!target.isRuntimeAvailable || !target.wallet) {
-      this.logUnavailable(target, "connection_unusable");
-      throw conflict("Custody Connection is unavailable");
-    }
-
-    await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
-    const adapter = await this.getConnectionAdapter(target);
-    return getTransactionSigner(adapter, target.wallet);
+    return persisted;
   }
 
   /**
@@ -725,108 +603,26 @@ export class CustodyRuntimeTargets {
     return signer;
   }
 
-  /**
-   * The scope's selected custody target. A selected connection is the effective
-   * target whatever its release-channel state: execution paths refuse an
-   * out-of-channel pair themselves, and nothing resolves a config in its place.
-   *
-   * @param organizationId - The organization that owns the project.
-   * @param projectId - The project whose custody target is wanted.
-   * @returns The selected connection, else the project's default config, else null.
-   */
-  private async resolveEffective(
-    organizationId: string,
-    projectId: string
-  ): Promise<CustodyRuntimeTarget | null> {
-    const connection = await this.findSelectedConnection(organizationId, projectId);
-    if (connection) {
-      return connection;
-    }
-
-    const config = await findEffectiveConfig(this.db, organizationId, projectId);
-    return config ? this.mapConfigTarget(config) : null;
-  }
-
   private async resolveConnection(
     organizationId: string,
     projectId: string,
     connectionId: string
   ): Promise<ConnectionRuntimeTarget | null> {
-    const row = await this.db.queryOne<ConnectionTargetRow>(
+    const row = await this.db.queryOne<ConnectionOwnerRow>(
       `SELECT c.id AS connection_id, c.organization_id, c.project_id, c.provider,
               c.status AS connection_status, c.last_check_status,
-              pc.status AS credential_status, c.provider_account_fingerprint,
-              c.default_custody_wallet_id,
-              w.wallet_id AS default_wallet_id,
-              w.public_key AS default_wallet_public_key,
-              w.status AS default_wallet_status,
-              w.wallet_id,
-              w.public_key AS wallet_public_key,
-              w.status AS wallet_status
+              pc.status AS credential_status, c.provider_account_fingerprint
        FROM custody_connections c
-       JOIN provider_credentials pc ON pc.id = c.provider_credential_id
-       LEFT JOIN custody_wallets w
-         ON w.id = c.default_custody_wallet_id
-        AND w.custody_connection_id = c.id
+       JOIN provider_credentials pc
+         ON pc.id = c.provider_credential_id
+        AND pc.project_id = c.project_id
        WHERE c.id = ?
          AND c.organization_id = ?
          AND c.project_id = ?
        LIMIT 1`,
       [connectionId, organizationId, projectId]
     );
-    return row ? this.mapConnectionTarget(row) : null;
-  }
-
-  private async resolveProvider(
-    organizationId: string,
-    projectId: string,
-    provider: CustodyProvider
-  ): Promise<CustodyRuntimeTarget | null> {
-    const effective = await this.resolveEffective(organizationId, projectId);
-    if (effective?.provider === provider) {
-      return effective;
-    }
-
-    const config = await findConfigByProvider(this.db, organizationId, projectId, provider);
-    if (config) {
-      return this.mapConfigTarget(config);
-    }
-
-    const connections = await this.db.queryMany<ConnectionTargetRow>(
-      `SELECT c.id AS connection_id, c.organization_id, c.project_id, c.provider,
-              c.status AS connection_status, c.last_check_status,
-              pc.status AS credential_status, c.provider_account_fingerprint,
-              c.default_custody_wallet_id,
-              w.wallet_id AS default_wallet_id,
-              w.public_key AS default_wallet_public_key,
-              w.status AS default_wallet_status,
-              w.wallet_id,
-              w.public_key AS wallet_public_key,
-              w.status AS wallet_status
-       FROM custody_connections c
-       JOIN provider_credentials pc ON pc.id = c.provider_credential_id
-       LEFT JOIN custody_wallets w
-         ON w.id = c.default_custody_wallet_id
-        AND w.custody_connection_id = c.id
-       WHERE c.organization_id = ?
-         AND c.project_id = ?
-         AND c.provider = ?
-       ORDER BY c.updated_at DESC, c.id DESC`,
-      [organizationId, projectId, provider]
-    );
-    const availableConnections = connections
-      .map((connection) => this.mapConnectionTarget(connection))
-      .filter((connection) => connection.isRuntimeAvailable);
-    if (availableConnections.length > 1) {
-      throw conflict("Connection selection is required");
-    }
-    if (availableConnections[0]) {
-      return availableConnections[0];
-    }
-    if (connections.length > 0) {
-      throw conflict("Custody Connection is unavailable");
-    }
-    return null;
+    return row ? this.mapConnectionOwnerTarget(row) : null;
   }
 
   private async resolveWallet(
@@ -835,7 +631,7 @@ export class CustodyRuntimeTargets {
     walletId: string
   ): Promise<CustodyRuntimeTarget | null> {
     const [connections, configs] = await Promise.all([
-      this.db.queryMany<ConnectionTargetRow>(
+      this.db.queryMany<ConnectionWalletRow>(
         `${connectionTargetSelect()}
          WHERE c.organization_id = ?
            AND c.project_id = ?
@@ -859,7 +655,7 @@ export class CustodyRuntimeTargets {
       throw conflict("Custody wallet ownership is ambiguous");
     }
     if (connections[0]) {
-      return this.mapConnectionTarget(connections[0]);
+      return this.mapConnectionWalletTarget(connections[0]);
     }
     if (configs[0]) {
       return this.mapConfigWalletTarget(configs[0]);
@@ -873,7 +669,7 @@ export class CustodyRuntimeTargets {
     custodyWalletId: string
   ): Promise<CustodyRuntimeTarget | null> {
     const [connections, configs] = await Promise.all([
-      this.db.queryMany<ConnectionTargetRow>(
+      this.db.queryMany<ConnectionWalletRow>(
         `${connectionTargetSelect()}
          WHERE c.organization_id = ?
            AND c.project_id = ?
@@ -896,7 +692,7 @@ export class CustodyRuntimeTargets {
     if (connections.length + configs.length > 1) {
       throw conflict("Custody wallet ownership is ambiguous");
     }
-    if (connections[0]) return this.mapConnectionTarget(connections[0]);
+    if (connections[0]) return this.mapConnectionWalletTarget(connections[0]);
     if (configs[0]) return this.mapConfigWalletTarget(configs[0]);
     return null;
   }
@@ -907,7 +703,7 @@ export class CustodyRuntimeTargets {
     custodyWalletId: string
   ): Promise<CustodyRuntimeTarget | null> {
     const [connections, configs] = await Promise.all([
-      this.db.queryMany<ConnectionTargetRow>(
+      this.db.queryMany<ConnectionWalletRow>(
         `${connectionTargetSelect()}
          WHERE c.organization_id = ?
            AND c.project_id = ?
@@ -926,53 +722,17 @@ export class CustodyRuntimeTargets {
     if (connections.length + configs.length > 1) {
       throw conflict("Custody wallet ownership is ambiguous");
     }
-    if (connections[0]) return this.mapExactConnectionTarget(connections[0]);
+    if (connections[0]) return this.mapConnectionWalletTarget(connections[0]);
     if (configs[0]) return this.mapConfigWalletTarget(configs[0]);
     return null;
   }
 
-  private async findSelectedConnection(
-    organizationId: string,
-    projectId: string
-  ): Promise<ConnectionRuntimeTarget | null> {
-    const row = await this.db.queryOne<ConnectionTargetRow>(
-      `SELECT c.id AS connection_id, c.organization_id, c.project_id, c.provider,
-              c.status AS connection_status, c.last_check_status,
-              pc.status AS credential_status, c.provider_account_fingerprint,
-              c.default_custody_wallet_id,
-              w.wallet_id AS default_wallet_id,
-              w.public_key AS default_wallet_public_key,
-              w.status AS default_wallet_status,
-              w.wallet_id,
-              w.public_key AS wallet_public_key,
-              w.status AS wallet_status
-       FROM custody_connections c
-       JOIN provider_credentials pc ON pc.id = c.provider_credential_id
-       LEFT JOIN custody_wallets w
-         ON w.id = c.default_custody_wallet_id
-        AND w.custody_connection_id = c.id
-       JOIN custody_scope_defaults d
-         ON d.default_custody_connection_id = c.id
-        AND d.organization_id = c.organization_id
-        AND d.project_id = c.project_id
-       WHERE d.organization_id = ? AND d.project_id = ?
-       LIMIT 1`,
-      [organizationId, projectId]
-    );
-    return row ? this.mapConnectionTarget(row) : null;
-  }
-
   private async getConnectionAdapter(
     target: ConnectionRuntimeTarget,
-    exactWallet?: RuntimeWallet
+    wallet: RuntimeWallet
   ): Promise<SigningPort> {
     const row = await this.loadConnectionCredential(target);
-    const adapterDefaultWalletId = exactWallet?.walletId ?? row?.default_wallet_id;
-    if (
-      !row ||
-      !adapterDefaultWalletId ||
-      (exactWallet ? !isUsableCredentialOwner(row) : !isUsableCredentialConnection(row))
-    ) {
+    if (!row || !isUsableCredentialOwner(row)) {
       this.logUnavailable(target, "connection_changed");
       throw conflict("Custody Connection is unavailable", {
         reason: RUNTIME_EXECUTION_UNAVAILABLE_REASON,
@@ -999,7 +759,7 @@ export class CustodyRuntimeTargets {
       row.credential_version,
       row.secret_version_ref ?? "none",
       row.connection_id,
-      adapterDefaultWalletId,
+      wallet.walletId,
       row.request_delay_ms ?? "env",
     ].join(":");
     const cached = this.adapterCache.get(cacheKey);
@@ -1010,7 +770,7 @@ export class CustodyRuntimeTargets {
     const secret = await this.readPrivyCredential(target, row);
     const adapter = createPrivyAdapterFromCredential(this.env, {
       ...secret,
-      defaultWalletId: adapterDefaultWalletId,
+      walletId: wallet.walletId,
       requestDelayMs: row.request_delay_ms ?? undefined,
     });
     this.adapterCache.set(cacheKey, adapter);
@@ -1024,17 +784,14 @@ export class CustodyRuntimeTargets {
       `SELECT c.id AS connection_id, c.provider,
               c.status AS connection_status, c.last_check_status,
               c.provider_account_fingerprint, c.request_delay_ms,
-              default_wallet.wallet_id AS default_wallet_id,
-              default_wallet.status AS default_wallet_status,
               pc.id AS provider_credential_id,
               pc.status AS credential_status,
               pc.credential_version, pc.storage_backend,
               pc.secret_ref, pc.secret_version_ref, pc.encrypted_secret_payload
        FROM custody_connections c
-       JOIN provider_credentials pc ON pc.id = c.provider_credential_id
-       LEFT JOIN custody_wallets default_wallet
-         ON default_wallet.id = c.default_custody_wallet_id
-        AND default_wallet.custody_connection_id = c.id
+       JOIN provider_credentials pc
+         ON pc.id = c.provider_credential_id
+        AND pc.project_id = c.project_id
        WHERE c.id = ?
          AND c.organization_id = ?
          AND c.project_id = ?
@@ -1052,9 +809,8 @@ export class CustodyRuntimeTargets {
       publicKey: string;
       label?: string;
       purpose?: CustodyWalletPurpose;
-      setDefault?: boolean;
     }
-  ): Promise<{ wallet: CreatedCustodyConnectionWallet; previousDefaultWalletId: string }> {
+  ): Promise<CreatedCustodyConnectionWallet> {
     return this.db.transaction(async (tx) => {
       const project = await tx.queryOne<{ id: string }>(
         `SELECT id
@@ -1069,7 +825,7 @@ export class CustodyRuntimeTargets {
 
       const connection = await tx.queryOne<LockedConnectionWalletCreationRow>(
         `SELECT provider_credential_id, provider_credential_scope_key, status, last_check_status,
-                provider_account_fingerprint, default_custody_wallet_id
+                provider_account_fingerprint
          FROM custody_connections
          WHERE id = ? AND organization_id = ? AND project_id = ?
          FOR UPDATE`,
@@ -1090,7 +846,7 @@ export class CustodyRuntimeTargets {
            AND organization_id = ?
            AND provider = ?
            AND scope_key = ?
-           AND (project_id IS NULL OR project_id = ?)
+           AND project_id = ?
          FOR UPDATE`,
         [
           connection.provider_credential_id,
@@ -1104,7 +860,6 @@ export class CustodyRuntimeTargets {
         connection.status !== "active" ||
         connection.last_check_status !== "success" ||
         connection.provider_account_fingerprint !== credential.provider_account_fingerprint ||
-        connection.default_custody_wallet_id === null ||
         currentCredential?.status !== "active"
       ) {
         throw conflict("Custody Connection changed during wallet creation");
@@ -1129,31 +884,16 @@ export class CustodyRuntimeTargets {
         throw new Error("Wallet persistence returned no row");
       }
 
-      if (wallet.setDefault) {
-        const updated = await tx.execute(
-          `UPDATE custody_connections
-           SET default_custody_wallet_id = ?, updated_at = sdp_iso_now()
-           WHERE id = ? AND status = 'active'`,
-          [created.id, target.connectionId]
-        );
-        if (updated !== 1) {
-          throw conflict("Custody Connection changed during wallet creation");
-        }
-      }
-
       return {
-        previousDefaultWalletId: connection.default_custody_wallet_id,
-        wallet: {
-          id: created.id,
-          custodyConnectionId: target.connectionId,
-          isRuntimeExecutionAllowed: true,
-          walletId: created.wallet_id,
-          publicKey: created.public_key,
-          label: created.label,
-          purpose: created.purpose,
-          status: "active",
-          createdAt: created.created_at,
-        },
+        id: created.id,
+        custodyConnectionId: target.connectionId,
+        isRuntimeExecutionAllowed: true,
+        walletId: created.wallet_id,
+        publicKey: created.public_key,
+        label: created.label,
+        purpose: created.purpose,
+        status: "active",
+        createdAt: created.created_at,
       };
     });
   }
@@ -1297,34 +1037,26 @@ export class CustodyRuntimeTargets {
     });
   }
 
-  private mapConnectionTarget(row: ConnectionTargetRow): ConnectionRuntimeTarget {
-    const provider = this.parseProvider(row.provider);
-    const wallet =
-      row.wallet_id && row.wallet_public_key
-        ? {
-            walletId: row.wallet_id,
-            publicKey: row.wallet_public_key as Address,
-          }
-        : null;
+  private mapConnectionOwnerTarget(row: ConnectionOwnerRow): ConnectionRuntimeTarget {
     return {
       kind: "connection",
-      provider,
+      provider: this.parseProvider(row.provider),
       organizationId: row.organization_id,
       projectId: row.project_id,
       connectionId: row.connection_id,
-      wallet,
-      isRuntimeAvailable: this.isConnectionRuntimeAvailable(row) && wallet !== null,
+      wallet: null,
+      isRuntimeAvailable: this.isConnectionRuntimeAvailable(row),
     };
   }
 
-  private mapExactConnectionTarget(row: ConnectionTargetRow): ConnectionRuntimeTarget {
-    const target = this.mapConnectionTarget(row);
+  private mapConnectionWalletTarget(row: ConnectionWalletRow): ConnectionRuntimeTarget {
     return {
-      ...target,
-      isRuntimeAvailable:
-        this.isConnectionOwnerRuntimeAvailable(row) &&
-        row.wallet_status === "active" &&
-        target.wallet !== null,
+      ...this.mapConnectionOwnerTarget(row),
+      wallet: {
+        walletId: row.wallet_id,
+        publicKey: row.wallet_public_key as Address,
+      },
+      isRuntimeAvailable: this.isConnectionRuntimeAvailable(row) && row.wallet_status === "active",
     };
   }
 
@@ -1356,20 +1088,15 @@ export class CustodyRuntimeTargets {
       `SELECT c.id AS connection_id, c.organization_id, c.project_id, c.provider,
               c.status AS connection_status, c.last_check_status,
               pc.status AS credential_status, c.provider_account_fingerprint,
-              c.default_custody_wallet_id,
-              default_wallet.wallet_id AS default_wallet_id,
-              default_wallet.public_key AS default_wallet_public_key,
-              default_wallet.status AS default_wallet_status,
               w.id AS wallet_record_id, w.wallet_id,
               w.public_key AS wallet_public_key, w.status AS wallet_status,
               w.label AS wallet_label, w.purpose AS wallet_purpose,
               w.created_at AS wallet_created_at
        FROM custody_connections c
-       JOIN provider_credentials pc ON pc.id = c.provider_credential_id
+       JOIN provider_credentials pc
+         ON pc.id = c.provider_credential_id
+        AND pc.project_id = c.project_id
        JOIN custody_wallets w ON w.custody_connection_id = c.id
-       LEFT JOIN custody_wallets default_wallet
-         ON default_wallet.id = c.default_custody_wallet_id
-        AND default_wallet.custody_connection_id = c.id
        WHERE c.organization_id = ?
          AND c.project_id = ?
          AND c.status = 'active'
@@ -1381,7 +1108,6 @@ export class CustodyRuntimeTargets {
 
   private mapOperationalConfigWallet(
     row: OperationalConfigWalletRow,
-    effective: CustodyRuntimeTarget | null,
     availability: OrganizationProviderAvailabilityResponse
   ): CustodyRuntimeWalletProjection {
     const provider = this.parseProvider(row.provider);
@@ -1389,8 +1115,6 @@ export class CustodyRuntimeTargets {
       id: row.wallet_record_id,
       custodyConfigId: row.custody_config_id,
       provider,
-      isDefaultProvider:
-        effective?.kind === "config" && effective.config.id === row.custody_config_id,
       isRuntimeExecutionAllowed:
         isCustodyProviderAvailable(this.env, provider, "managed") &&
         isCustodyProviderEntitled(availability, provider),
@@ -1405,7 +1129,6 @@ export class CustodyRuntimeTargets {
 
   private mapOperationalConnectionWallet(
     row: OperationalConnectionWalletRow,
-    effective: CustodyRuntimeTarget | null,
     availability: OrganizationProviderAvailabilityResponse
   ): CustodyRuntimeWalletProjection {
     const provider = this.parseProvider(row.provider);
@@ -1413,10 +1136,10 @@ export class CustodyRuntimeTargets {
       id: row.wallet_record_id,
       custodyConnectionId: row.connection_id,
       provider,
-      isDefaultProvider:
-        effective?.kind === "connection" && effective.connectionId === row.connection_id,
       isRuntimeExecutionAllowed:
-        this.isConnectionRuntimeAvailable(row) && isCustodyProviderEntitled(availability, provider),
+        this.isConnectionRuntimeAvailable(row) &&
+        row.wallet_status === "active" &&
+        isCustodyProviderEntitled(availability, provider),
       walletId: row.wallet_id,
       publicKey: row.wallet_public_key,
       label: row.wallet_label,
@@ -1426,19 +1149,8 @@ export class CustodyRuntimeTargets {
     };
   }
 
-  private isConnectionRuntimeAvailable(row: ConnectionTargetRow): boolean {
-    return (
-      isCustodyConnectionRuntimeAvailable(this.env, this.parseProvider(row.provider), row) &&
-      row.wallet_status === "active"
-    );
-  }
-
-  private isConnectionOwnerRuntimeAvailable(row: ConnectionTargetRow): boolean {
-    return isCustodyConnectionOwnerRuntimeAvailable(
-      this.env,
-      this.parseProvider(row.provider),
-      row
-    );
+  private isConnectionRuntimeAvailable(row: ConnectionOwnerRow): boolean {
+    return isCustodyConnectionRuntimeAvailable(this.env, this.parseProvider(row.provider), row);
   }
 
   private parseProvider(provider: string): CustodyProvider {
@@ -1528,217 +1240,18 @@ function parseWalletPurpose(purpose: string | null): CustodyWalletPurpose | null
   throw internalError("Unknown custody wallet purpose");
 }
 
-function walletBelongsToTarget(
-  wallet: CustodyRuntimeWalletProjection,
-  target: CustodyRuntimeTarget
-): boolean {
-  return target.kind === "config"
-    ? wallet.custodyConfigId === target.config.id
-    : wallet.custodyConnectionId === target.connectionId;
-}
-
 function sortRuntimeWallets(
   wallets: CustodyRuntimeWalletProjection[]
 ): CustodyRuntimeWalletProjection[] {
   return wallets.sort(
     (left, right) =>
-      Number(right.isDefaultProvider) - Number(left.isDefaultProvider) ||
-      left.createdAt.localeCompare(right.createdAt) ||
-      left.id.localeCompare(right.id)
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
   );
-}
-
-export async function selectCustodyConfigTarget(
-  db: DatabaseClient,
-  params: {
-    organizationId: string;
-    projectId: string;
-    configId: string;
-  }
-): Promise<CustodyScopeSelection> {
-  return db.transaction(async (tx) => {
-    const owner = await tx.queryOne<{ id: string }>(
-      `SELECT id FROM projects
-       WHERE id = ? AND organization_id = ? AND status = 'active'
-       FOR UPDATE`,
-      [params.projectId, params.organizationId]
-    );
-    if (!owner) {
-      throw new SigningError("Custody target scope is unavailable", "NOT_FOUND");
-    }
-
-    const config = await tx.queryOne<{ id: string; provider: string }>(
-      `SELECT id, provider
-       FROM custody_configs
-       WHERE id = ?
-         AND organization_id = ?
-         AND project_id = ?
-         AND status = 'active'
-       FOR UPDATE`,
-      [params.configId, params.organizationId, params.projectId]
-    );
-    if (!config) {
-      throw new SigningError(
-        "Default config must be active and match the requested scope",
-        "NOT_FOUND"
-      );
-    }
-
-    const scopeDefault = await findProjectScopeDefault(
-      tx,
-      params.organizationId,
-      params.projectId,
-      true
-    );
-    if (!scopeDefault) {
-      await tx.execute(
-        `INSERT INTO custody_scope_defaults (
-           id, organization_id, project_id, default_custody_config_id
-         ) VALUES (?, ?, ?, ?)`,
-        [`csd_${crypto.randomUUID()}`, params.organizationId, params.projectId, params.configId]
-      );
-      return {
-        previousConfigId: null,
-        previousConnectionId: null,
-        selectedConfigId: params.configId,
-        selectedConnectionId: null,
-      };
-    }
-
-    const selectedConnection = scopeDefault.default_custody_connection_id
-      ? await tx.queryOne<{ provider: string }>(
-          `SELECT provider
-           FROM custody_connections
-           WHERE id = ? AND organization_id = ? AND project_id = ?`,
-          [scopeDefault.default_custody_connection_id, params.organizationId, params.projectId]
-        )
-      : null;
-    const clearConnection =
-      Boolean(scopeDefault.default_custody_connection_id) &&
-      selectedConnection?.provider !== config.provider;
-
-    await tx.execute(
-      `UPDATE custody_scope_defaults
-       SET default_custody_config_id = ?,
-           default_custody_connection_id = CASE WHEN ? THEN NULL
-                                                ELSE default_custody_connection_id END,
-           updated_at = sdp_iso_now()
-       WHERE id = ?`,
-      [params.configId, clearConnection, scopeDefault.id]
-    );
-    return {
-      previousConfigId: scopeDefault.default_custody_config_id,
-      previousConnectionId: scopeDefault.default_custody_connection_id,
-      selectedConfigId: params.configId,
-      selectedConnectionId: clearConnection ? null : scopeDefault.default_custody_connection_id,
-    };
-  });
-}
-
-export async function selectCustodyConnectionTarget(
-  db: DatabaseClient,
-  env: Env,
-  params: {
-    organizationId: string;
-    projectId: string;
-    connectionId: string;
-    provider?: CustodyProvider;
-  }
-): Promise<CustodyConnectionSelectionResult> {
-  return db.transaction(async (tx) => {
-    const project = await tx.queryOne<{ id: string }>(
-      `SELECT id FROM projects
-       WHERE id = ? AND organization_id = ? AND status = 'active'
-       FOR UPDATE`,
-      [params.projectId, params.organizationId]
-    );
-    if (!project) {
-      throw notFound("Custody Connection");
-    }
-
-    const connection = await tx.queryOne<SelectableConnectionRow>(
-      `SELECT c.id, c.provider, c.status, c.last_check_status,
-              c.provider_account_fingerprint,
-              c.default_custody_wallet_id, pc.status AS credential_status
-       FROM custody_connections c
-       JOIN provider_credentials pc ON pc.id = c.provider_credential_id
-       WHERE c.id = ?
-         AND c.organization_id = ?
-         AND c.project_id = ?
-       FOR UPDATE OF c, pc`,
-      [params.connectionId, params.organizationId, params.projectId]
-    );
-    if (!connection) {
-      throw notFound("Custody Connection");
-    }
-
-    const provider = parseCustodyProvider(connection.provider);
-    if (params.provider && params.provider !== provider) {
-      throw badRequest("Provider does not match Custody Connection");
-    }
-    assertCustodyProviderAvailable(env, provider, "byok");
-    await assertCustodyProviderEntitled(env, tx, params.organizationId, provider);
-
-    const wallet = connection.default_custody_wallet_id
-      ? await tx.queryOne<{ wallet_id: string; public_key: string; status: string }>(
-          `SELECT wallet_id, public_key, status
-           FROM custody_wallets
-           WHERE id = ? AND custody_connection_id = ?
-           FOR UPDATE`,
-          [connection.default_custody_wallet_id, connection.id]
-        )
-      : null;
-    if (
-      connection.status !== "active" ||
-      connection.last_check_status !== "success" ||
-      connection.credential_status !== "active" ||
-      connection.provider_account_fingerprint === null ||
-      wallet?.status !== "active"
-    ) {
-      throw conflict("Custody Connection is unavailable");
-    }
-
-    const scopeDefault = await findProjectScopeDefault(
-      tx,
-      params.organizationId,
-      params.projectId,
-      true
-    );
-    const result: CustodyConnectionSelectionResult = {
-      connectionId: connection.id,
-      provider,
-      walletId: wallet.wallet_id,
-      publicKey: wallet.public_key,
-      selection: {
-        previousConfigId: scopeDefault?.default_custody_config_id ?? null,
-        previousConnectionId: scopeDefault?.default_custody_connection_id ?? null,
-        selectedConfigId: scopeDefault?.default_custody_config_id ?? null,
-        selectedConnectionId: connection.id,
-      },
-    };
-    if (scopeDefault) {
-      await tx.execute(
-        `UPDATE custody_scope_defaults
-         SET default_custody_connection_id = ?, updated_at = sdp_iso_now()
-         WHERE id = ?`,
-        [connection.id, scopeDefault.id]
-      );
-    } else {
-      await tx.execute(
-        `INSERT INTO custody_scope_defaults (
-           id, organization_id, project_id, default_custody_connection_id
-         ) VALUES (?, ?, ?, ?)`,
-        [`csd_${crypto.randomUUID()}`, params.organizationId, params.projectId, connection.id]
-      );
-    }
-
-    return result;
-  });
 }
 
 function getTransactionSigner(
   adapter: SigningPort,
-  wallet: RuntimeWallet | undefined
+  wallet: RuntimeWallet
 ): Promise<TransactionSigner> {
   if (!isFullSigningPort(adapter)) {
     throw new SigningError(
@@ -1746,27 +1259,22 @@ function getTransactionSigner(
       "INVALID_REQUEST"
     );
   }
-  return adapter.getTransactionSigner(wallet?.walletId, wallet?.publicKey);
+  return adapter.getTransactionSigner(wallet.walletId, wallet.publicKey);
 }
 
 function connectionTargetSelect(): string {
   return `SELECT c.id AS connection_id, c.organization_id, c.project_id, c.provider,
                  c.status AS connection_status, c.last_check_status,
                  pc.status AS credential_status, c.provider_account_fingerprint,
-                 c.default_custody_wallet_id,
-                 default_wallet.wallet_id AS default_wallet_id,
-                 default_wallet.public_key AS default_wallet_public_key,
-                 default_wallet.status AS default_wallet_status,
                  w.wallet_id,
                  w.public_key AS wallet_public_key,
                  w.status AS wallet_status
           FROM custody_connections c
-          JOIN provider_credentials pc ON pc.id = c.provider_credential_id
+          JOIN provider_credentials pc
+            ON pc.id = c.provider_credential_id
+           AND pc.project_id = c.project_id
           JOIN custody_wallets w
-            ON w.custody_connection_id = c.id
-          LEFT JOIN custody_wallets default_wallet
-            ON default_wallet.id = c.default_custody_wallet_id
-           AND default_wallet.custody_connection_id = c.id`;
+            ON w.custody_connection_id = c.id`;
 }
 
 function configWalletSelect(): string {
@@ -1777,63 +1285,6 @@ function configWalletSelect(): string {
                  w.status AS wallet_status
           FROM custody_configs c
           JOIN custody_wallets w ON w.custody_config_id = c.id`;
-}
-
-async function findEffectiveConfig(
-  db: DatabaseExecutor,
-  organizationId: string,
-  projectId: string
-): Promise<ConfigRow | null> {
-  return db.queryOne<ConfigRow>(
-    `SELECT c.id, c.organization_id, c.project_id, c.provider,
-            c.config_encrypted, c.encryption_version,
-            c.default_wallet_id, c.status, c.created_at, c.updated_at
-     FROM custody_scope_defaults d
-     JOIN custody_configs c
-       ON c.id = d.default_custody_config_id
-      AND c.organization_id = d.organization_id
-      AND c.project_id = d.project_id
-     WHERE d.organization_id = ?
-       AND d.project_id = ?
-       AND c.status = 'active'
-     LIMIT 1`,
-    [organizationId, projectId]
-  );
-}
-
-async function findConfigByProvider(
-  db: DatabaseExecutor,
-  organizationId: string,
-  projectId: string,
-  provider: CustodyProvider
-): Promise<ConfigRow | null> {
-  return db.queryOne<ConfigRow>(
-    `SELECT id, organization_id, project_id, provider,
-            config_encrypted, encryption_version,
-            default_wallet_id, status, created_at, updated_at
-     FROM custody_configs
-     WHERE organization_id = ?
-       AND project_id = ?
-       AND provider = ?
-       AND status = 'active'
-     LIMIT 1`,
-    [organizationId, projectId, provider]
-  );
-}
-
-async function findProjectScopeDefault(
-  db: DatabaseExecutor,
-  organizationId: string,
-  projectId: string,
-  lock: boolean
-): Promise<ScopeDefaultRow | null> {
-  return db.queryOne<ScopeDefaultRow>(
-    `SELECT id, default_custody_config_id, default_custody_connection_id
-     FROM custody_scope_defaults
-     WHERE organization_id = ? AND project_id = ?
-     ${lock ? "FOR UPDATE" : ""}`,
-    [organizationId, projectId]
-  );
 }
 
 function mapConfig(row: ConfigRow, provider: CustodyProvider): SigningConfigRecord {
@@ -1851,18 +1302,6 @@ function mapConfig(row: ConfigRow, provider: CustodyProvider): SigningConfigReco
   };
 }
 
-function isUsableCredentialConnection(
-  row: ConnectionCredentialRow
-): row is ConnectionCredentialRow & {
-  default_wallet_id: string;
-} {
-  return (
-    isUsableCredentialOwner(row) &&
-    row.default_wallet_id !== null &&
-    row.default_wallet_status === "active"
-  );
-}
-
 function isUsableCredentialOwner(row: ConnectionCredentialRow): boolean {
   return (
     row.connection_status === "active" &&
@@ -1870,11 +1309,4 @@ function isUsableCredentialOwner(row: ConnectionCredentialRow): boolean {
     row.credential_status === "active" &&
     row.provider_account_fingerprint !== null
   );
-}
-
-function parseCustodyProvider(provider: string): CustodyProvider {
-  if (CUSTODY_PROVIDERS.includes(provider as CustodyProvider)) {
-    return provider as CustodyProvider;
-  }
-  throw internalError("Custody Connection provider is invalid");
 }

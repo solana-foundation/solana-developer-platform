@@ -83,7 +83,6 @@ export async function callerPartyAddresses(
   const wallets = await new CustodyRuntimeTargets(getDb(env), env, new Map()).listWallets({
     organizationId: request.organizationId,
     projectId: request.projectId,
-    includeAllProviders: true,
   });
 
   const visible =

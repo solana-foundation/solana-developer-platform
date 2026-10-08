@@ -3,6 +3,7 @@
  */
 
 import type { AllowedOperation } from "./allowed-operations";
+import type { CustodyWalletOwnerTarget } from "./custody";
 import type { ApiKeyRole, Permission } from "./permissions";
 import type { ApiKeyWalletPolicyBindingScope } from "./policy";
 
@@ -132,7 +133,7 @@ export interface CreateApiKeyRequest {
     walletId: string;
     permissions?: Permission[];
   }>;
-  provisionWallet?: boolean | { connectionId: string };
+  provisionWallet?: CustodyWalletOwnerTarget;
   walletLabel?: string;
   walletPurpose?: string;
 }

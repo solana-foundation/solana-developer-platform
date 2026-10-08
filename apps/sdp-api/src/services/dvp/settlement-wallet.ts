@@ -13,15 +13,20 @@
  * SDP's leg, never a reuse of it.
  */
 
+import type { SdpEnvironment } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { conflict, notFound } from "@/lib/errors";
+import type { CustodyWalletOwnerTarget } from "@/routes/custody/schemas";
 import { getLogger } from "@/runtime/logger";
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
 import type { Env } from "@/types/env";
 
 /** Shown in the custody wallet list so this wallet is not a mystery row. */
 const SETTLEMENT_WALLET_LABEL = "DvP settlement authority";
+
+const DVP_SETTLEMENT_PRIVY_UNAVAILABLE_REASON = "dvp_settlement_privy_unavailable";
 
 export interface DvpSettlementWallet {
   /** `custody_wallets.id` — what the signer resolver takes. */
@@ -40,12 +45,16 @@ interface Scope {
 /**
  * Returns the project's settlement wallet, provisioning one on first use.
  *
- * Safe to call concurrently. Two racing trade creations both mint a provider
- * wallet — that part cannot be made atomic, because it is a call out to
- * Fireblocks or Turnkey — but only one wins the insert, and the loser returns
- * the winner's wallet. The loser's wallet is left orphaned and logged rather
- * than deleted: it holds no funds, and deleting a freshly provisioned key on a
- * race is a worse failure mode than leaving an unused one behind.
+ * The new wallet is a Privy wallet under the backend {@link resolveDvpSettlementOwner}
+ * picks, decided from database reads before any provider call.
+ *
+ * Safe to call concurrently. Two racing trade creations both pick the same
+ * backend and both mint a provider wallet — that part cannot be made atomic,
+ * because it is a call out to the custody provider — but only one wins the
+ * insert, and the loser returns the winner's wallet. The loser's wallet is left
+ * orphaned and logged rather than deleted: it holds no funds, and deleting a
+ * freshly provisioned key on a race is a worse failure mode than leaving an
+ * unused one behind.
  *
  * @param env - API process environment.
  * @param auditContext - Authenticated initiating request for wallet creation audit.
@@ -75,11 +84,13 @@ export async function getOrCreateDvpSettlementWallet(
     );
   }
 
+  const owner = await resolveDvpSettlementOwner(env, scope);
   const provisioned = await provisionApiKeyWallet(getDb(env), env, {
     auditContext,
     creationReason: "dvp_settlement_authority",
     organizationId: scope.organizationId,
     projectId: scope.projectId,
+    owner,
     label: SETTLEMENT_WALLET_LABEL,
     // Marked so the wallets list treats it as privileged rather than a transfer wallet.
     purpose: "dvp_settlement_authority",
@@ -129,6 +140,109 @@ export async function getOrCreateDvpSettlementWallet(
     throw new Error("DvP settlement wallet was written but cannot be read back");
   }
   return stored;
+}
+
+/**
+ * Picks the Privy backend a new settlement wallet is created under. Production
+ * projects use their one active Privy BYOK connection. Sandbox projects use the
+ * Managed Privy config when one is active, else their one active Privy BYOK
+ * connection. Anything else is refused with 409 `dvp_settlement_privy_unavailable`.
+ *
+ * Decided from database reads alone and writes nothing, so a refusal precedes
+ * every provider call. A connection that stops being usable after this choice is
+ * refused by the connection wallet path's own runtime check, not re-checked here.
+ *
+ * @param env - API process environment.
+ * @param scope - Organization and project the trade belongs to.
+ * @returns The connection or Managed provider the settlement wallet lives under.
+ * @throws 409 when the project has no usable Privy backend or more than one active Privy connection.
+ */
+export async function resolveDvpSettlementOwner(
+  env: Env,
+  scope: Scope
+): Promise<CustodyWalletOwnerTarget> {
+  const db = getDb(env);
+  const [project, connections] = await Promise.all([
+    db
+      .prepare(
+        `SELECT p.environment,
+                EXISTS (
+                  SELECT 1 FROM custody_configs cfg
+                   WHERE cfg.organization_id = p.organization_id
+                     AND cfg.project_id = p.id
+                     AND cfg.provider = 'privy'
+                     AND cfg.status = 'active'
+                ) AS has_managed_privy
+           FROM projects p
+          WHERE p.id = ? AND p.organization_id = ?`
+      )
+      .bind(scope.projectId, scope.organizationId)
+      .first<{ environment: SdpEnvironment; has_managed_privy: boolean }>(),
+    db
+      .prepare(
+        `SELECT id
+           FROM custody_connections
+          WHERE organization_id = ?
+            AND project_id = ?
+            AND provider = 'privy'
+            AND status = 'active'
+          ORDER BY id`
+      )
+      .bind(scope.organizationId, scope.projectId)
+      .all<{ id: string }>(),
+  ]);
+  if (!project) {
+    throw notFound("Project");
+  }
+
+  const connectionIds = connections.results.map((connection) => connection.id);
+  switch (project.environment) {
+    case "production":
+      return singlePrivyConnection(scope, project.environment, connectionIds);
+    case "sandbox":
+      return project.has_managed_privy
+        ? { provider: "privy" }
+        : singlePrivyConnection(scope, project.environment, connectionIds);
+    default: {
+      const unhandled: never = project.environment;
+      throw new Error(`Unknown project environment: ${String(unhandled)}`);
+    }
+  }
+}
+
+/**
+ * The project's one active Privy connection as a settlement owner, refusing none or several.
+ *
+ * @param scope - Organization and project the trade belongs to.
+ * @param environment - The project's environment, for the refusal log.
+ * @param connectionIds - The project's active Privy connection IDs.
+ * @returns The single connection as a wallet owner.
+ * @throws 409 when the project has zero or several active Privy connections.
+ */
+function singlePrivyConnection(
+  scope: Scope,
+  environment: SdpEnvironment,
+  connectionIds: string[]
+): CustodyWalletOwnerTarget {
+  if (connectionIds.length === 1) {
+    return { connectionId: connectionIds[0] };
+  }
+  getLogger().warn(
+    {
+      organizationId: scope.organizationId,
+      projectId: scope.projectId,
+      environment,
+      activePrivyConnectionCount: connectionIds.length,
+      reason: DVP_SETTLEMENT_PRIVY_UNAVAILABLE_REASON,
+    },
+    "dvp_settlement_owner_unavailable"
+  );
+  throw conflict(
+    connectionIds.length === 0
+      ? "DvP settlement needs a Privy custody backend for this project"
+      : "DvP settlement needs exactly one active Privy connection for this project",
+    { reason: DVP_SETTLEMENT_PRIVY_UNAVAILABLE_REASON }
+  );
 }
 
 /** The mapped wallet id regardless of whether that wallet can still sign. */

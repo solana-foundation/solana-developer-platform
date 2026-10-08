@@ -267,9 +267,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
     walletPurpose,
   } = c.req.valid("json");
 
-  const connectionId =
-    typeof provisionWallet === "object" ? provisionWallet.connectionId : undefined;
-  const provisionWalletRequested = Boolean(provisionWallet);
+  const provisionWalletRequested = provisionWallet !== undefined;
 
   const projectId = requireProjectId(c);
 
@@ -279,7 +277,6 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
     signingWalletIds,
     walletBindings,
     provisionWallet: provisionWalletRequested,
-    connectionId,
   });
 
   const actorApiKey = c.get("apiKey");
@@ -299,7 +296,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
 
-  if (provisionWalletRequested) {
+  if (provisionWallet !== undefined) {
     if (!(actor.permissions.includes("*") || actor.permissions.includes("custody:admin"))) {
       throw new AppError("INSUFFICIENT_PERMISSIONS", "Required permissions: custody:admin");
     }
@@ -316,7 +313,7 @@ export const createApiKey = async (c: ValidatedBodyContext<typeof apiKeyCreateSc
         creationReason: "api_key",
         organizationId: actor.organizationId,
         projectId,
-        connectionId,
+        owner: provisionWallet,
         label: walletLabel,
         purpose: walletPurpose,
       });
