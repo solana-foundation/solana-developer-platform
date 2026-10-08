@@ -1,3 +1,4 @@
+import { CUSTODY_PROVIDERS } from "@sdp/types";
 import {
   approvalRequestStatusSchema as approvalRequestStatusSchemaBase,
   createWalletSchema as createWalletSchemaBase,
@@ -34,18 +35,9 @@ export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   example: { walletId: "privy_wallet_123" },
 });
 
+// The runtime validates against the same list (routes/custody/schemas.ts).
 export const orgCustodyProviderSchema = z
-  .enum([
-    "local",
-    "fireblocks",
-    "privy",
-    "coinbase_cdp",
-    "para",
-    "turnkey",
-    "dfns",
-    "ibm_haven",
-    "anchorage",
-  ])
+  .enum(CUSTODY_PROVIDERS)
   .openapi({ description: "Wallet signing provider.", example: "privy" });
 
 export const createCustodyWalletRequestSchema = createWalletSchemaBase
