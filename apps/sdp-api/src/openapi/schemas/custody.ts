@@ -1,3 +1,4 @@
+import { CUSTODY_PROVIDERS } from "@sdp/types";
 import {
   approvalRequestStatusSchema as approvalRequestStatusSchemaBase,
   connectionWalletOwnerSchema as connectionWalletOwnerSchemaBase,
@@ -29,17 +30,7 @@ export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
 });
 
 export const orgCustodyProviderSchema = z
-  .enum([
-    "local",
-    "fireblocks",
-    "privy",
-    "coinbase_cdp",
-    "para",
-    "turnkey",
-    "dfns",
-    "ibm_haven",
-    "anchorage",
-  ])
+  .enum(CUSTODY_PROVIDERS)
   .openapi({ description: "Wallet signing provider.", example: "privy" });
 
 const managedWalletOwnerOpenApiSchema = managedWalletOwnerSchemaBase
