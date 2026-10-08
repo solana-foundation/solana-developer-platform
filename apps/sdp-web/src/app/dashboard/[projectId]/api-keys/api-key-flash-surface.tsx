@@ -11,33 +11,35 @@ interface ApiKeyFlashResponse {
   flash: ApiKeyFlash | null;
 }
 
-let pendingFlashRequest: Promise<ApiKeyFlash | null> | null = null;
+const pendingFlashRequests = new Map<string, Promise<ApiKeyFlash | null>>();
 
 async function loadApiKeyFlash(flashPath: string): Promise<ApiKeyFlash | null> {
-  if (!pendingFlashRequest) {
-    // POST, not GET: reading the flash consumes the one-time cookie, and a
-    // GET with that side effect is exposed to prefetching and CSRF.
-    pendingFlashRequest = fetch(flashPath, {
-      method: "POST",
-      cache: "no-store",
-      credentials: "same-origin",
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          // 401 (logged out) and unexpected errors alike mean "no flash";
-          // the route already destroyed any pending cookie on its side.
-          return null;
-        }
-        const payload = (await response.json()) as ApiKeyFlashResponse;
-        return payload.flash;
-      })
-      .catch(() => null)
-      .finally(() => {
-        pendingFlashRequest = null;
-      });
+  const pending = pendingFlashRequests.get(flashPath);
+  if (pending !== undefined) {
+    return pending;
   }
-
-  return pendingFlashRequest;
+  // POST, not GET: reading the flash consumes the one-time cookie, and a
+  // GET with that side effect is exposed to prefetching and CSRF.
+  const request = fetch(flashPath, {
+    method: "POST",
+    cache: "no-store",
+    credentials: "same-origin",
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        // 401 (logged out) and unexpected errors alike mean "no flash";
+        // the route already destroyed any pending cookie on its side.
+        return null;
+      }
+      const payload = (await response.json()) as ApiKeyFlashResponse;
+      return payload.flash;
+    })
+    .catch(() => null)
+    .finally(() => {
+      pendingFlashRequests.delete(flashPath);
+    });
+  pendingFlashRequests.set(flashPath, request);
+  return request;
 }
 
 export function ApiKeyFlashSurface() {

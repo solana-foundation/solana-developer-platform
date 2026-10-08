@@ -203,7 +203,7 @@ describe("proxy request project", () => {
   });
 
   it("drops a browser-sent project on a page outside any project", async () => {
-    for (const path of ["/dashboard", "/dashboard/payments", "/dashboard//evil.com", "/settings"]) {
+    for (const path of ["/dashboard", "/dashboard//evil.com", "/settings"]) {
       const response = await runProxy(
         dashboardRequest(path, { method: "GET", headers: { "x-project-id": SANDBOX_PROJECT.id } })
       );
@@ -222,8 +222,21 @@ describe("proxy request project", () => {
       })
     );
 
+    expect(response.headers.get("location")).toBeNull();
     expect(forwardedProjectId(response)).toBe(SANDBOX_PROJECT.id);
     expect(overriddenRequestHeaderNames(response)).toContain("x-project-id");
+  });
+
+  it("sends a project-less dashboard page to the landing with its path and query", async () => {
+    const response = await runProxy(
+      dashboardRequest("/dashboard/payments/transactions?tab=x", { method: "GET", headers: {} })
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      `https://dashboard.example.com/dashboard?return_to=${encodeURIComponent("/dashboard/payments/transactions?tab=x")}`
+    );
+    expect(lastUsedCookies(response)).toEqual([]);
   });
 
   it("records a project-scoped page as the last-used project", async () => {
@@ -241,7 +254,7 @@ describe("proxy request project", () => {
   });
 
   it("records nothing outside a project-scoped page", async () => {
-    for (const path of ["/dashboard", "/dashboard/payments", "/api/dashboard/home/activity"]) {
+    for (const path of ["/dashboard", "/api/dashboard/home/activity"]) {
       const response = await runProxy(
         dashboardRequest(path, { method: "GET", headers: { "x-project-id": SANDBOX_PROJECT.id } })
       );

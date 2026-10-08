@@ -159,8 +159,7 @@ export default async function WalletPolicyPage({
   const [{ walletId }, resolvedSearchParams] = await Promise.all([params, searchParams]);
   const resolvedWalletId = decodeURIComponent(walletId);
   const initialRevisionId = firstSearchParam(resolvedSearchParams.revision);
-  const projectId = await requestProjectId();
-  const apiClient = await createSdpApiClient();
+  const [projectId, apiClient] = await Promise.all([requestProjectId(), createSdpApiClient()]);
   const [wallet, policyResult, walletAssets, issuedTokens, complianceScreeningEnabled] =
     await Promise.all([
       getWalletDetail(apiClient.request, resolvedWalletId),
