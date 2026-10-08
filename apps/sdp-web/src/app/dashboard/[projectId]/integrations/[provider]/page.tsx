@@ -267,7 +267,9 @@ export default async function IntegrationDetailPage({
 
   const [availability, connectedProviders] = await Promise.all([
     fetchProjectProviderAvailability(projectClient),
-    custodyEnabled ? getConnectedCustodyProviders(projectClient.request) : Promise.resolve([]),
+    custodyEnabled && isKnownCustodyProvider(provider)
+      ? getConnectedCustodyProviders(projectClient.request)
+      : Promise.resolve([]),
   ]);
   if (!isProviderAvailableForProject(availability, provider)) {
     notFound();

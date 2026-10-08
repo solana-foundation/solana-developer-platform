@@ -232,7 +232,8 @@ function WalletFixedField({ label, value }: { label: string; value: string }) {
  * Nothing is preselected.
  *
  * @param props - The component props.
- * @param props.disabled - Locks the choice while a BYOK submission awaits recovery.
+ * @param props.disabled - Locks the choice while a setup request is pending or a
+ *   BYOK submission awaits recovery.
  * @param props.mode - The chosen mode, or `null` before the user picks.
  * @param props.onModeChange - Called with the newly chosen mode.
  * @param props.t - The translator.
@@ -707,7 +708,7 @@ export function WalletSetupFlow({
               <>
                 {showModeChoice ? (
                   <CustodyModeField
-                    disabled={byokRecoveryLocked}
+                    disabled={byokRecoveryLocked || isPending}
                     mode={chosenMode}
                     onModeChange={(mode) => {
                       setChosenMode(mode);
