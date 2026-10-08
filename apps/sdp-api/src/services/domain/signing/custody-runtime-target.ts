@@ -676,13 +676,13 @@ export class CustodyRuntimeTargets {
       );
     }
 
+    this.assertTargetInReleaseChannel(target);
     if (target.kind === "config") {
       await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
       const adapter = await getConfigAdapter(organizationId, target.config);
       return getTransactionSigner(adapter, target.wallet);
     }
 
-    this.assertTargetInReleaseChannel(target);
     if (!target.isRuntimeAvailable || !target.wallet) {
       this.logUnavailable(target, "connection_unusable");
       throw conflict("Custody Connection is unavailable");

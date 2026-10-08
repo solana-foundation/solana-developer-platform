@@ -94,6 +94,13 @@ interface AuthorizedCredential {
   references: CredentialReferenceRow[];
 }
 
+interface AuthorizedCandidate {
+  candidate: LifecycleCredentialRow;
+  predecessor: LifecycleCredentialRow;
+  references: CredentialReferenceRow[];
+  candidateReferences: CredentialReferenceRow[];
+}
+
 interface DeactivationTarget extends AuthorizedCredential {
   authorizationReferences: CredentialReferenceRow[];
   predecessor: LifecycleCredentialRow | null;
@@ -433,8 +440,9 @@ export async function completeRotationCandidate(
   candidateId: string
 ): Promise<ProviderCredentialRotationResult> {
   const context = createContext(c);
-  const loaded = await loadAuthorizedCandidate(context, candidateId);
-  assertCustodyProviderAvailable(c.env, loaded.candidate.provider, "byok");
+  const candidate = await requireScopedLifecycleCredential(context, candidateId);
+  assertCustodyProviderAvailable(c.env, candidate.provider, "byok");
+  const loaded = await authorizeCandidate(context, candidate, false, ROTATION_UNAVAILABLE);
   assertCredentialCreationSettled(loaded.candidate);
   if (loaded.candidate.status === "active") {
     return rotationResult(loaded.candidate, "success");
@@ -969,14 +977,31 @@ function createContext(c: Context<{ Bindings: Env }>): LifecycleContext {
   };
 }
 
-async function loadAuthorizedCredential(
+/**
+ * Loads a lifecycle credential visible from the request's project: an organization-scoped
+ * credential, or one scoped to this project.
+ *
+ * @param context - The lifecycle request context.
+ * @param credentialId - The Provider Credential to load.
+ * @returns The credential row.
+ * @throws 404 when the credential is missing or scoped to another project.
+ */
+async function requireScopedLifecycleCredential(
   context: LifecycleContext,
   credentialId: string
-): Promise<AuthorizedCredential> {
+): Promise<LifecycleCredentialRow> {
   const credential = await requireLifecycleCredential(context, credentialId);
   if (credential.scope === "project" && credential.project_id !== context.projectId) {
     throw notFound("Provider Credential");
   }
+  return credential;
+}
+
+async function loadAuthorizedCredential(
+  context: LifecycleContext,
+  credentialId: string
+): Promise<AuthorizedCredential> {
+  const credential = await requireScopedLifecycleCredential(context, credentialId);
   const references = await context.store.listCredentialReferences(
     context.organizationId,
     credential.id
@@ -1006,16 +1031,32 @@ async function loadAuthorizedCandidate(
   candidateId: string,
   allowHistorical = false,
   unavailableMessage = ROTATION_UNAVAILABLE
-): Promise<{
-  candidate: LifecycleCredentialRow;
-  predecessor: LifecycleCredentialRow;
-  references: CredentialReferenceRow[];
-  candidateReferences: CredentialReferenceRow[];
-}> {
-  const candidate = await requireLifecycleCredential(context, candidateId);
-  if (candidate.scope === "project" && candidate.project_id !== context.projectId) {
-    throw notFound("Provider Credential");
-  }
+): Promise<AuthorizedCandidate> {
+  return authorizeCandidate(
+    context,
+    await requireScopedLifecycleCredential(context, candidateId),
+    allowHistorical,
+    unavailableMessage
+  );
+}
+
+/**
+ * Checks that a scoped credential is a stored rotation candidate the actor may act on,
+ * and loads its predecessor and the references that authorize it.
+ *
+ * @param context - The lifecycle request context.
+ * @param candidate - The candidate row, already loaded through the project-scope check.
+ * @param allowHistorical - Whether a candidate whose lineage has no active credential is accepted.
+ * @param unavailableMessage - The 409 message when the credential is not an eligible candidate.
+ * @returns The candidate, its predecessor, the authorizing references and the candidate's own references.
+ * @throws 409 when the credential is not an eligible rotation candidate.
+ */
+async function authorizeCandidate(
+  context: LifecycleContext,
+  candidate: LifecycleCredentialRow,
+  allowHistorical: boolean,
+  unavailableMessage: string
+): Promise<AuthorizedCandidate> {
   if (!candidate.rotated_from_provider_credential_id || candidate.source !== "stored") {
     throw conflict(unavailableMessage);
   }
