@@ -148,8 +148,10 @@ export async function rotateProviderCredential(
   idempotencyKey: string
 ): Promise<ProviderCredentialRotationResult> {
   const context = createContext(c);
-  const target = await loadAuthorizedCredential(context, currentCredentialId);
-  assertCustodyProviderAvailable(c.env, target.credential.provider, "byok");
+  const target = await authorizeCredential(
+    context,
+    await requireChannelScopedCredential(context, currentCredentialId)
+  );
   const fingerprint = await rotationFingerprint(context, currentCredentialId, fields);
   const existing = await context.store.findReplayByKey(context.organizationId, idempotencyKey);
   if (existing) {
@@ -440,8 +442,7 @@ export async function completeRotationCandidate(
   candidateId: string
 ): Promise<ProviderCredentialRotationResult> {
   const context = createContext(c);
-  const candidate = await requireScopedLifecycleCredential(context, candidateId);
-  assertCustodyProviderAvailable(c.env, candidate.provider, "byok");
+  const candidate = await requireChannelScopedCredential(context, candidateId);
   const loaded = await authorizeCandidate(context, candidate, false, ROTATION_UNAVAILABLE);
   assertCredentialCreationSettled(loaded.candidate);
   if (loaded.candidate.status === "active") {
@@ -572,8 +573,13 @@ export async function rollbackProviderCredential(
   currentCredentialId: string
 ): Promise<{ providerCredential: SafeProviderCredential }> {
   const context = createContext(c);
-  const current = await loadAuthorizedCurrent(context, currentCredentialId, ROLLBACK_UNAVAILABLE);
-  assertCustodyProviderAvailable(c.env, current.credential.provider, "byok");
+  const current = assertCurrentCredential(
+    await authorizeCredential(
+      context,
+      await requireChannelScopedCredential(context, currentCredentialId)
+    ),
+    ROLLBACK_UNAVAILABLE
+  );
   if (
     await context.store.findUnfinishedDirectChild(context.organizationId, current.credential.id)
   ) {
@@ -997,11 +1003,39 @@ async function requireScopedLifecycleCredential(
   return credential;
 }
 
-async function loadAuthorizedCredential(
+/**
+ * The one release-channel gate for lifecycle operations that can reach the Provider
+ * (rotate, complete-rotation, rollback). It loads the project-scoped row and refuses an
+ * out-of-channel (provider, byok) pair before authorization, any state check (409) and
+ * any Provider call. Teardown (deactivate, which also cancels a rotation) and the
+ * lifecycle read stay ungated, matching Connection deactivation and listing.
+ *
+ * @param context - The lifecycle request context.
+ * @param credentialId - The Provider Credential the operation acts on.
+ * @returns The credential row.
+ * @throws 404 when the credential is missing or scoped to another project.
+ * @throws 403 when the credential's (provider, byok) pair is outside the release channel.
+ */
+async function requireChannelScopedCredential(
   context: LifecycleContext,
   credentialId: string
-): Promise<AuthorizedCredential> {
+): Promise<LifecycleCredentialRow> {
   const credential = await requireScopedLifecycleCredential(context, credentialId);
+  assertCustodyProviderAvailable(context.c.env, credential.provider, "byok");
+  return credential;
+}
+
+/**
+ * Loads the references that bind a scoped credential and checks the actor may act on them.
+ *
+ * @param context - The lifecycle request context.
+ * @param credential - The credential row, already loaded through the project-scope check.
+ * @returns The credential with its references.
+ */
+async function authorizeCredential(
+  context: LifecycleContext,
+  credential: LifecycleCredentialRow
+): Promise<AuthorizedCredential> {
   const references = await context.store.listCredentialReferences(
     context.organizationId,
     credential.id
@@ -1010,12 +1044,40 @@ async function loadAuthorizedCredential(
   return { credential, references };
 }
 
+async function loadAuthorizedCredential(
+  context: LifecycleContext,
+  credentialId: string
+): Promise<AuthorizedCredential> {
+  return authorizeCredential(
+    context,
+    await requireScopedLifecycleCredential(context, credentialId)
+  );
+}
+
 async function loadAuthorizedCurrent(
   context: LifecycleContext,
   credentialId: string,
   unavailableMessage: string
 ): Promise<AuthorizedCredential> {
-  const authorized = await loadAuthorizedCredential(context, credentialId);
+  return assertCurrentCredential(
+    await loadAuthorizedCredential(context, credentialId),
+    unavailableMessage
+  );
+}
+
+/**
+ * Checks that an authorized credential is the active, stored credential behind at
+ * least one reference, the only state a rotation or rollback starts from.
+ *
+ * @param authorized - The credential with its references.
+ * @param unavailableMessage - The 409 message when the credential is not current.
+ * @returns The same authorized credential.
+ * @throws 409 when the credential is not current.
+ */
+function assertCurrentCredential(
+  authorized: AuthorizedCredential,
+  unavailableMessage: string
+): AuthorizedCredential {
   if (
     authorized.credential.status !== "active" ||
     authorized.credential.source !== "stored" ||
