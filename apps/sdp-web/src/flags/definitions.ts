@@ -290,6 +290,8 @@ export function defineDashboardFlags({
     "Payments' Contacts (the list, a new contact, one contact's page)"
   );
 
+  const newDesignPayDeposit = newDesignModuleFlag("pay-deposit", "Payments' Pay and Deposit flows");
+
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
   const rampProviderLightspark = rampProviderFlag("lightspark", "Lightspark");
   const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
@@ -313,6 +315,7 @@ export function defineDashboardFlags({
     earn,
     newDesign,
     newDesignContacts,
+    newDesignPayDeposit,
     rampProviderMoonpay,
     rampProviderLightspark,
     rampProviderBvnk,

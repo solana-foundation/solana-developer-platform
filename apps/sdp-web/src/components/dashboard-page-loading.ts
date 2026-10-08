@@ -36,6 +36,8 @@ import { PaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payme
 import {
   CounterpartyCreateSkeleton as LegacyCounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton as LegacyCounterpartyDetailSkeleton,
+  PaymentsDepositPageSkeleton as LegacyPaymentsDepositPageSkeleton,
+  PaymentsPayPageSkeleton as LegacyPaymentsPayPageSkeleton,
 } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import {
   CounterpartyCreateSkeleton,
@@ -69,6 +71,8 @@ interface PageLoadingProps {
 const LEGACY_DESIGN_PAGE_LOADING: Partial<
   Record<DashboardLoadingRoute, ComponentType<PageLoadingProps>>
 > = {
+  "payments-pay": LegacyPaymentsPayPageSkeleton,
+  "payments-deposit": LegacyPaymentsDepositPageSkeleton,
   "counterparty-directory": LegacyCounterpartyDirectoryLoading,
   "counterparty-create": LegacyCounterpartyCreateSkeleton,
   "counterparty-detail": LegacyCounterpartyDetailSkeleton,
