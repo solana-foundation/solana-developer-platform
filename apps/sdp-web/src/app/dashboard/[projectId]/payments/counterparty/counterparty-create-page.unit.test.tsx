@@ -1,9 +1,9 @@
 import type { ReactElement, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { dashboardRouter } from "@/test/dashboard-navigation";
 
 const mocks = vi.hoisted(() => ({
   createdCounterparty: null as { id: string; displayName: string } | null,
-  push: vi.fn(),
   submit: vi.fn(),
 }));
 
@@ -11,9 +11,7 @@ vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mocks.push }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("./counterparty-create-context", () => ({
   CounterpartyCreateProvider: ({ children }: { children: ReactNode }) => children,
@@ -40,8 +38,8 @@ function embeddedFooter(onCancel?: () => void): FooterElement {
 }
 
 beforeEach(() => {
+  dashboardRouter.push.mockClear();
   mocks.createdCounterparty = null;
-  mocks.push.mockReset();
   mocks.submit.mockReset();
 });
 
@@ -52,7 +50,7 @@ describe("counterparty create flow", () => {
     embeddedFooter(onCancel).props.children[0].props.onClick();
 
     expect(onCancel).toHaveBeenCalledOnce();
-    expect(mocks.push).not.toHaveBeenCalled();
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
   it("submits directly from the footer with no review step", () => {
@@ -66,7 +64,9 @@ describe("counterparty create flow", () => {
 
     frame.props.footer.props.children[0].props.onClick();
 
-    expect(mocks.push).toHaveBeenCalledWith("/dashboard/payments/counterparty");
+    expect(dashboardRouter.push).toHaveBeenCalledWith(
+      "/dashboard/prj_test_sandbox/payments/counterparty"
+    );
   });
 
   it("passes the dialog close action through the create page", () => {

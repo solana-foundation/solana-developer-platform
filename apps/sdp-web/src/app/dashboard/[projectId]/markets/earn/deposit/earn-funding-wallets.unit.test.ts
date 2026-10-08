@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setWindowPathname } from "@/test/window-location";
 import {
   type EarnFundingWallet,
   fetchFundingWallets,
@@ -6,6 +7,9 @@ import {
   refreshFundingWalletBalances,
 } from "./earn-funding-wallets";
 
+const PROJECT_HEADERS = new Headers({ "x-project-id": "prj_test_sandbox" });
+
+beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/markets/treasury-solutions"));
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -30,15 +34,12 @@ function stubResponse(body: unknown) {
 }
 
 describe("fetchFundingWallets", () => {
-  it("fails closed when a successful response omits the wallet collection", async () => {
-    stubResponse({ data: {} });
-    await expect(fetchFundingWallets()).rejects.toThrow("Invalid custody wallet response");
-  });
-
-  it("fails closed on a row missing the address a deposit is signed from", async () => {
-    // The cast this replaced let such a row through as a complete wallet.
-    const { publicKey: _omitted, ...incomplete } = wallet({ id: "active" });
-    stubResponse({ data: { wallets: [incomplete] } });
+  const { publicKey: _omitted, ...incomplete } = wallet({ id: "active" });
+  it.each([
+    ["omits the wallet collection", { data: {} }],
+    ["has a row missing the address a deposit is signed from", { data: { wallets: [incomplete] } }],
+  ])("fails closed when a successful response %s", async (_condition, body) => {
+    stubResponse(body);
     await expect(fetchFundingWallets()).rejects.toThrow("Invalid custody wallet response");
   });
 
@@ -64,7 +65,8 @@ describe("fetchFundingWallets", () => {
 
     await expect(fetchFundingWallets()).resolves.toEqual(wallets);
     expect(fetch).toHaveBeenCalledWith(
-      "/api/dashboard/wallets?view=summary&includeBalances=true&includeAllProviders=true"
+      "/api/dashboard/wallets?view=summary&includeBalances=true&includeAllProviders=true",
+      { headers: PROJECT_HEADERS }
     );
   });
 });
@@ -111,7 +113,7 @@ describe("live funding wallet balances", () => {
     await expect(fetchLiveFundingWalletBalance("wallet", 101)).resolves.toEqual([]);
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/dashboard/payments/wallets/wallet/balances?minimumSlot=101",
-      { cache: "no-store" }
+      { cache: "no-store", headers: PROJECT_HEADERS }
     );
   });
 
@@ -131,7 +133,7 @@ describe("live funding wallet balances", () => {
     await expect(fetchLiveFundingWalletBalance("wallet/live")).resolves.toEqual(balances);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/dashboard/payments/wallets/wallet%2Flive/balances",
-      { cache: "no-store" }
+      { cache: "no-store", headers: PROJECT_HEADERS }
     );
   });
 

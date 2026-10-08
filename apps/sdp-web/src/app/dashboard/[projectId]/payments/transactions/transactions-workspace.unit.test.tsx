@@ -24,6 +24,7 @@ vi.mock("@/lib/dashboard-fetch", () => ({
     status: 200,
   }),
 }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
 
 function renderWorkspace(filters: TransactionFilters) {
@@ -84,7 +85,7 @@ describe("TransactionsWorkspace", () => {
     renderWorkspace({ counterpartyId: "cpty_42", cursors: [] });
 
     expect(screen.getByText("cpty_42").closest("a")?.getAttribute("href")).toBe(
-      "/dashboard/payments/counterparty/cpty_42"
+      "/dashboard/prj_test_sandbox/payments/counterparty/cpty_42"
     );
     act(() => fireEvent.click(screen.getByLabelText("Clear counterparty filter")));
     expect(replace).toHaveBeenLastCalledWith(expect.objectContaining({ counterpartyId: null }));

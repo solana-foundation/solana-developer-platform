@@ -1,9 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import AllowlistLoading from "../allowlist/loading";
-import SettingsLoading from "../settings/loading";
+import AllowlistLoading from "./allowlist/loading";
 import EditApiKeyLoading from "./api-keys/[keyId]/edit/loading";
 import ApiKeysLoading from "./api-keys/loading";
 import NewApiKeyLoading from "./api-keys/new/loading";
@@ -15,6 +14,9 @@ import IssuanceCreateLoading from "./issuance/create/loading";
 import { IssuancePageSkeleton } from "./issuance/issuance-page-skeleton";
 import { IssuancePlaygroundLoading } from "./issuance/issuance-playground-loading";
 import PoliciesLoading from "./policies/loading";
+import SettingsLoading from "./settings/loading";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const EXPECTED_ROUTE_LAYOUTS = [
   "issuance-overview",
@@ -125,11 +127,9 @@ describe("operations route loading states", () => {
   it("reserves the settled issuance-detail header shell, mark and actions", () => {
     const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
 
-    // The 44px mark beside the name and ticker chip, in the settled header's card.
     expect(markup).toMatch(/size-11[^"]*rounded-full/);
     expect(markup).toContain("h-7 w-40 max-w-full sm:h-8 sm:w-52");
     expect(markup).toContain("h-5 w-16 rounded-md");
-    // The two action buttons in the top-right corner.
     expect(markup.match(/h-8 w-\d+ rounded-lg/g)).toHaveLength(2);
   });
 
@@ -137,7 +137,6 @@ describe("operations route loading states", () => {
     const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
 
     expect(markup).toContain('data-loading-meta-line="issuance-detail"');
-    // The internal token ID is no longer part of this screen.
     expect(markup).toContain("data-loading-address-row");
     expect(markup).not.toContain("data-loading-token-id-row");
   });
@@ -149,7 +148,6 @@ describe("operations route loading states", () => {
     expect(markup).toContain("data-loading-desktop-table");
     expect(markup).toContain("data-loading-metadata-rail");
     expect(markup).toContain("data-loading-api-key-table");
-    // Settings reserves space for onboarding and members, not the retired RPC form.
     expect(markup).not.toContain("data-loading-settings-form");
     expect(markup).toContain("data-loading-settings-onboarding");
     expect(markup).toContain("data-loading-settings-members");

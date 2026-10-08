@@ -1,22 +1,11 @@
-/**
- * One-time API key secret handoff: session binding, replay, logout, and
- * cookie-policy coverage for the sealed flash cookie and its delivery route.
- */
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PRODUCTION_PROJECT } from "@/test/projects";
+import { requestCookies, resetRequestProject, setPageRequest } from "@/test/request-project";
 
-const mocks = vi.hoisted(() => ({
-  cookies: vi.fn(),
-  auth: vi.fn(),
-}));
+const mocks = vi.hoisted(() => ({ auth: vi.fn() }));
 
-vi.mock("next/headers", () => ({
-  cookies: mocks.cookies,
-}));
-
-vi.mock("@clerk/nextjs/server", () => ({
-  auth: mocks.auth,
-}));
+vi.mock("next/headers", () => import("@/test/next-headers"));
+vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 
 import {
   API_KEY_FLASH_COOKIE,
@@ -41,57 +30,57 @@ const SECRET_FLASH: ApiKeyFlash = {
   keyPrefix: "sk_test_gen",
 };
 
-function jarWithCookie(value: string | undefined) {
-  return {
-    get: (name: string) =>
-      name === API_KEY_FLASH_COOKIE && value !== undefined ? { value } : undefined,
-  };
+const API_KEYS_COOKIE_PATH = `/dashboard/${PRODUCTION_PROJECT.id}/api-keys`;
+
+async function sealedSecretFlash(mintedAt: number): Promise<string> {
+  const sealed = await sealApiKeyFlash(SECRET_FLASH, SESSION, 120, mintedAt);
+  if (sealed === null) {
+    throw new Error("sealApiKeyFlash returned null with a sealing secret configured");
+  }
+  return sealed;
 }
 
 describe("api key flash handoff", () => {
   beforeEach(() => {
     vi.stubEnv("CLERK_SECRET_KEY", "sk_clerk_unit_test_secret");
+    resetRequestProject();
+    setPageRequest(`${API_KEYS_COOKIE_PATH}/flash`);
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    mocks.cookies.mockReset();
     mocks.auth.mockReset();
   });
 
   describe("seal / unseal", () => {
     it("round-trips for the session that minted it", async () => {
-      const sealed = await sealApiKeyFlash(SECRET_FLASH, SESSION, 120);
-      expect(sealed).not.toBeNull();
+      const sealed = await sealedSecretFlash(Date.now());
       expect(sealed).not.toContain(SECRET_FLASH.key);
 
-      const unsealed = await unsealApiKeyFlash(sealed as string, SESSION);
+      const unsealed = await unsealApiKeyFlash(sealed, SESSION);
       expect(unsealed).toEqual(SECRET_FLASH);
     });
 
     it("rejects a different session on the same browser", async () => {
-      const sealed = (await sealApiKeyFlash(SECRET_FLASH, SESSION, 120)) as string;
+      const sealed = await sealedSecretFlash(Date.now());
       expect(await unsealApiKeyFlash(sealed, OTHER_SESSION)).toBeNull();
     });
 
     it("rejects a different user", async () => {
-      const sealed = (await sealApiKeyFlash(SECRET_FLASH, SESSION, 120)) as string;
+      const sealed = await sealedSecretFlash(Date.now());
       expect(await unsealApiKeyFlash(sealed, OTHER_USER)).toBeNull();
     });
 
     it("rejects a replayed value after its expiry", async () => {
       const mintedAt = Date.now();
-      const sealed = (await sealApiKeyFlash(SECRET_FLASH, SESSION, 120, mintedAt)) as string;
+      const sealed = await sealedSecretFlash(mintedAt);
 
       expect(await unsealApiKeyFlash(sealed, SESSION, mintedAt + 119_000)).toEqual(SECRET_FLASH);
       expect(await unsealApiKeyFlash(sealed, SESSION, mintedAt + 121_000)).toBeNull();
     });
 
     it("rejects tampered values", async () => {
-      const sealed = (await sealApiKeyFlash(SECRET_FLASH, SESSION, 120)) as string;
-      // Flip a real ciphertext byte rather than the trailing base64url chars:
-      // the final chars can carry padding bits the decoder ignores, so editing
-      // them is sometimes a byte-level no-op that unseals fine (a CI flake).
+      const sealed = await sealedSecretFlash(Date.now());
       const [version, ivPart, cipherPart] = sealed.split(".");
       const cipherBytes = Buffer.from(cipherPart, "base64url");
       cipherBytes[0] ^= 0xff;
@@ -109,14 +98,17 @@ describe("api key flash handoff", () => {
   });
 
   describe("cookie policy", () => {
-    it("is HttpOnly, SameSite=Strict, path-scoped, and Secure in production", () => {
+    it("is HttpOnly, SameSite=Strict, scoped to the Project's API keys, and Secure in production", () => {
       vi.stubEnv("NODE_ENV", "production");
-      const options = apiKeyFlashCookieOptions(API_KEY_FLASH_SECRET_MAX_AGE_SECONDS);
+      const options = apiKeyFlashCookieOptions(
+        PRODUCTION_PROJECT.id,
+        API_KEY_FLASH_SECRET_MAX_AGE_SECONDS
+      );
 
       expect(options.httpOnly).toBe(true);
       expect(options.secure).toBe(true);
       expect(options.sameSite).toBe("strict");
-      expect(options.path).toBe("/dashboard/api-keys");
+      expect(options.path).toBe(API_KEYS_COOKIE_PATH);
       expect(options.maxAge).toBe(API_KEY_FLASH_SECRET_MAX_AGE_SECONDS);
     });
 
@@ -133,9 +125,9 @@ describe("api key flash handoff", () => {
 
   describe("POST /dashboard/api-keys/flash", () => {
     it("delivers the flash once to the minting session and consumes the cookie", async () => {
-      const sealed = (await sealApiKeyFlash(SECRET_FLASH, SESSION, 120)) as string;
+      const sealed = await sealedSecretFlash(Date.now());
       mocks.auth.mockResolvedValue(SESSION);
-      mocks.cookies.mockResolvedValue(jarWithCookie(sealed));
+      requestCookies.set(API_KEY_FLASH_COOKIE, sealed);
 
       const response = await POST();
       expect(response.status).toBe(200);
@@ -146,18 +138,17 @@ describe("api key flash handoff", () => {
       expect(cleared?.maxAge).toBe(0);
       expect(cleared?.httpOnly).toBe(true);
       expect(cleared?.sameSite).toBe("strict");
-      expect(cleared?.path).toBe("/dashboard/api-keys");
+      expect(cleared?.path).toBe(API_KEYS_COOKIE_PATH);
 
-      // Replay: the cookie is gone, so a second read returns nothing.
-      mocks.cookies.mockResolvedValue(jarWithCookie(undefined));
+      requestCookies.delete(API_KEY_FLASH_COOKIE);
       const replay = await POST();
       expect(await replay.json()).toEqual({ flash: null });
     });
 
     it("returns null to a different session and still destroys the cookie", async () => {
-      const sealed = (await sealApiKeyFlash(SECRET_FLASH, SESSION, 120)) as string;
+      const sealed = await sealedSecretFlash(Date.now());
       mocks.auth.mockResolvedValue(OTHER_SESSION);
-      mocks.cookies.mockResolvedValue(jarWithCookie(sealed));
+      requestCookies.set(API_KEY_FLASH_COOKIE, sealed);
 
       const response = await POST();
       expect(response.status).toBe(200);
@@ -167,9 +158,9 @@ describe("api key flash handoff", () => {
     });
 
     it("rejects logged-out requests and destroys any pending secret", async () => {
-      const sealed = (await sealApiKeyFlash(SECRET_FLASH, SESSION, 120)) as string;
+      const sealed = await sealedSecretFlash(Date.now());
       mocks.auth.mockResolvedValue({ sessionId: null, userId: null });
-      mocks.cookies.mockResolvedValue(jarWithCookie(sealed));
+      requestCookies.set(API_KEY_FLASH_COOKIE, sealed);
 
       const response = await POST();
       expect(response.status).toBe(401);
@@ -180,7 +171,7 @@ describe("api key flash handoff", () => {
 
     it("ignores legacy plaintext cookies", async () => {
       mocks.auth.mockResolvedValue(SESSION);
-      mocks.cookies.mockResolvedValue(jarWithCookie(JSON.stringify(SECRET_FLASH)));
+      requestCookies.set(API_KEY_FLASH_COOKIE, JSON.stringify(SECRET_FLASH));
 
       const response = await POST();
       expect(await response.json()).toEqual({ flash: null });
@@ -194,6 +185,7 @@ describe("api key flash handoff", () => {
       expect(await response.json()).toEqual({ ok: true });
       expect(response.cookies.get(API_KEY_FLASH_COOKIE)?.value).toBe("");
       expect(response.cookies.get(API_KEY_FLASH_COOKIE)?.maxAge).toBe(0);
+      expect(response.cookies.get(API_KEY_FLASH_COOKIE)?.path).toBe(API_KEYS_COOKIE_PATH);
     });
   });
 });

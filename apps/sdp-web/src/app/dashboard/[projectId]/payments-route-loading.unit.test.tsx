@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import PublicPayLoading from "../../pay/[token]/loading";
 import DashboardLoading from "./(home)/loading";
 import CounterpartyDetailLoading from "./payments/counterparty/[counterpartyId]/loading";
@@ -27,7 +29,6 @@ import RecurringPaymentsLoading from "./payments/recurring/loading";
 import PaymentRequestsLoading from "./payments/requests/loading";
 import TransactionsLoading from "./payments/transactions/loading";
 
-const navigationMock = vi.hoisted(() => ({ tab: null as null | "playground" }));
 const designMock = vi.hoisted(() => ({ newDesign: true }));
 
 vi.mock("@/components/new-design", () => ({
@@ -36,15 +37,7 @@ vi.mock("@/components/new-design", () => ({
     designMock.newDesign ? current : legacy,
 }));
 
-vi.mock("next/navigation", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("next/navigation")>();
-  return {
-    ...actual,
-    useRouter: () => ({ push: () => undefined }),
-    useSearchParams: () =>
-      new URLSearchParams(navigationMock.tab ? { tab: navigationMock.tab } : undefined),
-  };
-});
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const EXPECTED_ROUTE_LAYOUTS = [
   "home",
@@ -87,7 +80,7 @@ function renderScopedLoadingStates(): string {
 
 describe("home and payments route loading states", () => {
   afterEach(() => {
-    navigationMock.tab = null;
+    resetDashboardNavigation();
   });
 
   it("gives every scoped route a geometry-specific loading boundary", () => {
@@ -103,7 +96,6 @@ describe("home and payments route loading states", () => {
 
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(5);
     expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
-    // A contact's page and the two blocks of a schedule's page.
     expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(3);
     expect(markup).toContain("lg:grid-cols-2");
     expect(markup).toContain("size-[208px]");
@@ -167,17 +159,16 @@ describe("home and payments route loading states", () => {
   });
 
   it("keeps counterparty menu loading aligned with the selected tab", () => {
-    navigationMock.tab = "playground";
+    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/payments/requests?tab=playground`, {});
 
     const expectedPlayground = renderToStaticMarkup(<CounterpartyPlaygroundLoading />);
-    // Contacts sends a playground tab to the Payments playground, so it loads as its list.
     expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
       'data-loading-layout="counterparty-directory"'
     );
     expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(expectedPlayground);
     expect(expectedPlayground).toContain('data-loading-layout="counterparty-playground"');
 
-    navigationMock.tab = null;
+    resetDashboardNavigation();
     expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
       'data-loading-layout="counterparty-directory"'
     );
@@ -223,7 +214,6 @@ describe("home and payments route loading states", () => {
         columns.map((column) => `data-loading-column="${column}"`)
       );
       expect(markup.match(/data-loading-table-row=/g)).toHaveLength(5);
-      // The settled lists scroll sideways on narrow screens rather than swapping to cards.
       expect(markup).toContain("overflow-x-auto");
       expect(markup).toContain("min-w-[760px]");
       expect(markup).not.toContain("data-loading-mobile-rows");

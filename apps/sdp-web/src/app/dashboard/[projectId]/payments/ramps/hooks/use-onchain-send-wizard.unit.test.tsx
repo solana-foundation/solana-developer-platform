@@ -14,11 +14,11 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { dashboardRouter } from "@/test/dashboard-navigation";
 import { resetTransferIdempotencyStateForTests } from "../../transfer-idempotency";
 import { useOnchainSendWizard } from "./use-onchain-send-wizard";
 
 const mocks = vi.hoisted(() => ({
-  push: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
   toastLoading: vi.fn(() => "toast-id"),
@@ -28,11 +28,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isLoaded: false, orgId: null, userId: null }),
 }));
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/payments",
-  useRouter: () => ({ push: mocks.push, replace: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("sonner", () => ({
   toast: {
     error: mocks.toastError,
@@ -119,8 +115,6 @@ function wrapper({ children }: { children: ReactNode }) {
         }}
         serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
         projects={[]}
-        initialSelectedProjectId={null}
-        shouldRepairInitialProjectCookie={false}
       >
         <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
       </DashboardWorkspaceProvider>
@@ -128,7 +122,8 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderWizard(onExit = vi.fn()) {
+function renderWizard() {
+  const onExit = vi.fn();
   return {
     onExit,
     ...renderHook(
@@ -150,15 +145,12 @@ async function resolveAccounts() {
   await act(async () => accountsResponse?.());
 }
 
-async function prepareReview(result: ReturnType<typeof renderWizard>["result"], memo = "") {
+async function prepareReview(result: ReturnType<typeof renderWizard>["result"]) {
   await resolveAccounts();
   act(() => result.current.setField("accountId", cryptoAccount.id));
   await act(async () => result.current.handlePrimary());
   act(() => result.current.selectWallet("wallet-usdc"));
   act(() => result.current.setField("amount", "0.5"));
-  if (memo !== "") {
-    act(() => result.current.setField("memo", memo));
-  }
   await act(async () => result.current.handlePrimary());
 }
 
@@ -338,7 +330,7 @@ describe("useOnchainSendWizard", () => {
     act(() => result.current.setField("walletId", ""));
     expect(result.current.canProceed).toBe(true);
     await act(async () => result.current.handlePrimary());
-    expect(mocks.push).toHaveBeenCalledWith("/dashboard/payments");
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/payments");
     expect(transferPosts()).toHaveLength(1);
   });
 

@@ -82,9 +82,8 @@ export function DashboardHeaderAction({
 }) {
   const projectHref = useProjectHref();
   const Icon = action.icon === undefined ? null : action.icon === "plus" ? PlusIcon : DownloadIcon;
-  const href = projectHref(
-    action.withCurrentQuery && search ? `${action.href}?${search}` : action.href
-  );
+  const target = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
+  const href = action.download ? target : projectHref(target);
   const content = (
     <>
       {Icon === null ? null : <Icon className="size-4" aria-hidden="true" />}

@@ -6,7 +6,6 @@ import type {
   EarnStrategy,
 } from "@sdp/types";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "../test-i18n";
 import { EmbeddedYieldDashboard } from "./embedded-yield-dashboard";
@@ -22,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   summaryOptions: vi.fn<(options?: { detailsVisible?: boolean }) => void>(),
 }));
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/use-solana-cluster", () => ({
   useSolanaCluster: () => mocks.cluster,
 }));
@@ -82,8 +82,12 @@ function positionFixture(
   };
 }
 
-function renderWithEnglish(children: ReactNode) {
-  return render(<EnglishTestI18n>{children}</EnglishTestI18n>);
+function renderDashboard() {
+  return render(
+    <EnglishTestI18n>
+      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
+    </EnglishTestI18n>
+  );
 }
 
 afterEach(() => {
@@ -135,13 +139,11 @@ describe("EmbeddedYieldDashboard", () => {
       ],
     };
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
 
     expect(
       screen.getByRole("link", { name: "Integrate Embedded Yield" }).getAttribute("href")
-    ).toBe("/dashboard/markets/embedded-yield/configure");
+    ).toBe("/dashboard/prj_test_sandbox/markets/embedded-yield/configure");
     expect(screen.getByText("USDC Core Yield")).toBeTruthy();
     expect(screen.getByText("$1,250.42")).toBeTruthy();
     expect(screen.getByText("Instant")).toBeTruthy();
@@ -192,9 +194,7 @@ describe("EmbeddedYieldDashboard", () => {
       ],
     };
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
 
     const strategyRow = screen.getByRole("row", {
       name: "View customer wallets for USDC Core Yield",
@@ -235,9 +235,7 @@ describe("EmbeddedYieldDashboard", () => {
       ],
     };
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
     fireEvent.click(screen.getByRole("row", { name: "View customer wallets for Veda USDC" }));
 
     const details = screen.getByRole("region", { name: "Veda USDC" });
@@ -272,9 +270,7 @@ describe("EmbeddedYieldDashboard", () => {
       ],
     };
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
     fireEvent.click(screen.getByRole("row", { name: "View customer wallets for Veda USDC" }));
 
     const details = screen.getByRole("region", { name: "Veda USDC" });
@@ -312,9 +308,7 @@ describe("EmbeddedYieldDashboard", () => {
       ],
     };
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
     fireEvent.click(screen.getByRole("row", { name: "View customer wallets for Veda USDC" }));
 
     const details = screen.getByRole("region", { name: "Veda USDC" });
@@ -344,9 +338,7 @@ describe("EmbeddedYieldDashboard", () => {
       ],
     };
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
 
     expect(screen.getByText(/Live values are unavailable for 1 position/)).toBeTruthy();
     expect(screen.getByText("Unavailable")).toBeTruthy();
@@ -369,9 +361,7 @@ describe("EmbeddedYieldDashboard", () => {
       ],
       totalsByStrategy: [],
     };
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
 
     expect(screen.getByText("Customer Portfolio")).toBeTruthy();
     expect(document.querySelector("[aria-busy='true']")).toBeNull();
@@ -397,9 +387,7 @@ describe("EmbeddedYieldDashboard", () => {
       totalsByStrategy: [],
     };
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
 
     const chart = document.querySelector("[data-portfolio-chart='assets']");
     if (!(chart instanceof HTMLElement)) throw new Error("Expected asset portfolio chart");
@@ -448,9 +436,7 @@ describe("EmbeddedYieldDashboard", () => {
       ],
     };
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
 
     expect(
       screen.getByRole("img", {
@@ -473,9 +459,7 @@ describe("EmbeddedYieldDashboard", () => {
       totalsByStrategy: [],
     };
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
 
     expect(screen.getByRole("status").textContent).toBe("");
   });
@@ -489,9 +473,7 @@ describe("EmbeddedYieldDashboard", () => {
       totalsByStrategy: [],
     };
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
 
     expect(screen.queryByRole("list", { name: "Embedded Yield integration path" })).toBeNull();
     expect(screen.getByRole("link", { name: "Integrate" })).toBeTruthy();
@@ -508,9 +490,7 @@ describe("EmbeddedYieldDashboard", () => {
     };
     mocks.error = new Error("refresh failed");
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
 
     expect(screen.getByText("Your customer portfolio will show here")).toBeTruthy();
     expect(screen.getByText(/Showing the last complete portfolio/)).toBeTruthy();
@@ -559,9 +539,7 @@ describe("EmbeddedYieldDashboard", () => {
         },
       ],
     };
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
     expect(mocks.summaryOptions).toHaveBeenLastCalledWith({ detailsVisible: false });
     fireEvent.click(screen.getByRole("row", { name: "View customer wallets for USDC Core Yield" }));
     expect(mocks.summaryOptions).toHaveBeenLastCalledWith({ detailsVisible: true });
@@ -633,9 +611,7 @@ describe("EmbeddedYieldDashboard", () => {
       },
     ]);
 
-    renderWithEnglish(
-      <EmbeddedYieldDashboard configureHref="/dashboard/markets/embedded-yield/configure" />
-    );
+    renderDashboard();
     fireEvent.click(screen.getByRole("row", { name: "View customer wallets for USDC Core Yield" }));
 
     const explorerLink = await screen.findByRole("link", {

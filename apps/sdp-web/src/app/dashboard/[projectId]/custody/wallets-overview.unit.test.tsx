@@ -28,6 +28,7 @@ vi.mock("@/app/dashboard/[projectId]/custody/wallet-address-copy-button", () => 
   WalletMetaValue: ({ displayValue }: { displayValue: string }) => <span>{displayValue}</span>,
 }));
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: ReactNode; href: string }) => (
     <a href={href}>{children}</a>

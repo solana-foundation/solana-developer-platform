@@ -1,5 +1,6 @@
 import { address } from "@solana/kit";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setWindowPathname } from "@/test/window-location";
 import {
   createTransfer,
   createTransferBatch,
@@ -17,37 +18,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("Payments write requests", () => {
+  beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/pay"));
   afterEach(() => vi.unstubAllGlobals());
-
-  it("creates a transfer with the exact custody wallet id", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(
-        jsonResponse({ data: { transfer: { id: "trf_1", status: "pending", signature: null } } })
-      );
-    vi.stubGlobal("fetch", fetch);
-
-    await createTransfer(
-      {
-        transferId: "xfr_1",
-        sourceCustodyWalletId: "cwlt_1",
-        destination: "destination",
-        token: address("So11111111111111111111111111111111111111112"),
-        amount: "1",
-      },
-      t,
-      null
-    );
-
-    const init = fetch.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({
-      transferId: "xfr_1",
-      sourceCustodyWalletId: "cwlt_1",
-      destination: "destination",
-      token: "So11111111111111111111111111111111111111112",
-      amount: "1",
-    });
-  });
 
   const transferInput = {
     sourceCustodyWalletId: "cwlt_1",
@@ -56,7 +28,7 @@ describe("Payments write requests", () => {
     amount: "1",
   };
 
-  it("sends the idempotency key as a header only when there is one", async () => {
+  it("sends the exact custody wallet id, the tab's Project, and a key only when there is one", async () => {
     const fetch = vi
       .fn()
       .mockImplementation(async () =>
@@ -64,15 +36,23 @@ describe("Payments write requests", () => {
       );
     vi.stubGlobal("fetch", fetch);
 
-    await createTransfer(transferInput, t, "idem_transfer_1");
+    await createTransfer({ ...transferInput, transferId: "xfr_1" }, t, "idem_transfer_1");
     await createTransfer(transferInput, t, null);
 
+    const init = fetch.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({ ...transferInput, transferId: "xfr_1" });
+
     const [keyed, unkeyed] = fetch.mock.calls.map(([, init]) => (init as RequestInit).headers);
-    expect(keyed).toEqual({
-      "Content-Type": "application/json",
-      "Idempotency-Key": "idem_transfer_1",
-    });
-    expect(unkeyed).toEqual({ "Content-Type": "application/json" });
+    expect(keyed).toEqual(
+      new Headers({
+        "Content-Type": "application/json",
+        "Idempotency-Key": "idem_transfer_1",
+        "x-project-id": "prj_test_sandbox",
+      })
+    );
+    expect(unkeyed).toEqual(
+      new Headers({ "Content-Type": "application/json", "x-project-id": "prj_test_sandbox" })
+    );
   });
 
   it("reads a policy hold as a pending approval, not a failed transfer", async () => {

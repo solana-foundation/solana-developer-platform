@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   getBootstrapApiBaseUrl,
   provisionWithAdminSession,
   seedCounterpartyWithSolanaAccount,
-  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 import { bootstrapLocalPaymentFixtures } from "../support/local-issuance-bootstrap";
 
@@ -57,16 +57,13 @@ test.describe
       });
     });
 
-    test.beforeEach(async ({ page }) => {
-      await seedProjectCookie(page, bootstrapProjectId);
-    });
-
     test("creates and displays a recurring payment", async ({ page }) => {
-      await page.goto("/dashboard/payments");
+      const recurringHref = projectHref(bootstrapProjectId, "/dashboard/payments/recurring");
+      await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments"));
 
       await expect(page.getByRole("link", { name: "Recurring", exact: true })).toBeVisible();
       await page.getByRole("link", { name: "Recurring", exact: true }).click();
-      await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
+      await expect(page).toHaveURL(recurringHref);
       await expect(
         page.locator("main").getByRole("heading", { name: "Recurring payments" }).first()
       ).toBeVisible();
@@ -75,7 +72,7 @@ test.describe
       ).toBeVisible({ timeout: 120_000 });
 
       await page.getByRole("link", { name: "Create recurring payment" }).first().click();
-      await expect(page).toHaveURL(/\/dashboard\/payments\/recurring\/create$/);
+      await expect(page).toHaveURL(`${recurringHref}/create`);
 
       const app = page.locator("main");
       const next = app.getByRole("button", { name: "Next", exact: true });
@@ -119,7 +116,7 @@ test.describe
       await expect(createButton).toBeEnabled({ timeout: 120_000 });
       await createButton.click();
 
-      await expect(page).toHaveURL(/\/dashboard\/payments\/recurring\/prp_/);
+      await expect(page).toHaveURL(new RegExp(`${recurringHref}/prp_`));
       recurringPaymentId = page.url().split("/").pop() ?? "";
       expect(recurringPaymentId).toMatch(/^prp_/);
       await expect(page.getByText(recurringCounterpartyName).first()).toBeVisible();
@@ -130,7 +127,7 @@ test.describe
       await expect(page.getByText("Every day", { exact: true }).first()).toBeVisible();
 
       await page.getByRole("link", { name: "Back to recurring payments" }).click();
-      await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
+      await expect(page).toHaveURL(recurringHref);
       const recurringRow = page
         .getByRole("button")
         .filter({ hasText: recurringCounterpartyName })
@@ -140,9 +137,7 @@ test.describe
       await expect(recurringRow).toContainText(`7.50 ${recurringTokenSymbol}`);
 
       await recurringRow.getByText(`7.50 ${recurringTokenSymbol}`, { exact: true }).click();
-      await expect(page).toHaveURL(
-        new RegExp(`/dashboard/payments/recurring/${recurringPaymentId}$`)
-      );
+      await expect(page).toHaveURL(`${recurringHref}/${recurringPaymentId}`);
       await expect(
         page.locator("main").getByRole("heading", { level: 1, name: "Recurring payment" })
       ).toBeVisible();

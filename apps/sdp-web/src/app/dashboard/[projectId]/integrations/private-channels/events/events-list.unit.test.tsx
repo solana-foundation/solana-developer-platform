@@ -127,10 +127,6 @@ function renderEvents(
   );
 }
 
-/**
- * Every event renders twice — a stacked list below `lg`, a table from `lg` up — and
- * jsdom applies no CSS, so row assertions have to name the layout they mean.
- */
 function eventTable() {
   return within(screen.getByRole("table"));
 }
@@ -260,7 +256,6 @@ describe("EventsList", () => {
       ])
     );
 
-    // Each name sits directly above the reference it names.
     const labels = rows.map(([label]) => label);
     expect(labels.indexOf("Channel")).toBe(labels.indexOf("Channel ID") - 1);
     expect(labels.indexOf("Gateway")).toBe(labels.indexOf("Instance ID") - 1);
@@ -322,7 +317,6 @@ describe("EventsList", () => {
       await loadMessages("fr")
     );
 
-    // FR private-channels catalog is release-bot owned; product branches fall back to EN copy.
     const summary = [...screen.getByRole("table").querySelectorAll("span")].find((element) =>
       element.textContent?.includes("USDC from")
     );
@@ -366,7 +360,6 @@ describe("EventsList", () => {
 
     await waitFor(() => {
       expect(mocks.loadProjectEventsAction).toHaveBeenNthCalledWith(1, {
-        projectId: "project_test",
         family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
         limit: 50,
       });
@@ -378,7 +371,6 @@ describe("EventsList", () => {
 
     await waitFor(() => {
       expect(mocks.loadProjectEventsAction).toHaveBeenNthCalledWith(2, {
-        projectId: "project_test",
         before: "cursor_transfer",
         family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
         limit: 50,

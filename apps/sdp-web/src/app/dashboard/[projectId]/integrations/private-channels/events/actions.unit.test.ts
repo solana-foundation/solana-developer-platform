@@ -6,7 +6,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createProjectBoundSdpApiClient: vi.fn(),
+  createSdpApiClient: vi.fn(),
   fetchPrivateChannelEvents: vi.fn(),
 }));
 
@@ -14,7 +14,7 @@ vi.mock("@/lib/private-channels", () => ({
   fetchPrivateChannelEvents: mocks.fetchPrivateChannelEvents,
 }));
 vi.mock("@/lib/sdp-api", () => ({
-  createProjectBoundSdpApiClient: mocks.createProjectBoundSdpApiClient,
+  createSdpApiClient: mocks.createSdpApiClient,
 }));
 
 import { loadProjectEventsAction } from "./actions";
@@ -30,15 +30,14 @@ describe("loadProjectEventsAction", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createProjectBoundSdpApiClient.mockResolvedValue(client);
+    mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
-  it("binds the request to the requested project and forwards typed filters", async () => {
+  it("loads through the request's Project client and forwards typed filters", async () => {
     mocks.fetchPrivateChannelEvents.mockResolvedValue(envelope);
 
     await expect(
       loadProjectEventsAction({
-        projectId: "project_mounted",
         before: "cursor_1",
         limit: 25,
         family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
@@ -46,7 +45,7 @@ describe("loadProjectEventsAction", () => {
       })
     ).resolves.toEqual({ ok: true, data: envelope });
 
-    expect(mocks.createProjectBoundSdpApiClient).toHaveBeenCalledWith("project_mounted");
+    expect(mocks.createSdpApiClient).toHaveBeenCalledWith();
     expect(mocks.fetchPrivateChannelEvents).toHaveBeenCalledWith(client, {
       before: "cursor_1",
       limit: 25,
@@ -55,22 +54,15 @@ describe("loadProjectEventsAction", () => {
     });
   });
 
-  it("returns a recoverable error result", async () => {
-    mocks.fetchPrivateChannelEvents.mockRejectedValue(new Error("Gateway unavailable"));
+  it.each([
+    ["the events request", mocks.fetchPrivateChannelEvents],
+    ["the client", mocks.createSdpApiClient],
+  ])("returns a recoverable error result when %s fails", async (_, failing) => {
+    failing.mockRejectedValue(new Error("Gateway unavailable"));
 
-    const result = await loadProjectEventsAction({ projectId: "project_mounted" });
-
-    expect(result).toMatchObject({ ok: false });
-  });
-
-  it("fails closed when the requested project is not available for the organization", async () => {
-    mocks.createProjectBoundSdpApiClient.mockRejectedValue(
-      new Error("Requested project is not available for this organization")
-    );
-
-    const result = await loadProjectEventsAction({ projectId: "project_unlisted" });
-
-    expect(result).toMatchObject({ ok: false });
-    expect(mocks.fetchPrivateChannelEvents).not.toHaveBeenCalled();
+    await expect(loadProjectEventsAction({})).resolves.toEqual({
+      ok: false,
+      message: "Gateway unavailable",
+    });
   });
 });

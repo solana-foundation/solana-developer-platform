@@ -8,6 +8,7 @@ import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { builtinEnvironments, type EnvironmentReturn } from "vitest/environments";
+import { dashboardRouter } from "@/test/dashboard-navigation";
 import { CounterpartyDetailWorkspace } from "./counterparty-detail-workspace.redesign";
 import { groupProviderAccounts } from "./counterparty-provider-accounts.utils";
 
@@ -37,11 +38,7 @@ vi.mock("@/i18n/provider", () => ({
 
 vi.mock("next/image", () => ({ default: () => null }));
 
-const routerRefresh = vi.hoisted(() => vi.fn());
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: routerRefresh }),
-  usePathname: () => "/dashboard/payments/counterparty/cpty_test",
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: ReactNode; href: string }) => (
@@ -69,6 +66,7 @@ function providerAccount(
     ...overrides,
   };
 }
+
 describe("groupProviderAccounts", () => {
   it("groups funding-wallet rows per provider with the customer link lifted onto the group", () => {
     const groups = groupProviderAccounts([
@@ -413,7 +411,7 @@ describe("counterparty provider accounts table", () => {
     );
     if (retry === undefined) throw new Error("Expected a retry button");
     await act(async () => retry.click());
-    expect(routerRefresh).toHaveBeenCalled();
+    expect(dashboardRouter.refresh).toHaveBeenCalled();
     // The refresh hands the page the read it retried.
     await act(async () => root.render(workspace({ addresses: [savedAddress("cpa_1")] })));
     const text = container.textContent ?? "";

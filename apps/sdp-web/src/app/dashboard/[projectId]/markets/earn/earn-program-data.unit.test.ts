@@ -9,7 +9,8 @@ import type {
   EarnVaultWithdrawal,
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setWindowPathname } from "@/test/window-location";
 import {
   appendVaultPositionsRead,
   createEarnVaultDeposit,
@@ -116,6 +117,7 @@ function stubCatalogue(total: number, pageSize = 100) {
   return { calls, fetchMock };
 }
 
+beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/markets/treasury-solutions"));
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -656,6 +658,7 @@ describe("createEarnVaultDeposit", () => {
     const [, options] = fetchMock.mock.calls[0] ?? [];
     const headers = new Headers(options?.headers);
     expect(headers.get("Idempotency-Key")).toBe("deposit-key");
+    expect(headers.get("x-project-id")).toBe("prj_test_sandbox");
     expect(JSON.parse(String(options?.body))).toEqual({
       strategyId: "strategy_1",
       custodyWalletId: "cwlt_1",

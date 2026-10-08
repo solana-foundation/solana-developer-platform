@@ -17,7 +17,7 @@ import { InboundRows } from "./dvp-inbound-rows";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 
 // Each row owns a funding action, which reaches for the router on mount.
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 // The fund action links its transaction on the project's cluster, read from the dashboard.
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
 
@@ -103,7 +103,7 @@ describe("InboundRows", () => {
     );
 
     expect(within(container).getByRole("link", { name: "Funding desk" }).getAttribute("href")).toBe(
-      "/dashboard/wallets/cwlt_action"
+      "/dashboard/prj_test_sandbox/wallets/cwlt_action"
     );
     fireEvent.click(within(container).getByRole("button", { name: "Fund your leg" }));
 

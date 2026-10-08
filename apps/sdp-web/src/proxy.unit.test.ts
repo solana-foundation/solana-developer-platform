@@ -1,6 +1,27 @@
-import { NextRequest } from "next/server";
-import { describe, expect, it } from "vitest";
-import { isPublicRoute, rejectCrossSiteWrite } from "./proxy";
+import { NextFetchEvent, NextRequest } from "next/server";
+import { describe, expect, it, vi } from "vitest";
+
+const clerk = vi.hoisted(() => ({ protect: vi.fn(async () => undefined) }));
+
+vi.mock("@clerk/nextjs/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@clerk/nextjs/server")>();
+  return {
+    ...actual,
+    clerkMiddleware:
+      (
+        handler: (
+          auth: { protect: typeof clerk.protect },
+          request: NextRequest,
+          event: NextFetchEvent
+        ) => unknown
+      ) =>
+      (request: NextRequest, event: NextFetchEvent) =>
+        handler({ protect: clerk.protect }, request, event),
+  };
+});
+
+import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
+import { isPublicRoute, proxy, rejectCrossSiteWrite } from "./proxy";
 
 describe("public web routes", () => {
   it("keeps the workspace loading transition available during bootstrap", () => {
@@ -118,5 +139,114 @@ describe("rejectCrossSiteWrite", () => {
         write("/api/vendor/moneygram/sdk/v1", { origin: "https://attacker.example" })
       )
     ).toBeNull();
+  });
+});
+
+describe("proxy request project", () => {
+  async function runProxy(request: NextRequest): Promise<Response> {
+    const result = await proxy(
+      request,
+      new NextFetchEvent({ request, page: "/", context: undefined })
+    );
+    if (!(result instanceof Response)) {
+      throw new Error(`proxy returned no response for ${request.nextUrl.pathname}`);
+    }
+    return result;
+  }
+
+  function dashboardRequest(
+    path: string,
+    init: { method: string; headers: Record<string, string> }
+  ) {
+    return new NextRequest(`https://dashboard.example.com${path}`, init);
+  }
+
+  function forwardedProjectId(response: Response): string | null {
+    return response.headers.get("x-middleware-request-x-project-id");
+  }
+
+  function overriddenRequestHeaderNames(response: Response): string[] {
+    const names = response.headers.get("x-middleware-override-headers");
+    if (names === null) {
+      throw new Error("proxy forwarded no request headers");
+    }
+    return names.split(",");
+  }
+
+  function lastUsedCookies(response: Response): string[] {
+    return response.headers
+      .getSetCookie()
+      .filter((cookie) => cookie.startsWith("sdp_selected_project_id="));
+  }
+
+  it("scopes a page render to the project in its URL over a browser-sent one", async () => {
+    const response = await runProxy(
+      dashboardRequest(`/dashboard/${SANDBOX_PROJECT.id}/api-keys`, {
+        method: "GET",
+        headers: { "x-project-id": PRODUCTION_PROJECT.id },
+      })
+    );
+
+    expect(response.headers.get("location")).toBeNull();
+    expect(forwardedProjectId(response)).toBe(SANDBOX_PROJECT.id);
+  });
+
+  it("scopes a server action to the project of the tab that posted it", async () => {
+    const response = await runProxy(
+      dashboardRequest(`/dashboard/${PRODUCTION_PROJECT.id}`, {
+        method: "POST",
+        headers: { "next-action": "action_test" },
+      })
+    );
+
+    expect(forwardedProjectId(response)).toBe(PRODUCTION_PROJECT.id);
+  });
+
+  it("drops a browser-sent project on a page outside any project", async () => {
+    for (const path of ["/dashboard", "/dashboard/payments", "/dashboard//evil.com", "/settings"]) {
+      const response = await runProxy(
+        dashboardRequest(path, { method: "GET", headers: { "x-project-id": SANDBOX_PROJECT.id } })
+      );
+
+      expect(response.headers.get("location")).toBeNull();
+      expect(forwardedProjectId(response)).toBeNull();
+      expect(overriddenRequestHeaderNames(response)).not.toContain("x-project-id");
+    }
+  });
+
+  it("keeps the project a browser call to the dashboard backend sent", async () => {
+    const response = await runProxy(
+      dashboardRequest("/api/dashboard/home/activity", {
+        method: "GET",
+        headers: { "x-project-id": SANDBOX_PROJECT.id },
+      })
+    );
+
+    expect(forwardedProjectId(response)).toBe(SANDBOX_PROJECT.id);
+    expect(overriddenRequestHeaderNames(response)).toContain("x-project-id");
+  });
+
+  it("records a project-scoped page as the last-used project", async () => {
+    const response = await runProxy(
+      dashboardRequest(`/dashboard/${SANDBOX_PROJECT.id}/api-keys`, {
+        method: "GET",
+        headers: { cookie: `sdp_selected_project_id=${PRODUCTION_PROJECT.id}` },
+      })
+    );
+
+    expect(lastUsedCookies(response)).toHaveLength(1);
+    expect(lastUsedCookies(response)[0]).toMatch(
+      new RegExp(`^sdp_selected_project_id=${SANDBOX_PROJECT.id};`)
+    );
+  });
+
+  it("records nothing outside a project-scoped page", async () => {
+    for (const path of ["/dashboard", "/dashboard/payments", "/api/dashboard/home/activity"]) {
+      const response = await runProxy(
+        dashboardRequest(path, { method: "GET", headers: { "x-project-id": SANDBOX_PROJECT.id } })
+      );
+
+      expect(lastUsedCookies(response)).toEqual([]);
+    }
   });
 });

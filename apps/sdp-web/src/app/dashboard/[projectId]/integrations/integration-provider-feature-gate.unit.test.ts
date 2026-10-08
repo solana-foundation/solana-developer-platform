@@ -6,12 +6,6 @@ const mocks = vi.hoisted(() => ({
   ramps: vi.fn(),
   payments: vi.fn(),
   policies: vi.fn(),
-  notFound: vi.fn(() => {
-    throw new Error("NEXT_NOT_FOUND");
-  }),
-  redirect: vi.fn(() => {
-    throw new Error("NEXT_REDIRECT");
-  }),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
@@ -22,7 +16,7 @@ vi.mock("@/flags", () => ({
   policies: mocks.policies,
 }));
 vi.mock("@/flags/ramps", () => ({ isRampsEnabled: mocks.ramps }));
-vi.mock("next/navigation", () => ({ notFound: mocks.notFound, redirect: mocks.redirect }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 
 import IntegrationDetailPage from "./[provider]/page";

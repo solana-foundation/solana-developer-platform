@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import {
   createProjectRing,
   createRingsWallet,
@@ -15,12 +17,6 @@ import {
   voidRingsOperation,
 } from "./helius-rings.data";
 
-/**
- * A provisioning failure's reason has to reach the operator intact: a 503 names
- * fixable conditions, so rewriting it as "awaiting integration" points them at
- * a wait that will never end.
- */
-
 function respondWith(status: number, body: unknown) {
   vi.stubGlobal(
     "fetch",
@@ -30,7 +26,12 @@ function respondWith(status: number, body: unknown) {
 
 const INPUT = { walletId: "para_1", name: "Treasury" };
 
+beforeEach(() => {
+  setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/helius-rings`);
+});
+
 afterEach(() => {
+  restoreWindowLocation();
   vi.unstubAllGlobals();
 });
 
@@ -65,7 +66,6 @@ describe("createRingsWallet", () => {
     });
   });
 
-  // The caller substitutes its own copy, so this only has to stay a failure.
   it("reports a failure carrying no message as an undefined reason", async () => {
     respondWith(500, {});
 
@@ -91,7 +91,6 @@ describe("fetchRingsWalletIdentity", () => {
     const result = await fetchRingsWalletIdentity("hrw_1/../health");
 
     expect(result.identity).toEqual(IDENTITY);
-    // Encoded, so an id carrying path characters cannot reach another endpoint.
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
       "/api/dashboard/helius-rings/wallets/hrw_1%2F..%2Fhealth/identity"
     );
@@ -133,7 +132,6 @@ describe("project rings", () => {
     await expect(fetchProjectRings("unused")).resolves.toEqual({ rings: [RING] });
   });
 
-  // A project with no custom ring is the normal case, not an error.
   it("reads no rings as an empty list", async () => {
     respondWith(200, { data: { rings: [] } });
 
@@ -166,7 +164,6 @@ describe("project rings", () => {
     });
   });
 
-  // Bring-up names what refused (a bad id, a missing signer); the card prints it verbatim.
   it("returns the refusal reason rather than throwing", async () => {
     respondWith(409, { error: { message: "that ring program is already recorded" } });
 
@@ -193,8 +190,6 @@ describe("operations", () => {
     expect(result.operation).toEqual(OPERATION);
     const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
     expect(body).toMatchObject({ opType: "withdraw", ring: "treasury", to: "9xQe" });
-    // The server dedupes on it, so a prepare that carried no nonce would let a
-    // double-click file two operations.
     expect(body.clientNonce).toEqual(expect.any(String));
   });
 
@@ -216,7 +211,6 @@ describe("operations", () => {
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
       "/api/dashboard/helius-rings/operations/hro_1/execute"
     );
-    // The approval verdict is read server-side, so execute carries nothing.
     expect(vi.mocked(fetch).mock.calls[0]?.[1]?.body).toBeUndefined();
 
     respondWith(201, { data: { operation: OPERATION } });

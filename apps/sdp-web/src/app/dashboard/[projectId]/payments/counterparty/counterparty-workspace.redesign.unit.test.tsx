@@ -11,9 +11,7 @@ vi.mock("@/i18n/provider", () => ({
   useLocale: () => "en",
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: ReactNode; href: string }) => (

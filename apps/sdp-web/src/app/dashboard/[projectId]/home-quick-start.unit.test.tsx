@@ -11,8 +11,12 @@ import {
   resumeQuickStart,
   setQuickStart,
 } from "@/lib/dashboard-quick-start";
+import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
+import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import DashboardLoading from "./(home)/loading";
 import { HomeWorkspace } from "./home-workspace";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const workspace = vi.hoisted(() => ({
   initialQuickStartStep: "api-key",
@@ -62,6 +66,7 @@ function ui(totalBalanceError: string | null = null) {
 }
 afterEach(() => {
   cleanup();
+  resetDashboardNavigation();
   workspace.sdpEnvironment = "sandbox";
   swr.activity = { activityRows: [] };
   swr.volume = { todaysVolume: 0, todaysVolumeError: null };
@@ -109,10 +114,13 @@ describe("home after quick start", () => {
 
   it("keeps the balance and first-wallet surface in production without the sandbox guide", () => {
     workspace.sdpEnvironment = "production";
+    setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}`, {});
     setQuickStart(progressKey, "api-key");
     const view = render(ui());
     expect(view.getByText("Total Balance")).toBeTruthy();
-    expect(view.getByRole("link", { name: "Create a wallet" })).toBeTruthy();
+    expect(view.getByRole("link", { name: "Create a wallet" }).getAttribute("href")).toBe(
+      `/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`
+    );
   });
 
   it("shows balances immediately on completion with a first-wallet action and no tutorials", () => {
@@ -124,7 +132,7 @@ describe("home after quick start", () => {
     expect(view.getByText("Total Balance")).toBeTruthy();
     expect(view.getAllByText("$0.00").length).toBeGreaterThan(0);
     expect(view.getByRole("link", { name: "Create a wallet" }).getAttribute("href")).toBe(
-      "/dashboard/wallets/setup"
+      `/dashboard/${SANDBOX_PROJECT.id}/wallets/setup`
     );
     expect(view.getByText("Create your first wallet to start tracking balances.")).toBeTruthy();
     expect(view.queryByRole("heading", { name: "Tutorials" })).toBeNull();
@@ -151,8 +159,6 @@ describe("home after quick start", () => {
     expect(reason.tagName).toBe("DD");
     expect(view.container.querySelector("dd[title]")).toBeNull();
   });
-  // Volume waits on every wallet, so it can land after the page: until then it
-  // is unknown, which is a dash, never a measured $0.00.
   it("shows a dash, not $0.00, while today's volume is still loading", () => {
     setQuickStart(progressKey, "done");
     swr.volume = undefined;

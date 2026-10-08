@@ -6,6 +6,7 @@ import { TokenAuthorityModal } from "./token-authority-modal";
 vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
 }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("@/components/ui/modal", () => ({
   Modal: ({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) =>

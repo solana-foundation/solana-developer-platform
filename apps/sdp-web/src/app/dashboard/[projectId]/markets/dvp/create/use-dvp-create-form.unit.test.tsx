@@ -17,7 +17,7 @@ import { EnglishTestI18n } from "../../test-i18n";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { useDvpCreateForm } from "./use-dvp-create-form";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 /**
  * Every chosen mint is inspected for eligibility now, listed ones included, and

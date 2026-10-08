@@ -3,15 +3,15 @@ import type {
   WalletControlProfileRevisionHistory,
   WalletPolicyEvaluationDetail,
 } from "@sdp/types";
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { prerender } from "react-dom/static";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages, translate } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { setPageRequest } from "@/test/request-project";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/dashboard/wallets/w/policy/audit",
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+vi.mock("next/headers", () => import("@/test/next-headers"));
 
 import type { PolicyTranslate } from "./policy-audit.shared";
 import { PolicyAuditDetail } from "./policy-audit-detail";
@@ -116,9 +116,16 @@ const wallet: CustodyWalletByIdResponse["wallet"] = {
   },
 };
 
+async function renderHtml(node: ReactNode): Promise<string> {
+  const { prelude } = await prerender(node);
+  return new Response(prelude).text();
+}
+
+beforeEach(() => setPageRequest("/dashboard/prj_test_sandbox/wallets/wallet-1/policy/audit"));
+
 describe("policy audit presentation", () => {
-  it("contains a long actor and the longest decision inside fixed desktop columns", () => {
-    const html = renderToStaticMarkup(
+  it("contains a long actor and the longest decision inside fixed desktop columns", async () => {
+    const html = await renderHtml(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <PolicyAuditList
           walletId="wallet-1"
@@ -143,10 +150,11 @@ describe("policy audit presentation", () => {
     expect(html).toContain("w-[150px]");
     expect(html).toContain("w-[110px]");
     expect(html).toContain("w-[180px]");
+    expect(html).toContain("/dashboard/prj_test_sandbox/wallets/wallet-1/policy/audit/evaluation-");
   });
 
-  it("truncates a long actor in the mobile detail metadata row", () => {
-    const html = renderToStaticMarkup(
+  it("truncates a long actor in the mobile detail metadata row", async () => {
+    const html = await renderHtml(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <PolicyAuditDetail
           wallet={wallet}
@@ -166,5 +174,6 @@ describe("policy audit presentation", () => {
     expect(html).toContain('class="min-w-0 flex-1 truncate"');
     expect(html).toContain(`title="User · ${LONG_ACTOR_ID}"`);
     expect(html).toContain("inline-flex min-w-0 max-w-full items-center gap-2");
+    expect(html).toContain('href="/dashboard/prj_test_sandbox/wallets/wallet-1/policy"');
   });
 });

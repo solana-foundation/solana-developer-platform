@@ -10,15 +10,13 @@ import type { ApiKeyAuthoringExistingKey } from "./api-key-authoring";
 import type { ApiKeyAuthoringWallets } from "./api-key-authoring.data";
 import { ApiKeyAuthoringWorkspace } from "./api-key-authoring-workspace";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     sdpEnvironment: "sandbox",
     dashboardCacheScope: { orgId: "org_test", userId: "user_test" },
-    selectedProjectId: "prj_test",
+    selectedProjectId: "prj_test_sandbox",
   }),
 }));
 
@@ -45,7 +43,6 @@ function permissionChips(): string[] {
 
 const WITH_POLICIES: ApiKeyAuthoringWallets = { policiesInReleaseChannel: true, wallets: [] };
 
-/** Fills the details step and lands on the permissions step, where the role cards live. */
 async function openPermissionsStep(authoringWallets: ApiKeyAuthoringWallets = WITH_POLICIES) {
   const user = userEvent.setup();
   render(
@@ -64,9 +61,6 @@ afterEach(() => {
 });
 
 describe("ApiKeyAuthoringWorkspace permissions", () => {
-  // The Embedded Yield guide tells partners to create a Developer key "with
-  // earn:read + earn:write". The wizard has to say so itself, or the partner
-  // is left comparing a role name against a permission list they cannot see.
   it("names Earn on the Developer card and lists earn:read and earn:write", async () => {
     await openPermissionsStep();
 
@@ -99,7 +93,6 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     expect(readOnlyChips).toContain("earn:read");
     expect(readOnlyChips).not.toContain("earn:write");
 
-    // `*` is a sentinel, not a permission to chip: the existing line stands alone.
     await user.click(screen.getByRole("radio", { name: /^Admin/ }));
     expect(screen.getByText("Full endpoint access")).toBeTruthy();
     expect(screen.queryByRole("list", { name: PERMISSION_LIST_NAME })).toBeNull();
@@ -111,7 +104,6 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
-    // Past the last "Continue": the primary action is now the create button.
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
     const chips = permissionChips();
     expect(chips).toEqual([...getPermissionsForApiKeyRole("api_developer")]);
@@ -174,7 +166,6 @@ function policiesOut(): ApiKeyAuthoringWallets {
   return { policiesInReleaseChannel: false, wallets: [WALLET_A, WALLET_B] };
 }
 
-/** Opens a restricted key's edit flow on the wallets step. */
 async function openRestrictedKeyWalletsStep(authoringWallets: ApiKeyAuthoringWallets) {
   const user = userEvent.setup();
   render(
@@ -208,7 +199,6 @@ describe("ApiKeyAuthoringWorkspace without the Policies module", () => {
       expect(screen.queryByText("Add API-key restrictions") !== null).toBe(shown);
 
       await user.click(screen.getByRole("button", { name: "Continue" }));
-      // Review and summary: no wallet-control baseline is invented when Policies is out.
       expect(screen.queryByText("Wallet-control baseline") !== null).toBe(shown);
       expect(screen.queryByText("Wallet control baseline") !== null).toBe(shown);
       expect(screen.queryByText(/Wallet controls always apply/) !== null).toBe(shown);

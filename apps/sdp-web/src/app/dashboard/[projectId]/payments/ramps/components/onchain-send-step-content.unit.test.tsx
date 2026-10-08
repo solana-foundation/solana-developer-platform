@@ -13,11 +13,7 @@ import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard";
 import { OnchainSendStepContent } from "./onchain-send-step-content";
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/dashboard/payments",
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const labeledWallet: PaymentsDashboardWallet = {
   id: "cwlt_treasury",
@@ -97,8 +93,6 @@ function wrapper({ children }: { children: ReactNode }) {
         }}
         serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
         projects={[]}
-        initialSelectedProjectId={null}
-        shouldRepairInitialProjectCookie={false}
       >
         {children}
       </DashboardWorkspaceProvider>
@@ -106,8 +100,8 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderStep(wizard: OnchainSendWizard, counterpartyName = "Ada Trading") {
-  return render(<OnchainSendStepContent wizard={wizard} counterpartyName={counterpartyName} />, {
+function renderStep(wizard: OnchainSendWizard) {
+  return render(<OnchainSendStepContent wizard={wizard} counterpartyName="Ada Trading" />, {
     wrapper,
   });
 }
@@ -184,7 +178,13 @@ describe("OnchainSendStepContent", () => {
   });
 
   it("shows empty review fallbacks and omits a blank memo", () => {
-    renderStep({ ...baseWizard, currentStepId: "REVIEW" }, "");
+    render(
+      <OnchainSendStepContent
+        wizard={{ ...baseWizard, currentStepId: "REVIEW" }}
+        counterpartyName=""
+      />,
+      { wrapper }
+    );
 
     expect(screen.queryByText(/^0$/)).not.toBeNull();
     expect(screen.getAllByText("—")).toHaveLength(3);
@@ -266,7 +266,7 @@ describe("OnchainSendStepContent", () => {
     expect(screen.queryByText("Transfer submitted")).toBeNull();
     expect(screen.queryByRole("button", { name: "View on explorer" })).toBeNull();
     expect(screen.getByRole("link", { name: "View approval request" }).getAttribute("href")).toBe(
-      "/dashboard/approvals/apr_test"
+      "/dashboard/prj_test_sandbox/approvals/apr_test"
     );
   });
 });

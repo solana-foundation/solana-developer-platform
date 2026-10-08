@@ -1,12 +1,5 @@
 // @vitest-environment jsdom
 
-/**
- * Regression for SOLA9-230 (APE-717): a mounted events feed must stay bound to
- * the project it rendered with. The follow-up server action receives the page's
- * project scope, and any response carrying another project's rows is dropped
- * instead of being appended to or replacing the feed.
- */
-
 import {
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
@@ -92,17 +85,13 @@ function event(projectId: string, id: string): PrivateChannelEventDto {
   };
 }
 
-function feed(
-  projectId: string,
-  overrides: Partial<ComponentProps<typeof EventsList>> = {}
-): ComponentProps<typeof EventsList> {
+function feed(projectId: string): ComponentProps<typeof EventsList> {
   return {
     projectId,
     initialEvents: [event(projectId, `event_${projectId}`)],
     initialHasMore: true,
     initialNextCursor: `cursor_from_${projectId}`,
     canViewRawPayload: true,
-    ...overrides,
   };
 }
 
@@ -125,7 +114,6 @@ function rerenderFeed(
   );
 }
 
-/** Every event renders twice — the stacked list and the table — so row assertions name the table. */
 function eventTable() {
   return within(screen.getByRole("table"));
 }
@@ -142,12 +130,10 @@ afterEach(() => cleanup());
 
 describe("stale project events feed (SOLA9-230)", () => {
   beforeEach(() => {
-    // resetAllMocks, not clearAllMocks: a test that aborts early must not leak
-    // its queued responses into the next test's action mock.
     vi.resetAllMocks();
   });
 
-  it("binds follow-up pagination to the mounted project and drops a sibling-project page", async () => {
+  it("drops a sibling-project page and keeps paginating from the mounted cursor", async () => {
     const user = userEvent.setup();
     mocks.loadProjectEventsAction
       .mockResolvedValueOnce({
@@ -167,8 +153,6 @@ describe("stale project events feed (SOLA9-230)", () => {
 
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
-    // Security invariant first: the sibling-project page must never enter the
-    // mounted feed, and the mounted project's own rows must survive.
     await waitFor(() => {
       expect(eventTable().queryByText(/999\.00 USDC/)).toBeNull();
     });
@@ -176,18 +160,14 @@ describe("stale project events feed (SOLA9-230)", () => {
 
     await waitFor(() => {
       expect(mocks.loadProjectEventsAction).toHaveBeenCalledWith({
-        projectId: "project_a",
         before: "cursor_from_project_a",
         limit: 50,
       });
     });
 
-    // The dropped response must not hand its cursor to the feed either: the
-    // retry still paginates from the mounted project's cursor.
     await user.click(screen.getByRole("button", { name: "Load more" }));
     await waitFor(() => {
       expect(mocks.loadProjectEventsAction).toHaveBeenNthCalledWith(2, {
-        projectId: "project_a",
         before: "cursor_from_project_a",
         limit: 50,
       });
@@ -210,8 +190,6 @@ describe("stale project events feed (SOLA9-230)", () => {
     const familyFilter = screen.getByRole("combobox", { name: "Event category" });
     await user.selectOptions(familyFilter, PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE);
 
-    // Security invariant first: the sibling-project page must never replace the
-    // mounted feed.
     await waitFor(() => {
       expect(eventTable().queryByText(/999\.00 USDC/)).toBeNull();
     });
@@ -241,8 +219,6 @@ describe("stale project events feed (SOLA9-230)", () => {
 
     rerenderFeed(rerender, feed("project_b"));
 
-    // The scope change remounts the feed's data: the other project's initial
-    // rows take over, the stale rows and filter do not survive.
     expect(eventTable().getByText(/999\.00 USDC/)).toBeTruthy();
     expect(eventTable().queryByText(/10\.00 USDC/)).toBeNull();
     expect(
@@ -252,7 +228,6 @@ describe("stale project events feed (SOLA9-230)", () => {
     await user.click(screen.getByRole("button", { name: "Load more" }));
     await waitFor(() => {
       expect(mocks.loadProjectEventsAction).toHaveBeenCalledWith({
-        projectId: "project_b",
         before: "cursor_from_project_b",
         limit: 50,
       });
@@ -263,8 +238,6 @@ describe("stale project events feed (SOLA9-230)", () => {
     "does not revert the new project's filter after a stale %s",
     async (outcome) => {
       const user = userEvent.setup();
-      // Project A: transfer filter loads, then the user reverts to "all"; that
-      // request is still in flight when the page switches to project B.
       const staleA = deferred<LoadEventsResult>();
       mocks.loadProjectEventsAction
         .mockResolvedValueOnce({
@@ -303,13 +276,10 @@ describe("stale project events feed (SOLA9-230)", () => {
         await staleA.promise;
       });
 
-      // B's filter stays on the "all" it reset to, and its unfiltered rows and
-      // cursor are intact for the next pagination request.
       expect((filter as HTMLSelectElement).value).toBe("all");
       expect(eventTable().getByText(/999\.00 USDC/)).toBeTruthy();
       await user.click(screen.getByRole("button", { name: "Load more" }));
       expect(mocks.loadProjectEventsAction).toHaveBeenLastCalledWith({
-        projectId: "project_b",
         before: "cursor_from_project_b",
         limit: 50,
       });
@@ -344,8 +314,6 @@ describe("stale project events feed (SOLA9-230)", () => {
         await staleA.promise;
       });
 
-      // The stale response dropped whole (no feed rewrite), so the details the
-      // user opened stay open until they close them.
       const dialog = screen.getByRole("dialog");
       expect(within(dialog).getByText(`${currentProject}_channel`)).toBeTruthy();
       await user.keyboard("{Escape}");

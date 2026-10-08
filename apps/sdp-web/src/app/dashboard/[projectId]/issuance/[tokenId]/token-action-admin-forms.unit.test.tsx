@@ -30,11 +30,7 @@ const entry: TokenAllowlistEntry = {
 
 // Only framework/session and HTTP boundaries are mocked; SWR and fetchers stay real.
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/dashboard/issuance/tok_test",
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const fetchMock = vi.fn<typeof fetch>();
 const allowlistUrl = "/api/dashboard/issuance/tokens/tok_test/allowlist";
@@ -140,8 +136,6 @@ async function renderControlList(
         }}
         serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
         projects={[]}
-        initialSelectedProjectId="prj_test"
-        shouldRepairInitialProjectCookie={false}
       >
         <SWRConfig value={{ shouldRetryOnError: false, dedupingInterval: 0 }}>
           <TokenActionAdminForms {...props} />
@@ -228,7 +222,7 @@ describe("control-list signing availability", () => {
     // The list authority shows as an identity row with its wallet link, not a dead select.
     expect(screen.getByText(/List authority/)).toBeTruthy();
     expect(screen.getByRole("link", { name: /List authority/ }).getAttribute("href")).toBe(
-      "/dashboard/wallets/wal_authority"
+      "/dashboard/prj_test_sandbox/wallets/wal_authority"
     );
     expect(screen.queryAllByRole("combobox").map((el) => el.textContent)).not.toContainEqual(
       expect.stringContaining("List authority")

@@ -4,16 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("@/app/dashboard/[projectId]/custody/wallet-provider-mark", () => ({
   WalletProviderMark: () => <span>Provider mark</span>,
-}));
-
-vi.mock("@/app/dashboard/[projectId]/custody/connections/use-selected-project-name", () => ({
-  useSelectedProjectName: () => "Acme Payments",
 }));
 
 vi.mock("./use-selected-project-name", () => ({

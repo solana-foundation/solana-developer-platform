@@ -6,7 +6,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { SANDBOX_PROJECT } from "@/test/projects";
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("./actions", () => ({
   addPrincipalToChannelAction: vi.fn(),
   createPrincipalAction: vi.fn(),
@@ -47,6 +49,9 @@ describe("Private Channels identities table", () => {
     renderTable(principalFixture());
     expect(screen.getByText("Default")).toBeDefined();
     expect(screen.getByText("1 identity for this project.")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Add identity" }).getAttribute("href")).toBe(
+      `/dashboard/${SANDBOX_PROJECT.id}/integrations/private-channels/members/create`
+    );
     expect(screen.queryByRole("columnheader", { name: "Type" })).toBeNull();
   });
 

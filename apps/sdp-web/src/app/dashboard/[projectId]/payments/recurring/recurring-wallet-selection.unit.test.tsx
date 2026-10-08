@@ -16,7 +16,7 @@ import { I18nProvider } from "@/i18n/provider";
 import { RecurringPaymentCreateWorkspace } from "./recurring-payment-create-workspace";
 import { RecurringPaymentDetailWorkspace } from "./recurring-payment-detail-workspace";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     dashboardCacheScope: { orgId: "org_test", userId: "user_test" },

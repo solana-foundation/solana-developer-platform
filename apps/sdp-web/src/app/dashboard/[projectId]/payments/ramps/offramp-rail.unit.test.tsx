@@ -14,6 +14,7 @@ import type { RailProps } from "./ramp-action-page";
 
 const mocks = vi.hoisted(() => ({ wizard: null as OfframpWizard | null }));
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("./hooks/use-offramp-wizard", () => ({
   useOfframpWizard: () => {
     if (mocks.wizard === null) {
@@ -186,7 +187,7 @@ describe("OfframpRail final step", () => {
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Waiting for approval");
     expect(screen.getAllByText("Waiting for approval")).toHaveLength(1);
     expect(screen.getByRole("link", { name: "View approval request" }).getAttribute("href")).toBe(
-      "/dashboard/approvals/apr_offramp"
+      "/dashboard/prj_test_sandbox/approvals/apr_offramp"
     );
     expect(screen.queryByText(/Once approved, 250 USDC is sent/)).not.toBeNull();
     expect(screen.queryByText(/If the quote expires first/)).not.toBeNull();

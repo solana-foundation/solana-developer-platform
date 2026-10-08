@@ -1,12 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PRODUCTION_PROJECT } from "@/test/projects";
+import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { createRingsConnection, fetchRingsSetupStatus } from "./helius-rings-configuration.data";
 
+beforeEach(() => {
+  setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/helius-rings`);
+});
+
 afterEach(() => {
+  restoreWindowLocation();
   vi.unstubAllGlobals();
 });
 
 describe("Helius Rings configuration data", () => {
-  it("reads the project setup status through its BFF route", async () => {
+  it("reads the tab's Project setup status through its BFF route", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -28,6 +35,7 @@ describe("Helius Rings configuration data", () => {
     });
     expect(fetch).toHaveBeenCalledWith("/api/dashboard/helius-rings/setup-status", {
       cache: "no-store",
+      headers: new Headers({ "x-project-id": PRODUCTION_PROJECT.id }),
     });
   });
 

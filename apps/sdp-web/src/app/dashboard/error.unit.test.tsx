@@ -4,9 +4,7 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import DashboardError from "./error";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn() }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("@sentry/nextjs", () => ({
   captureException: vi.fn(),
@@ -29,9 +27,6 @@ describe("DashboardError", () => {
   });
 
   it("does not add a second h1 — the shell above the boundary owns the page title", () => {
-    // The shell's <h1> is how role-based locators (and the e2e specs) find the
-    // current page; a heading of the same level in the error card would make that
-    // ambiguous exactly when something has already gone wrong.
     expect(render(new Error("boom"))).not.toContain("<h1");
   });
 
@@ -42,8 +37,6 @@ describe("DashboardError", () => {
   });
 
   it("keeps the raw error message out of the page", () => {
-    // Server-thrown messages can name internal endpoints or config; the digest is
-    // the handle for support, not the message.
     expect(render(new Error("Selected project required"))).not.toContain(
       "Selected project required"
     );

@@ -83,6 +83,7 @@ const mocks = vi.hoisted(() => ({
   mainnetLoading: false,
 }));
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
 }));
@@ -161,7 +162,7 @@ describe("EarnIntegrationGuide", () => {
       )
     ).toBeTruthy();
     expect(screen.getByRole("link", { name: "Developer API key" }).getAttribute("href")).toBe(
-      "/dashboard/api-keys"
+      "/dashboard/prj_test_sandbox/api-keys"
     );
 
     // The snippet is the REAL B2B2C contract (PRO-1722): build the unsigned

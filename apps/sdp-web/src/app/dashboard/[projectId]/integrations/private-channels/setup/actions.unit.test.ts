@@ -1,18 +1,20 @@
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
 import type { PrivateChannelInstance } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PRODUCTION_PROJECT } from "@/test/projects";
+import { resetRequestProject, setPageRequest } from "@/test/request-project";
 
 const fetchMock = vi.fn();
+const nextCache = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
 
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-// Only the client is stubbed. `extractSdpApiErrorMessage` is the real one: it
-// decides how much of a failure reaches the operator, so a hand-written stand-in
-// would assert against a message shape the product never produces.
+vi.mock("next/cache", () => nextCache);
+vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("@/lib/sdp-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/sdp-api")>("@/lib/sdp-api");
   return {
     createSdpApiClient: async () => ({ fetch: fetchMock }),
     extractSdpApiErrorMessage: actual.extractSdpApiErrorMessage,
+    requestProjectHref: actual.requestProjectHref,
   };
 });
 
@@ -24,13 +26,14 @@ import {
   updatePrivateChannelAction,
 } from "./actions";
 
+const INTEGRATIONS_PATH = `/dashboard/${PRODUCTION_PROJECT.id}/integrations`;
+
 const existingInstance: PrivateChannelInstance = {
   ...SANDBOX_DEFAULTS,
-  // New rows persist the retired RPC field as an empty string.
   chainRpcUrl: "",
   id: "pci_existing",
   organizationId: "org_test",
-  projectId: "project_test",
+  projectId: PRODUCTION_PROJECT.id,
   isActive: false,
   createdBy: "user_test",
   createdAt: "2026-08-31T10:00:00.000Z",
@@ -40,6 +43,9 @@ const existingInstance: PrivateChannelInstance = {
 describe("connectPrivateChannelAction", () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    nextCache.revalidatePath.mockClear();
+    resetRequestProject();
+    setPageRequest(`${INTEGRATIONS_PATH}/private-channels/setup`);
   });
 
   it("returns the reactivation confirmation when the persisted instance has an empty legacy RPC URL", async () => {
@@ -69,8 +75,6 @@ describe("connectPrivateChannelAction", () => {
   });
 
   it("surfaces egress-allowlist refusals as per-field errors, not a generic message", async () => {
-    // The API's 400 envelope for a refused destination carries fieldErrors —
-    // the operator must see WHICH URL was refused on its own form field.
     fetchMock.mockRejectedValue(
       new Error(
         `SDP API request failed (400): ${JSON.stringify({
@@ -178,6 +182,10 @@ describe("connectPrivateChannelAction", () => {
     const request = fetchMock.mock.calls[0][1] as { body: string };
     expect(request.body).toContain('"confirmReactivate":true');
     expect(request.body).not.toContain("chainRpcUrl");
+    expect(nextCache.revalidatePath.mock.calls).toEqual([
+      [`${INTEGRATIONS_PATH}/private-channels`, "layout"],
+      [INTEGRATIONS_PATH],
+    ]);
   });
 
   it("requires an instance id for an otherwise valid update", async () => {
@@ -237,11 +245,6 @@ describe("connectPrivateChannelAction", () => {
     });
   });
 
-  // These used to collapse to one of two fixed strings, so a failure that never
-  // reached the API rendered identically to one the API rejected. Each class is
-  // now distinguishable without echoing upstream text: raw exception bodies and
-  // infrastructure pages stay in the log, and only the class and HTTP status
-  // reach the form.
   it.each([
     { label: "non-Error throw", thrown: null },
     { label: "framework digest object", thrown: { digest: "NEXT_REDIRECT;replace;/x;307;" } },
@@ -295,6 +298,9 @@ describe("connectPrivateChannelAction", () => {
       instance: existingInstance,
     });
     await expect(deletePrivateChannelAction()).resolves.toEqual({ ok: true });
+    expect(nextCache.revalidatePath).toHaveBeenCalledWith(
+      `${INTEGRATIONS_PATH}/private-channels/setup`
+    );
   });
 
   it("returns safe failures for disconnect and delete requests", async () => {

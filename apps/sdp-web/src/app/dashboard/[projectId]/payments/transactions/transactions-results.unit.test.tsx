@@ -17,6 +17,7 @@ vi.mock("@/lib/dashboard-url-state", () => ({
   readDashboardTabFromUrl: () => urlState.tab,
   replaceDashboardSearchParams: vi.fn(),
 }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
 
 const ISSUED_TOKENS: Record<string, PaymentsIssuedTokenSymbol> = {
@@ -96,7 +97,7 @@ describe("TransactionsResults", () => {
 
     expect(screen.getByText("12.5 ACME")).toBeDefined();
     expect(screen.getByText("Treasury").closest("a")?.getAttribute("href")).toBe(
-      "/dashboard/wallets/cwlt_test"
+      "/dashboard/prj_test_sandbox/wallets/cwlt_test"
     );
     const signature = screen.getByText("sig_pay").closest("a");
     expect(signature?.getAttribute("href")).toBe(
@@ -118,7 +119,7 @@ describe("TransactionsResults", () => {
     expect(screen.getByText("Transaction details")).toBeDefined();
     expect(screen.queryByText("View in Payments")).toBeNull();
     expect(screen.getByText("cpty_test").closest("a")?.getAttribute("href")).toBe(
-      "/dashboard/payments/counterparty/cpty_test"
+      "/dashboard/prj_test_sandbox/payments/counterparty/cpty_test"
     );
   });
 
@@ -127,7 +128,7 @@ describe("TransactionsResults", () => {
     fireEvent.click(screen.getByText("Fund leg"));
     expect(
       screen.getByText("View in Delivery vs Payments").closest("a")?.getAttribute("href")
-    ).toBe("/dashboard/markets/dvp/dvp_trade");
+    ).toBe("/dashboard/prj_test_sandbox/markets/dvp/dvp_trade");
   });
 
   it("shows the empty state when nothing matches", () => {

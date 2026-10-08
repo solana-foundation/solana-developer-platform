@@ -11,6 +11,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { dashboardRouter } from "@/test/dashboard-navigation";
 import { EnglishTestI18n } from "../test-i18n";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -20,8 +21,7 @@ function withI18n({ children }: { children: ReactNode }) {
   return <EnglishTestI18n>{children}</EnglishTestI18n>;
 }
 
-const refresh = vi.hoisted(() => vi.fn());
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 const originalFetch = global.fetch;
@@ -58,7 +58,7 @@ describe("useDvpTradeActions", () => {
 
     await act(async () => await result.current.act("settle"));
 
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
   });
 
   // 202 is an ok status, so without its own branch the success read fails on an
@@ -89,7 +89,7 @@ describe("useDvpTradeActions", () => {
       })
     );
     expect(toast.error).not.toHaveBeenCalled();
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
   });
 
   it("surfaces the API's own message on a failure", async () => {
@@ -391,7 +391,7 @@ describe("useDvpTradeActions", () => {
       "SDP sent this but couldn't read the answer. Check the trade before trying again.",
       expect.anything()
     );
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
   });
 
   // A request the proxy or network retries must be answered with the first
@@ -413,12 +413,12 @@ describe("useDvpTradeActions", () => {
     );
     await act(async () => await result.current.act("settle"));
 
-    const keys = fetchMock.mock.calls.map(
-      ([, init]) => (init as { headers?: Record<string, string> }).headers?.["Idempotency-Key"]
+    const keys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers((init as RequestInit).headers).get("Idempotency-Key")
     );
     expect(keys[0]).toMatch(/^dvp-fund-[0-9a-f]{32}$/);
     expect(keys[1]).toMatch(/^dvp-reclaim-[0-9a-f]{32}$/);
-    expect(keys[2]).toBeUndefined();
+    expect(keys[2]).toBeNull();
   });
 
   it("reclaims the named leg through its own endpoint", async () => {

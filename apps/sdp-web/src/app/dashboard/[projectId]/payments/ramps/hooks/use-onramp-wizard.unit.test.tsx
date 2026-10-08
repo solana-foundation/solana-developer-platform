@@ -18,7 +18,6 @@ import { useOnrampWizard } from "./use-onramp-wizard";
 import type { UseRampWizardProps } from "./use-ramp-wizard";
 
 const mocks = vi.hoisted(() => ({
-  push: vi.fn(),
   toastDismiss: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
@@ -26,11 +25,7 @@ const mocks = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
 }));
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/payments",
-  useRouter: () => ({ push: mocks.push, replace: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("sonner", () => ({
   toast: {
     dismiss: mocks.toastDismiss,
@@ -88,7 +83,7 @@ const BVNK_PROCESSING_SETTLEMENT: BvnkRampSettlement = {
 
 function transferFixture(
   status: PaymentTransferSummary["status"],
-  overrides: Partial<PaymentTransferSummary> = {}
+  overrides: Partial<PaymentTransferSummary>
 ): PaymentTransferSummary {
   return {
     id: TRANSFER_ID,
@@ -114,7 +109,7 @@ const PROPS: UseRampWizardProps = {
   onExit: vi.fn(),
 };
 
-let currentTransfer: PaymentTransferSummary = transferFixture("awaiting_payment");
+let currentTransfer: PaymentTransferSummary = transferFixture("awaiting_payment", {});
 const fetchMock = vi.fn<typeof fetch>();
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -139,8 +134,6 @@ function wrapper({ children }: { children: ReactNode }) {
         }}
         serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
         projects={[]}
-        initialSelectedProjectId={null}
-        shouldRepairInitialProjectCookie={false}
       >
         <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
       </DashboardWorkspaceProvider>
@@ -155,7 +148,7 @@ function transferStatusCalls(): number {
 }
 
 beforeEach(() => {
-  currentTransfer = transferFixture("awaiting_payment");
+  currentTransfer = transferFixture("awaiting_payment", {});
   fetchMock.mockReset().mockImplementation((input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -242,7 +235,7 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
   });
 
   it("keeps the complete screen hidden while settling without a settlement", async () => {
-    const { result } = await renderAtTransfer(transferFixture("settling"));
+    const { result } = await renderAtTransfer(transferFixture("settling", {}));
 
     expect(result.current.transferStatus?.status).toBe("settling");
     expect(result.current.transferStatus?.settlement).toBeUndefined();
@@ -304,7 +297,7 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
   });
 
   it("turns the complete screen off for a failed transfer and stops polling", async () => {
-    const { result } = await renderAtTransfer(transferFixture("failed"));
+    const { result } = await renderAtTransfer(transferFixture("failed", {}));
 
     expect(result.current.transferStatus?.status).toBe("failed");
     expect(result.current.showCompleteScreen).toBe(false);

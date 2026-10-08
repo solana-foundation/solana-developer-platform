@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams, usePathname } from "next/navigation";
+import { useCallback } from "react";
 import { parseDashboardPathname, projectHref } from "./dashboard-project-path";
 
 /**
@@ -43,10 +44,14 @@ export function useDashboardPathname(): string {
  * there is no Project, so links stay project-less and the `[projectId]` layout
  * resolves them to the last-used or Sandbox Project on arrival.
  *
- * @returns A function mapping a project-less dashboard path to the href to render.
+ * @returns A function mapping a project-less dashboard path to the href to render;
+ *   stable until the URL's Project changes, so it is safe in hook deps.
  */
 export function useProjectHref(): (dashboardPath: string) => string {
   const projectId = useOptionalProjectId();
-  return (dashboardPath) =>
-    projectId === null ? dashboardPath : projectHref(projectId, dashboardPath);
+  return useCallback(
+    (dashboardPath: string) =>
+      projectId === null ? dashboardPath : projectHref(projectId, dashboardPath),
+    [projectId]
+  );
 }

@@ -26,9 +26,7 @@ vi.mock("@/i18n/provider", () => ({
 
 vi.mock("next/image", () => ({ default: () => null }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -50,6 +48,7 @@ function providerAccount(
     ...overrides,
   };
 }
+
 describe("groupProviderAccounts", () => {
   it("groups funding-wallet rows per provider with the customer link lifted onto the group", () => {
     const groups = groupProviderAccounts([

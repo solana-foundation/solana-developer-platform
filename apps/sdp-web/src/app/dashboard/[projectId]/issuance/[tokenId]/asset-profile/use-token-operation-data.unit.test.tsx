@@ -14,11 +14,7 @@ import { AssetManagementWorkspace } from "./asset-management-workspace";
 import { useTokenOperationData } from "./use-token-operation-data";
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/dashboard/issuance/tok_test",
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 const saveProfile = vi.hoisted(() => vi.fn());
 vi.mock("./actions", () => ({ updateAssetProfileAction: saveProfile }));
 
@@ -118,8 +114,6 @@ function wrapper({ children }: { children: ReactNode }) {
         }}
         serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
         projects={[]}
-        initialSelectedProjectId="prj_test"
-        shouldRepairInitialProjectCookie={false}
       >
         <SWRConfig value={{ shouldRetryOnError: false, dedupingInterval: 0 }}>{children}</SWRConfig>
       </DashboardWorkspaceProvider>

@@ -9,18 +9,13 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { dashboardRouter } from "@/test/dashboard-navigation";
 import { useOnchainReceiveWizard } from "./use-onchain-receive-wizard";
-
-const mocks = vi.hoisted(() => ({ push: vi.fn() }));
 
 vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isLoaded: false, orgId: null, userId: null }),
 }));
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/payments",
-  useRouter: () => ({ push: mocks.push, replace: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const wallets: PaymentsDashboardWallet[] = [
   {
@@ -58,8 +53,6 @@ function wrapper({ children }: { children: ReactNode }) {
         }}
         serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
         projects={[]}
-        initialSelectedProjectId={null}
-        shouldRepairInitialProjectCookie={false}
       >
         <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
       </DashboardWorkspaceProvider>
@@ -112,7 +105,7 @@ describe("useOnchainReceiveWizard", () => {
     expect(result.current.summaryDetails[0]?.value).toBe("Treasury");
 
     act(() => result.current.handlePrimary());
-    expect(mocks.push).toHaveBeenCalledWith("/dashboard/payments");
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/payments");
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   });
 });

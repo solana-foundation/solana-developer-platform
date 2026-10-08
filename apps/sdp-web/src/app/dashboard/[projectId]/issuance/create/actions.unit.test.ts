@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setPageRequest } from "@/test/request-project";
 import { saveIssuanceDraft } from "./actions";
 
 const mocks = vi.hoisted(() => ({
@@ -7,7 +8,11 @@ const mocks = vi.hoisted(() => ({
   revalidate: vi.fn(),
   enabled: vi.fn(),
 }));
-vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: async () => ({ request: mocks.request }) }));
+vi.mock("@/lib/sdp-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
+  createSdpApiClient: async () => ({ request: mocks.request }),
+}));
+vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("../../payments/payments-page.data", () => ({ fetchPaymentsWallets: mocks.wallets }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
 vi.mock("@/flags", () => ({ assetProfiles: mocks.enabled }));
@@ -36,6 +41,7 @@ const input = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  setPageRequest("/dashboard/prj_test_sandbox/issuance/create");
   mocks.enabled.mockResolvedValue(true);
   mocks.wallets.mockResolvedValue({
     ok: true,
@@ -62,7 +68,7 @@ describe("save issuance draft", () => {
       "/v1/issuance/asset-profiles",
       expect.objectContaining({ method: "POST" })
     );
-    expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/issuance");
+    expect(mocks.revalidate).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/issuance");
     expect(JSON.parse(mocks.request.mock.calls[0][1].body)).toMatchObject({
       signingCustodyWalletId: "wallet-a",
     });

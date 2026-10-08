@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const { mockUseSWR } = vi.hoisted(() => ({ mockUseSWR: vi.fn() }));
 
 vi.mock("swr", () => ({ default: mockUseSWR }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 import { BALANCE_REFRESH_INTERVAL_MS } from "@/app/dashboard/[projectId]/custody/wallet-balances.data";
 import {

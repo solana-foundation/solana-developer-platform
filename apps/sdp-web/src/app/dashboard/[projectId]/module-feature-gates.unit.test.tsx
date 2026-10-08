@@ -7,14 +7,8 @@ const flagMocks = vi.hoisted(() => ({
   policies: vi.fn(),
 }));
 
-const notFoundMock = vi.hoisted(() =>
-  vi.fn(() => {
-    throw new Error("NEXT_NOT_FOUND");
-  })
-);
-
 vi.mock("@/flags", () => flagMocks);
-vi.mock("next/navigation", () => ({ notFound: notFoundMock }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 import ApprovalsLayout from "./approvals/layout";
 import CustodyWalletPoliciesLayout from "./custody/[walletId]/policy/layout";

@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { setPageRequest } from "@/test/request-project";
 import { initializeCustodySetupAction } from "./actions";
 
 const fetchMock = vi.fn();
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("@clerk/nextjs/server", () => ({ auth: vi.fn() }));
 vi.mock("@/i18n/server", () => ({
   getTranslations: async () => (key: string) => key,
 }));
-vi.mock("@/lib/sdp-api", () => ({
+vi.mock("@/lib/sdp-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
   createSdpApiClient: async () => ({ fetch: fetchMock, request: vi.fn() }),
 }));
 
@@ -27,6 +30,7 @@ function form(provider: string): FormData {
 describe("custody initialization repair guard", () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    setPageRequest(`/dashboard/${SANDBOX_PROJECT.id}/wallets/setup`);
   });
 
   it("refuses to repair across providers when another provider owns the default", async () => {

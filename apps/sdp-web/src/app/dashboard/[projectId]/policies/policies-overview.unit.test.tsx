@@ -1,6 +1,6 @@
 import type { PolicyControlInventoryItem, PolicyControlInventoryResponse } from "@sdp/types";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import {
@@ -8,6 +8,8 @@ import {
   PoliciesOverviewSurface,
   type PoliciesUrlState,
 } from "./policies-overview";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const state: PoliciesUrlState = {
   tab: "all",

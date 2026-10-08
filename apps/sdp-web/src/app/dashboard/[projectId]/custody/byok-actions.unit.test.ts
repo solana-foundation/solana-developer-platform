@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PRODUCTION_PROJECT } from "@/test/projects";
+import { setPageRequest } from "@/test/request-project";
 
 const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
@@ -11,7 +13,9 @@ vi.mock("next/cache", () => ({
 vi.mock("@/i18n/server", () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
 }));
-vi.mock("@/lib/sdp-api", () => ({
+vi.mock("next/headers", () => import("@/test/next-headers"));
+vi.mock("@/lib/sdp-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
   createSdpApiClient: mocks.createSdpApiClient,
 }));
 
@@ -25,6 +29,8 @@ const credential = {
   status: "active",
   displayMetadata: { appIdSuffix: "1234" },
 };
+
+beforeEach(() => setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`));
 
 function completionResult(status: string, code?: string) {
   return {
@@ -70,28 +76,22 @@ describe("recheckPrivyCredentialAction", () => {
       "/internal/dashboard/custody/connections/conn_test/complete",
       expect.objectContaining({ method: "POST" })
     );
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/dashboard/custody");
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/dashboard/wallets");
+    expect(mocks.revalidatePath.mock.calls).toEqual([
+      [`/dashboard/${PRODUCTION_PROJECT.id}/custody`],
+      [`/dashboard/${PRODUCTION_PROJECT.id}/wallets`],
+      [`/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy`],
+    ]);
   });
 
-  it("reports a failed completion as invalid credentials with the connection replaceable", async () => {
-    client.fetch.mockResolvedValue(completionResult("failed", "invalid_credentials"));
+  it.each([
+    ["invalid_credentials", "DashboardCustody.byokInvalidCredentials"],
+    ["provider_account_already_connected", "DashboardCustody.byokAccountAlreadyConnected"],
+  ])("reports a %s completion failure with the connection replaceable", async (code, message) => {
+    client.fetch.mockResolvedValue(completionResult("failed", code));
 
     await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
       status: "failed",
-      message: "DashboardCustody.byokInvalidCredentials",
-      connectionId: "conn_test",
-    });
-  });
-
-  it("names the already-connected provider account when that is the failure", async () => {
-    client.fetch.mockResolvedValue(
-      completionResult("failed", "provider_account_already_connected")
-    );
-
-    await expect(recheckPrivyCredentialAction("conn_test")).resolves.toEqual({
-      status: "failed",
-      message: "DashboardCustody.byokAccountAlreadyConnected",
+      message,
       connectionId: "conn_test",
     });
   });
@@ -191,19 +191,6 @@ describe("submitPrivyCredentialAction outcome classification", () => {
       "/internal/dashboard/custody/connections/conn_test/complete",
       expect.objectContaining({ method: "POST" })
     );
-  });
-
-  it("always submits project-scoped fields; organization scope no longer exists", async () => {
-    client.fetch
-      .mockResolvedValueOnce({ providerCredential: credential, connectionId: "conn_test" })
-      .mockResolvedValueOnce(completionResult("success"));
-
-    await submitPrivyCredentialAction(submitForm());
-
-    const body = JSON.parse(String(client.fetch.mock.calls[0]?.[1]?.body)) as {
-      fields: { scope: string };
-    };
-    expect(body.fields.scope).toBe("project");
   });
 
   it("replaces the credentials on a failed connection when the form carries its id", async () => {

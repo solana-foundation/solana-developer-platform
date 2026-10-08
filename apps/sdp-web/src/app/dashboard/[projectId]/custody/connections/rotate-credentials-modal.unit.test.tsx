@@ -5,15 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { setPageRequest } from "@/test/request-project";
 
-const refresh = vi.fn();
-
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
-// Keep the modal, action and API client real; supply only the request host context.
-vi.mock("next/headers", () => ({
-  cookies: async () => ({ get: () => undefined }),
-  headers: async () => new Headers(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ orgId: "org_test", getToken: async () => "test-token" }),
@@ -28,7 +24,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
-  refresh.mockClear();
+  resetDashboardNavigation();
 });
 
 const lifecycle: CustodyCredentialLifecycle = {
@@ -94,15 +90,13 @@ function section(currentLifecycle: CustodyCredentialLifecycle | "restricted" | n
 }
 
 function mockApi() {
+  setPageRequest("/dashboard/prj_test_sandbox/integrations/privy/connections/cconn_1");
   vi.stubEnv("SDP_API_BASE_URL", "https://api.example.test");
   vi.spyOn(console, "info").mockImplementation(() => undefined);
   const rotation = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-      if (String(url).endsWith("/v1/projects")) {
-        return Response.json({ data: { projects: [{ id: "prj_1", slug: "default-sandbox" }] } });
-      }
       if (String(url).endsWith("/rotate")) {
         return rotation(String(url), init);
       }
@@ -145,7 +139,7 @@ describe("rotation recovery", () => {
       const onClose = vi.fn();
       const view = render(modal(onClose));
       await submitCredentials();
-      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
 
       view.rerender(
         modal(onClose, {
@@ -193,7 +187,7 @@ describe("rotation recovery", () => {
       const view = render(section(lifecycle));
       await userEvent.click(screen.getByRole("button", { name: "Rotate credentials" }));
       await submitCredentials();
-      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
 
       view.rerender(section(unavailableLifecycle));
       expect(screen.getByRole("dialog", { name: "Rotate credentials" })).toBeTruthy();
@@ -233,7 +227,7 @@ describe("rotation recovery", () => {
       const onClose = vi.fn();
       render(modal(onClose));
       await submitCredentials();
-      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
       expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("value", "");
       expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", false);
       expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty("disabled", false);
@@ -294,11 +288,11 @@ describe("rotation recovery", () => {
     const onClose = vi.fn();
     const view = render(modal(onClose));
     await submitCredentials();
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
 
     view.rerender(modal(onClose, lifecycle, false));
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(2));
     expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("value", "");
     expect(screen.getByLabelText("Privy app ID")).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "Rotate for 1 connections" })).toHaveProperty(
@@ -333,9 +327,9 @@ describe("rotation recovery", () => {
       const view = render(section(lifecycle));
       await userEvent.click(screen.getByRole("button", { name: "Rotate credentials" }));
       await submitCredentials();
-      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
       await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(2));
 
       expect(screen.getByLabelText("New Privy app secret")).toHaveProperty(
         "value",
@@ -430,11 +424,11 @@ describe("rotation recovery", () => {
     render(section(lifecycle));
     await userEvent.click(screen.getByRole("button", { name: "Rotate credentials" }));
     await submitCredentials();
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     await userEvent.click(screen.getByRole("button", { name: "Resume rotation" }));
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(2));
     expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("value", "");
     expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", false);
     await userEvent.type(screen.getByLabelText("New Privy app secret"), "corrected-secret");

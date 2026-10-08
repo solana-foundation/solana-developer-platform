@@ -25,7 +25,7 @@ import {
 import type { DvpTrade } from "./dvp-trade";
 import { DvpTradeDetailWorkspace } from "./dvp-trade-detail-workspace";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 // The on-chain details slide open through HeightReveal, which measures itself
 // with a ResizeObserver jsdom does not ship.
@@ -104,7 +104,7 @@ describe("DvpTradeDetailWorkspace", () => {
 
       expect(
         within(container).getByRole("link", { name: "Execution desk" }).getAttribute("href")
-      ).toBe("/dashboard/wallets/cwlt_execute");
+      ).toBe("/dashboard/prj_test_sandbox/wallets/cwlt_execute");
       expect(container.textContent).not.toContain("Read desk");
       fireEvent.click(
         within(container).getByRole("button", { name: action === "fund" ? "Fund" : "Reclaim" })
@@ -581,18 +581,18 @@ describe("DvpTradeDetailWorkspace", () => {
     });
   });
 
-  it("links a registered counterparty to its dashboard page", () => {
+  it.each([
+    [
+      { address: OTHER_ADDRESS, counterparty: { id: "cpa_1", label: "Acme OTC" }, wallet: null },
+      "Acme OTC",
+      "/dashboard/prj_test_sandbox/payments/counterparty/cpa_1",
+    ],
+    [ownParty(), "Fixture Desk", "/dashboard/prj_test_sandbox/wallets/cwlt_dvp_fixture_own"],
+  ])("links party %# to its page inside the project under its name", (party, name, href) => {
     const html = renderDetail(
       trade({
         legs: {
-          a: testLeg({
-            escrow: LEG_ESCROW_A,
-            party: {
-              address: OTHER_ADDRESS,
-              counterparty: { id: "cpa_1", label: "Acme OTC" },
-              wallet: null,
-            },
-          }),
+          a: testLeg({ escrow: LEG_ESCROW_A, party }),
           b: testLeg({
             escrow: LEG_ESCROW_B,
             party: { address: THIRD_ADDRESS, counterparty: null, wallet: null },
@@ -601,27 +601,8 @@ describe("DvpTradeDetailWorkspace", () => {
       })
     );
 
-    expect(html).toContain("Acme OTC");
-    expect(html).toContain("/dashboard/payments/counterparty/cpa_1");
-  });
-
-  // A custodied party is the caller's own wallet: a link to its page, labelled
-  // with its name — never plain text, per the referenced-entity house rule.
-  it("links a custodied party to its wallet's page under the wallet's name", () => {
-    const html = renderDetail(
-      trade({
-        legs: {
-          a: testLeg({
-            escrow: LEG_ESCROW_A,
-            party: ownParty(),
-          }),
-          b: testLeg({ escrow: LEG_ESCROW_B }),
-        },
-      })
-    );
-
-    expect(html).toContain("/dashboard/wallets/cwlt_dvp_fixture_own");
-    expect(html).toContain("Fixture Desk");
+    expect(html).toContain(name);
+    expect(html).toContain(href);
   });
 
   // Funding again would over-fund the escrow, and settlement refunds a surplus,

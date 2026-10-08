@@ -7,18 +7,11 @@ import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { setPageRequest } from "@/test/request-project";
 
-const refresh = vi.fn();
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh, push: vi.fn() }),
-}));
-
-// Supply the Next/Clerk request context; the card, dialogs, actions and API client stay real.
-vi.mock("next/headers", () => ({
-  cookies: async () => ({ get: () => undefined }),
-  headers: async () => new Headers(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ orgId: "org_test", getToken: async () => "test-token" }),
@@ -37,7 +30,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
-  refresh.mockClear();
+  resetDashboardNavigation();
 });
 
 function makeCredential(overrides: Partial<LifecycleCredential> = {}): LifecycleCredential {
@@ -242,12 +235,10 @@ describe("credentials section", () => {
 
   describe("deactivation through a deactivated connection", () => {
     function mockApi(status = 200) {
+      setPageRequest("/dashboard/prj_test_sandbox/integrations/privy/connections/cconn_1");
       vi.stubEnv("SDP_API_BASE_URL", "https://api.example.test");
       vi.spyOn(console, "info").mockImplementation(() => undefined);
       const api = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
-        if (String(url).endsWith("/v1/projects")) {
-          return Response.json({ data: { projects: [{ id: "prj_1", slug: "default-sandbox" }] } });
-        }
         if (String(url).endsWith("/provider-credentials/pcred_current/deactivate")) {
           return Response.json(
             status === 200
@@ -310,7 +301,7 @@ describe("credentials section", () => {
         expect(success).toHaveBeenCalledWith("Credentials deactivated", {
           description: "These credentials can no longer be used for signing through SDP.",
         });
-        expect(refresh).toHaveBeenCalled();
+        expect(dashboardRouter.refresh).toHaveBeenCalled();
       }
     );
 
@@ -354,7 +345,7 @@ describe("credentials section", () => {
           within(dialog).getByRole("button", { name: "Deactivate credentials" })
         );
 
-        await waitFor(() => expect(refresh).toHaveBeenCalled());
+        await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalled());
         expect(screen.getByRole("dialog")).toBeTruthy();
         expect(success).not.toHaveBeenCalled();
         expect(notice).toHaveBeenCalledWith(title, {

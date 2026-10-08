@@ -14,11 +14,7 @@ import type { RailProps } from "./ramp-action-page";
 const mocks = vi.hoisted(() => ({ wizard: null as OnchainSendWizard | null }));
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/dashboard/payments",
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("./hooks/use-onchain-send-wizard", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./hooks/use-onchain-send-wizard")>()),
   useOnchainSendWizard: () => {
@@ -102,8 +98,6 @@ function wrapper({ children }: { children: ReactNode }) {
         }}
         serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
         projects={[]}
-        initialSelectedProjectId={null}
-        shouldRepairInitialProjectCookie={false}
       >
         {children}
       </DashboardWorkspaceProvider>

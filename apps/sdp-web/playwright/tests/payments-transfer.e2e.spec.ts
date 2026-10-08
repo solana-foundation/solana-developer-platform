@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
@@ -8,7 +9,6 @@ import {
   getPlaywrightCustodyProvider,
   provisionWithAdminSession,
   seedCounterpartyWithSolanaAccount,
-  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
 test.describe
@@ -87,17 +87,13 @@ test.describe
       });
     });
 
-    test.beforeEach(async ({ page }) => {
-      await seedProjectCookie(page, bootstrapProjectId);
-    });
-
     test("user can submit a wallet transfer and see it in recent transactions", async ({
       page,
     }) => {
       const app = page.locator("main");
       const next = app.getByRole("button", { name: "Next", exact: true });
 
-      await page.goto("/dashboard/payments/pay");
+      await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments/pay"));
 
       await app.getByRole("button", { name: "Counterparty", exact: true }).click();
       await page.getByPlaceholder("Search counterparties").fill(counterpartyName);
@@ -139,7 +135,9 @@ test.describe
       const doneButton = app.getByRole("button", { name: "Done", exact: true });
       await doneButton.focus();
       await doneButton.press("Enter");
-      await expect(page).toHaveURL(/\/dashboard\/payments(?:\?.*)?$/);
+      await expect(page).toHaveURL(
+        new RegExp(`${projectHref(bootstrapProjectId, "/dashboard/payments")}(?:\\?.*)?$`)
+      );
 
       const shortenedDestination = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
       const transferRow = app.getByRole("link").filter({ hasText: shortenedDestination }).first();
@@ -151,7 +149,7 @@ test.describe
       const app = page.locator("main");
       const next = app.getByRole("button", { name: "Next", exact: true });
 
-      await page.goto("/dashboard/payments/pay");
+      await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments/pay"));
 
       await app.getByRole("button", { name: "Counterparty", exact: true }).click();
       await page.getByPlaceholder("Search counterparties").fill(deniedCounterpartyName);
@@ -210,7 +208,7 @@ test.describe
       await expect(page.getByText(/Wallet operation denied by policy/)).toBeVisible();
       await expect(app.getByText("Transfer submitted")).not.toBeVisible();
 
-      await page.goto("/dashboard/payments");
+      await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments"));
       const allowedShortened = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
       await expect(app.getByRole("link").filter({ hasText: allowedShortened }).first()).toBeVisible(
         { timeout: 120_000 }

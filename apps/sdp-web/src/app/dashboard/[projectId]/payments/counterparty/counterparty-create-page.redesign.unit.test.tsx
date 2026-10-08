@@ -1,10 +1,10 @@
 import type { ReactElement, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { dashboardRouter } from "@/test/dashboard-navigation";
 
 const mocks = vi.hoisted(() => ({
   flaggedAddress: null as { message: string } | null,
   submitting: false,
-  push: vi.fn(),
   submit: vi.fn(),
   attachFlaggedAddress: vi.fn(),
   skipFlaggedAddress: vi.fn(),
@@ -14,9 +14,7 @@ vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mocks.push }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("./counterparty-create-context.redesign", () => ({
   CounterpartyCreateProvider: ({ children }: { children: ReactNode }) => children,
@@ -66,9 +64,9 @@ function flaggedDialog(content: ContentElement) {
 }
 
 beforeEach(() => {
+  dashboardRouter.push.mockClear();
   mocks.flaggedAddress = null;
   mocks.submitting = false;
-  mocks.push.mockReset();
   mocks.submit.mockReset();
   mocks.attachFlaggedAddress.mockReset();
   mocks.skipFlaggedAddress.mockReset();
@@ -81,7 +79,7 @@ describe("counterparty create flow", () => {
     embeddedFooter(onCancel).props.children[0].props.onClick();
 
     expect(onCancel).toHaveBeenCalledOnce();
-    expect(mocks.push).not.toHaveBeenCalled();
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
   it("submits directly from the footer with no review step", () => {
@@ -93,7 +91,9 @@ describe("counterparty create flow", () => {
   it("returns the standalone page to the counterparty directory on cancel", () => {
     standalonePage().props.footer.props.children[0].props.onClick();
 
-    expect(mocks.push).toHaveBeenCalledWith("/dashboard/payments/counterparty");
+    expect(dashboardRouter.push).toHaveBeenCalledWith(
+      "/dashboard/prj_test_sandbox/payments/counterparty"
+    );
   });
 
   it("passes the dialog close action through the create page", () => {

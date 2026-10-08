@@ -11,9 +11,7 @@ vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en",
 }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/components/dashboard-page-title", () => ({ DashboardPageTitle: () => null }));
 vi.mock("@/components/dashboard-workspace-panel", () => ({
   DashboardWorkspaceOverviewPanel: ({ children }: { children: ReactNode }) => children,

@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { fetchHomeVolume } from "./home-workspace.data";
 
 function respond(status: number, body: unknown) {
@@ -8,7 +10,12 @@ function respond(status: number, body: unknown) {
   );
 }
 
+beforeEach(() => {
+  setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}`);
+});
+
 afterEach(() => {
+  restoreWindowLocation();
   vi.unstubAllGlobals();
 });
 
@@ -22,7 +29,6 @@ describe("fetchHomeVolume", () => {
     });
   });
 
-  // A body without the fields is a broken answer, not a day with no volume.
   it("rejects a malformed body instead of reading it as no volume", async () => {
     respond(200, { data: {} });
 

@@ -12,6 +12,7 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { dashboardRouter } from "@/test/dashboard-navigation";
 import { EnglishTestI18n } from "../../test-i18n";
 import type { DvpCreateRequest } from "./use-dvp-create-submit";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
@@ -21,8 +22,7 @@ function withI18n({ children }: { children: ReactNode }) {
   return <EnglishTestI18n>{children}</EnglishTestI18n>;
 }
 
-const push = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
 
 const T22 = SPL_TOKEN_PROGRAMS["token-2022"];
@@ -53,7 +53,7 @@ function request(overrides: Partial<DvpCreateRequest> = {}): DvpCreateRequest {
 
 /** Submits once and reports the request that went out. */
 async function requestFor(overrides: Partial<DvpCreateRequest> = {}): Promise<{
-  idempotencyKey: string;
+  idempotencyKey: string | null;
   body: Record<string, unknown>;
 }> {
   const fetchMock = vi.fn().mockResolvedValue({
@@ -68,10 +68,10 @@ async function requestFor(overrides: Partial<DvpCreateRequest> = {}): Promise<{
     await result.current.submit(request(overrides));
   });
 
-  const call = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string>; body?: string };
+  const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
   return {
-    idempotencyKey: call.headers?.["Idempotency-Key"] ?? "",
-    body: call.body ? (JSON.parse(call.body) as Record<string, unknown>) : {},
+    idempotencyKey: new Headers(init.headers).get("Idempotency-Key"),
+    body: JSON.parse(String(init.body)),
   };
 }
 
@@ -111,9 +111,9 @@ describe("useDvpCreateSubmit idempotency key", () => {
     vi.clearAllMocks();
   });
 
-  function keyOf(fetchMock: ReturnType<typeof vi.fn>, call: number): string {
-    const init = fetchMock.mock.calls[call]?.[1] as { headers?: Record<string, string> };
-    return init.headers?.["Idempotency-Key"] ?? "";
+  function keyOf(fetchMock: ReturnType<typeof vi.fn>, call: number): string | null {
+    const [, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+    return new Headers(init.headers).get("Idempotency-Key");
   }
 
   it("is well formed", async () => {
@@ -211,7 +211,7 @@ describe("useDvpCreateSubmit confirmation", () => {
       "The trade may have been created, but SDP couldn't read the answer. Press Create again to open it; it won't create a second one."
     );
     expect(toast.success).not.toHaveBeenCalled();
-    expect(push).not.toHaveBeenCalled();
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
   // A refusal whose body is not the error envelope still says something true.
@@ -233,7 +233,9 @@ describe("useDvpCreateSubmit confirmation", () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     await requestFor();
 
-    expect(push).toHaveBeenCalledWith("/dashboard/markets/dvp/dvp_1");
+    expect(dashboardRouter.push).toHaveBeenCalledWith(
+      "/dashboard/prj_test_sandbox/markets/dvp/dvp_1"
+    );
     const [, options] = vi.mocked(toast.success).mock.calls[0] as [
       string,
       { action: { label: string; onClick: () => void } },

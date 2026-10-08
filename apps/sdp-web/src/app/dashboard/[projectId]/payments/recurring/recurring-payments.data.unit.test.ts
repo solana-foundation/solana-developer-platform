@@ -1,5 +1,6 @@
 import type { PaymentRecurringPaymentResponse } from "@sdp/types";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setWindowPathname } from "@/test/window-location";
 import { createRecurringPayment, updateRecurringPayment } from "./recurring-payments.data";
 
 const t: Parameters<typeof createRecurringPayment>[2] = (key) => key;
@@ -40,6 +41,7 @@ const responseEnvelope = {
 } satisfies { data: PaymentRecurringPaymentResponse };
 
 describe("recurring payment write requests", () => {
+  beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/recurring"));
   afterEach(() => vi.unstubAllGlobals());
 
   it("sends the exact SDP Wallet ID for create and source replacement", async () => {
@@ -52,6 +54,10 @@ describe("recurring payment write requests", () => {
       )
     );
     vi.stubGlobal("fetch", fetchMock);
+    const headers = new Headers({
+      "Content-Type": "application/json",
+      "x-project-id": "prj_test_sandbox",
+    });
 
     await createRecurringPayment(
       {
@@ -75,7 +81,7 @@ describe("recurring payment write requests", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/dashboard/payments/recurring-payments", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         sourceCustodyWalletId: "cwlt_create",
         counterpartyId: "cpty_1",
@@ -91,7 +97,7 @@ describe("recurring payment write requests", () => {
       "/api/dashboard/payments/recurring-payments/prp_1",
       {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ sourceCustodyWalletId: "cwlt_replacement" }),
         signal: undefined,
       }

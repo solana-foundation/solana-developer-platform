@@ -5,6 +5,7 @@ import { type WalletIdentity, WalletIdentityBadge } from "./wallet-identity";
 vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
 }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const managed: WalletIdentity = {
   state: "managed",

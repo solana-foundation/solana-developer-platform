@@ -5,6 +5,7 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { ApprovalInbox } from "./approval-inbox";
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 const urlTab = vi.hoisted(() => ({ value: null as string | null }));
 vi.mock("@/lib/dashboard-url-state", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/dashboard-url-state")>()),
@@ -78,16 +79,9 @@ function pendingRequest(
 }
 
 describe("ApprovalInbox filters", () => {
-  it("renders the date presets with every catalog key resolved (regression: missing translation)", () => {
-    // Rendering exercises DateRangeFilter, which throws if any dateX key is absent;
-    // the closed select only shows the active preset in the trigger.
-    const markup = renderInbox();
-    expect(markup).toContain("All time");
-  });
-
   it("defaults the date range to All time with no date fields shown", () => {
     const markup = renderInbox();
-    // All time is the active preset by default; custom From/To inputs stay hidden.
+    expect(markup).toContain("All time");
     expect(markup).toContain('aria-label="Date"');
     expect(markup).not.toContain('type="date"');
   });

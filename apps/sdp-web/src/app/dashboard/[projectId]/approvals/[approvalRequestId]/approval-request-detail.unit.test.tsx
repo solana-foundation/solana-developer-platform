@@ -7,6 +7,7 @@ import { Toaster, toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import { ApprovalRequestDetail } from "./approval-request-detail";
 
 const pendingRequest: WalletApprovalRequestSummary = {
@@ -67,6 +68,7 @@ afterEach(() => {
   act(() => toast.dismiss());
   cleanup();
   vi.unstubAllGlobals();
+  restoreWindowLocation();
 });
 
 describe("ApprovalRequestDetail", () => {
@@ -97,6 +99,7 @@ describe("ApprovalRequestDetail", () => {
         Response.json({ error: { message: "Runtime refusal", details: { reason } } }, { status })
       );
       vi.stubGlobal("fetch", fetchResponse);
+      setWindowPathname("/dashboard/prj_test_production/approvals/apr_1");
       const user = userEvent.setup();
       render(
         <I18nProvider locale="en" messages={getMessages("en")}>
@@ -139,9 +142,13 @@ describe("ApprovalRequestDetail", () => {
 
       expect(await screen.findByText("Request approved")).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+      const decision = {
+        method: "POST",
+        headers: new Headers({ "x-project-id": "prj_test_production" }),
+      };
       expect(fetchResponse.mock.calls).toEqual([
-        ["/api/dashboard/approval-requests/apr_1/approve", { method: "POST" }],
-        ["/api/dashboard/approval-requests/apr_1/approve", { method: "POST" }],
+        ["/api/dashboard/approval-requests/apr_1/approve", decision],
+        ["/api/dashboard/approval-requests/apr_1/approve", decision],
       ]);
     }
   );

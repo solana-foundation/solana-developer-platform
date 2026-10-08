@@ -6,6 +6,7 @@ import type {
   Project,
   TokenTransactionListItem,
 } from "@sdp/types";
+import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import {
   formatCurrencyAmount,
   resolveTotalBalance,
@@ -13,7 +14,7 @@ import {
 import { getE2EEnv } from "../env";
 import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
 import { createLocalApiClient } from "../support/local-api-client";
-import { provisionWithAdminSession, seedProjectCookie } from "../support/local-dashboard-bootstrap";
+import { gotoProjectPage, provisionWithAdminSession } from "../support/local-dashboard-bootstrap";
 
 interface ReadOnlyFixture {
   issuanceTransactions: TokenTransactionListItem[];
@@ -86,10 +87,7 @@ async function assertExactIdentityAndProject(page: Page, fixture: ReadOnlyFixtur
     )
     .toBe(env.clerkOrgId);
 
-  const projectCookie = (await page.context().cookies()).find(
-    (cookie) => cookie.name === "sdp_selected_project_id"
-  );
-  expect(projectCookie?.value).toBe(fixture.project.id);
+  expect(parseDashboardPathname(new URL(page.url()).pathname).projectId).toBe(fixture.project.id);
   await expect(page.getByText(fixture.project.name, { exact: true }).first()).toBeVisible();
 }
 
@@ -217,10 +215,6 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     });
   });
 
-  test.beforeEach(async ({ page }) => {
-    await seedProjectCookie(page, fixture.project.id);
-  });
-
   test("home loads one combined activity request", async ({ page }) => {
     const capture = capturePageFailures(page);
     const activityRequests: string[] = [];
@@ -233,7 +227,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       (response) => new URL(response.url()).pathname === "/api/dashboard/home/activity"
     );
 
-    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, fixture.project.id, "/dashboard");
     expect((await activityResponse).status()).toBe(200);
     await expect(page.getByText("Recent transactions", { exact: true })).toBeVisible();
     const activityCard = page
@@ -265,7 +259,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       }
     });
 
-    await page.goto("/dashboard/payments", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, fixture.project.id, "/dashboard/payments");
     await expect(page.getByRole("heading", { level: 1, name: "Payments" })).toBeVisible();
     await proveDashboardHydrated(page, fixture.project.name);
     await assertExactIdentityAndProject(page, fixture);
@@ -277,14 +271,17 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     const drillDownWallet = fixture.populatedWallet ?? fixture.wallets[0];
     const capture = capturePageFailures(page);
 
-    await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, fixture.project.id, "/dashboard/wallets");
     const walletCard = page
       .locator("article")
       .filter({ hasText: drillDownWallet.publicKey })
       .first();
     await walletCard.getByRole("link", { name: "Manage" }).click();
 
-    await expect(page).toHaveURL(/\/dashboard\/wallets\/./, { timeout: 20_000 });
+    await expect(page).toHaveURL(
+      new RegExp(`${projectHref(fixture.project.id, "/dashboard/wallets")}/.`),
+      { timeout: 20_000 }
+    );
     const walletIdentity = drillDownWallet.label ?? drillDownWallet.publicKey;
     await expect(page.getByText(walletIdentity).first()).toBeVisible({ timeout: 20_000 });
     await assertExactIdentityAndProject(page, fixture);
@@ -316,7 +313,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       );
     });
 
-    await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+    await gotoProjectPage(page, fixture.project.id, "/dashboard/wallets");
     expect((await balancesResponse).status()).toBe(200);
     await expect(page.getByRole("heading", { level: 1, name: "Wallets" })).toBeVisible();
     await expect(

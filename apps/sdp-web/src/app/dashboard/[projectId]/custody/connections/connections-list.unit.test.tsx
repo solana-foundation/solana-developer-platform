@@ -5,10 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn() }),
-  usePathname: () => "/dashboard/wallets/connections",
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: ReactNode; href: string }) => (
@@ -127,8 +124,8 @@ describe("connections list", () => {
     // Two connections can legitimately share a label — it belongs to the
     // credential, not the connection — so each row has to address its own id
     // rather than rely on the name to tell them apart.
-    expect(html).toContain("/dashboard/integrations/privy/connections/conn-active");
-    expect(html).toContain("/dashboard/integrations/privy/connections/conn-second");
+    expect(html).toContain("prj_test_sandbox/integrations/privy/connections/conn-active");
+    expect(html).toContain("prj_test_sandbox/integrations/privy/connections/conn-second");
     expect(html).toContain("Active");
     expect(html).toContain("Pending");
   });

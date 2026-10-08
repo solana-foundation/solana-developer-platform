@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PRODUCTION_PROJECT } from "@/test/projects";
+import { setPageRequest } from "@/test/request-project";
 
 const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
@@ -11,17 +13,18 @@ vi.mock("@clerk/nextjs/server", () => ({
 vi.mock("next/cache", () => ({
   revalidatePath: mocks.revalidatePath,
 }));
-vi.mock("next/navigation", () => ({
-  redirect: vi.fn(),
-}));
+vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("@/i18n/server", () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
 }));
-vi.mock("@/lib/sdp-api", () => ({
+vi.mock("@/lib/sdp-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
   createSdpApiClient: mocks.createSdpApiClient,
 }));
 
 import { createCustodySetupWalletAction, requestDevnetSolanaFaucetAction } from "./actions";
+
+beforeEach(() => setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_one`));
 
 function walletForm(fields: Record<string, string>): FormData {
   const formData = new FormData();
@@ -135,7 +138,12 @@ describe("requestDevnetSolanaFaucetAction", () => {
     });
     expect(client.fetch.mock.calls[1]?.[1]?.signal).toBeInstanceOf(AbortSignal);
     const lastStatusCheck = client.fetch.mock.invocationCallOrder[2] ?? 0;
-    expect(mocks.revalidatePath).toHaveBeenCalled();
+    expect(mocks.revalidatePath.mock.calls).toEqual([
+      [`/dashboard/${PRODUCTION_PROJECT.id}/custody`],
+      [`/dashboard/${PRODUCTION_PROJECT.id}/wallets`],
+      [`/dashboard/${PRODUCTION_PROJECT.id}/custody/wallet_one`],
+      [`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_one`],
+    ]);
     for (const order of mocks.revalidatePath.mock.invocationCallOrder) {
       expect(order).toBeGreaterThan(lastStatusCheck);
     }

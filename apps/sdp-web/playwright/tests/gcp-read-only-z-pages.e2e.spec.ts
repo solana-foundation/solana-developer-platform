@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { getE2EEnv } from "../env";
-import { seedProjectCookie } from "../support/local-dashboard-bootstrap";
+import { gotoProjectPage } from "../support/local-dashboard-bootstrap";
 
 const READ_ONLY_PAGES = [
   "/dashboard/tokens",
@@ -20,7 +20,6 @@ test.describe("GCP dev dashboard read-only page sweep", () => {
     if (!env.useExternalApi) {
       throw new Error("GCP smoke must run in explicit external mode");
     }
-    await seedProjectCookie(page, env.expectedProjectId);
 
     const failures: string[] = [];
     let currentPath = "";
@@ -34,7 +33,7 @@ test.describe("GCP dev dashboard read-only page sweep", () => {
 
     for (const path of READ_ONLY_PAGES) {
       currentPath = path;
-      const response = await page.goto(path, { waitUntil: "domcontentloaded" });
+      const response = await gotoProjectPage(page, env.expectedProjectId, path);
       if ((response?.status() ?? 0) >= 400) {
         failures.push(`${path} status ${response?.status()}`);
         continue;

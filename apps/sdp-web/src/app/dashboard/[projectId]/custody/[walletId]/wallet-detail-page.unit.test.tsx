@@ -16,6 +16,8 @@ import { Callout } from "@/components/ui/callout";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { getTranslations } from "@/i18n/server";
+import { PRODUCTION_PROJECT } from "@/test/projects";
+import { setPageRequest } from "@/test/request-project";
 
 const {
   mockAuth,
@@ -37,15 +39,8 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mockAuth,
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn() }),
-  notFound: vi.fn(() => {
-    throw new Error("not found");
-  }),
-  redirect: vi.fn(() => {
-    throw new Error("redirected");
-  }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+vi.mock("next/headers", () => import("@/test/next-headers"));
 
 vi.mock("@/i18n/server", () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
@@ -57,7 +52,8 @@ vi.mock("@/flags", () => ({
   privyByok: mockPrivyByokFlag,
 }));
 
-vi.mock("@/lib/sdp-api", () => ({
+vi.mock("@/lib/sdp-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
   createSdpApiClient: vi.fn(async () => ({ request: mockRequest })),
 }));
 
@@ -76,6 +72,10 @@ import WalletDetailPage, {
   WalletBalanceSummary,
   WalletBalancesSection,
 } from "./wallet-detail-page";
+
+function renderPage() {
+  return WalletDetailPage({ params: Promise.resolve({ walletId: "wallet%2Fone" }) });
+}
 
 let walletOverrides: Record<string, unknown> = {};
 
@@ -149,6 +149,7 @@ function renderWalletIdentity(page: ReactNode): string {
 
 beforeEach(() => {
   walletOverrides = {};
+  setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
   mockAuth.mockReset();
   mockIssuanceFlag.mockReset();
   mockLoadWalletActivity.mockReset();
@@ -208,52 +209,40 @@ beforeEach(() => {
 });
 
 describe("WalletDetailPage critical path", () => {
-  it("keeps a connection-owned wallet readable without connection requests or links when BYOK is off", async () => {
-    walletOverrides = { custodyConnectionId: "connection_one" };
-    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
-    mockPrivyByokFlag.mockResolvedValue(false);
+  it.each([
+    ["an admin while BYOK is off", "org:admin", false],
+    ["a member", "org:member", true],
+  ])(
+    "keeps a connection-owned wallet readable without connection requests or links for %s",
+    async (_viewer, orgRole, byokEnabled) => {
+      walletOverrides = { custodyConnectionId: "connection_one" };
+      mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole });
+      mockPrivyByokFlag.mockResolvedValue(byokEnabled);
 
-    const page = await WalletDetailPage({
-      params: Promise.resolve({ walletId: "wallet%2Fone" }),
-    });
+      const page = await renderPage();
 
-    expect(
-      mockRequest.mock.calls.some(([path]) => String(path).includes("/custody/connections"))
-    ).toBe(false);
-    const markup = renderWalletIdentity(page);
-    expect(markup).toContain("Fast wallet");
-    expect(markup).not.toContain("/dashboard/integrations/privy/connections/");
-  });
-
-  it("does not request admin-only connection data for a member", async () => {
-    walletOverrides = { custodyConnectionId: "connection_one" };
-    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:member" });
-
-    const page = await WalletDetailPage({
-      params: Promise.resolve({ walletId: "wallet%2Fone" }),
-    });
-
-    expect(
-      mockRequest.mock.calls.some(([path]) => String(path).includes("/custody/connections"))
-    ).toBe(false);
-    const markup = renderWalletIdentity(page);
-    expect(markup).toContain("Fast wallet");
-    expect(markup).not.toContain("/dashboard/integrations/privy/connections/");
-  });
+      expect(
+        mockRequest.mock.calls.some(([path]) => String(path).includes("/custody/connections"))
+      ).toBe(false);
+      const markup = renderWalletIdentity(page);
+      expect(markup).toContain("Fast wallet");
+      expect(markup).not.toContain("/integrations/privy/connections/");
+    }
+  );
 
   it("loads the wallet's exact connection and links its label for an admin with BYOK enabled", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
     mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
 
-    const page = await WalletDetailPage({
-      params: Promise.resolve({ walletId: "wallet%2Fone" }),
-    });
+    const page = await renderPage();
 
     expect(
       mockRequest.mock.calls.filter(([path]) => String(path).includes("/custody/connections"))
     ).toEqual([["/internal/dashboard/custody/connections/connection_one"]]);
     const markup = renderWalletIdentity(page);
-    expect(markup).toContain('href="/dashboard/integrations/privy/connections/connection_one"');
+    expect(markup).toContain(
+      `href="/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy/connections/connection_one"`
+    );
     expect(markup).toContain("Treasury connection");
   });
 
@@ -272,9 +261,7 @@ describe("WalletDetailPage critical path", () => {
         return new Response(null, { status: 404 });
       });
 
-      const page = await WalletDetailPage({
-        params: Promise.resolve({ walletId: "wallet%2Fone" }),
-      });
+      const page = await renderPage();
 
       const markup = renderWalletIdentity(page);
       expect(markup).toContain("Fast wallet");
@@ -323,9 +310,7 @@ describe("WalletDetailPage critical path", () => {
   ])("reuses the wallet label editor for %s users", async (orgRole, canEdit) => {
     mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole });
 
-    const page = await WalletDetailPage({
-      params: Promise.resolve({ walletId: "wallet%2Fone" }),
-    });
+    const page = await renderPage();
 
     expect(findWalletLabelEditor(page)).toEqual({
       canEdit,
@@ -337,23 +322,19 @@ describe("WalletDetailPage critical path", () => {
 
   it("explains a signing restriction in the identity shell", async () => {
     walletOverrides = { isRuntimeExecutionAllowed: false };
-    const restricted = await WalletDetailPage({
-      params: Promise.resolve({ walletId: "wallet%2Fone" }),
-    });
+    const restricted = await renderPage();
     expect(findElementProps(restricted, Callout)).toMatchObject({
       variant: "warning",
       title: "DashboardCustody.signingDisabledTitle",
     });
 
     walletOverrides = {};
-    const allowed = await WalletDetailPage({
-      params: Promise.resolve({ walletId: "wallet%2Fone" }),
-    });
+    const allowed = await renderPage();
     expect(findElementProps(allowed, Callout)).toBeNull();
   });
 
   it("loads metadata only and leaves wallet activity off the initial render path", async () => {
-    await WalletDetailPage({ params: Promise.resolve({ walletId: "wallet%2Fone" }) });
+    await renderPage();
 
     expect(mockLoadWalletActivity).not.toHaveBeenCalled();
     expect(mockRequest).toHaveBeenCalledWith("/v1/wallets/wallet%2Fone?includeBalance=false");
@@ -362,9 +343,7 @@ describe("WalletDetailPage critical path", () => {
   it("does not load or render policy controls when Policies is disabled", async () => {
     mockPoliciesFlag.mockResolvedValue(false);
 
-    const page = await WalletDetailPage({
-      params: Promise.resolve({ walletId: "wallet%2Fone" }),
-    });
+    const page = await renderPage();
     expect(page).toBeTruthy();
 
     expect(mockRequest.mock.calls.some(([path]) => String(path).includes("/policies"))).toBe(false);
@@ -384,9 +363,7 @@ describe("WalletDetailPage critical path", () => {
       return Promise.reject(new Error(`Unexpected request: ${path}`));
     });
 
-    const pagePromise = WalletDetailPage({
-      params: Promise.resolve({ walletId: "wallet%2Fone" }),
-    });
+    const pagePromise = renderPage();
 
     try {
       const result = await Promise.race([

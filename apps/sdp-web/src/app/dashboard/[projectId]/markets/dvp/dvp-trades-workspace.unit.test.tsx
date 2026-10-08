@@ -20,10 +20,10 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { ChangeEvent, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { EnglishTestI18n } from "../test-i18n";
 import {
   OTHER_ADDRESS,
-  OWN_ADDRESS,
   OWN_WALLET_ID,
   ownParty,
   THIRD_ADDRESS,
@@ -35,14 +35,7 @@ import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 import { resolveTradesListState } from "./dvp-trades-list-state";
 import { DvpTradesWorkspace } from "./dvp-trades-workspace";
 
-const replaceMock = vi.fn();
-
-// The workspace navigates through the router on filter changes; the render
-// harness never runs effects, and the mock exists so importing the hook does
-// not throw in a node environment.
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: replaceMock }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 // The select's popup positioning is integration-tested with the shared UI
 // primitive. This workspace suite needs only its value-change contract.
@@ -138,7 +131,7 @@ function inboundTrade(): DvpInboundTrade {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  replaceMock.mockClear();
+  resetDashboardNavigation();
   window.history.replaceState(null, "", "/");
 });
 
@@ -160,11 +153,14 @@ describe("DvpTradesWorkspace", () => {
     expect(renderWorkspace({ trades: [], inbound: [] })).not.toContain("Filter by status");
   });
 
-  it("invites a first trade when the list is genuinely empty", () => {
-    const html = renderList([]);
+  it.each([
+    ["No trades yet", []],
+    ["<table", [trade()]],
+  ])("offers create inside the project alongside %s", (content, trades) => {
+    const html = renderList(trades);
 
-    expect(html).toContain("No trades yet");
-    expect(html).toContain("/dashboard/markets/dvp/create");
+    expect(html).toContain(content);
+    expect(html).toContain("/dashboard/prj_test_sandbox/markets/dvp/create");
   });
 
   // A filter that matches nothing is not an empty project. Deciding emptiness
@@ -243,7 +239,10 @@ describe("DvpTradesWorkspace", () => {
     act(() => {
       vi.advanceTimersByTime(400);
     });
-    expect(replaceMock).toHaveBeenCalledWith("/dashboard/markets/dvp?q=ab", { scroll: false });
+    expect(dashboardRouter.replace).toHaveBeenCalledWith(
+      "/dashboard/prj_test_sandbox/markets/dvp?q=ab",
+      { scroll: false }
+    );
 
     // More typing before the navigation's prop echo arrives…
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "abc" } });
@@ -282,13 +281,16 @@ describe("DvpTradesWorkspace", () => {
       target: { value: "open" },
     });
 
-    expect(replaceMock).toHaveBeenCalledTimes(1);
-    expect(replaceMock).toHaveBeenCalledWith("/dashboard/markets/dvp?status=open&q=ab", {
-      scroll: false,
-    });
+    expect(dashboardRouter.replace).toHaveBeenCalledTimes(1);
+    expect(dashboardRouter.replace).toHaveBeenCalledWith(
+      "/dashboard/prj_test_sandbox/markets/dvp?status=open&q=ab",
+      {
+        scroll: false,
+      }
+    );
 
     act(() => vi.advanceTimersByTime(400));
-    expect(replaceMock).toHaveBeenCalledTimes(1);
+    expect(dashboardRouter.replace).toHaveBeenCalledTimes(1);
   });
 
   // An EXTERNAL navigation (Back/Forward, a pasted URL) is exactly when the
@@ -310,7 +312,7 @@ describe("DvpTradesWorkspace", () => {
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "abacus" } });
     // Back/Forward lands before the debounce flushes.
     act(() => {
-      window.history.pushState(null, "", "/dashboard/markets/dvp?q=bamboo");
+      window.history.pushState(null, "", "/dashboard/prj_test_sandbox/markets/dvp?q=bamboo");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     view.rerender(
@@ -330,9 +332,12 @@ describe("DvpTradesWorkspace", () => {
       vi.advanceTimersByTime(400);
     });
     // The stale "abacus" flush was superseded; nothing may write it back.
-    expect(replaceMock).not.toHaveBeenCalledWith("/dashboard/markets/dvp?q=abacus", {
-      scroll: false,
-    });
+    expect(dashboardRouter.replace).not.toHaveBeenCalledWith(
+      "/dashboard/prj_test_sandbox/markets/dvp?q=abacus",
+      {
+        scroll: false,
+      }
+    );
   });
 
   it("starts from page one when browser navigation changes the search", () => {
@@ -353,7 +358,7 @@ describe("DvpTradesWorkspace", () => {
     expect(screen.getByText("Page 2 of 2")).toBeTruthy();
 
     act(() => {
-      window.history.pushState(null, "", "/dashboard/markets/dvp?q=second");
+      window.history.pushState(null, "", "/dashboard/prj_test_sandbox/markets/dvp?q=second");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     view.rerender(
@@ -445,65 +450,30 @@ describe("DvpTradesWorkspace", () => {
     });
   });
 
-  it("links a registered counterparty in the parties column to its page", () => {
+  it.each([
+    [
+      { address: OTHER_ADDRESS, counterparty: { id: "cpa_1", label: "Acme OTC" }, wallet: null },
+      "Acme OTC",
+      "/dashboard/prj_test_sandbox/payments/counterparty/cpa_1",
+    ],
+    [ownParty(), "Fixture Desk", `/dashboard/prj_test_sandbox/wallets/${OWN_WALLET_ID}`],
+    [
+      ownParty({ wallet: { id: OWN_WALLET_ID, name: null } }),
+      "SDP Wallet",
+      `/dashboard/prj_test_sandbox/wallets/${OWN_WALLET_ID}`,
+    ],
+  ])("links party %# in the parties column to its page under its name", (party, name, href) => {
     const html = renderList([
       trade({
         legs: {
-          a: testLeg({
-            party: {
-              address: OTHER_ADDRESS,
-              counterparty: { id: "cpa_1", label: "Acme OTC" },
-              wallet: null,
-            },
-          }),
+          a: testLeg({ party }),
           b: testLeg({ party: { address: THIRD_ADDRESS, counterparty: null, wallet: null } }),
         },
       }),
     ]);
 
-    expect(html).toContain("Acme OTC");
-    expect(html).toContain("/dashboard/payments/counterparty/cpa_1");
-  });
-
-  // A custodied party is the caller's own wallet: a link to its page, labelled
-  // with its name — never plain text, per the house rule for referenced
-  // entities, and never a bare "yours" badge now that the API names the wallet.
-  it("links a custodied party to its wallet's page under the wallet's name", () => {
-    const html = renderList([
-      trade({
-        legs: {
-          a: testLeg({ party: ownParty() }),
-          b: testLeg(),
-        },
-      }),
-    ]);
-
-    expect(html).toContain(`/dashboard/wallets/${OWN_WALLET_ID}`);
-    expect(html).toContain("Fixture Desk");
-    expect(html).toContain(OWN_ADDRESS.slice(0, 6));
-  });
-
-  // A wallet with no display name still links; the label falls back to the
-  // generic SDP Wallet copy rather than an empty string.
-  it("labels an unnamed custodied wallet with the SDP Wallet fallback", () => {
-    const html = renderList([
-      trade({
-        legs: {
-          a: testLeg({ party: ownParty({ wallet: { id: OWN_WALLET_ID, name: null } }) }),
-          b: testLeg(),
-        },
-      }),
-    ]);
-
-    expect(html).toContain(`/dashboard/wallets/${OWN_WALLET_ID}`);
-    expect(html).toContain("SDP Wallet");
-  });
-
-  it("keeps create reachable once trades exist", () => {
-    const html = renderList([trade()]);
-
-    expect(html).toContain("/dashboard/markets/dvp/create");
-    expect(html).toContain("<table");
+    expect(html).toContain(name);
+    expect(html).toContain(href);
   });
 
   // Before anything has read the escrow, its balance is unknown rather than

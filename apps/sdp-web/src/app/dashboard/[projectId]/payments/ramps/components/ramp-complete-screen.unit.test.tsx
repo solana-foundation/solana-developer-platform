@@ -12,11 +12,7 @@ import { RampCompleteScreen } from "./ramp-complete-screen";
 vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isLoaded: false, orgId: null, userId: null }),
 }));
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/payments",
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const SIGNATURE =
   "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM";
@@ -109,8 +105,6 @@ function renderScreen(transfer: PaymentTransferSummary): string {
       }}
       serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
       projects={[]}
-      initialSelectedProjectId={null}
-      shouldRepairInitialProjectCookie={false}
     >
       <I18nProvider locale="en" messages={getMessages("en")}>
         <RampCompleteScreen direction="onramp" quote={BVNK_QUOTE} transfer={transfer} />
@@ -135,7 +129,7 @@ describe("RampCompleteScreen — BVNK onramp projections", () => {
 
     // The destination custody wallet is linked; the receipt is placed last.
     expect(markup).toContain("Destination");
-    expect(markup).toContain(`href="/dashboard/wallets/${CUSTODY_WALLET_ID}"`);
+    expect(markup).toContain(`href="/dashboard/prj_test_sandbox/wallets/${CUSTODY_WALLET_ID}"`);
     expect(markup).toContain(`href="${RECEIPT_URL}"`);
     expect(markup).toContain("View receipt");
     expect(markup.indexOf("View receipt")).toBeGreaterThan(markup.indexOf("Pay-in ID"));

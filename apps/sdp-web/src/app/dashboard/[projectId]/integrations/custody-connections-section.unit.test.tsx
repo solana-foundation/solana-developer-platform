@@ -4,10 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }),
-  usePathname: () => "/dashboard/integrations/privy",
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: ReactNode; href: string }) => (
@@ -53,11 +50,6 @@ function makeConnection(
   };
 }
 
-/**
- * `projectConnections` defaults to the visible ones, which is the ordinary
- * single-page case. Passing it separately is how the off-page cases are set up:
- * the banners are claims about the project, not about the rows on screen.
- */
 function render({
   connections,
   projectConnections = connections,
@@ -117,7 +109,6 @@ describe("custody connections section", () => {
 
     expect(html).toContain("Signing through your own credentials is currently not allowed");
     expect(html).toContain("Nothing has been deleted.");
-    // The connection itself is untouched and still listed as Active.
     expect(html).toContain("Active");
   });
 
@@ -141,8 +132,6 @@ describe("custody connections section", () => {
     expect(html).not.toContain("Signing through your own credentials is currently not allowed");
   });
 
-  // Both banners are statements about every connection, so a read that could
-  // not see them all supports neither.
   it("raises neither banner when the project could not be read through", () => {
     const html = render({
       connections: [makeConnection({ id: "cconn_1", isRuntimeExecutionAllowed: false })],

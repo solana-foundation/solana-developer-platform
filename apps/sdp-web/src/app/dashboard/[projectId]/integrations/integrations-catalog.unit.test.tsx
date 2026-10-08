@@ -6,15 +6,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveCustodyIntegrations } from "@/app/dashboard/[projectId]/integrations/integrations-status";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { IntegrationsCatalog } from "./integrations-catalog";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
-  usePathname: () => "/dashboard/integrations",
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-// The family axis rides the sidebar submenu through `?tab=`; the catalog only
-// reads the resolved value, so the hook stands in for the URL here.
 const urlState = vi.hoisted(() => ({ tab: null as string | null }));
 vi.mock("@/lib/dashboard-url-state", () => ({
   useDashboardTab: () => urlState.tab,
@@ -124,9 +120,8 @@ describe("IntegrationsCatalog", () => {
     expect(screen.queryAllByRole("link", { name: "Manage" })).toHaveLength(0);
     expect(screen.queryAllByRole("link", { name: "Configure" })).toHaveLength(0);
     expect(screen.queryAllByRole("link", { name: "Request access" })).toHaveLength(0);
-    // Every card is a navigation target to its provider detail.
     const privy = screen.getByRole("link", { name: "Privy" });
-    expect(privy.getAttribute("href")).toBe("/dashboard/integrations/privy");
+    expect(privy.getAttribute("href")).toBe(`/dashboard/${SANDBOX_PROJECT.id}/integrations/privy`);
   });
 
   it("fills every row with a description instead of dead space", () => {

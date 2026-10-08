@@ -158,6 +158,7 @@ vi.mock("@/i18n/provider", () => ({
   useLocale: () => "en",
 }));
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useOptionalDashboardWorkspace: () => ({
     dashboardAccess: { capabilities: { canManageCustody: mocks.canManageCustody } },
@@ -995,7 +996,7 @@ describe("EarnVaultDepositModal", () => {
 
     await screen.findByRole("dialog");
     const action = screen.getByRole("link", { name: "Create wallet" });
-    expect(action.getAttribute("href")).toBe("/dashboard/wallets/setup");
+    expect(action.getAttribute("href")).toBe("/dashboard/prj_test_sandbox/wallets/setup");
   });
 
   it("does not offer wallet setup without custody management permission", async () => {

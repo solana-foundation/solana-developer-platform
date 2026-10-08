@@ -208,6 +208,7 @@ vi.mock("./kamino-allocations", () => ({
   },
 }));
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
   useOptionalDashboardWorkspace: () => ({
@@ -864,7 +865,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
     expect(screen.getByText("No active custody wallets")).toBeTruthy();
     const action = screen.getByRole("link", { name: "Create wallet" });
-    expect(action.getAttribute("href")).toBe("/dashboard/wallets/setup");
+    expect(action.getAttribute("href")).toBe("/dashboard/prj_test_sandbox/wallets/setup");
     expect(screen.queryByRole("link", { name: "View all" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Available strategies" })).toBeTruthy();
   });

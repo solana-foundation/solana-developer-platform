@@ -13,7 +13,7 @@ import { useOfframpWizard } from "./use-offramp-wizard";
 import { useOnchainReceiveWizard } from "./use-onchain-receive-wizard";
 import { useOnchainSendWizard } from "./use-onchain-send-wizard";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     dashboardCacheScope: { orgId: "org_test", userId: "user_test" },

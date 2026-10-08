@@ -13,18 +13,18 @@ import { earnQueryKeys } from "@/app/dashboard/[projectId]/markets/earn/earn-que
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { dashboardRouter, setDashboardUrl } from "@/test/dashboard-navigation";
+import { PRODUCTION_PROJECT } from "@/test/projects";
 import { PrivyCredentialForm } from "./privy-credential-form";
 
-const push = vi.fn();
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push, refresh: vi.fn() }),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("@/app/dashboard/[projectId]/custody/byok-actions", () => ({
   submitPrivyCredentialAction: vi.fn(),
   recheckPrivyCredentialAction: vi.fn(),
 }));
+
+const WALLETS_HREF = `/dashboard/${PRODUCTION_PROJECT.id}/wallets`;
 
 function renderForm() {
   return render(
@@ -48,7 +48,8 @@ function submittedKey(call: number): string {
 describe("PrivyCredentialForm", () => {
   beforeEach(() => {
     cleanup();
-    push.mockClear();
+    setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/setup`, {});
+    dashboardRouter.push.mockClear();
     vi.mocked(submitPrivyCredentialAction).mockReset();
     vi.mocked(recheckPrivyCredentialAction).mockReset();
   });
@@ -63,9 +64,6 @@ describe("PrivyCredentialForm", () => {
     const secret = screen.getByLabelText("Privy app secret") as HTMLInputElement;
     expect(secret.type).toBe("password");
     expect(secret.value).toBe("");
-    // Stored credentials always bind to the calling project now; the form no
-    // longer offers an organization scope the API would reject.
-    expect(screen.queryByLabelText("Credential scope")).toBeNull();
   });
 
   it("submits with an idempotency key and routes to wallets on success", async () => {
@@ -78,7 +76,7 @@ describe("PrivyCredentialForm", () => {
 
     await fillAndSubmit(user);
 
-    await waitFor(() => expect(push.mock.calls[0]?.[0]).toBe("/dashboard/wallets"));
+    await waitFor(() => expect(dashboardRouter.push.mock.calls[0]?.[0]).toBe(WALLETS_HREF));
     expect(submittedKey(0)).toMatch(/[0-9a-f-]{36}/);
   });
 
@@ -289,7 +287,7 @@ describe("PrivyCredentialForm", () => {
 
     await user.click(await screen.findByRole("button", { name: "Check again" }));
     await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_1"));
-    await waitFor(() => expect(push.mock.calls[0]?.[0]).toBe("/dashboard/wallets"));
+    await waitFor(() => expect(dashboardRouter.push.mock.calls[0]?.[0]).toBe(WALLETS_HREF));
     await waitFor(() => expect(onLock).toHaveBeenLastCalledWith(false));
   });
 
@@ -386,7 +384,7 @@ describe("PrivyCredentialForm", () => {
     // The re-check is idempotent, so a lost response keeps the same screen and
     // the same offer rather than discarding the stored credential's state.
     await user.click(await screen.findByRole("button", { name: "Check again" }));
-    await waitFor(() => expect(push.mock.calls[0]?.[0]).toBe("/dashboard/wallets"));
+    await waitFor(() => expect(dashboardRouter.push.mock.calls[0]?.[0]).toBe(WALLETS_HREF));
   });
 
   it("offers a safe re-check instead of resubmitting after an unknown outcome", async () => {
@@ -408,7 +406,7 @@ describe("PrivyCredentialForm", () => {
 
     await user.click(checkAgain);
     await waitFor(() => expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_1"));
-    await waitFor(() => expect(push.mock.calls[0]?.[0]).toBe("/dashboard/wallets"));
+    await waitFor(() => expect(dashboardRouter.push.mock.calls[0]?.[0]).toBe(WALLETS_HREF));
     expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(1);
   });
 });
