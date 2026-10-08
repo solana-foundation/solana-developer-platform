@@ -1,6 +1,7 @@
 import { type Context, Hono, type Next } from "hono";
 import { AppError } from "@/lib/errors";
 import { isPrivateChannelsEnabled } from "@/lib/feature-flags";
+import { isExitRequest } from "@/lib/movement-exits";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
@@ -71,7 +72,8 @@ async function requirePrivateChannelsFeature(c: Context<{ Bindings: Env }>, next
 
 privateChannels.use("*", requirePrivateChannelsFeature);
 privateChannels.use("*", unifiedAuthMiddleware());
-privateChannels.use("*", projectContextMiddleware());
+// Declared exits stay open after production is revoked (HOO-1955).
+privateChannels.use("*", projectContextMiddleware({ allowUnentitledProduction: isExitRequest }));
 
 // --- /health --------------------------------------------------------------
 // Gateway-only probe of a caller-supplied URL. Returns PrivateChannelHealth DTO.

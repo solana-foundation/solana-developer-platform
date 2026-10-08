@@ -6,6 +6,7 @@ import type {
 } from "@sdp/types";
 import { z } from "zod";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequestParams, badRequestQuery } from "@/lib/errors";
@@ -165,6 +166,7 @@ export const updateRecurringPayment = async (
 
   const updated = await updateRecurringPaymentRecord({
     env: c.env,
+    movement: await admitRequestMovement(c, "recurring.update"),
     organizationId: auth.organizationId,
     projectId,
     sourceWallet,
@@ -215,6 +217,7 @@ export const activateRecurringPayment = async (
 
   const activated = await activateRecurringPaymentRecord({
     env: c.env,
+    movement: await admitRequestMovement(c, "recurring.activate"),
     organizationId: auth.organizationId,
     projectId,
     sourceWallet,
@@ -261,6 +264,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
     operation === "cancel"
       ? await cancelRecurringPaymentRecord({
           env: c.env,
+          movement: await admitRequestMovement(c, "recurring.cancel"),
           organizationId: auth.organizationId,
           projectId,
           sourceWallet,
@@ -268,6 +272,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
         })
       : await resumeRecurringPaymentRecord({
           env: c.env,
+          movement: await admitRequestMovement(c, "recurring.resume"),
           organizationId: auth.organizationId,
           projectId,
           sourceWallet,
@@ -319,6 +324,7 @@ export const collectRecurringPayment = async (
 
   const collected = await collectRecurringPaymentRecord({
     env: c.env,
+    movement: await admitRequestMovement(c, "recurring.collect"),
     organizationId: auth.organizationId,
     projectId,
     sourceWallet,

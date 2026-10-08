@@ -6,6 +6,7 @@ import { AuthorityType } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";
 import { getDb } from "@/db";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -252,6 +253,7 @@ export const prepareUpdateAuthority = async (
   const { custodyWalletId, signer } = await resolveAuthoritySigner({
     env: c.env,
     auth,
+    movement: await admitRequestMovement(c, "issuance.execute"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],
@@ -479,6 +481,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   const signer = await createResolvedAuthoritySigner({
     env: c.env,
     auth,
+    movement: await admitRequestMovement(c, "issuance.execute"),
     custodyWalletId,
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],

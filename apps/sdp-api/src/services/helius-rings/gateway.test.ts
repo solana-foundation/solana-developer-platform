@@ -1,6 +1,7 @@
 import type { RingsGatewayPort } from "@sdp/helius-rings";
 import { HeliusRingsError } from "@sdp/helius-rings";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { admitMovement } from "@/lib/admit-movement";
 import { gatewayStub } from "@/test/fixtures/rings-gateway";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
@@ -10,6 +11,19 @@ import {
   type ResolveRingsGatewayDependencies,
   UnconfiguredRingsGateway,
 } from "./gateway";
+
+// The SDK's setup signatures are admitted lazily as `rings.setup` (HOO-1955);
+// admission itself is covered by admit-movement.test.ts.
+vi.mock("@/lib/admit-movement", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/admit-movement")>();
+  return {
+    ...actual,
+    admitMovement: vi.fn(
+      async (_env: unknown, scope: { organizationId: string; projectId: string }, purpose) =>
+        actual.mintAdmittedMovementForTests({ ...scope, purpose })
+    ),
+  };
+});
 
 type CapturedConfig = Parameters<NonNullable<ResolveRingsGatewayDependencies["createGateway"]>>[0];
 
@@ -209,9 +223,9 @@ describe("createConfiguredRingsGateway", () => {
     if (!config) throw new Error("no gateway config was captured");
     await expect(config.signTransaction("unsigned", "OwnerPublicKey")).resolves.toBe("signed");
     await expect(config.submitTransaction("signed")).resolves.toBe("sig");
+    expect(admitMovement).toHaveBeenCalledWith(env, tenant, "rings.setup");
     expect(signCalls[0]).toMatchObject({
-      organizationId: tenant.organizationId,
-      projectId: tenant.projectId,
+      movement: expect.objectContaining({ ...tenant, purpose: "rings.setup" }),
       owner: "OwnerPublicKey",
       unsignedTxBase64: "unsigned",
     });
@@ -237,9 +251,9 @@ describe("createConfiguredRingsGateway", () => {
     await expect(config.signMessage?.("attestation", "OwnerPublicKey")).resolves.toBe(
       "message-signature"
     );
+    expect(admitMovement).toHaveBeenCalledWith(env, tenant, "rings.setup");
     expect(calls[0]).toMatchObject({
-      organizationId: tenant.organizationId,
-      projectId: tenant.projectId,
+      movement: expect.objectContaining({ ...tenant, purpose: "rings.setup" }),
       owner: "OwnerPublicKey",
       messageBase64: "attestation",
     });

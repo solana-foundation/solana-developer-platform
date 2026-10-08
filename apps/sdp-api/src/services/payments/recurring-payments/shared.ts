@@ -27,6 +27,7 @@ import type {
   PaymentSubscriptionRow,
 } from "@/db/repositories";
 import { createTokenRepository } from "@/db/repositories";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import {
   AppError,
   badRequest,
@@ -217,8 +218,7 @@ export function assertRecurringPaymentSourceWallet(
 
 export async function sendSubscriptionInstructions(input: {
   env: Env;
-  organizationId: string;
-  projectId: string;
+  movement: AdmittedMovement;
   sourceWallet: CustodyWallet;
   sourceSigner?: TransactionSigner;
   instructions: Instruction[];
@@ -229,8 +229,7 @@ export async function sendSubscriptionInstructions(input: {
     input.sourceSigner ??
     (await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
-      input.organizationId,
-      input.projectId,
+      input.movement,
       input.sourceWallet.id
     ));
 
@@ -240,9 +239,7 @@ export async function sendSubscriptionInstructions(input: {
 
   const rpc = solanaRpc.createRpc(input.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-    organizationId: input.organizationId,
-    projectId: input.projectId,
+  const feePayment = createProjectSponsorshipFeePayment(input.env, input.movement, {
     actor: { type: "wallet", id: input.sourceWallet.walletId },
   });
   const feePayer = input.feePayer ?? (await feePayment.getFeePayer());

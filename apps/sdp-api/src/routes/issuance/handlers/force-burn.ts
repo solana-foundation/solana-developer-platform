@@ -1,6 +1,7 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
@@ -75,6 +76,7 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   const { signer, custodyWalletId } = await resolveAuthoritySigner({
     env: c.env,
     auth,
+    movement: await admitRequestMovement(c, "issuance.execute"),
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: permanentDelegateRaw,
     requiredWalletPermissions: ["tokens:admin"],
@@ -276,6 +278,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   const signer = await createResolvedAuthoritySigner({
     env: c.env,
     auth,
+    movement: await admitRequestMovement(c, "issuance.execute"),
     custodyWalletId,
     currentAuthority: permanentDelegateRaw,
     requiredWalletPermissions: ["tokens:admin"],

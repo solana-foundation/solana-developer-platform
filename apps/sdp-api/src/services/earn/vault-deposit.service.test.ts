@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   recoverApprovedWalletOperations,
@@ -92,6 +93,11 @@ function depositInput(overrides: Partial<VaultDepositInput> = {}): VaultDepositI
   return {
     organizationId: ORG,
     projectId: PROJECT,
+    movement: mintAdmittedMovementForTests({
+      organizationId: ORG,
+      projectId: PROJECT,
+      purpose: "earn.deposit",
+    }),
     environment: "sandbox" as const,
     provider: "kamino",
     providerReference: VAULT_A,
@@ -465,7 +471,11 @@ describe("depositIntoVault — validation and custody identity", () => {
   it("resolves signing by the exact custody-wallet row id", async () => {
     await depositIntoVault(env, depositInput());
 
-    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(env, ORG, PROJECT, WALLET_ROW_ID);
+    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ organizationId: ORG, projectId: PROJECT, purpose: "earn.deposit" }),
+      WALLET_ROW_ID
+    );
   });
 });
 

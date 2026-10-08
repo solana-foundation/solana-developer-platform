@@ -5,6 +5,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db";
 import { createPostgresAssetProfilesRepository } from "@/db/repositories";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import type { ApiKeyContext } from "@/lib/auth";
 import { badRequest, badRequestQuery, conflict, internalError, notFound } from "@/lib/errors";
 import { buildDefaultAssetProfile } from "@/lib/issuance/default-asset-profile";
@@ -120,6 +121,7 @@ async function resolveMetadataUpdate(params: {
   const signer = await createResolvedAuthoritySigner({
     env: params.c.env,
     auth: params.auth,
+    movement: await admitRequestMovement(params.c, "issuance.execute"),
     custodyWalletId: authorityWallet.custodyWalletId,
     currentAuthority,
     requiredWalletPermissions: ["tokens:write"],

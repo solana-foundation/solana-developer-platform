@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import type { AppError } from "@/lib/errors";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
@@ -81,6 +82,11 @@ function tradeInput() {
   return {
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
+    movement: mintAdmittedMovementForTests({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      purpose: "dvp.create",
+    }),
     partyA: { walletId: CUSTODY_WALLET_ID },
     partyB: { address: address(COUNTERPARTY_ADDRESS) },
     mintA: address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1"),
@@ -175,7 +181,7 @@ describe("createDvpTrade", () => {
       }
     );
     observeDvpTradeNow.mockResolvedValue(null);
-    createProjectSponsorshipFeePayment.mockResolvedValue({
+    createProjectSponsorshipFeePayment.mockReturnValue({
       getFeePayer,
       prepareOwnedSubmission,
     });
@@ -282,7 +288,9 @@ describe("createDvpTrade", () => {
         `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_connection_id) VALUES ('csd_dvp_audit', ?, ?, 'cconn_dvp')`,
         [TEST_ORG.id, TEST_PROJECT_ID]
       );
-      createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
+      createProjectSponsorshipFeePayment.mockImplementationOnce(() => {
+        throw new Error("Sponsor unavailable");
+      });
       await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(
         "Sponsor unavailable"
       );
@@ -381,6 +389,11 @@ describe("createDvpTrade", () => {
     expect(sendTransaction).toHaveBeenCalledOnce();
     expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
       env,
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        purpose: "dvp.create",
+      }),
       expect.objectContaining({ actor: { type: "wallet", id: "cwlt_settlement" } })
     );
   });
@@ -404,7 +417,9 @@ describe("createDvpTrade", () => {
     await seedConnectionAuthority();
     env.PRIVY_BYOK_ENABLED = "true";
     const input = { ...tradeInput(), idempotencyKey: "byok-failed-retry" };
-    createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
+    createProjectSponsorshipFeePayment.mockImplementationOnce(() => {
+      throw new Error("Sponsor unavailable");
+    });
     await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow("Sponsor unavailable");
     env.PRIVY_BYOK_ENABLED = "false";
     await expect(createDvpTrade(env, auditContext, input)).rejects.toMatchObject({
@@ -745,11 +760,15 @@ describe("createDvpTrade", () => {
       instructions: [{ accountIndices: expect.arrayContaining([0]) }],
     });
     expect(trade.createSignature).toBe(getSignatureFromTransaction(transaction));
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(env, {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      actor: { type: "wallet", id: "cwlt_settlement" },
-    });
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        purpose: "dvp.create",
+      }),
+      { actor: { type: "wallet", id: "cwlt_settlement" } }
+    );
   });
   it("fails the claim when the port refuses the sponsor response and never attaches a signature", async () => {
     const refusal = new SponsorMessageMismatchError();

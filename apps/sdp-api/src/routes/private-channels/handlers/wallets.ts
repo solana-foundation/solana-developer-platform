@@ -1,6 +1,7 @@
 import { PrivateChannelError } from "@sdp/private-channels";
 import { PRIVATE_CHANNEL_EVENT_TYPES, type PrivateChannelVerifiedWalletDto } from "@sdp/types";
 import type { PrivateChannelVerifiedWalletRow } from "@/db/repositories";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -67,11 +68,13 @@ export async function verifyWallet(c: ValidatedBodyContext<typeof verifyWalletBo
   }
 
   try {
+    const movement = await admitRequestMovement(c, "private_channels.wallet_setup");
     const { row, instance } = await verifyPrivateChannelWallet(
       c.env,
       auth,
       projectId,
       walletId,
+      movement,
       principalId
     );
     await emitMember(

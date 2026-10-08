@@ -1,4 +1,5 @@
 import { mapPrivateChannelDepositRow, type PrivateChannelDepositRow } from "@/db/repositories";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -64,12 +65,8 @@ export async function createPrivateChannelDeposit(
       walletId: body.walletId,
       recipient: body.recipient,
     });
-    const signer = await createPrivateChannelSigner(
-      c.env,
-      context.auth.organizationId,
-      context.projectId,
-      context.wallet
-    );
+    const movement = await admitRequestMovement(c, "private_channels.deposit");
+    const signer = await createPrivateChannelSigner(c.env, movement, context.wallet);
     const projectRpc = await loadPrivateChannelProjectRpcClient(c);
 
     // Auth-enabled instances JWT-gate the gateway baseline read.

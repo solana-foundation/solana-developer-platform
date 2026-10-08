@@ -14,6 +14,7 @@ import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { type AdmittedMovement, admitRequestMovement } from "@/lib/admit-movement";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, forbidden, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -375,6 +376,7 @@ async function resolveDeployAuthorityWallets(
 async function createDeployMetadataSigner(
   env: Env,
   auth: ApiKeyContext,
+  movement: AdmittedMovement,
   deploymentWallet: ResolvedIssuanceWallet,
   signer: TransactionSigner,
   metadataWallet?: ResolvedIssuanceWallet
@@ -384,6 +386,7 @@ async function createDeployMetadataSigner(
   return createResolvedAuthoritySigner({
     env,
     auth,
+    movement,
     custodyWalletId: metadataWallet.custodyWalletId,
     currentAuthority: metadataWallet.publicKey,
     requiredWalletPermissions: ["tokens:write"],
@@ -604,9 +607,11 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     // hold the deploy claim (status=deploying) any failure before the mint lands
     // must release it (catch below) — otherwise the draft is stranded in
     // `deploying`, uneditable and un-redeployable.
+    const movement = await admitRequestMovement(c, "issuance.execute");
     const signer = await createResolvedAuthoritySigner({
       env: c.env,
       auth,
+      movement,
       custodyWalletId: deploymentWallet.custodyWalletId,
       currentAuthority: deploymentWallet.publicKey,
       requiredWalletPermissions: ["tokens:write"],
@@ -616,6 +621,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     const metadataSigner = await createDeployMetadataSigner(
       c.env,
       auth,
+      movement,
       deploymentWallet,
       signer,
       metadataWallet
@@ -820,6 +826,7 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
   const signer = await createLegacyResolvedAuthoritySigner({
     env: c.env,
     auth,
+    movement: await admitRequestMovement(c, "issuance.execute"),
     walletId: signingWalletId,
     expectedCustodyWalletId: token.signingCustodyWalletId,
   });
@@ -1053,6 +1060,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     const signer = await createLegacyResolvedAuthoritySigner({
       env: c.env,
       auth,
+      movement: await admitRequestMovement(c, "issuance.execute"),
       walletId: signingWalletId,
       expectedCustodyWalletId: claimed.signingCustodyWalletId,
     });
@@ -1183,6 +1191,7 @@ export const prepareDeployMetadata = async (
   const signer = await createLegacyResolvedAuthoritySigner({
     env: c.env,
     auth,
+    movement: await admitRequestMovement(c, "issuance.execute"),
     walletId: signingWalletId,
     expectedCustodyWalletId: token.signingCustodyWalletId,
   });

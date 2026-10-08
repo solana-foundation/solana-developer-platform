@@ -1,6 +1,7 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
 import { getDb } from "@/db";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
@@ -173,6 +174,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     const signer = await createResolvedAuthoritySigner({
       env: c.env,
       auth,
+      movement: await admitRequestMovement(c, "issuance.execute"),
       custodyWalletId,
       currentAuthority: pauseAuthorityRaw,
       requiredWalletPermissions: ["tokens:admin"],
@@ -367,6 +369,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     const signer = await createResolvedAuthoritySigner({
       env: c.env,
       auth,
+      movement: await admitRequestMovement(c, "issuance.execute"),
       custodyWalletId,
       currentAuthority: pauseAuthorityRaw,
       requiredWalletPermissions: ["tokens:admin"],

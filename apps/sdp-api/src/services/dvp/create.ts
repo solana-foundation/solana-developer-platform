@@ -49,6 +49,7 @@ import {
   createDvpTradeRepository,
   type DvpTradeRow,
 } from "@/db/repositories";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -81,6 +82,8 @@ export type DvpPartyInput =
 export type CreateDvpTradeInput = {
   organizationId: string;
   projectId: string;
+  /** `dvp.create`, admitted by the handler for this organization and project (HOO-1955). */
+  movement: AdmittedMovement;
   /** The two parties, each as the caller described them. */
   partyA: DvpPartyInput;
   partyB: DvpPartyInput;
@@ -473,9 +476,7 @@ export async function createDvpTrade(
   // validation and after the durable claim has won the idempotency race.
   let signed = false;
   try {
-    const feePayment = await createProjectSponsorshipFeePayment(env, {
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+    const feePayment = createProjectSponsorshipFeePayment(env, input.movement, {
       actor: { type: "wallet", id: settlement.custodyWalletId },
     });
     const sponsor = await feePayment.getFeePayer();

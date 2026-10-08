@@ -33,6 +33,7 @@ import {
   type PaymentSubscriptionRow,
   type PaymentSubscriptionsRepository,
 } from "@/db/repositories";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { AppError, badRequest, conflict, internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
@@ -70,6 +71,27 @@ async function resetRecurringPaymentActivationUnlessAlreadyActive(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     updatedAt: input.updatedAt,
+  });
+}
+
+/**
+ * The scheduled-activation refusal (HOO-1955): a stale `activating` row whose
+ * organization is deleted or lost production goes back to
+ * `pending_activation`, which the job does not select, instead of signing the
+ * plan and authorization transactions.
+ */
+export async function revertRefusedRecurringActivation(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+}): Promise<void> {
+  await resetRecurringPaymentActivationUnlessAlreadyActive({
+    recurringRepo: createPaymentRecurringPaymentsRepository(input.env, createTenantScope(input)),
+    recurringPaymentId: input.recurringPaymentId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    updatedAt: new Date().toISOString(),
   });
 }
 
@@ -523,6 +545,7 @@ async function fetchConfirmedSubscriptionDelegation(input: {
 
 async function prepareSubscriptionAuthorityForActivation(input: {
   env: Env;
+  movement: AdmittedMovement;
   recurringRepo: PaymentRecurringPaymentsRepository;
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   organizationId: string;
@@ -565,8 +588,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
       });
   const initSignature = await sendSubscriptionInstructions({
     env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
+    movement: input.movement,
     sourceWallet: input.sourceWallet,
     sourceSigner: input.sourceSigner,
     instructions: [
@@ -605,6 +627,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
 
 export async function activateRecurringPayment(input: {
   env: Env;
+  movement: AdmittedMovement;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
@@ -694,8 +717,7 @@ export async function activateRecurringPayment(input: {
     const mint = assertValidAddress(claimed.token, "token");
     const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
       input.env,
-      input.organizationId,
-      input.projectId,
+      input.movement,
       input.sourceWallet.id
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
@@ -764,8 +786,7 @@ export async function activateRecurringPayment(input: {
       );
       planCreationSignature = await sendSubscriptionInstructions({
         env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+        movement: input.movement,
         sourceWallet: input.sourceWallet,
         sourceSigner,
         instructions: [createPlanInstruction],
@@ -878,9 +899,7 @@ export async function activateRecurringPayment(input: {
         subscriptionAuthorityAddress,
         { commitment: "confirmed" }
       );
-      const feePayment = await createProjectSponsorshipFeePayment(input.env, {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+      const feePayment = await createProjectSponsorshipFeePayment(input.env, input.movement, {
         actor: { type: "wallet", id: input.sourceWallet.walletId },
       });
       const feePayer = await feePayment.getFeePayer();
@@ -888,6 +907,7 @@ export async function activateRecurringPayment(input: {
 
       subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
         env: input.env,
+        movement: input.movement,
         recurringRepo,
         attempt,
         organizationId: input.organizationId,
@@ -920,8 +940,7 @@ export async function activateRecurringPayment(input: {
       });
       authorizationSignature = await sendSubscriptionInstructions({
         env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
+        movement: input.movement,
         sourceWallet: input.sourceWallet,
         sourceSigner,
         instructions: [subscribeInstruction],

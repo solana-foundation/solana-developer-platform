@@ -4,6 +4,7 @@ import type { TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import { admitRequestMovement } from "@/lib/admit-movement";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequestQuery, notFound } from "@/lib/errors";
 import { created, noContent, paginated, success } from "@/lib/response";
@@ -194,6 +195,7 @@ async function resolveAllowlistAuthoritySigner(
   const signer = await createResolvedAuthoritySigner({
     env: c.env,
     auth,
+    movement: await admitRequestMovement(c, "issuance.execute"),
     custodyWalletId: authorityWallet.custodyWalletId,
     currentAuthority: authority,
     requiredWalletPermissions: ["tokens:write"],

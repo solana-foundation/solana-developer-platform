@@ -5,6 +5,7 @@ import {
   type OuterTransactionPolicyInput,
   validateOuterTransaction as validateSdkOuterTransaction,
 } from "@sdp/helius-rings-sdk";
+import { admitMovement } from "@/lib/admit-movement";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import { createGuardedFetch } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";
@@ -93,22 +94,24 @@ export function createConfiguredRingsGateway(
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
     allowInsecureHttp: connection.allowInsecureHttp,
+    // The SDK calls these for wallet registration, ring bring-up and merge
+    // enablement, with no purpose of its own, so each signature is admitted
+    // here as setup (HOO-1955). Operation signatures go through the service,
+    // which admits them per operation.
     signTransaction: (unsignedTxBase64: string, owner: string) =>
-      asDomainFailure(() =>
+      asDomainFailure(async () =>
         signOuterTransaction({
           env,
-          organizationId: tenant.organizationId,
-          projectId: tenant.projectId,
+          movement: await admitMovement(env, tenant, "rings.setup"),
           owner,
           unsignedTxBase64,
         })
       ),
     signMessage: (messageBase64: string, owner: string) =>
-      asDomainFailure(() =>
+      asDomainFailure(async () =>
         signMessage({
           env,
-          organizationId: tenant.organizationId,
-          projectId: tenant.projectId,
+          movement: await admitMovement(env, tenant, "rings.setup"),
           owner,
           messageBase64,
         })

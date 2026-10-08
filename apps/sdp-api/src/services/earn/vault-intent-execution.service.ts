@@ -7,6 +7,7 @@ import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
 } from "@/db/repositories/earn-movements.repository";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { badRequest, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import * as solanaServices from "@/services/solana";
@@ -67,6 +68,8 @@ export interface ExecuteSignedVaultIntentInput<TResult extends SignedVaultIntent
   env: Env;
   organizationId: string;
   projectId: string;
+  /** `earn.deposit` or `earn.withdraw`, matching `operation`, from the caller. */
+  movement: AdmittedMovement;
   walletId: string;
   walletPublicKey: string;
   signerMismatchMessage: string;
@@ -171,12 +174,7 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
   let signed: SignedVaultTransaction;
   try {
     const signer = await input.deadline.run(`Resolving the vault ${operation} signer`, () =>
-      solanaServices.createOrgSignerForCustodyWallet(
-        env,
-        input.organizationId,
-        input.projectId,
-        input.walletId
-      )
+      solanaServices.createOrgSignerForCustodyWallet(env, input.movement, input.walletId)
     );
     if (signer.address !== input.walletPublicKey) {
       throw badRequest(input.signerMismatchMessage);

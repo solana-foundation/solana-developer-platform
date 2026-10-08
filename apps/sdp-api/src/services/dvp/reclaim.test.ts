@@ -28,6 +28,7 @@ import {
 } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories";
+import { mintAdmittedMovementForTests } from "@/lib/admit-movement";
 import { conflict } from "@/lib/errors";
 import { acceptTransaction, buildDvpTradeRow, createTestSponsor } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
@@ -123,6 +124,11 @@ const RECLAIMER_A = {
   custodyWalletId: "cwlt_a",
   organizationId: "org_a",
   projectId: "prj_a",
+  movement: mintAdmittedMovementForTests({
+    organizationId: "org_a",
+    projectId: "prj_a",
+    purpose: "dvp.reclaim",
+  }),
   recordAttempt,
 };
 
@@ -163,7 +169,7 @@ describe("reclaimDvpTradeLeg", () => {
     hasClaim.mockResolvedValue(true);
     releaseClaim.mockResolvedValue(undefined);
     prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
-    createProjectSponsorshipFeePayment.mockResolvedValue({
+    createProjectSponsorshipFeePayment.mockReturnValue({
       getFeePayer: async () => sponsor.address,
       prepareOwnedSubmission,
     });

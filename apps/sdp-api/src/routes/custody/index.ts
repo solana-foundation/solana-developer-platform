@@ -6,6 +6,7 @@
 
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { exitPurposeForRequest } from "@/lib/movement-exits";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
@@ -48,14 +49,14 @@ const APPROVAL_REQUEST_PATH =
   /^\/v1\/wallets\/approval-requests(?:\/([^/]+)(?:\/(approve|reject|cancel))?)?$/;
 
 /**
- * Earn exits stay open after the production entitlement is lost (ADR 0002,
- * APE-351), including the approvals some of them wait on. Without the
+ * Exits stay open after the production entitlement is lost (ADR 0002,
+ * APE-351, HOO-1955), including the approvals some of them wait on. Without the
  * entitlement a production organization may still read its approval requests,
  * reject or cancel any of them (that stops money), and approve one whose
- * stored operation is itself an Earn exit. Approving anything else stays
+ * stored operation is itself an exit (`lib/movement-exits.ts`). Approving anything else stays
  * refused, so no new money movement can be released here.
  */
-async function approvalMayReleaseEarnExit(c: Context<{ Bindings: Env }>): Promise<boolean> {
+async function approvalMayReleaseExit(c: Context<{ Bindings: Env }>): Promise<boolean> {
   const match = APPROVAL_REQUEST_PATH.exec(c.req.path);
   if (!match) {
     return false;
@@ -75,17 +76,20 @@ async function approvalMayReleaseEarnExit(c: Context<{ Bindings: Env }>): Promis
     return false;
   }
   const target = await readApprovalExecutionTarget(c.env, organizationId, approvalRequestId);
-  return target !== null && isEarnExitOrRead(target.method, target.path);
+  // Earn reads stay open too; every other module's exits come from the
+  // shared allowlist (HOO-1955).
+  return (
+    target !== null &&
+    (isEarnExitOrRead(target.method, target.path) ||
+      exitPurposeForRequest(target.method, target.path) !== null)
+  );
 }
 
 const wallets = new Hono<{ Bindings: Env }>();
 
 // All routes require authentication
 wallets.use("*", unifiedAuthMiddleware());
-wallets.use(
-  "*",
-  projectContextMiddleware({ allowUnentitledProduction: approvalMayReleaseEarnExit })
-);
+wallets.use("*", projectContextMiddleware({ allowUnentitledProduction: approvalMayReleaseExit }));
 
 // Initialize signing (requires admin)
 wallets.post(

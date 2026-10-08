@@ -7,6 +7,7 @@ import { getListConfig, inspectToken } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
 import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
 import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
@@ -428,14 +429,13 @@ export async function resolveAuthorityWallet(params: {
 
 async function loadResolvedAuthoritySigner(params: {
   env: Env;
-  auth: ApiKeyContext;
+  movement: AdmittedMovement;
   custodyWalletId: string;
   currentAuthority: string;
 }): Promise<TransactionSigner> {
   const signer = await solanaServices.createOrgSignerForCustodyWallet(
     params.env,
-    params.auth.organizationId,
-    params.auth.projectId,
+    params.movement,
     params.custodyWalletId
   );
   if (signer.address !== params.currentAuthority) {
@@ -447,6 +447,7 @@ async function loadResolvedAuthoritySigner(params: {
 export async function resolveAuthoritySigner(params: {
   env: Env;
   auth: ApiKeyContext;
+  movement: AdmittedMovement;
   requestedCustodyWalletId?: string | null;
   currentAuthority: string;
   requiredWalletPermissions: Permission[];
@@ -454,7 +455,7 @@ export async function resolveAuthoritySigner(params: {
   const resolved = await resolveAuthorityWallet(params);
   const signer = await loadResolvedAuthoritySigner({
     env: params.env,
-    auth: params.auth,
+    movement: params.movement,
     custodyWalletId: resolved.custodyWalletId,
     currentAuthority: params.currentAuthority,
   });
@@ -466,6 +467,7 @@ export async function resolveAuthoritySigner(params: {
 export async function createResolvedAuthoritySigner(params: {
   env: Env;
   auth: ApiKeyContext;
+  movement: AdmittedMovement;
   custodyWalletId: string;
   currentAuthority: string;
   requiredWalletPermissions: Permission[];
@@ -480,11 +482,12 @@ export async function createResolvedAuthoritySigner(params: {
 export async function createLegacyResolvedAuthoritySigner(params: {
   env: Env;
   auth: ApiKeyContext;
+  movement: AdmittedMovement;
   walletId: string | null;
   currentAuthority?: string | null;
   expectedCustodyWalletId?: string | null;
 }): Promise<TransactionSigner> {
-  const { env, auth, walletId, currentAuthority, expectedCustodyWalletId } = params;
+  const { env, auth, movement, walletId, currentAuthority, expectedCustodyWalletId } = params;
   const custodyStore = new CustodyConfigStore(getDb(env), env);
   const projectId = auth.projectId ?? undefined;
   const expectedWallet = expectedCustodyWalletId
@@ -521,12 +524,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     throw walletNotFound();
   }
 
-  const signer = await solanaServices.createOrgSignerForCustodyWallet(
-    env,
-    auth.organizationId,
-    auth.projectId,
-    wallet.id
-  );
+  const signer = await solanaServices.createOrgSignerForCustodyWallet(env, movement, wallet.id);
 
   if (currentAuthority && signer.address !== currentAuthority) {
     throw badRequest("Current authority is not controlled by custody");

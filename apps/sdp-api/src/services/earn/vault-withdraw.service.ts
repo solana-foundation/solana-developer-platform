@@ -9,6 +9,7 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
+import type { AdmittedMovement } from "@/lib/admit-movement";
 import { internalError } from "@/lib/errors";
 import { buildEarnVaultWithdrawalFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
@@ -35,6 +36,8 @@ import { resolveVaultSponsorship, vaultRentPayer } from "./vault-sponsorship";
 export interface VaultWithdrawalInput {
   organizationId: string;
   projectId: string;
+  /** `earn.withdraw`, admitted by the caller for this organization and project (HOO-1955). */
+  movement: AdmittedMovement;
   environment: SdpEnvironment;
   provider: string;
   positionId: string;
@@ -178,8 +181,7 @@ export async function withdrawFromVault(
   // this exit pays for any other account is charged to the sponsor and stays
   // there.
   const fee = await resolveVaultSponsorship(env, {
-    organizationId: input.organizationId,
-    projectId: input.projectId,
+    movement: input.movement,
     walletId: input.wallet.id,
     cluster,
     deadline,
@@ -239,6 +241,7 @@ export async function withdrawFromVault(
     env,
     organizationId: input.organizationId,
     projectId: input.projectId,
+    movement: input.movement,
     walletId: input.wallet.id,
     walletPublicKey: input.wallet.publicKey,
     signerMismatchMessage: "Resolved signing wallet does not match the position's wallet",
