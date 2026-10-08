@@ -73,8 +73,8 @@ const DUPLICATE_PROVIDER_CUSTODY_WALLET = {
   walletId: TEST_CUSTODY_WALLET.walletId,
   publicKey: "DuplicateProviderPolicyWallet11111111111111111",
   label: "Duplicate provider policy wallet",
-  purpose: "payments",
-};
+  purpose: "transfer",
+} as const;
 
 const FOREIGN_PROJECT_ID = `${TEST_PROJECT.id}_production`;
 const FOREIGN_PROJECT_CUSTODY_CONFIG_ID = "ccfg_policy_foreign_project";
@@ -1510,43 +1510,29 @@ async function seedPolicyFoundationFixtures(): Promise<void> {
     .bind(TEST_API_KEY.id, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id, TEST_API_KEY.prefix)
     .run();
 
-  // The config's default_wallet_id FK is deferred, so the config and its
-  // default wallet must land in one transaction.
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO custody_configs (
-           id,
-           organization_id,
-           project_id,
-           provider,
-           config_encrypted,
-           default_wallet_id,
-           status
-         ) VALUES (?, ?, ?, 'local', 'encrypted', ?, 'active')`
-      )
-      .bind(TEST_CUSTODY_CONFIG.id, TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET.walletId),
-    db
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id,
-           custody_config_id,
-           wallet_id,
-           public_key,
-           label,
-           purpose,
-           status
-         ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
-      )
-      .bind(
-        TEST_CUSTODY_WALLET.id,
-        TEST_CUSTODY_CONFIG.id,
-        TEST_CUSTODY_WALLET.walletId,
-        TEST_CUSTODY_WALLET.publicKey,
-        TEST_CUSTODY_WALLET.label,
-        TEST_CUSTODY_WALLET.purpose
-      ),
-  ]);
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: TEST_CUSTODY_CONFIG.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "local",
+        configEncrypted: "encrypted",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: TEST_CUSTODY_WALLET.id,
+        owner: { kind: "config", custodyConfigId: TEST_CUSTODY_CONFIG.id },
+        walletId: TEST_CUSTODY_WALLET.walletId,
+        publicKey: TEST_CUSTODY_WALLET.publicKey,
+        label: TEST_CUSTODY_WALLET.label,
+        purpose: TEST_CUSTODY_WALLET.purpose,
+        status: "active",
+      },
+    ],
+  });
 }
 
 async function seedForeignProjectCustodyWallet(): Promise<void> {
@@ -1558,7 +1544,6 @@ async function seedForeignProjectCustodyWallet(): Promise<void> {
         projectId: FOREIGN_PROJECT_ID,
         provider: "local",
         configEncrypted: "encrypted",
-        defaultWalletId: FOREIGN_PROJECT_CUSTODY_WALLET.walletId,
         status: "active",
       },
     ],
@@ -1573,7 +1558,6 @@ async function seedForeignProjectCustodyWallet(): Promise<void> {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
 }
 
@@ -1607,49 +1591,29 @@ async function seedAdditionalCustodyWallet(): Promise<void> {
  * @returns A promise that resolves when the duplicate provider wallet is stored.
  */
 async function seedDuplicateProviderCustodyWallet(): Promise<void> {
-  const db = getDb(env);
-  // The config's default_wallet_id FK is deferred, so the config and its
-  // default wallet must land in one transaction.
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO custody_configs (
-           id,
-           organization_id,
-           project_id,
-           provider,
-           config_encrypted,
-           default_wallet_id,
-           status
-         ) VALUES (?, ?, ?, 'privy', 'encrypted', ?, 'active')`
-      )
-      .bind(
-        DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        DUPLICATE_PROVIDER_CUSTODY_WALLET.walletId
-      ),
-    db
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id,
-           custody_config_id,
-           wallet_id,
-           public_key,
-           label,
-           purpose,
-           status
-         ) VALUES (?, ?, ?, ?, ?, ?, 'active')`
-      )
-      .bind(
-        DUPLICATE_PROVIDER_CUSTODY_WALLET.id,
-        DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID,
-        DUPLICATE_PROVIDER_CUSTODY_WALLET.walletId,
-        DUPLICATE_PROVIDER_CUSTODY_WALLET.publicKey,
-        DUPLICATE_PROVIDER_CUSTODY_WALLET.label,
-        DUPLICATE_PROVIDER_CUSTODY_WALLET.purpose
-      ),
-  ]);
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "privy",
+        configEncrypted: "encrypted",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: DUPLICATE_PROVIDER_CUSTODY_WALLET.id,
+        owner: { kind: "config", custodyConfigId: DUPLICATE_PROVIDER_CUSTODY_CONFIG_ID },
+        walletId: DUPLICATE_PROVIDER_CUSTODY_WALLET.walletId,
+        publicKey: DUPLICATE_PROVIDER_CUSTODY_WALLET.publicKey,
+        label: DUPLICATE_PROVIDER_CUSTODY_WALLET.label,
+        purpose: DUPLICATE_PROVIDER_CUSTODY_WALLET.purpose,
+        status: "active",
+      },
+    ],
+  });
 }
 
 async function seedConnectionCustodyWallet(): Promise<void> {

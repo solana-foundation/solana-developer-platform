@@ -70,7 +70,6 @@ describe("custodyWalletForParty", () => {
           projectId: PROJECT_ID,
           provider: "local",
           configEncrypted: "x",
-          defaultWalletId: null,
           status: "active",
         },
         {
@@ -79,7 +78,6 @@ describe("custodyWalletForParty", () => {
           projectId: OTHER_ORG_PROJECT_ID,
           provider: "local",
           configEncrypted: "x",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -94,7 +92,6 @@ describe("custodyWalletForParty", () => {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
   });
 

@@ -28,7 +28,6 @@ import * as sponsorshipService from "@/services/sponsorship.service";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { testClerkContext } from "@/test/helpers/clerk-context";
-import { insertTestCustodyScopeDefault } from "@/test/helpers/custody";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -321,13 +320,6 @@ describe("createDvpTrade", () => {
       await db.execute("DELETE FROM dvp_settlement_wallets WHERE project_id = ?", [
         TEST_PROJECT_ID,
       ]);
-      await insertTestCustodyScopeDefault(db, {
-        id: "csd_dvp_audit",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        defaultCustodyConfigId: null,
-        defaultCustodyConnectionId: "cconn_dvp",
-      });
       createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
       await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(
         "Sponsor unavailable"
@@ -410,15 +402,8 @@ describe("createDvpTrade", () => {
       expect(await db.queryMany("SELECT id FROM custody_wallets")).toHaveLength(2);
     }
   );
-  it("creates with an admitted nondefault Connection authority", async () => {
+  it("creates with an admitted Connection authority", async () => {
     await seedConnectionAuthority();
-    await insertTestCustodyScopeDefault(getDb(env), {
-      id: "csd_dvp",
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      defaultCustodyConfigId: CUSTODY_CONFIG_ID,
-      defaultCustodyConnectionId: null,
-    });
     const trade = await createDvpTrade(env, auditContext, tradeInput());
     expect(trade.settlementAuthority).toBe(SETTLEMENT_AUTHORITY);
     expect(sendTransaction).toHaveBeenCalledOnce();

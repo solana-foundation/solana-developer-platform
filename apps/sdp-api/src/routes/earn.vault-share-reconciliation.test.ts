@@ -145,7 +145,6 @@ async function seedSecondProjectAWallet(): Promise<void> {
         projectId: PROJECT_A,
         provider: "para",
         configEncrypted: "encrypted",
-        defaultWalletId: null,
         status: "active",
       },
     ],
@@ -160,7 +159,6 @@ async function seedSecondProjectAWallet(): Promise<void> {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
 }
 

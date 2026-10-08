@@ -114,7 +114,6 @@ async function seedAuthAndWallets(): Promise<void> {
         projectId: TEST_PROJECT.id,
         provider: "local",
         configEncrypted: "test-config",
-        defaultWalletId: "wal_scope_a",
         status: "active",
       },
     ],
@@ -138,15 +137,6 @@ async function seedAuthAndWallets(): Promise<void> {
         status: "active",
       },
     ],
-    scopeDefaults: [
-      {
-        id: "csd_api_key_wallet_scope",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        defaultCustodyConfigId: TEST_CONFIG_ID,
-        defaultCustodyConnectionId: null,
-      },
-    ],
   });
 }
 
@@ -159,7 +149,6 @@ async function seedDuplicateScopeAWallet(): Promise<void> {
         projectId: TEST_PROJECT.id,
         provider: "privy",
         configEncrypted: "test-config",
-        defaultWalletId: null,
         status: "active",
       },
     ],
@@ -174,7 +163,6 @@ async function seedDuplicateScopeAWallet(): Promise<void> {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
 }
 

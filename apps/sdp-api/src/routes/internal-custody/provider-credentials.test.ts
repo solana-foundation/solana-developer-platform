@@ -404,10 +404,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       status: "pending",
       setup_metadata: { pendingWalletLabel: "Treasury Wallet" },
     });
-    const defaults = await getDb(env)
-      .prepare("SELECT COUNT(*) AS count FROM custody_scope_defaults")
-      .first<{ count: number }>();
-    expect(defaults?.count).toBe(0);
   });
 
   it("keeps a committed submission replayable when its audit outcome cannot be persisted", async () => {
@@ -1252,8 +1248,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
             .all<Record<string, unknown>>(),
           db
             .prepare(
-              `SELECT id, project_id, status, provider_credential_id,
-                      default_custody_wallet_id, setup_metadata,
+              `SELECT id, project_id, status, provider_credential_id, setup_metadata,
                       last_check_status, last_check_at, last_check_failure_code,
                       activated_at
                FROM custody_connections
@@ -1453,7 +1448,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it("admits a pending BYOK Connection beside the selected Managed Privy Config in a Sandbox project", async () => {
+  it("admits a pending BYOK Connection beside an active Managed Privy Config in a Sandbox project", async () => {
     const configId = "cust_active_exact_project";
     await seedTestCustodySetup(
       env,
@@ -1464,7 +1459,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         provider: "privy",
         config: "managed",
         encryptionVersion: "test",
-        defaultWalletId: "managed-wallet",
         status: "active",
         createdAt: SEEDED_AT,
         updatedAt: SEEDED_AT,
@@ -1484,20 +1478,28 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     const readManagedState = () =>
       db
         .prepare(
-          `SELECT c.id AS config_id, c.config_encrypted, c.default_wallet_id,
+          `SELECT c.id AS config_id, c.config_encrypted,
                 c.status AS config_status, w.id AS custody_wallet_id,
                 w.wallet_id, w.public_key, w.status AS wallet_status,
-                w.custody_config_id, w.custody_connection_id,
-                d.default_custody_config_id, d.default_custody_connection_id
+                w.custody_config_id, w.custody_connection_id
          FROM custody_configs c
          JOIN custody_wallets w ON w.custody_config_id = c.id
-         JOIN custody_scope_defaults d
-           ON d.organization_id = c.organization_id AND d.project_id = c.project_id
          WHERE c.id = ?`
         )
         .bind(configId)
         .first();
     const managedBefore = await readManagedState();
+    expect(managedBefore).toEqual({
+      config_id: configId,
+      config_encrypted: "managed",
+      config_status: "active",
+      custody_wallet_id: "cwal_active_exact_project",
+      wallet_id: "managed-wallet",
+      public_key: "managed-public-key",
+      wallet_status: "active",
+      custody_config_id: configId,
+      custody_connection_id: null,
+    });
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {

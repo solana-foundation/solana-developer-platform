@@ -119,7 +119,6 @@ async function seed(): Promise<void> {
         projectId: `prj_${PARTY_ORG}`,
         provider: "local",
         configEncrypted: "x",
-        defaultWalletId: null,
         status: "active",
       },
     ],
@@ -134,7 +133,6 @@ async function seed(): Promise<void> {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
   await insertTrade(TRADE_ID, "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po");
   await insertTrade(OTHER_TRADE_ID, "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU");

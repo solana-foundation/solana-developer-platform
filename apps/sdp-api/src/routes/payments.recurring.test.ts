@@ -19,7 +19,7 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
@@ -40,7 +40,6 @@ import {
   confirmTransactionMock,
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
-  createOrgSignerMock,
   DEVNET_USDC_MINT,
   fetchMaybeSubscriptionDelegationMock,
   getAccountInfoMock,
@@ -62,7 +61,7 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
-
+import { seedConfigOwnedDuplicateProviderWallet } from "@/test/helpers/payments-transfers";
 import {
   activateRecurringPaymentFixture,
   createRecurringPaymentFixture,
@@ -208,7 +207,6 @@ function recurringExecutionCallCounts() {
   return {
     feePaymentAdapter: createFeePaymentAdapterMock.mock.calls.length,
     custodySigner: createOrgSignerForCustodyWalletMock.mock.calls.length,
-    providerSigner: createOrgSignerMock.mock.calls.length,
     accountInfo: getAccountInfoMock.mock.calls.length,
     blockhash: getRecentBlockhashMock.mock.calls.length,
     confirmation: confirmTransactionMock.mock.calls.length,
@@ -342,7 +340,6 @@ async function seedReplacementCustodyWallet(params: {
         projectId: TEST_PROJECT.id,
         provider: "privy",
         configEncrypted: "test-config",
-        defaultWalletId: null,
         status: "active",
       },
     ],
@@ -357,7 +354,6 @@ async function seedReplacementCustodyWallet(params: {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
 }
 
@@ -466,12 +462,6 @@ const unboundWalletCases: Array<{
 describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
   const recurringExecution = installRecurringExecutionHooks();
-
-  beforeEach(() => {
-    createOrgSignerForCustodyWalletMock.mockImplementation((signerEnv, orgId, projectId) =>
-      createOrgSignerMock(signerEnv, orgId, projectId)
-    );
-  });
 
   it("creates recurring work for the exact wallet when Provider wallet IDs are duplicated", async () => {
     await getDb(env).batch([
@@ -2074,10 +2064,13 @@ describe("Payments routes — recurring", () => {
     const signAsFeePayerMock = recurringExecution.signAsFeePayerMock();
     const signAndSendMock = recurringExecution.signAndSendMock();
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await seedConfigOwnedDuplicateProviderWallet();
     const duplicateProviderWalletSigner = await generateKeyPairSigner();
-    createOrgSignerMock.mockResolvedValue(duplicateProviderWalletSigner);
-    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    const providerSignerCallsBeforeCollection = createOrgSignerMock.mock.calls.length;
+    createOrgSignerForCustodyWalletMock.mockImplementation(
+      async (_signerEnv, _orgId, _projectId, custodyWalletId) =>
+        custodyWalletId === TEST_CUSTODY_WALLET_ID ? sourceSigner : duplicateProviderWalletSigner
+    );
+    const signerCallsBeforeCollection = createOrgSignerForCustodyWalletMock.mock.calls.length;
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
     await setRecurringCollectionDue({
       recurringPaymentId: activated.id,
@@ -2139,7 +2132,13 @@ describe("Payments routes — recurring", () => {
       TEST_PROJECT.id,
       TEST_CUSTODY_WALLET_ID
     );
-    expect(createOrgSignerMock).toHaveBeenCalledTimes(providerSignerCallsBeforeCollection);
+    expect(
+      new Set(
+        createOrgSignerForCustodyWalletMock.mock.calls
+          .slice(signerCallsBeforeCollection)
+          .map(([, , , custodyWalletId]) => custodyWalletId)
+      )
+    ).toEqual(new Set([TEST_CUSTODY_WALLET_ID]));
     const submission = await getDb(env)
       .prepare(
         `SELECT custody_wallet_id, signed_transaction, last_valid_block_height,
@@ -3248,7 +3247,9 @@ describe("Payments routes — recurring", () => {
       subscriptionId: activated.subscriptionId,
       dueAt,
     });
-    createOrgSignerMock.mockRejectedValueOnce(new Error("collection signer unavailable"));
+    createOrgSignerForCustodyWalletMock.mockRejectedValueOnce(
+      new Error("collection signer unavailable")
+    );
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/collect`,

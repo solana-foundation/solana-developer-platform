@@ -114,8 +114,8 @@ async function seedLegacyConfig(provider: string, configId: string): Promise<voi
   await getDb(env)
     .prepare(
       `INSERT INTO custody_configs
-         (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       configId,
@@ -124,7 +124,6 @@ async function seedLegacyConfig(provider: string, configId: string): Promise<voi
       provider,
       "test-config",
       "sdp-custody-encryption-v1",
-      null,
       "active"
     )
     .run();
@@ -267,10 +266,7 @@ describe("internal custody providers", () => {
     expect(status.providers.length).toBeGreaterThanOrEqual(10);
   });
 
-  it("reports every provider with a reachable config, not only the scope default", async () => {
-    // Signing targeted at a specific provider resolves through that provider's
-    // config regardless of which one is the scope default; default-ness is the
-    // configs resource's fact, not this endpoint's.
+  it("reports every provider with a reachable config", async () => {
     await seedLegacyConfig("privy", "cust_cfg_setup_status_multi_privy");
     await seedLegacyConfig("para", "cust_cfg_setup_status_multi_para");
 
@@ -357,12 +353,10 @@ describe("internal custody providers", () => {
           projectId: otherProjectId,
           provider: "privy",
           configEncrypted: "test-config",
-          defaultWalletId: null,
           status: "active",
         },
       ],
       wallets: [],
-      scopeDefaults: [],
     });
     await getDb(env).transaction((tx) =>
       seedTestPrivyConnection(tx, {
@@ -458,12 +452,10 @@ describe("internal custody providers", () => {
           projectId: "prj_setup_status_other",
           provider: "privy",
           configEncrypted: "test-config",
-          defaultWalletId: null,
           status: "active",
         },
       ],
       wallets: [],
-      scopeDefaults: [],
     });
 
     const privy = statusFor(await fetchSetupStatus(), "privy");

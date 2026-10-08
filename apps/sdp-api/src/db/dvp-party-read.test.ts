@@ -91,7 +91,6 @@ async function seed(): Promise<void> {
       projectId: holding.project,
       provider: "local",
       configEncrypted: "x",
-      defaultWalletId: null,
       status: "active",
     })),
     wallets: holdings.map((holding) => ({
@@ -103,7 +102,6 @@ async function seed(): Promise<void> {
       purpose: null,
       status: "active",
     })),
-    scopeDefaults: [],
   });
 
   // The trade belongs to the agent's organization and names a party who does

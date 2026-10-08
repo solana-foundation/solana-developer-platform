@@ -57,8 +57,6 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
 
 export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 
-export const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
-
 export const createOrgSignerForCustodyWalletMock = vi.spyOn(
   solanaServices,
   "createOrgSignerForCustodyWallet"
@@ -254,8 +252,8 @@ async function seedAuthAndWallet(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_CONFIG_ID,
@@ -264,16 +262,8 @@ async function seedAuthAndWallet(): Promise<void> {
         "local",
         "test-config",
         "sdp-custody-encryption-v1",
-        TEST_WALLET_ID,
         "active"
       ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, TEST_PROJECT.id, TEST_CONFIG_ID),
     getDb(env)
       .prepare(
         `INSERT INTO custody_wallets
@@ -592,9 +582,6 @@ export function installPaymentsRouteTestHooks(): void {
           "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
         ),
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
-    createOrgSignerMock.mockResolvedValue(
-      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
-    );
     createOrgSignerForCustodyWalletMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );

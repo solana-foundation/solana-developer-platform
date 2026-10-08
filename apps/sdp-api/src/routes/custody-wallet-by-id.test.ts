@@ -107,7 +107,6 @@ async function seedAuthAndConfigs(): Promise<void> {
         projectId: TEST_PROJECT.id,
         provider: "privy",
         configEncrypted: "test-config",
-        defaultWalletId: "privy_wallet_a",
         status: "active",
       },
       {
@@ -116,7 +115,6 @@ async function seedAuthAndConfigs(): Promise<void> {
         projectId: TEST_PROJECT.id,
         provider: "para",
         configEncrypted: "test-config",
-        defaultWalletId: "para_wallet_a",
         status: "active",
       },
     ],
@@ -138,15 +136,6 @@ async function seedAuthAndConfigs(): Promise<void> {
         label: "Para Wallet A",
         purpose: "transfer",
         status: "active",
-      },
-    ],
-    scopeDefaults: [
-      {
-        id: "csd_wallet_by_id_project_default",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        defaultCustodyConfigId: PRIVY_CONFIG_ID,
-        defaultCustodyConnectionId: null,
       },
     ],
   });
@@ -227,7 +216,6 @@ describe("Custody wallet by ID route", () => {
           id: connection.walletRecordId,
           custodyConnectionId: connection.connectionId,
           provider: "privy",
-          isDefaultProvider: false,
           isRuntimeExecutionAllowed: false,
           walletId: connection.walletId,
           publicKey: connection.publicKey,

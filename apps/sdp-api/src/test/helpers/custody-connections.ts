@@ -172,33 +172,12 @@ export async function insertTestCustodyConnection(
 }
 
 /**
- * Point a connection's default wallet at one of its own wallets, leaving its
- * lifecycle untouched; use {@link activateTestCustodyConnection} to activate.
+ * Move a connection to `active` in a single statement, stamping the check and
+ * activation times with the database clock. `custody_connections_active_lifecycle_check`
+ * still requires `default_custody_wallet_id` on an active row until HOO-1985 drops
+ * the column, so it is set to one of the connection's own wallets; nothing reads it.
  * @param db - Executor the update runs on.
- * @param params - Connection and wallet ids.
- * @param params.connectionId - Connection whose default changes.
- * @param params.custodyWalletId - `custody_wallets.id` owned by the connection.
- * @returns Resolves once the row is updated.
- */
-export async function setTestConnectionDefaultWallet(
-  db: DatabaseExecutor,
-  params: { connectionId: string; custodyWalletId: string }
-): Promise<void> {
-  const updated = await db.execute(
-    "UPDATE custody_connections SET default_custody_wallet_id = ? WHERE id = ?",
-    [params.custodyWalletId, params.connectionId]
-  );
-  if (updated !== 1) {
-    throw new Error(`Custody connection ${params.connectionId} not found`);
-  }
-}
-
-/**
- * Move a connection to `active` on one of its own wallets in a single statement,
- * as `custody_connections_active_lifecycle_check` requires, stamping the check
- * and activation times with the database clock.
- * @param db - Executor the update runs on.
- * @param params - Connection, default wallet and pinned Provider account.
+ * @param params - Connection, CHECK-satisfying wallet and pinned Provider account.
  * @param params.connectionId - Connection to activate.
  * @param params.custodyWalletId - `custody_wallets.id` owned by the connection.
  * @param params.providerAccountFingerprint - Provider account the connection pins.
@@ -221,7 +200,7 @@ export async function activateTestCustodyConnection(
   }
 }
 
-export interface TestPrivyConnectionSeed {
+interface TestPrivyConnectionSeedBase {
   organizationId: string;
   projectId: string;
   connectionId: string;
@@ -229,10 +208,18 @@ export interface TestPrivyConnectionSeed {
   createdBy: string;
   stored: StoredCredentialSecret;
   providerAccountFingerprint: string;
-  lastCheckStatus: Extract<CustodyConnectionCheckStatus, "success" | "retry_unknown">;
   wallets: readonly Omit<TestCustodyWalletRow, "owner">[];
-  defaultCustodyWalletId: string;
 }
+
+/**
+ * `success` seeds an `active` connection, which names the wallet that satisfies the
+ * active-lifecycle CHECK; `retry_unknown` seeds a `pending` one, which names none.
+ */
+export type TestPrivyConnectionSeed = TestPrivyConnectionSeedBase &
+  (
+    | { lastCheckStatus: "success"; defaultCustodyWalletId: string }
+    | { lastCheckStatus: "retry_unknown" }
+  );
 
 /**
  * Write a Privy app credential through the `encrypted_db` secret store, so the
@@ -260,8 +247,8 @@ export async function writeTestPrivyCredentialSecret(
 
 /**
  * Seed a project BYOK Privy connection over an active stored credential, with its
- * wallets and default wallet. `success` leaves it `active`; `retry_unknown` leaves
- * it `pending` with that last check.
+ * wallets. `success` leaves it `active`; `retry_unknown` leaves it `pending` with
+ * that last check.
  * @param db - Executor the writes run on; pass a transaction to seed atomically.
  * @param seed - The connection, credential and wallets.
  * @returns Resolves once the connection is in its final lifecycle state.
@@ -270,7 +257,6 @@ export async function seedTestPrivyConnection(
   db: DatabaseExecutor,
   seed: TestPrivyConnectionSeed
 ): Promise<void> {
-  const isActive = seed.lastCheckStatus === "success";
   await insertTestStoredProviderCredential(db, {
     id: seed.credentialId,
     organizationId: seed.organizationId,
@@ -295,8 +281,8 @@ export async function seedTestPrivyConnection(
     status: "pending",
     setupMetadata: {},
     providerAccountFingerprint: seed.providerAccountFingerprint,
-    lastCheckStatus: isActive ? null : seed.lastCheckStatus,
-    lastCheckAt: isActive ? null : new Date().toISOString(),
+    lastCheckStatus: seed.lastCheckStatus === "success" ? null : seed.lastCheckStatus,
+    lastCheckAt: seed.lastCheckStatus === "success" ? null : new Date().toISOString(),
     lastCheckFailureCode: null,
     activatedAt: null,
     deactivatedAt: null,
@@ -309,16 +295,11 @@ export async function seedTestPrivyConnection(
       owner: { kind: "connection", custodyConnectionId: seed.connectionId },
     });
   }
-  if (isActive) {
+  if (seed.lastCheckStatus === "success") {
     await activateTestCustodyConnection(db, {
       connectionId: seed.connectionId,
       custodyWalletId: seed.defaultCustodyWalletId,
       providerAccountFingerprint: seed.providerAccountFingerprint,
-    });
-  } else {
-    await setTestConnectionDefaultWallet(db, {
-      connectionId: seed.connectionId,
-      custodyWalletId: seed.defaultCustodyWalletId,
     });
   }
 }

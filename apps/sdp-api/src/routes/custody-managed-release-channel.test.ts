@@ -69,10 +69,16 @@ describe("Managed custody out of the release channel", () => {
       data: {
         wallets: [
           configWallet({
+            id: "cwlt_managed_channel_anchorage",
+            custodyConfigId: ANCHORAGE_CONFIG_ID,
+            provider: "anchorage",
+            walletId: "anchorage_managed_channel",
+            publicKey: PUBLIC_KEYS.anchorage,
+          }),
+          configWallet({
             id: "cwlt_managed_channel_privy_a",
             custodyConfigId: PRIVY_CONFIG_ID,
             provider: "privy",
-            isDefaultProvider: true,
             walletId: "privy_managed_channel_a",
             publicKey: PUBLIC_KEYS.privyA,
           }),
@@ -80,17 +86,8 @@ describe("Managed custody out of the release channel", () => {
             id: "cwlt_managed_channel_privy_b",
             custodyConfigId: PRIVY_CONFIG_ID,
             provider: "privy",
-            isDefaultProvider: true,
             walletId: "privy_managed_channel_b",
             publicKey: PUBLIC_KEYS.privyB,
-          }),
-          configWallet({
-            id: "cwlt_managed_channel_anchorage",
-            custodyConfigId: ANCHORAGE_CONFIG_ID,
-            provider: "anchorage",
-            isDefaultProvider: false,
-            walletId: "anchorage_managed_channel",
-            publicKey: PUBLIC_KEYS.anchorage,
           }),
         ],
       },
@@ -119,7 +116,7 @@ describe("Managed custody out of the release channel", () => {
     const response = await send(`/v1/projects/${PROJECT_ID}/api-keys`, "POST", {
       name: "Managed out of channel key",
       walletScope: "selected",
-      provisionWallet: true,
+      provisionWallet: { provider: "privy" },
     });
 
     expect(response.status).toBe(403);
@@ -169,7 +166,6 @@ function configWallet(wallet: {
   id: string;
   custodyConfigId: string;
   provider: CustodyProvider;
-  isDefaultProvider: boolean;
   walletId: string;
   publicKey: string;
 }) {
@@ -224,7 +220,6 @@ async function seedFixture(): Promise<void> {
         projectId: PROJECT_ID,
         provider: "privy",
         configEncrypted: "not-read",
-        defaultWalletId: "privy_managed_channel_a",
         status: "active",
       },
       {
@@ -233,7 +228,6 @@ async function seedFixture(): Promise<void> {
         projectId: PROJECT_ID,
         provider: "anchorage",
         configEncrypted: "not-read",
-        defaultWalletId: "anchorage_managed_channel",
         status: "active",
       },
     ],
@@ -264,15 +258,6 @@ async function seedFixture(): Promise<void> {
         label: null,
         purpose: null,
         status: "active",
-      },
-    ],
-    scopeDefaults: [
-      {
-        id: "csd_managed_release_channel",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        defaultCustodyConfigId: PRIVY_CONFIG_ID,
-        defaultCustodyConnectionId: null,
       },
     ],
   });

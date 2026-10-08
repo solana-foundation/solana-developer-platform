@@ -61,7 +61,6 @@ async function seedCustodyWalletForProject(
         projectId,
         provider: "local",
         configEncrypted: "test-config",
-        defaultWalletId: null,
         status: "active",
       },
     ],
@@ -76,7 +75,6 @@ async function seedCustodyWalletForProject(
         status: walletStatus,
       },
     ],
-    scopeDefaults: [],
   });
 }
 

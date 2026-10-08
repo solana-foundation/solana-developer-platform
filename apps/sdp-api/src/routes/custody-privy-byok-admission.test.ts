@@ -74,9 +74,9 @@ async function seedActor(): Promise<void> {
   ]);
 }
 
-async function request(path: "initialize" | "switch"): Promise<Response> {
+async function requestInitialize(): Promise<Response> {
   return app.request(
-    `/v1/wallets/${path}`,
+    "/v1/wallets/initialize",
     {
       method: "POST",
       headers: {
@@ -104,7 +104,6 @@ async function seedManagedPrivyConfig(): Promise<void> {
       provider: "privy",
       config: "managed",
       encryptionVersion: "test",
-      defaultWalletId: "privy_wallet_admission",
       status: "active",
       createdAt: SEEDED_AT,
       updatedAt: SEEDED_AT,
@@ -197,7 +196,7 @@ describe("Managed Privy setup beside BYOK Privy", () => {
     });
     await seedPendingPrivyConnection();
 
-    const response = await request("initialize");
+    const response = await requestInitialize();
 
     expect(response.status).toBe(201);
     const body = await response.json();
@@ -222,7 +221,7 @@ describe("Managed Privy setup beside BYOK Privy", () => {
   it("keeps the initialize conflict for an active project Config", async () => {
     await seedManagedPrivyConfig();
 
-    const response = await request("initialize");
+    const response = await requestInitialize();
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
@@ -241,24 +240,5 @@ describe("Managed Privy setup beside BYOK Privy", () => {
       )
       .first<{ count: number }>();
     expect(createAudits?.count).toBe(0);
-  });
-
-  it("keeps the active Managed Privy Config selected through switch beside a pending Connection", async () => {
-    await seedManagedPrivyConfig();
-    await seedPendingPrivyConnection();
-
-    const response = await request("switch");
-
-    expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({
-      data: {
-        configId: CONFIG_ID,
-        walletId: "privy_wallet_admission",
-        publicKey: "ManagedPublicKey",
-      },
-      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
-    });
-    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
-    expect(await connectionStatus()).toEqual({ status: "pending" });
   });
 });

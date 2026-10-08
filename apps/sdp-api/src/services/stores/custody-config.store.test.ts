@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createSigningService } from "@/services/domain/signing.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
-import { seedTestCustodyRows, type TestCustodyScopeDefaultRow } from "@/test/helpers/custody";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -30,7 +30,7 @@ describe("CustodyConfigStore project scope", () => {
   it.each(CUSTODY_CONFIG_STATUSES)(
     "finds a %s config by provider only while it is unarchived",
     async (status) => {
-      await seedPrivyConfig({ projectId: PROJECT_ID, status, scopeDefaults: [] });
+      await seedPrivyConfig({ projectId: PROJECT_ID, status });
       const store = new CustodyConfigStore(getDb(env), env);
 
       await expect(store.findByProvider(ORGANIZATION_ID, PROJECT_ID, "privy")).resolves.toEqual(
@@ -39,57 +39,23 @@ describe("CustodyConfigStore project scope", () => {
     }
   );
 
-  it.each(CUSTODY_CONFIG_STATUSES)(
-    "offers wallet reuse for a %s config only while it is unarchived",
-    async (status) => {
-      await seedPrivyConfig({ projectId: PROJECT_ID, status, scopeDefaults: [] });
-
-      await expect(
-        createSigningService(env).getProviderReuseState(ORGANIZATION_ID, PROJECT_ID)
-      ).resolves.toEqual({
-        privy: isUnarchivedCustodyConfigStatus(status),
-        coinbase_cdp: false,
-        para: false,
-        turnkey: false,
-        utila: false,
-      });
-    }
-  );
-
-  it("never returns another project's config through a default that points at it", async () => {
-    await seedPrivyConfig({
-      projectId: OTHER_PROJECT_ID,
-      status: "active",
-      scopeDefaults: [
-        {
-          id: "csd_custody_config_store",
-          organizationId: ORGANIZATION_ID,
-          projectId: PROJECT_ID,
-          defaultCustodyConfigId: CONFIG_ID,
-          defaultCustodyConnectionId: null,
-        },
-        {
-          id: "csd_custody_config_store_other",
-          organizationId: ORGANIZATION_ID,
-          projectId: OTHER_PROJECT_ID,
-          defaultCustodyConfigId: CONFIG_ID,
-          defaultCustodyConnectionId: null,
-        },
-      ],
-    });
+  it("never returns another project's active config", async () => {
+    await seedPrivyConfig({ projectId: OTHER_PROJECT_ID, status: "active" });
     const rowsBefore = await readCustodyRows();
     const store = new CustodyConfigStore(getDb(env), env);
 
-    await expect(store.getDefaultConfig(ORGANIZATION_ID, OTHER_PROJECT_ID)).resolves.toEqual(
-      expectedConfigRecord(OTHER_PROJECT_ID, "active")
-    );
-    await expect(store.getDefaultConfig(ORGANIZATION_ID, PROJECT_ID)).resolves.toBeNull();
-    await expect(store.findActive(ORGANIZATION_ID, PROJECT_ID)).resolves.toBeNull();
+    await expect(
+      store.findActiveByProvider(ORGANIZATION_ID, OTHER_PROJECT_ID, "privy")
+    ).resolves.toEqual(expectedConfigRecord(OTHER_PROJECT_ID, "active"));
+    await expect(
+      store.findActiveByProvider(ORGANIZATION_ID, PROJECT_ID, "privy")
+    ).resolves.toBeNull();
+    await expect(store.listActive(ORGANIZATION_ID, PROJECT_ID)).resolves.toEqual([]);
     expect(await readCustodyRows()).toEqual(rowsBefore);
   });
 
   it("never resolves a wallet under another project's config", async () => {
-    await seedPrivyConfig({ projectId: PROJECT_ID, status: "active", scopeDefaults: [] });
+    await seedPrivyConfig({ projectId: PROJECT_ID, status: "active" });
     const rowsBefore = await readCustodyRows();
     const store = new CustodyConfigStore(getDb(env), env);
     const signingService = createSigningService(env);
@@ -101,11 +67,15 @@ describe("CustodyConfigStore project scope", () => {
       store.findActiveWalletByPublicKey(ORGANIZATION_ID, PROJECT_ID, PUBLIC_KEY)
     ).resolves.toEqual(expectedWalletLookup());
     await expect(
-      signingService.getWalletById(ORGANIZATION_ID, OTHER_PROJECT_ID, PROVIDER_WALLET_ID)
-    ).resolves.toBeNull();
+      signingService.getPublicKey(ORGANIZATION_ID, OTHER_PROJECT_ID, PROVIDER_WALLET_ID)
+    ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
     await expect(
-      signingService.getWalletById(ORGANIZATION_ID, OTHER_PROJECT_ID, CUSTODY_WALLET_ID)
-    ).resolves.toBeNull();
+      signingService.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        OTHER_PROJECT_ID,
+        CUSTODY_WALLET_ID
+      )
+    ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
     await expect(
       store.findUniqueActiveWalletByIdentifier(
         ORGANIZATION_ID,
@@ -120,7 +90,7 @@ describe("CustodyConfigStore project scope", () => {
   });
 
   it("refuses to delete a wallet under another project's config", async () => {
-    await seedPrivyConfig({ projectId: PROJECT_ID, status: "active", scopeDefaults: [] });
+    await seedPrivyConfig({ projectId: PROJECT_ID, status: "active" });
     const rowsBefore = await readCustodyRows();
 
     await expect(
@@ -160,7 +130,6 @@ async function seedScope(): Promise<void> {
 async function seedPrivyConfig(params: {
   projectId: string;
   status: CustodyConfigStatus;
-  scopeDefaults: readonly TestCustodyScopeDefaultRow[];
 }): Promise<void> {
   await seedTestCustodyRows(env, {
     configs: [
@@ -170,7 +139,6 @@ async function seedPrivyConfig(params: {
         projectId: params.projectId,
         provider: "privy",
         configEncrypted: "encrypted",
-        defaultWalletId: PROVIDER_WALLET_ID,
         status: params.status,
       },
     ],
@@ -185,7 +153,6 @@ async function seedPrivyConfig(params: {
         status: "active",
       },
     ],
-    scopeDefaults: params.scopeDefaults,
   });
 }
 
@@ -197,7 +164,6 @@ function expectedConfigRecord(projectId: string, status: CustodyConfigStatus) {
     provider: "privy",
     config: "encrypted",
     encryptionVersion: "sdp-custody-encryption-v1",
-    defaultWalletId: PROVIDER_WALLET_ID,
     status,
     createdAt: expect.any(String),
     updatedAt: expect.any(String),
@@ -224,6 +190,5 @@ async function readCustodyRows() {
   return {
     configs: await db.queryMany("SELECT * FROM custody_configs ORDER BY id"),
     wallets: await db.queryMany("SELECT * FROM custody_wallets ORDER BY id"),
-    scopeDefaults: await db.queryMany("SELECT * FROM custody_scope_defaults ORDER BY id"),
   };
 }

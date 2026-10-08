@@ -134,7 +134,6 @@ describe("DvpTradeRepository (postgres)", () => {
           projectId: TEST_PROJECT_ID,
           provider: "local",
           configEncrypted: "x",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -158,7 +157,6 @@ describe("DvpTradeRepository (postgres)", () => {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
 
     repo = createPostgresDvpTradeRepository(db);

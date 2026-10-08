@@ -76,7 +76,6 @@ async function seedOrganizationCustody(): Promise<void> {
         projectId: OWNER_PROJECT_ID,
         provider: "privy",
         configEncrypted: "test-config",
-        defaultWalletId: "privy_wallet_owner",
         status: "active",
       },
       {
@@ -85,7 +84,6 @@ async function seedOrganizationCustody(): Promise<void> {
         projectId: REQUESTER_PROJECT_ID,
         provider: "privy",
         configEncrypted: "test-config",
-        defaultWalletId: REQUESTER_WALLET_ID,
         status: "active",
       },
     ],
@@ -107,22 +105,6 @@ async function seedOrganizationCustody(): Promise<void> {
         label: "Requester wallet",
         purpose: "root",
         status: "active",
-      },
-    ],
-    scopeDefaults: [
-      {
-        id: "csd_cross_project_owner",
-        organizationId: ORGANIZATION_ID,
-        projectId: OWNER_PROJECT_ID,
-        defaultCustodyConfigId: OWNER_CONFIG_ID,
-        defaultCustodyConnectionId: null,
-      },
-      {
-        id: "csd_cross_project_requester",
-        organizationId: ORGANIZATION_ID,
-        projectId: REQUESTER_PROJECT_ID,
-        defaultCustodyConfigId: REQUESTER_CONFIG_ID,
-        defaultCustodyConnectionId: null,
       },
     ],
   });
@@ -176,7 +158,6 @@ async function readCustodyState() {
     wallets: await db.queryMany("SELECT * FROM custody_wallets ORDER BY id"),
     configs: await db.queryMany("SELECT * FROM custody_configs ORDER BY id"),
     connections: await db.queryMany("SELECT * FROM custody_connections ORDER BY id"),
-    scopeDefaults: await db.queryMany("SELECT * FROM custody_scope_defaults ORDER BY id"),
   };
 }
 
@@ -219,7 +200,7 @@ describe("custody wallets across an organization's projects", () => {
   );
 
   it.each(OWNER_WALLETS)(
-    "leaves another project's $owner wallet untouched by label, default, and delete requests",
+    "leaves another project's $owner wallet untouched by label and delete requests",
     async ({ walletId }) => {
       const before = await readCustodyState();
 
@@ -229,15 +210,6 @@ describe("custody wallets across an organization's projects", () => {
       });
       expect(relabel.status).toBe(404);
       expect(await relabel.json()).toEqual(errorBody("NOT_FOUND", "Wallet not found"));
-
-      const redefault = await requestAsRequester("/v1/wallets/default-wallet", {
-        method: "POST",
-        body: { provider: "privy", walletId },
-      });
-      expect(redefault.status).toBe(400);
-      expect(await redefault.json()).toEqual(
-        errorBody("BAD_REQUEST", "Unknown walletId for this wallet signing configuration")
-      );
 
       const deletion = await requestAsRequester("/v1/wallets", {
         method: "DELETE",

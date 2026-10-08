@@ -48,7 +48,6 @@ async function insertConfig(
     projectId,
     provider,
     configEncrypted: "test-config",
-    defaultWalletId: null,
     status: "active",
   });
 }
@@ -152,11 +151,18 @@ describe("custody Config scoped upsert concurrency", () => {
   it("resolves concurrent project-level upserts to a single config row", async () => {
     const store = new CustodyConfigStore(getDb(env), env);
 
-    const configIds = await Promise.all(
-      Array.from({ length: 8 }, () =>
-        store.upsert(ORGANIZATION_ID, PROJECT_ID, { provider: "para" })
+    const configIds = (
+      await Promise.all(
+        Array.from({ length: 8 }, () =>
+          store.saveProviderConfig({
+            orgId: ORGANIZATION_ID,
+            projectId: PROJECT_ID,
+            provider: "para",
+            configJson: { provider: "para" },
+          })
+        )
       )
-    );
+    ).map((saved) => saved.configId);
 
     expect(new Set(configIds).size).toBe(1);
     const rows = await getDb(env).queryMany<{ id: string; status: CustodyConfigStatus }>(
@@ -167,7 +173,7 @@ describe("custody Config scoped upsert concurrency", () => {
     expect(rows).toEqual([{ id: configIds[0], status: "active" }]);
   });
 
-  it("persists the config payload, wallet, and default pointer atomically", async () => {
+  it("persists the config payload and its wallet atomically without a default pointer", async () => {
     const store = new CustodyConfigStore(getDb(env), env);
 
     const { configId } = await store.saveProviderConfig({
@@ -175,7 +181,6 @@ describe("custody Config scoped upsert concurrency", () => {
       projectId: PROJECT_ID,
       provider: "privy",
       configJson: { provider: "privy", privyAppId: "app_test" },
-      defaultWalletId: "wallet_atomic",
       wallet: {
         walletId: "wallet_atomic",
         publicKey: "public_atomic",
@@ -188,7 +193,7 @@ describe("custody Config scoped upsert concurrency", () => {
       .prepare("SELECT default_wallet_id, status FROM custody_configs WHERE id = ?")
       .bind(configId)
       .first<{ default_wallet_id: string | null; status: string }>();
-    expect(config).toMatchObject({ default_wallet_id: "wallet_atomic", status: "active" });
+    expect(config).toEqual({ default_wallet_id: null, status: "active" });
 
     const wallet = await getDb(env)
       .prepare(
@@ -211,7 +216,6 @@ describe("custody Config scoped upsert concurrency", () => {
         projectId: PROJECT_ID,
         provider: "para",
         configJson: { provider: "para" },
-        defaultWalletId: "wallet_rollback",
         wallet: {
           walletId: "wallet_rollback",
           publicKey: "public_rollback_dup",

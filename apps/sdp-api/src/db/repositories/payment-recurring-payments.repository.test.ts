@@ -56,7 +56,6 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
           projectId: TEST_PROJECT_ID,
           provider: "privy",
           configEncrypted: "encrypted",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -71,7 +70,6 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
 
     repo = createPostgresPaymentRecurringPaymentsRepository(db);

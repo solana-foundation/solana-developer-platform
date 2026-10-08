@@ -8,7 +8,6 @@ function facts(overrides: Partial<InstallationFacts>): InstallationFacts {
     connectionStatus: "pending",
     credentialStatus: "pending",
     isExpectedProjectCredential: true,
-    hasDefaultWallet: false,
     hasOwnedWallet: false,
     providerAccountFingerprint: null,
     activatedAt: null,

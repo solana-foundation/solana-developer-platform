@@ -82,7 +82,6 @@ async function seedExactIdProviderAliasWallet(): Promise<void> {
         projectId: TEST_PROJECT.id,
         provider: "privy",
         configEncrypted: "test-config",
-        defaultWalletId: TEST_CUSTODY_WALLET_ID,
         status: "active",
       },
     ],
@@ -97,7 +96,6 @@ async function seedExactIdProviderAliasWallet(): Promise<void> {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
 }
 

@@ -675,7 +675,6 @@ async function seedAuthCustodyWallet(params: {
         projectId: TEST_PROJECT.id,
         provider: params.provider,
         configEncrypted: "test-config",
-        defaultWalletId: null,
         status: "active",
       },
     ],
@@ -690,6 +689,5 @@ async function seedAuthCustodyWallet(params: {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
 }

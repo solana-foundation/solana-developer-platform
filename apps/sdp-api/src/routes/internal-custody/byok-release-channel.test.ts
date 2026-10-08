@@ -5,7 +5,6 @@ import { verifyClerkJwt } from "@/lib/clerk-token";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
-import { insertTestCustodyScopeDefault } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
@@ -33,9 +32,7 @@ const USER_ID = "usr_byok_release_channel";
 const CREDENTIAL_ID = "pcred_byok_release_channel";
 const SUCCESSOR_CREDENTIAL_ID = "pcred_byok_release_channel_successor";
 const CONNECTION_ID = "cconn_byok_release_channel";
-const DEFAULT_CUSTODY_WALLET_ID = "cwlt_byok_release_channel_default";
-const OTHER_CUSTODY_WALLET_ID = "cwlt_byok_release_channel_other";
-const OTHER_WALLET_ID = "privy_byok_release_channel_other";
+const CUSTODY_WALLET_ID = "cwlt_byok_release_channel_installed";
 const SEEDED_AT = "2026-01-01T00:00:00.000Z";
 const APP_ID = "privy-app-1234";
 const APP_SECRET = "exact secret";
@@ -130,7 +127,7 @@ async function seedPendingInstallation(providerAccountFingerprint: string | null
   });
 }
 
-async function seedSelectedActiveConnection(): Promise<void> {
+async function seedActiveConnection(): Promise<void> {
   const providerAccountFingerprint = await getPrivyProviderAccountFingerprint(APP_ID);
   await getDb(env).transaction(async (tx) => {
     await seedTestPrivyConnection(tx, {
@@ -144,30 +141,15 @@ async function seedSelectedActiveConnection(): Promise<void> {
       lastCheckStatus: "success",
       wallets: [
         {
-          id: DEFAULT_CUSTODY_WALLET_ID,
-          walletId: "privy_byok_release_channel_default",
-          publicKey: "byok-release-channel-default-address",
-          label: null,
-          purpose: null,
-          status: "active",
-        },
-        {
-          id: OTHER_CUSTODY_WALLET_ID,
-          walletId: OTHER_WALLET_ID,
-          publicKey: "byok-release-channel-other-address",
+          id: CUSTODY_WALLET_ID,
+          walletId: "privy_byok_release_channel_installed",
+          publicKey: "byok-release-channel-installed-address",
           label: null,
           purpose: null,
           status: "active",
         },
       ],
-      defaultCustodyWalletId: DEFAULT_CUSTODY_WALLET_ID,
-    });
-    await insertTestCustodyScopeDefault(tx, {
-      id: "csd_byok_release_channel",
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      defaultCustodyConfigId: null,
-      defaultCustodyConnectionId: CONNECTION_ID,
+      defaultCustodyWalletId: CUSTODY_WALLET_ID,
     });
   });
 }
@@ -282,8 +264,7 @@ async function credentialState() {
 
 async function connectionState() {
   return getDb(env).queryOne(
-    `SELECT status, last_check_status, last_check_at, provider_account_fingerprint,
-            default_custody_wallet_id
+    `SELECT status, last_check_status, last_check_at, provider_account_fingerprint
      FROM custody_connections WHERE id = ?`,
     [CONNECTION_ID]
   );
@@ -443,7 +424,7 @@ describe("BYOK Privy outside the release channel", () => {
       body: null,
     },
   ])("refuses $operation before any Provider call", async ({ path, idempotencyKey, body }) => {
-    await seedSelectedActiveConnection();
+    await seedActiveConnection();
     const before = await credentialState();
 
     const response = await dashboardRequest(path, { method: "POST", idempotencyKey, body });
@@ -485,7 +466,7 @@ describe("BYOK Privy outside the release channel", () => {
   ])(
     "refuses $operation on $state before its state check",
     async ({ seed, path, idempotencyKey, body }) => {
-      await seedSelectedActiveConnection();
+      await seedActiveConnection();
       await seed();
       const before = await credentialState();
 
@@ -538,8 +519,8 @@ describe("BYOK Privy outside the release channel", () => {
     ]);
   });
 
-  it("lists a selected Connection as neither default nor runtime-executable", async () => {
-    await seedSelectedActiveConnection();
+  it("lists an active Connection as not runtime-executable", async () => {
+    await seedActiveConnection();
 
     const response = await dashboardRequest("/internal/dashboard/custody/connections", {
       method: "GET",
@@ -556,9 +537,7 @@ describe("BYOK Privy outside the release channel", () => {
             provider: "privy",
             label: "Privy",
             status: "active",
-            isDefault: false,
             isRuntimeExecutionAllowed: false,
-            defaultCustodyWalletId: DEFAULT_CUSTODY_WALLET_ID,
             createdAt: expect.any(String),
             activatedAt: expect.any(String),
             lastCheck: { status: "success", at: expect.any(String), failureCode: null },
@@ -569,24 +548,5 @@ describe("BYOK Privy outside the release channel", () => {
       },
       meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
-  });
-
-  it("refuses moving the Connection's default wallet", async () => {
-    await seedSelectedActiveConnection();
-    const before = await connectionState();
-
-    const response = await dashboardRequest("/v1/wallets/default-wallet", {
-      method: "POST",
-      idempotencyKey: null,
-      body: { walletId: OTHER_WALLET_ID },
-    });
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({
-      error: CHANNEL_REFUSAL,
-      meta: { requestId: expect.any(String) },
-    });
-    expect(providerFetch).not.toHaveBeenCalled();
-    expect(await connectionState()).toEqual(before);
   });
 });
