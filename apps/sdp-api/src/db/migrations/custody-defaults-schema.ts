@@ -53,9 +53,9 @@ export async function restorePreCustodyDefaultsDropSchema(client: Client): Promi
          organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
          default_custody_config_id TEXT,
-         default_custody_connection_id TEXT,
          created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
          updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
+         default_custody_connection_id TEXT,
          CONSTRAINT custody_scope_defaults_default_custody_config_id_fkey
            FOREIGN KEY (default_custody_config_id)
            REFERENCES custody_configs(id)
@@ -71,6 +71,14 @@ export async function restorePreCustodyDefaultsDropSchema(client: Client): Promi
          ON custody_scope_defaults (organization_id, project_id)`,
       `CREATE INDEX idx_custody_scope_defaults_default_config
          ON custody_scope_defaults (default_custody_config_id)`,
+      `CREATE INDEX idx_custody_scope_defaults_default_connection
+    ON custody_scope_defaults(default_custody_connection_id)
+    WHERE default_custody_connection_id IS NOT NULL`,
+      "ALTER TABLE custody_scope_defaults ENABLE ROW LEVEL SECURITY",
+      "ALTER TABLE custody_scope_defaults FORCE ROW LEVEL SECURITY",
+      "CREATE POLICY sdp_tenant_isolation ON custody_scope_defaults" +
+        " USING (sdp_tenant_isolation_allows(organization_id))" +
+        " WITH CHECK (sdp_tenant_isolation_allows(organization_id))",
     ].join(";\n")
   );
 }

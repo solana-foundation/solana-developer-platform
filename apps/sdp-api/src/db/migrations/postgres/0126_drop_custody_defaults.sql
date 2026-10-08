@@ -18,7 +18,10 @@
 -- 4. custody_configs.project_environment carries its project's environment
 --    through a composite foreign key to projects (id, environment), pinned to
 --    'sandbox' by a CHECK. ON UPDATE RESTRICT keeps a project that holds
---    Managed configs from being switched to Production.
+--    Managed configs from being switched to Production. The foreign key
+--    counts archived configs too, so a project that ever held a Managed
+--    config can never move to Production. Nothing in the application changes
+--    a project's environment today, so this is accepted.
 -- 5. custody_connections_credential_scope_check drops both '__organization__'
 --    arms: a connection is project-scoped and its credential's scope key is
 --    its own project.
@@ -38,10 +41,23 @@
 -- read or write fails with 42P01 (custody_scope_defaults) or 42703
 -- (default_wallet_id).
 
--- The guards and the constraints they protect must see the same rows. Every
--- ALTER below takes these locks until commit anyway; taking them first only
--- covers the guards.
-LOCK TABLE projects, custody_configs, custody_scope_defaults, custody_connections
+-- The guards and the constraints they protect must see the same rows, so every
+-- table the DDL below locks is locked before the guards run. The DDL takes
+-- ACCESS EXCLUSIVE until commit on each table it names, and also on every
+-- table a dropped foreign key references: dropping a foreign key drops its
+-- referential triggers on the referenced table, and dropping a trigger
+-- exclusive-locks that table (RemoveTriggerById). That adds organizations
+-- (custody_scope_defaults_organization_id_fkey) and custody_wallets
+-- (custody_configs_default_wallet_fkey,
+-- custody_connections_default_wallet_owner_fkey). The list runs parent before
+-- child, as in 0125, so this migration never holds a child while queueing for
+-- its parent. lock_timeout bounds each wait: a long-running transaction on any
+-- of these tables fails the migration instead of queueing all traffic on them
+-- behind it.
+SET LOCAL lock_timeout = '5s';
+
+LOCK TABLE organizations, projects, custody_configs, custody_connections,
+    custody_wallets, custody_scope_defaults
     IN ACCESS EXCLUSIVE MODE;
 
 -- Fails the migration, rather than deleting or moving anything, when a custody
