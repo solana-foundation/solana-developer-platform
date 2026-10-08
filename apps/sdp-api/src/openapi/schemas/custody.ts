@@ -344,12 +344,6 @@ const orgCustodyConfigBaseSchema = z.object({
     .nullable()
     .openapi({ description: "Optional project scope for this config." }),
   provider: orgCustodyProviderSchema,
-  publicKey: solanaAddressSchema.openapi({
-    description: "Public key associated with the current default wallet.",
-  }),
-  defaultWalletId: walletIdParamSchema
-    .nullable()
-    .openapi({ description: "Default provider wallet ID." }),
   status: z.enum(["active", "inactive"]).openapi({
     description: "Config status.",
     example: "active",

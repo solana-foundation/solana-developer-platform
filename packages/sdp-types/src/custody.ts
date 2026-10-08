@@ -607,8 +607,6 @@ export interface CustodyConfigSummary {
   organizationId: string;
   projectId: string | null;
   provider: CustodyProvider;
-  publicKey: string;
-  defaultWalletId: string | null;
   status: CustodyConfigStatus;
   createdAt: string;
 }

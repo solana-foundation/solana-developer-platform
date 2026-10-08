@@ -2,6 +2,7 @@
  * Organization Types
  */
 
+import type { CustodyProvider } from "./custody";
 import type { OrganizationRole } from "./permissions";
 import type { OrganizationProviderOverrides } from "./provider-access";
 
@@ -82,6 +83,20 @@ export function normalizeOrganizationTier(value: string | null | undefined): Org
   const legacyTier =
     LEGACY_ORGANIZATION_TIER_ALIASES[value as keyof typeof LEGACY_ORGANIZATION_TIER_ALIASES];
   return legacyTier ?? "individual";
+}
+
+/**
+ * An organization's onboarding progress. `custodyProviders` lists, in
+ * `CUSTODY_PROVIDERS` order, every provider with an active Managed config or an
+ * active BYOK connection in the default sandbox project.
+ */
+export interface OrganizationOnboardingSetup {
+  status: "not_started" | "in_progress" | "complete";
+  currentStep: "custody" | "complete";
+  custodyProviders: CustodyProvider[];
+  completedAt: string | null;
+  version: number;
+  canManage: boolean;
 }
 
 export interface User {

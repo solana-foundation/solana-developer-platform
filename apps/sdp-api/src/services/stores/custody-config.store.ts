@@ -61,7 +61,6 @@ interface CustodyConfigRow {
   provider: string;
   config_encrypted: string;
   encryption_version: string;
-  default_wallet_id: string | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -102,7 +101,7 @@ export class CustodyConfigStore implements SigningConfigStore {
   async listActive(orgId: string, projectId: string): Promise<SigningConfigRecord[]> {
     const { results } = await this.db
       .prepare(
-        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, status, created_at, updated_at
          FROM custody_configs
          WHERE organization_id = ? AND project_id = ? AND status = 'active'
          ORDER BY updated_at DESC, id DESC`
@@ -124,7 +123,7 @@ export class CustodyConfigStore implements SigningConfigStore {
   ): Promise<SigningConfigRecord | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, status, created_at, updated_at
          FROM custody_configs
          WHERE organization_id = ? AND project_id = ? AND provider = ?
            AND status IN (${buildInClause(UNARCHIVED_CUSTODY_CONFIG_STATUSES.length)})
@@ -146,7 +145,7 @@ export class CustodyConfigStore implements SigningConfigStore {
   ): Promise<SigningConfigRecord | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, status, created_at, updated_at
          FROM custody_configs
          WHERE organization_id = ? AND project_id = ? AND provider = ? AND status = 'active'
          LIMIT 1`
@@ -163,7 +162,7 @@ export class CustodyConfigStore implements SigningConfigStore {
   async getById(configId: string): Promise<SigningConfigRecord | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at
+        `SELECT id, organization_id, project_id, provider, config_encrypted, encryption_version, status, created_at, updated_at
          FROM custody_configs
          WHERE id = ?`
       )
@@ -637,7 +636,6 @@ export class CustodyConfigStore implements SigningConfigStore {
       provider: row.provider as SigningProviderType,
       config: row.config_encrypted,
       encryptionVersion: row.encryption_version,
-      defaultWalletId: row.default_wallet_id,
       status: row.status as CustodyConfigStatus,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

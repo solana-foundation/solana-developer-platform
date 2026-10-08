@@ -128,7 +128,6 @@ interface ConfigRow {
   provider: string;
   config_encrypted: string;
   encryption_version: string;
-  default_wallet_id: string | null;
   status: CustodyConfigStatus;
   created_at: string;
   updated_at: string;
@@ -1280,7 +1279,7 @@ function connectionTargetSelect(): string {
 function configWalletSelect(): string {
   return `SELECT c.id, c.organization_id, c.project_id, c.provider,
                  c.config_encrypted, c.encryption_version,
-                 c.default_wallet_id, c.status, c.created_at, c.updated_at,
+                 c.status, c.created_at, c.updated_at,
                  w.wallet_id, w.public_key AS wallet_public_key,
                  w.status AS wallet_status
           FROM custody_configs c
@@ -1295,7 +1294,6 @@ function mapConfig(row: ConfigRow, provider: CustodyProvider): SigningConfigReco
     provider,
     config: row.config_encrypted,
     encryptionVersion: row.encryption_version,
-    defaultWalletId: row.default_wallet_id,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

@@ -13,7 +13,8 @@ export const loadQuickStartStep = cache(async (): Promise<QuickStartStep | null>
       signal,
     });
     if (!status.linked || !status.setup?.canManage) return null;
-    if (status.setup.status === "complete" || status.setup.custodyProvider) return "done";
+    if (status.setup.status === "complete" || status.setup.custodyProviders.length > 0)
+      return "done";
 
     // The default sandbox is not the only place an organization can have a wallet.
     const projects = await listSdpProjects();

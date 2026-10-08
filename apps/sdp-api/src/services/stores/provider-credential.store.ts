@@ -865,6 +865,8 @@ export class ProviderCredentialStore {
       ]
     );
 
+    // Write-only: default_custody_wallet_id is set solely to satisfy
+    // custody_connections_active_lifecycle_check until HOO-1985 drops it; nothing reads it.
     const updatedConnection = await this.db.execute(
       `UPDATE custody_connections
        SET default_custody_wallet_id = ?,

@@ -226,8 +226,6 @@
                 "organizationId": "org_example",
                 "projectId": "prj_example",
                 "provider": "privy",
-                "publicKey": "So11111111111111111111111111111111111111112",
-                "defaultWalletId": "privy_wallet_123",
                 "status": "active",
                 "createdAt": "2025-01-01T00:00:00.000Z"
               }
