@@ -1,10 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getDashboardFlags } from "@/flags/dashboard";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchIssuedTokensByMint } from "../payments-page.data";
+import RedesignTransactionsPage from "./page.redesign";
 import { enabledTransactionModules } from "./transaction-modules";
 import { fetchTransactionsPage } from "./transactions-page.data";
 import { parseTransactionFilters } from "./transactions-query";
@@ -14,7 +16,7 @@ interface TransactionsPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default async function TransactionsPage({ searchParams }: TransactionsPageProps) {
+async function TransactionsPage({ searchParams }: TransactionsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
@@ -40,3 +42,5 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
     />
   );
 }
+
+export default withLegacyDesign(RedesignTransactionsPage, TransactionsPage, "activity");

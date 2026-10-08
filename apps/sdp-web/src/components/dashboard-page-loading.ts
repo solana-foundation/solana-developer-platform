@@ -32,24 +32,34 @@ import { SettingsPageSkeleton } from "@/app/dashboard/[projectId]/operations-car
 import CounterpartyDirectoryLoading, {
   PreviousCounterpartyLoading as LegacyCounterpartyDirectoryLoading,
 } from "@/app/dashboard/[projectId]/payments/counterparty/loading";
-import { PaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton";
+import { PaymentsPageSkeleton as LegacyPaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton";
+import { PaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton.redesign";
 import {
   CounterpartyCreateSkeleton as LegacyCounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton as LegacyCounterpartyDetailSkeleton,
   PaymentsDepositPageSkeleton as LegacyPaymentsDepositPageSkeleton,
   PaymentsPayPageSkeleton as LegacyPaymentsPayPageSkeleton,
+  PaymentsTransactionsPageSkeleton as LegacyPaymentsTransactionsPageSkeleton,
+  RecurringPaymentCreateSkeleton as LegacyRecurringPaymentCreateSkeleton,
+  RecurringPaymentDetailSkeleton as LegacyRecurringPaymentDetailSkeleton,
+  RecurringPaymentsPageSkeleton as LegacyRecurringPaymentsPageSkeleton,
 } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import {
   CounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton,
+  PaymentRequestCreateSkeleton,
+  PaymentRequestDetailSkeleton,
   PaymentsDepositPageSkeleton,
   PaymentsPayPageSkeleton,
   PaymentsTransactionsPageSkeleton,
+  PaymentTransactionDetailSkeleton,
   RecurringPaymentCreateSkeleton,
   RecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton,
 } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
-import PaymentRequestsLoading from "@/app/dashboard/[projectId]/payments/requests/loading";
+import PaymentRequestsLoading, {
+  PreviousPaymentRequestsLoading as LegacyPaymentRequestsLoading,
+} from "@/app/dashboard/[projectId]/payments/requests/loading";
 import { PoliciesOverviewSkeleton } from "@/app/dashboard/[projectId]/policies/policies-overview";
 import TokenHoldingsLoading from "@/app/dashboard/[projectId]/tokens/loading";
 import {
@@ -67,22 +77,47 @@ interface PageLoadingProps {
   assetProfilesEnabled?: boolean;
 }
 
-// The previous design's skeletons for the routes NEW DESIGN redesigns.
+// The previous design's skeletons for the routes NEW DESIGN redesigns. Its own new routes (a
+// transaction's or a request's page, the new-request page) send the previous design to their
+// list, so they load as the list does.
 const LEGACY_DESIGN_PAGE_LOADING: Partial<
   Record<DashboardLoadingRoute, ComponentType<PageLoadingProps>>
 > = {
+  "payments-overview": LegacyPaymentsPageSkeleton,
+  "payments-transactions": LegacyPaymentsTransactionsPageSkeleton,
+  "payment-transaction-detail": LegacyPaymentsTransactionsPageSkeleton,
   "payments-pay": LegacyPaymentsPayPageSkeleton,
   "payments-deposit": LegacyPaymentsDepositPageSkeleton,
+  "payment-requests": LegacyPaymentRequestsLoading,
+  "payment-request-create": LegacyPaymentRequestsLoading,
+  "payment-request-detail": LegacyPaymentRequestsLoading,
   "counterparty-directory": LegacyCounterpartyDirectoryLoading,
   "counterparty-create": LegacyCounterpartyCreateSkeleton,
   "counterparty-detail": LegacyCounterpartyDetailSkeleton,
+  "recurring-payments": LegacyRecurringPaymentsPageSkeleton,
+  "recurring-payment-create": LegacyRecurringPaymentCreateSkeleton,
+  "recurring-payment-detail": LegacyRecurringPaymentDetailSkeleton,
 };
+
+// Requests and Schedules are still the previous design's pages, so they load as them with
+// new-design-activity on too.
+const HELD_ON_PREVIOUS_DESIGN: ReadonlySet<DashboardLoadingRoute> = new Set([
+  "payment-requests",
+  "payment-request-create",
+  "payment-request-detail",
+  "recurring-payments",
+  "recurring-payment-create",
+  "recurring-payment-detail",
+]);
 
 export function resolvePageLoadingComponent(
   route: DashboardLoadingRoute,
   newDesign = true
 ): ComponentType<PageLoadingProps> {
-  const legacy = newDesign ? undefined : LEGACY_DESIGN_PAGE_LOADING[route];
+  const legacy =
+    newDesign && !HELD_ON_PREVIOUS_DESIGN.has(route)
+      ? undefined
+      : LEGACY_DESIGN_PAGE_LOADING[route];
   return legacy ?? resolveCurrentPageLoadingComponent(route);
 }
 
@@ -140,12 +175,18 @@ function resolveCurrentPageLoadingComponent(
       return DvpTradeDetailSkeleton;
     case "payments-transactions":
       return PaymentsTransactionsPageSkeleton;
+    case "payment-transaction-detail":
+      return PaymentTransactionDetailSkeleton;
     case "payments-pay":
       return PaymentsPayPageSkeleton;
     case "payments-deposit":
       return PaymentsDepositPageSkeleton;
     case "payment-requests":
       return PaymentRequestsLoading;
+    case "payment-request-create":
+      return PaymentRequestCreateSkeleton;
+    case "payment-request-detail":
+      return PaymentRequestDetailSkeleton;
     case "counterparty-directory":
       return CounterpartyDirectoryLoading;
     case "counterparty-create":

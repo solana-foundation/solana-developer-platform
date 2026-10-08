@@ -58,6 +58,7 @@ export const {
   newDesign,
   newDesignContacts,
   newDesignPayDeposit,
+  newDesignActivity,
   rampProviderMoonpay,
   rampProviderLightspark,
   rampProviderBvnk,
