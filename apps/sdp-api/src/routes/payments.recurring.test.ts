@@ -3350,6 +3350,60 @@ describe("Payments routes — recurring", () => {
       ]);
     });
 
+    it("skips a production project's due period once its organization loses production access", async () => {
+      const signAndSendMock = recurringExecution.signAndSendMock();
+      const recurringPayment = await activateRecurringPaymentForTest(RECURRING_HEADERS);
+      const signaturesBefore = signAndSendMock.mock.calls.length;
+      const now = new Date();
+      await setRecurringCollectionDue({
+        recurringPaymentId: recurringPayment.id,
+        subscriptionId: recurringPayment.subscriptionId,
+        dueAt: new Date(now.getTime() - 60 * 1000).toISOString(),
+      });
+      // Make the payment's project the organization's production project (one
+      // active project per environment), then revoke production access.
+      await getDb(env)
+        .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
+        .bind(`${TEST_PROJECT.id}_production`)
+        .run();
+      await getDb(env)
+        .prepare("UPDATE projects SET environment = 'production' WHERE id = ?")
+        .bind(TEST_PROJECT.id)
+        .run();
+      await getDb(env)
+        .prepare(
+          `UPDATE organizations
+              SET settings = (settings::jsonb - 'enableProductionProject')::text
+            WHERE id = ?`
+        )
+        .bind(TEST_ORG.id)
+        .run();
+
+      expect(await collectDueRecurringPayments(env, now)).toEqual({
+        recovered: 0,
+        collected: 0,
+        failed: 0,
+        skipped: 0,
+        refused: 1,
+      });
+
+      expect(signAndSendMock).toHaveBeenCalledTimes(signaturesBefore);
+      expect(await collectionAttempts(recurringPayment.subscriptionId)).toEqual([
+        expect.objectContaining({
+          status: "skipped",
+          error: "Production is not enabled for this organization",
+          signature: null,
+        }),
+      ]);
+      const row = await recurringPaymentDueAt(recurringPayment.id);
+      expect(row.dueAt).toBeGreaterThan(now.getTime());
+      const subscription = await getDb(env)
+        .prepare("SELECT next_collection_due_at FROM payment_subscriptions WHERE id = ?")
+        .bind(recurringPayment.subscriptionId)
+        .first<{ next_collection_due_at: string | Date }>();
+      expect(new Date(subscription?.next_collection_due_at ?? 0).getTime()).toBe(row.dueAt);
+    });
+
     it("keeps collecting a sandbox project for an organization without production access", async () => {
       recurringExecution.signAndSendMock();
       const recurringPayment = await activateRecurringPaymentForTest(RECURRING_HEADERS);
