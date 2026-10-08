@@ -8,14 +8,9 @@ import type {
   ProviderAvailabilityEntry,
   RampProviderId,
 } from "@sdp/types";
-import {
-  isKnownCustodyProvider,
-  type KnownCustodyProvider,
-} from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export interface DashboardProviderAvailability extends OrganizationProviderAvailabilityResponse {
-  enabledCustodyProviders: KnownCustodyProvider[];
   enabledComplianceProviders: ComplianceProviderId[];
   rampProviderAccess: RampProviderAccess;
 }
@@ -68,10 +63,6 @@ export async function fetchProviderAvailability(
 
   return {
     ...data,
-    enabledCustodyProviders: Object.entries(data.providers.custody)
-      .filter(([, entry]) => entry.enabled)
-      .map(([provider]) => provider)
-      .filter(isKnownCustodyProvider),
     enabledComplianceProviders: Object.entries(data.providers.compliance)
       .filter(([, entry]) => entry.enabled)
       .map(([provider]) => provider as ComplianceProviderId),
@@ -79,11 +70,24 @@ export async function fetchProviderAvailability(
   };
 }
 
-/** One custody provider's entry in a project's provider availability. */
-export type ProjectCustodyAvailability = Extract<
-  ProjectProviderAvailabilityEntry,
-  { family: "custody" }
->;
+/** The custody modes a provider the project can use may be set up in. */
+export type AvailableCustodyModes = readonly [CustodyMode, ...CustodyMode[]];
+
+/** A custody provider the project can set up in at least one mode. */
+export type ProjectCustodyAvailability = Omit<
+  Extract<ProjectProviderAvailabilityEntry, { family: "custody" }>,
+  "modes"
+> & { modes: AvailableCustodyModes };
+
+/**
+ * Whether a provider offers at least one custody mode.
+ *
+ * @param modes - The modes a project availability entry reports.
+ * @returns True when `modes` is not empty.
+ */
+function hasCustodyMode(modes: readonly CustodyMode[]): modes is AvailableCustodyModes {
+  return modes.length > 0;
+}
 
 /**
  * The custody providers the project can set up in at least one mode.
@@ -94,10 +98,13 @@ export type ProjectCustodyAvailability = Extract<
 export function availableCustodyProviders(
   availability: ProjectProviderAvailability
 ): ProjectCustodyAvailability[] {
-  return availability.providers.filter(
-    (entry): entry is ProjectCustodyAvailability =>
-      entry.family === "custody" && entry.modes.length > 0
-  );
+  return availability.providers.flatMap((entry): ProjectCustodyAvailability[] => {
+    if (entry.family !== "custody") {
+      return [];
+    }
+    const { modes } = entry;
+    return hasCustodyMode(modes) ? [{ ...entry, modes }] : [];
+  });
 }
 
 /**

@@ -42,7 +42,9 @@ import {
 } from "../integrations-status";
 import { type CustodyConnectionsContext, IntegrationDetailView } from "./integration-detail-view";
 
-async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
+async function getConnectedCustodyProviders(
+  request: SdpApiClient["request"]
+): Promise<KnownCustodyProvider[]> {
   const res = await request("/v1/wallets/configs");
   if (!res.ok) {
     const body = await res.text();
@@ -195,7 +197,7 @@ async function resolveRequestContext() {
  *
  * @param params - The provider and the family inputs to resolve it against.
  * @param params.provider - The provider id from the route.
- * @param params.connectedProviders - Active custody providers, or `null` when the lookup failed.
+ * @param params.connectedProviders - Active custody providers.
  * @param params.availability - The project's provider availability.
  * @param params.rampProviders - The ramp providers offered (`getOfferedRampProviders`).
  * @returns The provider's detail, or `null` when no family lists it.
@@ -207,19 +209,16 @@ function resolveDetail({
   rampProviders,
 }: {
   provider: string;
-  connectedProviders: KnownCustodyProvider[] | null;
+  connectedProviders: KnownCustodyProvider[];
   availability: ProjectProviderAvailability;
   rampProviders: readonly RampProviderId[];
 }) {
   return resolveIntegrationDetail({
     provider,
-    custody:
-      connectedProviders === null
-        ? null
-        : resolveCustodyIntegrations({
-            connectedProviders,
-            custodyAvailability: availableCustodyProviders(availability),
-          }),
+    custody: resolveCustodyIntegrations({
+      connectedProviders,
+      custodyAvailability: availableCustodyProviders(availability),
+    }),
     ramps: resolveRampIntegrations(availableRampProviders(availability), rampProviders),
     compliance: resolveComplianceIntegrations(availableComplianceProviders(availability)),
   });
@@ -268,9 +267,7 @@ export default async function IntegrationDetailPage({
 
   const [availability, connectedProviders] = await Promise.all([
     fetchProjectProviderAvailability(projectClient),
-    custodyEnabled
-      ? getConnectedCustodyProviders(projectClient.request).catch(() => null)
-      : Promise.resolve([]),
+    custodyEnabled ? getConnectedCustodyProviders(projectClient.request) : Promise.resolve([]),
   ]);
   if (!isProviderAvailableForProject(availability, provider)) {
     notFound();

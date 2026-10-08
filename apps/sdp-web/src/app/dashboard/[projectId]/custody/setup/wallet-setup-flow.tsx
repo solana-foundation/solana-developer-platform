@@ -1,6 +1,12 @@
 "use client";
 
-import { CUSTODY_MODES, type CustodyMode, type SdpEnvironment } from "@sdp/types";
+import {
+  type ByokCustodyProvider,
+  CUSTODY_MODES,
+  type CustodyMode,
+  isByokCustodyProvider,
+  type SdpEnvironment,
+} from "@sdp/types";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -26,7 +32,10 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { completeQuickStartStep, quickStartKey } from "@/lib/dashboard-quick-start";
-import type { ProjectCustodyAvailability } from "@/lib/provider-availability";
+import type {
+  AvailableCustodyModes,
+  ProjectCustodyAvailability,
+} from "@/lib/provider-availability";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 type SetupStep = "provider" | "details";
@@ -101,29 +110,19 @@ function isCustodyMode(value: string | null): value is CustodyMode {
 
 /**
  * The mode a provider that is not set up yet gets set up in: its only mode,
- * or the user's choice when it offers both.
+ * or the user's choice when it offers more than one.
  *
  * @param input - What the selected provider offers and what the user chose.
- * @param input.offersManaged - Whether the provider's modes include `managed`.
- * @param input.offersByok - Whether the provider's modes include `byok`.
+ * @param input.modes - The modes the project may set the provider up in.
  * @param input.chosenMode - The mode the user picked, if any.
- * @returns The setup mode, or `null` while the user still has to choose or no provider offers one.
+ * @returns The setup mode, or `null` while the user still has to choose.
  */
 function resolveSetupMode(input: {
-  offersManaged: boolean;
-  offersByok: boolean;
+  modes: AvailableCustodyModes;
   chosenMode: CustodyMode | null;
 }): CustodyMode | null {
-  if (input.offersManaged && input.offersByok) {
-    return input.chosenMode;
-  }
-  if (input.offersByok) {
-    return "byok";
-  }
-  if (input.offersManaged) {
-    return "managed";
-  }
-  return null;
+  const [firstMode, ...otherModes] = input.modes;
+  return otherModes.length === 0 ? firstMode : input.chosenMode;
 }
 
 /** Only an active connection holds verified credentials, so only it can take a wallet. */
@@ -269,7 +268,37 @@ function CustodyModeField({
   );
 }
 
+/**
+ * The credential form a BYOK provider is set up with.
+ *
+ * @param props - The component props.
+ * @param props.provider - The BYOK provider being set up.
+ * @param props.formId - The id the footer's submit button targets.
+ * @param props.onRecoveryLockChange - Called with whether leaving the form would strand a stored credential or key.
+ * @returns The provider's credential form.
+ */
+function ByokCredentialForm({
+  provider,
+  formId,
+  onRecoveryLockChange,
+}: {
+  provider: ByokCustodyProvider;
+  formId: string;
+  onRecoveryLockChange: (locked: boolean) => void;
+}) {
+  switch (provider) {
+    case "privy":
+      return <PrivyCredentialForm formId={formId} onRecoveryLockChange={onRecoveryLockChange} />;
+    default: {
+      const unhandledProvider: never = provider;
+      throw new Error(`Unhandled BYOK custody provider: ${String(unhandledProvider)}`);
+    }
+  }
+}
+
 interface SetupOptions {
+  /** The BYOK provider whose credential form step 2 shows, or `null` when it shows none. */
+  byokSetupProvider: ByokCustodyProvider | null;
   connectionOptions: CustodyConnectionListItem[];
   hasManagedConfig: boolean;
   isConnected: boolean;
@@ -293,7 +322,7 @@ interface SetupOptions {
  * @param input.selectedAvailability - The selected provider's row, or `null` before one is picked.
  * @param input.connections - Every connection the wallet could be created in.
  * @param input.chosenMode - The mode the user picked for a provider offering both.
- * @returns The connections, setup state and mode step 2 renders from.
+ * @returns The connections, setup state, mode and BYOK credential form step 2 renders from.
  */
 function resolveSetupOptions(input: {
   selectedAvailability: CustodyProviderAvailability | null;
@@ -303,6 +332,7 @@ function resolveSetupOptions(input: {
   const { selectedAvailability, connections, chosenMode } = input;
   if (selectedAvailability === null) {
     return {
+      byokSetupProvider: null,
       connectionOptions: [],
       hasManagedConfig: false,
       isConnected: false,
@@ -317,11 +347,15 @@ function resolveSetupOptions(input: {
     : [];
   const hasManagedConfig = offersManaged && selectedAvailability.status === "active";
   const isConnected = hasManagedConfig || connectionOptions.some(isSelectableConnection);
+  const setupMode = resolveSetupMode({ modes: selectedAvailability.modes, chosenMode });
+  const providerId = selectedAvailability.entry.id;
   return {
+    byokSetupProvider:
+      !isConnected && setupMode === "byok" && isByokCustodyProvider(providerId) ? providerId : null,
     connectionOptions,
     hasManagedConfig,
     isConnected,
-    setupMode: resolveSetupMode({ offersManaged, offersByok, chosenMode }),
+    setupMode,
     showModeChoice: !isConnected && offersManaged && offersByok,
   };
 }
@@ -468,7 +502,14 @@ export function WalletSetupFlow({
     return match === undefined ? null : match;
   }, [availability, selectedProvider]);
   const selectedProviderEntry = selectedAvailability === null ? null : selectedAvailability.entry;
-  const { connectionOptions, hasManagedConfig, isConnected, setupMode, showModeChoice } = useMemo(
+  const {
+    byokSetupProvider,
+    connectionOptions,
+    hasManagedConfig,
+    isConnected,
+    setupMode,
+    showModeChoice,
+  } = useMemo(
     () => resolveSetupOptions({ selectedAvailability, connections, chosenMode }),
     [selectedAvailability, connections, chosenMode]
   );
@@ -480,7 +521,7 @@ export function WalletSetupFlow({
   const showConnectionPicker = isConnected && connectionOptions.some(isSelectableConnection);
   // A BYOK setup goes through provider details (credential submission +
   // connection check) instead of the Managed initialize path.
-  const isByokDetails = !isConnected && setupMode === "byok";
+  const isByokDetails = byokSetupProvider !== null;
 
   const continueFromProvider = () => {
     if (!selectedProviderEntry) {
@@ -675,12 +716,13 @@ export function WalletSetupFlow({
                     t={t}
                   />
                 ) : null}
-                {isByokDetails ? (
-                  <PrivyCredentialForm
+                {byokSetupProvider === null ? null : (
+                  <ByokCredentialForm
+                    provider={byokSetupProvider}
                     formId={DETAILS_FORM_ID}
                     onRecoveryLockChange={setByokRecoveryLocked}
                   />
-                ) : null}
+                )}
                 {isByokDetails || awaitingModeChoice ? null : (
                   <form id={DETAILS_FORM_ID} onSubmit={handleDetailsSubmit} className="grid gap-4">
                     {formContent}

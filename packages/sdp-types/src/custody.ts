@@ -241,12 +241,11 @@ export type CustodyProviderSetupField = CustodyProviderSetupFieldBase &
   CustodyProviderSetupFieldValueHandling;
 
 /**
- * How this provider's credentials come to exist: a self-service form, an
- * external request route, or none — the deployment supplies them via env.
+ * How this provider's credentials come to exist: a self-service form, or
+ * none — the deployment supplies them via env.
  */
 export type CustodyProviderStoredCredentialSetup =
   | { mode: "self_service"; fields: readonly CustodyProviderSetupField[] }
-  | { mode: "request_access"; requestAccessUrl: string }
   | { mode: "none" };
 
 interface CustodyProviderCatalogEntryShape {
@@ -362,14 +361,7 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.fireblocks,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    // The one provider with an established external request route. The other
-    // manual providers get a CTA when the request-access endpoint with
-    // organization/provider attribution exists (decision-map.md #4) — not a
-    // recycled link whose audience we have not confirmed.
-    storedCredentialSetup: {
-      mode: "request_access",
-      requestAccessUrl: "https://solanafoundation.typeform.com/to/wShiq9SN",
-    },
+    storedCredentialSetup: { mode: "none" },
   },
   coinbase_cdp: {
     id: "coinbase_cdp",

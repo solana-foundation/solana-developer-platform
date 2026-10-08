@@ -14,7 +14,6 @@ import {
   formatCustodyProviderName,
   getCustodyProviderCategory,
   getCustodyProviderEntry,
-  isKnownCustodyProvider,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { WalletActionsMenu } from "@/app/dashboard/[projectId]/custody/wallet-actions-menu";
 import { WalletActivityViewport } from "@/app/dashboard/[projectId]/custody/wallet-activity-viewport";
@@ -95,6 +94,39 @@ async function getWalletDetail(
   }
 
   return wallet;
+}
+
+/**
+ * The connection row of a wallet created in a custody connection: the
+ * connection's label, linked to its detail page, for a viewer who may manage
+ * custody, and the truncated connection id, unlinked, for one who may not read
+ * connections.
+ *
+ * @param params - The wallet's connection and the viewer's access.
+ * @param params.request - The SDP API request function.
+ * @param params.connectionId - The wallet's custody connection id, absent for a Managed wallet.
+ * @param params.canManageCustody - Whether the viewer may read custody connections.
+ * @returns The row's label and link, or `null` for a Managed wallet.
+ */
+async function resolveWalletConnectionRow(params: {
+  request: SdpApiClient["request"];
+  connectionId: string | undefined;
+  canManageCustody: boolean;
+}): Promise<{ label: string; href: string | undefined } | null> {
+  const { request, connectionId, canManageCustody } = params;
+  if (connectionId === undefined) {
+    return null;
+  }
+  if (!canManageCustody) {
+    return { label: truncateMiddle(connectionId), href: undefined };
+  }
+  const connection = await fetchConnectionInstallation(request, connectionId);
+  return {
+    label: connection.label,
+    href: await requestProjectHref(
+      `/dashboard/integrations/${connection.provider}/connections/${connectionId}`
+    ),
+  };
 }
 
 async function getWalletTrackedBalances(
@@ -240,24 +272,17 @@ export default async function WalletDetailPage({
   const ownedTokensByMintPromise = getOwnedTokenRoutes(apiClient.request);
   const wallet = await walletPromise;
 
-  const provider =
-    wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
-  const category = provider ? getCustodyProviderCategory(provider) : null;
-  const supportsSignerCheck = provider
-    ? getCustodyProviderEntry(provider).supportsSigning
-    : !wallet.provider;
+  const { provider } = wallet;
+  const category = getCustodyProviderCategory(provider);
+  const supportsSignerCheck = getCustodyProviderEntry(provider).supportsSigning;
   const purposeLabel = formatPurpose(wallet.purpose, t);
-  const providerLabel = provider
-    ? formatCustodyProviderName(provider)
-    : t("DashboardCustody.unknown");
+  const providerLabel = formatCustodyProviderName(provider);
   const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
-  // The connection label is optional; retain the wallet and its connection id if lookup fails.
-  const connection =
-    canManageCustody && wallet.custodyConnectionId
-      ? await fetchConnectionInstallation(apiClient.request, wallet.custodyConnectionId).catch(
-          () => null
-        )
-      : null;
+  const connectionRow = await resolveWalletConnectionRow({
+    request: apiClient.request,
+    connectionId: wallet.custodyConnectionId,
+    canManageCustody,
+  });
 
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
@@ -278,7 +303,7 @@ export default async function WalletDetailPage({
           <div className="space-y-6 p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-start gap-4">
-                {provider ? <WalletProviderMark provider={provider} /> : null}
+                <WalletProviderMark provider={provider} />
                 <div className="space-y-2">
                   {/* biome-ignore lint/a11y/useSemanticElements: The inline editor can render a block-level input wrapper, which is invalid inside h2. */}
                   <div
@@ -294,9 +319,7 @@ export default async function WalletDetailPage({
                       walletId={wallet.walletId}
                     />
                   </div>
-                  <p className="text-sm text-tertiary">
-                    {provider ? formatCustodyProviderName(provider) : t("DashboardCustody.wallet")}
-                  </p>
+                  <p className="text-sm text-tertiary">{providerLabel}</p>
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -304,7 +327,7 @@ export default async function WalletDetailPage({
                 {wallet.isRuntimeExecutionAllowed ? null : (
                   <Badge variant="warning">{t("DashboardCustody.restricted")}</Badge>
                 )}
-                {category ? <WalletCategoryBadge category={category} compact /> : null}
+                <WalletCategoryBadge category={category} compact />
                 {purposeLabel ? (
                   <span className="rounded-full bg-fill px-3 py-1.5 text-xs font-medium text-primary">
                     {purposeLabel}
@@ -335,25 +358,14 @@ export default async function WalletDetailPage({
                 label={t("DashboardCustody.status")}
                 value={formatDisplayLabel(wallet.status)}
               />
-              {provider ? (
-                <WalletInfoRow
-                  label={t("DashboardCustody.provider")}
-                  value={formatCustodyProviderName(provider)}
-                />
-              ) : null}
-              {wallet.custodyConnectionId ? (
+              <WalletInfoRow label={t("DashboardCustody.provider")} value={providerLabel} />
+              {connectionRow === null ? null : (
                 <WalletInfoRow
                   label={t("DashboardCustody.connection")}
-                  value={connection?.label ?? truncateMiddle(wallet.custodyConnectionId)}
-                  href={
-                    canManageCustody
-                      ? await requestProjectHref(
-                          `/dashboard/integrations/${connection?.provider ?? provider ?? "privy"}/connections/${wallet.custodyConnectionId}`
-                        )
-                      : undefined
-                  }
+                  value={connectionRow.label}
+                  href={connectionRow.href}
                 />
-              ) : null}
+              )}
               {purposeLabel ? (
                 <WalletInfoRow label={t("DashboardCustody.purpose")} value={purposeLabel} />
               ) : null}
