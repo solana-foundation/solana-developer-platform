@@ -1,13 +1,11 @@
 import { assertValidAddress } from "@sdp/solana/address";
-import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
+import { COMPLIANCE_PROVIDERS } from "@sdp/types";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { createComplianceService } from "@/services/compliance";
 import {
-  getEnabledProviders,
   loadProjectProviderVerdict,
   refuseProjectProvider,
 } from "@/services/provider-availability.service";
@@ -42,12 +40,10 @@ export async function screenAddress(c: ValidatedBodyContext<typeof screenAddress
     }
   }
 
-  const auth = getAuth(c);
-  const enabledComplianceProviders = (
-    await getEnabledProviders(c.env, getDb(c.env), auth.organizationId, {
-      rampProviderStages: c.get("rampProviderStages"),
-    })
-  ).compliance;
+  const verdict = await loadProjectProviderVerdict(c);
+  const enabledComplianceProviders = COMPLIANCE_PROVIDERS.filter(
+    (provider) => verdict.availability.providers.compliance[provider].enabled
+  );
 
   if (enabledComplianceProviders.length === 0) {
     throw new AppError(
@@ -58,9 +54,8 @@ export async function screenAddress(c: ValidatedBodyContext<typeof screenAddress
     );
   }
 
-  const verdict = await loadProjectProviderVerdict(c);
   for (const provider of enabledComplianceProviders) {
-    const decision = verdict({ family: "compliance", provider });
+    const decision = verdict.decide({ family: "compliance", provider });
     if (!decision.admitted) {
       throw refuseProjectProvider(decision);
     }

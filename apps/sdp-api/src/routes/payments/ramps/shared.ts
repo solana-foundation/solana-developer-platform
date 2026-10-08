@@ -375,7 +375,7 @@ export async function estimateAcrossProviders(
     RAMP_ESTIMATE_PROVIDER_CONCURRENCY,
     async (provider): Promise<RampProviderEstimateResult> => {
       try {
-        const decision = verdict({ family: "ramps", provider });
+        const decision = verdict.decide({ family: "ramps", provider });
         if (!decision.admitted) {
           if (!isStagedProviderRefusalReason(decision.reason)) {
             throw decision.error;

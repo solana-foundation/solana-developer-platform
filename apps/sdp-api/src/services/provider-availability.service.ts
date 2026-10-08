@@ -1521,18 +1521,27 @@ export type StagedProviderGateRequest = Extract<
   { family: "ramps" | "earn" }
 >;
 
-/** The project provider rule for one request's project, deciding without logging. */
-export type ProjectProviderVerdict = (request: ProjectProviderRequest) => ProjectProviderDecision;
+/**
+ * The project provider rule for one request's project: `decide` evaluates any
+ * provider without logging, and `availability` is the organization provider
+ * access it decides from, so a caller needing the organization's enabled set
+ * reads it here instead of loading it again.
+ */
+export interface ProjectProviderVerdict {
+  decide: (request: ProjectProviderRequest) => ProjectProviderDecision;
+  availability: OrganizationProviderAvailabilityResponse;
+}
 
 /**
  * Loads the request's project facts once (its active project row and its
  * organization's provider access) and returns the project provider rule over
- * them, so a request deciding several providers reads the database once.
- * Evaluating is not refusing: a caller that refuses the request with a
- * refusal throws `refuseProjectProvider(decision)`.
+ * them with the access it read, so a request deciding several providers reads
+ * the database once. Evaluating is not refusing: a caller that refuses the
+ * request with a refusal throws `refuseProjectProvider(decision)`.
  *
  * @param c - Request context carrying the authenticated project scope.
- * @returns The rule's non-logging verdict for any provider of the project.
+ * @returns The rule's non-logging `decide` for any provider of the project and
+ *   the organization provider access it decides from.
  * @throws 404 when the project is not an active project of the organization.
  */
 export async function loadProjectProviderVerdict(
@@ -1542,7 +1551,10 @@ export async function loadProjectProviderVerdict(
     organizationId: getAuth(c).organizationId,
     projectId: requireProjectId(c),
   });
-  return (request) => decideProjectProvider(c.env, facts, request);
+  return {
+    decide: (request) => decideProjectProvider(c.env, facts, request),
+    availability: facts.availability,
+  };
 }
 
 /**
@@ -1569,7 +1581,7 @@ export async function assertProviderAvailable(
   request: StagedProviderGateRequest
 ): Promise<void> {
   const verdict = await loadProjectProviderVerdict(c);
-  const decision = verdict(request);
+  const decision = verdict.decide(request);
   if (!decision.admitted) {
     throw refuseProjectProvider(decision);
   }
@@ -1631,25 +1643,6 @@ export function assertEarnProviderConfigured(
       `${def?.label ?? providerId} is not configured for ${mode} mode.`
     );
   }
-}
-
-export async function getEnabledProviders(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  options: ProviderAvailabilityOptions
-) {
-  const access = await getProviderAvailability(env, db, organizationId, options);
-
-  return {
-    tier: access.tier,
-    custody: CUSTODY_PROVIDERS.filter((provider) => access.providers.custody[provider]?.enabled),
-    compliance: COMPLIANCE_PROVIDERS.filter(
-      (provider) => access.providers.compliance[provider]?.enabled
-    ),
-    ramps: RAMP_PROVIDERS.filter((provider) => access.providers.ramps[provider]?.enabled),
-    earn: EARN_PROVIDERS.filter((provider) => access.providers.earn[provider]?.enabled),
-  };
 }
 
 export async function syncProviderAccessFromClerk(

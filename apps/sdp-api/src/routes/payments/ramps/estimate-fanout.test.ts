@@ -19,7 +19,16 @@ vi.mock("../wallets", async (importOriginal) => ({
   resolveScope: vi.fn().mockResolvedValue({ auth: { organizationId: "org_fanout_test" } }),
 }));
 
-import { type PaymentRampEstimate, STAGED_PROVIDER_REFUSAL_REASONS } from "@sdp/types";
+import {
+  COMPLIANCE_PROVIDERS,
+  CUSTODY_PROVIDERS,
+  EARN_PROVIDERS,
+  type OrganizationProviderAvailabilityResponse,
+  type PaymentRampEstimate,
+  type ProviderAvailabilityEntry,
+  RAMP_PROVIDERS,
+  STAGED_PROVIDER_REFUSAL_REASONS,
+} from "@sdp/types";
 import { AppError, forbidden } from "@/lib/errors";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
@@ -38,6 +47,24 @@ function buildContext(options?: { sentryDsn?: string; observability?: Observabil
   } as unknown as AppContext;
 }
 
+function unavailableEntries<Provider extends string>(
+  providers: readonly Provider[]
+): Record<Provider, ProviderAvailabilityEntry> {
+  return Object.fromEntries(
+    providers.map((provider) => [provider, { entitled: false, configured: false, enabled: false }])
+  ) as Record<Provider, ProviderAvailabilityEntry>;
+}
+
+const FANOUT_AVAILABILITY: OrganizationProviderAvailabilityResponse = {
+  tier: "individual",
+  providers: {
+    custody: unavailableEntries(CUSTODY_PROVIDERS),
+    compliance: unavailableEntries(COMPLIANCE_PROVIDERS),
+    ramps: unavailableEntries(RAMP_PROVIDERS),
+    earn: unavailableEntries(EARN_PROVIDERS),
+  },
+};
+
 const MOONPAY_NOT_CONFIGURED: ProjectProviderRefusal = {
   admitted: false,
   scope: { organizationId: "org_fanout_test", projectId: "prj_fanout_test" },
@@ -53,7 +80,10 @@ const MOONPAY_NOT_CONFIGURED: ProjectProviderRefusal = {
 
 describe("estimateAcrossProviders", () => {
   beforeEach(() => {
-    vi.mocked(loadProjectProviderVerdict).mockResolvedValue(() => ({ admitted: true }));
+    vi.mocked(loadProjectProviderVerdict).mockResolvedValue({
+      decide: () => ({ admitted: true }),
+      availability: FANOUT_AVAILABILITY,
+    });
   });
 
   afterEach(() => {
@@ -81,7 +111,10 @@ describe("estimateAcrossProviders", () => {
   });
 
   it("keeps a provider the deployment cannot run on the error log, without calling it", async () => {
-    vi.mocked(loadProjectProviderVerdict).mockResolvedValue(() => MOONPAY_NOT_CONFIGURED);
+    vi.mocked(loadProjectProviderVerdict).mockResolvedValue({
+      decide: () => MOONPAY_NOT_CONFIGURED,
+      availability: FANOUT_AVAILABILITY,
+    });
     const runProvider = vi.fn();
 
     const results = await estimateAcrossProviders(buildContext(), ["moonpay"], runProvider);
@@ -113,7 +146,10 @@ describe("estimateAcrossProviders", () => {
         reason,
         error: forbidden("MoonPay is refused for this project.", { reason }),
       };
-      vi.mocked(loadProjectProviderVerdict).mockResolvedValue(() => refusal);
+      vi.mocked(loadProjectProviderVerdict).mockResolvedValue({
+        decide: () => refusal,
+        availability: FANOUT_AVAILABILITY,
+      });
       const runProvider = vi.fn();
 
       const results = await estimateAcrossProviders(buildContext(), ["moonpay"], runProvider);
