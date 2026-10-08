@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isDashboardNavItemActive,
+  projectSwitchDestination,
   resolveDashboardLoadingRoute,
 } from "./dashboard-navigation-loading";
 
@@ -132,5 +133,21 @@ describe("holdings route", () => {
   it("does not light up an unrelated nav item", () => {
     expect(isDashboardNavItemActive("/dashboard/tokens", "/dashboard/wallets")).toBe(false);
     expect(isDashboardNavItemActive("/dashboard/tokens", "/dashboard/payments")).toBe(false);
+  });
+});
+
+describe("project switch destination", () => {
+  it.each([
+    ["/dashboard/custody/cwlt_test_1", "/dashboard/wallets"],
+    ["/dashboard/wallets/setup", "/dashboard/wallets"],
+    ["/dashboard/payments/transactions/tx_test_1", "/dashboard/payments/transactions"],
+    ["/dashboard/payments", "/dashboard/payments"],
+    ["/dashboard/markets/dvp/trades/dvp_test_1", "/dashboard/markets/dvp"],
+    ["/dashboard/issuance/tok_test_1", "/dashboard/issuance"],
+    ["/dashboard/integrations/private-channels/events", "/dashboard/integrations"],
+    ["/dashboard/tokens", "/dashboard"],
+    ["/dashboard", "/dashboard"],
+  ])("lands %s on %s", (dashboardPath, destination) => {
+    expect(projectSwitchDestination(dashboardPath)).toBe(destination);
   });
 });

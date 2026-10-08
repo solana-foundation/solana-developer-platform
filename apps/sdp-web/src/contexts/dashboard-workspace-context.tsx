@@ -18,6 +18,7 @@ import { SWRConfig } from "swr";
 import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
+import { projectSwitchDestination } from "@/lib/dashboard-navigation-loading";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
@@ -160,7 +161,7 @@ export function DashboardWorkspaceProvider({
         clearStoredApiKeySecrets();
       }
       startProjectSwitchTransition(() => {
-        router.push(projectHref(projectId, pathnameRef.current));
+        router.push(projectHref(projectId, projectSwitchDestination(pathnameRef.current)));
       });
     },
     [router, selectedProjectId]

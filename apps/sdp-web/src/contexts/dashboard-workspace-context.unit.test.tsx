@@ -117,7 +117,10 @@ describe("DashboardWorkspaceProvider project selection", () => {
     expect(screen.getByLabelText("environment").textContent).toBe("sandbox");
   });
 
-  it("switches project by navigating to the same page under the other project", async () => {
+  it("switches project to the module root under the other project, dropping entity ids", async () => {
+    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/custody/cwlt_test_1`, {
+      walletId: "cwlt_test_1",
+    });
     const user = userEvent.setup();
     render(<WorkspaceFixture />);
 
@@ -125,7 +128,7 @@ describe("DashboardWorkspaceProvider project selection", () => {
 
     await waitFor(() =>
       expect(dashboardRouter.push).toHaveBeenCalledWith(
-        `/dashboard/${PRODUCTION_PROJECT.id}/issuance`
+        `/dashboard/${PRODUCTION_PROJECT.id}/wallets`
       )
     );
   });
