@@ -127,6 +127,73 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(next).not.toBe(retried);
   });
 
+  it("retires the key once a 5xx comes back as a replay, so the next submit is new", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const responses = [
+      new Response("{}", { status: 500 }),
+      new Response("{}", { status: 500, headers: { "Idempotent-Replayed": "true" } }),
+      new Response("{}", { status: 201 }),
+    ];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        responses.shift() ?? new Response("{}", { status: 201 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submit();
+    await submit();
+    await submit();
+
+    const keys = [0, 1, 2].map((index) =>
+      new Headers(fetchMock.mock.calls[index]?.[1]?.headers).get("Idempotency-Key")
+    );
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[1]);
+  });
+
+  it("holds the key when the request never got an answer", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = vi
+      .fn(
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response("{}", { status: 201 })
+      )
+      .mockRejectedValueOnce(new TypeError("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submit()).rejects.toThrow("network down");
+    await submit();
+
+    expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+  });
+
+  it("does not let one caller's abort cancel the request another caller joined", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    let respond: (response: Response) => void = () => undefined;
+    const fetchMock = vi.fn(
+      (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    const aborted = dashboardRequest(PATH, {
+      method: "POST",
+      body: '{"amount":"1"}',
+      signal: controller.signal,
+    });
+    const joined = submit();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    controller.abort();
+    respond(new Response("{}", { status: 201 }));
+
+    await expect(aborted).rejects.toBeDefined();
+    expect((await joined).status).toBe(201);
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeUndefined();
+  });
+
   it("joins a double submit of the same action into one request", async () => {
     setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const fetchMock = statusFetchMock(201);
@@ -161,7 +228,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
       body: "{}",
     });
     await dashboardRequest(PATH, { method: "GET" });
-    await dashboardRequest("/api/dashboard/markets/earn/programs", { method: "POST", body: "{}" });
+    await dashboardRequest("/api/dashboard/payments/ramps/quote", { method: "POST", body: "{}" });
 
     expect(keyOfCall(fetchMock, 0)).toBe("own-key");
     expect(keyOfCall(fetchMock, 1)).toBeNull();
