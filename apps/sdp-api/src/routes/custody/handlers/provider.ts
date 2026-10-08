@@ -5,7 +5,6 @@ import { redactCredentialString } from "@sdp/redaction";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
-import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -133,12 +132,7 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
 
   try {
     let connectionId = "connectionId" in body ? body.connectionId : undefined;
-    if (
-      !connectionId &&
-      projectId &&
-      requestedProvider &&
-      isCustodyProviderAvailable(c.env, requestedProvider, "byok")
-    ) {
+    if (!connectionId && projectId && requestedProvider) {
       const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
         kind: "provider",
         organizationId: actor.organizationId,

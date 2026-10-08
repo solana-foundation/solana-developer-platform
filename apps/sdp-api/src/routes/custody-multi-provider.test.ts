@@ -829,6 +829,41 @@ describe("Custody multi-provider routes", () => {
     expect(await readSwitchAudit()).toHaveLength(0);
   });
 
+  it("refuses a provider-only switch to a selected Connection while its BYOK pair is out of channel", async () => {
+    const connection = await seedActivePrivyConnection("selected_out_of_channel");
+    const db = getDb(env);
+    await db.execute(
+      `UPDATE custody_scope_defaults
+       SET default_custody_connection_id = ?, updated_at = sdp_iso_now()
+       WHERE organization_id = ? AND project_id = ?`,
+      [connection.connectionId, TEST_ORG.id, TEST_PROJECT.id]
+    );
+    const walletsBefore = await db.queryMany("SELECT id, status FROM custody_wallets ORDER BY id");
+    custodyReleaseChannel.outOfChannelMode = "byok";
+
+    const res = await switchProvider({ provider: "privy" });
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual(channelRefusalBody("privy", "byok"));
+    expect(await readScopeDefault()).toEqual({
+      default_custody_config_id: PRIVY_CONFIG_ID,
+      default_custody_connection_id: connection.connectionId,
+    });
+    expect(
+      await db.queryMany(
+        "SELECT id, status FROM custody_configs WHERE organization_id = ? ORDER BY id",
+        [TEST_ORG.id]
+      )
+    ).toEqual([
+      { id: PARA_CONFIG_ID, status: "active" },
+      { id: PRIVY_CONFIG_ID, status: "active" },
+    ]);
+    expect(await db.queryMany("SELECT id, status FROM custody_wallets ORDER BY id")).toEqual(
+      walletsBefore
+    );
+    expect(await readSwitchAudit()).toHaveLength(0);
+  });
+
   it("rejects an exact Connection switch without changing the target when entitlement is revoked", async () => {
     const connection = await seedActivePrivyConnection("unentitled");
     await getDb(env)
