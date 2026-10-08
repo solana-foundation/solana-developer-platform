@@ -5067,6 +5067,7 @@ For provider-managed co-signer runtimes that live outside the default stack, see
 | `SDP_API_PORT` | `8787` | Host port for the API. |
 | `SDP_WEB_PORT` | `3000` | Host port for the dashboard. |
 | `SDP_DOCS_PORT` | `3001` | Host port for these docs. |
+| `SDP_RELEASE_CHANNEL` | `experimental` | Which product modules the API, its background jobs, and the dashboard run: `experimental` runs every module, `stable` runs custody, payments, recurring payments, and compliance, and `beta` adds modules in final validation to `stable`. A module outside the channel is off whatever its feature flag says: its API routes return `403` and the dashboard hides it. `GET /health` reports the active channel as `releaseChannel`. `compose.yml` supplies the default; if you run the images another way, set it yourself, because the services refuse to start without a valid value. |
 | `TRUST_PROXY_HEADERS` | `false` | Trust the first `X-Forwarded-For` address outside Cloud Run. Enable only behind an ingress that replaces caller-supplied forwarding headers; direct deployments share the fail-closed unidentified quota bucket. |
 
 `SDP_API_BASE_URL` defaults to the in-network service name `http://sdp-api:8787`
@@ -5210,6 +5211,15 @@ as `set POSTGRES_PASSWORD in .env`. Make sure a `.env` exists next to
 `compose.yml` and fills in every required variable. The
 [configurator](/docs/self-hosting/configurator) produces a complete file; the
 [environment reference](/docs/self-hosting/env-reference) lists what is required.
+
+## A module returns "not available in this release channel"
+
+A `403` with a message such as `The issuance module is not available in this
+release channel.` means `SDP_RELEASE_CHANNEL` excludes that module. The bundled
+`compose.yml` defaults to `experimental`, which runs every module; a value of
+`beta` or `stable` turns less mature modules off. See
+[`SDP_RELEASE_CHANNEL`](/docs/self-hosting/env-reference#advanced) and restart
+the stack after changing it.
 
 ## Images won't pull
 
