@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { forbidden } from "@/lib/errors";
 import { decideInstallation, type InstallationFacts } from "./provider-credential-installation";
 
 const NOW = Date.parse("2026-08-06T12:00:00.000Z");
+const SETUP_REFUSAL = forbidden(
+  "Privy BYOK custody is not stable yet, so a production project cannot use it.",
+  { reason: "custody_mode_not_allowed" }
+);
 
 function facts(overrides: Partial<InstallationFacts>): InstallationFacts {
   return {
@@ -15,7 +20,7 @@ function facts(overrides: Partial<InstallationFacts>): InstallationFacts {
     lastCheckAt: null,
     lastCheckFailureCode: null,
     hasSiblingUnfinished: false,
-    fullCompletionEnabled: true,
+    completionAdmission: { admitted: true },
     nowMs: NOW,
     ...overrides,
   };
@@ -40,13 +45,14 @@ describe("provider credential installation decisions", () => {
   });
 
   it("allows reconciliation without full completion only after the Provider account is pinned", () => {
-    expect(decideInstallation(facts({ fullCompletionEnabled: false })).complete).toEqual({
-      kind: "disabled",
-    });
+    expect(
+      decideInstallation(facts({ completionAdmission: { admitted: false, error: SETUP_REFUSAL } }))
+        .complete
+    ).toEqual({ kind: "disabled", error: SETUP_REFUSAL });
     expect(
       decideInstallation(
         facts({
-          fullCompletionEnabled: false,
+          completionAdmission: { admitted: false, error: SETUP_REFUSAL },
           providerAccountFingerprint: "sha256:app",
           lastCheckStatus: "retry_unknown",
           lastCheckAt: "2026-08-06T11:58:00.000Z",
@@ -79,6 +85,12 @@ describe("provider credential installation decisions", () => {
       lastCheckAt: "2026-08-06T11:58:00.000Z",
     });
     expect(decideInstallation(failed).replace).toEqual({ kind: "execute" });
+    expect(
+      decideInstallation({
+        ...failed,
+        completionAdmission: { admitted: false, error: SETUP_REFUSAL },
+      }).replace
+    ).toEqual({ kind: "disabled", error: SETUP_REFUSAL });
     expect(decideInstallation({ ...failed, hasSiblingUnfinished: true }).replace).toEqual({
       kind: "conflict",
       reason: "unfinished_installation_exists",

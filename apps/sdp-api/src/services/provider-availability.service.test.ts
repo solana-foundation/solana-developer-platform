@@ -1,4 +1,6 @@
 import {
+  type CustodyMode,
+  type CustodyProvider,
   EARN_PROVIDERS,
   RAMP_PROVIDERS,
   resolveOrganizationProviderEntitlements,
@@ -9,20 +11,48 @@ import { getDb } from "@/db";
 import { getLogger } from "@/runtime/logger";
 import {
   assertCustodyProviderEntitled,
+  assertCustodySetupAdmitted,
   assertEarnProviderConfigured,
   assertProviderAvailable,
+  custodyProviderNotInReleaseChannel,
   getProviderAvailability,
   isPersistedCustodyCompletionEnabled,
   parseClerkOrganizationTierMetadata,
   parseProviderOverridesFromClerkMetadata,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import {
+  type SeededDefaultProjects,
+  type SeededProject,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 const MANIFEST_STAGES = { rampProviderStages: SDP_RAMP_PROVIDER_STAGES };
 
 const TEST_ORG_ID = "org_provider_availability_test";
+const TEST_USER_ID = "usr_provider_availability_test";
+const NOT_STABLE_PRODUCTION_REFUSAL = {
+  code: "FORBIDDEN",
+  statusCode: 403,
+  message: "Privy BYOK custody is not stable yet, so a production project cannot use it.",
+  details: { reason: "custody_mode_not_allowed" },
+};
+const NOT_ENTITLED_REFUSAL = {
+  code: "FORBIDDEN",
+  statusCode: 403,
+  message: "Privy requires manual activation for this organization.",
+  details: { reason: "provider_not_entitled" },
+};
 
 const providerEnvKeys = [
   "CUSTODY_PRIVATE_KEY",
@@ -101,6 +131,26 @@ function setBaseProviderEnv(): void {
     TURNKEY_API_PUBLIC_KEY: "turnkey_test_public_key",
     TURNKEY_API_PRIVATE_KEY: "turnkey_test_private_key",
     TURNKEY_ORGANIZATION_ID: "turnkey_test_org",
+  });
+}
+
+async function disablePrivyEntitlement(): Promise<void> {
+  await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+    JSON.stringify({ providerOverrides: { custody: { privy: false } } }),
+    TEST_ORG_ID,
+  ]);
+}
+
+function admitCustodySetup(
+  project: SeededProject,
+  provider: CustodyProvider,
+  mode: CustodyMode
+): Promise<void> {
+  return assertCustodySetupAdmitted(env, getDb(env), {
+    organizationId: project.organizationId,
+    projectId: project.id,
+    provider,
+    mode,
   });
 }
 
@@ -452,32 +502,6 @@ describe("provider-availability.service", () => {
     expect(availability.providers.compliance.range.entitled).toBe(false);
     expect(availability.providers.ramps.lightspark.entitled).toBe(true);
     expect(availability.providers.ramps.bvnk.entitled).toBe(true);
-  });
-
-  it("completes a BYOK Privy connection without deployment Privy credentials", async () => {
-    env.PRIVY_APP_ID = undefined;
-    env.PRIVY_APP_SECRET = undefined;
-
-    await expect(
-      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy")
-    ).resolves.toBe(true);
-  });
-
-  it("refuses BYOK completion for an organization not entitled to the provider", async () => {
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ providerOverrides: { custody: { privy: false } } }), TEST_ORG_ID)
-      .run();
-
-    await expect(
-      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy")
-    ).resolves.toBe(false);
-  });
-
-  it("refuses BYOK completion for a provider without a BYOK runtime", async () => {
-    await expect(
-      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "turnkey")
-    ).resolves.toBe(false);
   });
 
   it("honors a custody override disabling local the same way in self-hosted mode", async () => {
@@ -856,5 +880,152 @@ describe("provider-availability.service", () => {
     // Keyless, so the exit path is never blocked on a credential that does not
     // exist — the ADR 0002 "money out beats money off" half of the same rule.
     expect(() => assertEarnProviderConfigured(env, "veda", true)).not.toThrow();
+  });
+
+  describe("custody setup admission", () => {
+    let projects: SeededDefaultProjects;
+
+    beforeEach(async () => {
+      custodyReleaseChannel.outOfChannelMode = null;
+      custodyReleaseChannel.stageOverride = null;
+      await getDb(env).execute(
+        `INSERT INTO users (id, email, email_verified, status)
+         VALUES (?, 'provider-availability-test@example.com', 1, 'active')`,
+        [TEST_USER_ID]
+      );
+      projects = await seedDefaultProjects(getDb(env), {
+        organizationId: TEST_ORG_ID,
+        createdBy: TEST_USER_ID,
+        members: [],
+      });
+    });
+
+    it("admits Managed and BYOK Privy in a Sandbox project", async () => {
+      await expect(
+        admitCustodySetup(projects.sandbox, "privy", "managed")
+      ).resolves.toBeUndefined();
+      await expect(admitCustodySetup(projects.sandbox, "privy", "byok")).resolves.toBeUndefined();
+    });
+
+    it("admits only BYOK Privy in a Production project and logs the Managed refusal", async () => {
+      const logger = getLogger();
+      const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+
+      await expect(
+        admitCustodySetup(projects.production, "privy", "byok")
+      ).resolves.toBeUndefined();
+      await expect(
+        admitCustodySetup(projects.production, "privy", "managed")
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        statusCode: 403,
+        message: "Privy Managed custody is not allowed in a production project.",
+        details: { reason: "custody_mode_not_allowed" },
+      });
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        {
+          event: "sdp_api_custody_setup_refused",
+          organization_id: TEST_ORG_ID,
+          project_id: projects.production.id,
+          environment: "production",
+          provider: "privy",
+          mode: "managed",
+          reason: "custody_mode_not_allowed",
+        },
+        "sdp_api_custody_setup_refused"
+      );
+    });
+
+    it("refuses a pair outside the release channel before the Production mode check", async () => {
+      custodyReleaseChannel.outOfChannelMode = "managed";
+
+      await expect(
+        admitCustodySetup(projects.production, "privy", "managed")
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        statusCode: 403,
+        message: custodyProviderNotInReleaseChannel("privy", "managed").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
+      });
+    });
+
+    it("refuses a Production pair that is not stable though the channel offers it, and admits it in Sandbox", async () => {
+      custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
+
+      await expect(admitCustodySetup(projects.production, "privy", "byok")).rejects.toMatchObject(
+        NOT_STABLE_PRODUCTION_REFUSAL
+      );
+      await expect(admitCustodySetup(projects.sandbox, "privy", "byok")).resolves.toBeUndefined();
+    });
+
+    it("refuses an unentitled provider after the Production mode check", async () => {
+      await disablePrivyEntitlement();
+
+      await expect(admitCustodySetup(projects.sandbox, "privy", "managed")).rejects.toMatchObject(
+        NOT_ENTITLED_REFUSAL
+      );
+      await expect(admitCustodySetup(projects.production, "privy", "byok")).rejects.toMatchObject(
+        NOT_ENTITLED_REFUSAL
+      );
+      await expect(
+        admitCustodySetup(projects.production, "privy", "managed")
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        details: { reason: "custody_mode_not_allowed" },
+      });
+    });
+
+    it("refuses Managed custody whose credentials the deployment lacks and admits BYOK without them", async () => {
+      env.PRIVY_APP_ID = undefined;
+      env.PRIVY_APP_SECRET = undefined;
+
+      await expect(admitCustodySetup(projects.sandbox, "privy", "managed")).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        statusCode: 403,
+        message: "Privy is not configured in this environment.",
+        details: { reason: "provider_not_configured" },
+      });
+      await expect(admitCustodySetup(projects.sandbox, "privy", "byok")).resolves.toBeUndefined();
+    });
+
+    it("admits BYOK completion in a Production project without deployment Privy credentials", async () => {
+      env.PRIVY_APP_ID = undefined;
+      env.PRIVY_APP_SECRET = undefined;
+
+      await expect(
+        isPersistedCustodyCompletionEnabled(
+          env,
+          getDb(env),
+          { organizationId: TEST_ORG_ID, projectId: projects.production.id },
+          "privy"
+        )
+      ).resolves.toEqual({ admitted: true });
+    });
+
+    it("returns the gate's refusal for BYOK completion instead of throwing it", async () => {
+      const project = { organizationId: TEST_ORG_ID, projectId: projects.production.id };
+
+      await expect(
+        isPersistedCustodyCompletionEnabled(env, getDb(env), project, "turnkey")
+      ).resolves.toMatchObject({
+        admitted: false,
+        error: {
+          code: "FORBIDDEN",
+          message: custodyProviderNotInReleaseChannel("turnkey", "byok").message,
+          details: { reason: "custody_provider_not_in_release_channel" },
+        },
+      });
+
+      custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
+      await expect(
+        isPersistedCustodyCompletionEnabled(env, getDb(env), project, "privy")
+      ).resolves.toMatchObject({ admitted: false, error: NOT_STABLE_PRODUCTION_REFUSAL });
+
+      custodyReleaseChannel.stageOverride = null;
+      await disablePrivyEntitlement();
+      await expect(
+        isPersistedCustodyCompletionEnabled(env, getDb(env), project, "privy")
+      ).resolves.toMatchObject({ admitted: false, error: NOT_ENTITLED_REFUSAL });
+    });
   });
 });

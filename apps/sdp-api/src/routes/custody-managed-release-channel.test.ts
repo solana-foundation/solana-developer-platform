@@ -112,6 +112,14 @@ describe("Managed custody out of the release channel", () => {
     expect(await auditRows()).toEqual([]);
   });
 
+  it("returns the release-channel 403 for a Config wallet's public key", async () => {
+    const response = await get("/v1/wallets/public-key?walletId=privy_managed_channel_a");
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(channelRefusalBody("privy"));
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("refuses API-key Config wallet provisioning before any Provider call or row", async () => {
     const response = await send(`/v1/projects/${PROJECT_ID}/api-keys`, "POST", {
       name: "Managed out of channel key",

@@ -742,11 +742,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "new-intent-after-gates",
     });
     expect(deniedNewIntent.status).toBe(403);
-    expect(await deniedNewIntent.json()).toMatchObject({
+    expect(await deniedNewIntent.json()).toEqual({
       error: {
         code: "FORBIDDEN",
-        message: "Custody Connection setup is disabled for this provider",
+        message: "Privy requires manual activation for this organization.",
+        details: { reason: "provider_not_entitled" },
       },
+      meta: { requestId: "req_provider_credential_submit" },
     });
     expect(await getDomainCounts()).toEqual({
       credentials: 1,

@@ -1524,6 +1524,44 @@ describe("Custody wallet scope routes", () => {
     );
 
     expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      error: { code: "NOT_FOUND", message: "Wallet not found" },
+      meta: { requestId: expect.any(String) },
+    });
+  });
+
+  it("returns the release-channel 403 for an out-of-channel Connection wallet's public key through either selector", async () => {
+    await seedActiveConnectionWallet(
+      "public_key",
+      "privy_public_key",
+      TEST_SOLANA_ADDRESSES.wallet1
+    );
+    custodyReleaseChannel.outOfChannelMode = "byok";
+    const request = () =>
+      app.request(
+        "/v1/wallets/public-key?walletId=privy_public_key",
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+    const channelRefusal = {
+      error: {
+        code: "FORBIDDEN",
+        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
+      },
+      meta: { requestId: expect.any(String) },
+    };
+
+    const unscoped = await request();
+    expect(unscoped.status).toBe(403);
+    expect(await unscoped.json()).toEqual(channelRefusal);
+
+    await seedCachedKey({
+      walletBindings: [{ walletId: "privy_public_key", permissions: ["wallets:read"] }],
+    });
+    const bound = await request();
+    expect(bound.status).toBe(403);
+    expect(await bound.json()).toEqual(channelRefusal);
   });
 
   it("updates the label when the wallet is inside the API key bindings", async () => {
@@ -1629,6 +1667,10 @@ describe("Custody wallet scope routes", () => {
       );
 
       expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({
+        error: { code: "NOT_FOUND", message: "Custody wallet not found" },
+        meta: { requestId: expect.any(String) },
+      });
       const wallet = await getDb(env)
         .prepare("SELECT status FROM custody_wallets WHERE wallet_id = ?")
         .bind("privy_wallet_b")
