@@ -6,9 +6,8 @@ import { useTranslations } from "@/i18n/provider";
 import { watchActive } from "@/lib/use-scene-active";
 import { cn } from "@/lib/utils";
 import bubble from "../bubble.module.css";
-import { BUBBLE_LAND_DELAY, fitPill, followHand } from "../bubble-motion";
+import { fitPill } from "../bubble-motion";
 import { restartAttribute } from "../restart-animation";
-import { useRiseArrived } from "../rise";
 import { KIND_ICONS, PAYMENT_KINDS, type PaymentKind } from "./kinds";
 import styles from "./payment-bubble.module.css";
 import { usePaymentKind } from "./payment-kind-context";
@@ -37,7 +36,6 @@ export function PaymentBubble() {
   const t = useTranslations();
   const { kind, shows } = usePaymentKind();
   const reducedMotion = useReducedMotion() ?? false;
-  const arrived = useRiseArrived() ?? true;
   const cubeRef = useRef<HTMLDivElement>(null);
   const pillRef = useRef<HTMLDivElement>(null);
   const wordRefs = useRef<(HTMLSpanElement | null)[]>([]);
@@ -69,26 +67,15 @@ export function PaymentBubble() {
     if (shows > 0) restartAttribute(cubeRef.current, "data-beat");
   }, [shows]);
 
-  /* the ambient loops stop off screen and in a hidden tab; the mouse's wobble runs only once the block has landed */
+  /* the ambient loops stop off screen and in a hidden tab */
   useEffect(() => {
     const cube = cubeRef.current;
     if (!cube || reducedMotion) return;
     const stopWatching = watchActive(cube, { rootMargin: "120px" }, (active) => {
       cube.toggleAttribute("data-paused", !active);
     });
-    let landed = false;
-    const landTimer = arrived
-      ? setTimeout(() => {
-          landed = true;
-        }, BUBBLE_LAND_DELAY)
-      : undefined;
-    const stopHand = followHand(cube, { canStart: () => landed });
-    return () => {
-      stopWatching();
-      clearTimeout(landTimer);
-      stopHand();
-    };
-  }, [reducedMotion, arrived]);
+    return stopWatching;
+  }, [reducedMotion]);
 
   return (
     <div

@@ -30,8 +30,7 @@ type PrivacyBubbleProps = {
 /**
  * The privacy picture: a green pill in two rings with one word in it. The pill folds into a switch,
  * the switch turns on (its padlock closes), and the pill opens on the next word. It is a picture,
- * not a control: nothing in it is focusable. Under a mouse the timeline holds and moving the
- * pointer up and down drives a wave through the rings instead.
+ * not a control: nothing in it is focusable.
  */
 export function PrivacyBubble({ label, words }: PrivacyBubbleProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -114,7 +113,7 @@ export function PrivacyBubble({ label, words }: PrivacyBubbleProps) {
       stop();
       window.removeEventListener("resize", refit);
       // back to the first word, unfolded, for a fresh start
-      for (const name of ["data-tg", "data-on", "data-off", "data-beat", "data-hand"]) {
+      for (const name of ["data-tg", "data-on", "data-off", "data-beat"]) {
         root.removeAttribute(name);
       }
       show(0);

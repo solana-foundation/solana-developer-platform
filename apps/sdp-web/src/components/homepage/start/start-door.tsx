@@ -60,7 +60,7 @@ export function StartDoor({ signup, note }: { signup: SignupLink; note?: string 
       </span>
       <span className={styles.knob} data-knob>
         <svg className={styles.arrow} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-          <path d="M4 12 12 4M6 4h6v6" />
+          <path d="M3 8h10M9 4l4 4-4 4" />
         </svg>
       </span>
     </Link>

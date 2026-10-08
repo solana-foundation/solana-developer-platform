@@ -4,8 +4,8 @@
  * its outer ring `.ring`, its inner ring `.inner`, its pill `.pill`. Each section keeps its own
  * layout (sizes in cqw, the pill's width and what is in it) and may set `--ring-pad` and
  * `--inner-pad` on the root. The script toggles data-beat (the pill swells, the wave runs out
- * through the rings and a ripple leaves the outer one), data-hand (the pointer drives the rings
- * through --s0..--rs) and data-paused (off screen or tab hidden: the breathing stops).
+ * through the rings and a ripple leaves the outer one) and data-paused (off screen or tab hidden:
+ * the breathing stops).
  */
 
 /* ── tones ──────────────────────────────────────────────────────────────── */
@@ -129,35 +129,6 @@
 
 .bubble[data-beat] .ring::after {
   animation: ripple 1700ms cubic-bezier(0.2, 0.6, 0.3, 1) 300ms 1 both;
-}
-
-/* by hand: nothing runs by itself; the scales come from how the pointer moves */
-.bubble[data-hand] {
-  cursor: ns-resize;
-}
-
-.bubble[data-hand] .pill,
-.bubble[data-hand] .ring,
-.bubble[data-hand] .inner,
-.bubble[data-hand] .ring::after {
-  animation: none;
-}
-
-.bubble[data-hand] .pill {
-  scale: var(--s0, 1);
-}
-
-.bubble[data-hand] .inner {
-  scale: var(--s1, 1);
-}
-
-.bubble[data-hand] .ring {
-  scale: var(--s2, 1);
-}
-
-.bubble[data-hand] .ring::after {
-  opacity: var(--rp, 0);
-  scale: var(--rs, 1);
 }
 
 .bubble[data-paused] .pill,

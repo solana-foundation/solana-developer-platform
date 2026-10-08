@@ -279,11 +279,11 @@
   }
 
   42% {
-    transform: translate(120%, -120%);
+    transform: translate(120%, 0);
   }
 
   42.01% {
-    transform: translate(-120%, 120%);
+    transform: translate(-120%, 0);
   }
 
   100% {

@@ -26,9 +26,8 @@ type PillarBubbleProps = {
 
 /**
  * The pillar's picture: a violet pill in two rings that repeats one gesture (issuance mints a
- * coin, payments sends a dot across, markets swaps two legs). Under a mouse the timeline holds
- * and moving the pointer up and down drives a wave through the rings instead. Decorative motion
- * only: the label carries the meaning.
+ * coin, payments sends a dot across, markets swaps two legs). Decorative motion only: the label
+ * carries the meaning.
  */
 export function PillarBubble({ kind, label, order }: PillarBubbleProps) {
   const rootRef = useRef<HTMLDivElement>(null);
