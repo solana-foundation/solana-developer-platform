@@ -1,4 +1,5 @@
 import type { ComplianceProviderId, RampProviderId } from "@sdp/types";
+// biome-ignore lint/style/noRestrictedImports: recognises provider ids for routing; visibility is gated in integration-feature-gates.ts
 import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
 import {
   CUSTODY_PROVIDER_CATALOG,

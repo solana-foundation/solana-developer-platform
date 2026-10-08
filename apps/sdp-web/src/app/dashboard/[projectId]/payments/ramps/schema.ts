@@ -1,4 +1,5 @@
 import { compareDecimalAmounts } from "@sdp/solana/amount";
+// biome-ignore lint/style/noRestrictedImports: validates a submitted provider id; the picker's options come from getEnabledRampProviders()
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import {
   offeredCountryCodes,
