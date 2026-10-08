@@ -9,6 +9,14 @@ import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { setupTestAuth } from "@/test/helpers/auth";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import {
+  activateTestCustodyConnection,
+  insertTestConnectionWallet,
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  selectTestCustodyConnection,
+  type TestStoredProviderCredential,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -22,7 +30,6 @@ const PROJECT = "prj_connection_deactivation";
 const CONNECTION = "cconn_connection_deactivation";
 const CREDENTIAL = "pcred_connection_deactivation";
 let clerkToken: string;
-const ORIGINAL_PRIVY_BYOK_ENABLED = env.PRIVY_BYOK_ENABLED;
 
 const app = new Hono<{ Bindings: Env }>();
 app.use("*", databaseIdentityBoundary());
@@ -54,30 +61,39 @@ function request(
 
 async function seedConnection(status: "pending" | "checking" | "failed") {
   const db = getDb(env);
-  await db.execute(
-    `INSERT INTO provider_credentials
-       (id, organization_id, project_id, provider, label, scope, source,
-        storage_backend, encrypted_secret_payload, status)
-     VALUES (?, ?, ?, 'privy', 'Deactivation test', 'project', 'stored',
-             'encrypted_db', 'retained-ciphertext', ?)`,
-    [CREDENTIAL, ORG, PROJECT, status === "failed" ? "failed_validation" : "pending"]
-  );
-  await db.execute(
-    `INSERT INTO custody_connections
-       (id, organization_id, project_id, provider, scope, provider_credential_id,
-        provider_credential_scope_key, status, last_check_status, last_check_at)
-     VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, ?, ?)`,
-    [
-      CONNECTION,
-      ORG,
-      PROJECT,
-      CREDENTIAL,
-      PROJECT,
-      status,
-      status === "checking" ? "running" : status === "failed" ? "failed" : null,
-      status === "pending" ? null : "2026-01-01T00:00:00.000Z",
-    ]
-  );
+  const credential: TestStoredProviderCredential = {
+    id: CREDENTIAL,
+    organizationId: ORG,
+    projectId: PROJECT,
+    provider: "privy",
+    label: "Deactivation test",
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "retained-ciphertext" },
+    displayMetadata: {},
+    status: status === "failed" ? "failed_validation" : "pending",
+    credentialVersion: 1,
+    rotatedFromProviderCredentialId: null,
+    lastValidatedAt: null,
+    deactivatedAt: null,
+    createdBy: null,
+  };
+  await insertTestStoredProviderCredential(db, credential);
+  await insertTestCustodyConnection(db, {
+    id: CONNECTION,
+    organizationId: ORG,
+    projectId: PROJECT,
+    provider: "privy",
+    credential,
+    status,
+    setupMetadata: {},
+    providerAccountFingerprint: null,
+    lastCheckStatus: status === "checking" ? "running" : status === "failed" ? "failed" : null,
+    lastCheckAt: status === "pending" ? null : "2026-01-01T00:00:00.000Z",
+    lastCheckFailureCode: null,
+    activatedAt: null,
+    deactivatedAt: null,
+    createdBy: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
 }
 
 async function lifecycleAudits() {
@@ -92,25 +108,24 @@ async function seedActiveConnection(walletStatus: "active" | "inactive") {
   await seedConnection("pending");
   const db = getDb(env);
   await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [CREDENTIAL]);
-  await db.execute(
-    `INSERT INTO custody_wallets (id, custody_connection_id, wallet_id, public_key, status)
-     VALUES ('cwlt_connection_deactivation', ?, 'provider-wallet-deactivation', 'address-deactivation', ?)`,
-    [CONNECTION, walletStatus]
-  );
-  await db.execute(
-    `UPDATE custody_connections
-     SET status = 'active', last_check_status = 'success', last_check_at = sdp_iso_now(),
-         activated_at = sdp_iso_now(), provider_account_fingerprint = 'retained-fingerprint',
-         default_custody_wallet_id = 'cwlt_connection_deactivation'
-     WHERE id = ?`,
-    [CONNECTION]
-  );
-  await db.execute(
-    `INSERT INTO custody_scope_defaults
-       (id, organization_id, project_id, default_custody_connection_id)
-     VALUES ('csd_connection_deactivation', ?, ?, ?)`,
-    [ORG, PROJECT, CONNECTION]
-  );
+  await insertTestConnectionWallet(db, {
+    id: "cwlt_connection_deactivation",
+    connectionId: CONNECTION,
+    walletId: "provider-wallet-deactivation",
+    publicKey: "address-deactivation",
+    status: walletStatus,
+  });
+  await activateTestCustodyConnection(db, {
+    connectionId: CONNECTION,
+    custodyWalletId: "cwlt_connection_deactivation",
+    providerAccountFingerprint: "retained-fingerprint",
+  });
+  await selectTestCustodyConnection(db, {
+    id: "csd_connection_deactivation",
+    organizationId: ORG,
+    projectId: PROJECT,
+    connectionId: CONNECTION,
+  });
 }
 
 async function persistedState() {
@@ -163,7 +178,6 @@ describe("custody Connection deactivation", () => {
   });
 
   afterEach(async () => {
-    env.PRIVY_BYOK_ENABLED = ORIGINAL_PRIVY_BYOK_ENABLED;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     await clearKVStores(env);
@@ -358,9 +372,8 @@ describe("custody Connection deactivation", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("preserves inactive wallets, the current Credential, and the selected default while runtime is off", async () => {
+  it("preserves inactive wallets, the current Credential, and the selected default while the Provider is not entitled", async () => {
     await seedActiveConnection("inactive");
-    env.PRIVY_BYOK_ENABLED = "false";
     await getDb(env).execute("UPDATE organizations SET settings = ?::jsonb WHERE id = ?", [
       JSON.stringify({ providerOverrides: { custody: { privy: false } } }),
       ORG,
@@ -484,11 +497,13 @@ describe("custody Connection deactivation", () => {
       await tx.queryOne("SELECT id FROM projects WHERE id = ? FOR UPDATE", [PROJECT]);
       signalLocked();
       await released;
-      await tx.execute(
-        `INSERT INTO custody_wallets (id, custody_connection_id, wallet_id, public_key, status)
-         VALUES ('cwlt_racing_creation', ?, 'racing-provider-wallet', 'racing-address', 'active')`,
-        [CONNECTION]
-      );
+      await insertTestConnectionWallet(tx, {
+        id: "cwlt_racing_creation",
+        connectionId: CONNECTION,
+        walletId: "racing-provider-wallet",
+        publicKey: "racing-address",
+        status: "active",
+      });
     });
     await locked;
     const response = request(`/connections/${CONNECTION}/deactivate`, {

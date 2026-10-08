@@ -2532,17 +2532,11 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
         });
         const path = `/v1/wallets/approval-requests/${heldBody.error.details.approvalRequestId}/approve`;
         const headers = { Authorization: `Bearer ${approverKey}` };
-        const flag = env.PRIVY_BYOK_ENABLED;
-        env.PRIVY_BYOK_ENABLED = "false";
-        try {
-          const response = await app.request(path, { method: "POST", headers }, env);
-          expect(response.status).toBe(200);
-          expect(await response.json()).toMatchObject({
-            data: { approvalRequest: { status: "approved", operation: { status: "completed" } } },
-          });
-        } finally {
-          env.PRIVY_BYOK_ENABLED = flag;
-        }
+        const response = await app.request(path, { method: "POST", headers }, env);
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: { approvalRequest: { status: "approved", operation: { status: "completed" } } },
+        });
       }
 
       expect(createWithdrawal).toHaveBeenCalledTimes(1);

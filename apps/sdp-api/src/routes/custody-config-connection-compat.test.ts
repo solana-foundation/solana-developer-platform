@@ -1,12 +1,34 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { CachedApiKey, CustodyMode } from "@sdp/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import {
+  insertTestCustodyConfigRow,
+  insertTestCustodyScopeDefault,
+  insertTestCustodyWalletRow,
+  seedTestPrivyConnection,
+} from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
+  outOfChannelMode: null,
+}));
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
+  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
+    releaseChannel,
+    provider,
+    mode
+  ) =>
+    mode !== custodyReleaseChannel.outOfChannelMode &&
+    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
+  return { ...original, isCustodyProviderInReleaseChannel };
+});
 
 const ORGANIZATION_ID = "org_custody_config_connection_compat";
 const PROJECT_ID = "prj_custody_config_connection_compat";
@@ -17,6 +39,8 @@ const CREDENTIAL_ID = "pcred_config_connection_compat";
 const CONNECTION_ID = "cconn_config_connection_compat";
 const CONNECTION_WALLET_RECORD_ID = "cwlt_config_connection_compat";
 const CONNECTION_WALLET_ID = "privy_config_connection_wallet";
+const CONFIG_PUBLIC_KEY = "11111111111111111111111111111111";
+const CONNECTION_PUBLIC_KEY = "Vote111111111111111111111111111111111111111";
 const API_KEY = {
   id: "key_custody_config_connection_compat",
   raw: "sk_test_custody_config_connection_compat",
@@ -39,7 +63,6 @@ const CACHED_API_KEY: CachedApiKey = {
 
 describe("custody Config compatibility with an effective Connection", () => {
   const original = {
-    privyByokEnabled: env.PRIVY_BYOK_ENABLED,
     privyAppId: env.PRIVY_APP_ID,
     privyAppSecret: env.PRIVY_APP_SECRET,
     paraApiKey: env.PARA_API_KEY,
@@ -48,14 +71,13 @@ describe("custody Config compatibility with an effective Connection", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await seedScope();
-    env.PRIVY_BYOK_ENABLED = "true";
+    custodyReleaseChannel.outOfChannelMode = null;
     env.PRIVY_APP_ID = undefined;
     env.PRIVY_APP_SECRET = undefined;
     env.PARA_API_KEY = "para_config_connection_compat";
   });
 
   afterEach(async () => {
-    env.PRIVY_BYOK_ENABLED = original.privyByokEnabled;
     env.PRIVY_APP_ID = original.privyAppId;
     env.PRIVY_APP_SECRET = original.privyAppSecret;
     env.PARA_API_KEY = original.paraApiKey;
@@ -98,46 +120,32 @@ describe("custody Config compatibility with an effective Connection", () => {
       isActive: false,
       isDefault: true,
     });
-
-    env.PRIVY_BYOK_ENABLED = "false";
-
-    const rolledBackConfig = await request("/v1/wallets/config");
-    expect(rolledBackConfig.status).toBe(200);
-    expect(await rolledBackConfig.json()).toMatchObject({
-      data: { config: { id: CONFIG_ID, provider: "para" } },
-    });
-
-    const rolledBackConfigs = await request("/v1/wallets/configs");
-    expect(await rolledBackConfigs.json()).toMatchObject({
-      data: {
-        configs: [{ id: CONFIG_ID, provider: "para", isDefault: true }],
-        defaultConfigId: CONFIG_ID,
-      },
-    });
-
-    const rolledBackOptions = await request("/v1/wallets/switch-options");
-    expect(await readProviderOption(rolledBackOptions, "para")).toMatchObject({
-      provider: "para",
-      hasReusableWallet: true,
-      needsWalletLabel: false,
-      isActive: true,
-      isDefault: true,
-    });
   });
 
   it("keeps implicit public-key resolution aligned with the effective target", async () => {
     const connectionPublicKey = await request("/v1/wallets/public-key");
     expect(connectionPublicKey.status).toBe(200);
-    expect(await connectionPublicKey.json()).toMatchObject({
-      data: { publicKey: "Vote111111111111111111111111111111111111111" },
+    expect(await connectionPublicKey.json()).toEqual({
+      data: { publicKey: CONNECTION_PUBLIC_KEY },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
+  });
 
-    env.PRIVY_BYOK_ENABLED = "false";
+  it("keeps a selected out-of-channel Connection effective instead of falling back to the Config", async () => {
+    custodyReleaseChannel.outOfChannelMode = "byok";
 
-    const configPublicKey = await request("/v1/wallets/public-key");
-    expect(configPublicKey.status).toBe(200);
-    expect(await configPublicKey.json()).toMatchObject({
-      data: { publicKey: "11111111111111111111111111111111" },
+    expect((await request("/v1/wallets/config")).status).toBe(404);
+    expect(await (await request("/v1/wallets/configs")).json()).toMatchObject({
+      data: {
+        configs: [{ id: CONFIG_ID, provider: "para", isDefault: false }],
+        defaultConfigId: null,
+      },
+    });
+    const publicKey = await request("/v1/wallets/public-key");
+    expect(publicKey.status).toBe(200);
+    expect(await publicKey.json()).toEqual({
+      data: { publicKey: CONNECTION_PUBLIC_KEY },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
   });
 });
@@ -185,80 +193,67 @@ async function seedScope(): Promise<void> {
     members: [],
     ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
   });
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
-            role, permissions, status)
-         VALUES (?, ?, ?, ?, 'Custody Config Connection Compat', ?, ?, 'api_admin', ?, 'active')`
-      )
-      .bind(
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      `INSERT INTO api_keys
+         (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+          role, permissions, status)
+       VALUES (?, ?, ?, ?, 'Custody Config Connection Compat', ?, ?, 'api_admin', ?, 'active')`,
+      [
         API_KEY.id,
         ORGANIZATION_ID,
         PROJECT_ID,
         USER_ID,
         API_KEY.prefix,
         keyHash,
-        JSON.stringify(["*"])
-      ),
-    db
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted,
-            encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, 'para', 'test-config', 'sdp-custody-encryption-v1', ?, 'active')`
-      )
-      .bind(CONFIG_ID, ORGANIZATION_ID, PROJECT_ID, CONFIG_WALLET_ID),
-    db
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES ('cwlt_config_connection_compat_config', ?, ?,
-                 '11111111111111111111111111111111', 'Config wallet', 'root', 'active')`
-      )
-      .bind(CONFIG_ID, CONFIG_WALLET_ID),
-    db
-      .prepare(
-        `INSERT INTO provider_credentials
-           (id, organization_id, project_id, provider, label, scope, source,
-            storage_backend, encrypted_secret_payload, status, created_by)
-         VALUES (?, ?, ?, 'privy', 'Privy Connection', 'project', 'stored',
-                 'encrypted_db', 'ciphertext', 'active', ?)`
-      )
-      .bind(CREDENTIAL_ID, ORGANIZATION_ID, PROJECT_ID, USER_ID),
-    db
-      .prepare(
-        `INSERT INTO custody_connections
-           (id, organization_id, project_id, provider, scope, provider_credential_id,
-            provider_credential_scope_key, status, created_by)
-         VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
-      )
-      .bind(CONNECTION_ID, ORGANIZATION_ID, PROJECT_ID, CREDENTIAL_ID, PROJECT_ID, USER_ID),
-    db
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_connection_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, 'Vote111111111111111111111111111111111111111',
-                 'Connection wallet', 'root', 'active')`
-      )
-      .bind(CONNECTION_WALLET_RECORD_ID, CONNECTION_ID, CONNECTION_WALLET_ID),
-    db
-      .prepare(
-        `UPDATE custody_connections
-         SET default_custody_wallet_id = ?, status = 'active', last_check_status = 'success',
-             last_check_at = sdp_iso_now(), provider_account_fingerprint = 'sha256:compat',
-             activated_at = sdp_iso_now()
-         WHERE id = ?`
-      )
-      .bind(CONNECTION_WALLET_RECORD_ID, CONNECTION_ID),
-    db
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id,
-            default_custody_config_id, default_custody_connection_id)
-         VALUES ('csd_config_connection_compat', ?, ?, ?, ?)`
-      )
-      .bind(ORGANIZATION_ID, PROJECT_ID, CONFIG_ID, CONNECTION_ID),
-  ]);
+        JSON.stringify(["*"]),
+      ]
+    );
+    await insertTestCustodyConfigRow(tx, {
+      id: CONFIG_ID,
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      provider: "para",
+      configEncrypted: "test-config",
+      defaultWalletId: CONFIG_WALLET_ID,
+      status: "active",
+    });
+    await insertTestCustodyWalletRow(tx, {
+      id: "cwlt_config_connection_compat_config",
+      owner: { kind: "config", custodyConfigId: CONFIG_ID },
+      walletId: CONFIG_WALLET_ID,
+      publicKey: CONFIG_PUBLIC_KEY,
+      label: "Config wallet",
+      purpose: "root",
+      status: "active",
+    });
+    await seedTestPrivyConnection(tx, {
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      connectionId: CONNECTION_ID,
+      credentialId: CREDENTIAL_ID,
+      createdBy: USER_ID,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+      providerAccountFingerprint: "sha256:compat",
+      lastCheckStatus: "success",
+      wallets: [
+        {
+          id: CONNECTION_WALLET_RECORD_ID,
+          walletId: CONNECTION_WALLET_ID,
+          publicKey: CONNECTION_PUBLIC_KEY,
+          label: "Connection wallet",
+          purpose: "root",
+          status: "active",
+        },
+      ],
+      defaultCustodyWalletId: CONNECTION_WALLET_RECORD_ID,
+    });
+    await insertTestCustodyScopeDefault(tx, {
+      id: "csd_config_connection_compat",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      defaultCustodyConfigId: CONFIG_ID,
+      defaultCustodyConnectionId: CONNECTION_ID,
+    });
+  });
 }

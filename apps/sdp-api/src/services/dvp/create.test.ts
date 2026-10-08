@@ -21,13 +21,14 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
-import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { testClerkContext } from "@/test/helpers/clerk-context";
+import { writeTestPrivyCredentialSecret } from "@/test/helpers/custody";
+import { insertTestStoredProviderCredential } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -68,6 +69,8 @@ const CUSTODY_WALLET_ID = "cwlt_dvp_create_test";
 const SETTLEMENT_AUTHORITY = "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY";
 
 const COUNTERPARTY_ADDRESS = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
+
+const CONNECTION_APP_SECRET = "dvp-connection-secret";
 
 const EXPIRY_TIMESTAMP = BigInt(Math.floor(Date.now() / 1000) + 3600);
 
@@ -133,7 +136,7 @@ describe("createDvpTrade", () => {
   let custodyWalletAddress: string;
   let sponsor: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let originalSettlementAuthority: string | undefined;
-  let originalByok: string | undefined;
+  let originalEncryptionKey: string | undefined;
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.spyOn(sponsorshipService, "createProjectSponsorshipFeePayment").mockImplementation(
@@ -148,8 +151,7 @@ describe("createDvpTrade", () => {
     });
     vi.spyOn(solanaRpc, "sendTransaction").mockImplementation(sendTransaction);
     await seedTestDatabase(env);
-    originalByok = env.PRIVY_BYOK_ENABLED;
-    env.PRIVY_BYOK_ENABLED = "false";
+    originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
     validateDvpMints.mockResolvedValue([]);
     inspectDvpMint.mockResolvedValue({
       decimals: 6,
@@ -231,16 +233,31 @@ describe("createDvpTrade", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     env.DVP_SETTLEMENT_AUTHORITY = originalSettlementAuthority;
-    env.PRIVY_BYOK_ENABLED = originalByok;
+    env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   });
   async function seedConnectionAuthority() {
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 23).toString("base64");
     const db = getDb(env);
-    await db.execute(
-      `INSERT INTO provider_credentials
-       (id, organization_id, project_id, provider, label, scope, source, storage_backend, status, created_by)
-       VALUES ('pcred_dvp', ?, ?, 'privy', 'DvP authority', 'project', 'runtime', 'runtime_env', 'active', ?)`,
-      [TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id]
-    );
+    await insertTestStoredProviderCredential(db, {
+      id: "pcred_dvp",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      provider: "privy",
+      label: "DvP authority",
+      stored: await writeTestPrivyCredentialSecret(env, {
+        organizationId: TEST_ORG.id,
+        credentialId: "pcred_dvp",
+        appId: "dvp-connection-app",
+        appSecret: CONNECTION_APP_SECRET,
+      }),
+      displayMetadata: {},
+      status: "active",
+      credentialVersion: 1,
+      rotatedFromProviderCredentialId: null,
+      lastValidatedAt: null,
+      deactivatedAt: null,
+      createdBy: TEST_USER.id,
+    });
     await db.execute(
       `INSERT INTO custody_connections
        (id, organization_id, project_id, provider, scope, provider_credential_id,
@@ -255,15 +272,10 @@ describe("createDvpTrade", () => {
       activated_at = sdp_iso_now() WHERE id = 'cconn_dvp'`);
   }
   it("keeps the BYOK wallet creation audit when the later trade creation fails", async () => {
-    const previousAppId = env.PRIVY_APP_ID;
-    const previousAppSecret = env.PRIVY_APP_SECRET;
     const provider = vi.spyOn(custodyProvisioning, "provisionPrivyWallet").mockResolvedValueOnce({
       walletId: "new_dvp_authority",
       address: SETTLEMENT_AUTHORITY,
     });
-    env.PRIVY_BYOK_ENABLED = "true";
-    env.PRIVY_APP_ID = "dvp-audit-app";
-    env.PRIVY_APP_SECRET = "dvp-audit-secret";
     auditContext.set("clerk", await testClerkContext(env));
     auditContext.set("requestId", "dvp-create-audit-request");
     await clearKVStores(env);
@@ -271,10 +283,6 @@ describe("createDvpTrade", () => {
       await seedConnectionAuthority();
       const db = getDb(env);
       await db.execute("UPDATE organizations SET tier = 'enterprise' WHERE id = ?", [TEST_ORG.id]);
-      await db.execute(
-        "UPDATE custody_connections SET provider_account_fingerprint = ? WHERE id = 'cconn_dvp'",
-        [await getPrivyProviderAccountFingerprint(env.PRIVY_APP_ID)]
-      );
       await db.execute("DELETE FROM dvp_settlement_wallets WHERE project_id = ?", [
         TEST_PROJECT_ID,
       ]);
@@ -315,33 +323,16 @@ describe("createDvpTrade", () => {
       expect(
         await db.queryOne("SELECT id FROM custody_wallets WHERE id = ?", [audit.resource_id])
       ).toEqual({ id: audit.resource_id });
-      expect(JSON.stringify(audit)).not.toContain("dvp-audit-secret");
+      expect(JSON.stringify(audit)).not.toContain(CONNECTION_APP_SECRET);
     } finally {
-      env.PRIVY_APP_ID = previousAppId;
-      env.PRIVY_APP_SECRET = previousAppSecret;
       provider.mockRestore();
       await clearKVStores(env);
     }
-  });
-  it("refuses a paused authority before creating a trade, replacement or sponsor request", async () => {
-    await seedConnectionAuthority();
-    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toMatchObject({
-      statusCode: 403,
-      details: { reason: "runtime_execution_paused" },
-    });
-    expect(await rowsInDb()).toEqual([]);
-    expect(createProjectSponsorshipFeePayment).not.toHaveBeenCalled();
-    expect(sendTransaction).not.toHaveBeenCalled();
-    expect(
-      await getDb(env).queryMany("SELECT custody_wallet_id FROM dvp_settlement_wallets")
-    ).toEqual([{ custody_wallet_id: "cwlt_settlement" }]);
-    expect(await getDb(env).queryMany("SELECT id FROM custody_wallets")).toHaveLength(2);
   });
   it.each(["connection", "credential", "entitlement"] as const)(
     "refuses an authority with unavailable %s before recording or sponsoring a trade",
     async (unavailable) => {
       await seedConnectionAuthority();
-      env.PRIVY_BYOK_ENABLED = "true";
       const db = getDb(env);
       if (unavailable === "connection") {
         await db.execute(`UPDATE custody_connections SET status = 'deactivated',
@@ -369,7 +360,6 @@ describe("createDvpTrade", () => {
   );
   it("creates with an admitted nondefault Connection authority", async () => {
     await seedConnectionAuthority();
-    env.PRIVY_BYOK_ENABLED = "true";
     await getDb(env).execute(
       `INSERT INTO custody_scope_defaults
        (id, organization_id, project_id, default_custody_config_id)
@@ -383,37 +373,6 @@ describe("createDvpTrade", () => {
       env,
       expect.objectContaining({ actor: { type: "wallet", id: "cwlt_settlement" } })
     );
-  });
-  it("replays the recorded create after BYOK is paused without sponsoring again", async () => {
-    await seedConnectionAuthority();
-    env.PRIVY_BYOK_ENABLED = "true";
-    const input = { ...tradeInput(), idempotencyKey: "byok-replay" };
-    const original = await createDvpTrade(env, auditContext, input);
-    env.PRIVY_BYOK_ENABLED = "false";
-    expect((await createDvpTrade(env, auditContext, input)).id).toBe(original.id);
-    await expect(
-      createDvpTrade(env, auditContext, { ...input, amountA: 2000n })
-    ).rejects.toMatchObject({
-      statusCode: 409,
-    });
-    expect(await rowsInDb()).toHaveLength(1);
-    expect(sendTransaction).toHaveBeenCalledOnce();
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledOnce();
-  });
-  it("admits a new attempt after a failed create instead of replaying through a paused authority", async () => {
-    await seedConnectionAuthority();
-    env.PRIVY_BYOK_ENABLED = "true";
-    const input = { ...tradeInput(), idempotencyKey: "byok-failed-retry" };
-    createProjectSponsorshipFeePayment.mockRejectedValueOnce(new Error("Sponsor unavailable"));
-    await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow("Sponsor unavailable");
-    env.PRIVY_BYOK_ENABLED = "false";
-    await expect(createDvpTrade(env, auditContext, input)).rejects.toMatchObject({
-      statusCode: 403,
-      details: { reason: "runtime_execution_paused" },
-    });
-    expect(await rowsInDb()).toMatchObject([{ status: "create_failed" }]);
-    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledOnce();
-    expect(sendTransaction).not.toHaveBeenCalled();
   });
   it("has the trade durably recorded at `creating` before the bytes go out", async () => {
     let rowsAtSendTime: Awaited<ReturnType<typeof rowsInDb>> = [];

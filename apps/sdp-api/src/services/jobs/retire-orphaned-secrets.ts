@@ -39,7 +39,7 @@ function isMissingVersion(error: unknown): boolean {
 }
 
 function isKnownBackend(value: string): value is CredentialSecretStorageBackend {
-  return value === "gcp_secret_manager" || value === "encrypted_db" || value === "runtime_env";
+  return value === "gcp_secret_manager" || value === "encrypted_db";
 }
 
 // The store a row's version actually lives in — resolved from the backend recorded ON THE

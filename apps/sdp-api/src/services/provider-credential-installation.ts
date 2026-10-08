@@ -25,7 +25,6 @@ export type InstallationDecision<Mode extends string = never> =
 export interface InstallationFacts {
   connectionStatus: CustodyConnectionStatus;
   credentialStatus: ProviderCredentialStatus;
-  credentialSource: "stored" | "runtime";
   isExpectedProjectCredential: boolean;
   hasDefaultWallet: boolean;
   hasOwnedWallet: boolean;
@@ -55,7 +54,6 @@ export function installationFactsFromConnection(
   return {
     connectionStatus: connection.status,
     credentialStatus: connection.credential_status,
-    credentialSource: connection.credential_source,
     isExpectedProjectCredential:
       connection.credential_scope === "project" &&
       connection.credential_project_id === connection.project_id &&
@@ -103,12 +101,7 @@ function decideComplete(
     return { kind: "replay" };
   }
   if (facts.connectionStatus === "failed" && facts.lastCheckStatus === "failed") {
-    if (!isRetryableRuntimeFailure(facts) || !facts.fullCompletionEnabled) {
-      return { kind: "replay" };
-    }
-    return facts.hasSiblingUnfinished
-      ? { kind: "conflict", reason: "unfinished_installation_exists" }
-      : { kind: "execute", mode: "full" };
+    return { kind: "replay" };
   }
   if (facts.connectionStatus !== "pending" && facts.connectionStatus !== "checking") {
     return { kind: "conflict" };
@@ -145,9 +138,6 @@ function decideCancel(facts: InstallationFacts, leaseCurrent: boolean): Installa
 }
 
 function decideReplace(facts: InstallationFacts): InstallationDecision {
-  if (facts.credentialSource !== "stored") {
-    return { kind: "conflict" };
-  }
   if (!facts.fullCompletionEnabled) {
     return { kind: "disabled" };
   }
@@ -162,19 +152,6 @@ function decideReplace(facts: InstallationFacts): InstallationDecision {
     !facts.activatedAt
     ? { kind: "execute" }
     : { kind: "conflict" };
-}
-
-function isRetryableRuntimeFailure(facts: InstallationFacts): boolean {
-  return (
-    facts.credentialSource === "runtime" &&
-    facts.credentialStatus === "failed_validation" &&
-    (facts.lastCheckFailureCode === "invalid_credentials" ||
-      facts.lastCheckFailureCode === "provider_account_already_connected") &&
-    facts.providerAccountFingerprint === null &&
-    !facts.hasOwnedWallet &&
-    !facts.hasDefaultWallet &&
-    facts.activatedAt === null
-  );
 }
 
 function isCompletionLeaseCurrent(facts: InstallationFacts): boolean {

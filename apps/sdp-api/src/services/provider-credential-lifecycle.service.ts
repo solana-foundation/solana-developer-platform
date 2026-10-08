@@ -29,6 +29,7 @@ import {
   getPrivyProviderAccountFingerprint,
   type PrivyCredentialAuthentication,
 } from "@/services/custody/privy-credential";
+import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import {
   assertCredentialCreationSettled,
   recoverCredentialCreation,
@@ -139,6 +140,7 @@ export async function rotateProviderCredential(
   fields: { appId: string; appSecret: string },
   idempotencyKey: string
 ): Promise<ProviderCredentialRotationResult> {
+  assertCustodyProviderAvailable(c.env, "privy", "byok");
   const context = createContext(c);
   const target = await loadAuthorizedCredential(context, currentCredentialId);
   const fingerprint = await rotationFingerprint(context, currentCredentialId, fields);
@@ -430,6 +432,7 @@ export async function completeRotationCandidate(
   c: Context<{ Bindings: Env }>,
   candidateId: string
 ): Promise<ProviderCredentialRotationResult> {
+  assertCustodyProviderAvailable(c.env, "privy", "byok");
   const context = createContext(c);
   const loaded = await loadAuthorizedCandidate(context, candidateId);
   assertCredentialCreationSettled(loaded.candidate);
@@ -560,6 +563,7 @@ export async function rollbackProviderCredential(
   c: Context<{ Bindings: Env }>,
   currentCredentialId: string
 ): Promise<{ providerCredential: SafeProviderCredential }> {
+  assertCustodyProviderAvailable(c.env, "privy", "byok");
   const context = createContext(c);
   const current = await loadAuthorizedCurrent(context, currentCredentialId, ROLLBACK_UNAVAILABLE);
   if (
@@ -1481,9 +1485,7 @@ function createStoredSecretStore(
   credentialId: string
 ): CredentialSecretStore {
   try {
-    const store = createCredentialSecretStore(c.env);
-    if (store.storageBackend === "runtime_env") throw internalError();
-    return store;
+    return createCredentialSecretStore(c.env);
   } catch (error) {
     logLifecycleFailure(c, "secret_store_create", credentialId, error);
     if (error instanceof AppError) throw error;
@@ -1496,7 +1498,6 @@ function createPersistedSecretStore(
   backend: LifecycleCredentialRow["storage_backend"],
   credentialId: string
 ): CredentialSecretStore {
-  if (backend === "runtime_env") throw conflict(ROTATION_UNAVAILABLE);
   try {
     return createCredentialSecretStore(c.env, backend);
   } catch (error) {

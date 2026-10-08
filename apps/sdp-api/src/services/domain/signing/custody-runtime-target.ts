@@ -3,6 +3,7 @@ import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/
 import type {
   CustodyConnectionCheckStatus,
   CustodyConnectionLifecycle,
+  CustodyMode,
   CustodyWalletPurpose,
   CustodyWalletStatus,
   OrganizationProviderAvailabilityResponse,
@@ -16,12 +17,11 @@ import {
   AppError,
   badRequest,
   conflict,
-  forbidden,
   internalError,
   notFound,
   providerUnavailable,
 } from "@/lib/errors";
-import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
+import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters";
 import { AuditService } from "@/services/audit.service";
@@ -30,15 +30,13 @@ import {
   createCredentialSecretStore,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
-import {
-  getPrivyProviderAccountFingerprint,
-  PRIVY_RUNTIME_ENV_FIELDS,
-} from "@/services/custody/privy-credential";
 import { provisionPrivyWallet } from "@/services/custody/provisioning";
 import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provider-lifecycle.service";
 import { createPrivyAdapterFromCredential } from "@/services/domain/signing/provider-adapter-factory";
 import {
+  assertCustodyProviderAvailable,
   assertCustodyProviderEntitled,
+  custodyProviderNotInReleaseChannel,
   getProviderAvailability,
   isCustodyProviderEntitled,
 } from "@/services/provider-availability.service";
@@ -215,7 +213,6 @@ interface ConnectionCredentialRow {
   provider_account_fingerprint: string | null;
   request_delay_ms: number | null;
   credential_version: number;
-  source: "stored" | "runtime";
   storage_backend: CredentialSecretStorageBackend;
   secret_ref: string | null;
   secret_version_ref: string | null;
@@ -275,8 +272,18 @@ export interface CustodyConnectionSelectionResult {
   selection: CustodyScopeSelection;
 }
 
+/**
+ * Whether a custody connection can sign right now: its (provider, byok) pair is in
+ * the release channel, the connection and credential are active, and it holds an
+ * active default wallet.
+ *
+ * @param env - Process environment naming the release channel.
+ * @param provider - The connection's custody provider.
+ * @param row - The connection's lifecycle and default-wallet facts.
+ * @returns True when the connection's default wallet can execute.
+ */
 export function isCustodyConnectionRuntimeAvailable(
-  env: Pick<Env, "PRIVY_BYOK_ENABLED">,
+  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
   provider: CustodyProvider,
   row: CustodyConnectionRuntimeAvailabilityFacts
 ): boolean {
@@ -290,12 +297,12 @@ export function isCustodyConnectionRuntimeAvailable(
 }
 
 function isCustodyConnectionOwnerRuntimeAvailable(
-  env: Pick<Env, "PRIVY_BYOK_ENABLED">,
+  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
   provider: CustodyProvider,
   row: CustodyConnectionRuntimeAvailabilityFacts
 ): boolean {
   return (
-    isCustodyConnectionRuntimeEnabled(env, provider) &&
+    isCustodyProviderAvailable(env, provider, "byok") &&
     row.connection_status === "active" &&
     row.last_check_status === "success" &&
     row.credential_status === "active" &&
@@ -303,7 +310,6 @@ function isCustodyConnectionOwnerRuntimeAvailable(
   );
 }
 
-const RUNTIME_EXECUTION_PAUSED_REASON = "runtime_execution_paused";
 const RUNTIME_EXECUTION_UNAVAILABLE_REASON = "runtime_execution_unavailable";
 
 export class CustodyRuntimeTargets {
@@ -567,9 +573,7 @@ export class CustodyRuntimeTargets {
       throw badRequest("Provider does not match Custody Connection");
     }
     assertCustodyProviderCanCreateWallet(target.provider);
-    if (!isCustodyConnectionRuntimeEnabled(this.env, target.provider)) {
-      throw forbidden("Custody Connection runtime is disabled");
-    }
+    this.assertTargetInReleaseChannel(target);
     if (!target.isRuntimeAvailable) {
       throw conflict("Custody Connection is unavailable");
     }
@@ -672,15 +676,11 @@ export class CustodyRuntimeTargets {
       );
     }
 
+    this.assertTargetInReleaseChannel(target);
     if (target.kind === "config") {
       await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
       const adapter = await getConfigAdapter(organizationId, target.config);
       return getTransactionSigner(adapter, target.wallet);
-    }
-
-    if (!isCustodyConnectionRuntimeEnabled(this.env, target.provider)) {
-      this.logUnavailable(target, "runtime_disabled");
-      throw forbidden("Custody Connection runtime is disabled");
     }
 
     if (!target.isRuntimeAvailable || !target.wallet) {
@@ -730,16 +730,22 @@ export class CustodyRuntimeTargets {
     return signer;
   }
 
+  /**
+   * The scope's selected custody target. A selected connection is the effective
+   * target whatever its release-channel state: execution paths refuse an
+   * out-of-channel pair themselves, and nothing resolves a config in its place.
+   *
+   * @param organizationId - The organization that owns the scope.
+   * @param projectId - The project scope, or undefined for the organization scope.
+   * @returns The selected connection, else the scope's default config, else null.
+   */
   private async resolveEffective(
     organizationId: string,
     projectId: string | undefined
   ): Promise<CustodyRuntimeTarget | null> {
-    if (
-      projectId &&
-      CUSTODY_PROVIDERS.some((provider) => isCustodyConnectionRuntimeEnabled(this.env, provider))
-    ) {
+    if (projectId) {
       const connection = await this.findSelectedConnection(organizationId, projectId);
-      if (connection && isCustodyConnectionRuntimeEnabled(this.env, connection.provider)) {
+      if (connection) {
         return connection;
       }
     }
@@ -783,7 +789,7 @@ export class CustodyRuntimeTargets {
     projectId: string | undefined,
     provider: CustodyProvider
   ): Promise<CustodyRuntimeTarget | null> {
-    if (!projectId || !isCustodyConnectionRuntimeEnabled(this.env, provider)) {
+    if (!projectId) {
       const config = await findConfigByProvider(this.db, organizationId, projectId, provider);
       return config ? this.mapConfigTarget(config) : null;
     }
@@ -1026,11 +1032,9 @@ export class CustodyRuntimeTargets {
       adapterDefaultWalletId,
       row.request_delay_ms ?? "env",
     ].join(":");
-    if (row.storage_backend !== "runtime_env") {
-      const cached = this.adapterCache.get(cacheKey);
-      if (cached) {
-        return cached;
-      }
+    const cached = this.adapterCache.get(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const secret = await this.readPrivyCredential(target, row);
@@ -1039,9 +1043,7 @@ export class CustodyRuntimeTargets {
       defaultWalletId: adapterDefaultWalletId,
       requestDelayMs: row.request_delay_ms ?? undefined,
     });
-    if (row.storage_backend !== "runtime_env") {
-      this.adapterCache.set(cacheKey, adapter);
-    }
+    this.adapterCache.set(cacheKey, adapter);
     return adapter;
   }
 
@@ -1056,7 +1058,7 @@ export class CustodyRuntimeTargets {
               default_wallet.status AS default_wallet_status,
               pc.id AS provider_credential_id,
               pc.status AS credential_status,
-              pc.credential_version, pc.source, pc.storage_backend,
+              pc.credential_version, pc.storage_backend,
               pc.secret_ref, pc.secret_version_ref, pc.encrypted_secret_payload
        FROM custody_connections c
        JOIN provider_credentials pc ON pc.id = c.provider_credential_id
@@ -1215,12 +1217,8 @@ export class CustodyRuntimeTargets {
       secretRef: row.secret_ref ?? undefined,
       secretVersionRef: row.secret_version_ref ?? undefined,
       encryptedSecretPayload: row.encrypted_secret_payload ?? undefined,
-      ...(row.storage_backend === "runtime_env"
-        ? { runtimeEnvFields: PRIVY_RUNTIME_ENV_FIELDS }
-        : {}),
     };
 
-    let credential: { appId: string; appSecret: string };
     try {
       const payload = await createCredentialSecretStore(this.env, row.storage_backend).read({
         orgId: target.organizationId,
@@ -1231,21 +1229,11 @@ export class CustodyRuntimeTargets {
       if (!appId || !appSecret) {
         throw new Error("incomplete credential payload");
       }
-      credential = { appId, appSecret };
+      return { appId, appSecret };
     } catch {
       this.logUnavailable(target, "credential_secret_unavailable");
       throw providerUnavailable("Custody credential is temporarily unavailable");
     }
-
-    if (
-      row.source === "runtime" &&
-      (await getPrivyProviderAccountFingerprint(credential.appId)) !==
-        row.provider_account_fingerprint
-    ) {
-      this.logUnavailable(target, "provider_account_mismatch");
-      throw conflict("Custody runtime credential does not match the connected Provider account");
-    }
-    return credential;
   }
 
   private mapConfigTarget(row: ConfigRow): ConfigRuntimeTarget {
@@ -1269,10 +1257,31 @@ export class CustodyRuntimeTargets {
     };
   }
 
+  /**
+   * Refuses a target whose (provider, custody mode) pair the release channel
+   * leaves out. A config is Managed custody, a connection is BYOK.
+   *
+   * @param target - The custody target about to execute.
+   * @param custodyWalletId - The wallet row the caller named, for the refusal log.
+   * @throws 403 when the pair is outside the release channel.
+   */
+  private assertTargetInReleaseChannel(
+    target: CustodyRuntimeTarget,
+    custodyWalletId?: string
+  ): void {
+    const mode: CustodyMode = target.kind === "config" ? "managed" : "byok";
+    if (isCustodyProviderAvailable(this.env, target.provider, mode)) {
+      return;
+    }
+    this.logUnavailable(target, "not_in_release_channel", custodyWalletId);
+    throw custodyProviderNotInReleaseChannel(target.provider, mode);
+  }
+
   private assertRuntimeExecutionAllowed(
     target: CustodyRuntimeTarget,
     custodyWalletId: string
   ): asserts target is CustodyRuntimeTarget & { wallet: RuntimeWallet } {
+    this.assertTargetInReleaseChannel(target, custodyWalletId);
     if (target.kind === "config") {
       if (!target.isRuntimeAvailable || !target.wallet) {
         this.logUnavailable(target, RUNTIME_EXECUTION_UNAVAILABLE_REASON, custodyWalletId);
@@ -1283,14 +1292,6 @@ export class CustodyRuntimeTargets {
       return;
     }
 
-    if (!isCustodyConnectionRuntimeEnabled(this.env, target.provider)) {
-      this.logUnavailable(target, RUNTIME_EXECUTION_PAUSED_REASON, custodyWalletId);
-      throw new AppError(
-        "FORBIDDEN",
-        "Wallet execution is paused. Retry after wallet execution is available.",
-        { reason: RUNTIME_EXECUTION_PAUSED_REASON }
-      );
-    }
     if (!target.isRuntimeAvailable || !target.wallet) {
       this.logUnavailable(target, "connection_unusable", custodyWalletId);
       throw conflict("Custody Connection is unavailable", {
@@ -1420,7 +1421,9 @@ export class CustodyRuntimeTargets {
       provider,
       isDefaultProvider:
         effective?.kind === "config" && effective.config.id === row.custody_config_id,
-      isRuntimeExecutionAllowed: isCustodyProviderEntitled(availability, provider),
+      isRuntimeExecutionAllowed:
+        isCustodyProviderAvailable(this.env, provider, "managed") &&
+        isCustodyProviderEntitled(availability, provider),
       walletId: row.wallet_id,
       publicKey: row.wallet_public_key,
       label: row.wallet_label,
@@ -1499,13 +1502,11 @@ export class CustodyRuntimeTargets {
   private logUnavailable(
     target: CustodyRuntimeTarget,
     reason:
-      | "runtime_disabled"
-      | "runtime_execution_paused"
+      | "not_in_release_channel"
       | "runtime_execution_unavailable"
       | "connection_unusable"
       | "connection_changed"
-      | "credential_secret_unavailable"
-      | "provider_account_mismatch",
+      | "credential_secret_unavailable",
     custodyWalletId?: string
   ): void {
     getLogger().warn(
@@ -1722,9 +1723,7 @@ export async function selectCustodyConnectionTarget(
     if (params.provider && params.provider !== provider) {
       throw badRequest("Provider does not match Custody Connection");
     }
-    if (!isCustodyConnectionRuntimeEnabled(env, provider)) {
-      throw forbidden("Custody Connection runtime is disabled");
-    }
+    assertCustodyProviderAvailable(env, provider, "byok");
     await assertCustodyProviderEntitled(env, tx, params.organizationId, provider);
 
     const wallet = connection.default_custody_wallet_id

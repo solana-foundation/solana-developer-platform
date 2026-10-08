@@ -1,15 +1,39 @@
 import { hashString } from "@sdp/payments/hash";
+import type { CustodyMode } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { createProviderWallet } from "@/services/domain/signing/provider-wallet-lifecycle";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
+import {
+  insertTestCustodyConfigRow,
+  insertTestCustodyScopeDefault,
+  insertTestCustodyWalletRow,
+  seedTestPrivyConnection,
+} from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
+  outOfChannelMode: null,
+}));
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
+  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
+    releaseChannel,
+    provider,
+    mode
+  ) =>
+    mode !== custodyReleaseChannel.outOfChannelMode &&
+    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
+  return { ...original, isCustodyProviderInReleaseChannel };
+});
 
 vi.mock("@/services/domain/signing/provider-config", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/domain/signing/provider-config")>()),
@@ -31,11 +55,12 @@ const apiKey = "key_default_audit";
 const rawKey = "sk_test_default_audit";
 const config = "cust_default_audit";
 const connection = "cconn_default_audit";
-const originalFlag = env.PRIVY_BYOK_ENABLED;
-const originalAppId = env.PRIVY_APP_ID;
-const originalAppSecret = env.PRIVY_APP_SECRET;
+const walletPublicKeys = {
+  a: "11111111111111111111111111111111",
+  b: "So11111111111111111111111111111111111111112",
+} as const;
 
-async function changeDefault(owner: "connection" | "config", suffix = "b") {
+async function changeDefault(owner: "connection" | "config") {
   return app.request(
     "/v1/wallets/default-wallet",
     {
@@ -45,7 +70,7 @@ async function changeDefault(owner: "connection" | "config", suffix = "b") {
         "Content-Type": "application/json",
         "X-Request-ID": "req_default_wallet_audit",
       },
-      body: JSON.stringify({ walletId: `privy_${owner}_${suffix}` }),
+      body: JSON.stringify({ walletId: `privy_${owner}_b` }),
     },
     env
   );
@@ -96,9 +121,7 @@ async function readDefault(owner: "connection" | "config") {
 
 describe("default wallet audit admission", () => {
   beforeEach(async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
-    env.PRIVY_APP_ID = "default-audit-app";
-    env.PRIVY_APP_SECRET = "default-audit-secret";
+    custodyReleaseChannel.outOfChannelMode = null;
     await seedTestDatabase(env);
     await clearKVStores(env);
     const db = getDb(env);
@@ -135,60 +158,58 @@ describe("default wallet audit admission", () => {
       status: "active",
       expiresAt: null,
     });
-    await db.execute(
-      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-      VALUES (?, ?, ?, 'privy', 'test', 'test', 'active')`,
-      [config, org, project]
-    );
-    await db.execute(
-      `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
-      VALUES ('csd_default_audit', ?, ?, ?)`,
-      [org, project, config]
-    );
-    await db.execute(
-      `INSERT INTO provider_credentials (id, organization_id, project_id, provider, label, scope, source, storage_backend, status, created_by)
-      VALUES ('pcred_default_audit', ?, ?, 'privy', 'Test', 'project', 'runtime', 'runtime_env', 'active', ?)`,
-      [org, project, user]
-    );
-    await db.execute(
-      `INSERT INTO custody_connections (id, organization_id, project_id, provider, scope, provider_credential_id, provider_credential_scope_key, status, created_by)
-      VALUES (?, ?, ?, 'privy', 'project', 'pcred_default_audit', ?, 'pending', ?)`,
-      [connection, org, project, project, user]
-    );
-    for (const owner of ["connection", "config"] as const) {
-      for (const suffix of ["a", "b"]) {
-        await db.execute(
-          `INSERT INTO custody_wallets (id, custody_config_id, custody_connection_id, wallet_id, public_key, status)
-          VALUES (?, ?, ?, ?, ?, 'active')`,
-          [
-            `cwlt_${owner}_${suffix}`,
-            owner === "config" ? config : null,
-            owner === "connection" ? connection : null,
-            `privy_${owner}_${suffix}`,
-            suffix === "a"
-              ? "11111111111111111111111111111111"
-              : "So11111111111111111111111111111111111111112",
-          ]
-        );
+    await db.transaction(async (tx) => {
+      await insertTestCustodyConfigRow(tx, {
+        id: config,
+        organizationId: org,
+        projectId: project,
+        provider: "privy",
+        configEncrypted: "test",
+        defaultWalletId: "privy_config_a",
+        status: "active",
+      });
+      for (const suffix of ["a", "b"] as const) {
+        await insertTestCustodyWalletRow(tx, {
+          id: `cwlt_config_${suffix}`,
+          owner: { kind: "config", custodyConfigId: config },
+          walletId: `privy_config_${suffix}`,
+          publicKey: walletPublicKeys[suffix],
+          label: null,
+          purpose: null,
+          status: "active",
+        });
       }
-    }
-    await db.execute(
-      "UPDATE custody_configs SET default_wallet_id = 'privy_config_a' WHERE id = ?",
-      [config]
-    );
-    await db.execute(
-      `UPDATE custody_connections SET default_custody_wallet_id = 'cwlt_connection_a',
-      status = 'active', last_check_status = 'success', last_check_at = sdp_iso_now(),
-      provider_account_fingerprint = 'sha256:default-audit', activated_at = sdp_iso_now() WHERE id = ?`,
-      [connection]
-    );
+      await insertTestCustodyScopeDefault(tx, {
+        id: "csd_default_audit",
+        organizationId: org,
+        projectId: project,
+        defaultCustodyConfigId: config,
+        defaultCustodyConnectionId: null,
+      });
+      await seedTestPrivyConnection(tx, {
+        organizationId: org,
+        projectId: project,
+        connectionId: connection,
+        credentialId: "pcred_default_audit",
+        createdBy: user,
+        stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+        providerAccountFingerprint: "sha256:default-audit",
+        lastCheckStatus: "success",
+        wallets: (["a", "b"] as const).map((suffix) => ({
+          id: `cwlt_connection_${suffix}`,
+          walletId: `privy_connection_${suffix}`,
+          publicKey: walletPublicKeys[suffix],
+          label: null,
+          purpose: null,
+          status: "active",
+        })),
+        defaultCustodyWalletId: "cwlt_connection_a",
+      });
+    });
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    env.PRIVY_BYOK_ENABLED = originalFlag;
-    env.PRIVY_APP_ID = originalAppId;
-    env.PRIVY_APP_SECRET = originalAppSecret;
     await clearKVStores(env);
   });
 
@@ -245,7 +266,6 @@ describe("default wallet audit admission", () => {
         },
       });
       expect(JSON.stringify(rows)).not.toContain(rawKey);
-      expect(JSON.stringify(rows)).not.toContain("default-audit-secret");
     }
   );
 
@@ -483,9 +503,51 @@ describe("default wallet audit admission", () => {
     }
   );
 
-  it("keeps Config selection available while BYOK is disabled", async () => {
-    env.PRIVY_BYOK_ENABLED = "false";
+  it("keeps Config selection available while the BYOK pair is out of channel", async () => {
+    custodyReleaseChannel.outOfChannelMode = "byok";
     expect((await changeDefault("config")).status).toBe(200);
     expect(await readDefault("config")).toEqual({ wallet_id: "privy_config_b" });
   });
+
+  it("refuses a Config default change while the Managed pair is out of channel", async () => {
+    custodyReleaseChannel.outOfChannelMode = "managed";
+
+    const response = await changeDefault("config");
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(managedChannelRefusalBody());
+    expect(await readDefault("config")).toEqual({ wallet_id: "privy_config_a" });
+    expect(await readAuditRows()).toEqual([]);
+  });
+
+  it.each([{ setDefault: true }, {}])(
+    "refuses Config wallet creation %o before Provider I/O while the Managed pair is out of channel",
+    async (body) => {
+      vi.mocked(createProviderWallet).mockClear();
+      custodyReleaseChannel.outOfChannelMode = "managed";
+
+      const response = await createConfigWallet(body);
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual(managedChannelRefusalBody());
+      expect(createProviderWallet).not.toHaveBeenCalled();
+      expect(
+        await getDb(env).queryMany("SELECT id FROM custody_wallets WHERE custody_config_id = ?", [
+          config,
+        ])
+      ).toEqual([{ id: "cwlt_config_a" }, { id: "cwlt_config_b" }]);
+      expect(await readDefault("config")).toEqual({ wallet_id: "privy_config_a" });
+      expect(await readAuditRows()).toEqual([]);
+    }
+  );
 });
+
+function managedChannelRefusalBody() {
+  return {
+    error: {
+      code: "FORBIDDEN",
+      message: custodyProviderNotInReleaseChannel("privy", "managed").message,
+    },
+    meta: { requestId: "req_default_wallet_audit" },
+  };
+}

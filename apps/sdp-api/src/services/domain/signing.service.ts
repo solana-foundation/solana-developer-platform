@@ -64,7 +64,10 @@ import {
   createProviderWallet,
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
-import { assertProviderAvailable } from "@/services/provider-availability.service";
+import {
+  assertCustodyProviderAvailable,
+  assertProviderAvailable,
+} from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
   type CustodyConfigWallet,
@@ -297,10 +300,19 @@ export class SigningService {
     return this.custodyCipher;
   }
 
+  /**
+   * Refuses Managed custody on `provider` for `orgId` unless the (provider, managed)
+   * pair is in the release channel and the organization has the provider enabled.
+   * The channel refusal keeps its 403; the entitlement refusal is a signing error.
+   *
+   * @param orgId - The organization whose custody config is about to be used.
+   * @param provider - The config's custody provider.
+   */
   private async assertProviderEnabled(
     orgId: string,
     provider: SigningConfiguration["provider"]
   ): Promise<void> {
+    assertCustodyProviderAvailable(this.env, provider, "managed");
     try {
       await assertProviderAvailable(this.env, getDb(this.env), orgId, "custody", provider);
     } catch (error) {
@@ -1653,6 +1665,7 @@ export class SigningService {
       if (!config) {
         throw new SigningError("Custody not initialized", "NOT_FOUND");
       }
+      await this.assertProviderEnabled(orgId, config.provider);
 
       const wallets = await this.configStore.getWallets(config.id);
       const defaultWallet =

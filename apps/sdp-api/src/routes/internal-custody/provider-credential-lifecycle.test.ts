@@ -13,6 +13,13 @@ import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-cre
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { scanGcpCredentialContainers } from "@/services/jobs/provider-credential-container-cleanup";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
+import {
+  activateTestCustodyConnection,
+  insertTestConnectionWallet,
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  type TestStoredProviderCredential,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { DEFAULT_PROJECT_NAME, seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -135,60 +142,55 @@ async function seedActiveSharedCredential(): Promise<void> {
   });
   const fingerprint = await getPrivyProviderAccountFingerprint(APP_ID);
   const db = getDb(env);
-  await db
-    .prepare(
-      `INSERT INTO provider_credentials (
-           id, organization_id, project_id, provider, label, scope, source,
-           storage_backend, secret_ref, secret_version_ref, encrypted_secret_payload,
-           display_metadata, status, credential_version, created_by, last_validated_at
-         ) VALUES (
-           ?, ?, NULL, 'privy', 'Shared Privy', 'organization', 'stored',
-           ?, ?, ?, ?, ?::jsonb, 'active', 1, ?, sdp_iso_now()
-         )`
-    )
-    .bind(
-      CREDENTIAL_ID,
-      ORGANIZATION_ID,
-      stored.storageBackend,
-      stored.secretRef ?? null,
-      stored.secretVersionRef ?? null,
-      stored.encryptedSecretPayload ?? null,
-      JSON.stringify({ appIdSuffix: APP_ID.slice(-4) }),
-      USER_ID
-    )
-    .run();
+  const credential: TestStoredProviderCredential = {
+    id: CREDENTIAL_ID,
+    organizationId: ORGANIZATION_ID,
+    projectId: null,
+    provider: "privy",
+    label: "Shared Privy",
+    stored,
+    displayMetadata: { appIdSuffix: APP_ID.slice(-4) },
+    status: "active",
+    credentialVersion: 1,
+    rotatedFromProviderCredentialId: null,
+    lastValidatedAt: new Date().toISOString(),
+    deactivatedAt: null,
+    createdBy: USER_ID,
+  };
+  await insertTestStoredProviderCredential(db, credential);
   for (const [connectionId, projectId, walletId] of [
     [CONNECTION_A_ID, PROJECT_A_ID, "cwlt_provider_credential_lifecycle_a"],
     [CONNECTION_B_ID, PROJECT_B_ID, "cwlt_provider_credential_lifecycle_b"],
   ] as const) {
-    await db
-      .prepare(
-        `INSERT INTO custody_connections (
-             id, organization_id, project_id, provider, scope, provider_credential_id,
-             provider_credential_scope_key, provider_account_fingerprint, status, created_by
-           ) VALUES (
-             ?, ?, ?, 'privy', 'project', ?, '__organization__', ?, 'pending', ?
-           )`
-      )
-      .bind(connectionId, ORGANIZATION_ID, projectId, CREDENTIAL_ID, fingerprint, USER_ID)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_connection_id, wallet_id, public_key, status)
-         VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(walletId, connectionId, `provider-${walletId}`, `address-${walletId}`)
-      .run();
-    await db
-      .prepare(
-        `UPDATE custody_connections
-         SET status = 'active', last_check_status = 'success', last_check_at = sdp_iso_now(),
-             default_custody_wallet_id = ?, activated_at = sdp_iso_now()
-         WHERE id = ?`
-      )
-      .bind(walletId, connectionId)
-      .run();
+    await insertTestCustodyConnection(db, {
+      id: connectionId,
+      organizationId: ORGANIZATION_ID,
+      projectId,
+      provider: "privy",
+      credential,
+      status: "pending",
+      setupMetadata: {},
+      providerAccountFingerprint: fingerprint,
+      lastCheckStatus: null,
+      lastCheckAt: null,
+      lastCheckFailureCode: null,
+      activatedAt: null,
+      deactivatedAt: null,
+      createdBy: USER_ID,
+      createdAt: new Date().toISOString(),
+    });
+    await insertTestConnectionWallet(db, {
+      id: walletId,
+      connectionId,
+      walletId: `provider-${walletId}`,
+      publicKey: `address-${walletId}`,
+      status: "active",
+    });
+    await activateTestCustodyConnection(db, {
+      connectionId,
+      custodyWalletId: walletId,
+      providerAccountFingerprint: fingerprint,
+    });
   }
 }
 
@@ -840,52 +842,39 @@ describe("provider credential lifecycle", () => {
       ).toEqual([{ reason_code: "invalid_state" }]);
     });
 
-    it.each(["encrypted_db", "runtime_env"])(
-      "deactivates the active %s Credential without changing deployment secrets or Connection history",
-      async (backend) => {
-        const db = getDb(env);
-        if (backend === "runtime_env") {
-          await db.execute(
-            `UPDATE provider_credentials SET source = 'runtime', storage_backend = 'runtime_env',
-               encrypted_secret_payload = NULL WHERE id = ?`,
-            [CREDENTIAL_ID]
-          );
-        }
-        const deployment = { ...env };
-        const connections = await db.queryMany("SELECT * FROM custody_connections ORDER BY id");
-        const providerFetch = vi.fn();
-        vi.stubGlobal("fetch", providerFetch);
+    it("deactivates the active Credential without changing deployment secrets or Connection history", async () => {
+      const db = getDb(env);
+      const deployment = { ...env };
+      const connections = await db.queryMany("SELECT * FROM custody_connections ORDER BY id");
+      const providerFetch = vi.fn();
+      vi.stubGlobal("fetch", providerFetch);
 
-        const response = await lifecycleRequest(
-          `/provider-credentials/${CREDENTIAL_ID}/deactivate`,
-          {
-            method: "POST",
-          }
-        );
+      const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/deactivate`, {
+        method: "POST",
+      });
 
-        expect(response.status).toBe(200);
-        expect(await response.json()).toMatchObject({
-          data: { providerCredential: { id: CREDENTIAL_ID, status: "deactivated" } },
-        });
-        expect(
-          await db.queryOne(
-            "SELECT status, encrypted_secret_payload FROM provider_credentials WHERE id = ?",
-            [CREDENTIAL_ID]
-          )
-        ).toEqual({ status: "deactivated", encrypted_secret_payload: null });
-        expect(await db.queryMany("SELECT * FROM custody_connections ORDER BY id")).toEqual(
-          connections
-        );
-        expect(
-          await db.queryOne(
-            "SELECT COUNT(*) AS count FROM audit_logs WHERE resource_id = ? AND action = 'deactivate'",
-            [CREDENTIAL_ID]
-          )
-        ).toEqual({ count: 1 });
-        expect(env).toEqual(deployment);
-        expect(providerFetch).not.toHaveBeenCalled();
-      }
-    );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: { providerCredential: { id: CREDENTIAL_ID, status: "deactivated" } },
+      });
+      expect(
+        await db.queryOne(
+          "SELECT status, encrypted_secret_payload FROM provider_credentials WHERE id = ?",
+          [CREDENTIAL_ID]
+        )
+      ).toEqual({ status: "deactivated", encrypted_secret_payload: null });
+      expect(await db.queryMany("SELECT * FROM custody_connections ORDER BY id")).toEqual(
+        connections
+      );
+      expect(
+        await db.queryOne(
+          "SELECT COUNT(*) AS count FROM audit_logs WHERE resource_id = ? AND action = 'deactivate'",
+          [CREDENTIAL_ID]
+        )
+      ).toEqual({ count: 1 });
+      expect(env).toEqual(deployment);
+      expect(providerFetch).not.toHaveBeenCalled();
+    });
 
     it.each(["failed_validation", "retired"])("preserves %s history", async (status) => {
       const db = getDb(env);
@@ -1332,45 +1321,23 @@ describe("provider credential lifecycle", () => {
     expect(JSON.stringify(body)).not.toContain(APP_SECRET);
   });
 
-  it("exposes runtime credentials as deployment-managed state and rejects rotation", async () => {
-    await getDb(env)
-      .prepare(
-        `UPDATE provider_credentials
-         SET source = 'runtime', storage_backend = 'runtime_env', encrypted_secret_payload = NULL
-         WHERE id = ?`
-      )
-      .bind(CREDENTIAL_ID)
-      .run();
-
-    const read = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
-    expect(read.status).toBe(200);
-    expect(await read.json()).toMatchObject({
-      data: { providerCredential: { id: CREDENTIAL_ID, source: "runtime" } },
-    });
-
-    const providerFetch = vi.fn();
-    vi.stubGlobal("fetch", providerFetch);
-    const rotate = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
-      method: "POST",
-      key: "rotate-runtime-credential",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
-    });
-    expect(rotate.status).toBe(409);
-    expect(providerFetch).not.toHaveBeenCalled();
-  });
-
   it("hides a foreign-project credential before inspecting its lifecycle", async () => {
     const credentialId = "pcred_foreign_project_root";
-    await getDb(env)
-      .prepare(
-        `INSERT INTO provider_credentials (
-           id, organization_id, project_id, provider, label, scope, source,
-           storage_backend, status, credential_version, created_by
-         ) VALUES (?, ?, ?, 'privy', 'Foreign Privy', 'project', 'runtime',
-                   'runtime_env', 'active', 1, ?)`
-      )
-      .bind(credentialId, ORGANIZATION_ID, PROJECT_B_ID, USER_ID)
-      .run();
+    await insertTestStoredProviderCredential(getDb(env), {
+      id: credentialId,
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_B_ID,
+      provider: "privy",
+      label: "Foreign Privy",
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "foreign-ciphertext" },
+      displayMetadata: {},
+      status: "active",
+      credentialVersion: 1,
+      rotatedFromProviderCredentialId: null,
+      lastValidatedAt: null,
+      deactivatedAt: null,
+      createdBy: USER_ID,
+    });
     const secretLookup = vi.spyOn(
       ProviderCredentialStore.prototype,
       "findLifecycleCredentialWithSecret"
@@ -3118,27 +3085,30 @@ describe("provider credential lifecycle", () => {
     };
     const candidateId = rotatedBody.data.providerCredential.id;
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare(
-          `INSERT INTO custody_connections (
-             id, organization_id, project_id, provider, scope, provider_credential_id,
-             provider_credential_scope_key, status, deactivated_at, created_by
-           ) VALUES (
-             'cconn_candidate_invariant', ?, ?, 'privy', 'project', ?,
-             '__organization__', 'deactivated', sdp_iso_now(), ?
-           )`
-        )
-        .bind(ORGANIZATION_ID, PROJECT_A_ID, candidateId, USER_ID),
-      db.prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_connection_id, wallet_id, public_key, status)
-         VALUES (
-           'cwlt_candidate_invariant', 'cconn_candidate_invariant',
-           'provider-candidate-invariant', 'address-candidate-invariant', 'active'
-         )`
-      ),
-    ]);
+    await insertTestCustodyConnection(db, {
+      id: "cconn_candidate_invariant",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_A_ID,
+      provider: "privy",
+      credential: { id: candidateId, projectId: null },
+      status: "deactivated",
+      setupMetadata: {},
+      providerAccountFingerprint: null,
+      lastCheckStatus: null,
+      lastCheckAt: null,
+      lastCheckFailureCode: null,
+      activatedAt: null,
+      deactivatedAt: new Date().toISOString(),
+      createdBy: USER_ID,
+      createdAt: new Date().toISOString(),
+    });
+    await insertTestConnectionWallet(db, {
+      id: "cwlt_candidate_invariant",
+      connectionId: "cconn_candidate_invariant",
+      walletId: "provider-candidate-invariant",
+      publicKey: "address-candidate-invariant",
+      status: "active",
+    });
 
     const canceled = await lifecycleRequest(`/provider-credentials/${candidateId}/deactivate`, {
       method: "POST",

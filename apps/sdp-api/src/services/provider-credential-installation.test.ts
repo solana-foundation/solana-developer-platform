@@ -3,11 +3,10 @@ import { decideInstallation, type InstallationFacts } from "./provider-credentia
 
 const NOW = Date.parse("2026-08-06T12:00:00.000Z");
 
-function facts(overrides: Partial<InstallationFacts> = {}): InstallationFacts {
+function facts(overrides: Partial<InstallationFacts>): InstallationFacts {
   return {
     connectionStatus: "pending",
     credentialStatus: "pending",
-    credentialSource: "stored",
     isExpectedProjectCredential: true,
     hasDefaultWallet: false,
     hasOwnedWallet: false,
@@ -25,7 +24,7 @@ function facts(overrides: Partial<InstallationFacts> = {}): InstallationFacts {
 
 describe("provider credential installation decisions", () => {
   it("admits full completion, blocks a live lease, and reclaims an expired lease", () => {
-    expect(decideInstallation(facts()).complete).toEqual({ kind: "execute", mode: "full" });
+    expect(decideInstallation(facts({})).complete).toEqual({ kind: "execute", mode: "full" });
 
     const checking = {
       connectionStatus: "checking" as const,
@@ -41,7 +40,7 @@ describe("provider credential installation decisions", () => {
     ).toEqual({ kind: "execute", mode: "full" });
   });
 
-  it("allows flag-off reconciliation only after the Provider account is pinned", () => {
+  it("allows reconciliation without full completion only after the Provider account is pinned", () => {
     expect(decideInstallation(facts({ fullCompletionEnabled: false })).complete).toEqual({
       kind: "disabled",
     });
@@ -68,7 +67,7 @@ describe("provider credential installation decisions", () => {
   });
 
   it("allows cancellation only before account pinning and replacement only for safe failure", () => {
-    expect(decideInstallation(facts()).cancel).toEqual({ kind: "execute" });
+    expect(decideInstallation(facts({})).cancel).toEqual({ kind: "execute" });
     expect(decideInstallation(facts({ providerAccountFingerprint: "sha256:app" })).cancel).toEqual({
       kind: "conflict",
       reason: "installation_completion_required",
@@ -86,42 +85,7 @@ describe("provider credential installation decisions", () => {
       reason: "unfinished_installation_exists",
     });
 
-    expect(decideInstallation({ ...failed, credentialSource: "runtime" }).replace).toEqual({
-      kind: "conflict",
-    });
-  });
-
-  it("revalidates only safe runtime failures", () => {
-    const retryable = facts({
-      connectionStatus: "failed",
-      credentialStatus: "failed_validation",
-      credentialSource: "runtime",
-      lastCheckStatus: "failed",
-      lastCheckAt: "2026-08-06T11:58:00.000Z",
-      lastCheckFailureCode: "invalid_credentials",
-    });
-
-    expect(decideInstallation(retryable).complete).toEqual({ kind: "execute", mode: "full" });
-    expect(
-      decideInstallation({
-        ...retryable,
-        lastCheckFailureCode: "provider_account_already_connected",
-      }).complete
-    ).toEqual({ kind: "execute", mode: "full" });
-    expect(decideInstallation({ ...retryable, fullCompletionEnabled: false }).complete).toEqual({
-      kind: "replay",
-    });
-    expect(decideInstallation({ ...retryable, hasSiblingUnfinished: true }).complete).toEqual({
-      kind: "conflict",
-      reason: "unfinished_installation_exists",
-    });
-    expect(
-      decideInstallation({
-        ...retryable,
-        providerAccountFingerprint: "sha256:app",
-        lastCheckFailureCode: "wallet_conflict",
-      }).complete
-    ).toEqual({ kind: "replay" });
+    expect(decideInstallation(failed).complete).toEqual({ kind: "replay" });
   });
 
   it("fails closed on inconsistent persisted lifecycle facts", () => {

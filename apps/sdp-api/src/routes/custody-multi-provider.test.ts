@@ -1,16 +1,48 @@
 import { hashString } from "@sdp/payments/hash";
-import { type CachedApiKey, CUSTODY_CONFIG_STATUSES, type CustodyConfigStatus } from "@sdp/types";
+import {
+  type CachedApiKey,
+  CUSTODY_CONFIG_STATUSES,
+  type CustodyConfigStatus,
+  type CustodyMode,
+} from "@sdp/types";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db";
 import app from "@/index";
 import { initializeSigningResponseSchema } from "@/openapi/schemas/custody";
 import type { SwitchSigningRequest } from "@/routes/custody/schemas";
 import { getLogger } from "@/runtime/logger";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import {
+  insertTestCustodyConfigRow,
+  insertTestCustodyWalletRow,
+  seedTestCustodyRows,
+  seedTestPrivyConnection,
+} from "@/test/helpers/custody";
+import {
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
+  outOfChannelMode: null,
+}));
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
+  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
+    releaseChannel,
+    provider,
+    mode
+  ) =>
+    mode !== custodyReleaseChannel.outOfChannelMode &&
+    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
+  return { ...original, isCustodyProviderInReleaseChannel };
+});
 
 const TEST_ORG = {
   id: "org_custody_multi_provider",
@@ -54,10 +86,34 @@ const DFNS_CONFIG_ID = "cust_cfg_dfns_legacy";
 const IBM_HAVEN_CONFIG_ID = "cust_cfg_ibm_haven";
 
 let originalParaApiKey: string | undefined;
-let originalPrivyByokEnabled: string | undefined;
 let originalPrivyAppId: string | undefined;
 let originalPrivyAppSecret: string | undefined;
 let originalCustodyEncryptionKey: string | undefined;
+
+async function initializeProvider(body: { provider: "para" }): Promise<Response> {
+  return app.request(
+    "/v1/wallets/initialize",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      },
+      body: JSON.stringify(body),
+    },
+    env
+  );
+}
+
+function channelRefusalBody(provider: "para" | "privy", mode: CustodyMode) {
+  return {
+    error: {
+      code: "FORBIDDEN",
+      message: custodyProviderNotInReleaseChannel(provider, mode).message,
+    },
+    meta: { requestId: expect.any(String) },
+  };
+}
 
 async function switchProvider(body: SwitchSigningRequest): Promise<Response> {
   return app.request(
@@ -111,6 +167,15 @@ async function prepareParaConfig(status: CustodyConfigStatus | "absent") {
   return providerFetch;
 }
 
+async function selectProjectDefaultConfig(db: DatabaseExecutor, configId: string) {
+  await db.execute(
+    `UPDATE custody_scope_defaults
+     SET default_custody_config_id = ?, updated_at = sdp_iso_now()
+     WHERE organization_id = ? AND project_id = ?`,
+    [configId, TEST_ORG.id, TEST_PROJECT.id]
+  );
+}
+
 async function readSwitchAudit() {
   const rows = await getDb(env).queryMany<{
     action: string;
@@ -147,170 +212,117 @@ async function seedAuthAndConfigs(): Promise<void> {
     members: [],
     ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
   });
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_API_KEY.id,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        TEST_USER.id,
-        "Custody Multi Provider Test Key",
-        TEST_API_KEY.prefix,
-        keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        PRIVY_CONFIG_ID,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        "privy",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "privy_wallet_a",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        PARA_CONFIG_ID,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        "para",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "para_wallet_a",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind("csd_multi_org_default", TEST_ORG.id, TEST_PROJECT.id, PRIVY_CONFIG_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_privy_a",
-        PRIVY_CONFIG_ID,
-        "privy_wallet_a",
-        "privy_pubkey_a",
-        "Privy Root A",
-        "root",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_privy_b",
-        PRIVY_CONFIG_ID,
-        "privy_wallet_b",
-        "privy_pubkey_b",
-        "Privy Root B",
-        "transfer",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_para_a",
-        PARA_CONFIG_ID,
-        "para_wallet_a",
-        "11111111111111111111111111111111",
-        "Para Root A",
-        "root",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_para_b",
-        PARA_CONFIG_ID,
-        "para_wallet_b",
-        "para_pubkey_b",
-        "Para Root B",
-        "transfer",
-        "active"
-      ),
-  ]);
+  await getDb(env).execute(
+    `INSERT INTO api_keys
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      TEST_API_KEY.id,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_USER.id,
+      "Custody Multi Provider Test Key",
+      TEST_API_KEY.prefix,
+      keyHash,
+      "api_admin",
+      JSON.stringify(["*"]),
+      "active",
+    ]
+  );
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: PRIVY_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "privy",
+        configEncrypted: "test-config",
+        defaultWalletId: "privy_wallet_a",
+        status: "active",
+      },
+      {
+        id: PARA_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "para",
+        configEncrypted: "test-config",
+        defaultWalletId: "para_wallet_a",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: "cwlt_privy_a",
+        owner: { kind: "config", custodyConfigId: PRIVY_CONFIG_ID },
+        walletId: "privy_wallet_a",
+        publicKey: "privy_pubkey_a",
+        label: "Privy Root A",
+        purpose: "root",
+        status: "active",
+      },
+      {
+        id: "cwlt_privy_b",
+        owner: { kind: "config", custodyConfigId: PRIVY_CONFIG_ID },
+        walletId: "privy_wallet_b",
+        publicKey: "privy_pubkey_b",
+        label: "Privy Root B",
+        purpose: "transfer",
+        status: "active",
+      },
+      {
+        id: "cwlt_para_a",
+        owner: { kind: "config", custodyConfigId: PARA_CONFIG_ID },
+        walletId: "para_wallet_a",
+        publicKey: "11111111111111111111111111111111",
+        label: "Para Root A",
+        purpose: "root",
+        status: "active",
+      },
+      {
+        id: "cwlt_para_b",
+        owner: { kind: "config", custodyConfigId: PARA_CONFIG_ID },
+        walletId: "para_wallet_b",
+        publicKey: "para_pubkey_b",
+        label: "Para Root B",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    scopeDefaults: [
+      {
+        id: "csd_multi_org_default",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        defaultCustodyConfigId: PRIVY_CONFIG_ID,
+        defaultCustodyConnectionId: null,
+      },
+    ],
+  });
 }
 
-async function seedActivePrivyConnection(suffix: string, projectId = TEST_PROJECT.id) {
-  const credentialId = `pcred_switch_${suffix}`;
+async function seedActivePrivyConnection(suffix: string) {
   const connectionId = `cconn_switch_${suffix}`;
   const walletRecordId = `cwlt_switch_${suffix}`;
   const walletId = `privy_switch_${suffix}`;
   const publicKey = "11111111111111111111111111111111";
+  const credentialId = `pcred_switch_${suffix}`;
 
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO provider_credentials (
-           id, organization_id, project_id, provider, label, scope, source,
-           storage_backend, encrypted_secret_payload, status, created_by
-         ) VALUES (?, ?, ?, 'privy', ?, 'project', 'stored',
-                   'encrypted_db', 'ciphertext', 'active', ?)`
-      )
-      .bind(credentialId, TEST_ORG.id, projectId, `Privy ${suffix}`, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_connections (
-           id, organization_id, project_id, provider, scope,
-           provider_credential_id, provider_credential_scope_key, status, created_by
-         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
-      )
-      .bind(connectionId, TEST_ORG.id, projectId, credentialId, projectId, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_connection_id, wallet_id, public_key, status
-         ) VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(walletRecordId, connectionId, walletId, publicKey),
-    getDb(env)
-      .prepare(
-        `UPDATE custody_connections
-         SET default_custody_wallet_id = ?, status = 'active',
-             last_check_status = 'success', last_check_at = sdp_iso_now(),
-             provider_account_fingerprint = ?,
-             activated_at = sdp_iso_now()
-         WHERE id = ?`
-      )
-      .bind(walletRecordId, `sha256:${credentialId}`, connectionId),
-  ]);
+  await getDb(env).transaction((tx) =>
+    seedTestPrivyConnection(tx, {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      connectionId,
+      credentialId,
+      createdBy: TEST_USER.id,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+      providerAccountFingerprint: `sha256:${credentialId}`,
+      lastCheckStatus: "success",
+      wallets: [
+        { id: walletRecordId, walletId, publicKey, label: null, purpose: null, status: "active" },
+      ],
+      defaultCustodyWalletId: walletRecordId,
+    })
+  );
 
   return { connectionId, walletId, publicKey };
 }
@@ -318,7 +330,7 @@ async function seedActivePrivyConnection(suffix: string, projectId = TEST_PROJEC
 describe("Custody multi-provider routes", () => {
   beforeEach(async () => {
     originalParaApiKey = env.PARA_API_KEY;
-    originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
+    custodyReleaseChannel.outOfChannelMode = null;
     originalPrivyAppId = env.PRIVY_APP_ID;
     originalPrivyAppSecret = env.PRIVY_APP_SECRET;
     originalCustodyEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
@@ -330,7 +342,6 @@ describe("Custody multi-provider routes", () => {
 
   afterEach(async () => {
     env.PARA_API_KEY = originalParaApiKey;
-    env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
     env.PRIVY_APP_ID = originalPrivyAppId;
     env.PRIVY_APP_SECRET = originalPrivyAppSecret;
     env.CUSTODY_ENCRYPTION_KEY = originalCustodyEncryptionKey;
@@ -355,21 +366,46 @@ describe("Custody multi-provider routes", () => {
     }
   );
 
-  it("rejects fresh legacy Privy setup before opening an audit intent", async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
-    env.PRIVY_APP_ID = "legacy-privy-app";
-    env.PRIVY_APP_SECRET = "legacy-privy-secret";
-    await getDb(env).execute("UPDATE custody_configs SET status = 'inactive' WHERE id = ?", [
-      PRIVY_CONFIG_ID,
-    ]);
-    const before = await readScopeDefault();
-    const providerFetch = vi.fn();
-    vi.stubGlobal("fetch", providerFetch);
+  it.each([...CUSTODY_CONFIG_STATUSES, "absent"] as const)(
+    "rejects a Managed switch out of channel for an %s Config before opening an audit intent",
+    async (status) => {
+      const providerFetch = await prepareParaConfig(status);
+      const before = await readScopeDefault();
+      custodyReleaseChannel.outOfChannelMode = "managed";
 
-    const response = await switchProvider({ provider: "privy" });
+      const response = await switchProvider({ provider: "para" });
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual(channelRefusalBody("para", "managed"));
+      expect(providerFetch).not.toHaveBeenCalled();
+      expect(await readScopeDefault()).toEqual(before);
+      expect(await readSwitchAudit()).toHaveLength(0);
+      expect(
+        await getDb(env).queryOne("SELECT status FROM custody_configs WHERE id = ?", [
+          PARA_CONFIG_ID,
+        ])
+      ).toEqual(status === "absent" ? null : { status });
+    }
+  );
+
+  it("rejects Managed initialization out of channel before any Provider call or row", async () => {
+    const providerFetch = await prepareParaConfig("absent");
+    const before = await readScopeDefault();
+    custodyReleaseChannel.outOfChannelMode = "managed";
+
+    const response = await initializeProvider({ provider: "para" });
 
     expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(channelRefusalBody("para", "managed"));
     expect(providerFetch).not.toHaveBeenCalled();
+    expect(
+      await getDb(env).queryMany("SELECT id FROM custody_configs WHERE provider = 'para'")
+    ).toEqual([]);
+    expect(
+      await getDb(env).queryMany(
+        "SELECT id FROM custody_wallets WHERE wallet_id = 'para_wallet_initialized'"
+      )
+    ).toEqual([]);
     expect(await readScopeDefault()).toEqual(before);
     expect(await readSwitchAudit()).toHaveLength(0);
   });
@@ -435,7 +471,6 @@ describe("Custody multi-provider routes", () => {
   it.each(["intent", "outcome"] as const)(
     "handles unavailable Connection audit %s without a misleading selection",
     async (phase) => {
-      env.PRIVY_BYOK_ENABLED = "true";
       const connection = await seedActivePrivyConnection(`audit_${phase}`);
       const db = getDb(env);
       await db.execute(`ALTER TABLE audit_logs ADD CONSTRAINT fail_connection_audit
@@ -455,7 +490,6 @@ describe("Custody multi-provider routes", () => {
   );
 
   it("audits one actual Connection transition and a technical completion for concurrent same-target switches", async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
     const connection = await seedActivePrivyConnection("concurrent_audit");
     const responses = await Promise.all([
       switchProvider({ connectionId: connection.connectionId }),
@@ -638,7 +672,6 @@ describe("Custody multi-provider routes", () => {
   });
 
   it("switches to an exact Connection without clearing the legacy Config pointer", async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
     const connection = await seedActivePrivyConnection("exact");
 
     const res = await app.request(
@@ -695,7 +728,6 @@ describe("Custody multi-provider routes", () => {
   });
 
   it("rejects an active Connection without a Provider Account fingerprint", async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
     const connection = await seedActivePrivyConnection("missing_fingerprint");
     await getDb(env)
       .prepare("UPDATE custody_connections SET provider_account_fingerprint = NULL WHERE id = ?")
@@ -723,35 +755,42 @@ describe("Custody multi-provider routes", () => {
     [{ connectionId: "cconn_missing" }, 404, "NOT_FOUND"],
     [{ connectionId: "cconn_switch_unusable" }, 409, "CONFLICT"],
   ] as const)("rejects an unavailable exact Connection with %s", async (request, status, code) => {
-    env.PRIVY_BYOK_ENABLED = "true";
     if (request.connectionId === "cconn_switch_unusable") {
       const credentialId = "pcred_switch_unusable";
-      await getDb(env).batch([
-        getDb(env)
-          .prepare(
-            `INSERT INTO provider_credentials (
-               id, organization_id, project_id, provider, label, scope, source,
-               storage_backend, encrypted_secret_payload, status, created_by
-             ) VALUES (?, ?, ?, 'privy', 'Privy unusable', 'project', 'stored',
-                       'encrypted_db', 'ciphertext', 'pending', ?)`
-          )
-          .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
-        getDb(env)
-          .prepare(
-            `INSERT INTO custody_connections (
-               id, organization_id, project_id, provider, scope,
-               provider_credential_id, provider_credential_scope_key, status, created_by
-             ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
-          )
-          .bind(
-            request.connectionId,
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            credentialId,
-            TEST_PROJECT.id,
-            TEST_USER.id
-          ),
-      ]);
+      await getDb(env).transaction(async (tx) => {
+        await insertTestStoredProviderCredential(tx, {
+          id: credentialId,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          provider: "privy",
+          label: "Privy unusable",
+          stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+          displayMetadata: {},
+          status: "pending",
+          credentialVersion: 1,
+          rotatedFromProviderCredentialId: null,
+          lastValidatedAt: null,
+          deactivatedAt: null,
+          createdBy: TEST_USER.id,
+        });
+        await insertTestCustodyConnection(tx, {
+          id: request.connectionId,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          provider: "privy",
+          credential: { id: credentialId, projectId: TEST_PROJECT.id },
+          status: "pending",
+          setupMetadata: {},
+          providerAccountFingerprint: null,
+          lastCheckStatus: null,
+          lastCheckAt: null,
+          lastCheckFailureCode: null,
+          activatedAt: null,
+          deactivatedAt: null,
+          createdBy: TEST_USER.id,
+          createdAt: new Date().toISOString(),
+        });
+      });
     }
 
     const res = await app.request(
@@ -771,9 +810,9 @@ describe("Custody multi-provider routes", () => {
     expect(await res.json()).toMatchObject({ error: { code } });
   });
 
-  it("rejects an exact Connection while Connection runtime is disabled", async () => {
-    env.PRIVY_BYOK_ENABLED = "false";
-    const connection = await seedActivePrivyConnection("disabled");
+  it("rejects an exact Connection switch while its BYOK pair is out of channel", async () => {
+    const connection = await seedActivePrivyConnection("out_of_channel");
+    custodyReleaseChannel.outOfChannelMode = "byok";
 
     const res = await app.request(
       "/v1/wallets/switch",
@@ -789,11 +828,15 @@ describe("Custody multi-provider routes", () => {
     );
 
     expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(await res.json()).toEqual(channelRefusalBody("privy", "byok"));
+    expect(await readScopeDefault()).toEqual({
+      default_custody_config_id: PRIVY_CONFIG_ID,
+      default_custody_connection_id: null,
+    });
+    expect(await readSwitchAudit()).toHaveLength(0);
   });
 
   it("rejects an exact Connection switch without changing the target when entitlement is revoked", async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
     const connection = await seedActivePrivyConnection("unentitled");
     await getDb(env)
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
@@ -849,7 +892,6 @@ describe("Custody multi-provider routes", () => {
   });
 
   it("keeps provider-only switching on the active Config when Connections are candidates", async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
     env.PRIVY_APP_ID = "privy_test_app_id";
     env.PRIVY_APP_SECRET = "privy_test_app_secret";
     await seedActivePrivyConnection("candidate_a");
@@ -962,7 +1004,6 @@ describe("Custody multi-provider routes", () => {
   });
 
   it("keeps active Connection wallets visible with fresh Runtime Execution Admission", async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
     const connection = await seedActivePrivyConnection("inventory");
 
     const readWallet = async () => {
@@ -990,7 +1031,7 @@ describe("Custody multi-provider routes", () => {
       provider: "privy",
     });
 
-    env.PRIVY_BYOK_ENABLED = "false";
+    custodyReleaseChannel.outOfChannelMode = "byok";
     await expect(readWallet()).resolves.toMatchObject({
       custodyConnectionId: connection.connectionId,
       isDefaultProvider: false,
@@ -998,7 +1039,7 @@ describe("Custody multi-provider routes", () => {
       provider: "privy",
     });
 
-    env.PRIVY_BYOK_ENABLED = "true";
+    custodyReleaseChannel.outOfChannelMode = null;
     await getDb(env)
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(JSON.stringify({ providerOverrides: { custody: { privy: false } } }), TEST_ORG.id)
@@ -1048,31 +1089,18 @@ describe("Custody multi-provider routes", () => {
 
   it("skips active configs without wallets in /v1/wallets/configs instead of failing", async () => {
     const walletlessConfigId = "cust_cfg_walletless";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          walletlessConfigId,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
-          "turnkey",
-          "test-config",
-          "sdp-custody-encryption-v1",
-          null,
-          "active"
-        ),
-      getDb(env)
-        .prepare(
-          `UPDATE custody_scope_defaults
-           SET default_custody_config_id = ?, updated_at = datetime('now')
-           WHERE organization_id = ? AND project_id = ?`
-        )
-        .bind(walletlessConfigId, TEST_ORG.id, TEST_PROJECT.id),
-    ]);
+    await getDb(env).transaction(async (tx) => {
+      await insertTestCustodyConfigRow(tx, {
+        id: walletlessConfigId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "turnkey",
+        configEncrypted: "test-config",
+        defaultWalletId: null,
+        status: "active",
+      });
+      await selectProjectDefaultConfig(tx, walletlessConfigId);
+    });
 
     const res = await app.request(
       "/v1/wallets/configs",
@@ -1102,46 +1130,27 @@ describe("Custody multi-provider routes", () => {
   });
 
   it("returns config for legacy default providers without adapter resolution", async () => {
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          DFNS_CONFIG_ID,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
-          "dfns",
-          "legacy-config",
-          "sdp-custody-encryption-v1",
-          "dfns_wallet_a",
-          "active"
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "cwlt_dfns_a",
-          DFNS_CONFIG_ID,
-          "dfns_wallet_a",
-          "dfns_pubkey_a",
-          "Dfns Root A",
-          "root",
-          "active"
-        ),
-      getDb(env)
-        .prepare(
-          `UPDATE custody_scope_defaults
-           SET default_custody_config_id = ?, updated_at = datetime('now')
-           WHERE organization_id = ? AND project_id = ?`
-        )
-        .bind(DFNS_CONFIG_ID, TEST_ORG.id, TEST_PROJECT.id),
-    ]);
+    await getDb(env).transaction(async (tx) => {
+      await insertTestCustodyConfigRow(tx, {
+        id: DFNS_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "dfns",
+        configEncrypted: "legacy-config",
+        defaultWalletId: "dfns_wallet_a",
+        status: "active",
+      });
+      await insertTestCustodyWalletRow(tx, {
+        id: "cwlt_dfns_a",
+        owner: { kind: "config", custodyConfigId: DFNS_CONFIG_ID },
+        walletId: "dfns_wallet_a",
+        publicKey: "dfns_pubkey_a",
+        label: "Dfns Root A",
+        purpose: "root",
+        status: "active",
+      });
+      await selectProjectDefaultConfig(tx, DFNS_CONFIG_ID);
+    });
 
     const res = await app.request(
       "/v1/wallets/config",
@@ -1168,46 +1177,27 @@ describe("Custody multi-provider routes", () => {
 
   it("returns config for an ibm_haven default provider without adapter resolution", async () => {
     // IBM Digital Asset Haven wallets are stored with an `ibmhaven_` prefix (white-label Dfns).
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          IBM_HAVEN_CONFIG_ID,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
-          "ibm_haven",
-          "legacy-config",
-          "sdp-custody-encryption-v1",
-          "ibmhaven_wallet_haven",
-          "active"
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "cwlt_ibm_haven",
-          IBM_HAVEN_CONFIG_ID,
-          "ibmhaven_wallet_haven",
-          "haven_pubkey",
-          "Haven Root",
-          "root",
-          "active"
-        ),
-      getDb(env)
-        .prepare(
-          `UPDATE custody_scope_defaults
-           SET default_custody_config_id = ?, updated_at = datetime('now')
-           WHERE organization_id = ? AND project_id = ?`
-        )
-        .bind(IBM_HAVEN_CONFIG_ID, TEST_ORG.id, TEST_PROJECT.id),
-    ]);
+    await getDb(env).transaction(async (tx) => {
+      await insertTestCustodyConfigRow(tx, {
+        id: IBM_HAVEN_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "ibm_haven",
+        configEncrypted: "legacy-config",
+        defaultWalletId: "ibmhaven_wallet_haven",
+        status: "active",
+      });
+      await insertTestCustodyWalletRow(tx, {
+        id: "cwlt_ibm_haven",
+        owner: { kind: "config", custodyConfigId: IBM_HAVEN_CONFIG_ID },
+        walletId: "ibmhaven_wallet_haven",
+        publicKey: "haven_pubkey",
+        label: "Haven Root",
+        purpose: "root",
+        status: "active",
+      });
+      await selectProjectDefaultConfig(tx, IBM_HAVEN_CONFIG_ID);
+    });
 
     const res = await app.request(
       "/v1/wallets/config",

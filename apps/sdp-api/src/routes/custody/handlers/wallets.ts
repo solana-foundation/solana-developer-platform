@@ -7,7 +7,6 @@ import type { Address } from "@solana/kit";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, conflict, serviceUnavailable } from "@/lib/errors";
-import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -31,6 +30,7 @@ import {
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
 import {
+  assertCustodyProviderAvailable,
   assertCustodyProviderEntitled,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
@@ -448,14 +448,13 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
   }
 
   if (wallet.custodyConnectionId) {
-    if (!isCustodyConnectionRuntimeEnabled(c.env, wallet.provider)) {
-      throw new AppError("FORBIDDEN", "Custody Connection runtime is disabled");
-    }
+    assertCustodyProviderAvailable(c.env, wallet.provider, "byok");
     await assertCustodyProviderEntitled(c.env, getDb(c.env), actor.organizationId, wallet.provider);
     if (!wallet.isRuntimeExecutionAllowed) {
       throw new AppError("CONFLICT", "Custody Connection is unavailable");
     }
   } else {
+    assertCustodyProviderAvailable(c.env, wallet.provider, "managed");
     const signingService = signingServiceModule.createSigningService(
       c.env,
       getRequestTenantScope(c)
@@ -806,6 +805,7 @@ export const getPublicKey = async (c: AppContext) => {
   const requestedWalletId = c.req.query("walletId");
 
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
+  const runtimeTargets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
 
   try {
     const custodyWalletId = resolveApiKeyCustodyWalletId(auth, requestedWalletId, ["wallets:read"]);
@@ -813,11 +813,7 @@ export const getPublicKey = async (c: AppContext) => {
       ? null
       : resolveApiKeySigningWalletId(auth, requestedWalletId, ["wallets:read"]);
     if (custodyWalletId) {
-      const wallet = await new CustodyRuntimeTargets(
-        getDb(c.env),
-        c.env,
-        new Map()
-      ).findOperationalWalletById({
+      const wallet = await runtimeTargets.findOperationalWalletById({
         organizationId: actor.organizationId,
         projectId,
         custodyWalletId,
@@ -828,11 +824,7 @@ export const getPublicKey = async (c: AppContext) => {
       return success(c, { publicKey: wallet.publicKey });
     }
     if (walletId) {
-      const wallet = await new CustodyRuntimeTargets(
-        getDb(c.env),
-        c.env,
-        new Map()
-      ).findOperationalWallet({
+      const wallet = await runtimeTargets.findOperationalWallet({
         organizationId: actor.organizationId,
         projectId,
         walletId,
@@ -851,14 +843,14 @@ export const getPublicKey = async (c: AppContext) => {
       return success(c, { publicKey });
     }
 
-    const effective = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
+    const effective = await runtimeTargets.resolve({
       kind: "effective",
       organizationId: actor.organizationId,
       projectId,
     });
     if (effective?.kind === "connection") {
       const wallet = effective.wallet
-        ? await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).findOperationalWallet({
+        ? await runtimeTargets.findOperationalWallet({
             organizationId: actor.organizationId,
             projectId,
             walletId: effective.wallet.walletId,

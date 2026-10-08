@@ -1,20 +1,42 @@
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey } from "@sdp/types";
+import type { CachedApiKey, CustodyMode } from "@sdp/types";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
 import { custodyWalletResponse } from "@/openapi/paths/responses";
 import { getLogger } from "@/runtime/logger";
-import { createCredentialSecretStore } from "@/services/credential-secret-store";
-import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import {
+  insertTestCustodyConfigRow,
+  insertTestCustodyScopeDefault,
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody";
+import { insertTestStoredProviderCredential } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+const custodyReleaseChannel = vi.hoisted((): { outOfChannelMode: CustodyMode | null } => ({
+  outOfChannelMode: null,
+}));
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@sdp/types/release-channels")>();
+  const isCustodyProviderInReleaseChannel: typeof original.isCustodyProviderInReleaseChannel = (
+    releaseChannel,
+    provider,
+    mode
+  ) =>
+    mode !== custodyReleaseChannel.outOfChannelMode &&
+    original.isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
+  return { ...original, isCustodyProviderInReleaseChannel };
+});
 
 const provisionPrivyWalletMock = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
 
@@ -28,6 +50,8 @@ const DEFAULT_WALLET_RECORD_ID = "cwlt_connection_wallets_default";
 const DEFAULT_WALLET_ID = "privy_connection_wallets_default";
 const SECOND_WALLET_RECORD_ID = "cwlt_connection_wallets_second";
 const SECOND_WALLET_ID = "privy_connection_wallets_second";
+const PRIVY_APP_ID = "connection-wallets-app";
+const PRIVY_APP_SECRET = "connection-wallets-secret";
 const API_KEY = {
   id: "key_custody_connection_wallets",
   raw: "sk_test_custody_connection_wallets",
@@ -47,16 +71,10 @@ const CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
-const originalEnv = {
-  byok: env.PRIVY_BYOK_ENABLED,
-  appId: env.PRIVY_APP_ID,
-  appSecret: env.PRIVY_APP_SECRET,
-  encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
-};
+const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
 
 async function seedFixture(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
-  const fingerprint = await getPrivyProviderAccountFingerprint(env.PRIVY_APP_ID as string);
   await seedCachedApiKey(env, keyHash, CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
@@ -74,71 +92,76 @@ async function seedFixture(): Promise<void> {
     members: [],
     ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
   });
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO api_keys (
-           id, organization_id, project_id, created_by, name, key_prefix,
-           key_hash, role, permissions, status
-         ) VALUES (?, ?, ?, ?, 'Test', ?, ?, 'api_admin', '["*"]', 'active')`
-      )
-      .bind(API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs (
-           id, organization_id, project_id, provider, config_encrypted,
-           encryption_version, status
-         ) VALUES (?, ?, ?, 'para', 'test', 'test', 'active')`
-      )
-      .bind(CONFIG_ID, ORGANIZATION_ID, PROJECT_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults (
-           id, organization_id, project_id, default_custody_config_id
-         ) VALUES ('csd_connection_wallets', ?, ?, ?)`
-      )
-      .bind(ORGANIZATION_ID, PROJECT_ID, CONFIG_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO provider_credentials (
-           id, organization_id, project_id, provider, label, scope, source,
-           storage_backend, status, created_by
-         ) VALUES (?, ?, ?, 'privy', 'Runtime Privy', 'project', 'runtime',
-                   'runtime_env', 'active', ?)`
-      )
-      .bind(CREDENTIAL_ID, ORGANIZATION_ID, PROJECT_ID, USER_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_connections (
-           id, organization_id, project_id, provider, scope,
-           provider_credential_id, provider_credential_scope_key, status, created_by
-         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
-      )
-      .bind(CONNECTION_ID, ORGANIZATION_ID, PROJECT_ID, CREDENTIAL_ID, PROJECT_ID, USER_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_connection_id, wallet_id, public_key, label, status
-         ) VALUES (?, ?, ?, '11111111111111111111111111111111', 'Default', 'active')`
-      )
-      .bind(DEFAULT_WALLET_RECORD_ID, CONNECTION_ID, DEFAULT_WALLET_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_connection_id, wallet_id, public_key, label, status
-         ) VALUES (?, ?, ?, 'So11111111111111111111111111111111111111112', 'Second', 'active')`
-      )
-      .bind(SECOND_WALLET_RECORD_ID, CONNECTION_ID, SECOND_WALLET_ID),
-    getDb(env)
-      .prepare(
-        `UPDATE custody_connections
-         SET default_custody_wallet_id = ?, status = 'active',
-             last_check_status = 'success', last_check_at = sdp_iso_now(),
-             provider_account_fingerprint = ?, activated_at = sdp_iso_now()
-         WHERE id = ?`
-      )
-      .bind(DEFAULT_WALLET_RECORD_ID, fingerprint, CONNECTION_ID),
-  ]);
+  const stored = await writeTestPrivyCredentialSecret(env, {
+    organizationId: ORGANIZATION_ID,
+    credentialId: CREDENTIAL_ID,
+    appId: PRIVY_APP_ID,
+    appSecret: PRIVY_APP_SECRET,
+  });
+  await getDb(env).transaction(async (tx) => {
+    await tx.execute(
+      `INSERT INTO api_keys (
+         id, organization_id, project_id, created_by, name, key_prefix,
+         key_hash, role, permissions, status
+       ) VALUES (?, ?, ?, ?, 'Test', ?, ?, 'api_admin', '["*"]', 'active')`,
+      [API_KEY.id, ORGANIZATION_ID, PROJECT_ID, USER_ID, API_KEY.prefix, keyHash]
+    );
+    await insertTestCustodyConfigRow(tx, {
+      id: CONFIG_ID,
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      provider: "para",
+      configEncrypted: "test",
+      defaultWalletId: null,
+      status: "active",
+    });
+    await insertTestCustodyScopeDefault(tx, {
+      id: "csd_connection_wallets",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      defaultCustodyConfigId: CONFIG_ID,
+      defaultCustodyConnectionId: null,
+    });
+    await seedTestPrivyConnection(tx, {
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      connectionId: CONNECTION_ID,
+      credentialId: CREDENTIAL_ID,
+      createdBy: USER_ID,
+      stored,
+      providerAccountFingerprint: `sha256:${CREDENTIAL_ID}`,
+      lastCheckStatus: "success",
+      wallets: [
+        {
+          id: DEFAULT_WALLET_RECORD_ID,
+          walletId: DEFAULT_WALLET_ID,
+          publicKey: "11111111111111111111111111111111",
+          label: "Default",
+          purpose: null,
+          status: "active",
+        },
+        {
+          id: SECOND_WALLET_RECORD_ID,
+          walletId: SECOND_WALLET_ID,
+          publicKey: "So11111111111111111111111111111111111111112",
+          label: "Second",
+          purpose: null,
+          status: "active",
+        },
+      ],
+      defaultCustodyWalletId: DEFAULT_WALLET_RECORD_ID,
+    });
+  });
+}
+
+function channelRefusalBody(mode: CustodyMode) {
+  return {
+    error: {
+      code: "FORBIDDEN",
+      message: custodyProviderNotInReleaseChannel("privy", mode).message,
+    },
+    meta: { requestId: expect.any(String) },
+  };
 }
 
 async function request(path: string, method: "POST" | "DELETE", body: unknown): Promise<Response> {
@@ -161,19 +184,15 @@ describe("Connection-owned wallet control plane", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     provisionPrivyWalletMock.mockReset();
-    env.PRIVY_BYOK_ENABLED = "true";
-    env.PRIVY_APP_ID = "connection-wallets-app";
-    env.PRIVY_APP_SECRET = "connection-wallets-secret";
+    custodyReleaseChannel.outOfChannelMode = null;
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 19).toString("base64");
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedFixture();
   });
 
   afterEach(async () => {
-    env.PRIVY_BYOK_ENABLED = originalEnv.byok;
-    env.PRIVY_APP_ID = originalEnv.appId;
-    env.PRIVY_APP_SECRET = originalEnv.appSecret;
-    env.CUSTODY_ENCRYPTION_KEY = originalEnv.encryptionKey;
+    env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
     await clearKVStores(env);
   });
 
@@ -236,7 +255,7 @@ describe("Connection-owned wallet control plane", () => {
     expect(provisionPrivyWalletMock).toHaveBeenCalledWith(
       env,
       { credentialRequest: true },
-      { appId: "connection-wallets-app", appSecret: "connection-wallets-secret" }
+      { appId: PRIVY_APP_ID, appSecret: PRIVY_APP_SECRET }
     );
 
     const persisted = await getDb(env)
@@ -339,25 +358,6 @@ describe("Connection-owned wallet control plane", () => {
   });
 
   it("persists a wallet when its Connection moves to a replacement Credential during Provider creation", async () => {
-    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 19).toString("base64");
-    const secretStore = createCredentialSecretStore(env, "encrypted_db");
-    const predecessorSecret = await secretStore.write({
-      orgId: ORGANIZATION_ID,
-      provider: "privy",
-      providerCredentialId: CREDENTIAL_ID,
-      payload: {
-        appId: env.PRIVY_APP_ID as string,
-        appSecret: env.PRIVY_APP_SECRET as string,
-      },
-    });
-    await getDb(env).execute(
-      `UPDATE provider_credentials
-       SET source = 'stored', storage_backend = 'encrypted_db',
-           encrypted_secret_payload = ?, credential_version = 1
-       WHERE id = ?`,
-      [predecessorSecret.encryptedSecretPayload, CREDENTIAL_ID]
-    );
-
     let markProviderCreationStarted!: () => void;
     const providerCreationStarted = new Promise<void>((resolve) => {
       markProviderCreationStarted = resolve;
@@ -378,33 +378,29 @@ describe("Connection-owned wallet control plane", () => {
     const creation = request("", "POST", { connectionId: CONNECTION_ID });
     await providerCreationStarted;
     const rotatedCredentialId = "pcred_connection_wallets_rotated";
-    const replacementSecret = await secretStore.write({
-      orgId: ORGANIZATION_ID,
-      provider: "privy",
-      providerCredentialId: rotatedCredentialId,
-      payload: {
-        appId: env.PRIVY_APP_ID as string,
-        appSecret: env.PRIVY_APP_SECRET as string,
-      },
+    const replacementSecret = await writeTestPrivyCredentialSecret(env, {
+      organizationId: ORGANIZATION_ID,
+      credentialId: rotatedCredentialId,
+      appId: PRIVY_APP_ID,
+      appSecret: PRIVY_APP_SECRET,
     });
     try {
       await getDb(env).transaction(async (tx) => {
-        await tx.execute(
-          `INSERT INTO provider_credentials (
-             id, organization_id, project_id, provider, label, scope, source,
-             storage_backend, encrypted_secret_payload, status, credential_version,
-             rotated_from_provider_credential_id, created_by
-           ) VALUES (?, ?, ?, 'privy', 'Rotated Privy', 'project', 'stored',
-                     'encrypted_db', ?, 'active', 2, ?, ?)`,
-          [
-            rotatedCredentialId,
-            ORGANIZATION_ID,
-            PROJECT_ID,
-            replacementSecret.encryptedSecretPayload,
-            CREDENTIAL_ID,
-            USER_ID,
-          ]
-        );
+        await insertTestStoredProviderCredential(tx, {
+          id: rotatedCredentialId,
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          provider: "privy",
+          label: "Rotated Privy",
+          stored: replacementSecret,
+          displayMetadata: {},
+          status: "active",
+          credentialVersion: 2,
+          rotatedFromProviderCredentialId: CREDENTIAL_ID,
+          lastValidatedAt: null,
+          deactivatedAt: null,
+          createdBy: USER_ID,
+        });
         await tx.execute(
           `UPDATE custody_connections
            SET provider_credential_id = ?, updated_at = sdp_iso_now()
@@ -448,7 +444,7 @@ describe("Connection-owned wallet control plane", () => {
     expect(await walletCount()).toBe(before);
   });
 
-  it("fails exact create before Provider access on assertion or runtime errors", async () => {
+  it("fails exact create before Provider access on assertion or release-channel errors", async () => {
     const missing = await request("", "POST", { connectionId: "cconn_missing" });
     expect(missing.status).toBe(404);
 
@@ -458,10 +454,13 @@ describe("Connection-owned wallet control plane", () => {
     });
     expect(mismatch.status).toBe(400);
 
-    env.PRIVY_BYOK_ENABLED = "false";
-    const disabled = await request("", "POST", { connectionId: CONNECTION_ID });
-    expect(disabled.status).toBe(403);
+    custodyReleaseChannel.outOfChannelMode = "byok";
+    const before = await walletCount();
+    const outOfChannel = await request("", "POST", { connectionId: CONNECTION_ID });
+    expect(outOfChannel.status).toBe(403);
+    expect(await outOfChannel.json()).toEqual(channelRefusalBody("byok"));
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    expect(await walletCount()).toBe(before);
   });
 
   it("uses the sole eligible Connection for provider-only creation without selecting it", async () => {
@@ -642,11 +641,18 @@ describe("Connection-owned wallet control plane", () => {
         .first()
     ).toEqual({ default_custody_connection_id: null });
 
-    env.PRIVY_BYOK_ENABLED = "false";
-    const disabled = await request("/default-wallet", "POST", {
+    custodyReleaseChannel.outOfChannelMode = "byok";
+    const outOfChannel = await request("/default-wallet", "POST", {
       walletId: DEFAULT_WALLET_ID,
     });
-    expect(disabled.status).toBe(403);
+    expect(outOfChannel.status).toBe(403);
+    expect(await outOfChannel.json()).toEqual(channelRefusalBody("byok"));
+    expect(
+      await getDb(env)
+        .prepare("SELECT default_custody_wallet_id FROM custody_connections WHERE id = ?")
+        .bind(CONNECTION_ID)
+        .first()
+    ).toEqual({ default_custody_wallet_id: SECOND_WALLET_RECORD_ID });
   });
 
   it("keeps the Connection default wallet unchanged when entitlement is revoked", async () => {
@@ -716,8 +722,8 @@ describe("Connection-owned wallet control plane", () => {
     }
   });
 
-  it("returns static unsupported deletion before Connection runtime gates", async () => {
-    env.PRIVY_BYOK_ENABLED = "false";
+  it("returns static unsupported deletion before release-channel gates", async () => {
+    custodyReleaseChannel.outOfChannelMode = "byok";
 
     const response = await request("", "DELETE", {
       walletId: DEFAULT_WALLET_ID,
@@ -740,8 +746,8 @@ describe("Connection-owned wallet control plane", () => {
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
 
-  it("keeps Connection wallet policy control-plane available while runtime is disabled", async () => {
-    env.PRIVY_BYOK_ENABLED = "false";
+  it("keeps Connection wallet policy control-plane available while the BYOK pair is out of channel", async () => {
+    custodyReleaseChannel.outOfChannelMode = "byok";
     const headers = {
       Authorization: `Bearer ${API_KEY.raw}`,
       "Content-Type": "application/json",
