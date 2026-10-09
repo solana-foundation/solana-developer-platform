@@ -6,7 +6,7 @@ import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
-import app from "@/index";
+import baseApp from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
@@ -21,6 +21,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { APPROVAL_DECISION_PATH, withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
@@ -46,6 +47,9 @@ import {
   seedWalletControlProfile,
 } from "@/test/helpers/payments-transfers";
 import { required } from "@/test/helpers/required";
+
+// Approving an approval request requires an Idempotency-Key (HOO-1918).
+const app = withIdempotencyKeys(baseApp, { only: APPROVAL_DECISION_PATH });
 
 const TEST_DUPLICATE_CUSTODY_WALLET_ID = "cwlt_payments_duplicate_test";
 

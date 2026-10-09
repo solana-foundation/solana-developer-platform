@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requirePermissions } from "@/middleware/auth";
+import { idempotent } from "@/middleware/idempotency";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -19,6 +20,7 @@ counterpartyAccounts.get("/", requirePermissions("counterparties:read"), listCou
 counterpartyAccounts.post(
   "/",
   requirePermissions("counterparties:write"),
+  idempotent({ key: "accepted" }),
   validateBody(createCounterpartyAccountSchema),
   createCounterpartyAccount
 );
@@ -30,6 +32,7 @@ counterpartyAccounts.get(
 counterpartyAccounts.patch(
   "/:counterpartyAccountId",
   requirePermissions("counterparties:write"),
+  idempotent({ key: "accepted" }),
   validateBody(updateCounterpartyAccountSchema),
   updateCounterpartyAccount
 );

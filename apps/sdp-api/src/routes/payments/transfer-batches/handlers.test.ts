@@ -26,7 +26,7 @@ import {
 } from "@/db/repositories";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
-import app from "@/index";
+import baseApp from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
@@ -39,6 +39,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { APPROVAL_DECISION_PATH, withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import {
   sendTransactionMock,
   sendTransactionPreflightError,
@@ -49,6 +50,9 @@ import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+// Approving an approval request requires an Idempotency-Key (HOO-1918).
+const app = withIdempotencyKeys(baseApp, { only: APPROVAL_DECISION_PATH });
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");

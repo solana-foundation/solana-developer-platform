@@ -151,6 +151,9 @@ export interface CreatePaymentRecurringPaymentInput {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  /** The request's Idempotency-Key and its fingerprint (HOO-1918), or null. */
+  idempotencyKey: string | null;
+  idempotencyFingerprint: string | null;
 }
 
 export interface UpdatePaymentRecurringPaymentInput {
@@ -433,6 +436,12 @@ export interface PaymentRecurringPaymentsRepository {
   createRecurringPayment(
     input: CreatePaymentRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;
+  /** The recurring payment created under this Idempotency-Key, if any. */
+  findRecurringPaymentByIdempotencyKey(params: {
+    organizationId: string;
+    projectId: string;
+    idempotencyKey: string;
+  }): Promise<{ id: string; idempotencyFingerprint: string | null } | null>;
   updateRecurringPayment(
     input: UpdatePaymentRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;

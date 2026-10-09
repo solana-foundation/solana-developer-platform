@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { idempotent } from "@/middleware/idempotency";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireModule } from "@/middleware/require-module";
 import { validateBody } from "@/middleware/validate";
@@ -46,6 +47,7 @@ counterparties.get("/", requirePermissions("counterparties:read"), listCounterpa
 counterparties.post(
   "/",
   requirePermissions("counterparties:write"),
+  idempotent({ key: "accepted" }),
   validateBody(createCounterpartySchema),
   createCounterparty
 );
@@ -64,6 +66,7 @@ counterparties.post(
 counterparties.patch(
   "/:counterpartyId",
   requirePermissions("counterparties:write"),
+  idempotent({ key: "accepted" }),
   validateBody(updateCounterpartySchema),
   updateCounterparty
 );

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { idempotent } from "@/middleware/idempotency";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
@@ -17,6 +18,7 @@ compliance.use("*", projectContextMiddleware());
 compliance.post(
   "/address-screenings",
   requirePermissions("payments:read"),
+  idempotent({ key: "accepted" }),
   validateBody(screenAddressSchema),
   meteredQuota({ name: "compliance-screening", actorMax: 30, orgMax: 120 }),
   screenAddress

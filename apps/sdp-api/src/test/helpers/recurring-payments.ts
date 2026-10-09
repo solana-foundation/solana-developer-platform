@@ -4,7 +4,7 @@ import { generateKeyPairSigner, type Signature, signature } from "@solana/kit";
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db";
-import app from "@/index";
+import baseApp from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
   paymentRecurringPaymentCollectionResponseSchema,
@@ -12,6 +12,7 @@ import {
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
@@ -24,6 +25,9 @@ import {
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+
+// Recurring create and lifecycle actions require an Idempotency-Key (HOO-1918).
+const app = withIdempotencyKeys(baseApp);
 
 const recurringResponseSchema = successResponseSchema(paymentRecurringPaymentResponseSchema);
 const collectionResponseSchema = successResponseSchema(

@@ -422,8 +422,10 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              metadata_uri,
              created_by,
              created_at,
-             updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             updated_at,
+             idempotency_key,
+             idempotency_fingerprint
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           input.id,
@@ -442,7 +444,9 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.metadataUri,
           input.createdBy,
           input.createdAt,
-          input.updatedAt
+          input.updatedAt,
+          input.idempotencyKey,
+          input.idempotencyFingerprint
         )
         .run();
 
@@ -451,6 +455,20 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         organizationId: input.organizationId,
         projectId: input.projectId,
       });
+    },
+
+    async findRecurringPaymentByIdempotencyKey({ organizationId, projectId, idempotencyKey }) {
+      const row = await db
+        .prepare(
+          `SELECT id, idempotency_fingerprint
+             FROM payment_recurring_payments
+            WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`
+        )
+        .bind(organizationId, projectId, idempotencyKey)
+        .first<{ id: string; idempotency_fingerprint: string | null }>();
+      return row === null
+        ? null
+        : { id: row.id, idempotencyFingerprint: row.idempotency_fingerprint };
     },
 
     async updateRecurringPayment(input: UpdatePaymentRecurringPaymentInput) {

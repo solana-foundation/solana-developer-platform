@@ -61,7 +61,7 @@ import {
   type UpsertEarnStrategyInput,
 } from "@/db/repositories";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
-import app from "@/index";
+import baseApp from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
@@ -69,9 +69,13 @@ import { recoverApprovedWalletOperations } from "@/services/policy/approved-oper
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { APPROVAL_DECISION_PATH, withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
+
+// Approving an approval request requires an Idempotency-Key (HOO-1918).
+const app = withIdempotencyKeys(baseApp, { only: APPROVAL_DECISION_PATH });
 
 const TEST_ORG = {
   id: "org_test_earn_program",

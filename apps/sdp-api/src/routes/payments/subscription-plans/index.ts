@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requirePermissions } from "@/middleware/auth";
+import { idempotent } from "@/middleware/idempotency";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -20,6 +21,7 @@ const subscriptionPlans = new Hono<{ Bindings: Env }>();
 subscriptionPlans.post(
   "/",
   requirePermissions("payments:write", "wallets:read"),
+  idempotent({ key: "accepted" }),
   validateBody(createSubscriptionPlanSchema),
   createSubscriptionPlan
 );
@@ -27,6 +29,7 @@ subscriptionPlans.get("/", requirePermissions("payments:read"), listSubscription
 subscriptionPlans.post(
   "/:planId/prepare-create",
   requirePermissions("payments:write", "wallets:read"),
+  idempotent({ key: "accepted" }),
   validateBody(prepareSubscriptionPlanCreateSchema),
   prepareCreateSubscriptionPlan
 );
@@ -34,6 +37,7 @@ subscriptionPlans.get("/:planId", requirePermissions("payments:read"), getSubscr
 subscriptionPlans.patch(
   "/:planId",
   requirePermissions("payments:write", "wallets:read"),
+  idempotent({ key: "accepted" }),
   validateBody(updateSubscriptionPlanSchema),
   updateSubscriptionPlan
 );
