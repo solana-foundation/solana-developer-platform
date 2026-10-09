@@ -59,6 +59,7 @@ import {
 } from "@/services/domain/signing/provider-wallet-lifecycle";
 import {
   assertCustodyProviderAvailable,
+  assertManagedCustodyUseAllowed,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import {
@@ -258,20 +259,22 @@ export class SigningService {
   }
 
   /**
-   * Refuses Managed custody on `provider` for `orgId` unless the (provider, managed)
-   * pair is in the release channel and the organization has the provider enabled.
-   * The channel refusal keeps its 403; the entitlement refusal is a signing error.
+   * Refuses using a Managed custody config unless the (provider, managed) pair is
+   * in the release channel, the config's project allows Managed custody
+   * (Production is BYOK only) and the organization has the provider enabled.
+   * Every Managed use passes here before any decrypt or provider call: wallet
+   * creation and deletion, and the adapter every signer and public-key read
+   * builds. The channel and environment refusals keep their 403s; the
+   * entitlement refusal is a signing error.
    *
-   * @param orgId - The organization whose custody config is about to be used.
-   * @param provider - The config's custody provider.
+   * @param config - The Managed config about to be used.
    */
-  private async assertProviderEnabled(
-    orgId: string,
-    provider: SigningConfiguration["provider"]
-  ): Promise<void> {
+  private async assertManagedConfigUsable(config: SigningConfigRecord): Promise<void> {
+    const { organizationId, projectId, provider } = config;
     assertCustodyProviderAvailable(this.env, provider, "managed");
+    await assertManagedCustodyUseAllowed(getDb(this.env), { organizationId, projectId, provider });
     try {
-      await assertProviderAvailable(this.env, getDb(this.env), orgId, "custody", provider);
+      await assertProviderAvailable(this.env, getDb(this.env), organizationId, "custody", provider);
     } catch (error) {
       if (error instanceof AppError) {
         throw new SigningError(error.message, "INVALID_REQUEST", error);
@@ -1039,7 +1042,7 @@ export class SigningService {
       );
     }
 
-    await this.assertProviderEnabled(orgId, config.provider);
+    await this.assertManagedConfigUsable(config);
     assertCustodyProviderCanCreateWallet(config.provider);
 
     const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
@@ -1107,7 +1110,7 @@ export class SigningService {
       throw new SigningError("Provider does not match custody wallet", "INVALID_REQUEST");
     }
 
-    await this.assertProviderEnabled(orgId, config.provider);
+    await this.assertManagedConfigUsable(config);
     assertCustodyProviderCanDeleteWallet(config.provider);
 
     const wallets = await this.configStore.getWallets(config.id);
@@ -1154,7 +1157,7 @@ export class SigningService {
     orgId: string,
     config: SigningConfigRecord
   ): Promise<SigningPort> {
-    await this.assertProviderEnabled(orgId, config.provider);
+    await this.assertManagedConfigUsable(config);
 
     const cacheKey = config.id;
 

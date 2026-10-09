@@ -29,6 +29,7 @@ import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provide
 import { createPrivyAdapterFromCredential } from "@/services/domain/signing/provider-adapter-factory";
 import {
   assertCustodyProviderEntitled,
+  assertManagedCustodyUseAllowed,
   custodyProviderNotInReleaseChannel,
   getProviderAvailability,
   isCustodyProviderEntitled,
@@ -124,7 +125,7 @@ export type CustodyOwnedWallet = {
 interface ConfigRow {
   id: string;
   organization_id: string;
-  project_id: string | null;
+  project_id: string;
   provider: string;
   config_encrypted: string;
   encryption_version: string;
@@ -283,6 +284,13 @@ export class CustodyRuntimeTargets {
       throw notFound("Custody wallet");
     }
     this.assertRuntimeExecutionAllowed(target, params.custodyWalletId);
+    if (target.kind === "config") {
+      await assertManagedCustodyUseAllowed(this.db, {
+        organizationId: target.config.organizationId,
+        projectId: target.config.projectId,
+        provider: target.provider,
+      });
+    }
     await assertCustodyProviderEntitled(this.env, this.db, params.organizationId, target.provider);
   }
 

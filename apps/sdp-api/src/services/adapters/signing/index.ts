@@ -13,7 +13,7 @@ export type SigningProviderType = CustodyProvider;
 export interface SigningConfigRecord {
   id: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   provider: SigningProviderType;
   config: string;
   encryptionVersion: string;

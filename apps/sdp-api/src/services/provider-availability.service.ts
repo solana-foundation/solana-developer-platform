@@ -752,6 +752,52 @@ const CUSTODY_MODE_LABELS = {
 } as const satisfies Record<CustodyMode, string>;
 
 /**
+ * The project's environment, read from its active `projects` row: never from
+ * the API key, its cache or request state.
+ *
+ * @param db - Database client for the project row.
+ * @param project - The project being decided for.
+ * @param project.organizationId - The organization that owns the project.
+ * @param project.projectId - The project whose environment is read.
+ * @returns The project's environment.
+ * @throws 404 when the project is not an active project of the organization.
+ */
+async function loadActiveProjectEnvironment(
+  db: DatabaseExecutor,
+  project: CustodySetupProject
+): Promise<SdpEnvironment> {
+  const row = await db
+    .prepare(
+      "SELECT environment FROM projects WHERE id = ? AND organization_id = ? AND status = 'active'"
+    )
+    .bind(project.projectId, project.organizationId)
+    .first<{ environment: SdpEnvironment }>();
+  if (!row) {
+    throw new AppError("NOT_FOUND", "Project not found");
+  }
+  return row.environment;
+}
+
+/**
+ * The refusal for a custody mode the project's environment does not allow.
+ *
+ * @param provider - The custody provider.
+ * @param mode - The custody mode the provider is used in.
+ * @param environment - The project's environment.
+ * @returns A 403 with `details.reason` `custody_mode_not_allowed`.
+ */
+function custodyModeNotAllowed(
+  provider: CustodyProvider,
+  mode: CustodyMode,
+  environment: SdpEnvironment
+): CustodySetupRefusedError {
+  return new CustodySetupRefusedError(
+    `${getProviderLabel("custody", provider)} ${CUSTODY_MODE_LABELS[mode]} custody is not allowed in a ${environment} project.`,
+    "custody_mode_not_allowed"
+  );
+}
+
+/**
  * Reads what the custody setup rule decides from: the project's environment from
  * its active `projects` row (never from the API key, its cache or request state)
  * and the organization's provider access.
@@ -769,17 +815,8 @@ async function loadCustodySetupFacts(
   db: DatabaseExecutor,
   project: CustodySetupProject
 ): Promise<CustodySetupFacts> {
-  const row = await db
-    .prepare(
-      "SELECT environment FROM projects WHERE id = ? AND organization_id = ? AND status = 'active'"
-    )
-    .bind(project.projectId, project.organizationId)
-    .first<{ environment: SdpEnvironment }>();
-  if (!row) {
-    throw new AppError("NOT_FOUND", "Project not found");
-  }
   return {
-    environment: row.environment,
+    environment: await loadActiveProjectEnvironment(db, project),
     availability: await getProviderAvailability(
       env,
       db,
@@ -823,14 +860,8 @@ function decideCustodySetup(
   if (!isCustodyProviderAvailable(env, provider, mode)) {
     return refuse(custodyProviderNotInReleaseChannel(provider, mode));
   }
-  const label = `${getProviderLabel("custody", provider)} ${CUSTODY_MODE_LABELS[mode]} custody`;
   if (!isCustodyModeAllowedInEnvironment(facts.environment, mode)) {
-    return refuse(
-      new CustodySetupRefusedError(
-        `${label} is not allowed in a ${facts.environment} project.`,
-        "custody_mode_not_allowed"
-      )
-    );
+    return refuse(custodyModeNotAllowed(provider, mode, facts.environment));
   }
   const entry = facts.availability.providers.custody[provider];
   if (!entry.entitled) {
@@ -971,6 +1002,44 @@ export async function admitByokCustodySetup(
   provider: CustodyProvider
 ): Promise<CustodySetupAdmission> {
   return admitCustodySetup(env, db, { ...project, provider, mode: "byok" });
+}
+
+/**
+ * Refuses using an existing Managed custody config whose project's environment
+ * does not allow Managed custody (Production is BYOK only). Setup is refused by
+ * the custody setup rule, but a config created before that rule existed would
+ * still create wallets and sign, so every Managed use is refused here, before
+ * any decrypt, adapter build or provider call. The environment is read from the
+ * config's project row, the same read the setup rule makes.
+ *
+ * @param db - Database client for the project row.
+ * @param config - The Managed config about to be used.
+ * @param config.organizationId - The organization that owns the config's project.
+ * @param config.projectId - The config's project.
+ * @param config.provider - The config's custody provider.
+ * @throws 403 `CustodySetupRefusedError` with `details.reason`
+ *   `custody_mode_not_allowed`; 404 when the project is not an active project
+ *   of the organization.
+ */
+export async function assertManagedCustodyUseAllowed(
+  db: DatabaseExecutor,
+  config: CustodySetupProject & { provider: CustodyProvider }
+): Promise<void> {
+  const environment = await loadActiveProjectEnvironment(db, config);
+  if (isCustodyModeAllowedInEnvironment(environment, "managed")) {
+    return;
+  }
+  const error = custodyModeNotAllowed(config.provider, "managed", environment);
+  logEvent("warn", {
+    event: "sdp_api_custody_use_refused",
+    organization_id: config.organizationId,
+    project_id: config.projectId,
+    environment,
+    provider: config.provider,
+    mode: "managed",
+    reason: error.details.reason,
+  });
+  throw error;
 }
 
 function getAvailabilityMessage(
