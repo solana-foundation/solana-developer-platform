@@ -3,6 +3,7 @@ import {
   getPermissionsForApiKeyRole,
   type OrganizationProviderOverrides,
   type ProjectProviderAvailability,
+  type ProjectProviderAvailabilityEntry,
   type SdpEnvironment,
 } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +15,11 @@ import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
-import { type SeededDefaultProjects, seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  archiveProject,
+  type SeededDefaultProjects,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { providerStages } from "@/test/helpers/provider-stages";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
@@ -43,6 +48,11 @@ vi.mock("@/openapi/spec", async (importOriginal) => {
     },
   };
 });
+
+type CustodyUnavailableModes = Extract<
+  ProjectProviderAvailabilityEntry,
+  { family: "custody" }
+>["unavailableModes"];
 
 const ORGANIZATION_ID = "org_project_provider_availability";
 const USER_ID = "usr_project_provider_availability";
@@ -100,74 +110,192 @@ const DEPLOYMENT_CREDENTIALS = {
   STRIPE_PUBLISHABLE_KEY: "stripe_project_provider_availability_publishable",
   STRIPE_WEBHOOK_SECRET: "stripe_project_provider_availability_webhook",
 } as const satisfies Partial<Env>;
+const SANDBOX_UNENTITLED_CUSTODY_MODES: CustodyUnavailableModes = [
+  { mode: "managed", reason: "provider_not_entitled" },
+  { mode: "byok", reason: "custody_provider_not_in_release_channel" },
+];
+const SANDBOX_UNCONFIGURED_CUSTODY_MODES: CustodyUnavailableModes = [
+  { mode: "managed", reason: "provider_not_configured" },
+  { mode: "byok", reason: "custody_provider_not_in_release_channel" },
+];
+const PRODUCTION_UNOFFERED_CUSTODY_MODES: CustodyUnavailableModes = [
+  { mode: "managed", reason: "custody_mode_not_allowed" },
+  { mode: "byok", reason: "custody_provider_not_in_release_channel" },
+];
+const COMPLIANCE_AVAILABILITY: ProjectProviderAvailabilityEntry[] = [
+  { family: "compliance", provider: "range", available: true },
+  { family: "compliance", provider: "elliptic", available: false, reason: "provider_not_entitled" },
+  { family: "compliance", provider: "trm", available: false, reason: "provider_not_entitled" },
+  {
+    family: "compliance",
+    provider: "chainalysis",
+    available: false,
+    reason: "provider_not_entitled",
+  },
+];
+const EARN_AVAILABILITY: ProjectProviderAvailabilityEntry[] = [
+  { family: "earn", provider: "veda", available: true },
+  { family: "earn", provider: "upshift", available: false, reason: "provider_not_offered" },
+  { family: "earn", provider: "perena", available: false, reason: "provider_not_offered" },
+  { family: "earn", provider: "kamino", available: false, reason: "provider_not_entitled" },
+  { family: "earn", provider: "jupiter_lend", available: false, reason: "provider_not_entitled" },
+  { family: "earn", provider: "ondo", available: false, reason: "provider_not_entitled" },
+  { family: "earn", provider: "hastra", available: false, reason: "provider_not_offered" },
+  { family: "earn", provider: "wisdomtree", available: false, reason: "provider_not_offered" },
+];
 const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
   projectId: PROJECT_IDS.sandbox,
   environment: "sandbox",
   providers: [
-    { family: "custody", provider: "local", modes: [] },
-    { family: "custody", provider: "fireblocks", modes: [] },
-    { family: "custody", provider: "privy", modes: ["managed", "byok"] },
-    { family: "custody", provider: "coinbase_cdp", modes: [] },
-    { family: "custody", provider: "para", modes: [] },
-    { family: "custody", provider: "turnkey", modes: [] },
-    { family: "custody", provider: "dfns", modes: [] },
-    { family: "custody", provider: "ibm_haven", modes: [] },
-    { family: "custody", provider: "anchorage", modes: [] },
-    { family: "custody", provider: "utila", modes: [] },
-    { family: "compliance", provider: "range", available: true },
-    { family: "compliance", provider: "elliptic", available: false },
-    { family: "compliance", provider: "trm", available: false },
-    { family: "compliance", provider: "chainalysis", available: false },
+    {
+      family: "custody",
+      provider: "local",
+      modes: [],
+      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "fireblocks",
+      modes: [],
+      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+    },
+    { family: "custody", provider: "privy", modes: ["managed", "byok"], unavailableModes: [] },
+    {
+      family: "custody",
+      provider: "coinbase_cdp",
+      modes: [],
+      unavailableModes: SANDBOX_UNCONFIGURED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "para",
+      modes: [],
+      unavailableModes: SANDBOX_UNCONFIGURED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "turnkey",
+      modes: [],
+      unavailableModes: SANDBOX_UNCONFIGURED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "dfns",
+      modes: [],
+      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "ibm_haven",
+      modes: [],
+      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "anchorage",
+      modes: [],
+      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "utila",
+      modes: [],
+      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+    },
+    ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: true },
-    { family: "ramps", provider: "lightspark", available: false },
-    { family: "ramps", provider: "bvnk", available: false },
-    { family: "ramps", provider: "moneygram", available: false },
-    { family: "ramps", provider: "coinbase", available: false },
-    { family: "ramps", provider: "mural", available: false },
+    {
+      family: "ramps",
+      provider: "lightspark",
+      available: false,
+      reason: "provider_not_configured",
+    },
+    { family: "ramps", provider: "bvnk", available: false, reason: "provider_not_configured" },
+    { family: "ramps", provider: "moneygram", available: false, reason: "provider_not_configured" },
+    { family: "ramps", provider: "coinbase", available: false, reason: "provider_not_configured" },
+    { family: "ramps", provider: "mural", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "stripe", available: true },
-    { family: "earn", provider: "veda", available: true },
-    { family: "earn", provider: "upshift", available: false },
-    { family: "earn", provider: "perena", available: false },
-    { family: "earn", provider: "kamino", available: false },
-    { family: "earn", provider: "jupiter_lend", available: false },
-    { family: "earn", provider: "ondo", available: false },
-    { family: "earn", provider: "hastra", available: false },
-    { family: "earn", provider: "wisdomtree", available: false },
+    ...EARN_AVAILABILITY,
   ],
 };
 const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
   projectId: PROJECT_IDS.production,
   environment: "production",
   providers: [
-    { family: "custody", provider: "local", modes: [] },
-    { family: "custody", provider: "fireblocks", modes: [] },
-    { family: "custody", provider: "privy", modes: ["byok"] },
-    { family: "custody", provider: "coinbase_cdp", modes: [] },
-    { family: "custody", provider: "para", modes: [] },
-    { family: "custody", provider: "turnkey", modes: [] },
-    { family: "custody", provider: "dfns", modes: [] },
-    { family: "custody", provider: "ibm_haven", modes: [] },
-    { family: "custody", provider: "anchorage", modes: [] },
-    { family: "custody", provider: "utila", modes: [] },
-    { family: "compliance", provider: "range", available: true },
-    { family: "compliance", provider: "elliptic", available: false },
-    { family: "compliance", provider: "trm", available: false },
-    { family: "compliance", provider: "chainalysis", available: false },
+    {
+      family: "custody",
+      provider: "local",
+      modes: [],
+      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "fireblocks",
+      modes: [],
+      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "privy",
+      modes: ["byok"],
+      unavailableModes: [{ mode: "managed", reason: "custody_mode_not_allowed" }],
+    },
+    {
+      family: "custody",
+      provider: "coinbase_cdp",
+      modes: [],
+      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "para",
+      modes: [],
+      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "turnkey",
+      modes: [],
+      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "dfns",
+      modes: [],
+      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "ibm_haven",
+      modes: [],
+      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "anchorage",
+      modes: [],
+      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+    },
+    {
+      family: "custody",
+      provider: "utila",
+      modes: [],
+      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+    },
+    ...COMPLIANCE_AVAILABILITY,
     { family: "ramps", provider: "moonpay", available: true },
-    { family: "ramps", provider: "lightspark", available: false },
-    { family: "ramps", provider: "bvnk", available: false },
-    { family: "ramps", provider: "moneygram", available: false },
-    { family: "ramps", provider: "coinbase", available: false },
-    { family: "ramps", provider: "mural", available: false },
+    {
+      family: "ramps",
+      provider: "lightspark",
+      available: false,
+      reason: "provider_not_configured",
+    },
+    { family: "ramps", provider: "bvnk", available: false, reason: "provider_not_configured" },
+    { family: "ramps", provider: "moneygram", available: false, reason: "provider_not_offered" },
+    { family: "ramps", provider: "coinbase", available: false, reason: "provider_not_configured" },
+    { family: "ramps", provider: "mural", available: false, reason: "provider_not_configured" },
     { family: "ramps", provider: "stripe", available: true },
-    { family: "earn", provider: "veda", available: true },
-    { family: "earn", provider: "upshift", available: false },
-    { family: "earn", provider: "perena", available: false },
-    { family: "earn", provider: "kamino", available: false },
-    { family: "earn", provider: "jupiter_lend", available: false },
-    { family: "earn", provider: "ondo", available: false },
-    { family: "earn", provider: "hastra", available: false },
-    { family: "earn", provider: "wisdomtree", available: false },
+    ...EARN_AVAILABILITY,
   ],
 };
 const PROJECT_NOT_FOUND_BODY = {
@@ -360,33 +488,45 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       family: "custody",
       provider: "privy",
       modes: ["byok"],
+      unavailableModes: [{ mode: "managed", reason: "custody_provider_not_in_release_channel" }],
     });
     expect(availability.providers).toContainEqual({
       family: "compliance",
       provider: "range",
       available: false,
+      reason: "provider_not_in_release_channel",
     });
     expect(availability.providers).toContainEqual({
       family: "ramps",
       provider: "moonpay",
       available: false,
+      reason: "provider_not_in_release_channel",
     });
     expect(availability.providers).toContainEqual({
       family: "earn",
       provider: "veda",
       available: false,
+      reason: "provider_not_in_release_channel",
     });
   });
 
   it.for(EARN_FLAG_OFF_CASES)(
-    "reports every Earn provider as unavailable while $flag is off",
+    "reports every Earn provider as outside the release channel while $flag is off",
     async ({ flags }) => {
       const availability = await readAvailability("sandbox", deploymentEnv(flags));
 
       expect(availability).toEqual({
         ...SANDBOX_AVAILABILITY,
-        providers: SANDBOX_AVAILABILITY.providers.map((entry) =>
-          entry.family === "earn" ? { ...entry, available: false } : entry
+        providers: SANDBOX_AVAILABILITY.providers.map(
+          (entry): ProjectProviderAvailabilityEntry =>
+            entry.family === "earn"
+              ? {
+                  family: "earn",
+                  provider: entry.provider,
+                  available: false,
+                  reason: "provider_not_in_release_channel",
+                }
+              : entry
         ),
       });
     }
@@ -406,21 +546,28 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       family: "custody",
       provider: "privy",
       modes: [],
+      unavailableModes: [
+        { mode: "managed", reason: "provider_not_entitled" },
+        { mode: "byok", reason: "provider_not_entitled" },
+      ],
     });
     expect(availability.providers).toContainEqual({
       family: "compliance",
       provider: "range",
       available: false,
+      reason: "provider_not_entitled",
     });
     expect(availability.providers).toContainEqual({
       family: "ramps",
       provider: "moonpay",
       available: false,
+      reason: "provider_not_entitled",
     });
     expect(availability.providers).toContainEqual({
       family: "earn",
       provider: "veda",
       available: false,
+      reason: "provider_not_entitled",
     });
   });
 
@@ -431,22 +578,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     const production = await readAvailability("production", deploymentEnv({}));
     const sandbox = await readAvailability("sandbox", deploymentEnv({}));
 
-    expect(production.providers.filter((entry) => entry.family !== "custody")).toEqual(
-      SANDBOX_AVAILABILITY.providers.filter((entry) => entry.family !== "custody")
-    );
-    expect(sandbox.providers.filter((entry) => entry.family !== "custody")).toEqual(
-      SANDBOX_AVAILABILITY.providers.filter((entry) => entry.family !== "custody")
-    );
-    expect(production.providers).toContainEqual({
-      family: "custody",
-      provider: "privy",
-      modes: ["byok"],
-    });
-    expect(sandbox.providers).toContainEqual({
-      family: "custody",
-      provider: "privy",
-      modes: ["managed", "byok"],
-    });
+    expect(production).toEqual(PRODUCTION_AVAILABILITY);
+    expect(sandbox).toEqual(SANDBOX_AVAILABILITY);
   });
 
   it("reports providers the deployment holds no credentials for as unavailable, except BYOK custody", async () => {
@@ -473,21 +606,25 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       family: "custody",
       provider: "privy",
       modes: ["byok"],
+      unavailableModes: [{ mode: "managed", reason: "provider_not_configured" }],
     });
     expect(availability.providers).toContainEqual({
       family: "compliance",
       provider: "range",
       available: false,
+      reason: "provider_not_configured",
     });
     expect(availability.providers).toContainEqual({
       family: "ramps",
       provider: "moonpay",
       available: false,
+      reason: "provider_not_configured",
     });
     expect(availability.providers).toContainEqual({
       family: "earn",
       provider: "upshift",
       available: false,
+      reason: "provider_not_configured",
     });
     expect(withUpshiftKey.providers).toContainEqual({
       family: "earn",
@@ -509,6 +646,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       family: "ramps",
       provider: "moonpay",
       available: false,
+      reason: "provider_not_configured",
     });
     expect(sandbox.providers).toContainEqual({
       family: "ramps",
@@ -543,6 +681,44 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     const response = await read(
       otherProjects.sandbox.id,
       apiKeyHeaders(API_KEYS.sandbox),
+      deploymentEnv({})
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual(PROJECT_NOT_FOUND_BODY);
+  });
+
+  it("returns 404 to an API key bound to the organization's other project", async () => {
+    const response = await read(
+      PROJECT_IDS.sandbox,
+      apiKeyHeaders(API_KEYS.production),
+      deploymentEnv({})
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual(PROJECT_NOT_FOUND_BODY);
+  });
+
+  it("returns 404 to an API key bound to an archived project", async () => {
+    await archiveProject(getDb(env), PROJECT_IDS.sandbox);
+
+    const response = await read(
+      PROJECT_IDS.sandbox,
+      apiKeyHeaders(API_KEYS.sandbox),
+      deploymentEnv({})
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual(PROJECT_NOT_FOUND_BODY);
+  });
+
+  it("returns 404 to a dashboard session of an archived project's members", async () => {
+    await archiveProject(getDb(env), PROJECT_IDS.sandbox);
+    const token = await signSeededClerkMember(env, getDb(env), USER_ID, ORGANIZATION_ID);
+
+    const response = await read(
+      PROJECT_IDS.sandbox,
+      clerkHeadersWithoutProject(token),
       deploymentEnv({})
     );
 
