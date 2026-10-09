@@ -55,6 +55,10 @@ step** → admission → validation → handler.
 
 - A replay re-checks the caller first.
 - A replay is not admitted again, because it isn't a new movement.
+- Edge refusals deliberately run before replay, and that stays. Once an organization is deleted or loses
+  production access, a same-key retry of a request that already completed gets the 403, not its stored
+  response. A revoked organization is not special-cased to read status, and every new attempt is refused
+  too, so nothing can pay twice. Do not move replay ahead of authentication or project context.
 
 **Outcomes.**
 
