@@ -6,6 +6,7 @@ import {
   OPERATION_FAMILIES,
   OPERATION_FAMILY_BY_TYPE,
   OPERATION_TYPES,
+  upgradeStoredAllowedOperations,
   WALLET_OPERATION_FAMILIES,
   WALLET_OPERATION_TYPES,
 } from "@sdp/types";
@@ -22,7 +23,12 @@ import {
 describe("allowed operations vocabulary", () => {
   it("mirrors the wallet operation vocabulary the routes already declare", () => {
     expect([...OPERATION_TYPES].sort()).toEqual([...WALLET_OPERATION_TYPES].sort());
-    expect([...OPERATION_FAMILIES].sort()).toEqual([...WALLET_OPERATION_FAMILIES].sort());
+    // One deliberate difference: the policy engine's Rings family `transfer`
+    // is `privacy` here, so it cannot be mistaken for `payment` transfers.
+    const renamed = WALLET_OPERATION_FAMILIES.map((family) =>
+      family === "transfer" ? "privacy" : family
+    );
+    expect([...OPERATION_FAMILIES].sort()).toEqual(renamed.sort());
   });
 
   it("files every type under a known family and lists each value once", () => {
@@ -30,6 +36,17 @@ describe("allowed operations vocabulary", () => {
       expect(OPERATION_FAMILIES).toContain(OPERATION_FAMILY_BY_TYPE[type]);
     }
     expect(new Set(ALLOWED_OPERATIONS).size).toBe(ALLOWED_OPERATIONS.length);
+  });
+
+  it("translates a stored legacy family and keeps unknown values so the list never widens", () => {
+    expect(upgradeStoredAllowedOperations(["transfer"])).toEqual(["privacy"]);
+    expect(upgradeStoredAllowedOperations(["transfer", "privacy", "payment"])).toEqual([
+      "payment",
+      "privacy",
+    ]);
+    const kept = upgradeStoredAllowedOperations(["not_an_operation"]);
+    expect(kept).toEqual(["not_an_operation"]);
+    expect(isOperationAllowed(kept, "rings_shield")).toBe(false);
   });
 
   it("treats an empty or missing list as unrestricted", () => {

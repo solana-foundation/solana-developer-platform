@@ -515,18 +515,18 @@ describe("Helius Rings routes", () => {
       expect(await refusedCode(executed)).toBe("OPERATION_NOT_ALLOWED");
 
       // A key whose list names the Rings family goes through to the normal path.
-      const transferKey = { id: "key_hr_transfer_family", raw: "sk_test_helius_rings_xfer" };
-      await seedCachedApiKey(env, await hashString(transferKey.raw, env.API_KEY_PEPPER), {
+      const privacyKey = { id: "key_hr_privacy_family", raw: "sk_test_helius_rings_privacy" };
+      await seedCachedApiKey(env, await hashString(privacyKey.raw, env.API_KEY_PEPPER), {
         ...TEST_CACHED_API_KEY,
-        id: transferKey.id,
-        allowedOperations: ["transfer"],
+        id: privacyKey.id,
+        allowedOperations: ["privacy"],
       });
       const allowedRetry = await app.request(
         `/v1/helius-rings/operations/${failed.data.operation.id}/retry`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${transferKey.raw}`,
+            Authorization: `Bearer ${privacyKey.raw}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ clientNonce: "route-nonce-allowed-ops-retry-ok" }),

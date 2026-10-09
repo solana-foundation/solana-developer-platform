@@ -521,7 +521,7 @@ A key can carry a list of the operation families and types it may perform on the
 | `ramp` | On-ramp and off-ramp quotes |
 | `issuance` | Token deploy, mint, burn, seize, force-burn, authority, pause, freeze, metadata and allowlist actions |
 | `program` | Earn vault deposits and withdrawals, Earn program withdrawals, DvP fund and settle |
-| `transfer` | Helius Rings shielded operations |
+| `privacy` | Private operations through Helius Rings |
 
 Set the list when you create a key, or change it later with `PATCH /v1/api-keys/{keyId}`. A family entry covers every type in it, and a single type can be listed on its own. A key can only grant operations inside its own list.
 

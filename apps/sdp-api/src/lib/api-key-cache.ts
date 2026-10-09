@@ -38,8 +38,13 @@
  * this paragraph first: the fences below are already that check.
  */
 
-import type { AllowedOperation, ApiKeyStatus, CachedApiKey } from "@sdp/types";
-import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
+import type { ApiKeyStatus, CachedApiKey } from "@sdp/types";
+import {
+  getPermissionsForApiKeyRole,
+  isAllowedOperation,
+  type Permission,
+  upgradeStoredAllowedOperations,
+} from "@sdp/types";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import type { KVStore } from "@/runtime/kv";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
@@ -107,9 +112,10 @@ export async function loadCachedApiKeyFromDb(
     return null;
   }
 
-  const allowedOperations = parseOptionalPostgresJson<AllowedOperation[]>(
-    result.allowed_operations
-  );
+  const storedAllowedOperations = parseOptionalPostgresJson<string[]>(result.allowed_operations);
+  const allowedOperations = storedAllowedOperations
+    ? upgradeStoredAllowedOperations(storedAllowedOperations)
+    : null;
   const { walletScope, signingWalletId, signingWalletIds, walletBindings } =
     await loadApiKeyWalletAuthorization(
       db,
@@ -151,7 +157,10 @@ export async function loadCachedApiKeyFromDb(
  * drift. Rejects payloads written before rotation-deadline,
  * organization-status, or wallet-scope enforcement (a deploy must not extend
  * an old key's validity), bindings missing their custody-wallet resolution,
- * and pending installs — a fill's snapshot is not trustworthy until its
+ * allowed operations outside the current vocabulary (an entry cached before a
+ * family was renamed, such as `transfer`, is re-read from Postgres and
+ * translated instead of refusing the key for the rest of its TTL), and
+ * pending installs — a fill's snapshot is not trustworthy until its
  * post-install Postgres verification clears it.
  */
 export function isTrustedCachedApiKey(entry: CachedApiKey): boolean {
@@ -160,6 +169,7 @@ export function isTrustedCachedApiKey(entry: CachedApiKey): boolean {
     Object.hasOwn(entry, "rotationDeadline") &&
     Object.hasOwn(entry, "organizationStatus") &&
     (entry.walletScope === "all" || entry.walletScope === "selected") &&
+    (entry.allowedOperations ?? []).every(isAllowedOperation) &&
     (entry.walletBindings ?? []).every(
       (binding) => typeof binding.custodyWalletId === "string" && binding.custodyWalletId.length > 0
     )

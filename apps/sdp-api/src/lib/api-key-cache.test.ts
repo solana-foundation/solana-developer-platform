@@ -22,7 +22,7 @@
 import type { CachedApiKey } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { KVStore } from "@/runtime/kv";
-import { fillApiKeyCache, refreshApiKeyCache } from "./api-key-cache";
+import { fillApiKeyCache, isTrustedCachedApiKey, refreshApiKeyCache } from "./api-key-cache";
 
 const KEY_HASH = "hash_fill_race_exhaustion";
 
@@ -144,6 +144,25 @@ function uncacheableStore(slotValue: string | null): KVStore {
 function unresolvedBindingRow(status: string): Record<string, unknown> {
   return { ...revokedRow(), status, signing_wallet_id: "wal_unresolved" };
 }
+
+describe("isTrustedCachedApiKey allowed-operations vocabulary", () => {
+  it("re-reads an entry cached with a family that has since been renamed", () => {
+    // SAFETY: `transfer` left the vocabulary when the family became `privacy`;
+    // this is the shape an entry cached before that deploy still carries.
+    const legacy = ["transfer"] as unknown as CachedApiKey["allowedOperations"];
+    expect(isTrustedCachedApiKey({ ...entryWithStatus("active"), allowedOperations: legacy })).toBe(
+      false
+    );
+  });
+
+  it("trusts current values, and entries with no list", () => {
+    const active = entryWithStatus("active");
+    expect(isTrustedCachedApiKey({ ...active, allowedOperations: ["privacy", "payment"] })).toBe(
+      true
+    );
+    expect(isTrustedCachedApiKey(active)).toBe(true);
+  });
+});
 
 describe("fillApiKeyCache deploy-compat class (selected scope, no bindings)", () => {
   it("fences the uncacheable class against a revocation that raced the DB read", async () => {

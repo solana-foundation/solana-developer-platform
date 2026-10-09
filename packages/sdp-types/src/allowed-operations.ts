@@ -10,7 +10,7 @@
  * entry covers every type in that family.
  */
 
-export const OPERATION_FAMILIES = ["transfer", "payment", "ramp", "issuance", "program"] as const;
+export const OPERATION_FAMILIES = ["privacy", "payment", "ramp", "issuance", "program"] as const;
 
 export type OperationFamily = (typeof OPERATION_FAMILIES)[number];
 
@@ -44,7 +44,7 @@ export const OPERATION_TYPES = [
   "earn_vault_deposit",
   "earn_vault_withdrawal",
   "earn_program_withdrawal",
-  // transfer (Helius Rings shielded operations)
+  // privacy (private operations through Helius Rings)
   "rings_shield",
   "rings_transfer_registered",
   "rings_transfer_anonymous",
@@ -85,22 +85,44 @@ export const OPERATION_FAMILY_BY_TYPE = {
   earn_vault_deposit: "program",
   earn_vault_withdrawal: "program",
   earn_program_withdrawal: "program",
-  rings_shield: "transfer",
-  rings_transfer_registered: "transfer",
-  rings_transfer_anonymous: "transfer",
-  rings_withdraw: "transfer",
-  rings_merge: "transfer",
-  rings_timelock_create: "transfer",
-  rings_timelock_settle: "transfer",
-  rings_zone_create: "transfer",
-  rings_ring_exit: "transfer",
-  rings_ring_entry: "transfer",
+  rings_shield: "privacy",
+  rings_transfer_registered: "privacy",
+  rings_transfer_anonymous: "privacy",
+  rings_withdraw: "privacy",
+  rings_merge: "privacy",
+  rings_timelock_create: "privacy",
+  rings_timelock_settle: "privacy",
+  rings_zone_create: "privacy",
+  rings_ring_exit: "privacy",
+  rings_ring_entry: "privacy",
 } as const satisfies Record<OperationType, OperationFamily>;
 
 /** Every value an `allowedOperations` list may hold: a family or a type. */
 export const ALLOWED_OPERATIONS = [...OPERATION_FAMILIES, ...OPERATION_TYPES] as const;
 
 export type AllowedOperation = (typeof ALLOWED_OPERATIONS)[number];
+
+/**
+ * Values a stored list may still hold under an earlier name. Rows are not
+ * rewritten (a rewrite would break a traffic rollback), so every read
+ * translates them instead.
+ */
+export const LEGACY_ALLOWED_OPERATION_RENAMES = {
+  transfer: "privacy",
+} as const satisfies Record<string, AllowedOperation>;
+
+/**
+ * A stored list in the current vocabulary: legacy names translated, then
+ * deduped and sorted. Unknown values are kept, never dropped, so a list never
+ * widens to unrestricted; they match nothing and fail closed.
+ */
+export function upgradeStoredAllowedOperations(stored: readonly string[]): AllowedOperation[] {
+  const renames: Readonly<Record<string, AllowedOperation>> = LEGACY_ALLOWED_OPERATION_RENAMES;
+  // SAFETY: unknown values pass through on purpose (see above); every check
+  // compares by equality, so they can only narrow what the key may do.
+  const upgraded = stored.map((value) => renames[value] ?? value) as AllowedOperation[];
+  return normalizeAllowedOperations(upgraded);
+}
 
 export function isOperationFamily(value: string): value is OperationFamily {
   return (OPERATION_FAMILIES as readonly string[]).includes(value);
