@@ -993,9 +993,9 @@ transaction signed by the organization custody wallet or external owner.
   attributes to the active-then-newest row and sets `ambiguousAttribution` when
   the candidates disagree on the vault identity — `share_mint` carries no
   uniqueness rule, and a re-listed vault leaves its predecessor row behind.
-  **Report-only in both directions**: it writes, adopts, and closes nothing — an org-level custody
-  config is shared by sibling projects, so adoption would guess attribution,
-  and a scan that writes money records fabricates claims the moment it has a
+  **Report-only in both directions**: it writes, adopts, and closes nothing — a
+  holding does not name the request that produced it, so adoption would guess
+  attribution, and a scan that writes money records fabricates claims the moment it has a
   bug. Claim visibility is the positions read's EXACT predicate by construction
   (`CUSTODY_VAULT_CLAIM_VISIBILITY_SQL` — a broader match would mark a holding
   recorded while `/vault-positions` still hides it), and wallet-binding scope is

@@ -28,9 +28,6 @@ const USER = "usr_earn_feed";
 const PROJECT_A = "prj_earn_feed_a";
 const CONFIG_A = "cfg_earn_feed_a";
 const WALLET_A = "cwlt_earn_feed_a";
-// An ORGANIZATION-level config, so this wallet is reachable from PROJECT_A —
-// which is what makes the API-key wallet binding the only thing that can
-// exclude its movements.
 const PUBLIC_KEY_A = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "So11111111111111111111111111111111111111112";

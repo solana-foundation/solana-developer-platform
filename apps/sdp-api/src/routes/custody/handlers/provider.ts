@@ -2,9 +2,7 @@ import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/custody";
 import { normalizePem } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { redactCredentialString } from "@sdp/redaction";
-import { type CustodyConfigStatus, UNARCHIVED_CUSTODY_CONFIG_STATUSES } from "@sdp/types";
 import { getDb } from "@/db";
-import { buildInClause } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -32,6 +30,7 @@ import {
   assertProviderAvailable,
   getEnabledProviders,
 } from "@/services/provider-availability.service";
+import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
 import type {
   InitializeSigningRequest,
@@ -183,8 +182,7 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
     }
     const targetProvider = providerRequest.provider;
     assertCustodyProviderAvailable(c.env, targetProvider, "managed");
-    const existingScopeConfig = await findScopeConfigByProvider(
-      c,
+    const existingScopeConfig = await new CustodyConfigStore(getDb(c.env), c.env).findByProvider(
       actor.organizationId,
       projectId,
       targetProvider
@@ -202,7 +200,7 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
       result = await getActiveConfigInitializationResult(
         c,
         existingScopeConfig.id,
-        existingScopeConfig.default_wallet_id
+        existingScopeConfig.defaultWalletId
       );
       intent = await beginConfigSelection(c, auditService, targetProvider, existingScopeConfig.id);
       const selection = await signingService.setDefaultConfiguration(
@@ -509,92 +507,21 @@ async function getActiveConfigInitializationResult(
   };
 }
 
-async function findScopeConfigByProvider(
-  c: AppContext,
-  organizationId: string,
-  projectId: string,
-  provider: CustodyProvider
-): Promise<{
-  id: string;
-  status: CustodyConfigStatus;
-  default_wallet_id: string | null;
-} | null> {
-  return getDb(c.env)
-    .prepare(
-      `SELECT id, status, default_wallet_id
-       FROM custody_configs
-       WHERE organization_id = ? AND project_id = ? AND provider = ?
-         AND status IN (${buildInClause(UNARCHIVED_CUSTODY_CONFIG_STATUSES.length)})
-       LIMIT 1`
-    )
-    .bind(organizationId, projectId, provider, ...UNARCHIVED_CUSTODY_CONFIG_STATUSES)
-    .first<{
-      id: string;
-      status: CustodyConfigStatus;
-      default_wallet_id: string | null;
-    }>();
-}
-
-async function findScopeProviderConfigRecord(
-  c: AppContext,
-  organizationId: string,
-  projectId: string,
-  provider: CustodyProvider
-) {
-  return getDb(c.env)
-    .prepare(
-      `SELECT id,
-            organization_id,
-            project_id,
-            provider,
-            config_encrypted AS config,
-            encryption_version,
-            default_wallet_id,
-            status,
-            created_at,
-            updated_at
-       FROM custody_configs
-       WHERE organization_id = ? AND project_id = ? AND provider = ?
-         AND status IN (${buildInClause(UNARCHIVED_CUSTODY_CONFIG_STATUSES.length)})
-       LIMIT 1`
-    )
-    .bind(organizationId, projectId, provider, ...UNARCHIVED_CUSTODY_CONFIG_STATUSES)
-    .first<{
-      id: string;
-      organization_id: string;
-      project_id: string | null;
-      provider: CustodyProvider;
-      config: string;
-      encryption_version: string;
-      default_wallet_id: string | null;
-      status: CustodyConfigStatus;
-      created_at: string;
-      updated_at: string;
-    }>();
-}
-
 async function findScopeFireblocksConfig(
   c: AppContext,
   organizationId: string,
   projectId: string
 ): Promise<FireblocksProviderConfig | null> {
-  const record = await findScopeProviderConfigRecord(c, organizationId, projectId, "fireblocks");
+  const record = await new CustodyConfigStore(getDb(c.env), c.env).findByProvider(
+    organizationId,
+    projectId,
+    "fireblocks"
+  );
   if (!record) {
     return null;
   }
 
-  const parsed = await parseConfigRecord(c.env, organizationId, {
-    id: record.id,
-    organizationId: record.organization_id,
-    projectId: record.project_id,
-    provider: record.provider,
-    config: record.config,
-    encryptionVersion: record.encryption_version,
-    defaultWalletId: record.default_wallet_id,
-    status: record.status,
-    createdAt: record.created_at,
-    updatedAt: record.updated_at,
-  });
+  const parsed = await parseConfigRecord(c.env, organizationId, record);
 
   return parsed.provider === "fireblocks" ? parsed : null;
 }

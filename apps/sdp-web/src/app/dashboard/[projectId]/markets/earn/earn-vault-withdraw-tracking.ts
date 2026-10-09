@@ -18,8 +18,8 @@ export const vaultWithdrawalIdempotencyKeyStore = createIdempotencyKeyStore(
  * share quantity. Change any one and it is a different withdrawal, not a
  * retry. The position carries the vault and the signing wallet transitively —
  * a holding is one (org, environment, provider, vault, wallet) claim — so
- * naming it is naming both, and the project is here for the same
- * organization-level custody-config reason the deposit fingerprint documents.
+ * naming it is naming both, and the project is here for the same replay-scope
+ * reason the deposit fingerprint documents.
  */
 export function vaultWithdrawalRequestFingerprint(input: {
   /** `null` only before a project resolves; it still discriminates. */
