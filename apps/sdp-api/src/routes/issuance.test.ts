@@ -2726,6 +2726,11 @@ describe("Issuance Routes", () => {
       "allowlist-remove",
     ] as const;
     type Operation = (typeof operations)[number];
+    // Pausing and removing from an allowlist only reduce exposure (exits).
+    const movementFor = (operation: Operation) =>
+      operation === "pause" || operation === "allowlist-remove"
+        ? "issuance.control"
+        : "issuance.authority";
     const selectedWalletId = "cwlt_explicit_authority";
     const headers = {
       "Content-Type": "application/json",
@@ -2837,7 +2842,7 @@ describe("Issuance Routes", () => {
           TEST_ORG.id,
           TEST_PROJECT.id,
           selectedWalletId,
-          "issuance.authority"
+          movementFor(operation)
         );
         if (operation === "pause" || operation === "unpause") {
           expect(await selected.json()).toMatchObject({
@@ -2869,7 +2874,7 @@ describe("Issuance Routes", () => {
           TEST_ORG.id,
           TEST_PROJECT.id,
           DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
-          "issuance.authority"
+          movementFor(operation)
         );
       }
     );
@@ -6574,7 +6579,7 @@ describe("Issuance Routes", () => {
             TEST_ORG.id,
             TEST_PROJECT.id,
             DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
-            "issuance.authority"
+            "issuance.control"
           );
           expect(removeFromListSpy).toHaveBeenCalledWith({
             list: TEST_SOLANA_ADDRESSES.wallet3,

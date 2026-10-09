@@ -18,6 +18,7 @@
  * security reviewer. Ids are stable: refusal events carry them.
  */
 
+import type { HeliusRingsOperationType } from "./helius-rings";
 import type { SdpModule } from "./release-channels";
 
 export type MovementKind = "start" | "exit";
@@ -43,7 +44,13 @@ export const MOVEMENTS = {
   "recurring.resume": { module: "recurring_payments", kind: "start" },
   "recurring.cancel": { module: "recurring_payments", kind: "exit" },
 
+  /** Mint, deploy, thaw, unpause, metadata and authority changes, allowlist additions. */
   "issuance.authority": { module: "issuance", kind: "start" },
+  /**
+   * Compliance controls that only reduce exposure: burn, force-burn, freeze,
+   * pause, seize, allowlist removal. An issuer must keep them while suspended.
+   */
+  "issuance.control": { module: "issuance", kind: "exit" },
 
   "dvp.create": { module: "dvp", kind: "start" },
   "dvp.fund": { module: "dvp", kind: "start" },
@@ -65,8 +72,13 @@ export const MOVEMENTS = {
   "helius_rings.operation_start": { module: "helius_rings", kind: "start" },
   /** Withdraw, merge, timelock settlement, ring exit. */
   "helius_rings.operation_exit": { module: "helius_rings", kind: "exit" },
-  /** Transactions the Rings SDK signs on its own, for ring bring-up. */
-  "helius_rings.gateway_transaction": { module: "helius_rings", kind: "start" },
+  /**
+   * Transactions the Rings SDK signs on its own (ring bring-up, enabling
+   * merges, re-keying). Every value-moving Rings operation signs through the
+   * service's own path and is classified by its op type, so these move no
+   * value and must stay open for an organization's exits.
+   */
+  "helius_rings.gateway_transaction": { module: "helius_rings", kind: "exit" },
   /**
    * Raw message signatures. Shielded keys are re-derived from one on every
    * use, withdrawals included, so refusing it would trap funds.
@@ -75,3 +87,20 @@ export const MOVEMENTS = {
 } as const satisfies Record<string, MovementDefinition>;
 
 export type MovementId = keyof typeof MOVEMENTS;
+
+/**
+ * The movement each Rings operation signs for. A new operation type does not
+ * compile until it is classified here (a security-reviewed change).
+ */
+export const HELIUS_RINGS_OPERATION_MOVEMENTS = {
+  shield: "helius_rings.operation_start",
+  transfer_registered: "helius_rings.operation_start",
+  transfer_anonymous: "helius_rings.operation_start",
+  withdraw: "helius_rings.operation_exit",
+  merge: "helius_rings.operation_exit",
+  timelock_create: "helius_rings.operation_start",
+  timelock_settle: "helius_rings.operation_exit",
+  zone_create: "helius_rings.operation_start",
+  ring_exit: "helius_rings.operation_exit",
+  ring_entry: "helius_rings.operation_start",
+} as const satisfies Record<HeliusRingsOperationType, MovementId>;

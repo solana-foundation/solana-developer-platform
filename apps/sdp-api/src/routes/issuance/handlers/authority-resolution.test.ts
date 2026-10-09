@@ -601,6 +601,7 @@ describe("authority-resolution", () => {
 
     await expect(
       resolveAuthoritySigner({
+        movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
         currentAuthority: AUTHORITY,
@@ -779,6 +780,7 @@ describe("authority-resolution", () => {
 
     await expect(
       createResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
         custodyWalletId: "cwlt_other",
@@ -798,6 +800,7 @@ describe("authority-resolution", () => {
 
     await expect(
       createResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
         custodyWalletId: "cwlt_authority",
@@ -814,6 +817,7 @@ describe("authority-resolution", () => {
 
     await expect(
       createLegacyResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
         walletId: "wal_connection",
@@ -830,6 +834,7 @@ describe("authority-resolution", () => {
 
     await expect(
       createLegacyResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
         walletId: "wal_other",

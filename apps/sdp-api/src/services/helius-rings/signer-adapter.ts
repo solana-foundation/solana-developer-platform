@@ -21,6 +21,7 @@ import {
   type TransactionSigner,
 } from "@solana/signers";
 import { getDb } from "@/db";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import type { SigningProviderType } from "@/services/adapters/signing";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -344,8 +345,11 @@ async function resolveOwnerSigner(input: OwnerSignerInput): Promise<TransactionS
   return signer;
 }
 
-function toSignerFailure(error: unknown): RingsAdapterError {
+function toSignerFailure(error: unknown): RingsAdapterError | MoneyMovementRefusedError {
   if (error instanceof RingsAdapterError) return error;
+  // A money-admission refusal is a decision, not a signer fault: it surfaces as
+  // the 403 it is, and retrying will not change it.
+  if (error instanceof MoneyMovementRefusedError) return error;
   if (error instanceof SigningError) {
     return new RingsAdapterError("signer_failed", error.message, {
       retryable: !NON_RETRYABLE_SIGNING_CODES.has(error.code),

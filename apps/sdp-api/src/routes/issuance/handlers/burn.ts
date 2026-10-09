@@ -165,6 +165,7 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     requiredWalletPermissions: ["tokens:write"],
   });
   const signer = await createResolvedAuthoritySigner({
+    movement: "issuance.control",
     env: c.env,
     auth,
     custodyWalletId: wallet.custodyWalletId,
@@ -187,7 +188,7 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   );
 
   // Build unsigned transaction
-  const token2022 = createIssuanceToken2022Service(c, signer);
+  const token2022 = createIssuanceToken2022Service(c, signer, "issuance.control");
   const prepared = await (async () => {
     try {
       return await token2022.prepareBurn(
@@ -379,6 +380,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   let onChainEffectCompleted = false;
   try {
     const signer = await createResolvedAuthoritySigner({
+      movement: "issuance.control",
       env: c.env,
       auth,
       custodyWalletId: wallet.custodyWalletId,
@@ -395,7 +397,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     );
 
     // Execute burn on Solana
-    const token2022 = createIssuanceToken2022Service(c, signer);
+    const token2022 = createIssuanceToken2022Service(c, signer, "issuance.control");
 
     await beginApprovedWalletOperationEffect(c);
     const result = await token2022.burn({

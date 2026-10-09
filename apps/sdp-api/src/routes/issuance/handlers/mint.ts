@@ -496,6 +496,7 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
   }
   const mintAuthority = assertValidAddress(currentAuthority, "mintAuthority");
   const { custodyWalletId, signer } = await resolveAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
@@ -504,7 +505,7 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
   });
   // Build unsigned transaction using Mosaic
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.authority");
 
   // Preparation must not mutate on-chain compliance state. A destination that
   // is not already on the ABL can only be added by the execute route after its
@@ -875,13 +876,14 @@ export const executeMint = async (c: AppContext) => {
   let addedToAllowlist = false;
   try {
     const signer = await createResolvedAuthoritySigner({
+      movement: "issuance.authority",
       env: c.env,
       auth,
       custodyWalletId: tx.custodyWalletId,
       currentAuthority,
       requiredWalletPermissions: ["tokens:write"],
     });
-    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+    const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.authority");
     addedToAllowlist = ablListAddress
       ? await syncDestinationToOnChainAllowlist({
           c,

@@ -1,4 +1,4 @@
-import type { MovementId } from "@sdp/types";
+import { MOVEMENTS, type MovementId } from "@sdp/types";
 import {
   assertMovementAdmitted,
   decideMovement,
@@ -24,9 +24,11 @@ export async function readSponsorshipAdmissionFacts(
   scope: SponsorshipAdmissionScope,
   readFacts: typeof readMoneyAdmissionFacts = readMoneyAdmissionFacts
 ): Promise<MoneyAdmissionFacts | null> {
-  return scope.projectId === null
-    ? null
-    : readFacts(env, { organizationId: scope.organizationId, projectId: scope.projectId });
+  // An exit always passes, so it reads nothing.
+  if (MOVEMENTS[scope.movement].kind === "exit" || scope.projectId === null) {
+    return null;
+  }
+  return readFacts(env, { organizationId: scope.organizationId, projectId: scope.projectId });
 }
 
 /** Throws for a start the organization may not make; an exit always passes. */

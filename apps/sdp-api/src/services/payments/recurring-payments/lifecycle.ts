@@ -6,6 +6,7 @@ import {
 } from "@sdp/payments/recurring-payment-lifecycle";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import type { MovementId } from "@sdp/types";
 import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isPendingActivationRecurringPaymentStatus,
@@ -41,6 +42,12 @@ import {
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
 } from "./shared";
+
+/** The movement each lifecycle operation signs for: cancel is an exit, resume a start. */
+const LIFECYCLE_MOVEMENTS = {
+  cancel: "recurring.cancel",
+  resume: "recurring.resume",
+} as const satisfies Record<RecurringPaymentLifecycleOperation, MovementId>;
 
 function lifecycleConfirmationMessage(operation: RecurringPaymentLifecycleOperation) {
   return operation === "cancel"
@@ -491,7 +498,7 @@ async function runRecurringPaymentLifecycle(
       input.organizationId,
       input.projectId,
       input.sourceWallet.id,
-      input.operation === "resume" ? "recurring.resume" : "recurring.cancel"
+      LIFECYCLE_MOVEMENTS[input.operation]
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -520,7 +527,7 @@ async function runRecurringPaymentLifecycle(
       });
 
       signature = await sendSubscriptionInstructions({
-        movement: input.operation === "resume" ? "recurring.resume" : "recurring.cancel",
+        movement: LIFECYCLE_MOVEMENTS[input.operation],
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,

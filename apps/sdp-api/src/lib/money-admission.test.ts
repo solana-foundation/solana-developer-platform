@@ -90,6 +90,28 @@ describe("decideMoneyStart", () => {
 const asSystem = <T>(read: () => Promise<T>) =>
   runWithSystemDatabaseIdentity("test:money-admission", read);
 
+describe("MOVEMENTS exits", () => {
+  // SECURITY REVIEW GATE: an exit is never refused, so this list changes only
+  // with a named security reviewer (see packages/sdp-types/src/movements.ts).
+  it("exempts exactly the reviewed exits from admission", () => {
+    const exits = (Object.keys(MOVEMENTS) as MovementId[])
+      .filter((movement) => MOVEMENTS[movement].kind === "exit")
+      .sort();
+    expect(exits).toEqual([
+      "dvp.reclaim",
+      "earn.queued_withdraw",
+      "earn.withdraw",
+      "helius_rings.gateway_transaction",
+      "helius_rings.key_derivation",
+      "helius_rings.operation_exit",
+      "issuance.control",
+      "private_channels.withdraw",
+      "recurring.cancel",
+      "recurring.update_cancel_old",
+    ]);
+  });
+});
+
 describe("decideMovement", () => {
   const cases: [string, MoneyAdmissionFacts | null][] = [
     ["a deleted organization", facts({ organizationStatus: "deleted" })],

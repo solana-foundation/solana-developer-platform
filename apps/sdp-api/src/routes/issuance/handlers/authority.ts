@@ -250,13 +250,14 @@ export const prepareUpdateAuthority = async (
     : null;
 
   const { custodyWalletId, signer } = await resolveAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.authority");
 
   const prepared = await mosaic.prepareUpdateAuthority({
     mint: mintAddress,
@@ -477,6 +478,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const signer = await createResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     custodyWalletId,
@@ -543,7 +545,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
   }
 
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.authority");
   const auditIntent = await auditService.beginCritical(c, {
     action: "update_authority",
     resourceType: "token_transaction",

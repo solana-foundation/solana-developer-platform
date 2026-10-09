@@ -7,11 +7,7 @@
 
 import { Token2022Service } from "@sdp/solana/token-2022";
 import type { TransactionSigner } from "@solana/kit";
-import {
-  createSponsorshipFeePayment,
-  createUnscopedSponsorshipFeePayment,
-  type SponsorshipScope,
-} from "@/services/sponsorship.service";
+import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 /**
@@ -27,13 +23,11 @@ import type { Env } from "@/types/env";
 export function createToken2022Service(
   env: Env,
   signer: TransactionSigner,
-  sponsorshipScope?: SponsorshipScope
+  sponsorshipScope: SponsorshipScope
 ): Token2022Service {
   // Only create fee payment adapter if Kora is configured
   const feePayment = env.KORA_RPC_URL
-    ? sponsorshipScope
-      ? createSponsorshipFeePayment(env, sponsorshipScope)
-      : createUnscopedSponsorshipFeePayment(env)
+    ? createSponsorshipFeePayment(env, sponsorshipScope)
     : undefined;
 
   return new Token2022Service(env, signer, feePayment);

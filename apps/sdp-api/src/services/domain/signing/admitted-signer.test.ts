@@ -57,6 +57,7 @@ describe("admittedSigner", () => {
       event: "sdp_money_refused",
       surface: "signer",
       movement: "payments.transfer",
+      module: "payments",
       subject_id: "cwlt_admitted_signer",
       organization_id: "org_admitted_signer",
       project_id: "prj_admitted_signer",

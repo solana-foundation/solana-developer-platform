@@ -73,6 +73,7 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   }
 
   const { signer, custodyWalletId } = await resolveAuthoritySigner({
+    movement: "issuance.control",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
@@ -83,7 +84,7 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   const source = assertValidAddress(body.forceBurn.source, "source");
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.control");
   const prepared = await mosaic.prepareForceBurn({
     mint: mintAddress,
     source,
@@ -274,6 +275,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   }
 
   const signer = await createResolvedAuthoritySigner({
+    movement: "issuance.control",
     env: c.env,
     auth,
     custodyWalletId,
@@ -281,7 +283,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
     requiredWalletPermissions: ["tokens:admin"],
   });
 
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.control");
   const auditIntent = await auditService.beginCritical(c, {
     action: "force_burn",
     resourceType: "token_transaction",

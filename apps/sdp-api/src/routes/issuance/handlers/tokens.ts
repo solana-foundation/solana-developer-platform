@@ -118,6 +118,7 @@ async function resolveMetadataUpdate(params: {
     tokenService: params.tokenService,
   });
   const signer = await createResolvedAuthoritySigner({
+    movement: "issuance.authority",
     env: params.c.env,
     auth: params.auth,
     custodyWalletId: authorityWallet.custodyWalletId,
@@ -424,7 +425,7 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
     if (metadataUpdate) {
       const { signer } = metadataUpdate.authority;
 
-      const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+      const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.authority");
       await beginApprovedWalletOperationEffect(c);
       const result = await mosaic.updateMetadata({
         mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),

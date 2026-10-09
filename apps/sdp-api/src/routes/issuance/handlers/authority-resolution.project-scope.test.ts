@@ -251,6 +251,7 @@ describe("issuance authority resolution across an organization's projects", () =
 
     await expect(
       createLegacyResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env,
         auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
         walletId: REQUESTER_WALLET.providerWalletId,
@@ -270,6 +271,7 @@ describe("issuance authority resolution across an organization's projects", () =
 
     await expect(
       createLegacyResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env,
         auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
         walletId: OWNER_WALLETS[1].providerWalletId,
@@ -284,6 +286,7 @@ describe("issuance authority resolution across an organization's projects", () =
 
     await expect(
       createLegacyResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env,
         auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
         walletId: null,

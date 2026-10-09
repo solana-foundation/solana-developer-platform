@@ -73,13 +73,12 @@ export interface SponsorshipFeePayment extends FeePaymentPort {
 }
 
 /**
- * Self-hosted sponsorship. With a tenant scope it checks money admission
- * before each sponsor signature (one organization read); the unscoped
- * self-hosted boundary has no tenant to check.
+ * Self-hosted sponsorship: checks money admission before each sponsor
+ * signature (one organization read; none for an exit).
  */
 function withOwnedSubmissionLifecycle(
   provider: FeePaymentPort,
-  admission?: { env: Env; scope: SponsorshipScope }
+  admission: { env: Env; scope: SponsorshipScope }
 ): SponsorshipFeePayment {
   const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
   let feePayer: Promise<Address> | undefined;
@@ -93,12 +92,10 @@ function withOwnedSubmissionLifecycle(
     return feePayer;
   };
   const admit = async () => {
-    if (admission) {
-      assertSponsorshipAdmitted(
-        admission.scope,
-        await readSponsorshipAdmissionFacts(admission.env, admission.scope)
-      );
-    }
+    assertSponsorshipAdmitted(
+      admission.scope,
+      await readSponsorshipAdmissionFacts(admission.env, admission.scope)
+    );
   };
   const signVerified = async (transaction: Uint8Array) => {
     await admit();
@@ -211,19 +208,6 @@ export async function getManagedSponsorshipProviderConfiguration(
     );
   }
   return provider.getSponsorshipConfiguration();
-}
-
-/** Compatibility boundary for self-hosted consumers without tenant context. */
-export function createUnscopedSponsorshipFeePayment(env: Env): FeePaymentPort {
-  if (!isSelfHostedDeployment(env)) {
-    throw new AppError(
-      "FORBIDDEN",
-      "Managed sponsorship requires a trusted organization or project scope"
-    );
-  }
-  return withOwnedSubmissionLifecycle(
-    instrumentVendorPort(resolveFeePaymentProvider(env), createFeePaymentAdapter(env))
-  );
 }
 
 /** Resolve a scope exclusively from trusted request middleware state. */

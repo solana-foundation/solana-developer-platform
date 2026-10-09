@@ -1,7 +1,7 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
 import { createRpc, createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
+import type { MovementId, Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
 import { type TransactionSigner, unwrapOption } from "@solana/kit";
 import { getListConfig, inspectToken } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
@@ -417,18 +417,22 @@ export async function resolveAuthorityWallet(params: {
   return wallet;
 }
 
+/** The two issuance movements: compliance controls are exits, everything else a start. */
+export type IssuanceMovement = Extract<MovementId, "issuance.authority" | "issuance.control">;
+
 async function loadResolvedAuthoritySigner(params: {
   env: Env;
   auth: ApiKeyContext;
   custodyWalletId: string;
   currentAuthority: string;
+  movement: IssuanceMovement;
 }): Promise<TransactionSigner> {
   const signer = await solanaServices.createOrgSignerForCustodyWallet(
     params.env,
     params.auth.organizationId,
     requireAuthProjectId(params.auth),
     params.custodyWalletId,
-    "issuance.authority"
+    params.movement
   );
   if (signer.address !== params.currentAuthority) {
     throw conflict("Current authority is not controlled by custody");
@@ -442,6 +446,7 @@ export async function resolveAuthoritySigner(params: {
   requestedCustodyWalletId?: string | null;
   currentAuthority: string;
   requiredWalletPermissions: Permission[];
+  movement: IssuanceMovement;
 }): Promise<ResolvedIssuanceWallet & { signer: TransactionSigner }> {
   const resolved = await resolveAuthorityWallet(params);
   const signer = await loadResolvedAuthoritySigner({
@@ -449,6 +454,7 @@ export async function resolveAuthoritySigner(params: {
     auth: params.auth,
     custodyWalletId: resolved.custodyWalletId,
     currentAuthority: params.currentAuthority,
+    movement: params.movement,
   });
 
   return { ...resolved, signer };
@@ -461,6 +467,7 @@ export async function createResolvedAuthoritySigner(params: {
   custodyWalletId: string;
   currentAuthority: string;
   requiredWalletPermissions: Permission[];
+  movement: IssuanceMovement;
 }): Promise<TransactionSigner> {
   const wallet = await resolveIssuanceWallet(params);
   if (wallet.publicKey !== params.currentAuthority) {
@@ -489,8 +496,9 @@ export async function createLegacyResolvedAuthoritySigner(params: {
   walletId: string | null;
   currentAuthority?: string | null;
   expectedCustodyWalletId?: string | null;
+  movement: IssuanceMovement;
 }): Promise<TransactionSigner> {
-  const { env, auth, walletId, currentAuthority, expectedCustodyWalletId } = params;
+  const { env, auth, walletId, currentAuthority, expectedCustodyWalletId, movement } = params;
   if (walletId === null) {
     throw badRequest("signingWalletId is required for the legacy issuance prepare flow");
   }
@@ -525,7 +533,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     auth.organizationId,
     projectId,
     wallet.id,
-    "issuance.authority"
+    movement
   );
 
   if (currentAuthority && signer.address !== currentAuthority) {

@@ -140,6 +140,7 @@ export function assertMovementAdmitted(
     event: "sdp_money_refused",
     surface: context.surface,
     movement: context.movement,
+    module: MOVEMENTS[context.movement].module,
     subject_id: context.subjectId,
     organization_id: context.organizationId,
     project_id: context.projectId,

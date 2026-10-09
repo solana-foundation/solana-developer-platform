@@ -10,7 +10,7 @@ import type {
   OrganizationProviderAvailabilityResponse,
   ProviderCredentialStatus,
 } from "@sdp/types";
-import { type MovementId, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { MOVEMENTS, type MovementId, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db";
@@ -603,10 +603,13 @@ export class CustodyRuntimeTargets {
     movement: MovementId,
     getConfigAdapter: ConfigAdapterResolver
   ): Promise<TransactionSigner> {
-    // In parallel with the wallet row, so admission adds no round trip.
+    // In parallel with the wallet row, so admission adds no round trip; an
+    // exit always passes and reads nothing.
     const [target, admissionFacts] = await Promise.all([
       this.resolveRetainedWalletRecord(organizationId, projectId, custodyWalletId),
-      readMoneyAdmissionFactsWith(this.db, { organizationId, projectId }),
+      MOVEMENTS[movement].kind === "exit"
+        ? null
+        : readMoneyAdmissionFactsWith(this.db, { organizationId, projectId }),
     ]);
     if (!target) {
       this.logMissingExactWallet({ organizationId, projectId, custodyWalletId });
