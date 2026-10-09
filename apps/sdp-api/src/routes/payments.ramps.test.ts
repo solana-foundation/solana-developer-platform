@@ -57,8 +57,14 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { providerStages } from "@/test/helpers/provider-stages";
 import { required } from "@/test/helpers/required";
 import { seedRateLimit } from "@/test/mocks/kv";
+
+vi.mock("@sdp/types", async (importOriginal) => {
+  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
+  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+});
 
 const TEST_CONNECTION_WALLET_ID = "privy_payments_connection_wallet";
 const TEST_CONNECTION_CUSTODY_WALLET_ID = "cwlt_payments_connection_balance";
@@ -966,6 +972,59 @@ describe("Payments routes — ramps", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
+
+  describe("in a stable release channel", () => {
+    beforeEach(() => {
+      providerStages.rampStageOverride = { provider: "moonpay", stage: "stable" };
+    });
+
+    afterEach(() => {
+      providerStages.rampStageOverride = null;
+    });
+
+    it("refuses a quote for an experimental provider through the shared provider gate", async () => {
+      const counterpartyId = await seedCounterparty({ externalId: "stable_channel_quote" });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "lightspark",
+            counterpartyId,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            fiatAmount: "100.00",
+          }),
+        },
+        { ...env, SDP_RELEASE_CHANNEL: "stable" }
+      );
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "FORBIDDEN",
+          message: "Lightspark is not available in this release channel.",
+          details: { reason: "provider_not_in_release_channel" },
+        },
+        meta: { requestId: expect.any(String) },
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+      const transfers = await getDb(env)
+        .prepare("SELECT id FROM payment_transfers WHERE counterparty_id = ?")
+        .bind(counterpartyId)
+        .all<{ id: string }>();
+      expect(transfers.results).toEqual([]);
+    });
+  });
+
   describe("BVNK off-ramp quote (funding-wallet channel)", () => {
     const BVNK_OFFRAMP_CUSTOMER = "bvnk_offramp_test_customer";
     async function seedProvisionedOfframpCounterparty(externalId: string): Promise<string> {
@@ -2036,6 +2095,14 @@ describe("Payments routes — ramps", () => {
       );
 
       expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "FORBIDDEN",
+          message: "BVNK is not available in this release channel.",
+          details: { reason: "provider_not_in_release_channel" },
+        },
+        meta: { requestId: expect.any(String) },
+      });
       expect(simulateSpy).not.toHaveBeenCalled();
       simulateSpy.mockRestore();
     });

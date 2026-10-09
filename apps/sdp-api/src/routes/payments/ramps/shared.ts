@@ -38,7 +38,7 @@ import {
   redactErrorForCapture,
   unsupportedRampCorridor,
 } from "@/lib/errors";
-import { assertRampProviderInChannel, isRampProviderInChannel } from "@/middleware/require-module";
+import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -208,7 +208,6 @@ export async function resolveRampQuoteRequest(
   input: CreateOnrampQuoteBody | CreateOfframpQuoteBody,
   custodyWalletId: string
 ): Promise<RampQuotePolicyResolved> {
-  assertRampProviderInChannel(c, input.provider);
   assertRampCorridorSupported(c, direction, input);
   const scope = await resolveScope(c);
   await assertProviderAvailable(c, { family: "ramps", provider: input.provider });

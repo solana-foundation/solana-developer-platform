@@ -432,7 +432,6 @@ export const submitCounterpartyRequirements = async (
 
   const body = c.req.valid("json");
 
-  assertRampProviderInChannel(c, body.provider);
   await assertProviderAvailable(c, { family: "ramps", provider: body.provider });
 
   const repo = getCounterpartiesRepository(c);

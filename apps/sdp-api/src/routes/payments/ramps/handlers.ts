@@ -22,10 +22,7 @@ import {
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
-import {
-  assertRampProviderInChannel,
-  assertTransferRampProviderInChannel,
-} from "@/middleware/require-module";
+import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { sendOnceUnderTransferClaim } from "@/services/payments/transfer-claim";
@@ -114,7 +111,6 @@ export async function simulateSandboxTransfer(
   if (transfer.provider === null) {
     throw internalError("On-ramp transfer has no provider.");
   }
-  assertRampProviderInChannel(c, transfer.provider);
   await assertProviderAvailable(c, { family: "ramps", provider: transfer.provider });
   if (transfer.counterparty_id === null) {
     throw internalError("On-ramp transfer has no counterparty.");
