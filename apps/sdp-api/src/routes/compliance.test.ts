@@ -721,7 +721,7 @@ describe("Compliance routes", () => {
       async (input) =>
         new Response(
           JSON.stringify(
-            String(input).startsWith("https://api.range.org")
+            new URL(String(input)).hostname === "api.range.org"
               ? { riskScore: 2, riskLevel: "Low risk" }
               : { address: TEST_SOLANA_ADDRESSES.wallet1, risk: "Low", status: "COMPLETE" }
           ),
