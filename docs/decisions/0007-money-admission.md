@@ -30,8 +30,8 @@ dropped.
 3. **The two signing waists decide again, from live rows, when asked to sign.**
    Every custody signature comes from
    `CustodyRuntimeTargets#getTransactionSignerForWalletRecord`, and every
-   tenant sponsor signature from `createSponsorshipFeePayment`. The self-hosted
-   `createUnscopedSponsorshipFeePayment` has no tenant and so no admission. Each caller names its
+   tenant sponsor signature from `createSponsorshipFeePayment`. There is no unscoped sponsor:
+   every sponsor has a tenant and a movement. Each caller names its
    movement (`MOVEMENTS` in `@sdp/types`); a start the organization may not make
    gets a signer or sponsor that refuses (`sdp_money_refused`, 403), and an
    exit always signs. The decision is `decideMovement`, a pure function of the
