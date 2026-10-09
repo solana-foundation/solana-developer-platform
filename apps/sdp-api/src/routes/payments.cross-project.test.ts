@@ -3,19 +3,20 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   installPaymentsRouteTestHooks,
   TEST_API_KEY,
   TEST_ORG,
   TEST_PROJECT,
+  TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import { countTransferRows, postTransfer } from "@/test/helpers/payments-transfers";
 
 const OTHER_PROJECT_ID = `${TEST_PROJECT.id}_production`;
-const OTHER_PROJECT_CONFIG_ID = "cust_cfg_payments_other_project";
+const OTHER_PROJECT_CONNECTION_ID = "cconn_payments_other_project";
 const OTHER_PROJECT_WALLET = {
   id: "cwlt_payments_other_project",
   walletId: "wal_payments_other_project",
@@ -31,11 +32,11 @@ const WALLET_NOT_FOUND_BODY = {
 
 function readOtherProjectState() {
   return getDb(env).queryMany(
-    `SELECT w.*, c.status AS config_status
+    `SELECT w.*, c.status AS connection_status
        FROM custody_wallets w
-       JOIN custody_configs c ON c.id = w.custody_config_id
+       JOIN custody_connections c ON c.id = w.custody_connection_id
       WHERE c.id = ?`,
-    [OTHER_PROJECT_CONFIG_ID]
+    [OTHER_PROJECT_CONNECTION_ID]
   );
 }
 
@@ -58,29 +59,29 @@ describe("Payments routes — custody wallets of another project", () => {
   installPaymentsRouteTestHooks();
 
   beforeEach(async () => {
-    await seedTestCustodyRows(env, {
-      configs: [
-        {
-          id: OTHER_PROJECT_CONFIG_ID,
-          organizationId: TEST_ORG.id,
-          projectId: OTHER_PROJECT_ID,
-          provider: "local",
-          configEncrypted: "test-config",
-          status: "active",
-        },
-      ],
-      wallets: [
-        {
-          id: OTHER_PROJECT_WALLET.id,
-          owner: { kind: "config", custodyConfigId: OTHER_PROJECT_CONFIG_ID },
-          walletId: OTHER_PROJECT_WALLET.walletId,
-          publicKey: TEST_SOLANA_ADDRESSES.wallet3,
-          label: "Other project wallet",
-          purpose: "transfer",
-          status: "active",
-        },
-      ],
-    });
+    await getDb(env).transaction((tx) =>
+      seedTestPrivyConnection(tx, {
+        organizationId: TEST_ORG.id,
+        projectId: OTHER_PROJECT_ID,
+        connectionId: OTHER_PROJECT_CONNECTION_ID,
+        credentialId: "pcred_payments_other_project",
+        createdBy: TEST_USER.id,
+        stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+        providerAccountFingerprint: "sha256:payments-other-project",
+        lastCheckStatus: "success",
+        wallets: [
+          {
+            id: OTHER_PROJECT_WALLET.id,
+            walletId: OTHER_PROJECT_WALLET.walletId,
+            publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+            label: "Other project wallet",
+            purpose: "transfer",
+            status: "active",
+          },
+        ],
+        defaultCustodyWalletId: OTHER_PROJECT_WALLET.id,
+      })
+    );
   });
 
   it("does not retain another project's wallet as an idempotent transfer source", async () => {

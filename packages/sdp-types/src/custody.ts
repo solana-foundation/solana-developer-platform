@@ -64,6 +64,18 @@ export function isCustodyModeAllowedInEnvironment(
 }
 
 /**
+ * Why the custody setup rule refused a (provider, mode) pair for a project,
+ * carried as `details.reason` on its 403.
+ */
+export const CUSTODY_SETUP_REFUSAL_REASONS = [
+  "custody_provider_not_in_release_channel",
+  "custody_mode_not_allowed",
+  "provider_not_entitled",
+  "provider_not_configured",
+] as const;
+export type CustodySetupRefusalReason = (typeof CUSTODY_SETUP_REFUSAL_REASONS)[number];
+
+/**
  * Every provider the catalog shows is built and runnable, so the status only
  * ever answers "what is my next step" — never "does this exist". The two
  * non-actionable states are deliberately distinct (HOO-772/775 and the
@@ -235,8 +247,22 @@ interface CustodyProviderCatalogEntryShape {
   storedCredentialSetup: CustodyProviderStoredCredentialSetup;
 }
 
+/**
+ * A BYOK custody provider takes self-service credentials by type, so the custody
+ * setup gate's release-channel check (which admits `byok` only for
+ * `BYOK_CUSTODY_PROVIDERS`) already implies self-service setup.
+ */
 type CustodyProviderCatalogByIdShape = {
-  [Provider in CustodyProvider]: CustodyProviderCatalogEntryShape & { id: Provider };
+  [Provider in CustodyProvider]: CustodyProviderCatalogEntryShape & {
+    id: Provider;
+  } & (Provider extends ByokCustodyProvider
+      ? {
+          storedCredentialSetup: Extract<
+            CustodyProviderStoredCredentialSetup,
+            { mode: "self_service" }
+          >;
+        }
+      : unknown);
 };
 
 const DEFAULT_CUSTODY_PROVIDER_USE_CASES = CUSTODY_PROVIDER_USE_CASES;

@@ -7,21 +7,19 @@
 \echo '=== 1. Null Payments identities by exactly-one resolution ==='
 WITH wallet_scope AS (
   SELECT wallet.id, wallet.wallet_id, wallet.public_key,
-         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+         config.organization_id, config.project_id
   FROM custody_wallets wallet
   JOIN custody_configs config ON config.id = wallet.custody_config_id
   UNION ALL
   SELECT wallet.id, wallet.wallet_id, wallet.public_key,
-         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+         connection.organization_id, connection.project_id
   FROM custody_wallets wallet
   JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
 ), resolutions AS (
   SELECT 'transfer'::TEXT AS resource, transfer.id, transfer.status,
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = transfer.organization_id
-            AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = transfer.project_id OR wallet.project_id IS NULL))
-              OR (wallet.owner_kind = 'connection' AND wallet.project_id = transfer.project_id))
+            AND wallet.project_id = transfer.project_id
             AND wallet.wallet_id = transfer.wallet_id
             AND wallet.public_key = CASE WHEN transfer.direction = 'inbound'
                                          THEN transfer.destination_address
@@ -32,9 +30,7 @@ WITH wallet_scope AS (
   SELECT 'batch', batch.id, batch.status,
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = batch.organization_id
-            AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = batch.project_id OR wallet.project_id IS NULL))
-              OR (wallet.owner_kind = 'connection' AND wallet.project_id = batch.project_id))
+            AND wallet.project_id = batch.project_id
             AND wallet.wallet_id = batch.source_wallet_id
             AND wallet.public_key = batch.source_address)
   FROM payment_transfer_batches batch
@@ -43,9 +39,7 @@ WITH wallet_scope AS (
   SELECT 'payment_request', request.id, request.status,
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = request.organization_id
-            AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = request.project_id OR wallet.project_id IS NULL))
-              OR (wallet.owner_kind = 'connection' AND wallet.project_id = request.project_id))
+            AND wallet.project_id = request.project_id
             AND wallet.wallet_id = request.wallet_id
             AND wallet.public_key = request.destination_address)
   FROM payment_requests request
@@ -62,12 +56,12 @@ ORDER BY resource, status;
 \echo '=== 1a. Unresolved or ambiguous Payments rows (up to 100) ==='
 WITH wallet_scope AS (
   SELECT wallet.id, wallet.wallet_id, wallet.public_key,
-         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+         config.organization_id, config.project_id
   FROM custody_wallets wallet
   JOIN custody_configs config ON config.id = wallet.custody_config_id
   UNION ALL
   SELECT wallet.id, wallet.wallet_id, wallet.public_key,
-         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+         connection.organization_id, connection.project_id
   FROM custody_wallets wallet
   JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
 ), resolutions AS (
@@ -75,9 +69,7 @@ WITH wallet_scope AS (
          transfer.project_id, transfer.status,
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = transfer.organization_id
-            AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = transfer.project_id OR wallet.project_id IS NULL))
-              OR (wallet.owner_kind = 'connection' AND wallet.project_id = transfer.project_id))
+            AND wallet.project_id = transfer.project_id
             AND wallet.wallet_id = transfer.wallet_id
             AND wallet.public_key = CASE WHEN transfer.direction = 'inbound'
                                          THEN transfer.destination_address
@@ -87,9 +79,7 @@ WITH wallet_scope AS (
   SELECT 'batch', batch.id, batch.organization_id, batch.project_id, batch.status,
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = batch.organization_id
-            AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = batch.project_id OR wallet.project_id IS NULL))
-              OR (wallet.owner_kind = 'connection' AND wallet.project_id = batch.project_id))
+            AND wallet.project_id = batch.project_id
             AND wallet.wallet_id = batch.source_wallet_id
             AND wallet.public_key = batch.source_address)
   FROM payment_transfer_batches batch WHERE batch.source_custody_wallet_id IS NULL
@@ -97,9 +87,7 @@ WITH wallet_scope AS (
   SELECT 'payment_request', request.id, request.organization_id, request.project_id, request.status,
          (SELECT COUNT(*) FROM wallet_scope wallet
           WHERE wallet.organization_id = request.organization_id
-            AND ((wallet.owner_kind = 'config'
-                  AND (wallet.project_id = request.project_id OR wallet.project_id IS NULL))
-              OR (wallet.owner_kind = 'connection' AND wallet.project_id = request.project_id))
+            AND wallet.project_id = request.project_id
             AND wallet.wallet_id = request.wallet_id
             AND wallet.public_key = request.destination_address)
   FROM payment_requests request WHERE request.custody_wallet_id IS NULL
@@ -113,12 +101,12 @@ LIMIT 100;
 \echo '=== 2. Persisted exact IDs that disagree with retained evidence (must be zero) ==='
 WITH wallet_scope AS (
   SELECT wallet.id, wallet.wallet_id, wallet.public_key,
-         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+         config.organization_id, config.project_id
   FROM custody_wallets wallet
   JOIN custody_configs config ON config.id = wallet.custody_config_id
   UNION ALL
   SELECT wallet.id, wallet.wallet_id, wallet.public_key,
-         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+         connection.organization_id, connection.project_id
   FROM custody_wallets wallet
   JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
 ), mismatches AS (
@@ -129,9 +117,7 @@ WITH wallet_scope AS (
       SELECT 1 FROM wallet_scope wallet
       WHERE wallet.id = transfer.custody_wallet_id
         AND wallet.organization_id = transfer.organization_id
-        AND ((wallet.owner_kind = 'config'
-              AND (wallet.project_id = transfer.project_id OR wallet.project_id IS NULL))
-          OR (wallet.owner_kind = 'connection' AND wallet.project_id = transfer.project_id))
+        AND wallet.project_id = transfer.project_id
         AND wallet.wallet_id = transfer.wallet_id
         AND wallet.public_key = CASE WHEN transfer.direction = 'inbound'
                                      THEN transfer.destination_address
@@ -145,9 +131,7 @@ WITH wallet_scope AS (
       SELECT 1 FROM wallet_scope wallet
       WHERE wallet.id = batch.source_custody_wallet_id
         AND wallet.organization_id = batch.organization_id
-        AND ((wallet.owner_kind = 'config'
-              AND (wallet.project_id = batch.project_id OR wallet.project_id IS NULL))
-          OR (wallet.owner_kind = 'connection' AND wallet.project_id = batch.project_id))
+        AND wallet.project_id = batch.project_id
         AND wallet.wallet_id = batch.source_wallet_id
         AND wallet.public_key = batch.source_address
     )
@@ -159,9 +143,7 @@ WITH wallet_scope AS (
       SELECT 1 FROM wallet_scope wallet
       WHERE wallet.id = request.custody_wallet_id
         AND wallet.organization_id = request.organization_id
-        AND ((wallet.owner_kind = 'config'
-              AND (wallet.project_id = request.project_id OR wallet.project_id IS NULL))
-          OR (wallet.owner_kind = 'connection' AND wallet.project_id = request.project_id))
+        AND wallet.project_id = request.project_id
         AND wallet.wallet_id = request.wallet_id
         AND wallet.public_key = request.destination_address
     )
@@ -200,12 +182,12 @@ LIMIT 100;
 \echo '=== 3. Executable Payments Approvals that cannot use compatibility replay ==='
 WITH wallet_scope AS (
   SELECT wallet.id, wallet.wallet_id, wallet.public_key,
-         config.organization_id, config.project_id, 'config'::TEXT AS owner_kind
+         config.organization_id, config.project_id
   FROM custody_wallets wallet
   JOIN custody_configs config ON config.id = wallet.custody_config_id
   UNION ALL
   SELECT wallet.id, wallet.wallet_id, wallet.public_key,
-         connection.organization_id, connection.project_id, 'connection'::TEXT AS owner_kind
+         connection.organization_id, connection.project_id
   FROM custody_wallets wallet
   JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
 ), audited AS (
@@ -215,10 +197,7 @@ WITH wallet_scope AS (
            FROM wallet_scope wallet
            WHERE wallet.id = operation.custody_wallet_id
              AND wallet.organization_id = operation.organization_id
-             AND ((wallet.owner_kind = 'config'
-                   AND (wallet.project_id = operation.project_id OR wallet.project_id IS NULL))
-               OR (wallet.owner_kind = 'connection'
-                   AND wallet.project_id = operation.project_id))
+             AND wallet.project_id = operation.project_id
              AND wallet.wallet_id = operation.wallet_id
              AND wallet.public_key = operation.raw_payload #>> '{context,sourceAddress}'
          ) AS exact_wallet_matches

@@ -57,7 +57,7 @@ export type DeactivateWalletResult = "deactivated" | "wallet_not_found" | "last_
 interface CustodyConfigRow {
   id: string;
   organization_id: string;
-  project_id: string | null;
+  project_id: string;
   provider: string;
   config_encrypted: string;
   encryption_version: string;

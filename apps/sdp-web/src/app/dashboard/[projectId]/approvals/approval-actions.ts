@@ -1,5 +1,6 @@
 import type {
   ApprovalRequestStatus,
+  CustodySetupRefusalReason,
   WalletApprovalRequestSummary,
   WalletOperationStatus,
 } from "@sdp/types";
@@ -7,6 +8,9 @@ import { z } from "zod";
 
 export const APPROVAL_ACTIONS = ["approve", "reject", "cancel"] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
+
+const PROVIDER_NOT_ENTITLED = "provider_not_entitled" satisfies CustodySetupRefusalReason;
+
 export type ApprovalActionOutcome =
   | "success"
   | "stale"
@@ -14,7 +18,7 @@ export type ApprovalActionOutcome =
   | "failure"
   | "runtime_paused"
   | "runtime_unavailable"
-  | "provider_not_entitled";
+  | typeof PROVIDER_NOT_ENTITLED;
 
 export function isApprovalAction(action: string): action is ApprovalAction {
   return APPROVAL_ACTIONS.includes(action as ApprovalAction);
@@ -29,7 +33,7 @@ export function classifyApprovalActionResponse(
   reason?: string
 ): ApprovalActionOutcome {
   if (status >= 200 && status < 300) return "success";
-  if (status === 403 && reason === "provider_not_entitled") return "provider_not_entitled";
+  if (status === 403 && reason === PROVIDER_NOT_ENTITLED) return PROVIDER_NOT_ENTITLED;
   if (status === 403 && reason === "runtime_execution_paused") return "runtime_paused";
   if (status === 409 && reason === "runtime_execution_unavailable") return "runtime_unavailable";
   if (status === 409) return "stale";

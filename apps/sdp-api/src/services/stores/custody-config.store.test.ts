@@ -40,17 +40,17 @@ describe("CustodyConfigStore project scope", () => {
   );
 
   it("never returns another project's active config", async () => {
-    await seedPrivyConfig({ projectId: OTHER_PROJECT_ID, status: "active" });
+    await seedPrivyConfig({ projectId: PROJECT_ID, status: "active" });
     const rowsBefore = await readCustodyRows();
     const store = new CustodyConfigStore(getDb(env), env);
 
+    await expect(store.findActiveByProvider(ORGANIZATION_ID, PROJECT_ID, "privy")).resolves.toEqual(
+      expectedConfigRecord(PROJECT_ID, "active")
+    );
     await expect(
       store.findActiveByProvider(ORGANIZATION_ID, OTHER_PROJECT_ID, "privy")
-    ).resolves.toEqual(expectedConfigRecord(OTHER_PROJECT_ID, "active"));
-    await expect(
-      store.findActiveByProvider(ORGANIZATION_ID, PROJECT_ID, "privy")
     ).resolves.toBeNull();
-    await expect(store.listActive(ORGANIZATION_ID, PROJECT_ID)).resolves.toEqual([]);
+    await expect(store.listActive(ORGANIZATION_ID, OTHER_PROJECT_ID)).resolves.toEqual([]);
     expect(await readCustodyRows()).toEqual(rowsBefore);
   });
 

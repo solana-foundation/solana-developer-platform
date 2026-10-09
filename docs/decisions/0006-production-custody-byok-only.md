@@ -14,7 +14,7 @@ Custody has two modes, fixed per wallet: Managed (the deployment's own provider 
 - A Production project may use BYOK only; a Sandbox project may use both. SDP's hosted deployment never holds mainnet keys under its own provider accounts.
 - Custody is set up per project only. Org-level custody configs and every project-to-org fallback are removed.
 - Which (provider, mode) pairs a deployment offers is set by its release channel, with one stage map per mode, extending ADR 0005. This replaces `PRIVY_BYOK_ENABLED`.
-- A Production project uses only providers whose stage is `stable`, in every provider family, whatever the deployment's channel. The API enforces this, and a public project-scoped availability read reports it.
+- The release channel alone decides which providers a deployment offers, the same for Sandbox and Production projects (revised Oct 9: an earlier Production `stable`-only rule was withdrawn). A public project-scoped availability read reports what each project can use.
 
 ## Considered Options
 

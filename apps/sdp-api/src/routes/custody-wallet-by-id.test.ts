@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
@@ -229,7 +230,7 @@ describe("Custody wallet by ID route", () => {
     });
   });
 
-  it("hides a persisted Connection public key while the BYOK pair is out of channel", async () => {
+  it("refuses a persisted Connection public key while the BYOK pair is out of channel", async () => {
     const connection = await seedConnectionWallet();
     custodyReleaseChannel.outOfChannelMode = "byok";
 
@@ -241,9 +242,13 @@ describe("Custody wallet by ID route", () => {
       },
       env
     );
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error: { code: "NOT_FOUND", message: "Wallet not found" },
+      error: {
+        code: "FORBIDDEN",
+        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
+      },
       meta: { requestId: expect.any(String) },
     });
   });

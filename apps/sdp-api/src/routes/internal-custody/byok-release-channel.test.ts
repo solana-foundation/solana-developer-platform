@@ -309,10 +309,7 @@ describe("BYOK Privy outside the release channel", () => {
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: "Custody Connection setup is disabled for this provider",
-      },
+      error: CHANNEL_REFUSAL,
       meta: { requestId: expect.any(String) },
     });
     expect(providerFetch).not.toHaveBeenCalled();
@@ -336,10 +333,7 @@ describe("BYOK Privy outside the release channel", () => {
     });
     expect(fresh.status).toBe(403);
     expect(await fresh.json()).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: "Custody Connection setup is disabled for this provider",
-      },
+      error: CHANNEL_REFUSAL,
       meta: { requestId: expect.any(String) },
     });
     expect(providerFetch).not.toHaveBeenCalled();
@@ -357,7 +351,7 @@ describe("BYOK Privy outside the release channel", () => {
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({
-      error: { code: "FORBIDDEN", message: "Provider credential installation is unavailable" },
+      error: CHANNEL_REFUSAL,
       meta: { requestId: expect.any(String) },
     });
     expect(providerFetch).not.toHaveBeenCalled();

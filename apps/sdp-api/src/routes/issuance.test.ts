@@ -14,7 +14,7 @@ import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as TokenAclSdk from "@solana/token-acl-sdk";
 import * as Token2022 from "@solana-program/token-2022";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
@@ -44,8 +44,10 @@ import {
   TEST_SOLANA_ADDRESSES,
 } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -271,17 +273,11 @@ describe("Issuance Routes", () => {
   let apiKeyHash: string;
 
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-
     // Pre-compute API key hash
     apiKeyHash = await hashString(
       TEST_PROJECT_API_KEY.raw,
       (env as { API_KEY_PEPPER: string }).API_KEY_PEPPER
     );
-  });
-
-  afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {
@@ -294,51 +290,7 @@ describe("Issuance Routes", () => {
       await kv.rateLimits.delete(key.name);
     }
 
-    // Clear token-related tables
-    await db
-      .prepare("DELETE FROM wallet_operations")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM frozen_accounts")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM token_allowlist_statuses")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM token_allowlists")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issuance_transaction_statuses")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issuance_transactions")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issued_token_extensions")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issued_tokens")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM project_members")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM projects")
-      .run()
-      .catch(() => {});
+    await seedTestDatabase(env);
 
     // Seed organization
     await db
@@ -2953,38 +2905,51 @@ describe("Issuance Routes", () => {
       async (operation) => {
         const request = await prepareAction(operation);
         await seedOrganization({ id: "org_other_selector", name: "Other", slug: "other-selector" });
-        for (const organizationId of [TEST_ORG.id, "org_other_selector"]) {
-          const projectId =
-            organizationId === TEST_ORG.id
-              ? TEST_PRODUCTION_PROJECT.id
-              : `prj_other_${organizationId}`;
-          const configId = `cfg_other_${organizationId}`;
-          const custodyWalletId = `cwlt_other_${organizationId}`;
-          if (organizationId !== TEST_ORG.id) {
-            await seedProject({
-              id: projectId,
-              organizationId,
-              name: "Other project",
-              slug: "other-project",
-              environment: "sandbox",
-            });
-          }
-          await getDb(env)
-            .prepare(
-              `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-           VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', 'active')`
-            )
-            .bind(configId, organizationId, projectId)
-            .run();
-          await getDb(env)
-            .prepare(
-              `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, purpose, status)
-           VALUES (?, ?, ?, ?, 'transfer', 'active')`
-            )
-            .bind(custodyWalletId, configId, custodyWalletId, TEST_ACTIVE_TOKEN.mintAuthority)
-            .run();
-          expect((await request(custodyWalletId)).status).toBe(404);
-        }
+        await getDb(env).transaction((tx) =>
+          seedTestPrivyConnection(tx, {
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PRODUCTION_PROJECT.id,
+            connectionId: "cconn_other_production_project",
+            credentialId: "pcred_other_production_project",
+            createdBy: TEST_USER.id,
+            stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+            providerAccountFingerprint: "sha256:other-production-project",
+            lastCheckStatus: "success",
+            wallets: [
+              {
+                id: "cwlt_other_production_project",
+                walletId: "cwlt_other_production_project",
+                publicKey: required(TEST_ACTIVE_TOKEN.mintAuthority),
+                label: null,
+                purpose: "transfer",
+                status: "active",
+              },
+            ],
+            defaultCustodyWalletId: "cwlt_other_production_project",
+          })
+        );
+        expect((await request("cwlt_other_production_project")).status).toBe(404);
+        await seedProject({
+          id: "prj_other_org_other_selector",
+          organizationId: "org_other_selector",
+          name: "Other project",
+          slug: "other-project",
+          environment: "sandbox",
+        });
+        await getDb(env)
+          .prepare(
+            `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+         VALUES ('cfg_other_org_other_selector', 'org_other_selector', 'prj_other_org_other_selector', 'local', 'test-config', 'sdp-custody-encryption-v1', 'active')`
+          )
+          .run();
+        await getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, purpose, status)
+         VALUES ('cwlt_other_org_other_selector', 'cfg_other_org_other_selector', 'cwlt_other_org_other_selector', ?, 'transfer', 'active')`
+          )
+          .bind(TEST_ACTIVE_TOKEN.mintAuthority)
+          .run();
+        expect((await request("cwlt_other_org_other_selector")).status).toBe(404);
         expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
         const history = await app.request(
           "/v1/issuance/tokens/tok_explicit_authority/transactions",

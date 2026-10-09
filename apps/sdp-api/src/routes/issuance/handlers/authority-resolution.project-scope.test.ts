@@ -19,6 +19,8 @@ const ORGANIZATION_ID = "org_issuance_project_scope";
 const USER_ID = "usr_issuance_project_scope";
 const REQUESTER_PROJECT_ID = "prj_issuance_project_scope";
 const OWNER_PROJECT_ID = "prj_issuance_project_scope_production";
+const OTHER_ORGANIZATION_ID = "org_issuance_project_scope_other";
+const OTHER_ORGANIZATION_SANDBOX_PROJECT_ID = "prj_issuance_project_scope_other_sandbox";
 const OWNER_CONFIG_ID = "cfg_issuance_project_scope_owner";
 const REQUESTER_CONFIG_ID = "cfg_issuance_project_scope_requester";
 const SHARED_AUTHORITY = TEST_SOLANA_ADDRESSES.wallet1;
@@ -26,15 +28,19 @@ const SHARED_AUTHORITY = TEST_SOLANA_ADDRESSES.wallet1;
 const OWNER_WALLETS = [
   {
     owner: "config",
+    organizationId: OTHER_ORGANIZATION_ID,
+    projectId: OTHER_ORGANIZATION_SANDBOX_PROJECT_ID,
     custodyWalletId: "cwlt_issuance_scope_owner_config",
     providerWalletId: "wal_issuance_scope_owner_config",
-    publicKey: SHARED_AUTHORITY,
+    publicKey: TEST_SOLANA_ADDRESSES.wallet2,
   },
   {
     owner: "connection",
+    organizationId: ORGANIZATION_ID,
+    projectId: OWNER_PROJECT_ID,
     custodyWalletId: "cwlt_issuance_scope_owner_connection",
     providerWalletId: "wal_issuance_scope_owner_connection",
-    publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+    publicKey: SHARED_AUTHORITY,
   },
 ] as const;
 
@@ -44,10 +50,10 @@ const REQUESTER_WALLET = {
   publicKey: SHARED_AUTHORITY,
 };
 
-function clerkAuth(projectId: string): ApiKeyContext {
+function clerkAuth(organizationId: string, projectId: string): ApiKeyContext {
   return {
     id: USER_ID,
-    organizationId: ORGANIZATION_ID,
+    organizationId,
     projectId,
     role: "admin",
     permissions: ["*"],
@@ -67,8 +73,8 @@ async function seedOwnerProjectCustody(): Promise<void> {
     configs: [
       {
         id: OWNER_CONFIG_ID,
-        organizationId: ORGANIZATION_ID,
-        projectId: OWNER_PROJECT_ID,
+        organizationId: OWNER_WALLETS[0].organizationId,
+        projectId: OWNER_WALLETS[0].projectId,
         provider: "local",
         configEncrypted: "encrypted",
         status: "active",
@@ -88,8 +94,8 @@ async function seedOwnerProjectCustody(): Promise<void> {
   });
   await getDb(env).transaction((tx) =>
     seedTestPrivyConnection(tx, {
-      organizationId: ORGANIZATION_ID,
-      projectId: OWNER_PROJECT_ID,
+      organizationId: OWNER_WALLETS[1].organizationId,
+      projectId: OWNER_WALLETS[1].projectId,
       connectionId: "cconn_issuance_project_scope_owner",
       credentialId: "pcred_issuance_project_scope_owner",
       createdBy: USER_ID,
@@ -151,6 +157,15 @@ describe("issuance authority resolution across an organization's projects", () =
           "active"
         ),
       getDb(env)
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+        .bind(
+          OTHER_ORGANIZATION_ID,
+          "Issuance Project Scope Other",
+          "issuance-project-scope-other",
+          "individual",
+          "active"
+        ),
+      getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(USER_ID, "issuance-project-scope@example.com", 1, "active"),
     ]);
@@ -159,6 +174,15 @@ describe("issuance authority resolution across an organization's projects", () =
       createdBy: USER_ID,
       members: [],
       ids: { sandbox: REQUESTER_PROJECT_ID, production: OWNER_PROJECT_ID },
+    });
+    await seedDefaultProjects(getDb(env), {
+      organizationId: OTHER_ORGANIZATION_ID,
+      createdBy: USER_ID,
+      members: [],
+      ids: {
+        sandbox: OTHER_ORGANIZATION_SANDBOX_PROJECT_ID,
+        production: "prj_issuance_project_scope_other_production",
+      },
     });
     await seedOwnerProjectCustody();
   });
@@ -169,11 +193,11 @@ describe("issuance authority resolution across an organization's projects", () =
 
   it.each(OWNER_WALLETS)(
     "resolves a $owner wallet only for the project that owns it",
-    async ({ custodyWalletId, providerWalletId, publicKey }) => {
+    async ({ organizationId, projectId, custodyWalletId, providerWalletId, publicKey }) => {
       await expect(
         resolveIssuanceWallet({
           env,
-          auth: clerkAuth(OWNER_PROJECT_ID),
+          auth: clerkAuth(organizationId, projectId),
           custodyWalletId,
           requiredWalletPermissions: ["tokens:write"],
         })
@@ -182,7 +206,7 @@ describe("issuance authority resolution across an organization's projects", () =
       await expect(
         resolveIssuanceWallet({
           env,
-          auth: clerkAuth(REQUESTER_PROJECT_ID),
+          auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
           custodyWalletId,
           requiredWalletPermissions: ["tokens:write"],
         })
@@ -196,7 +220,7 @@ describe("issuance authority resolution across an organization's projects", () =
     await expect(
       resolveAuthorityWallet({
         env,
-        auth: clerkAuth(REQUESTER_PROJECT_ID),
+        auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
         currentAuthority: SHARED_AUTHORITY,
         requiredWalletPermissions: ["tokens:write"],
       })
@@ -207,7 +231,7 @@ describe("issuance authority resolution across an organization's projects", () =
     await expect(
       resolveAuthorityWallet({
         env,
-        auth: clerkAuth(REQUESTER_PROJECT_ID),
+        auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
         currentAuthority: SHARED_AUTHORITY,
         requiredWalletPermissions: ["tokens:write"],
       })
@@ -228,7 +252,7 @@ describe("issuance authority resolution across an organization's projects", () =
     await expect(
       createLegacyResolvedAuthoritySigner({
         env,
-        auth: clerkAuth(REQUESTER_PROJECT_ID),
+        auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
         walletId: REQUESTER_WALLET.providerWalletId,
       })
     ).resolves.toBe(signer);
@@ -246,8 +270,8 @@ describe("issuance authority resolution across an organization's projects", () =
     await expect(
       createLegacyResolvedAuthoritySigner({
         env,
-        auth: clerkAuth(REQUESTER_PROJECT_ID),
-        walletId: OWNER_WALLETS[0].providerWalletId,
+        auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
+        walletId: OWNER_WALLETS[1].providerWalletId,
       })
     ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
     expect(exactSigner).not.toHaveBeenCalled();
@@ -260,7 +284,7 @@ describe("issuance authority resolution across an organization's projects", () =
     await expect(
       createLegacyResolvedAuthoritySigner({
         env,
-        auth: clerkAuth(REQUESTER_PROJECT_ID),
+        auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
         walletId: null,
       })
     ).rejects.toMatchObject({

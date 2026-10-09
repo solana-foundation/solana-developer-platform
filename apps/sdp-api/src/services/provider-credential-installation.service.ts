@@ -31,7 +31,11 @@ import {
   type ProvisionPrivyResult,
   provisionPrivyWallet,
 } from "@/services/custody/provisioning";
-import { isPersistedCustodyCompletionEnabled } from "@/services/provider-availability.service";
+import {
+  admitByokCustodySetup,
+  type CustodySetupAdmission,
+  refuseCustodySetup,
+} from "@/services/provider-availability.service";
 import {
   decideInstallation,
   type InstallationConflictReason,
@@ -92,6 +96,7 @@ interface InstallationContext {
 
 interface LoadedInstallation {
   target: InstallationConnectionState;
+  admission: CustodySetupAdmission;
   decisions: InstallationDecisions;
 }
 
@@ -199,8 +204,13 @@ export async function deactivateCustodyConnection(
       const deactivated = { ...target, status: "deactivated" as const };
       return projectConnection({
         target: deactivated,
+        admission: loaded.admission,
         decisions: decideInstallation(
-          installationFactsFromConnection(deactivated, await store.getDatabaseNowMs(), false)
+          installationFactsFromConnection(
+            deactivated,
+            await store.getDatabaseNowMs(),
+            loaded.admission
+          )
         ),
       });
     });
@@ -285,7 +295,7 @@ export async function completeProviderCredentialInstallation(
     return completionResult(loaded);
   }
   if (loaded.decisions.complete.kind === "disabled") {
-    throw forbidden(INSTALLATION_UNAVAILABLE_MESSAGE);
+    throw refuseCustodySetup(loaded.decisions.complete.refusal);
   }
   if (loaded.decisions.complete.kind === "conflict") {
     throw installationConflict(loaded.decisions.complete.reason);
@@ -546,17 +556,16 @@ async function loadInstallation(
     if (!target) {
       throw notFound("Custody Connection");
     }
-    const fullCompletionEnabled = await isPersistedCustodyCompletionEnabled(
+    const admission = await admitByokCustodySetup(
       context.c.env,
       context.db,
-      context.organizationId,
+      { organizationId: context.organizationId, projectId: context.projectId },
       target.provider
     );
     return {
       target,
-      decisions: decideInstallation(
-        installationFactsFromConnection(target, nowMs, fullCompletionEnabled)
-      ),
+      admission,
+      decisions: decideInstallation(installationFactsFromConnection(target, nowMs, admission)),
     };
   } catch (error) {
     if (error instanceof AppError) {
@@ -885,7 +894,7 @@ async function resolveCompletionRace(
     throw installationConflict(current.decisions.complete.reason);
   }
   if (current.decisions.complete.kind === "disabled") {
-    throw forbidden(INSTALLATION_UNAVAILABLE_MESSAGE);
+    throw refuseCustodySetup(current.decisions.complete.refusal);
   }
   throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
 }

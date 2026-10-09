@@ -3,6 +3,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -109,14 +110,18 @@ describe("custody Config beside a BYOK Connection", () => {
     });
   });
 
-  it("hides an out-of-channel Connection wallet without touching the Config listing", async () => {
+  it("refuses an out-of-channel Connection wallet without touching the Config listing", async () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
 
     expect(await (await request("/v1/wallets/configs")).json()).toEqual(configsBody());
     const publicKey = await request(`/v1/wallets/public-key?walletId=${CONNECTION_WALLET_ID}`);
-    expect(publicKey.status).toBe(404);
+    expect(publicKey.status).toBe(403);
     expect(await publicKey.json()).toEqual({
-      error: { code: "NOT_FOUND", message: "Wallet not found" },
+      error: {
+        code: "FORBIDDEN",
+        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
+      },
       meta: { requestId: expect.any(String) },
     });
   });

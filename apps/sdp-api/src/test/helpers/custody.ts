@@ -199,7 +199,7 @@ export async function getTestCustodyConfig(
     .first<{
       id: string;
       organization_id: string;
-      project_id: string | null;
+      project_id: string;
       provider: string;
       config: string;
       encryption_version: string;

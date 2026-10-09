@@ -22,7 +22,7 @@ const ORGANIZATION_ID = "org_factory_release_channel";
 const FIREBLOCKS_RECORD: SigningConfigRecord = {
   id: "cust_factory_release_channel",
   organizationId: ORGANIZATION_ID,
-  projectId: null,
+  projectId: "prj_factory_release_channel",
   provider: "fireblocks",
   config: JSON.stringify({
     provider: "fireblocks",

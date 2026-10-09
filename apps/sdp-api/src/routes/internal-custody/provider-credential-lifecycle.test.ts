@@ -33,7 +33,6 @@ const PROJECT_A_ID = "prj_provider_credential_lifecycle_a";
 const PROJECT_B_ID = "prj_provider_credential_lifecycle_b";
 const CREDENTIAL_ID = "pcred_provider_credential_lifecycle";
 const CONNECTION_A_ID = "cconn_provider_credential_lifecycle_a";
-const CONNECTION_B_ID = "cconn_provider_credential_lifecycle_b";
 const APP_ID = "privy-lifecycle-app";
 const APP_SECRET = "privy-lifecycle-secret";
 const ORIGINAL_SECRET_BACKEND = env.CREDENTIAL_SECRET_STORE_BACKEND;
@@ -133,7 +132,7 @@ async function seedActor(): Promise<void> {
   });
 }
 
-async function seedActiveSharedCredential(): Promise<void> {
+async function seedActiveProjectCredential(): Promise<void> {
   const stored = await createCredentialSecretStore(env).write({
     orgId: ORGANIZATION_ID,
     provider: "privy",
@@ -145,9 +144,9 @@ async function seedActiveSharedCredential(): Promise<void> {
   const credential: TestStoredProviderCredential = {
     id: CREDENTIAL_ID,
     organizationId: ORGANIZATION_ID,
-    projectId: null,
+    projectId: PROJECT_A_ID,
     provider: "privy",
-    label: "Shared Privy",
+    label: "Project Privy",
     stored,
     displayMetadata: { appIdSuffix: APP_ID.slice(-4) },
     status: "active",
@@ -158,42 +157,38 @@ async function seedActiveSharedCredential(): Promise<void> {
     createdBy: USER_ID,
   };
   await insertTestStoredProviderCredential(db, credential);
-  for (const [connectionId, projectId, walletId] of [
-    [CONNECTION_A_ID, PROJECT_A_ID, "cwlt_provider_credential_lifecycle_a"],
-    [CONNECTION_B_ID, PROJECT_B_ID, "cwlt_provider_credential_lifecycle_b"],
-  ] as const) {
-    await insertTestCustodyConnection(db, {
-      id: connectionId,
-      organizationId: ORGANIZATION_ID,
-      projectId,
-      provider: "privy",
-      credential,
-      status: "pending",
-      setupMetadata: {},
-      providerAccountFingerprint: fingerprint,
-      lastCheckStatus: null,
-      lastCheckAt: null,
-      lastCheckFailureCode: null,
-      activatedAt: null,
-      deactivatedAt: null,
-      createdBy: USER_ID,
-      createdAt: new Date().toISOString(),
-    });
-    await insertTestCustodyWalletRow(db, {
-      id: walletId,
-      owner: { kind: "connection", custodyConnectionId: connectionId },
-      walletId: `provider-${walletId}`,
-      publicKey: `address-${walletId}`,
-      label: null,
-      purpose: null,
-      status: "active",
-    });
-    await activateTestCustodyConnection(db, {
-      connectionId,
-      custodyWalletId: walletId,
-      providerAccountFingerprint: fingerprint,
-    });
-  }
+  const walletId = "cwlt_provider_credential_lifecycle_a";
+  await insertTestCustodyConnection(db, {
+    id: CONNECTION_A_ID,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_A_ID,
+    provider: "privy",
+    credential,
+    status: "pending",
+    setupMetadata: {},
+    providerAccountFingerprint: fingerprint,
+    lastCheckStatus: null,
+    lastCheckAt: null,
+    lastCheckFailureCode: null,
+    activatedAt: null,
+    deactivatedAt: null,
+    createdBy: USER_ID,
+    createdAt: new Date().toISOString(),
+  });
+  await insertTestCustodyWalletRow(db, {
+    id: walletId,
+    owner: { kind: "connection", custodyConnectionId: CONNECTION_A_ID },
+    walletId: `provider-${walletId}`,
+    publicKey: `address-${walletId}`,
+    label: null,
+    purpose: null,
+    status: "active",
+  });
+  await activateTestCustodyConnection(db, {
+    connectionId: CONNECTION_A_ID,
+    custodyWalletId: walletId,
+    providerAccountFingerprint: fingerprint,
+  });
 }
 
 async function lifecycleRequest(
@@ -385,7 +380,7 @@ describe("provider credential lifecycle", () => {
     env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 19).toString("base64");
     await seedTestDatabase(env);
     await seedActor();
-    await seedActiveSharedCredential();
+    await seedActiveProjectCredential();
   });
 
   afterEach(async () => {
@@ -488,7 +483,6 @@ describe("provider credential lifecycle", () => {
       expect(rollback.status).toBe(200);
       expect(await activeConnectionCredentialIds()).toEqual([
         { provider_credential_id: CREDENTIAL_ID },
-        { provider_credential_id: CREDENTIAL_ID },
       ]);
     }
   );
@@ -518,7 +512,6 @@ describe("provider credential lifecycle", () => {
     expect(response.status).toBe(200);
     const { data } = credentialResponseSchema.parse(await response.json());
     expect(await activeConnectionCredentialIds()).toEqual([
-      { provider_credential_id: data.providerCredential.id },
       { provider_credential_id: data.providerCredential.id },
     ]);
     expect(
@@ -586,7 +579,6 @@ describe("provider credential lifecycle", () => {
     expect((await rotation).status).toBe(409);
     expect(await activeConnectionCredentialIds()).toEqual([
       { provider_credential_id: CREDENTIAL_ID },
-      { provider_credential_id: CREDENTIAL_ID },
     ]);
   });
 
@@ -653,10 +645,6 @@ describe("provider credential lifecycle", () => {
            activated_at = CASE WHEN ? = 'active' THEN activated_at ELSE NULL END WHERE id = ?`,
         [status, status, status, CONNECTION_A_ID]
       );
-      await db.execute(
-        "UPDATE custody_connections SET status = 'deactivated', deactivated_at = sdp_iso_now() WHERE id = ?",
-        [CONNECTION_B_ID]
-      );
       const original = await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [
         CREDENTIAL_ID,
       ]);
@@ -686,7 +674,7 @@ describe("provider credential lifecycle", () => {
           metadata: {
             event: "provider_credential_deactivation_blocked",
             provider: "privy",
-            scope: "organization",
+            scope: "project",
             projectId: PROJECT_A_ID,
             credentialStatus: "active",
             reasonCode: "credential_in_use",
@@ -1309,14 +1297,8 @@ describe("provider credential lifecycle", () => {
       providerCredential: { id: CREDENTIAL_ID, status: "active", source: "stored" },
       rotationCandidate: null,
       impact: {
-        projects: [
-          { id: PROJECT_A_ID, name: DEFAULT_PROJECT_NAME.sandbox },
-          { id: PROJECT_B_ID, name: DEFAULT_PROJECT_NAME.production },
-        ],
-        connections: [
-          { id: CONNECTION_A_ID, projectId: PROJECT_A_ID },
-          { id: CONNECTION_B_ID, projectId: PROJECT_B_ID },
-        ],
+        projects: [{ id: PROJECT_A_ID, name: DEFAULT_PROJECT_NAME.sandbox }],
+        connections: [{ id: CONNECTION_A_ID, projectId: PROJECT_A_ID }],
       },
       rollback: null,
     });
@@ -1397,8 +1379,8 @@ describe("provider credential lifecycle", () => {
       expect.objectContaining({
         fromProviderCredentialId: CREDENTIAL_ID,
         toProviderCredentialId: body.data.providerCredential.id,
-        connectionIds: [CONNECTION_A_ID, CONNECTION_B_ID],
-        projectIds: [PROJECT_A_ID, PROJECT_B_ID],
+        connectionIds: [CONNECTION_A_ID],
+        projectIds: [PROJECT_A_ID],
         auditIntentId: expect.any(String),
       }),
     ]);
@@ -1438,10 +1420,7 @@ describe("provider credential lifecycle", () => {
       await getDb(env).queryMany<{ provider_credential_id: string }>(
         `SELECT provider_credential_id FROM custody_connections ORDER BY id`
       )
-    ).toEqual([
-      { provider_credential_id: body.data.providerCredential.id },
-      { provider_credential_id: body.data.providerCredential.id },
-    ]);
+    ).toEqual([{ provider_credential_id: body.data.providerCredential.id }]);
   });
 
   it("rolls back the whole cutover when retiring the predecessor fails", async () => {
@@ -1506,10 +1485,7 @@ describe("provider credential lifecycle", () => {
            FROM custody_connections
            ORDER BY id`
         )
-      ).toEqual([
-        { id: CONNECTION_A_ID, provider_credential_id: CREDENTIAL_ID },
-        { id: CONNECTION_B_ID, provider_credential_id: CREDENTIAL_ID },
-      ]);
+      ).toEqual([{ id: CONNECTION_A_ID, provider_credential_id: CREDENTIAL_ID }]);
     } finally {
       await db.execute(
         `ALTER TABLE provider_credentials
@@ -1580,10 +1556,7 @@ describe("provider credential lifecycle", () => {
         await db.queryMany<{ provider_credential_id: string }>(
           "SELECT provider_credential_id FROM custody_connections ORDER BY id"
         )
-      ).toEqual([
-        { provider_credential_id: CREDENTIAL_ID },
-        { provider_credential_id: CREDENTIAL_ID },
-      ]);
+      ).toEqual([{ provider_credential_id: CREDENTIAL_ID }]);
       const orphanLogs = errorLog.mock.calls.filter(
         (call) => call[1] === "provider_credential_orphan_risk"
       );
@@ -1652,7 +1625,6 @@ describe("provider credential lifecycle", () => {
       expect(gcp.requests.filter(({ url }) => url.endsWith(":addVersion"))).toHaveLength(1);
       expect(await activeConnectionCredentialIds()).toEqual([
         { provider_credential_id: CREDENTIAL_ID },
-        { provider_credential_id: CREDENTIAL_ID },
       ]);
     } finally {
       released.resolve();
@@ -1717,7 +1689,6 @@ describe("provider credential lifecycle", () => {
       expect(gcp.versions.size).toBe(writeFailure === "lost_response" ? 1 : 0);
       expect(await activeConnectionCredentialIds()).toEqual([
         { provider_credential_id: CREDENTIAL_ID },
-        { provider_credential_id: CREDENTIAL_ID },
       ]);
       const writesBeforeReplay = gcp.requests.filter(({ method }) => method === "POST");
       expect(
@@ -1757,7 +1728,6 @@ describe("provider credential lifecycle", () => {
         secret_retention_expires_at: expect.any(String),
       });
       expect(await activeConnectionCredentialIds()).toEqual([
-        { provider_credential_id: CREDENTIAL_ID },
         { provider_credential_id: CREDENTIAL_ID },
       ]);
       expect(gcp.requests.some(({ url }) => url.endsWith(":destroy"))).toBe(false);
@@ -1824,7 +1794,6 @@ describe("provider credential lifecycle", () => {
       secret_retention_expires_at: expect.any(String),
     });
     expect(await activeConnectionCredentialIds()).toEqual([
-      { provider_credential_id: CREDENTIAL_ID },
       { provider_credential_id: CREDENTIAL_ID },
     ]);
     expect(gcp.requests.some(({ url }) => new URL(url).hostname === "api.privy.io")).toBe(false);
@@ -1948,7 +1917,6 @@ describe("provider credential lifecycle", () => {
       const currentId = status === "active" ? data.providerCredential.id : CREDENTIAL_ID;
       expect(await activeConnectionCredentialIds()).toEqual([
         { provider_credential_id: currentId },
-        { provider_credential_id: currentId },
       ]);
       expect(gcp.requests.some(({ url }) => url.endsWith(":destroy"))).toBe(false);
       expect(gcp.requests.filter(({ url }) => url.endsWith(":addVersion"))).toHaveLength(1);
@@ -2012,7 +1980,6 @@ describe("provider credential lifecycle", () => {
       ]);
       expect(await activeConnectionCredentialIds()).toEqual([
         { provider_credential_id: CREDENTIAL_ID },
-        { provider_credential_id: CREDENTIAL_ID },
       ]);
       expect(gcp.requests.some(({ url }) => url.endsWith(":destroy"))).toBe(false);
       const replay = await lifecycleRequest(
@@ -2072,7 +2039,6 @@ describe("provider credential lifecycle", () => {
     expect(await lifecycleAuditAttempts("submit")).toEqual(submissionAttempts);
     expect(await activeConnectionCredentialIds()).toEqual([
       { provider_credential_id: CREDENTIAL_ID },
-      { provider_credential_id: CREDENTIAL_ID },
     ]);
   });
 
@@ -2105,10 +2071,7 @@ describe("provider credential lifecycle", () => {
       await getDb(env).queryMany<{ provider_credential_id: string }>(
         "SELECT provider_credential_id FROM custody_connections ORDER BY id"
       )
-    ).toEqual([
-      { provider_credential_id: CREDENTIAL_ID },
-      { provider_credential_id: CREDENTIAL_ID },
-    ]);
+    ).toEqual([{ provider_credential_id: CREDENTIAL_ID }]);
   });
 
   it("audits a rejected rotation once across replays", async () => {
@@ -2168,10 +2131,7 @@ describe("provider credential lifecycle", () => {
       await db.queryMany<{ id: string; provider_credential_id: string }>(
         "SELECT id, provider_credential_id FROM custody_connections ORDER BY id"
       )
-    ).toEqual([
-      { id: CONNECTION_A_ID, provider_credential_id: CREDENTIAL_ID },
-      { id: CONNECTION_B_ID, provider_credential_id: CREDENTIAL_ID },
-    ]);
+    ).toEqual([{ id: CONNECTION_A_ID, provider_credential_id: CREDENTIAL_ID }]);
     expect(
       await db.queryOne<{
         status: string;
@@ -2527,7 +2487,6 @@ describe("provider credential lifecycle", () => {
           .providerCredential.id;
         expect(await activeConnectionCredentialIds()).toEqual([
           { provider_credential_id: resultId },
-          { provider_credential_id: resultId },
         ]);
         expect(errorLog).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -2833,10 +2792,7 @@ describe("provider credential lifecycle", () => {
       await getDb(env).queryMany<{ provider_credential_id: string }>(
         "SELECT provider_credential_id FROM custody_connections ORDER BY id"
       )
-    ).toEqual([
-      { provider_credential_id: CREDENTIAL_ID },
-      { provider_credential_id: CREDENTIAL_ID },
-    ]);
+    ).toEqual([{ provider_credential_id: CREDENTIAL_ID }]);
     const rolledBackFrom = await getDb(env).queryOne<{
       status: string;
       secret_retention_expires_at: string | null;
@@ -3024,10 +2980,7 @@ describe("provider credential lifecycle", () => {
       await getDb(env).queryMany<{ provider_credential_id: string }>(
         "SELECT provider_credential_id FROM custody_connections ORDER BY id"
       )
-    ).toEqual([
-      { provider_credential_id: CREDENTIAL_ID },
-      { provider_credential_id: CREDENTIAL_ID },
-    ]);
+    ).toEqual([{ provider_credential_id: CREDENTIAL_ID }]);
     expect(
       await getDb(env).queryOne<{ encrypted_secret_payload: string | null }>(
         "SELECT encrypted_secret_payload FROM provider_credentials WHERE id = ?",
@@ -3092,7 +3045,7 @@ describe("provider credential lifecycle", () => {
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_A_ID,
       provider: "privy",
-      credential: { id: candidateId, projectId: null },
+      credential: { id: candidateId, projectId: PROJECT_A_ID },
       status: "deactivated",
       setupMetadata: {},
       providerAccountFingerprint: null,
@@ -3291,7 +3244,7 @@ describe("provider credential lifecycle", () => {
       await getDb(env).queryMany<{ provider_credential_id: string }>(
         "SELECT provider_credential_id FROM custody_connections ORDER BY id"
       )
-    ).toEqual([{ provider_credential_id: currentId }, { provider_credential_id: currentId }]);
+    ).toEqual([{ provider_credential_id: currentId }]);
 
     const canceled = await lifecycleRequest(`/provider-credentials/${candidateId}/deactivate`, {
       method: "POST",
@@ -3373,7 +3326,6 @@ describe("provider credential lifecycle", () => {
       ]);
       expect(await db.queryMany("SELECT * FROM provider_credentials ORDER BY id")).toEqual(before);
       expect(await activeConnectionCredentialIds()).toEqual([
-        { provider_credential_id: currentId },
         { provider_credential_id: currentId },
       ]);
       expect(providerFetch).toHaveBeenCalledTimes(

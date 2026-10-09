@@ -16,6 +16,7 @@ import { getLogger } from "@/runtime/logger";
 import {
   assertApiKeyNotWalletScoped,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
+  isApiKeyWalletAccessDenied,
   resolveApiKeyCustodyWalletId,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
@@ -289,7 +290,7 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
       "wallets:write",
     ]);
   } catch (error) {
-    if (error instanceof AppError && error.code === "FORBIDDEN") {
+    if (isApiKeyWalletAccessDenied(error)) {
       throw new AppError("NOT_FOUND", "Custody wallet not found");
     }
     throw error;
@@ -374,7 +375,7 @@ export const updateWallet = async (c: ValidatedBodyContext<typeof updateWalletSc
   try {
     wallet = await findAuthorizedOperationalWallet(c, walletId, ["wallets:write"], true);
   } catch (error) {
-    if (error instanceof AppError && error.code === "FORBIDDEN") {
+    if (isApiKeyWalletAccessDenied(error)) {
       throw new AppError("NOT_FOUND", "Wallet not found");
     }
     throw error;
@@ -511,7 +512,7 @@ export const getWalletById = async (c: AppContext) => {
   try {
     wallet = await findAuthorizedOperationalWallet(c, walletId, ["wallets:read"], true);
   } catch (error) {
-    if (error instanceof AppError && error.code === "FORBIDDEN") {
+    if (isApiKeyWalletAccessDenied(error)) {
       throw new AppError("NOT_FOUND", "Wallet not found");
     }
     throw error;
@@ -647,7 +648,7 @@ export const getPublicKey = async (c: AppContext) => {
     );
     return success(c, { publicKey });
   } catch (error) {
-    if (error instanceof AppError && error.code === "FORBIDDEN") {
+    if (isApiKeyWalletAccessDenied(error)) {
       throw new AppError("NOT_FOUND", "Wallet not found");
     }
     if (error instanceof SigningError) {
