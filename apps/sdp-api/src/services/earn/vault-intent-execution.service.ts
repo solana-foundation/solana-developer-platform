@@ -175,7 +175,8 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
         env,
         input.organizationId,
         input.projectId,
-        input.walletId
+        input.walletId,
+        operation === "deposit" ? "earn.deposit" : "earn.withdraw"
       )
     );
     if (signer.address !== input.walletPublicKey) {

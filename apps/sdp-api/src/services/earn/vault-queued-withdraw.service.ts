@@ -430,7 +430,8 @@ async function prepareCustodyTransaction(
       env,
       input.actor.organizationId,
       input.actor.projectId,
-      input.actor.custodyWalletId
+      input.actor.custodyWalletId,
+      "earn.queued_withdraw"
     )
   );
   if (signer.address !== input.actor.custodyWalletPublicKey) {
@@ -579,7 +580,8 @@ export async function createCustodyQueuedWithdrawal(
         env,
         input.actor.organizationId,
         input.actor.projectId,
-        input.actor.custodyWalletId
+        input.actor.custodyWalletId,
+        "earn.queued_withdraw"
       )
     );
     if (signer.address !== input.actor.custodyWalletPublicKey) {

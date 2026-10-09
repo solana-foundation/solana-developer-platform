@@ -87,6 +87,7 @@ function signInput(overrides: Partial<Parameters<typeof signRingsOuterTransactio
     projectId: "prj_1",
     owner: FEE_PAYER as string,
     unsignedTxBase64: unsignedTxBase64(),
+    movement: "helius_rings.operation_start" as const,
     ...overrides,
   };
 }
@@ -155,7 +156,8 @@ describe("signRingsOuterTransaction", () => {
         env,
         "org_1",
         "prj_1",
-        "cw_owner"
+        "cw_owner",
+        "helius_rings.operation_start"
       );
       expect(getTransactionDecoder().decode(base64.encode(signed)).signatures[FEE_PAYER]).toEqual(
         signature

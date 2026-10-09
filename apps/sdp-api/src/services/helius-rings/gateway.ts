@@ -101,6 +101,7 @@ export function createConfiguredRingsGateway(
           projectId: tenant.projectId,
           owner,
           unsignedTxBase64,
+          movement: "helius_rings.gateway_transaction",
         })
       ),
     signMessage: (messageBase64: string, owner: string) =>

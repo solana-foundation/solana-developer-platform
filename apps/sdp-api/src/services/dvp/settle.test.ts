@@ -233,7 +233,8 @@ describe("closeDvpTrade", () => {
       env,
       "org_x",
       "prj_x",
-      "cwlt_settlement"
+      "cwlt_settlement",
+      "dvp.settle"
     );
   });
 

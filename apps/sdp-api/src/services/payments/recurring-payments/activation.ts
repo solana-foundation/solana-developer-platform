@@ -564,6 +564,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
         tokenProgram: input.tokenProgram,
       });
   const initSignature = await sendSubscriptionInstructions({
+    movement: "recurring.activate",
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -706,7 +707,8 @@ export async function activateRecurringPayment(input: {
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.id
+      input.sourceWallet.id,
+      "recurring.activate"
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -773,6 +775,7 @@ export async function activateRecurringPayment(input: {
         }
       );
       planCreationSignature = await sendSubscriptionInstructions({
+        movement: "recurring.activate",
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -929,6 +932,7 @@ export async function activateRecurringPayment(input: {
         tokenMint: mint,
       });
       authorizationSignature = await sendSubscriptionInstructions({
+        movement: "recurring.activate",
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,

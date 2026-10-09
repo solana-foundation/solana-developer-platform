@@ -117,7 +117,8 @@ export async function reclaimDvpTradeLeg(
     env,
     params.organizationId,
     params.projectId,
-    params.custodyWalletId
+    params.custodyWalletId,
+    "dvp.reclaim"
   );
   // The handler matched this wallet to the party address from the database.
   // The program only accepts the party itself, so a signer that resolves to

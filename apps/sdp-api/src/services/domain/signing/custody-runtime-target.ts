@@ -10,12 +10,13 @@ import type {
   OrganizationProviderAvailabilityResponse,
   ProviderCredentialStatus,
 } from "@sdp/types";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import { type MovementId, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
+import { decideMovement, readMoneyAdmissionFactsWith } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters";
 import { AuditService } from "@/services/audit.service";
@@ -26,6 +27,7 @@ import {
 } from "@/services/credential-secret-store";
 import { provisionPrivyWallet } from "@/services/custody/provisioning";
 import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provider-lifecycle.service";
+import { admittedSigner } from "@/services/domain/signing/admitted-signer";
 import { createPrivyAdapterFromCredential } from "@/services/domain/signing/provider-adapter-factory";
 import {
   assertCustodyProviderEntitled,
@@ -588,18 +590,24 @@ export class CustodyRuntimeTargets {
    * caller. Provider wallet ids are not unique across a project's retained
    * Config and Connection targets, so money-moving flows that already hold a
    * row id must not collapse it back to `walletId` before signing.
+   *
+   * This is the one place in the API a custody wallet's signer comes from, so
+   * it is where money admission is enforced for every module (HOO-1955,
+   * APE-564): the organization's live state is read alongside the wallet row,
+   * and a refused start gets a signer that refuses to sign (`admittedSigner`).
    */
   async getTransactionSignerForWalletRecord(
     organizationId: string,
     projectId: string,
     custodyWalletId: string,
+    movement: MovementId,
     getConfigAdapter: ConfigAdapterResolver
   ): Promise<TransactionSigner> {
-    const target = await this.resolveRetainedWalletRecord(
-      organizationId,
-      projectId,
-      custodyWalletId
-    );
+    // In parallel with the wallet row, so admission adds no round trip.
+    const [target, admissionFacts] = await Promise.all([
+      this.resolveRetainedWalletRecord(organizationId, projectId, custodyWalletId),
+      readMoneyAdmissionFactsWith(this.db, { organizationId, projectId }),
+    ]);
     if (!target) {
       this.logMissingExactWallet({ organizationId, projectId, custodyWalletId });
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
@@ -607,17 +615,18 @@ export class CustodyRuntimeTargets {
     this.assertRuntimeExecutionAllowed(target, custodyWalletId);
     await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
 
-    if (target.kind === "config") {
-      const adapter = await getConfigAdapter(organizationId, target.config);
-      const signer = await getTransactionSigner(adapter, target.wallet);
-      this.assertSignerMatchesWallet(target, signer, custodyWalletId);
-      return signer;
-    }
-
-    const adapter = await this.getConnectionAdapter(target, target.wallet);
+    const adapter =
+      target.kind === "config"
+        ? await getConfigAdapter(organizationId, target.config)
+        : await this.getConnectionAdapter(target, target.wallet);
     const signer = await getTransactionSigner(adapter, target.wallet);
     this.assertSignerMatchesWallet(target, signer, custodyWalletId);
-    return signer;
+    return admittedSigner(signer, decideMovement(movement, admissionFacts), {
+      movement,
+      organizationId,
+      projectId,
+      custodyWalletId,
+    });
   }
 
   private async resolveConnection(

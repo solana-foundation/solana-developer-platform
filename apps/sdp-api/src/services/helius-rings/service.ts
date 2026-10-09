@@ -27,7 +27,11 @@ import {
   RUNTIME_HEALTH_COMPONENTS,
 } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
-import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
+import type {
+  ApprovalRequestStatus,
+  HeliusRingsOperationType,
+  WalletOperationActor,
+} from "@sdp/types";
 import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db";
 import {
   createHeliusRingsAssetRepository,
@@ -69,6 +73,17 @@ import {
 import { buildRingsWalletOperationInput } from "./policy-envelope";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { assertRingsSignedTransactionMatches, signRingsOuterTransaction } from "./signer-adapter";
+
+/**
+ * Operations that only take committed value back out or finish what was
+ * started; their custody signatures are never refused (HOO-1955, ADR 0002).
+ */
+const RINGS_EXIT_OPERATIONS: ReadonlySet<HeliusRingsOperationType> = new Set([
+  "withdraw",
+  "merge",
+  "timelock_settle",
+  "ring_exit",
+]);
 
 /**
  * Orchestrates every Rings action: provisioning, prepare-through-policy,
@@ -1445,6 +1460,9 @@ export class HeliusRingsService {
         projectId: this.tenant.projectId,
         owner,
         unsignedTxBase64: built.outerUnsignedTxBase64,
+        movement: RINGS_EXIT_OPERATIONS.has(current.op_type)
+          ? "helius_rings.operation_exit"
+          : "helius_rings.operation_start",
       });
       const signature = await assertRingsSignedTransactionMatches({
         owner,

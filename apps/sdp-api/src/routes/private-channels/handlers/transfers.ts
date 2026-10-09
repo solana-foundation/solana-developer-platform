@@ -103,7 +103,8 @@ export async function createPrivateChannelTransfer(
       c.env,
       context.auth.organizationId,
       context.projectId,
-      context.wallet
+      context.wallet,
+      "private_channels.transfer"
     );
     const gatewayAuth = await resolveGatewayAuth(c.env, {
       instance: context.instance,

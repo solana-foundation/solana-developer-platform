@@ -167,7 +167,8 @@ export async function closeDvpTrade(
     env,
     trade.organizationId,
     trade.projectId,
-    settlement.custodyWalletId
+    settlement.custodyWalletId,
+    "dvp.settle"
   );
   if (signer.address !== trade.settlementAuthority) {
     throw badRequest("DvP settlement wallet no longer matches the trade's authority");

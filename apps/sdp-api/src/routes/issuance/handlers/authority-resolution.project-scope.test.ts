@@ -260,7 +260,8 @@ describe("issuance authority resolution across an organization's projects", () =
       env,
       ORGANIZATION_ID,
       REQUESTER_PROJECT_ID,
-      REQUESTER_WALLET.custodyWalletId
+      REQUESTER_WALLET.custodyWalletId,
+      "issuance.authority"
     );
   });
 

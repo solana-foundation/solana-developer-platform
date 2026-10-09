@@ -408,7 +408,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_signer_check"
+      "cwlt_scope_signer_check",
+      "custody.signer_check"
     );
     expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
     expect(createClusterRpcMock).toHaveBeenCalledExactlyOnceWith(env, "devnet");
@@ -592,7 +593,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_privy_a"
+      "cwlt_scope_privy_a",
+      "custody.signer_check"
     );
   });
 
@@ -687,7 +689,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_privy_a"
+      "cwlt_scope_privy_a",
+      "custody.signer_check"
     );
 
     expect(simulateTransactionMock).toHaveBeenCalledOnce();
@@ -754,7 +757,8 @@ describe("Custody wallet scope routes", () => {
           env,
           TEST_ORG.id,
           TEST_PROJECT.id,
-          recordId
+          recordId,
+          "custody.signer_check"
         );
       } else {
         expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
@@ -818,7 +822,8 @@ describe("Custody wallet scope routes", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      "cwlt_scope_privy_a"
+      "cwlt_scope_privy_a",
+      "custody.signer_check"
     );
     expect(signerCheckMocks.createSponsorship).toHaveBeenCalledOnce();
   });

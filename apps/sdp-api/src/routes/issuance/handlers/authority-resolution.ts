@@ -427,7 +427,8 @@ async function loadResolvedAuthoritySigner(params: {
     params.env,
     params.auth.organizationId,
     requireAuthProjectId(params.auth),
-    params.custodyWalletId
+    params.custodyWalletId,
+    "issuance.authority"
   );
   if (signer.address !== params.currentAuthority) {
     throw conflict("Current authority is not controlled by custody");
@@ -523,7 +524,8 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     env,
     auth.organizationId,
     projectId,
-    wallet.id
+    wallet.id,
+    "issuance.authority"
   );
 
   if (currentAuthority && signer.address !== currentAuthority) {

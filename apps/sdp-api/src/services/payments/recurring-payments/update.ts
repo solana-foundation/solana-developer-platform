@@ -749,7 +749,8 @@ async function runMetadataScheduleUpdate(input: {
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.id
+      input.sourceWallet.id,
+      "recurring.update"
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -785,6 +786,7 @@ async function runMetadataScheduleUpdate(input: {
         status: parsePlanStatus(onChainPlan.data.status),
       });
       planUpdateSignature = await sendSubscriptionInstructions({
+        movement: "recurring.update",
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -866,6 +868,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
         tokenProgram: input.tokenProgram,
       });
   const initSignature = await sendSubscriptionInstructions({
+    movement: "recurring.update",
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -1215,7 +1218,8 @@ async function runReplacementUpdate(input: {
     input.env,
     input.organizationId,
     input.projectId,
-    input.resolved.sourceWallet.id
+    input.resolved.sourceWallet.id,
+    "recurring.update"
   );
   if (sourceSigner.address !== input.resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
@@ -1286,6 +1290,7 @@ async function runReplacementUpdate(input: {
       tokenProgram,
     });
     planCreationSignature = await sendSubscriptionInstructions({
+      movement: "recurring.update",
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1413,6 +1418,7 @@ async function runReplacementUpdate(input: {
       tokenMint: mint,
     });
     authorizationSignature = await sendSubscriptionInstructions({
+      movement: "recurring.update",
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1452,7 +1458,8 @@ async function runReplacementUpdate(input: {
       input.env,
       input.organizationId,
       input.projectId,
-      input.oldSourceWallet.id
+      input.oldSourceWallet.id,
+      "recurring.update_cancel_old"
     );
     if (oldSourceSigner.address !== input.oldSourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -1464,6 +1471,7 @@ async function runReplacementUpdate(input: {
         subscriptionPda: assertValidAddress(input.claimed.subscription_pda, "subscriptionPda"),
       });
     oldCancelSignature = await sendSubscriptionInstructions({
+      movement: "recurring.update_cancel_old",
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,

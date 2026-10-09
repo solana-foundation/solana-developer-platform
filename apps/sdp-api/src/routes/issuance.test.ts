@@ -1833,7 +1833,8 @@ describe("Issuance Routes", () => {
           env,
           TEST_ORG.id,
           TEST_PROJECT.id,
-          DEFAULT_ISSUANCE_CUSTODY_WALLET_ID
+          DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+          "issuance.authority"
         );
         expect(mintToSpy).toHaveBeenCalledTimes(1);
 
@@ -2835,7 +2836,8 @@ describe("Issuance Routes", () => {
           env,
           TEST_ORG.id,
           TEST_PROJECT.id,
-          selectedWalletId
+          selectedWalletId,
+          "issuance.authority"
         );
         if (operation === "pause" || operation === "unpause") {
           expect(await selected.json()).toMatchObject({
@@ -2866,7 +2868,8 @@ describe("Issuance Routes", () => {
           env,
           TEST_ORG.id,
           TEST_PROJECT.id,
-          DEFAULT_ISSUANCE_CUSTODY_WALLET_ID
+          DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+          "issuance.authority"
         );
       }
     );
@@ -6100,7 +6103,8 @@ describe("Issuance Routes", () => {
             env,
             TEST_ORG.id,
             TEST_PROJECT.id,
-            DEFAULT_ISSUANCE_CUSTODY_WALLET_ID
+            DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+            "issuance.authority"
           );
           expect(addToListSpy).toHaveBeenCalledWith({
             list: TEST_SOLANA_ADDRESSES.wallet3,
@@ -6569,7 +6573,8 @@ describe("Issuance Routes", () => {
             env,
             TEST_ORG.id,
             TEST_PROJECT.id,
-            DEFAULT_ISSUANCE_CUSTODY_WALLET_ID
+            DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+            "issuance.authority"
           );
           expect(removeFromListSpy).toHaveBeenCalledWith({
             list: TEST_SOLANA_ADDRESSES.wallet3,
@@ -9332,7 +9337,8 @@ describe("Issuance Routes", () => {
             env,
             TEST_ORG.id,
             TEST_PROJECT.id,
-            requestedWallet.custodyWalletId
+            requestedWallet.custodyWalletId,
+            "issuance.authority"
           );
         } finally {
           createTokenSpy.mockRestore();
@@ -10209,7 +10215,8 @@ describe("Issuance Routes", () => {
             env,
             TEST_ORG.id,
             TEST_PROJECT.id,
-            "cwlt_issuance_activity_wallet_pinned"
+            "cwlt_issuance_activity_wallet_pinned",
+            "issuance.authority"
           );
         } finally {
           prepareUpdateMetadataSpy.mockRestore();
@@ -10881,7 +10888,8 @@ describe("Issuance Routes", () => {
             expect.anything(),
             expect.anything(),
             expect.anything(),
-            "cwlt_issuance_activity_wallet_custom_pin"
+            "cwlt_issuance_activity_wallet_custom_pin",
+            "issuance.authority"
           );
         } finally {
           exactSignerSpy.mockRestore();

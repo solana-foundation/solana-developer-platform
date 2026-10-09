@@ -649,7 +649,8 @@ async function executeSponsoredTransfer(
     c.env,
     auth.organizationId,
     requireProjectId(c),
-    params.sourceWallet.id
+    params.sourceWallet.id,
+    "payments.transfer"
   );
 
   if (signer.address !== params.sourceWallet.publicKey) {

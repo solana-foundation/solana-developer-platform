@@ -2,6 +2,7 @@ import {
   type ApiKeyRole,
   getPermissionsForApiKeyRole,
   hasAllPermissions,
+  type MovementId,
   PERMISSIONS,
   type Permission,
 } from "@sdp/types";
@@ -130,11 +131,18 @@ export async function createPrivateChannelSigner(
   env: Env,
   organizationId: string,
   projectId: string,
-  wallet: CustodyWallet
+  wallet: CustodyWallet,
+  movement: MovementId
 ) {
   await createSigningService(env).admitRuntimeExecution(organizationId, projectId, wallet.id);
   try {
-    return await createOrgSignerForCustodyWallet(env, organizationId, projectId, wallet.id);
+    return await createOrgSignerForCustodyWallet(
+      env,
+      organizationId,
+      projectId,
+      wallet.id,
+      movement
+    );
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw providerUnavailable("The source custody wallet is not currently signable.");

@@ -298,7 +298,8 @@ export async function executeDvpFunding(
     env,
     plan.signer.organizationId,
     plan.signer.projectId,
-    plan.signer.custodyWalletId
+    plan.signer.custodyWalletId,
+    "dvp.fund"
   );
 
   const [source] = await findAssociatedTokenPda({

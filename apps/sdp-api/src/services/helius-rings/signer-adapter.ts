@@ -1,4 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
+import type { MovementId } from "@sdp/types";
 import { getBase64Codec } from "@solana/codecs";
 import {
   address,
@@ -102,6 +103,16 @@ export interface SignRingsOuterTransactionInput {
    */
   owner: string;
   unsignedTxBase64: string;
+  /**
+   * The movement the transaction serves; the custody signer refuses a start
+   * for an organization that may not start money (HOO-1955).
+   */
+  movement: Extract<
+    MovementId,
+    | "helius_rings.operation_start"
+    | "helius_rings.operation_exit"
+    | "helius_rings.gateway_transaction"
+  >;
   /** Test seam; production resolves the owner's custody wallet. */
   signer?: TransactionSigner;
 }
@@ -187,10 +198,13 @@ function equalBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean 
 }
 
 /** The test-seam signer, or the owner's custody signer with failures mapped once. */
+type OwnerSignerInput = Pick<
+  SignRingsOuterTransactionInput,
+  "env" | "organizationId" | "projectId" | "owner"
+> & { movement: MovementId };
+
 async function ownerSigner(
-  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner"> & {
-    signer?: TransactionSigner;
-  }
+  input: OwnerSignerInput & { signer?: TransactionSigner }
 ): Promise<TransactionSigner> {
   try {
     return input.signer ?? (await resolveOwnerSigner(input));
@@ -252,7 +266,9 @@ export interface SignRingsMessageInput {
 export async function signRingsMessage(input: SignRingsMessageInput): Promise<string> {
   const base64 = getBase64Codec();
 
-  const signer = await ownerSigner(input);
+  // Shielded keys are re-derived from this signature on every use, withdrawals
+  // included, so it is never refused (an exit).
+  const signer = await ownerSigner({ ...input, movement: "helius_rings.key_derivation" });
   if (!isMessagePartialSigner(signer)) {
     throw new RingsAdapterError("signer_failed", "custody signer cannot sign raw messages", {
       retryable: false,
@@ -286,9 +302,7 @@ export async function signRingsMessage(input: SignRingsMessageInput): Promise<st
  * lookup is scoped to the organization and to active wallets, so an owner
  * custody no longer controls fails here rather than at the chain.
  */
-async function resolveOwnerSigner(
-  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner">
-): Promise<TransactionSigner> {
+async function resolveOwnerSigner(input: OwnerSignerInput): Promise<TransactionSigner> {
   const wallet = await new CustodyConfigStore(
     getDb(input.env),
     input.env
@@ -313,7 +327,8 @@ async function resolveOwnerSigner(
     input.env,
     input.organizationId,
     input.projectId,
-    wallet.id
+    wallet.id,
+    input.movement
   );
 
   // Unreachable via the public-key lookup, but the cost of being wrong is

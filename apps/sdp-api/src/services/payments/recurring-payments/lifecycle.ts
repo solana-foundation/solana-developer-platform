@@ -490,7 +490,8 @@ async function runRecurringPaymentLifecycle(
       input.env,
       input.organizationId,
       input.projectId,
-      input.sourceWallet.id
+      input.sourceWallet.id,
+      input.operation === "resume" ? "recurring.resume" : "recurring.cancel"
     );
     if (sourceSigner.address !== input.sourceWallet.publicKey) {
       throw badRequest("Resolved signing wallet does not match source wallet");
@@ -519,6 +520,7 @@ async function runRecurringPaymentLifecycle(
       });
 
       signature = await sendSubscriptionInstructions({
+        movement: input.operation === "resume" ? "recurring.resume" : "recurring.cancel",
         env: input.env,
         organizationId: input.organizationId,
         projectId: input.projectId,

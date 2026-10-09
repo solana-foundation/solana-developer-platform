@@ -607,7 +607,13 @@ describe("authority-resolution", () => {
         requiredWalletPermissions: ["tokens:write"],
       })
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
-    expect(exactSigner).toHaveBeenCalledWith(testEnv, "org_test", "proj_test", "cwlt_inactive");
+    expect(exactSigner).toHaveBeenCalledWith(
+      testEnv,
+      "org_test",
+      "proj_test",
+      "cwlt_inactive",
+      "issuance.authority"
+    );
   });
 
   it("resolves an exact draft wallet without performing runtime admission", async () => {

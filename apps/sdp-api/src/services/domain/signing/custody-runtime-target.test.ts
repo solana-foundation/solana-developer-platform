@@ -6,13 +6,15 @@ import {
   type CustodyConnectionCheckStatus,
   type CustodyConnectionLifecycle,
   type CustodyMode,
+  type MovementId,
   type ProviderCredentialStatus,
 } from "@sdp/types";
 import { PrivySigner } from "@solana/keychain-privy";
-import { address } from "@solana/kit";
+import { address, type TransactionPartialSigner } from "@solana/kit";
 import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters";
@@ -185,7 +187,12 @@ describe("CustodyRuntimeTargets", () => {
       service.admitRuntimeExecution("org_foreign", PROJECT_ID, `cwlt_${config.id}`)
     ).toThrow(TenantScopeViolationError);
     expect(() =>
-      service.getTransactionSignerForWalletRecord("org_foreign", PROJECT_ID, `cwlt_${config.id}`)
+      service.getTransactionSignerForWalletRecord(
+        "org_foreign",
+        PROJECT_ID,
+        `cwlt_${config.id}`,
+        "payments.transfer"
+      )
     ).toThrow(TenantScopeViolationError);
   });
 
@@ -258,6 +265,52 @@ describe("CustodyRuntimeTargets", () => {
     );
   });
 
+  describe("money admission at the custody signer (HOO-1955, APE-564)", () => {
+    async function signerFor(custodyWalletId: string, movement: MovementId) {
+      const signer = await new CustodyRuntimeTargets(
+        getDb(env),
+        env,
+        new Map()
+      ).getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        custodyWalletId,
+        movement,
+        createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
+      );
+      // SAFETY: the config adapter factory's signer is a partial signer.
+      return signer as TransactionPartialSigner;
+    }
+
+    it("refuses to sign a start for a deleted organization's retained Config wallet, and still signs an exit", async () => {
+      const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+      await getDb(env)
+        .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
+        .bind(ORGANIZATION_ID)
+        .run();
+
+      // The wallet still resolves (work that only confirms keeps working)…
+      const start = await signerFor(`cwlt_${config.id}`, "payments.transfer");
+      expect(start.address).toBe(CONFIG_PUBLIC_KEY);
+      // …but a start is refused the moment it is asked to sign.
+      await expect(start.signTransactions([])).rejects.toBeInstanceOf(MoneyMovementRefusedError);
+      await expect(start.signTransactions([])).rejects.toMatchObject({
+        reason: "organization_inactive",
+      });
+
+      const exit = await signerFor(`cwlt_${config.id}`, "recurring.cancel");
+      await expect(exit.signTransactions([])).resolves.toEqual([]);
+    });
+
+    it("signs a start for an active organization", async () => {
+      const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+
+      const start = await signerFor(`cwlt_${config.id}`, "payments.transfer");
+
+      await expect(start.signTransactions([])).resolves.toEqual([]);
+    });
+  });
+
   it("preserves the exact signer's WALLET_NOT_FOUND compatibility code", async () => {
     const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
@@ -267,6 +320,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         "cwlt_missing",
+        "payments.transfer",
         createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
       )
     ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
@@ -357,6 +411,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${connection.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).rejects.toMatchObject({
@@ -384,6 +439,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${connection.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
@@ -396,6 +452,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${connection.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
@@ -413,6 +470,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${config.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
@@ -423,6 +481,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${config.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
@@ -466,6 +525,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         custodyWalletId,
+        "payments.transfer",
         createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
       )
     ).resolves.toMatchObject({ address: SECOND_CONNECTION_PUBLIC_KEY });
@@ -538,6 +598,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${config.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).rejects.toMatchObject({
@@ -556,6 +617,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${config.id}`,
+        "payments.transfer",
         createConfigAdapterFactory(CONNECTION_PUBLIC_KEY)
       )
     ).rejects.toMatchObject({
@@ -678,6 +740,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${connection.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
@@ -686,6 +749,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${config.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
@@ -781,6 +845,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${connection.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).rejects.toMatchObject({
@@ -807,6 +872,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${connection.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).rejects.toMatchObject({
@@ -868,6 +934,7 @@ describe("CustodyRuntimeTargets", () => {
           ORGANIZATION_ID,
           OTHER_PROJECT_ID,
           custodyWalletId,
+          "payments.transfer",
           getConfigAdapter
         )
       ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
@@ -888,12 +955,14 @@ describe("CustodyRuntimeTargets", () => {
       ORGANIZATION_ID,
       PROJECT_ID,
       custodyWalletId,
+      "payments.transfer",
       getConfigAdapter
     );
     await targets.getTransactionSignerForWalletRecord(
       ORGANIZATION_ID,
       PROJECT_ID,
       custodyWalletId,
+      "payments.transfer",
       getConfigAdapter
     );
     expect(read).toHaveBeenCalledOnce();
@@ -911,6 +980,7 @@ describe("CustodyRuntimeTargets", () => {
       ORGANIZATION_ID,
       PROJECT_ID,
       custodyWalletId,
+      "payments.transfer",
       getConfigAdapter
     );
     expect(read).toHaveBeenCalledTimes(2);
@@ -933,6 +1003,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${connection.id}`,
+        "payments.transfer",
         createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
       )
     ).rejects.toMatchObject({
@@ -950,7 +1021,8 @@ describe("CustodyRuntimeTargets", () => {
       createSigningService(env).getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
         PROJECT_ID,
-        `cwlt_${connection.id}`
+        `cwlt_${connection.id}`,
+        "payments.transfer"
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
   });
@@ -969,6 +1041,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${connection.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
@@ -985,6 +1058,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${connection.id}`,
+        "payments.transfer",
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
@@ -1040,6 +1114,7 @@ describe("CustodyRuntimeTargets", () => {
           ORGANIZATION_ID,
           PROJECT_ID,
           custodyWalletId,
+          "payments.transfer",
           getConfigAdapter
         )
       ).rejects.toMatchObject(channelRefusal(mode));

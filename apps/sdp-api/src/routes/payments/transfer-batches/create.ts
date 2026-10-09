@@ -269,7 +269,8 @@ export async function createTransferBatch(c: AppContext) {
       c.env,
       resolved.scope.auth.organizationId,
       resolved.projectId,
-      resolved.sourceWallet.id
+      resolved.sourceWallet.id,
+      "payments.transfer_batch"
     ),
     feePayment.getFeePayer(),
     solanaRpc.getRecentBlockhash(resolved.rpc, "confirmed"),

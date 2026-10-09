@@ -104,7 +104,13 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // simulation, and is never broadcast.
     const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const [signer, feePayer] = await Promise.all([
-      createOrgSignerForCustodyWallet(c.env, auth.organizationId, projectId, wallet.id),
+      createOrgSignerForCustodyWallet(
+        c.env,
+        auth.organizationId,
+        projectId,
+        wallet.id,
+        "custody.signer_check"
+      ),
       feePayment.getFeePayer(),
     ]);
 
