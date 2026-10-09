@@ -33,6 +33,7 @@ import {
   custodyProviderNotInReleaseChannel,
   getProviderAvailability,
   isCustodyProviderEntitled,
+  isManagedCustodyUseAllowed,
 } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 
@@ -317,8 +318,16 @@ export class CustodyRuntimeTargets {
         rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
       }),
     ]);
+    const managedUseAllowed =
+      configRows.length > 0 &&
+      (await isManagedCustodyUseAllowed(this.db, {
+        organizationId: params.organizationId,
+        projectId: params.projectId,
+      }));
     const wallets = [
-      ...configRows.map((row) => this.mapOperationalConfigWallet(row, availability)),
+      ...configRows.map((row) =>
+        this.mapOperationalConfigWallet(row, availability, managedUseAllowed)
+      ),
       ...connectionRows.map((row) => this.mapOperationalConnectionWallet(row, availability)),
     ].filter((wallet) => !params.provider || wallet.provider === params.provider);
 
@@ -1116,7 +1125,8 @@ export class CustodyRuntimeTargets {
 
   private mapOperationalConfigWallet(
     row: OperationalConfigWalletRow,
-    availability: OrganizationProviderAvailabilityResponse
+    availability: OrganizationProviderAvailabilityResponse,
+    managedUseAllowed: boolean
   ): CustodyRuntimeWalletProjection {
     const provider = this.parseProvider(row.provider);
     return {
@@ -1124,6 +1134,7 @@ export class CustodyRuntimeTargets {
       custodyConfigId: row.custody_config_id,
       provider,
       isRuntimeExecutionAllowed:
+        managedUseAllowed &&
         isCustodyProviderAvailable(this.env, provider, "managed") &&
         isCustodyProviderEntitled(availability, provider),
       walletId: row.wallet_id,

@@ -1005,6 +1005,45 @@ export async function admitByokCustodySetup(
 }
 
 /**
+ * Decides whether the project's environment allows using Managed custody
+ * (Production is BYOK only), from the project's active row. The use gate and
+ * every wallet read model decide from this one rule, so a wallet listed as
+ * runtime-executable is never refused by the gate for its environment.
+ *
+ * @param db - Database client for the project row.
+ * @param project - The project whose Managed custody use is decided.
+ * @param project.organizationId - The organization that owns the project.
+ * @param project.projectId - The project whose environment is read.
+ * @returns The project's environment and whether it allows Managed custody use.
+ * @throws 404 when the project is not an active project of the organization.
+ */
+async function decideManagedCustodyUse(
+  db: DatabaseExecutor,
+  project: CustodySetupProject
+): Promise<{ environment: SdpEnvironment; allowed: boolean }> {
+  const environment = await loadActiveProjectEnvironment(db, project);
+  return { environment, allowed: isCustodyModeAllowedInEnvironment(environment, "managed") };
+}
+
+/**
+ * The non-throwing form of `assertManagedCustodyUseAllowed`, for read models
+ * that report whether a Managed wallet can execute.
+ *
+ * @param db - Database client for the project row.
+ * @param project - The project whose Managed custody use is decided.
+ * @param project.organizationId - The organization that owns the project.
+ * @param project.projectId - The project whose environment is read.
+ * @returns Whether the project's environment allows Managed custody use.
+ * @throws 404 when the project is not an active project of the organization.
+ */
+export async function isManagedCustodyUseAllowed(
+  db: DatabaseExecutor,
+  project: CustodySetupProject
+): Promise<boolean> {
+  return (await decideManagedCustodyUse(db, project)).allowed;
+}
+
+/**
  * Refuses using an existing Managed custody config whose project's environment
  * does not allow Managed custody (Production is BYOK only). Setup is refused by
  * the custody setup rule, but a config created before that rule existed would
@@ -1025,8 +1064,8 @@ export async function assertManagedCustodyUseAllowed(
   db: DatabaseExecutor,
   config: CustodySetupProject & { provider: CustodyProvider }
 ): Promise<void> {
-  const environment = await loadActiveProjectEnvironment(db, config);
-  if (isCustodyModeAllowedInEnvironment(environment, "managed")) {
+  const { environment, allowed } = await decideManagedCustodyUse(db, config);
+  if (allowed) {
     return;
   }
   const error = custodyModeNotAllowed(config.provider, "managed", environment);
