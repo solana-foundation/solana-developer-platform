@@ -1,34 +1,94 @@
 import type { CustodyProvider } from "@sdp/custody";
-import type { SigningPort } from "@sdp/custody/signing";
+import type { FullSigningPort } from "@sdp/custody/signing";
+import {
+  type CachedApiKey,
+  CUSTODY_CONNECTION_LIFECYCLES,
+  type CustodyConnectionCheckStatus,
+  type CustodyConnectionLifecycle,
+  type CustodyMode,
+  type ProviderCredentialStatus,
+} from "@sdp/types";
 import { PrivySigner } from "@solana/keychain-privy";
+import { address } from "@solana/kit";
+import { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters";
 import * as credentialSecretStore from "@/services/credential-secret-store";
-import { RuntimeEnvCredentialSecretStore } from "@/services/credential-secret-store";
-import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
-import {
-  CustodyRuntimeTargets,
-  selectCustodyConnectionTarget,
-} from "@/services/domain/signing/custody-runtime-target";
+import * as custodyProvisioning from "@/services/custody/provisioning";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
-import { CustodyConfigStore } from "@/services/stores/custody-config.store";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
+import {
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  seedTestPrivyConnection,
+  type TestPrivyConnectionSeed,
+} from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import type { Env } from "@/types/env";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 const ORGANIZATION_ID = "org_runtime_targets";
 const PROJECT_ID = "prj_runtime_targets";
+const OTHER_PROJECT_ID = "prj_runtime_targets_other";
 const USER_ID = "usr_runtime_targets";
 const CONFIG_PUBLIC_KEY = "Vote111111111111111111111111111111111111111";
 const CONNECTION_PUBLIC_KEY = "11111111111111111111111111111111";
 const SECOND_CONNECTION_PUBLIC_KEY = "Stake11111111111111111111111111111111111111";
 
+interface ConnectionSeed {
+  id: string;
+  credentialId: string;
+  lastCheckStatus: TestPrivyConnectionSeed["lastCheckStatus"];
+}
+
+const UNFINISHED_INSTALLATION_FACTS = {
+  pending: { credentialStatus: "pending", lastCheckStatus: null },
+  checking: { credentialStatus: "pending", lastCheckStatus: "running" },
+  failed: { credentialStatus: "failed_validation", lastCheckStatus: "failed" },
+} as const satisfies Record<
+  Exclude<CustodyConnectionLifecycle, "active" | "deactivated">,
+  {
+    credentialStatus: ProviderCredentialStatus;
+    lastCheckStatus: CustodyConnectionCheckStatus | null;
+  }
+>;
+
+const AUDIT_API_KEY: CachedApiKey = {
+  id: "key_runtime_targets",
+  organizationId: ORGANIZATION_ID,
+  projectId: PROJECT_ID,
+  role: "api_admin",
+  permissions: ["*"],
+  environment: "sandbox",
+  rateLimitTier: "standard",
+  allowedIps: null,
+  signingWalletId: null,
+  status: "active",
+  expiresAt: null,
+};
+
+const DEFAULT_CONNECTION: ConnectionSeed = {
+  id: "cconn_runtime_targets",
+  credentialId: "pcred_runtime_targets",
+  lastCheckStatus: "success",
+};
+
 describe("CustodyRuntimeTargets", () => {
   const original = {
-    byokEnabled: env.PRIVY_BYOK_ENABLED,
     appId: env.PRIVY_APP_ID,
     appSecret: env.PRIVY_APP_SECRET,
     apiBaseUrl: env.PRIVY_API_BASE_URL,
@@ -37,7 +97,7 @@ describe("CustodyRuntimeTargets", () => {
 
   beforeEach(async () => {
     await seedTestDatabase(env);
-    env.PRIVY_BYOK_ENABLED = "true";
+    custodyReleaseChannel.outOfChannelMode = null;
     env.PRIVY_APP_ID = undefined;
     env.PRIVY_APP_SECRET = undefined;
     env.PRIVY_API_BASE_URL = "https://privy.runtime-targets.test/v1";
@@ -58,62 +118,14 @@ describe("CustodyRuntimeTargets", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    env.PRIVY_BYOK_ENABLED = original.byokEnabled;
     env.PRIVY_APP_ID = original.appId;
     env.PRIVY_APP_SECRET = original.appSecret;
     env.PRIVY_API_BASE_URL = original.apiBaseUrl;
     env.PRIVY_REQUEST_DELAY_MS = original.requestDelayMs;
   });
 
-  it("switches effective signing ON -> OFF -> ON without changing retained targets", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection({ requestDelayMs: 0 });
-    await setProjectDefault(config.id, connection.id);
-    const read = mockStoredCredentialRead();
-    const createPrivySigner = vi.spyOn(PrivySigner, "create");
-    const getConfigAdapter = createConfigAdapterFactory();
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-    ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-
-    env.PRIVY_BYOK_ENABLED = "false";
-    await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-    ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
-
-    env.PRIVY_BYOK_ENABLED = "true";
-    await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-    ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
-
-    expect(read).toHaveBeenCalledOnce();
-    expect(getConfigAdapter).toHaveBeenCalledOnce();
-    expect(createPrivySigner).toHaveBeenCalledWith(expect.objectContaining({ requestDelayMs: 0 }));
-    expect(await getProjectDefault()).toEqual({
-      default_custody_config_id: config.id,
-      default_custody_connection_id: connection.id,
-    });
-
-    await getDb(env)
-      .prepare("UPDATE custody_connections SET request_delay_ms = NULL WHERE id = ?")
-      .bind(connection.id)
-      .run();
-    await new CustodyRuntimeTargets(getDb(env), env, new Map()).getTransactionSigner(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      undefined,
-      getConfigAdapter
-    );
-    expect(createPrivySigner).toHaveBeenLastCalledWith(
-      expect.objectContaining({ requestDelayMs: 250 })
-    );
-    expect(read).toHaveBeenCalledTimes(2);
-  });
-
   it("admits an exact active Config wallet without constructing a signer", async () => {
-    const config = await seedConfig({ provider: "privy" });
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
@@ -126,7 +138,7 @@ describe("CustodyRuntimeTargets", () => {
   });
 
   it("logs an unavailable exact Config admission without Provider access", async () => {
-    const config = await seedConfig({ provider: "privy" });
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
     const custodyWalletId = `cwlt_${config.id}`;
     await getDb(env)
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
@@ -160,7 +172,7 @@ describe("CustodyRuntimeTargets", () => {
   });
 
   it("exposes exact admission through the tenant-scoped SigningService", async () => {
-    const config = await seedConfig({ provider: "privy" });
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
     const service = createSigningService(
       env,
       createTenantScope({ organizationId: ORGANIZATION_ID, projectId: PROJECT_ID })
@@ -177,10 +189,8 @@ describe("CustodyRuntimeTargets", () => {
     ).toThrow(TenantScopeViolationError);
   });
 
-  it("admits an active non-selected Connection without reading credentials", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, null);
+  it("admits an active Connection wallet without reading credentials", async () => {
+    const connection = await seedConnection(DEFAULT_CONNECTION);
     const read = mockStoredCredentialRead();
     const createPrivySigner = vi.spyOn(PrivySigner, "create");
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
@@ -201,7 +211,9 @@ describe("CustodyRuntimeTargets", () => {
     "rejects exact %s admission when the custody provider entitlement is revoked",
     async (owner) => {
       const wallet =
-        owner === "config" ? await seedConfig({ provider: "privy" }) : await seedConnection();
+        owner === "config"
+          ? await seedConfig({ provider: "privy", projectId: PROJECT_ID })
+          : await seedConnection(DEFAULT_CONNECTION);
       await setPrivyEntitlement(false);
       const read = mockStoredCredentialRead();
       const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
@@ -218,32 +230,11 @@ describe("CustodyRuntimeTargets", () => {
     }
   );
 
-  it("pauses exact Connection admission before reading credentials when runtime is off", async () => {
-    const connection = await seedConnection();
-    env.PRIVY_BYOK_ENABLED = "false";
-    const read = mockStoredCredentialRead();
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.admitRuntimeExecution({
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        custodyWalletId: `cwlt_${connection.id}`,
-      })
-    ).rejects.toMatchObject({
-      code: "FORBIDDEN",
-      statusCode: 403,
-      details: { reason: "runtime_execution_paused" },
-    });
-    expect(read).not.toHaveBeenCalled();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
   it.each([
     [PROJECT_ID, "cwlt_missing"],
     ["prj_foreign", "cwlt_cconn_runtime_targets"],
   ])("hides a missing or foreign exact wallet", async (projectId, custodyWalletId) => {
-    await seedConnection();
+    await seedConnection(DEFAULT_CONNECTION);
     const read = mockStoredCredentialRead();
     const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
@@ -276,7 +267,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         "cwlt_missing",
-        createConfigAdapterFactory()
+        createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
       )
     ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
     expect(warn).toHaveBeenCalledWith(
@@ -293,7 +284,7 @@ describe("CustodyRuntimeTargets", () => {
   it.each(["wallet", "connection", "credential"] as const)(
     "reports an inactive exact Connection %s as runtime-unavailable",
     async (inactiveOwner) => {
-      const connection = await seedConnection();
+      const connection = await seedConnection(DEFAULT_CONNECTION);
       if (inactiveOwner === "wallet") {
         await getDb(env)
           .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
@@ -346,9 +337,9 @@ describe("CustodyRuntimeTargets", () => {
   );
 
   it("rechecks an exact Connection immediately before reading credentials", async () => {
-    const connection = await seedConnection();
+    const connection = await seedConnection(DEFAULT_CONNECTION);
     const read = mockStoredCredentialRead();
-    const getConfigAdapter = createConfigAdapterFactory();
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await targets.admitRuntimeExecution({
@@ -377,12 +368,10 @@ describe("CustodyRuntimeTargets", () => {
     expect(getConfigAdapter).not.toHaveBeenCalled();
   });
 
-  it("rechecks Connection entitlement before cached generic and exact signer resolution", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, connection.id);
+  it("rechecks Connection entitlement before cached exact signer resolution", async () => {
+    const connection = await seedConnection(DEFAULT_CONNECTION);
     const read = mockStoredCredentialRead();
-    const getConfigAdapter = createConfigAdapterFactory();
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await targets.admitRuntimeExecution({
@@ -391,15 +380,17 @@ describe("CustodyRuntimeTargets", () => {
       custodyWalletId: `cwlt_${connection.id}`,
     });
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${connection.id}`,
+        getConfigAdapter
+      )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
     expect(read).toHaveBeenCalledOnce();
 
     await setPrivyEntitlement(false);
 
-    await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-    ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
     await expect(
       targets.getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
@@ -410,26 +401,23 @@ describe("CustodyRuntimeTargets", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
     expect(read).toHaveBeenCalledOnce();
     expect(getConfigAdapter).not.toHaveBeenCalled();
-    expect(await getProjectDefault()).toEqual({
-      default_custody_config_id: config.id,
-      default_custody_connection_id: connection.id,
-    });
   });
 
-  it("rechecks Config entitlement before generic and exact signer resolution", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    await setProjectDefault(config.id, null);
-    const getConfigAdapter = createConfigAdapterFactory();
+  it("rechecks Config entitlement before exact signer resolution", async () => {
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${config.id}`,
+        getConfigAdapter
+      )
     ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
     await setPrivyEntitlement(false);
 
-    await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-    ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
     await expect(
       targets.getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
@@ -441,24 +429,18 @@ describe("CustodyRuntimeTargets", () => {
     expect(getConfigAdapter).toHaveBeenCalledOnce();
   });
 
-  it("signs with an exact non-default wallet under a non-selected Connection", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, null);
+  it("signs with an exact secondary wallet of a Connection whose first wallet is inactive", async () => {
+    const connection = await seedConnection(DEFAULT_CONNECTION);
     const custodyWalletId = `cwlt_${connection.id}_secondary`;
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_connection_id, wallet_id, public_key, status
-         ) VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(
-        custodyWalletId,
-        connection.id,
-        `${connection.walletId}_secondary`,
-        SECOND_CONNECTION_PUBLIC_KEY
-      )
-      .run();
+    await insertTestCustodyWalletRow(getDb(env), {
+      id: custodyWalletId,
+      owner: { kind: "connection", custodyConnectionId: connection.id },
+      walletId: `${connection.walletId}_secondary`,
+      publicKey: SECOND_CONNECTION_PUBLIC_KEY,
+      label: null,
+      purpose: null,
+      status: "active",
+    });
     await getDb(env)
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
       .bind(`cwlt_${connection.id}`)
@@ -484,7 +466,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         custodyWalletId,
-        createConfigAdapterFactory()
+        createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
       )
     ).resolves.toMatchObject({ address: SECOND_CONNECTION_PUBLIC_KEY });
     expect(read).toHaveBeenCalledOnce();
@@ -493,7 +475,7 @@ describe("CustodyRuntimeTargets", () => {
   it.each(["wallet", "config"] as const)(
     "reports an inactive exact Config %s as runtime-unavailable",
     async (inactiveOwner) => {
-      const config = await seedConfig({ provider: "privy" });
+      const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
       await getDb(env)
         .prepare(
           inactiveOwner === "wallet"
@@ -519,7 +501,7 @@ describe("CustodyRuntimeTargets", () => {
   );
 
   it("keeps inactive wallet rows out of the public wallet-record resolver", async () => {
-    const config = await seedConfig({ provider: "privy" });
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
     await getDb(env)
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
       .bind(`cwlt_${config.id}`)
@@ -537,8 +519,8 @@ describe("CustodyRuntimeTargets", () => {
   });
 
   it("rechecks an exact Config wallet before constructing its signer", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const getConfigAdapter = createConfigAdapterFactory();
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await targets.admitRuntimeExecution({
@@ -566,7 +548,7 @@ describe("CustodyRuntimeTargets", () => {
   });
 
   it("rejects an exact signer whose address does not match the wallet row", async () => {
-    const config = await seedConfig({ provider: "privy" });
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
@@ -583,68 +565,9 @@ describe("CustodyRuntimeTargets", () => {
     });
   });
 
-  it("rejects an exact Connection wallet while runtime is off before reading its secret", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, null);
-    env.PRIVY_BYOK_ENABLED = "false";
-    const read = mockStoredCredentialRead();
-    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.resolve({
-        kind: "wallet",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        walletId: connection.walletId,
-      })
-    ).resolves.toMatchObject({ kind: "connection", isRuntimeAvailable: false });
-
-    await expect(
-      targets.getTransactionSigner(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        connection.walletId,
-        createConfigAdapterFactory()
-      )
-    ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
-    expect(read).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(
-      {
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        provider: "privy",
-        targetKind: "connection",
-        targetId: connection.id,
-        custodyWalletId: null,
-        reason: "runtime_disabled",
-      },
-      "custody_runtime_target_unavailable"
-    );
-  });
-
-  it("uses the legacy Config for provider resolution while runtime is off", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, connection.id);
-    env.PRIVY_BYOK_ENABLED = "false";
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.resolve({
-        kind: "provider",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        provider: "privy",
-      })
-    ).resolves.toMatchObject({ kind: "config", config: { id: config.id } });
-  });
-
-  it("resolves an exact unselected Connection without falling back to Config", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, null);
+  it("resolves an exact Connection without falling back to Config", async () => {
+    await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+    const connection = await seedConnection(DEFAULT_CONNECTION);
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
@@ -669,210 +592,108 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toBeNull();
   });
 
-  it("returns the locked previous and selected defaults for an exact Connection switch", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, null);
+  it("creates a wallet under an active Connection", async () => {
+    const connection = await seedConnection(DEFAULT_CONNECTION);
+    const read = mockStoredCredentialRead();
+    const provisionPrivyWallet = vi
+      .spyOn(custodyProvisioning, "provisionPrivyWallet")
+      .mockResolvedValueOnce({
+        walletId: "runtime_targets_created",
+        address: SECOND_CONNECTION_PUBLIC_KEY,
+      });
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
-    const result = await selectCustodyConnectionTarget(getDb(env), env, {
+    const wallet = await targets.createConnectionWallet({
+      auditContext: createAuditContext(),
+      creationReason: "wallet_api",
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
       connectionId: connection.id,
+      label: "Created",
+      purpose: "transfer",
     });
 
-    expect(result).toMatchObject({
-      selection: {
-        previousConfigId: config.id,
-        previousConnectionId: null,
-        selectedConfigId: config.id,
-        selectedConnectionId: connection.id,
-      },
+    expect(wallet).toEqual({
+      id: expect.stringMatching(/^cwlt_/),
+      custodyConnectionId: connection.id,
+      isRuntimeExecutionAllowed: true,
+      walletId: "privy_runtime_targets_created",
+      publicKey: SECOND_CONNECTION_PUBLIC_KEY,
+      label: "Created",
+      purpose: "transfer",
+      status: "active",
+      createdAt: expect.any(String),
+    });
+    expect(read).toHaveBeenCalledOnce();
+    expect(provisionPrivyWallet).toHaveBeenCalledOnce();
+    expect(await getCustodyWalletRow(wallet.id)).toMatchObject({
+      custody_connection_id: connection.id,
+      custody_config_id: null,
+      wallet_id: "privy_runtime_targets_created",
+      status: "active",
     });
   });
 
-  it("does not select a retained Connection after its provider entitlement is revoked", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, null);
-    await setPrivyEntitlement(false);
+  it.each(
+    CUSTODY_CONNECTION_LIFECYCLES.filter(
+      (lifecycle): lifecycle is UnavailableConnectionLifecycle => lifecycle !== "active"
+    )
+  )("refuses wallet creation under a %s Connection before any Provider call", async (lifecycle) => {
+    const connection = await seedConnectionInLifecycle(lifecycle);
+    const read = mockStoredCredentialRead();
+    const provisionPrivyWallet = vi.spyOn(custodyProvisioning, "provisionPrivyWallet");
+    const walletRowsBefore = await getConnectionWalletRows(connection.id);
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      selectCustodyConnectionTarget(getDb(env), env, {
+      targets.createConnectionWallet({
+        auditContext: createAuditContext(),
+        creationReason: "wallet_api",
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
         connectionId: connection.id,
-      })
-    ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
-    expect(await getProjectDefault()).toEqual({
-      default_custody_config_id: config.id,
-      default_custody_connection_id: null,
-    });
-  });
-
-  it("keeps an effective same-provider Config ahead of an unselected Connection", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    await seedConnection();
-    await setProjectDefault(config.id, null);
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.resolve({
-        kind: "provider",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        provider: "privy",
-      })
-    ).resolves.toMatchObject({ kind: "config", config: { id: config.id } });
-  });
-
-  it.each(["success", "retry_unknown"] as const)(
-    "keeps an active matching Project Config ahead of an unselected Connection with %s status",
-    async (lastCheckStatus) => {
-      const effectiveConfig = await seedConfig({ provider: "turnkey" });
-      const matchingConfig = await seedConfig({ provider: "privy" });
-      await seedConnection({ lastCheckStatus });
-      await setProjectDefault(effectiveConfig.id, null);
-      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-      await expect(
-        targets.resolve({
-          kind: "provider",
-          organizationId: ORGANIZATION_ID,
-          projectId: PROJECT_ID,
-          provider: "privy",
-        })
-      ).resolves.toMatchObject({ kind: "config", config: { id: matchingConfig.id } });
-    }
-  );
-
-  it("does not fall back to an Organization Config when matching Connection state is unusable", async () => {
-    const effectiveConfig = await seedConfig({ provider: "turnkey" });
-    const organizationConfig = await seedConfig({ provider: "privy", projectId: null });
-    await seedConnection({ lastCheckStatus: "retry_unknown" });
-    await setOrganizationDefault(organizationConfig.id);
-    await setProjectDefault(effectiveConfig.id, null);
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.resolve({
-        kind: "provider",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        provider: "privy",
+        label: "Refused",
+        purpose: "transfer",
       })
     ).rejects.toMatchObject({
       code: "CONFLICT",
       statusCode: 409,
       message: "Custody Connection is unavailable",
     });
+    expect(read).not.toHaveBeenCalled();
+    expect(provisionPrivyWallet).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await getConnectionWalletRows(connection.id)).toEqual(walletRowsBefore);
   });
 
-  it("keeps a selected unusable Connection ahead of an active matching Config", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection({ lastCheckStatus: "retry_unknown" });
-    await setProjectDefault(config.id, connection.id);
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.resolve({
-        kind: "provider",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        provider: "privy",
-      })
-    ).resolves.toMatchObject({
-      kind: "connection",
-      connectionId: connection.id,
-      isRuntimeAvailable: false,
-    });
-  });
-
-  it("resolves the sole matching Connection when another provider is effective", async () => {
-    const config = await seedConfig({ provider: "turnkey" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, null);
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.resolve({
-        kind: "provider",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        provider: "privy",
-      })
-    ).resolves.toMatchObject({
-      kind: "connection",
-      connectionId: connection.id,
-      isRuntimeAvailable: true,
-    });
-  });
-
-  it("requires selection when provider resolution finds multiple live Connections", async () => {
-    const config = await seedConfig({ provider: "turnkey" });
-    await seedConnection({ id: "cconn_first", credentialId: "pcred_first" });
-    await seedConnection({ id: "cconn_second", credentialId: "pcred_second" });
-    await setProjectDefault(config.id, null);
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.resolve({
-        kind: "provider",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        provider: "privy",
-      })
-    ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
-  });
-
-  it("ignores an unusable Connection when provider resolution has one usable target", async () => {
-    const config = await seedConfig({ provider: "turnkey" });
-    const connection = await seedConnection({
-      id: "cconn_usable",
-      credentialId: "pcred_usable",
-    });
-    await seedConnection({
-      id: "cconn_unusable",
-      credentialId: "pcred_unusable",
-      lastCheckStatus: "retry_unknown",
-    });
-    await setProjectDefault(config.id, null);
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.resolve({
-        kind: "provider",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        provider: "privy",
-      })
-    ).resolves.toMatchObject({ kind: "connection", connectionId: connection.id });
-  });
-
-  it("supports exact unselected Connection and Config wallets while runtime is on", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, null);
+  it("signs exact Connection and Config wallets of one project by record id", async () => {
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+    const connection = await seedConnection(DEFAULT_CONNECTION);
     mockStoredCredentialRead();
-    const getConfigAdapter = createConfigAdapterFactory();
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(
+      targets.getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
         PROJECT_ID,
-        connection.walletId,
+        `cwlt_${connection.id}`,
         getConfigAdapter
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, config.walletId, getConfigAdapter)
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${config.id}`,
+        getConfigAdapter
+      )
     ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
   });
 
-  it("projects revoked entitlement without changing retained Config or Connection selection", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, connection.id);
+  it("projects revoked entitlement on retained Config and Connection wallets", async () => {
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+    const connection = await seedConnection(DEFAULT_CONNECTION);
     await setPrivyEntitlement(false);
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
@@ -880,7 +701,6 @@ describe("CustodyRuntimeTargets", () => {
       targets.listWallets({
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
-        includeAllProviders: true,
       })
     ).resolves.toEqual(
       expect.arrayContaining([
@@ -890,16 +710,16 @@ describe("CustodyRuntimeTargets", () => {
         }),
         expect.objectContaining({
           custodyConnectionId: connection.id,
-          isDefaultProvider: true,
           isRuntimeExecutionAllowed: false,
         }),
       ])
     );
     await expect(
       targets.resolve({
-        kind: "effective",
+        kind: "connection",
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
+        connectionId: connection.id,
       })
     ).resolves.toMatchObject({ kind: "connection", connectionId: connection.id });
   });
@@ -907,7 +727,7 @@ describe("CustodyRuntimeTargets", () => {
   it.each([null, "root", "mint_authority", "freeze_authority", "fee_payer", "transfer"] as const)(
     "projects the supported wallet purpose %s",
     async (purpose) => {
-      const config = await seedConfig({ provider: "privy" });
+      const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
       await getDb(env)
         .prepare("UPDATE custody_wallets SET purpose = ? WHERE id = ?")
         .bind(purpose, `cwlt_${config.id}`)
@@ -928,7 +748,9 @@ describe("CustodyRuntimeTargets", () => {
     "rejects an unknown wallet purpose from the %s projection",
     async (owner) => {
       const wallet =
-        owner === "config" ? await seedConfig({ provider: "privy" }) : await seedConnection();
+        owner === "config"
+          ? await seedConfig({ provider: "privy", projectId: PROJECT_ID })
+          : await seedConnection(DEFAULT_CONNECTION);
       await getDb(env)
         .prepare("UPDATE custody_wallets SET purpose = 'unexpected' WHERE id = ?")
         .bind(`cwlt_${wallet.id}`)
@@ -945,127 +767,133 @@ describe("CustodyRuntimeTargets", () => {
     }
   );
 
-  it("fails closed when the selected Connection is unusable", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection({ lastCheckStatus: "retry_unknown" });
-    await setProjectDefault(config.id, connection.id);
+  it("fails closed on an exact wallet of a pending Connection", async () => {
+    const connection = await seedConnection({
+      ...DEFAULT_CONNECTION,
+      lastCheckStatus: "retry_unknown",
+    });
     const read = mockStoredCredentialRead();
-    const getConfigAdapter = createConfigAdapterFactory();
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-    ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${connection.id}`,
+        getConfigAdapter
+      )
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      statusCode: 409,
+      details: { reason: "runtime_execution_unavailable" },
+    });
     expect(read).not.toHaveBeenCalled();
     expect(getConfigAdapter).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the selected Connection has no Provider Account fingerprint", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, connection.id);
+  it("fails closed on an exact wallet of a Connection with no Provider Account fingerprint", async () => {
+    const connection = await seedConnection(DEFAULT_CONNECTION);
     await getDb(env)
       .prepare("UPDATE custody_connections SET provider_account_fingerprint = NULL WHERE id = ?")
       .bind(connection.id)
       .run();
     const read = mockStoredCredentialRead();
-    const getConfigAdapter = createConfigAdapterFactory();
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-    ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${connection.id}`,
+        getConfigAdapter
+      )
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      statusCode: 409,
+      details: { reason: "runtime_execution_unavailable" },
+    });
     expect(read).not.toHaveBeenCalled();
     expect(getConfigAdapter).not.toHaveBeenCalled();
   });
 
-  it("does not fall back when a selected Connection loses its default wallet", async () => {
-    const config = await seedConfig({ provider: "privy" });
-    const connection = await seedConnection();
-    await setProjectDefault(config.id, connection.id);
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `UPDATE custody_connections
-           SET status = 'deactivated', deactivated_at = sdp_iso_now()
-           WHERE id = ?`
+  it.each(["config", "connection"] as const)(
+    "never resolves a %s wallet from another project of the organization",
+    async (owner) => {
+      const wallet =
+        owner === "config"
+          ? await seedConfig({ provider: "privy", projectId: PROJECT_ID })
+          : await seedConnection(DEFAULT_CONNECTION);
+      const custodyWalletId = `cwlt_${wallet.id}`;
+      const walletRowBefore = await getCustodyWalletRow(custodyWalletId);
+      const read = mockStoredCredentialRead();
+      const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
+      vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.resolve({
+          kind: "wallet_record",
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          custodyWalletId,
+        })
+      ).resolves.toMatchObject({ kind: owner });
+      await expect(
+        targets.resolve({
+          kind: "wallet_record",
+          organizationId: ORGANIZATION_ID,
+          projectId: OTHER_PROJECT_ID,
+          custodyWalletId,
+        })
+      ).resolves.toBeNull();
+      await expect(
+        targets.resolve({
+          kind: "wallet",
+          organizationId: ORGANIZATION_ID,
+          projectId: OTHER_PROJECT_ID,
+          walletId: wallet.walletId,
+        })
+      ).resolves.toBeNull();
+      await expect(
+        targets.admitRuntimeExecution({
+          organizationId: ORGANIZATION_ID,
+          projectId: OTHER_PROJECT_ID,
+          custodyWalletId,
+        })
+      ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
+      await expect(
+        targets.getTransactionSignerForWalletRecord(
+          ORGANIZATION_ID,
+          OTHER_PROJECT_ID,
+          custodyWalletId,
+          getConfigAdapter
         )
-        .bind(connection.id),
-      getDb(env)
-        .prepare("DELETE FROM custody_wallets WHERE custody_connection_id = ?")
-        .bind(connection.id),
-    ]);
-    const getConfigAdapter = createConfigAdapterFactory();
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-    ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
-    expect(getConfigAdapter).not.toHaveBeenCalled();
-  });
-
-  it("uses the retained Organization Config when runtime is off", async () => {
-    const config = await seedConfig({ provider: "privy", projectId: null });
-    const connection = await seedConnection();
-    await setOrganizationDefault(config.id);
-    await setProjectDefault(null, connection.id);
-    env.PRIVY_BYOK_ENABLED = "false";
-    const read = mockStoredCredentialRead();
-    const getConfigAdapter = createConfigAdapterFactory();
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-    ).resolves.toMatchObject({ address: CONFIG_PUBLIC_KEY });
-    expect(read).not.toHaveBeenCalled();
-  });
-
-  it("does not resolve a default Config owned by another scope", async () => {
-    const foreignOrganizationId = "org_runtime_targets_foreign";
-    const foreignConfigId = "cust_runtime_targets_foreign";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO organizations (id, name, slug, tier, status)
-           VALUES (?, 'Foreign runtime targets', 'foreign-runtime-targets', 'individual', 'active')`
-        )
-        .bind(foreignOrganizationId),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs (
-             id, organization_id, project_id, provider, config_encrypted,
-             encryption_version, status
-           ) VALUES (?, ?, NULL, 'privy', 'encrypted', 'test', 'active')`
-        )
-        .bind(foreignConfigId, foreignOrganizationId),
-    ]);
-    await setProjectDefault(foreignConfigId, null);
-    const getConfigAdapter = createConfigAdapterFactory();
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.getTransactionSigner(ORGANIZATION_ID, PROJECT_ID, undefined, getConfigAdapter)
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(getConfigAdapter).not.toHaveBeenCalled();
-  });
+      ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
+      expect(getConfigAdapter).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(await getCustodyWalletRow(custodyWalletId)).toEqual(walletRowBefore);
+    }
+  );
 
   it("misses the stored adapter cache after Credential version rotation", async () => {
-    const connection = await seedConnection();
-    await setProjectDefault(null, connection.id);
+    const connection = await seedConnection(DEFAULT_CONNECTION);
+    const custodyWalletId = `cwlt_${connection.id}`;
     const read = mockStoredCredentialRead();
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-    const getConfigAdapter = createConfigAdapterFactory();
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
 
-    await targets.getTransactionSigner(
+    await targets.getTransactionSignerForWalletRecord(
       ORGANIZATION_ID,
       PROJECT_ID,
-      connection.walletId,
+      custodyWalletId,
       getConfigAdapter
     );
-    await targets.getTransactionSigner(
+    await targets.getTransactionSignerForWalletRecord(
       ORGANIZATION_ID,
       PROJECT_ID,
-      connection.walletId,
+      custodyWalletId,
       getConfigAdapter
     );
     expect(read).toHaveBeenCalledOnce();
@@ -1079,18 +907,17 @@ describe("CustodyRuntimeTargets", () => {
       .bind(connection.credentialId)
       .run();
 
-    await targets.getTransactionSigner(
+    await targets.getTransactionSignerForWalletRecord(
       ORGANIZATION_ID,
       PROJECT_ID,
-      connection.walletId,
+      custodyWalletId,
       getConfigAdapter
     );
     expect(read).toHaveBeenCalledTimes(2);
   });
 
   it("returns a redacted unavailable error when the Credential secret cannot be read", async () => {
-    const connection = await seedConnection();
-    await setProjectDefault(null, connection.id);
+    const connection = await seedConnection(DEFAULT_CONNECTION);
     const read = vi.fn().mockRejectedValue(new Error("raw secret backend error"));
     vi.spyOn(credentialSecretStore, "createCredentialSecretStore").mockReturnValue({
       storageBackend: "encrypted_db",
@@ -1106,7 +933,7 @@ describe("CustodyRuntimeTargets", () => {
         ORGANIZATION_ID,
         PROJECT_ID,
         `cwlt_${connection.id}`,
-        createConfigAdapterFactory()
+        createConfigAdapterFactory(CONFIG_PUBLIC_KEY)
       )
     ).rejects.toMatchObject({
       code: "PROVIDER_UNAVAILABLE",
@@ -1115,93 +942,176 @@ describe("CustodyRuntimeTargets", () => {
     });
   });
 
-  it("reads runtime-env credentials on every signer resolution", async () => {
-    env.PRIVY_APP_ID = "runtime-app-id";
-    env.PRIVY_APP_SECRET = "runtime-app-secret";
-    const connection = await seedConnection({ backend: "runtime_env" });
-    await setProjectDefault(null, connection.id);
-    const read = vi.spyOn(RuntimeEnvCredentialSecretStore.prototype, "read");
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-    const getConfigAdapter = createConfigAdapterFactory();
-
-    await targets.getTransactionSigner(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      connection.walletId,
-      getConfigAdapter
-    );
-    await targets.getTransactionSigner(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      connection.walletId,
-      getConfigAdapter
-    );
-
-    expect(read).toHaveBeenCalledTimes(2);
-  });
-
-  it("fails closed when runtime env credentials point to another Privy account", async () => {
-    env.PRIVY_APP_ID = "runtime-app-id";
-    env.PRIVY_APP_SECRET = "runtime-app-secret";
-    const connection = await seedConnection({ backend: "runtime_env" });
-    await setProjectDefault(null, connection.id);
-    env.PRIVY_APP_ID = "different-runtime-app-id";
-    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
-
-    await expect(
-      targets.getTransactionSigner(
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        connection.walletId,
-        createConfigAdapterFactory()
-      )
-    ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
-  });
-
-  it("is used by the production SigningService transaction-signer path", async () => {
-    const connection = await seedConnection();
-    await setProjectDefault(null, connection.id);
+  it("is used by the production SigningService exact transaction-signer path", async () => {
+    const connection = await seedConnection(DEFAULT_CONNECTION);
     mockStoredCredentialRead();
 
     await expect(
-      createSigningService(env).getTransactionSigner(
+      createSigningService(env).getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
         PROJECT_ID,
-        connection.walletId
+        `cwlt_${connection.id}`
       )
     ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
   });
 
-  it("preserves a same-provider Connection on Config selection and clears it for another provider", async () => {
-    const privyConfig = await seedConfig({ provider: "privy" });
-    const turnkeyConfig = await seedConfig({ provider: "turnkey" });
-    const connection = await seedConnection();
-    await setProjectDefault(null, connection.id);
-    const configStore = new CustodyConfigStore(getDb(env), env);
+  it("passes the Connection request delay, else the environment delay, to the Privy signer", async () => {
+    const connection = await seedConnection(DEFAULT_CONNECTION);
+    await getDb(env).execute("UPDATE custody_connections SET request_delay_ms = 0 WHERE id = ?", [
+      connection.id,
+    ]);
+    mockStoredCredentialRead();
+    const createPrivySigner = vi.spyOn(PrivySigner, "create");
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
 
-    await configStore.setDefaultConfig(ORGANIZATION_ID, PROJECT_ID, privyConfig.id);
-    expect(await getProjectDefault()).toEqual({
-      default_custody_config_id: privyConfig.id,
-      default_custody_connection_id: connection.id,
-    });
-
-    const selection = await configStore.setDefaultConfig(
-      ORGANIZATION_ID,
-      PROJECT_ID,
-      turnkeyConfig.id
+    await expect(
+      new CustodyRuntimeTargets(getDb(env), env, new Map()).getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${connection.id}`,
+        getConfigAdapter
+      )
+    ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
+    expect(createPrivySigner).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestDelayMs: 0 })
     );
-    expect(selection).toEqual({
-      previousConfigId: privyConfig.id,
-      previousConnectionId: connection.id,
-      selectedConfigId: turnkeyConfig.id,
-      selectedConnectionId: null,
-    });
-    expect(await getProjectDefault()).toEqual({
-      default_custody_config_id: turnkeyConfig.id,
-      default_custody_connection_id: null,
-    });
+
+    await getDb(env).execute(
+      "UPDATE custody_connections SET request_delay_ms = NULL WHERE id = ?",
+      [connection.id]
+    );
+    await expect(
+      new CustodyRuntimeTargets(getDb(env), env, new Map()).getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${connection.id}`,
+        getConfigAdapter
+      )
+    ).resolves.toMatchObject({ address: CONNECTION_PUBLIC_KEY });
+    expect(createPrivySigner).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestDelayMs: 250 })
+    );
   });
+
+  it.each([
+    ["managed", "config"],
+    ["byok", "connection"],
+  ] as const)(
+    "refuses exact admission of a %s wallet whose pair is out of channel",
+    async (mode, owner) => {
+      const wallet =
+        owner === "config"
+          ? await seedConfig({ provider: "privy", projectId: PROJECT_ID })
+          : await seedConnection(DEFAULT_CONNECTION);
+      custodyReleaseChannel.outOfChannelMode = mode;
+      const read = mockStoredCredentialRead();
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.admitRuntimeExecution({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          custodyWalletId: `cwlt_${wallet.id}`,
+        })
+      ).rejects.toMatchObject(channelRefusal(mode));
+      expect(read).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["managed", "config"],
+    ["byok", "connection"],
+  ] as const)(
+    "refuses the record-path signer for a %s wallet whose pair is out of channel",
+    async (mode, owner) => {
+      const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+      const connection = await seedConnection(DEFAULT_CONNECTION);
+      const targetId = owner === "config" ? config.id : connection.id;
+      const custodyWalletId = `cwlt_${targetId}`;
+      custodyReleaseChannel.outOfChannelMode = mode;
+      const read = mockStoredCredentialRead();
+      const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+      const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.getTransactionSignerForWalletRecord(
+          ORGANIZATION_ID,
+          PROJECT_ID,
+          custodyWalletId,
+          getConfigAdapter
+        )
+      ).rejects.toMatchObject(channelRefusal(mode));
+      expect(read).not.toHaveBeenCalled();
+      expect(getConfigAdapter).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        {
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          provider: "privy",
+          targetKind: owner,
+          targetId,
+          custodyWalletId,
+          reason: "not_in_release_channel",
+        },
+        "custody_runtime_target_unavailable"
+      );
+    }
+  );
+
+  it.each(["managed", "byok"] as const)(
+    "lists wallets whose pair is out of channel as not executable (%s out)",
+    async (mode) => {
+      const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+      const connection = await seedConnection(DEFAULT_CONNECTION);
+      custodyReleaseChannel.outOfChannelMode = mode;
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.listWallets({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+        })
+      ).resolves.toEqual([
+        {
+          id: `cwlt_${config.id}`,
+          custodyConfigId: config.id,
+          provider: "privy",
+          isRuntimeExecutionAllowed: mode !== "managed",
+          walletId: config.walletId,
+          publicKey: CONFIG_PUBLIC_KEY,
+          label: null,
+          purpose: null,
+          status: "active",
+          createdAt: expect.any(String),
+        },
+        {
+          id: `cwlt_${connection.id}`,
+          custodyConnectionId: connection.id,
+          provider: "privy",
+          isRuntimeExecutionAllowed: mode !== "byok",
+          walletId: connection.walletId,
+          publicKey: CONNECTION_PUBLIC_KEY,
+          label: null,
+          purpose: null,
+          status: "active",
+          createdAt: expect.any(String),
+        },
+      ]);
+    }
+  );
 });
+
+function channelRefusal(mode: CustodyMode) {
+  return {
+    code: "FORBIDDEN",
+    statusCode: 403,
+    message: custodyProviderNotInReleaseChannel("privy", mode).message,
+    details: { reason: "custody_provider_not_in_release_channel" },
+  };
+}
 
 async function seedScope(): Promise<void> {
   await getDb(env).batch([
@@ -1222,137 +1132,77 @@ async function seedScope(): Promise<void> {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,
     members: [],
-    ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    ids: { sandbox: PROJECT_ID, production: OTHER_PROJECT_ID },
   });
 }
 
 async function seedConfig(params: {
   provider: CustodyProvider;
-  projectId?: string | null;
+  projectId: string;
 }): Promise<{ id: string; walletId: string }> {
-  const projectId = params.projectId === undefined ? PROJECT_ID : params.projectId;
-  const id = `cust_runtime_${params.provider}_${projectId ?? "org"}`;
-  const walletId = `wallet_${params.provider}_${projectId ?? "org"}`;
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs (
-           id, organization_id, project_id, provider, config_encrypted,
-           encryption_version, default_wallet_id, status
-         ) VALUES (?, ?, ?, ?, 'encrypted', 'test', ?, 'active')`
-      )
-      .bind(id, ORGANIZATION_ID, projectId, params.provider, walletId),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_config_id, wallet_id, public_key, status
-         ) VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(`cwlt_${id}`, id, walletId, CONFIG_PUBLIC_KEY),
-  ]);
+  const id = `cust_runtime_${params.provider}_${params.projectId}`;
+  const walletId = `wallet_${params.provider}_${params.projectId}`;
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id,
+        organizationId: ORGANIZATION_ID,
+        projectId: params.projectId,
+        provider: params.provider,
+        configEncrypted: "encrypted",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: `cwlt_${id}`,
+        owner: { kind: "config", custodyConfigId: id },
+        walletId,
+        publicKey: CONFIG_PUBLIC_KEY,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+  });
   return { id, walletId };
 }
 
 async function seedConnection(
-  params: {
-    id?: string;
-    credentialId?: string;
-    backend?: "encrypted_db" | "runtime_env";
-    lastCheckStatus?: "success" | "retry_unknown";
-    requestDelayMs?: number;
-  } = {}
+  seed: ConnectionSeed
 ): Promise<{ id: string; credentialId: string; walletId: string }> {
-  const id = params.id ?? "cconn_runtime_targets";
-  const credentialId = params.credentialId ?? "pcred_runtime_targets";
-  const walletId = `privy_${id}`;
-  const backend = params.backend ?? "encrypted_db";
-  const source = backend === "runtime_env" ? "runtime" : "stored";
-  const encryptedPayload = backend === "encrypted_db" ? "ciphertext" : null;
-  const lastCheckStatus = params.lastCheckStatus ?? "success";
-  const connectionStatus = lastCheckStatus === "success" ? "active" : "pending";
-  const providerAccountFingerprint =
-    backend === "runtime_env"
-      ? await getPrivyProviderAccountFingerprint(env.PRIVY_APP_ID ?? "")
-      : `sha256:${credentialId}`;
-
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO provider_credentials (
-           id, organization_id, project_id, provider, label, scope, source,
-           storage_backend, encrypted_secret_payload, status, credential_version, created_by
-         ) VALUES (?, ?, ?, 'privy', 'Runtime Privy', 'project', ?, ?, ?, 'active', 1, ?)`
-      )
-      .bind(credentialId, ORGANIZATION_ID, PROJECT_ID, source, backend, encryptedPayload, USER_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_connections (
-           id, organization_id, project_id, provider, scope,
-           provider_credential_id, provider_credential_scope_key,
-           request_delay_ms, status, created_by
-         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, 'pending', ?)`
-      )
-      .bind(
-        id,
-        ORGANIZATION_ID,
-        PROJECT_ID,
-        credentialId,
-        PROJECT_ID,
-        params.requestDelayMs ?? null,
-        USER_ID
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_connection_id, wallet_id, public_key, status
-         ) VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(`cwlt_${id}`, id, walletId, CONNECTION_PUBLIC_KEY),
-    getDb(env)
-      .prepare(
-        `UPDATE custody_connections
-         SET default_custody_wallet_id = ?, status = ?,
-             last_check_status = ?, last_check_at = sdp_iso_now(),
-             provider_account_fingerprint = ?,
-             activated_at = CASE WHEN ? = 'active' THEN sdp_iso_now() ELSE NULL END
-         WHERE id = ?`
-      )
-      .bind(
-        `cwlt_${id}`,
-        connectionStatus,
-        lastCheckStatus,
-        providerAccountFingerprint,
-        connectionStatus,
-        id
-      ),
-  ]);
-  return { id, credentialId, walletId };
-}
-
-async function setProjectDefault(
-  configId: string | null,
-  connectionId: string | null
-): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_scope_defaults (
-         id, organization_id, project_id,
-         default_custody_config_id, default_custody_connection_id
-       ) VALUES ('csd_runtime_targets', ?, ?, ?, ?)`
+  const walletId = `privy_${seed.id}`;
+  const connection = {
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    connectionId: seed.id,
+    credentialId: seed.credentialId,
+    createdBy: USER_ID,
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+    providerAccountFingerprint: `sha256:${seed.credentialId}`,
+    wallets: [
+      {
+        id: `cwlt_${seed.id}`,
+        walletId,
+        publicKey: CONNECTION_PUBLIC_KEY,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+  } satisfies Omit<
+    Extract<TestPrivyConnectionSeed, { lastCheckStatus: "retry_unknown" }>,
+    "lastCheckStatus"
+  >;
+  await getDb(env).transaction((tx) =>
+    seedTestPrivyConnection(
+      tx,
+      seed.lastCheckStatus === "success"
+        ? { ...connection, lastCheckStatus: "success", defaultCustodyWalletId: `cwlt_${seed.id}` }
+        : { ...connection, lastCheckStatus: "retry_unknown" }
     )
-    .bind(ORGANIZATION_ID, PROJECT_ID, configId, connectionId)
-    .run();
-}
-
-async function setOrganizationDefault(configId: string): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_scope_defaults (
-         id, organization_id, project_id, default_custody_config_id
-       ) VALUES ('csd_runtime_targets_org', ?, NULL, ?)`
-    )
-    .bind(ORGANIZATION_ID, configId)
-    .run();
+  );
+  return { id: seed.id, credentialId: seed.credentialId, walletId };
 }
 
 async function setPrivyEntitlement(entitled: boolean): Promise<void> {
@@ -1362,17 +1212,108 @@ async function setPrivyEntitlement(entitled: boolean): Promise<void> {
     .run();
 }
 
-async function getProjectDefault(): Promise<{
-  default_custody_config_id: string | null;
-  default_custody_connection_id: string | null;
-} | null> {
+type UnavailableConnectionLifecycle = Exclude<CustodyConnectionLifecycle, "active">;
+
+/**
+ * Seed a Connection in a lifecycle other than `active` exactly as the product leaves
+ * it there: an unfinished installation owns no wallet, and a deactivated Connection
+ * keeps the wallets it owned while active.
+ * @param lifecycle - The lifecycle the Connection is in.
+ * @returns The Connection's ID.
+ */
+async function seedConnectionInLifecycle(
+  lifecycle: UnavailableConnectionLifecycle
+): Promise<{ id: string }> {
+  switch (lifecycle) {
+    case "pending":
+    case "checking":
+    case "failed": {
+      const installation = UNFINISHED_INSTALLATION_FACTS[lifecycle];
+      const id = `cconn_runtime_targets_${lifecycle}`;
+      const credentialId = `pcred_runtime_targets_${lifecycle}`;
+      await getDb(env).transaction(async (tx) => {
+        await insertTestStoredProviderCredential(tx, {
+          id: credentialId,
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          provider: "privy",
+          label: "Privy",
+          stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+          displayMetadata: {},
+          status: installation.credentialStatus,
+          credentialVersion: 1,
+          rotatedFromProviderCredentialId: null,
+          lastValidatedAt: null,
+          deactivatedAt: null,
+          createdBy: USER_ID,
+        });
+        await insertTestCustodyConnection(tx, {
+          id,
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          provider: "privy",
+          credential: { id: credentialId, projectId: PROJECT_ID },
+          status: lifecycle,
+          setupMetadata: {},
+          providerAccountFingerprint: null,
+          lastCheckStatus: installation.lastCheckStatus,
+          lastCheckAt: installation.lastCheckStatus === null ? null : new Date().toISOString(),
+          lastCheckFailureCode: null,
+          activatedAt: null,
+          deactivatedAt: null,
+          createdBy: USER_ID,
+          createdAt: new Date().toISOString(),
+        });
+      });
+      return { id };
+    }
+    case "deactivated": {
+      const connection = await seedConnection(DEFAULT_CONNECTION);
+      await getDb(env).execute(
+        `UPDATE custody_connections
+         SET status = 'deactivated', deactivated_at = sdp_iso_now()
+         WHERE id = ?`,
+        [connection.id]
+      );
+      return { id: connection.id };
+    }
+    default: {
+      const unhandled: never = lifecycle;
+      throw new Error(`Unhandled Connection lifecycle: ${String(unhandled)}`);
+    }
+  }
+}
+
+/**
+ * Every wallet row owned by one Connection, by ID.
+ * @param connectionId - The owning Connection.
+ * @returns The Connection's wallet rows.
+ */
+async function getConnectionWalletRows(connectionId: string): Promise<Record<string, unknown>[]> {
+  return getDb(env).queryMany(
+    "SELECT * FROM custody_wallets WHERE custody_connection_id = ? ORDER BY id",
+    [connectionId]
+  );
+}
+
+/**
+ * An API-key request context for the wallet-creation audit intent.
+ * @returns The audit context.
+ */
+function createAuditContext(): Context<{ Bindings: Env }> {
+  const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/v1/wallets"), {
+    env,
+  });
+  auditContext.set("apiKey", AUDIT_API_KEY);
+  return auditContext;
+}
+
+async function getCustodyWalletRow(
+  custodyWalletId: string
+): Promise<Record<string, unknown> | null> {
   return getDb(env)
-    .prepare(
-      `SELECT default_custody_config_id, default_custody_connection_id
-       FROM custody_scope_defaults
-       WHERE organization_id = ? AND project_id = ?`
-    )
-    .bind(ORGANIZATION_ID, PROJECT_ID)
+    .prepare("SELECT * FROM custody_wallets WHERE id = ?")
+    .bind(custodyWalletId)
     .first();
 }
 
@@ -1391,15 +1332,15 @@ function mockStoredCredentialRead() {
   return read;
 }
 
-function createConfigAdapterFactory(signerAddress = CONFIG_PUBLIC_KEY) {
-  const adapter = {
+function createConfigAdapterFactory(signerAddress: string) {
+  const adapter: FullSigningPort = {
     providerId: "privy",
-    getPublicKey: vi.fn().mockResolvedValue(CONFIG_PUBLIC_KEY),
-    getTransactionSigner: vi.fn().mockResolvedValue({
-      address: signerAddress,
-      signTransactions: vi.fn(),
-    }),
-  } as unknown as SigningPort;
+    getPublicKey: vi.fn(async () => address(CONFIG_PUBLIC_KEY)),
+    getTransactionSigner: vi.fn(async () => ({
+      address: address(signerAddress),
+      signTransactions: vi.fn(async () => []),
+    })),
+  };
 
   return vi.fn(async (_orgId: string, _config: SigningConfigRecord) => adapter);
 }

@@ -22,6 +22,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithoutDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -79,27 +80,29 @@ async function seed(): Promise<void> {
   // A wallet is reachable from its organization through its custody config,
   // which is how 0081 scopes `custody_wallets`, and therefore how 0089's
   // `sdp_dvp_caller_is_party` ends up scoped too.
-  for (const [org, address, suffix] of [
-    [PARTY_ORG, PARTY_ADDRESS, "holder"],
-    [STRANGER_ORG, STRANGER_ADDRESS, "stranger"],
-  ] as const) {
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-         VALUES (?, ?, 'local', 'x', 'active')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(`cust_dvp_party_${suffix}`, org)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, ?, ?, 'active')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(`cwlt_dvp_party_${suffix}`, `cust_dvp_party_${suffix}`, `w_${suffix}`, address)
-      .run();
-  }
+  const holdings = [
+    { org: PARTY_ORG, project: PARTY_PROJECT, address: PARTY_ADDRESS, suffix: "holder" },
+    { org: STRANGER_ORG, project: STRANGER_PROJECT, address: STRANGER_ADDRESS, suffix: "stranger" },
+  ] as const;
+  await seedTestCustodyRows(env, {
+    configs: holdings.map((holding) => ({
+      id: `cust_dvp_party_${holding.suffix}`,
+      organizationId: holding.org,
+      projectId: holding.project,
+      provider: "local",
+      configEncrypted: "x",
+      status: "active",
+    })),
+    wallets: holdings.map((holding) => ({
+      id: `cwlt_dvp_party_${holding.suffix}`,
+      owner: { kind: "config", custodyConfigId: `cust_dvp_party_${holding.suffix}` },
+      walletId: `w_${holding.suffix}`,
+      publicKey: holding.address,
+      label: null,
+      purpose: null,
+      status: "active",
+    })),
+  });
 
   // The trade belongs to the agent's organization and names a party who does
   // not: exactly the shape PRO-1853 creates.

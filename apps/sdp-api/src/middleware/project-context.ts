@@ -1,6 +1,6 @@
 import type { SdpEnvironment } from "@sdp/types";
 import type { Context, Next } from "hono";
-import { getDb } from "@/db";
+import { type DatabaseExecutor, getDb } from "@/db";
 import { badRequest, forbidden, notFound, unauthorized } from "@/lib/errors";
 import { isProductionEntitled, productionNotEnabled } from "@/lib/production-entitlement";
 import type { Env } from "@/types/env";
@@ -122,8 +122,40 @@ async function assertProjectMembership(
   organizationId: string,
   userId: string,
   projectId: string
-): Promise<{ id: string; environment: SdpEnvironment }> {
-  const row = await getDb(c.env)
+): Promise<MemberProject> {
+  const row = await findMemberProject(getDb(c.env), { organizationId, userId, projectId });
+
+  if (!row) {
+    throw forbidden("Requested project is not accessible");
+  }
+
+  return row;
+}
+
+/** An active project the user is a member of. */
+export interface MemberProject {
+  id: string;
+  environment: SdpEnvironment;
+}
+
+/**
+ * Finds `projectId` when it is an active project of `organizationId` and
+ * `userId` has a `project_members` row for it: the membership rule every
+ * dashboard-session project scope is admitted by.
+ *
+ * @param db - Database client for the project and membership rows.
+ * @param params - The project lookup.
+ * @param params.organizationId - The caller's organization.
+ * @param params.userId - The dashboard user.
+ * @param params.projectId - The project the caller names.
+ * @returns The project, or null when it is outside the organization, archived,
+ *   or the user is not a member.
+ */
+export async function findMemberProject(
+  db: DatabaseExecutor,
+  params: { organizationId: string; userId: string; projectId: string }
+): Promise<MemberProject | null> {
+  return db
     .prepare(
       `SELECT p.id, p.environment
        FROM projects p
@@ -131,12 +163,6 @@ async function assertProjectMembership(
        WHERE p.id = ? AND p.organization_id = ? AND p.status = 'active' AND pm.user_id = ?
        LIMIT 1`
     )
-    .bind(projectId, organizationId, userId)
-    .first<{ id: string; environment: SdpEnvironment }>();
-
-  if (!row) {
-    throw forbidden("Requested project is not accessible");
-  }
-
-  return row;
+    .bind(params.projectId, params.organizationId, params.userId)
+    .first<MemberProject>();
 }

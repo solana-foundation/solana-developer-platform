@@ -22,9 +22,7 @@ const custodyConnectionListItemSchema = z.object({
   provider: z.enum(CUSTODY_PROVIDERS),
   label: z.string(),
   status: z.enum(CUSTODY_CONNECTION_LIFECYCLES),
-  isDefault: z.boolean(),
   isRuntimeExecutionAllowed: z.boolean(),
-  defaultCustodyWalletId: z.string().nullable(),
   createdAt: z.string(),
   activatedAt: z.string().nullable(),
   lastCheck: connectionLastCheckSchema.nullable(),
@@ -62,12 +60,10 @@ export interface ProviderConnections {
 }
 
 /**
- * What the banners above the table and the Make-default dialog assert, derived
- * from the whole project rather than the rows currently on screen.
+ * What the banner above the table asserts, derived from the whole project
+ * rather than the rows currently on screen.
  */
 export interface ConnectionsProjectSummary {
-  activeCount: number;
-  defaultConnection: { id: string; label: string } | null;
   signingPaused: boolean;
   /**
    * False when the project holds more connections than the loader reads. The
@@ -247,21 +243,18 @@ export async function fetchProviderConnections(
 }
 
 /**
- * The project-level facts the table's banners state.
+ * The project-level facts the table's banner states.
  *
- * Deliberately not derived from the visible page: "no default connection" and
- * "signing is paused" are claims about the project, and a default sitting on
- * page 2 would have made both of them false alarms.
+ * Deliberately not derived from the visible page: "signing is paused" is a
+ * claim about the project, and one paused connection among twenty on screen
+ * would have made it a false alarm.
  */
 export function summarizeProviderConnections(
   project: ProviderConnections
 ): ConnectionsProjectSummary {
   const active = project.connections.filter((connection) => connection.status === "active");
-  const current = active.find((connection) => connection.isDefault) ?? null;
 
   return {
-    activeCount: active.length,
-    defaultConnection: current ? { id: current.id, label: current.label } : null,
     signingPaused:
       active.length > 0 && active.every((connection) => !connection.isRuntimeExecutionAllowed),
     complete: project.complete,
@@ -275,24 +268,23 @@ export function summarizeProviderConnections(
  * pending and failed ones are kept so the picker can show them disabled with a
  * reason, rather than leave the user wondering where their connection went.
  *
- * Returns `[]` instead of throwing on any failure: the endpoint requires
- * `custody:admin`, and someone allowed to create a wallet without it must still
- * reach the wizard's provider form.
+ * A failed read throws: an empty picker would make an existing connection look
+ * absent and send the user back to the credential form for a second one.
+ *
+ * @param request - The SDP API request function scoped to the project.
+ * @param provider - The custody provider whose connections to read.
+ * @returns The provider's connections in the project, deactivated ones excluded.
  */
 export async function fetchConnectionPickerOptions(
   request: SdpApiClient["request"],
   provider: CustodyProvider
 ): Promise<CustodyConnectionListItem[]> {
-  try {
-    const page = await fetchConnectionsSlice(request, {
-      provider,
-      limit: CONNECTIONS_FETCH_LIMIT,
-      offset: 0,
-    });
-    return page.connections.filter((connection) => connection.status !== "deactivated");
-  } catch {
-    return [];
-  }
+  const page = await fetchConnectionsSlice(request, {
+    provider,
+    limit: CONNECTIONS_FETCH_LIMIT,
+    offset: 0,
+  });
+  return page.connections.filter((connection) => connection.status !== "deactivated");
 }
 
 /**
@@ -303,7 +295,7 @@ export async function fetchConnectionPickerOptions(
 export async function fetchWalletsByConnection(
   request: SdpApiClient["request"]
 ): Promise<Map<string, CustodyWalletSummary[]>> {
-  const res = await request("/v1/wallets?includeAllProviders=true");
+  const res = await request("/v1/wallets");
   if (!res.ok) {
     throw new ConnectionsRequestError(res.status);
   }

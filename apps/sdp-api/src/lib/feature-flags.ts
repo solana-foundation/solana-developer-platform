@@ -1,6 +1,7 @@
 import type { CustodyProvider } from "@sdp/custody";
 import { type FeePaymentEnv, isFeePaymentConfiguredForCluster } from "@sdp/payments/fee-payment";
 import {
+  type CustodyMode,
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
   type RampProviderId,
@@ -10,6 +11,7 @@ import {
   type SdpRampProviderStages,
   type SolanaCluster,
 } from "@sdp/types";
+import { isCustodyProviderInReleaseChannel } from "@sdp/types/release-channels";
 import type { Env } from "@/types/env";
 import { isSelfHostedDeployment } from "./runtime-env";
 
@@ -32,6 +34,29 @@ export function isModuleAvailable(
     resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
     module,
     rampProviderStages
+  );
+}
+
+/**
+ * Whether the deployment's release channel offers custody `provider` in `mode`.
+ * The one predicate every custody gate calls; the stage maps are the
+ * `@sdp/types/release-channels` constants, so tests override them by mocking
+ * that module.
+ *
+ * @param env - Process environment naming the release channel.
+ * @param provider - The custody provider.
+ * @param mode - The custody mode the provider is used in.
+ * @returns True when the (provider, mode) pair is in the release channel.
+ */
+export function isCustodyProviderAvailable(
+  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
+  provider: CustodyProvider,
+  mode: CustodyMode
+): boolean {
+  return isCustodyProviderInReleaseChannel(
+    resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
+    provider,
+    mode
   );
 }
 
@@ -93,37 +118,6 @@ export function isHeliusRingsEnabled(
     isModuleAvailable(env, "helius_rings", SDP_RAMP_PROVIDER_STAGES) &&
     isTruthyFlag(env.HELIUS_RINGS_ENABLED)
   );
-}
-
-export function isPrivyByokEnabled(env: Pick<Env, "PRIVY_BYOK_ENABLED">): boolean {
-  return isTruthyFlag(env.PRIVY_BYOK_ENABLED);
-}
-
-export function isCustodyConnectionRuntimeEnabled(
-  env: Pick<Env, "PRIVY_BYOK_ENABLED">,
-  provider: CustodyProvider
-): boolean {
-  return provider === "privy" && isPrivyByokEnabled(env);
-}
-
-export type CustodySetupMethod = "legacy_config" | "stored_credentials" | "deployment_credentials";
-
-export function resolveNewCustodySetupMethod(
-  env: Pick<
-    Env,
-    "PRIVY_BYOK_ENABLED" | "SDP_DEPLOYMENT_MODE" | "SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED"
-  >,
-  provider: CustodyProvider
-): CustodySetupMethod {
-  if (!isCustodyConnectionRuntimeEnabled(env, provider)) {
-    return "legacy_config";
-  }
-  if (!isSelfHostedDeployment(env)) {
-    return "stored_credentials";
-  }
-  return isTruthyFlag(env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED)
-    ? "stored_credentials"
-    : "deployment_credentials";
 }
 
 export function isMarketsEnabled(

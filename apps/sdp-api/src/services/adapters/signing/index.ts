@@ -2,6 +2,7 @@
 
 import type { CustodyProvider } from "@sdp/custody";
 import { SigningError } from "@sdp/custody/signing";
+import type { CustodyConfigStatus } from "@sdp/types";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import type { Env } from "@/types/env";
 
@@ -12,12 +13,11 @@ export type SigningProviderType = CustodyProvider;
 export interface SigningConfigRecord {
   id: string;
   organizationId: string;
-  projectId: string | null;
+  projectId: string;
   provider: SigningProviderType;
   config: string;
   encryptionVersion: string;
-  defaultWalletId: string | null;
-  status: "active" | "inactive";
+  status: CustodyConfigStatus;
   createdAt: string;
   updatedAt: string;
 }

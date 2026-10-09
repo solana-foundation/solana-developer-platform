@@ -109,7 +109,7 @@ export async function loadApiKeyWalletAuthorization(
        FROM custody_wallets w
        JOIN custody_configs c ON c.id = w.custody_config_id
        WHERE c.organization_id = ?
-         AND (c.project_id IS NULL OR c.project_id = ?)
+         AND c.project_id = ?
          AND c.status = 'active'
          AND w.status = 'active'
          AND w.wallet_id IN (${placeholders})

@@ -1,42 +1,28 @@
-import type { ComplianceProviderId, ProviderAvailabilityEntry, RampProviderId } from "@sdp/types";
-import { COMPLIANCE_PROVIDERS } from "@sdp/types";
+import type { ComplianceProviderId, RampProviderId } from "@sdp/types";
 import type { KnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import {
   type CustodyProviderAvailability,
   resolveCustodyProviderAvailability,
 } from "@/app/dashboard/[projectId]/custody/provider-display-status";
 import type { MessageKey } from "@/i18n/messages";
+import type { ProjectCustodyAvailability } from "@/lib/provider-availability";
 
 /**
- * One vocabulary across every provider family, aligned with the
- * remove-signup-waitlist decision map. Every provider this catalog lists is
- * built and runnable, so a status only ever answers "what is my next step":
+ * One vocabulary across every provider family. The catalog lists only the
+ * providers the project can use (the project provider-availability read), so
+ * a status only ever answers "what is my next step":
  *
- * - `active` — running for this organization now. Only families that hold a
- *   real per-organization link (a custody connection, an active Private
- *   Channels instance) may report it; a deployment-wide rail is never
- *   "connected" to anyone.
- * - `available` — the organization can use or set this up from here.
- * - `enabled` — a deployment-wide rail (ramps, compliance) that is on for this
- *   organization; there is nothing to connect.
- * - `request_access` — organization access the SDP team grants (HOO-772/775).
- *   For custody this is only shown when the catalog carries an actual request
- *   route: the state is a promise of a way to ask, not just a classification.
- * - `not_configured` — environment availability: this deployment does not hold
- *   the provider's credentials, and never phrased as organization access
- *   (decision-map.md #4). Manual custody providers without a wired request
- *   route also hold here until HOO-775 gives each one a real route.
+ * - `active` — running for this project now. Only families that hold a real
+ *   per-project link (a custody config, an active Private Channels instance)
+ *   may report it; a deployment-wide rail is never "connected" to anyone.
+ * - `available` — the project can set this up from here.
+ * - `enabled` — a deployment-wide rail (ramps, compliance) the project can
+ *   use; there is nothing to connect.
+ * - `unknown` — the state could not be read.
  *
- * Nothing here may imply a provider does not exist — the row is the claim
- * that it does.
+ * A provider the project cannot use is hidden, not given a status.
  */
-export type IntegrationStatus =
-  | "active"
-  | "available"
-  | "enabled"
-  | "request_access"
-  | "not_configured"
-  | "unknown";
+export type IntegrationStatus = "active" | "available" | "enabled" | "unknown";
 
 export type PrivacyProviderId = "private-channels";
 
@@ -81,63 +67,59 @@ export const COMPLIANCE_PROVIDER_LABELS: Record<ComplianceProviderId, string> = 
   chainalysis: "Chainalysis",
 };
 
+/**
+ * The custody providers the project can use, with their setup status.
+ *
+ * @param input - The project's custody state.
+ * @param input.connectedProviders - Providers with an active custody config in the project.
+ * @param input.custodyAvailability - The project's custody provider availability entries.
+ * @returns One row per custody provider the project can use.
+ */
 export function resolveCustodyIntegrations(input: {
   connectedProviders: readonly KnownCustodyProvider[];
-  enabledProviders: readonly KnownCustodyProvider[];
+  custodyAvailability: readonly ProjectCustodyAvailability[];
 }): CustodyProviderAvailability[] {
   return resolveCustodyProviderAvailability(input);
 }
 
 /**
- * A deployment-wide rail is on or off; no organization ever connects one, so
- * these families never report `active`. All three flags, not just `enabled`:
- * the API derives it as entitled && configured, so anything less than
- * agreement between them is a payload we should not read a promise out of.
- */
-function railIsOn(entry: ProviderAvailabilityEntry | undefined): boolean {
-  return entry?.entitled === true && entry.configured && entry.enabled;
-}
-
-/**
- * One card per offered ramp provider; off means uncredentialed here, never gated.
+ * A deployment-wide rail is on or off; no project ever connects one, so these
+ * families never report `active`.
  *
- * @param entries - The organization's ramp availability, by provider.
- * @param providers - The providers offered (`getOfferedRampProviders`), in canonical order.
+ * @param availableProviders - The ramp providers the project can use.
+ * @param offeredProviders - The providers offered (`getOfferedRampProviders`), in canonical order.
+ * @returns One `enabled` entry per offered ramp provider the project can use.
  */
 export function resolveRampIntegrations(
-  entries: Partial<Record<RampProviderId, ProviderAvailabilityEntry>>,
-  providers: readonly RampProviderId[]
+  availableProviders: readonly RampProviderId[],
+  offeredProviders: readonly RampProviderId[]
 ): IntegrationEntry<RampProviderId>[] {
-  return providers.map((provider) => ({
-    provider,
-    label: RAMP_PROVIDER_LABELS[provider],
-    status: railIsOn(entries[provider]) ? "enabled" : "not_configured",
-    descriptionKey: RAMP_DESCRIPTION_KEYS[provider],
-  }));
+  return offeredProviders
+    .filter((provider) => availableProviders.includes(provider))
+    .map((provider) => ({
+      provider,
+      label: RAMP_PROVIDER_LABELS[provider],
+      status: "enabled",
+      descriptionKey: RAMP_DESCRIPTION_KEYS[provider],
+    }));
 }
 
 /**
- * Every compliance provider is manual: the SDP team activates it per
- * organization. Activated but uncredentialed is the one case where the
- * deployment, not access, is what is missing.
+ * Compliance providers are deployment-wide rails the SDP team activates per
+ * organization; the project lists the ones it can use.
+ *
+ * @param availableProviders - The compliance providers the project can use.
+ * @returns One `enabled` entry per available compliance provider.
  */
 export function resolveComplianceIntegrations(
-  entries: Partial<Record<ComplianceProviderId, ProviderAvailabilityEntry>>
+  availableProviders: readonly ComplianceProviderId[]
 ): IntegrationEntry<ComplianceProviderId>[] {
-  return COMPLIANCE_PROVIDERS.map((provider) => {
-    const entry = entries[provider];
-    const status: IntegrationStatus = railIsOn(entry)
-      ? "enabled"
-      : entry?.entitled
-        ? "not_configured"
-        : "request_access";
-    return {
-      provider,
-      label: COMPLIANCE_PROVIDER_LABELS[provider],
-      status,
-      descriptionKey: COMPLIANCE_DESCRIPTION_KEYS[provider],
-    };
-  });
+  return availableProviders.map((provider) => ({
+    provider,
+    label: COMPLIANCE_PROVIDER_LABELS[provider],
+    status: "enabled",
+    descriptionKey: COMPLIANCE_DESCRIPTION_KEYS[provider],
+  }));
 }
 
 /**

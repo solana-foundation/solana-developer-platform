@@ -39,7 +39,6 @@ it("pins only exactly-one pending Issuance draft wallets", async () => {
 
     await client.query(`INSERT INTO custody_configs (id, organization_id, project_id) VALUES
       ('cfg_project', 'org_a', 'prj_a'),
-      ('cfg_org', 'org_a', NULL),
       ('cfg_duplicate', 'org_a', 'prj_a'),
       ('cfg_foreign_project', 'org_a', 'prj_b'),
       ('cfg_foreign_org', 'org_b', 'prj_a')`);
@@ -48,7 +47,6 @@ it("pins only exactly-one pending Issuance draft wallets", async () => {
     await client.query(`INSERT INTO custody_wallets
       (id, custody_config_id, custody_connection_id, wallet_id, public_key) VALUES
       ('cw_project', 'cfg_project', NULL, 'provider_project', 'addr_project'),
-      ('cw_org', 'cfg_org', NULL, 'provider_org', 'addr_org'),
       ('cw_connection', NULL, 'conn_project', 'provider_connection', 'addr_connection'),
       ('cw_duplicate_a', 'cfg_project', NULL, 'provider_duplicate', 'addr_duplicate_a'),
       ('cw_duplicate_b', 'cfg_duplicate', NULL, 'provider_duplicate', 'addr_duplicate_b'),
@@ -57,7 +55,6 @@ it("pins only exactly-one pending Issuance draft wallets", async () => {
     await client.query(`INSERT INTO issued_tokens
       (id, organization_id, project_id, signing_wallet_id, mint_address, status) VALUES
       ('tok_project', 'org_a', 'prj_a', 'provider_project', NULL, 'pending'),
-      ('tok_org', 'org_a', 'prj_a', 'provider_org', NULL, 'pending'),
       ('tok_connection', 'org_a', 'prj_a', 'provider_connection', NULL, 'pending'),
       ('tok_ambiguous', 'org_a', 'prj_a', 'provider_duplicate', NULL, 'pending'),
       ('tok_foreign', 'org_a', 'prj_a', 'provider_foreign', NULL, 'pending'),
@@ -98,11 +95,6 @@ it("pins only exactly-one pending Issuance draft wallets", async () => {
         signing_wallet_id: "provider_foreign",
       },
       { id: "tok_no_selection", signing_custody_wallet_id: null, signing_wallet_id: null },
-      {
-        id: "tok_org",
-        signing_custody_wallet_id: "cw_org",
-        signing_wallet_id: "provider_org",
-      },
       {
         id: "tok_project",
         signing_custody_wallet_id: "cw_project",

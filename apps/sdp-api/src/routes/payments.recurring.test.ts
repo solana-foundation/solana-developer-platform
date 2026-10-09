@@ -19,7 +19,7 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
@@ -36,12 +36,16 @@ import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
+import {
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
-  createOrgSignerMock,
   DEVNET_USDC_MINT,
   fetchMaybeSubscriptionDelegationMock,
   getAccountInfoMock,
@@ -63,7 +67,7 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
-
+import { seedConfigOwnedDuplicateProviderWallet } from "@/test/helpers/payments-transfers";
 import {
   activateRecurringPaymentFixture,
   createRecurringPaymentFixture,
@@ -244,7 +248,6 @@ function recurringExecutionCallCounts() {
   return {
     feePaymentAdapter: createFeePaymentAdapterMock.mock.calls.length,
     custodySigner: createOrgSignerForCustodyWalletMock.mock.calls.length,
-    providerSigner: createOrgSignerMock.mock.calls.length,
     accountInfo: getAccountInfoMock.mock.calls.length,
     blockhash: getRecentBlockhashMock.mock.calls.length,
     confirmation: confirmTransactionMock.mock.calls.length,
@@ -356,6 +359,45 @@ async function seedUnboundWallet(): Promise<void> {
     .run();
 }
 
+/**
+ * Seed a wallet sharing the primary wallet's Provider ID under another provider's config in the
+ * project, since a project holds one config per provider.
+ * @param params - The replacement wallet's rows.
+ * @param params.custodyConfigId - Id of the owning config.
+ * @param params.custodyWalletId - Id of the replacement wallet record.
+ * @param params.publicKey - The replacement wallet's address.
+ * @returns Resolves once the config and wallet are written.
+ */
+async function seedReplacementCustodyWallet(params: {
+  custodyConfigId: string;
+  custodyWalletId: string;
+  publicKey: string;
+}): Promise<void> {
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: params.custodyConfigId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "privy",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: params.custodyWalletId,
+        owner: { kind: "config", custodyConfigId: params.custodyConfigId },
+        walletId: TEST_WALLET_ID,
+        publicKey: params.publicKey,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+  });
+}
+
 async function bindApiKeyToWallet(walletId: string, custodyWalletId: string): Promise<void> {
   await getDb(env)
     .prepare(
@@ -461,12 +503,6 @@ const unboundWalletCases: Array<{
 describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
   const recurringExecution = installRecurringExecutionHooks();
-
-  beforeEach(() => {
-    createOrgSignerForCustodyWalletMock.mockImplementation((signerEnv, orgId, projectId) =>
-      createOrgSignerMock(signerEnv, orgId, projectId)
-    );
-  });
 
   it("creates recurring work for the exact wallet when Provider wallet IDs are duplicated", async () => {
     await getDb(env).batch([
@@ -1027,24 +1063,11 @@ describe("Payments routes — recurring", () => {
   it("replaces active recurring payment records for term changes and cancels the old subscription", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const replacementCustodyWalletId = "cwlt_recurring_replacement";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              encryption_version, status)
-           VALUES ('cust_cfg_recurring_replacement', ?, ?, 'local', 'test-config',
-                   'sdp-custody-encryption-v1', 'active')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES (?, 'cust_cfg_recurring_replacement', ?, ?, 'active')`
-        )
-        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
-    ]);
+    await seedReplacementCustodyWallet({
+      custodyConfigId: "cust_cfg_recurring_replacement",
+      custodyWalletId: replacementCustodyWalletId,
+      publicKey: sourceSigner.address,
+    });
     const replacementPlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
     );
@@ -1240,24 +1263,11 @@ describe("Payments routes — recurring", () => {
   it("lets a collection claim win over a concurrent source-wallet change", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const replacementCustodyWalletId = "cwlt_recurring_race_replacement";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              encryption_version, status)
-           VALUES ('cust_cfg_recurring_race_replacement', ?, ?, 'local', 'test-config',
-                   'sdp-custody-encryption-v1', 'active')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES (?, 'cust_cfg_recurring_race_replacement', ?, ?, 'active')`
-        )
-        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
-    ]);
+    await seedReplacementCustodyWallet({
+      custodyConfigId: "cust_cfg_recurring_race_replacement",
+      custodyWalletId: replacementCustodyWalletId,
+      publicKey: sourceSigner.address,
+    });
     const signAndSendMock = recurringExecution
       .signAndSendMock()
       .mockResolvedValueOnce(
@@ -2095,10 +2105,13 @@ describe("Payments routes — recurring", () => {
     const signAsFeePayerMock = recurringExecution.signAsFeePayerMock();
     const signAndSendMock = recurringExecution.signAndSendMock();
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await seedConfigOwnedDuplicateProviderWallet();
     const duplicateProviderWalletSigner = await generateKeyPairSigner();
-    createOrgSignerMock.mockResolvedValue(duplicateProviderWalletSigner);
-    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    const providerSignerCallsBeforeCollection = createOrgSignerMock.mock.calls.length;
+    createOrgSignerForCustodyWalletMock.mockImplementation(
+      async (_signerEnv, _orgId, _projectId, custodyWalletId) =>
+        custodyWalletId === TEST_CUSTODY_WALLET_ID ? sourceSigner : duplicateProviderWalletSigner
+    );
+    const signerCallsBeforeCollection = createOrgSignerForCustodyWalletMock.mock.calls.length;
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
     await setRecurringCollectionDue({
       recurringPaymentId: activated.id,
@@ -2160,7 +2173,13 @@ describe("Payments routes — recurring", () => {
       TEST_PROJECT.id,
       TEST_CUSTODY_WALLET_ID
     );
-    expect(createOrgSignerMock).toHaveBeenCalledTimes(providerSignerCallsBeforeCollection);
+    expect(
+      new Set(
+        createOrgSignerForCustodyWalletMock.mock.calls
+          .slice(signerCallsBeforeCollection)
+          .map(([, , , custodyWalletId]) => custodyWalletId)
+      )
+    ).toEqual(new Set([TEST_CUSTODY_WALLET_ID]));
     const submission = await getDb(env)
       .prepare(
         `SELECT custody_wallet_id, signed_transaction, last_valid_block_height,
@@ -3269,7 +3288,9 @@ describe("Payments routes — recurring", () => {
       subscriptionId: activated.subscriptionId,
       dueAt,
     });
-    createOrgSignerMock.mockRejectedValueOnce(new Error("collection signer unavailable"));
+    createOrgSignerForCustodyWalletMock.mockRejectedValueOnce(
+      new Error("collection signer unavailable")
+    );
 
     const collectRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/collect`,
@@ -3351,8 +3372,54 @@ describe("Payments routes — recurring", () => {
     });
 
     it("skips a production project's due period once its organization loses production access", async () => {
+      // Production custody is BYOK only (HOO-1970), so the payment runs from a
+      // Privy wallet in the organization's production project, under a key
+      // re-homed there. The wallet carries the address the source signer signs as.
+      const productionProjectId = `${TEST_PROJECT.id}_production`;
+      const productionWalletId = "cwlt_recurring_production";
+      const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
+      env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
+      onTestFinished(() => {
+        env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
+      });
+      await seedTestPrivyConnection(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: productionProjectId,
+        connectionId: "cconn_recurring_production",
+        credentialId: "pcred_recurring_production",
+        createdBy: TEST_USER.id,
+        stored: await writeTestPrivyCredentialSecret(env, {
+          organizationId: TEST_ORG.id,
+          credentialId: "pcred_recurring_production",
+          appId: "recurring-production-app",
+          appSecret: "recurring-production-secret",
+        }),
+        providerAccountFingerprint: "sha256:recurring-production",
+        wallets: [
+          {
+            id: productionWalletId,
+            walletId: "privy_recurring_production",
+            publicKey: recurringExecution.sourceSigner().address,
+            label: "Production Recurring Wallet",
+            purpose: "transfer",
+            status: "active",
+          },
+        ],
+        lastCheckStatus: "success",
+        defaultCustodyWalletId: productionWalletId,
+      });
+      await getDb(env)
+        .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
+        .bind(productionProjectId, TEST_API_KEY.id)
+        .run();
+      await seedCachedKey({ projectId: productionProjectId, environment: "production" });
+
       const signAndSendMock = recurringExecution.signAndSendMock();
-      const recurringPayment = await activateRecurringPaymentForTest(RECURRING_HEADERS);
+      const recurringPayment = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        projectId: productionProjectId,
+        sourceCustodyWalletId: productionWalletId,
+      });
       const signaturesBefore = signAndSendMock.mock.calls.length;
       const now = new Date();
       await setRecurringCollectionDue({
@@ -3360,16 +3427,6 @@ describe("Payments routes — recurring", () => {
         subscriptionId: recurringPayment.subscriptionId,
         dueAt: new Date(now.getTime() - 60 * 1000).toISOString(),
       });
-      // Make the payment's project the organization's production project (one
-      // active project per environment), then revoke production access.
-      await getDb(env)
-        .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
-        .bind(`${TEST_PROJECT.id}_production`)
-        .run();
-      await getDb(env)
-        .prepare("UPDATE projects SET environment = 'production' WHERE id = ?")
-        .bind(TEST_PROJECT.id)
-        .run();
       await getDb(env)
         .prepare(
           `UPDATE organizations

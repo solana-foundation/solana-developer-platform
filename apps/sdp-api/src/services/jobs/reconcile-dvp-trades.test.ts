@@ -5,6 +5,7 @@ import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dv
 import { createPostgresDvpLegTransferRepository } from "@/db/repositories/dvp-leg-transfer.repository";
 import { createPostgresDvpTradeRepository } from "@/db/repositories/dvp-trade.repository.postgres";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -188,20 +189,29 @@ describe("reconcileDvpTrades", () => {
       members: [],
       ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-         VALUES (?, ?, 'local', 'x', 'active')`
-      )
-      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, 'w1', '5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn', 'active')`
-      )
-      .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID)
-      .run();
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: CUSTODY_CONFIG_ID,
+          organizationId: TEST_ORG.id,
+          projectId: PROJECT_ID,
+          provider: "local",
+          configEncrypted: "x",
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: CUSTODY_WALLET_ID,
+          owner: { kind: "config", custodyConfigId: CUSTODY_CONFIG_ID },
+          walletId: "w1",
+          publicKey: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+    });
   });
 
   it("does nothing when Markets is off", async () => {

@@ -298,7 +298,7 @@ for. Every withdrawal route gates on:
 - **Custody-wallet authorization** — the caller may act for the wallet holding
   the shares, with a WRITE-scoped binding, exactly as the deposit route requires.
 
-And on NOTHING else. Specifically **not** `assertEarnProviderSurfaced`, **not**
+And on NOTHING else. Specifically **not** surfacing (`provider_not_offered`), **not**
 the organization entitlement override, **not** `assertStrategyDepositable`, and
 **not** `isVaultDirectDepositEnabled`. A strategy that is `paused`, a provider
 that has been un-surfaced, an organization whose override was revoked — every

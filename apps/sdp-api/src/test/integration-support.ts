@@ -31,7 +31,7 @@ import {
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
 import { createMosaicService } from "@/services/issuance/mosaic";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
-import { createOrgSigner } from "@/services/solana";
+import { createOrgSignerForCustodyWallet } from "@/services/solana";
 import { CustodyConfigStore, type CustodyWallet } from "@/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
@@ -54,7 +54,7 @@ export const apiTestSupport = {
   createFeePaymentAdapter,
   createKVStoreSet,
   createMosaicService,
-  createOrgSigner,
+  createOrgSignerForCustodyWallet,
   createPostgresEarnRepository,
   createSigningService,
   createVaultDeadline,

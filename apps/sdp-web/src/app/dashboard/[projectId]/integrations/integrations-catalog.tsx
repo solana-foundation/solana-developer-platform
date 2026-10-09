@@ -52,12 +52,12 @@ function statusLabel(status: IntegrationStatus, t: Translate): string {
       return t("Shared.integrations.statusAvailable");
     case "enabled":
       return t("Shared.integrations.statusEnabled");
-    case "request_access":
-      return t("Shared.integrations.statusRequestAccess");
     case "unknown":
       return t("Shared.integrations.statusUnknown");
-    default:
-      return t("Shared.integrations.statusNotConfigured");
+    default: {
+      const exhaustive: never = status;
+      throw new Error(`Unknown integration status: ${String(exhaustive)}`);
+    }
   }
 }
 
@@ -73,7 +73,6 @@ function statusLabel(status: IntegrationStatus, t: Translate): string {
 const STATE_CLASS_NAMES: Record<ConnectionState, string> = {
   connected: "bg-success-bg text-success",
   not_connected: "bg-fill-subtle text-tertiary",
-  on_request: "bg-fill-subtle text-secondary",
   unknown: "bg-status-warning-bg text-status-warning-text",
 };
 

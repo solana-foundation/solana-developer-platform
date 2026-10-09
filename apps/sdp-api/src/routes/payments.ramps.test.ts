@@ -52,12 +52,19 @@ import {
   TEST_MOONPAY_ONRAMP_URL,
   TEST_MOONPAY_SECRET_KEY,
   TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { providerStages } from "@/test/helpers/provider-stages";
 import { required } from "@/test/helpers/required";
 import { seedRateLimit } from "@/test/mocks/kv";
+
+vi.mock("@sdp/types", async (importOriginal) => {
+  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
+  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+});
 
 const TEST_CONNECTION_WALLET_ID = "privy_payments_connection_wallet";
 const TEST_CONNECTION_CUSTODY_WALLET_ID = "cwlt_payments_connection_balance";
@@ -928,6 +935,96 @@ describe("Payments routes — ramps", () => {
     const offrampBody = (await offrampRes.json()) as { error: { code: string } };
     expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
+
+  it("refuses a quote for a provider not surfaced in the project's environment", async () => {
+    await seedCachedKey({ projectId: TEST_PRODUCTION_PROJECT_ID, environment: "production" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moneygram",
+          counterpartyId: "cpty_unsurfaced_quote",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
+          fiatCurrency: "USD",
+          cryptoAmount: "25",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "MoneyGram is not currently offered.",
+        details: { reason: "provider_not_offered" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  describe("in a stable release channel", () => {
+    beforeEach(() => {
+      providerStages.rampStageOverride = { provider: "moonpay", stage: "stable" };
+    });
+
+    afterEach(() => {
+      providerStages.rampStageOverride = null;
+    });
+
+    it("refuses a quote for an experimental provider through the shared provider gate", async () => {
+      const counterpartyId = await seedCounterparty({ externalId: "stable_channel_quote" });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "lightspark",
+            counterpartyId,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            fiatAmount: "100.00",
+          }),
+        },
+        { ...env, SDP_RELEASE_CHANNEL: "stable" }
+      );
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "FORBIDDEN",
+          message: "Lightspark is not available in this release channel.",
+          details: { reason: "provider_not_in_release_channel" },
+        },
+        meta: { requestId: expect.any(String) },
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+      const transfers = await getDb(env)
+        .prepare("SELECT id FROM payment_transfers WHERE counterparty_id = ?")
+        .bind(counterpartyId)
+        .all<{ id: string }>();
+      expect(transfers.results).toEqual([]);
+    });
+  });
+
   describe("BVNK off-ramp quote (funding-wallet channel)", () => {
     const BVNK_OFFRAMP_CUSTOMER = "bvnk_offramp_test_customer";
     async function seedProvisionedOfframpCounterparty(externalId: string): Promise<string> {
@@ -1998,6 +2095,14 @@ describe("Payments routes — ramps", () => {
       );
 
       expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "FORBIDDEN",
+          message: "BVNK is not available in this release channel.",
+          details: { reason: "provider_not_in_release_channel" },
+        },
+        meta: { requestId: expect.any(String) },
+      });
       expect(simulateSpy).not.toHaveBeenCalled();
       simulateSpy.mockRestore();
     });
@@ -2051,11 +2156,11 @@ describe("Payments routes — ramps", () => {
       try {
         const res = await simulateRequest(transferId);
 
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(503);
         const body: { error: { code: string; message: string } } = await res.json();
         expect(body.error).toMatchObject({
-          code: "FORBIDDEN",
-          message: "Lightspark is not configured in this environment.",
+          code: "PROVIDER_NOT_CONFIGURED",
+          message: "Lightspark is not configured for sandbox projects in this deployment.",
         });
         expect(simulateSpy).not.toHaveBeenCalled();
         const transfer = await readSimulationTransfer(transferId);
@@ -3085,8 +3190,6 @@ describe("Payments routes — ramps", () => {
   });
 
   describe("Clerk-caller environment resolution", () => {
-    const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
-
     async function seedClerkAuth(): Promise<void> {
       await getDb(env).batch([
         getDb(env)
@@ -3121,7 +3224,10 @@ describe("Payments routes — ramps", () => {
     it("refuses the sandbox simulator from a production-project Clerk", async () => {
       await seedClerkAuth();
 
-      const res = await simulateAsClerk(PRODUCTION_PROJECT_ID, NONEXISTENT_MURAL_SIMULATE_BODY);
+      const res = await simulateAsClerk(
+        TEST_PRODUCTION_PROJECT_ID,
+        NONEXISTENT_MURAL_SIMULATE_BODY
+      );
 
       expect(res.status).toBe(403);
       const body = (await res.json()) as { error: { message: string } };

@@ -1,9 +1,8 @@
 "use client";
 
 import type { CustodyWalletSummary } from "@sdp/types";
-import { PlusIcon, SearchIcon } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo } from "react";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
@@ -21,31 +20,26 @@ import {
 } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { WalletLabelInlineEditor } from "@/app/dashboard/[projectId]/custody/wallet-label-inline-editor";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
-import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { useDebounce } from "@/lib/use-debounce";
-import {
-  type CustodyProviderAvailability,
-  resolveCustodyProviderAvailability,
-} from "./provider-display-status";
-import { WalletProviderChoices } from "./wallet-provider-choices";
+import { useWalletSearch } from "./use-wallet-search";
 import { WalletProviderMark } from "./wallet-provider-mark";
+import { WalletSearchEmptyState, WalletSearchToolbar } from "./wallet-search-controls";
 import {
-  filterWallets,
-  normalizeWalletSearchQuery,
-  WALLET_SEARCH_MAX_LENGTH,
-  WALLET_SEARCH_QUERY_PARAM,
-} from "./wallet-search";
+  CreateOptionsUnavailable,
+  CreateWalletButton,
+  CreateWalletTile,
+  type CustodyAvailabilityResult,
+  useWalletCreateArea,
+} from "./wallets-create-area";
+import { EmptyWallets } from "./wallets-empty-state";
 
 type OpenCreateWallet = (provider: KnownCustodyProvider | null) => void;
 
 interface WalletsOverviewProps {
   canManageCustody: boolean;
   connectedProviders: KnownCustodyProvider[];
-  enabledProviders: KnownCustodyProvider[];
+  custodyAvailability: CustodyAvailabilityResult;
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
@@ -59,21 +53,6 @@ interface WalletWithProvider {
 
 function getWalletProvider(wallet: CustodyWalletSummary): KnownCustodyProvider | null {
   return wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
-}
-
-function CreateWalletTile({ onClick }: { onClick: () => void }) {
-  const t = useTranslations();
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-wallet-create-tile
-      className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2"
-      aria-label={t("DashboardCustody.createWallet")}
-    >
-      <PlusIcon className="h-6 w-6" />
-    </button>
-  );
 }
 
 function WalletCard({
@@ -188,74 +167,29 @@ function WalletCardsGrid({
   );
 }
 
-function EmptyWallets({
-  canManageCustody,
-  configsError,
-  onCreateWallet,
-  providerAvailability,
-}: Pick<WalletsOverviewProps, "canManageCustody" | "configsError" | "onCreateWallet"> & {
-  providerAvailability: CustodyProviderAvailability[];
-}) {
-  const t = useTranslations();
-  return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 py-8">
-      <div className="max-w-2xl space-y-2">
-        <h2 className="text-[32px] leading-[1.08] font-medium tracking-[-0.04em] text-primary">
-          {canManageCustody
-            ? t("DashboardCustody.createFirstWallet")
-            : t("DashboardCustody.noWalletsAvailable")}
-        </h2>
-        <p className="text-sm leading-6 text-secondary">
-          {canManageCustody
-            ? t("DashboardCustody.createWalletDescription")
-            : t("DashboardCustody.walletCreationLimited")}
-        </p>
-        {configsError ? <p className="text-sm text-destructive-strong">{configsError}</p> : null}
-      </div>
-
-      <WalletProviderChoices
-        availability={providerAvailability}
-        canSelect={canManageCustody}
-        grouped={false}
-        selectedProvider={null}
-        onSelect={onCreateWallet}
-      />
-    </div>
-  );
-}
-
 export function WalletsOverview({
   canManageCustody,
   connectedProviders,
-  enabledProviders,
+  custodyAvailability,
   configsError,
   wallets,
   walletsError,
   onCreateWallet,
 }: WalletsOverviewProps) {
   const t = useTranslations();
-  const { replaceSearchParams, searchParams } = useDashboardUrlState();
-  const initialSearch = normalizeWalletSearchQuery(
-    searchParams.get(WALLET_SEARCH_QUERY_PARAM) ?? ""
-  );
-  const [searchValue, setSearchValue] = useState(initialSearch);
-  const deferredSearchValue = useDeferredValue(searchValue);
-  const effectiveSearchValue = normalizeWalletSearchQuery(searchValue)
-    ? deferredSearchValue
-    : searchValue;
-  const debouncedSearch = useDebounce(normalizeWalletSearchQuery(searchValue), 200);
-  const lastUrlSearchRef = useRef(initialSearch);
-  const syncingFromUrlRef = useRef<string | null>(null);
-  const providerAvailability = useMemo(
-    () => resolveCustodyProviderAvailability({ connectedProviders, enabledProviders }),
-    [connectedProviders, enabledProviders]
-  );
-  const hasAvailableProvider = providerAvailability.some((provider) => provider.isSelectable);
-  const normalizedSearch = normalizeWalletSearchQuery(effectiveSearchValue);
-  const visibleWallets = useMemo(
-    () => filterWallets(wallets, normalizedSearch),
-    [normalizedSearch, wallets]
-  );
+  const { providerAvailability, createOptionsUnavailable, canCreateWallet } = useWalletCreateArea({
+    canManageCustody,
+    connectedProviders,
+    custodyAvailability,
+  });
+  const {
+    searchValue,
+    normalizedSearch,
+    visibleWallets,
+    searchIsPending,
+    updateSearchValue,
+    clearSearch,
+  } = useWalletSearch(wallets);
   const walletsWithProvider = useMemo(
     () =>
       visibleWallets.map((wallet) => ({
@@ -264,43 +198,6 @@ export function WalletsOverview({
       })),
     [visibleWallets]
   );
-  const searchIsPending = deferredSearchValue !== searchValue;
-
-  useEffect(() => {
-    const urlSearch = normalizeWalletSearchQuery(searchParams.get(WALLET_SEARCH_QUERY_PARAM) ?? "");
-    if (urlSearch === lastUrlSearchRef.current) return;
-
-    lastUrlSearchRef.current = urlSearch;
-    syncingFromUrlRef.current = urlSearch;
-    setSearchValue(urlSearch);
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (syncingFromUrlRef.current !== null) {
-      if (debouncedSearch === syncingFromUrlRef.current) {
-        syncingFromUrlRef.current = null;
-      }
-      return;
-    }
-    if (debouncedSearch === lastUrlSearchRef.current) return;
-
-    lastUrlSearchRef.current = debouncedSearch;
-    replaceSearchParams({
-      [WALLET_SEARCH_QUERY_PARAM]: debouncedSearch || null,
-    });
-  }, [debouncedSearch, replaceSearchParams]);
-
-  const updateSearchValue = (value: string) => {
-    syncingFromUrlRef.current = null;
-    setSearchValue(value);
-  };
-
-  const clearSearch = () => {
-    lastUrlSearchRef.current = "";
-    syncingFromUrlRef.current = null;
-    setSearchValue("");
-    replaceSearchParams({ [WALLET_SEARCH_QUERY_PARAM]: null });
-  };
 
   if (walletsError) {
     return (
@@ -324,67 +221,30 @@ export function WalletsOverview({
 
   return (
     <div className="space-y-6">
+      {createOptionsUnavailable ? <CreateOptionsUnavailable /> : null}
       {configsError ? (
         <div className="rounded-[18px] border border-border-default bg-fill-subtle px-4 py-3 text-sm text-secondary">
           {configsError}
         </div>
       ) : null}
 
-      <div
-        className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
-        data-wallet-search-toolbar
+      <WalletSearchToolbar
+        searchValue={searchValue}
+        normalizedSearch={normalizedSearch}
+        resultCount={visibleWallets.length}
+        totalCount={wallets.length}
+        onSearchChange={updateSearchValue}
+        onClearSearch={clearSearch}
       >
-        <div className="w-full sm:max-w-md">
-          <SearchInput
-            value={searchValue}
-            maxLength={WALLET_SEARCH_MAX_LENGTH}
-            onChange={(event) => updateSearchValue(event.target.value)}
-            placeholder={t("DashboardCustody.walletSearchPlaceholder")}
-            clear={{ label: t("DashboardCustody.clearWalletSearch"), onClear: clearSearch }}
-          />
-          {normalizedSearch ? (
-            <p className="mt-2 text-xs text-secondary" aria-live="polite">
-              {t("DashboardCustody.walletSearchResults", {
-                count: visibleWallets.length,
-                total: wallets.length,
-              })}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          {canManageCustody && hasAvailableProvider ? (
-            <Button
-              type="button"
-              className="w-full sm:w-auto"
-              onClick={() => onCreateWallet(null)}
-              iconLeft={<PlusIcon className="h-4 w-4" />}
-            >
-              {t("DashboardCustody.createWallet")}
-            </Button>
-          ) : null}
-        </div>
-      </div>
+        {canCreateWallet ? <CreateWalletButton onClick={() => onCreateWallet(null)} /> : null}
+      </WalletSearchToolbar>
 
       <div aria-busy={searchIsPending} data-wallet-search-results>
         {normalizedSearch && visibleWallets.length === 0 ? (
-          <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-border-default bg-surface-raised px-6 text-center">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
-              <SearchIcon className="size-5" />
-            </span>
-            <h2 className="mt-4 text-base font-medium text-primary">
-              {t("DashboardCustody.noWalletSearchResults")}
-            </h2>
-            <p className="mt-1 max-w-md text-sm text-secondary">
-              {t("DashboardCustody.noWalletSearchResultsDescription")}
-            </p>
-            <Button type="button" variant="secondary" className="mt-4" onClick={clearSearch}>
-              {t("DashboardCustody.clearWalletSearchAction")}
-            </Button>
-          </div>
+          <WalletSearchEmptyState onClearSearch={clearSearch} />
         ) : (
           <WalletCardsGrid wallets={walletsWithProvider} canManageCustody={canManageCustody}>
-            {!normalizedSearch && canManageCustody && hasAvailableProvider ? (
+            {!normalizedSearch && canCreateWallet ? (
               <CreateWalletTile onClick={() => onCreateWallet(null)} />
             ) : null}
           </WalletCardsGrid>

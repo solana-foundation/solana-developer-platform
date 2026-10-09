@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -86,22 +87,23 @@ describe("Earn queued withdrawal repository", () => {
       members: [],
       ids: { sandbox: OTHER_PROJECT, production: `${OTHER_PROJECT}_production` },
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, status)
-         VALUES (?, ?, NULL, 'local', 'encrypted', 'active')`
-      )
-      .bind(CONFIG, ORG)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, 'queued-wallet', ?, 'active')`
-      )
-      .bind(WALLET, CONFIG, OWNER)
-      .run();
+    await insertTestCustodyConfigRow(db, {
+      id: CONFIG,
+      organizationId: ORG,
+      projectId: PROJECT,
+      provider: "local",
+      configEncrypted: "encrypted",
+      status: "active",
+    });
+    await insertTestCustodyWalletRow(db, {
+      id: WALLET,
+      owner: { kind: "config", custodyConfigId: CONFIG },
+      walletId: "queued-wallet",
+      publicKey: OWNER,
+      label: null,
+      purpose: null,
+      status: "active",
+    });
     await db
       .prepare(
         `INSERT INTO earn_positions (

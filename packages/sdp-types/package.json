@@ -94,6 +94,11 @@
       "import": "./src/provider-access.ts",
       "default": "./src/provider-access.ts"
     },
+    "./release-channels": {
+      "types": "./src/release-channels.ts",
+      "import": "./src/release-channels.ts",
+      "default": "./src/release-channels.ts"
+    },
     "./ramp-requirements": {
       "types": "./src/ramp-requirements.ts",
       "import": "./src/ramp-requirements.ts",

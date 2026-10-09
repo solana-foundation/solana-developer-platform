@@ -116,9 +116,8 @@ export async function resetIntegrationState(
   apiKeyHash: string
 ): Promise<{ custodyAddress: string; custodyWallet: IntegrationCustodyWallet }> {
   await resetIntegrationApiState(apiKeyHash);
-  const custodyAddress = await ensureIntegrationCustodyAddress();
-  cachedCustodyWallet = await findIntegrationCustodyWallet(custodyAddress);
-  return { custodyAddress, custodyWallet: cachedCustodyWallet };
+  cachedCustodyWallet = await ensureIntegrationCustodyWallet();
+  return { custodyAddress: cachedCustodyWallet.address, custodyWallet: cachedCustodyWallet };
 }
 
 async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
@@ -225,38 +224,6 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
   await apiKeysKV.put(`key:${apiKeyHash}`, JSON.stringify(TEST_PROJECT_CACHED_KEY));
 }
 
-async function findIntegrationCustodyWallet(address: string): Promise<IntegrationCustodyWallet> {
-  if (!SOLANA_CONFIGURED) {
-    return { id: "", address };
-  }
-
-  const signingService = createSigningService(env);
-  const config = await signingService.getConfigurationByProvider(
-    TEST_ORG.id,
-    undefined,
-    INTEGRATION_CUSTODY_PROVIDER
-  );
-  if (!config?.defaultWalletId) {
-    throw new Error("Integration precondition failed: default custody wallet not found.");
-  }
-
-  const wallet = await getDb(env)
-    .prepare(
-      `SELECT id, public_key
-       FROM custody_wallets
-       WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
-       LIMIT 1`
-    )
-    .bind(config.id, config.defaultWalletId)
-    .first<{ id: string; public_key: string }>();
-
-  if (!wallet || wallet.public_key !== address) {
-    throw new Error("Integration precondition failed: exact default custody wallet not found.");
-  }
-
-  return { id: wallet.id, address: wallet.public_key };
-}
-
 export async function cleanupIntegrationSuite() {
   await seedTestDatabase(env);
 }
@@ -326,166 +293,127 @@ export function requestWithApiKey(apiKey: string = TEST_PROJECT_API_KEY.raw) {
   };
 }
 
-async function ensurePrivyCustodyAddress(): Promise<string> {
-  if (!SOLANA_CONFIGURED) {
-    return "";
-  }
+interface IntegrationCustodyWalletRow {
+  id: string;
+  wallet_id: string;
+  public_key: string;
+}
 
-  const db = getDb(env);
+/**
+ * The active wallets of one custody config, oldest first.
+ * @param configId - The custody config whose wallets are listed.
+ * @returns The config's active wallet rows.
+ */
+async function listActiveConfigWallets(configId: string): Promise<IntegrationCustodyWalletRow[]> {
+  const { results } = await getDb(env)
+    .prepare(
+      `SELECT id, wallet_id, public_key
+       FROM custody_wallets
+       WHERE custody_config_id = ? AND status = 'active'
+       ORDER BY created_at ASC, id ASC`
+    )
+    .bind(configId)
+    .all<IntegrationCustodyWalletRow>();
+  return results;
+}
+
+/**
+ * Fund a chosen custody wallet and return it as the suite's signing wallet.
+ * @param wallet - The exact custody wallet row the suite signs with.
+ * @returns The wallet's record ID and address.
+ */
+async function fundIntegrationCustodyWallet(
+  wallet: IntegrationCustodyWalletRow
+): Promise<IntegrationCustodyWallet> {
+  await ensureAddressAccountExists(wallet.public_key);
+  // Top up existing wallets too — sRFC-37 deploy paths now have custody pay
+  // directly, so a 1M-lamport bootstrap left over from older runs isn't enough.
+  await fundAddressToLamports(wallet.public_key, INTEGRATION_CUSTODY_FUND_LAMPORTS);
+  return { id: wallet.id, address: wallet.public_key };
+}
+
+/**
+ * The project's Managed Privy wallet the suite signs with: the oldest active wallet
+ * that already exists on chain, else the oldest active wallet.
+ * @returns The chosen wallet's record ID and address.
+ */
+async function ensurePrivyCustodyWallet(): Promise<IntegrationCustodyWallet> {
   const signingService = createSigningService(env);
-  const existing = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
+  const existing = await signingService.getConfigurationByProvider(
+    TEST_ORG.id,
+    TEST_PROJECT.id,
+    "privy"
+  );
+  const configId = existing
+    ? existing.id
+    : (
+        await signingService.initializePrivySigning(TEST_ORG.id, TEST_PROJECT.id, {
+          walletLabel: "Integration Root Wallet",
+        })
+      ).configId;
 
-  if (!existing) {
-    await signingService.initializePrivySigning(TEST_ORG.id, undefined, {
-      walletLabel: "Integration Root Wallet",
-    });
-  } else {
-    await signingService.setDefaultProvider(TEST_ORG.id, undefined, "privy");
-  }
-
-  const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
-  if (!config) {
-    throw new Error("Integration precondition failed: Privy signer configuration not found.");
-  }
-
-  if (!config.defaultWalletId) {
-    const fallbackWallet = await db
-      .prepare(
-        `SELECT wallet_id
-       FROM custody_wallets
-       WHERE custody_config_id = ? AND status = 'active'
-       ORDER BY created_at ASC
-       LIMIT 1`
-      )
-      .bind(config.id)
-      .first<{ wallet_id: string }>();
-
-    if (!fallbackWallet) {
-      throw new Error("Integration precondition failed: Privy signer has no active wallets.");
-    }
-
-    await db
-      .prepare(
-        `UPDATE custody_configs
-       SET default_wallet_id = ?, updated_at = datetime('now')
-       WHERE id = ?`
-      )
-      .bind(fallbackWallet.wallet_id, config.id)
-      .run();
-  }
-
-  const walletRows = (
-    await db
-      .prepare(
-        `SELECT wallet_id, public_key
-       FROM custody_wallets
-       WHERE custody_config_id = ? AND status = 'active'
-       ORDER BY created_at ASC`
-      )
-      .bind(config.id)
-      .all<{ wallet_id: string; public_key: string }>()
-  ).results;
-
-  let preferredWallet = walletRows.find((wallet) => wallet.wallet_id === config.defaultWalletId);
-  if (!preferredWallet) {
-    preferredWallet = walletRows[0];
-  }
-
-  if (!preferredWallet) {
+  const walletRows = await listActiveConfigWallets(configId);
+  const [oldestWallet] = walletRows;
+  if (!oldestWallet) {
     throw new Error("Integration precondition failed: Privy signer has no active wallets.");
   }
 
   for (const wallet of walletRows) {
     // eslint-disable-next-line no-await-in-loop
-    const exists = await solanaAccountExists(env.SOLANA_RPC_URL as string, wallet.public_key);
-    if (!exists) {
-      continue;
+    if (await solanaAccountExists(env.SOLANA_RPC_URL as string, wallet.public_key)) {
+      return fundIntegrationCustodyWallet(wallet);
     }
-
-    preferredWallet = wallet;
-    break;
   }
-
-  if (preferredWallet.wallet_id !== config.defaultWalletId) {
-    await db
-      .prepare(
-        `UPDATE custody_configs
-       SET default_wallet_id = ?, updated_at = datetime('now')
-       WHERE id = ?`
-      )
-      .bind(preferredWallet.wallet_id, config.id)
-      .run();
-  }
-
-  const address = preferredWallet.public_key;
-  await ensureAddressAccountExists(address);
-  // Top up existing wallets too — sRFC-37 deploy paths now have custody pay
-  // directly, so a 1M-lamport bootstrap left over from older runs isn't enough.
-  await fundAddressToLamports(address, INTEGRATION_CUSTODY_FUND_LAMPORTS);
-  return address;
+  return fundIntegrationCustodyWallet(oldestWallet);
 }
 
-async function ensureIntegrationCustodyAddress(): Promise<string> {
-  if (INTEGRATION_CUSTODY_PROVIDER === "local") {
-    return ensureLocalCustodyAddress();
-  }
-
-  return ensurePrivyCustodyAddress();
-}
-
-async function ensureLocalCustodyAddress(): Promise<string> {
-  if (!SOLANA_CONFIGURED) {
-    return "";
-  }
-
-  const db = getDb(env);
+/**
+ * The project's Managed local wallet the suite signs with: the wallet a fresh
+ * initialization creates, else the config's oldest active wallet.
+ * @returns The chosen wallet's record ID and address.
+ */
+async function ensureLocalCustodyWallet(): Promise<IntegrationCustodyWallet> {
   const signingService = createSigningService(env);
-  const existing = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "local");
+  const existing = await signingService.getConfigurationByProvider(
+    TEST_ORG.id,
+    TEST_PROJECT.id,
+    "local"
+  );
 
   if (!existing) {
-    const initialized = await signingService.initializeLocalSigning(TEST_ORG.id, undefined, {
+    const initialized = await signingService.initializeLocalSigning(TEST_ORG.id, TEST_PROJECT.id, {
       walletLabel: "Integration Local Root Wallet",
     });
-    await ensureAddressAccountExists(initialized.publicKey);
-    await fundAddressToLamports(initialized.publicKey, INTEGRATION_CUSTODY_FUND_LAMPORTS);
-    return initialized.publicKey;
+    const initializedWallet = (await listActiveConfigWallets(initialized.configId)).find(
+      (wallet) => wallet.wallet_id === initialized.walletId
+    );
+    if (!initializedWallet) {
+      throw new Error("Integration precondition failed: initialized local wallet not found.");
+    }
+    return fundIntegrationCustodyWallet(initializedWallet);
   }
 
-  await signingService.setDefaultProvider(TEST_ORG.id, undefined, "local");
-  const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "local");
-  if (!config) {
-    throw new Error("Integration precondition failed: local signer configuration not found.");
-  }
-
-  const wallet = await db
-    .prepare(
-      `SELECT wallet_id, public_key
-       FROM custody_wallets
-       WHERE custody_config_id = ? AND status = 'active'
-       ORDER BY CASE WHEN wallet_id = ? THEN 0 ELSE 1 END, created_at ASC
-       LIMIT 1`
-    )
-    .bind(config.id, config.defaultWalletId ?? "")
-    .first<{ wallet_id: string; public_key: string }>();
-
-  if (!wallet) {
+  const [oldestWallet] = await listActiveConfigWallets(existing.id);
+  if (!oldestWallet) {
     throw new Error("Integration precondition failed: local signer has no active wallets.");
   }
+  return fundIntegrationCustodyWallet(oldestWallet);
+}
 
-  if (wallet.wallet_id !== config.defaultWalletId) {
-    await db
-      .prepare(
-        `UPDATE custody_configs
-         SET default_wallet_id = ?, updated_at = datetime('now')
-         WHERE id = ?`
-      )
-      .bind(wallet.wallet_id, config.id)
-      .run();
+/**
+ * The exact custody wallet the integration suite signs with, under the configured provider.
+ * @returns The wallet's record ID and address; both empty when Solana is not configured.
+ */
+async function ensureIntegrationCustodyWallet(): Promise<IntegrationCustodyWallet> {
+  if (!SOLANA_CONFIGURED) {
+    return { id: "", address: "" };
   }
 
-  await ensureAddressAccountExists(wallet.public_key);
-  await fundAddressToLamports(wallet.public_key, INTEGRATION_CUSTODY_FUND_LAMPORTS);
-  return wallet.public_key;
+  if (INTEGRATION_CUSTODY_PROVIDER === "local") {
+    return ensureLocalCustodyWallet();
+  }
+
+  return ensurePrivyCustodyWallet();
 }
 
 async function ensureAddressAccountExists(address: string): Promise<void> {
@@ -752,26 +680,12 @@ function isRetryableSolanaRpcError(error: unknown): boolean {
 export async function createFundedPrivyWallet(input: {
   label: string;
   fundLamports?: number;
-  setDefault?: boolean;
 }): Promise<ApiTestCustodyWallet> {
   const signingService = createSigningService(env);
-  const wallet = await signingService.createWallet(TEST_ORG.id, undefined, {
+  const wallet = await signingService.createWallet(TEST_ORG.id, TEST_PROJECT.id, {
     provider: "privy",
     label: input.label,
   });
-
-  if (input.setDefault) {
-    const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
-    if (!config) {
-      throw new Error("Integration precondition failed: privy signer configuration not found.");
-    }
-    await getDb(env)
-      .prepare(
-        "UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?"
-      )
-      .bind(wallet.walletId, config.id)
-      .run();
-  }
 
   if (input.fundLamports && input.fundLamports > 0) {
     await fundAddressToLamports(wallet.publicKey, input.fundLamports);
@@ -785,7 +699,6 @@ export async function createFundedPrivyWallet(input: {
 export async function createFundedIntegrationWallet(input: {
   label: string;
   fundLamports?: number;
-  setDefault?: boolean;
 }): Promise<ApiTestCustodyWallet> {
   if (INTEGRATION_CUSTODY_PROVIDER === "local") {
     return createFundedLocalWallet(input);
@@ -797,11 +710,14 @@ export async function createFundedIntegrationWallet(input: {
 async function createFundedLocalWallet(input: {
   label: string;
   fundLamports?: number;
-  setDefault?: boolean;
 }): Promise<ApiTestCustodyWallet> {
-  const publicKey = await ensureLocalCustodyAddress();
+  const { address: publicKey } = await ensureIntegrationCustodyWallet();
   const signingService = createSigningService(env);
-  const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "local");
+  const config = await signingService.getConfigurationByProvider(
+    TEST_ORG.id,
+    TEST_PROJECT.id,
+    "local"
+  );
   if (!config) {
     throw new Error("Integration precondition failed: local signer configuration not found.");
   }
@@ -815,15 +731,6 @@ async function createFundedLocalWallet(input: {
     purpose: "transfer",
   });
 
-  if (input.setDefault) {
-    await getDb(env)
-      .prepare(
-        "UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?"
-      )
-      .bind(wallet.walletId, config.id)
-      .run();
-  }
-
   if (input.fundLamports && input.fundLamports > 0) {
     await fundAddressToLamports(wallet.publicKey, input.fundLamports);
   } else {
@@ -836,7 +743,6 @@ async function createFundedLocalWallet(input: {
 export {
   app,
   createMosaicService,
-  ensurePrivyCustodyAddress,
   env,
   INTEGRATION_CUSTODY_PROVIDER,
   KORA_CONFIGURED,

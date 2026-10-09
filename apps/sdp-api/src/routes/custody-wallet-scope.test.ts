@@ -10,8 +10,16 @@ import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import {
+  insertTestCustodyConfigRow,
+  insertTestCustodyWalletRow,
+  seedTestCustodyRows,
+} from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
@@ -19,15 +27,20 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const signerCheckMocks = vi.hoisted(() => ({
-  createOrgSigner: vi.fn(),
   createExactSigner: vi.fn(),
   createSponsorship: vi.fn(),
   signAndSend: vi.fn(),
 }));
 
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
+
 vi.mock("@/services/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/solana")>()),
-  createOrgSigner: signerCheckMocks.createOrgSigner,
   createOrgSignerForCustodyWallet: signerCheckMocks.createExactSigner,
 }));
 
@@ -120,110 +133,72 @@ async function seedAuthAndConfigs(): Promise<void> {
     members: [TEST_USER.id],
     ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT_ID },
   });
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_API_KEY.id,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        TEST_USER.id,
-        "Custody scope key",
-        TEST_API_KEY.prefix,
-        keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        PRIVY_CONFIG_ID,
-        TEST_ORG.id,
-        null,
-        "privy",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "privy_wallet_a",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        PARA_CONFIG_ID,
-        TEST_ORG.id,
-        null,
-        "para",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "para_wallet_a",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind("csd_scope_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_scope_privy_a",
-        PRIVY_CONFIG_ID,
-        "privy_wallet_a",
-        SEEDED_PUBLIC_KEYS.privyA,
-        "A",
-        "root",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_scope_privy_b",
-        PRIVY_CONFIG_ID,
-        "privy_wallet_b",
-        SEEDED_PUBLIC_KEYS.privyB,
-        "B",
-        "transfer",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_scope_para_a",
-        PARA_CONFIG_ID,
-        "para_wallet_a",
-        SEEDED_PUBLIC_KEYS.paraA,
-        "C",
-        "root",
-        "active"
-      ),
-  ]);
+  await getDb(env).execute(
+    `INSERT INTO api_keys
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      TEST_API_KEY.id,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_USER.id,
+      "Custody scope key",
+      TEST_API_KEY.prefix,
+      keyHash,
+      "api_admin",
+      JSON.stringify(["*"]),
+      "active",
+    ]
+  );
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: PRIVY_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "privy",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+      {
+        id: PARA_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "para",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: "cwlt_scope_privy_a",
+        owner: { kind: "config", custodyConfigId: PRIVY_CONFIG_ID },
+        walletId: "privy_wallet_a",
+        publicKey: SEEDED_PUBLIC_KEYS.privyA,
+        label: "A",
+        purpose: "root",
+        status: "active",
+      },
+      {
+        id: "cwlt_scope_privy_b",
+        owner: { kind: "config", custodyConfigId: PRIVY_CONFIG_ID },
+        walletId: "privy_wallet_b",
+        publicKey: SEEDED_PUBLIC_KEYS.privyB,
+        label: "B",
+        purpose: "transfer",
+        status: "active",
+      },
+      {
+        id: "cwlt_scope_para_a",
+        owner: { kind: "config", custodyConfigId: PARA_CONFIG_ID },
+        walletId: "para_wallet_a",
+        publicKey: SEEDED_PUBLIC_KEYS.paraA,
+        label: "C",
+        purpose: "root",
+        status: "active",
+      },
+    ],
+  });
 }
 
 async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
@@ -254,52 +229,29 @@ async function seedActiveConnectionWallet(
   walletId: string,
   publicKey: string
 ): Promise<void> {
-  const credentialId = `pcred_scope_${suffix}`;
-  const connectionId = `cconn_scope_${suffix}`;
-  const walletRecordId = `cwlt_scope_${suffix}`;
-
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO provider_credentials (
-           id, organization_id, project_id, provider, label, scope, source,
-           storage_backend, encrypted_secret_payload, status, created_by
-         ) VALUES (?, ?, ?, 'privy', ?, 'project', 'stored',
-                   'encrypted_db', 'not-read', 'active', ?)`
-      )
-      .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, suffix, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_connections (
-           id, organization_id, project_id, provider, scope,
-           provider_credential_id, provider_credential_scope_key, status, created_by
-         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
-      )
-      .bind(
-        connectionId,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        credentialId,
-        TEST_PROJECT.id,
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_connection_id, wallet_id, public_key, status
-         ) VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(walletRecordId, connectionId, walletId, publicKey),
-    getDb(env)
-      .prepare(
-        `UPDATE custody_connections
-         SET default_custody_wallet_id = ?, status = 'active',
-             last_check_status = 'success', last_check_at = sdp_iso_now(),
-             provider_account_fingerprint = ?, activated_at = sdp_iso_now()
-         WHERE id = ?`
-      )
-      .bind(walletRecordId, `sha256:${suffix}`, connectionId),
-  ]);
+  await getDb(env).transaction((tx) =>
+    seedTestPrivyConnection(tx, {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      connectionId: `cconn_scope_${suffix}`,
+      credentialId: `pcred_scope_${suffix}`,
+      createdBy: TEST_USER.id,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+      providerAccountFingerprint: `sha256:${suffix}`,
+      lastCheckStatus: "success",
+      wallets: [
+        {
+          id: `cwlt_scope_${suffix}`,
+          walletId,
+          publicKey,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+      defaultCustodyWalletId: `cwlt_scope_${suffix}`,
+    })
+  );
 }
 
 async function requestSignerCheck(body: SignerCheckRequest, actor: "api_key" | "clerk") {
@@ -327,10 +279,8 @@ async function requestSignerCheck(body: SignerCheckRequest, actor: "api_key" | "
 }
 
 describe("Custody wallet scope routes", () => {
-  let originalPrivyByokEnabled: string | undefined;
-
   beforeEach(async () => {
-    originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
+    custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
 
     createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
@@ -367,7 +317,6 @@ describe("Custody wallet scope routes", () => {
       error: null,
     });
     const signer = await generateKeyPairSigner();
-    signerCheckMocks.createOrgSigner.mockResolvedValue(signer);
     signerCheckMocks.createExactSigner.mockResolvedValue(signer);
     signerCheckMocks.signAndSend.mockResolvedValue(TEST_SIGNATURE);
     signerCheckMocks.createSponsorship.mockReturnValue({
@@ -395,7 +344,6 @@ describe("Custody wallet scope routes", () => {
   });
 
   afterEach(async () => {
-    env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
     env.SOLANA_MAINNET_RPC_URL = undefined;
     await clearKVStores(env);
     createSigningServiceMock.mockReset();
@@ -404,58 +352,51 @@ describe("Custody wallet scope routes", () => {
     getSplTokenBalancesMock.mockReset();
   });
 
-  it.each([
-    { state: "paused", status: 403, reason: "runtime_execution_paused" },
-    { state: "unavailable", status: 409, reason: "runtime_execution_unavailable" },
-  ])(
-    "refuses a $state signer check before signer, fee payer, or RPC access",
-    async ({ state, status, reason }) => {
-      await seedActiveConnectionWallet(
-        "signer_check",
-        "privy_check",
-        TEST_SOLANA_ADDRESSES.wallet1
-      );
-      env.PRIVY_BYOK_ENABLED = state === "paused" ? "false" : "true";
-      if (state === "unavailable") {
-        await getDb(env)
-          .prepare(
-            "UPDATE provider_credentials SET status = 'retired' WHERE id = 'pcred_scope_signer_check'"
-          )
-          .run();
-      }
-      const response = await requestSignerCheck({ walletId: "privy_check" }, "clerk");
+  it("refuses a signer check whose BYOK pair is out of channel before signer, fee payer, or RPC access", async () => {
+    await seedActiveConnectionWallet("signer_check", "privy_check", TEST_SOLANA_ADDRESSES.wallet1);
+    custodyReleaseChannel.outOfChannelMode = "byok";
 
-      expect(response.status).toBe(status);
-      expect(await response.json()).toMatchObject({
-        error: { details: { reason } },
-      });
-      expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
-      expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
-      expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
-      expect(createClusterRpcMock).not.toHaveBeenCalled();
-      expect(simulateTransactionMock).not.toHaveBeenCalled();
-    }
-  );
+    const response = await requestSignerCheck({ walletId: "privy_check" }, "clerk");
 
-  it("checks the exact Connection wallet even if the default changes after admission", async () => {
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
+    expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
+    expect(createClusterRpcMock).not.toHaveBeenCalled();
+    expect(simulateTransactionMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unavailable signer check before signer, fee payer, or RPC access", async () => {
+    await seedActiveConnectionWallet("signer_check", "privy_check", TEST_SOLANA_ADDRESSES.wallet1);
+    await getDb(env)
+      .prepare(
+        "UPDATE provider_credentials SET status = 'retired' WHERE id = 'pcred_scope_signer_check'"
+      )
+      .run();
+
+    const response = await requestSignerCheck({ walletId: "privy_check" }, "clerk");
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { details: { reason: "runtime_execution_unavailable" } },
+    });
+    expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
+    expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
+    expect(createClusterRpcMock).not.toHaveBeenCalled();
+    expect(simulateTransactionMock).not.toHaveBeenCalled();
+  });
+
+  it("checks the exact Connection wallet record it admitted", async () => {
     const signer = await generateKeyPairSigner();
     await seedActiveConnectionWallet("signer_check", "privy_check", signer.address);
-    env.PRIVY_BYOK_ENABLED = "true";
     signerCheckMocks.createExactSigner.mockResolvedValue(signer);
-    createSigningServiceMock.mockImplementation((envArg, scope) => {
-      const service = actualCreateSigningService(envArg, scope);
-      const admit = service.admitRuntimeExecution.bind(service);
-      service.admitRuntimeExecution = async (...args) => {
-        await admit(...args);
-        await getDb(env)
-          .prepare(
-            "UPDATE custody_scope_defaults SET default_custody_config_id = ? WHERE id = 'csd_scope_org_default'"
-          )
-          .bind(PARA_CONFIG_ID)
-          .run();
-      };
-      return service;
-    });
 
     const response = await requestSignerCheck({ walletId: "privy_check" }, "clerk");
 
@@ -469,7 +410,6 @@ describe("Custody wallet scope routes", () => {
       TEST_PROJECT.id,
       "cwlt_scope_signer_check"
     );
-    expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
     expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
     expect(createClusterRpcMock).toHaveBeenCalledExactlyOnceWith(env, "devnet");
   });
@@ -491,13 +431,11 @@ describe("Custody wallet scope routes", () => {
         "privy_wallet_a",
         TEST_SOLANA_ADDRESSES.wallet2
       );
-      env.PRIVY_BYOK_ENABLED = "true";
 
       const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, actor);
 
       expect(response.status).toBe(actor === "clerk" ? 409 : 403);
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
-      expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
       expect(createClusterRpcMock).not.toHaveBeenCalled();
       expect(simulateTransactionMock).not.toHaveBeenCalled();
@@ -505,20 +443,13 @@ describe("Custody wallet scope routes", () => {
   );
 
   it.each([
-    { actor: "clerk", connectionStatus: "active", configScope: "project" },
-    { actor: "api_key", connectionStatus: "active", configScope: "project" },
-    { actor: "selected_key", connectionStatus: "active", configScope: "project" },
-    { actor: "clerk", connectionStatus: "deactivated", configScope: "project" },
-    { actor: "clerk", connectionStatus: "active", configScope: "organization" },
+    { actor: "clerk", connectionStatus: "active" },
+    { actor: "api_key", connectionStatus: "active" },
+    { actor: "selected_key", connectionStatus: "active" },
+    { actor: "clerk", connectionStatus: "deactivated" },
   ])(
-    "refuses a signer check for $actor with a $configScope Config and inactive duplicate in a $connectionStatus Connection",
-    async ({ actor, connectionStatus, configScope }) => {
-      if (configScope === "project") {
-        await getDb(env)
-          .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
-          .bind(TEST_PROJECT.id, PRIVY_CONFIG_ID)
-          .run();
-      }
+    "refuses a signer check for $actor with a Config and inactive duplicate in a $connectionStatus Connection",
+    async ({ actor, connectionStatus }) => {
       await seedActiveConnectionWallet(
         "inactive_duplicate",
         "privy_wallet_a",
@@ -552,7 +483,6 @@ describe("Custody wallet scope routes", () => {
           ],
         });
       }
-      env.PRIVY_BYOK_ENABLED = "true";
 
       const response = await requestSignerCheck(
         { walletId: "privy_wallet_a" },
@@ -564,7 +494,6 @@ describe("Custody wallet scope routes", () => {
         error: { code: "CONFLICT", message: "Custody wallet ownership is ambiguous" },
       });
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
-      expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
       expect(createClusterRpcMock).not.toHaveBeenCalled();
       expect(simulateTransactionMock).not.toHaveBeenCalled();
@@ -572,11 +501,44 @@ describe("Custody wallet scope routes", () => {
   );
 
   it.each([
-    { environment: "sandbox", projectId: TEST_PROJECT.id, cluster: "devnet" },
-    { environment: "production", projectId: TEST_PRODUCTION_PROJECT_ID, cluster: "mainnet-beta" },
+    {
+      environment: "sandbox",
+      projectId: TEST_PROJECT.id,
+      walletId: "privy_wallet_a",
+      cluster: "devnet",
+    },
+    {
+      environment: "production",
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      walletId: "privy_wallet_production",
+      cluster: "mainnet-beta",
+    },
   ] as const)(
     "simulates a $environment project's signer check on $cluster",
-    async ({ projectId, cluster }) => {
+    async ({ projectId, walletId, cluster }) => {
+      await getDb(env).transaction((tx) =>
+        seedTestPrivyConnection(tx, {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PRODUCTION_PROJECT_ID,
+          connectionId: "cconn_scope_privy_production",
+          credentialId: "pcred_scope_privy_production",
+          createdBy: TEST_USER.id,
+          stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+          providerAccountFingerprint: "sha256:privy_production",
+          lastCheckStatus: "success",
+          wallets: [
+            {
+              id: "cwlt_scope_privy_production",
+              walletId: "privy_wallet_production",
+              publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+              label: null,
+              purpose: "root",
+              status: "active",
+            },
+          ],
+          defaultCustodyWalletId: "cwlt_scope_privy_production",
+        })
+      );
       env.SOLANA_MAINNET_RPC_URL = "https://mainnet-rpc.mock.invalid";
       const response = await app.request(
         "/v1/wallets/signer-check",
@@ -587,7 +549,7 @@ describe("Custody wallet scope routes", () => {
             Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id)}`,
             "x-project-id": projectId,
           },
-          body: JSON.stringify({ walletId: "privy_wallet_a" }),
+          body: JSON.stringify({ walletId }),
         },
         env
       );
@@ -599,20 +561,29 @@ describe("Custody wallet scope routes", () => {
   );
 
   it("keeps signer-check Config selection when an inactive Config has the same Provider ID", async () => {
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
-           VALUES ('cfg_signer_retired', ?, ?, 'privy', 'not-read', 'inactive')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-           VALUES ('cwlt_signer_retired', 'cfg_signer_retired', 'privy_wallet_a', ?, 'inactive')`
-        )
-        .bind(TEST_SOLANA_ADDRESSES.wallet2),
-    ]);
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cfg_signer_retired",
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          provider: "turnkey",
+          configEncrypted: "not-read",
+          status: "inactive",
+        },
+      ],
+      wallets: [
+        {
+          id: "cwlt_signer_retired",
+          owner: { kind: "config", custodyConfigId: "cfg_signer_retired" },
+          walletId: "privy_wallet_a",
+          publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+          label: null,
+          purpose: null,
+          status: "inactive",
+        },
+      ],
+    });
 
     const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, "clerk");
 
@@ -790,7 +761,6 @@ describe("Custody wallet scope routes", () => {
         expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
         expect(createClusterRpcMock).not.toHaveBeenCalled();
       }
-      expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
     }
   );
 
@@ -816,7 +786,6 @@ describe("Custody wallet scope routes", () => {
         message: expect.stringContaining("Clerk authentication"),
       },
     });
-    expect(signerCheckMocks.createOrgSigner).not.toHaveBeenCalled();
     expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
   });
 
@@ -863,10 +832,6 @@ describe("Custody wallet scope routes", () => {
       signingWalletId: "privy_wallet_a",
       walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
     });
-    await getDb(env)
-      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
-      .bind(TEST_PROJECT.id, PRIVY_CONFIG_ID)
-      .run();
     const policyResponse = await app.request(
       "/v1/payments/wallets/privy_wallet_a/policies",
       {
@@ -946,7 +911,7 @@ describe("Custody wallet scope routes", () => {
     });
 
     const res = await app.request(
-      "/v1/wallets?includeAllProviders=true",
+      "/v1/wallets",
       {
         method: "GET",
         headers: {
@@ -971,7 +936,7 @@ describe("Custody wallet scope routes", () => {
     });
 
     const res = await app.request(
-      "/v1/wallets?includeAllProviders=true&view=summary",
+      "/v1/wallets?view=summary",
       {
         method: "GET",
         headers: {
@@ -992,7 +957,7 @@ describe("Custody wallet scope routes", () => {
 
   it("returns summary wallets without hydrating balances", async () => {
     const res = await app.request(
-      "/v1/wallets?includeAllProviders=true&view=summary",
+      "/v1/wallets?view=summary",
       {
         method: "GET",
         headers: {
@@ -1019,7 +984,7 @@ describe("Custody wallet scope routes", () => {
     clearWalletCaches();
 
     const response = await app.request(
-      "/v1/wallets?includeAllProviders=true&view=summary&includeBalances=true",
+      "/v1/wallets?view=summary&includeBalances=true",
       { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
       env
     );
@@ -1036,7 +1001,7 @@ describe("Custody wallet scope routes", () => {
 
     const request = () =>
       app.request(
-        "/v1/wallets?includeAllProviders=true&view=summary&includeBalances=true",
+        "/v1/wallets?view=summary&includeBalances=true",
         {
           method: "GET",
           headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -1062,7 +1027,7 @@ describe("Custody wallet scope routes", () => {
     getSplTokenBalancesMock.mockRejectedValueOnce(new Error("temporary RPC failure"));
     const request = () =>
       app.request(
-        "/v1/wallets/aggregate?includeAllProviders=true",
+        "/v1/wallets/aggregate",
         { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
@@ -1082,7 +1047,7 @@ describe("Custody wallet scope routes", () => {
     });
 
     const res = await app.request(
-      "/v1/wallets/aggregate?includeAllProviders=true",
+      "/v1/wallets/aggregate",
       {
         method: "GET",
         headers: {
@@ -1116,52 +1081,7 @@ describe("Custody wallet scope routes", () => {
       ["a", TEST_SOLANA_ADDRESSES.wallet2],
       ["b", TEST_SOLANA_ADDRESSES.wallet3],
     ] as const) {
-      const credentialId = `pcred_scope_shared_${suffix}`;
-      const connectionId = `cconn_scope_shared_${suffix}`;
-      const walletRecordId = `cwlt_scope_shared_${suffix}`;
-      await getDb(env).batch([
-        getDb(env)
-          .prepare(
-            `INSERT INTO provider_credentials (
-               id, organization_id, project_id, provider, label, scope, source,
-               storage_backend, encrypted_secret_payload, status, created_by
-             ) VALUES (?, ?, ?, 'privy', ?, 'project', 'stored',
-                       'encrypted_db', 'not-read', 'active', ?)`
-          )
-          .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, suffix, TEST_USER.id),
-        getDb(env)
-          .prepare(
-            `INSERT INTO custody_connections (
-               id, organization_id, project_id, provider, scope,
-               provider_credential_id, provider_credential_scope_key, status, created_by
-             ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
-          )
-          .bind(
-            connectionId,
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            credentialId,
-            TEST_PROJECT.id,
-            TEST_USER.id
-          ),
-        getDb(env)
-          .prepare(
-            `INSERT INTO custody_wallets (
-               id, custody_connection_id, wallet_id, public_key, status
-             ) VALUES (?, ?, ?, ?, 'active')`
-          )
-          .bind(walletRecordId, connectionId, sharedWalletId, publicKey),
-        getDb(env)
-          .prepare(
-            `UPDATE custody_connections
-             SET default_custody_wallet_id = ?, status = 'active',
-                 last_check_status = 'success', last_check_at = sdp_iso_now(),
-                 provider_account_fingerprint = ?,
-                 activated_at = sdp_iso_now()
-             WHERE id = ?`
-          )
-          .bind(walletRecordId, `sha256:${suffix}`, connectionId),
-      ]);
+      await seedActiveConnectionWallet(`shared_${suffix}`, sharedWalletId, publicKey);
     }
     getSplTokenBalancesMock.mockResolvedValue([]);
     getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
@@ -1175,7 +1095,7 @@ describe("Custody wallet scope routes", () => {
     );
 
     const response = await app.request(
-      "/v1/wallets/aggregate?includeAllProviders=true",
+      "/v1/wallets/aggregate",
       {
         method: "GET",
         headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
@@ -1210,7 +1130,7 @@ describe("Custody wallet scope routes", () => {
     });
 
     const selectedList = await app.request(
-      "/v1/wallets?includeAllProviders=true",
+      "/v1/wallets",
       {
         headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
       },
@@ -1374,14 +1294,15 @@ describe("Custody wallet scope routes", () => {
         },
       ],
     });
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, status)
-         VALUES ('para_wallet_a', ?, 'para_alias_collision', ?, 'active')`
-      )
-      .bind(PARA_CONFIG_ID, TEST_SOLANA_ADDRESSES.wallet3)
-      .run();
+    await insertTestCustodyWalletRow(getDb(env), {
+      id: "para_wallet_a",
+      owner: { kind: "config", custodyConfigId: PARA_CONFIG_ID },
+      walletId: "para_alias_collision",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+      label: null,
+      purpose: null,
+      status: "active",
+    });
 
     const detail = await app.request(
       "/v1/wallets/para_wallet_a?includeBalance=false",
@@ -1417,14 +1338,15 @@ describe("Custody wallet scope routes", () => {
         },
       ],
     });
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, status)
-         VALUES ('privy_wallet_a', ?, 'privy_alias_unbound', ?, 'active')`
-      )
-      .bind(PRIVY_CONFIG_ID, TEST_SOLANA_ADDRESSES.wallet3)
-      .run();
+    await insertTestCustodyWalletRow(getDb(env), {
+      id: "privy_wallet_a",
+      owner: { kind: "config", custodyConfigId: PRIVY_CONFIG_ID },
+      walletId: "privy_alias_unbound",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+      label: null,
+      purpose: null,
+      status: "active",
+    });
 
     const detail = await app.request(
       "/v1/wallets/privy_wallet_a?includeBalance=false",
@@ -1449,29 +1371,30 @@ describe("Custody wallet scope routes", () => {
   });
 
   it("fails closed when a selected wallet ID becomes ambiguous", async () => {
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              encryption_version, default_wallet_id, status)
-           VALUES ('cust_cfg_scope_privy_project', ?, ?, 'privy', 'test-config',
-                   'sdp-custody-encryption-v1', 'privy_wallet_a', 'active')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id),
-      getDb(env).prepare(
-        `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES ('cwlt_scope_privy_project', 'cust_cfg_scope_privy_project',
-                   'privy_wallet_a', 'project_duplicate_pubkey', 'active')`
-      ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-           VALUES ('akw_scope_ambiguous', ?, 'privy_wallet_a', '["wallets:read"]')`
-        )
-        .bind(TEST_API_KEY.id),
-    ]);
+    await getDb(env).transaction(async (tx) => {
+      await insertTestCustodyConfigRow(tx, {
+        id: "cust_cfg_scope_turnkey_project",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "turnkey",
+        configEncrypted: "test-config",
+        status: "active",
+      });
+      await insertTestCustodyWalletRow(tx, {
+        id: "cwlt_scope_turnkey_project",
+        owner: { kind: "config", custodyConfigId: "cust_cfg_scope_turnkey_project" },
+        walletId: "privy_wallet_a",
+        publicKey: "project_duplicate_pubkey",
+        label: null,
+        purpose: null,
+        status: "active",
+      });
+      await tx.execute(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES ('akw_scope_ambiguous', ?, 'privy_wallet_a', '["wallets:read"]')`,
+        [TEST_API_KEY.id]
+      );
+    });
     await clearKVStores(env);
 
     const response = await app.request(
@@ -1518,7 +1441,7 @@ describe("Custody wallet scope routes", () => {
     const listWalletIds = async (): Promise<string[]> => {
       await clearKVStores(env);
       const response = await app.request(
-        "/v1/wallets?includeAllProviders=true&view=summary",
+        "/v1/wallets?view=summary",
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
@@ -1601,6 +1524,44 @@ describe("Custody wallet scope routes", () => {
     );
 
     expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      error: { code: "NOT_FOUND", message: "Wallet not found" },
+      meta: { requestId: expect.any(String) },
+    });
+  });
+
+  it("returns the release-channel 403 for an out-of-channel Connection wallet's public key through either selector", async () => {
+    await seedActiveConnectionWallet(
+      "public_key",
+      "privy_public_key",
+      TEST_SOLANA_ADDRESSES.wallet1
+    );
+    custodyReleaseChannel.outOfChannelMode = "byok";
+    const request = () =>
+      app.request(
+        "/v1/wallets/public-key?walletId=privy_public_key",
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+    const channelRefusal = {
+      error: {
+        code: "FORBIDDEN",
+        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
+      },
+      meta: { requestId: expect.any(String) },
+    };
+
+    const unscoped = await request();
+    expect(unscoped.status).toBe(403);
+    expect(await unscoped.json()).toEqual(channelRefusal);
+
+    await seedCachedKey({
+      walletBindings: [{ walletId: "privy_public_key", permissions: ["wallets:read"] }],
+    });
+    const bound = await request();
+    expect(bound.status).toBe(403);
+    expect(await bound.json()).toEqual(channelRefusal);
   });
 
   it("updates the label when the wallet is inside the API key bindings", async () => {
@@ -1668,56 +1629,6 @@ describe("Custody wallet scope routes", () => {
     expect(res.status).toBe(404);
   });
 
-  it("prevents a project-scoped caller from changing an organization default wallet", async () => {
-    const res = await app.request(
-      "/v1/wallets/default-wallet",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          provider: "privy",
-          walletId: "privy_wallet_b",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(409);
-    const config = await getDb(env)
-      .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
-      .bind(PRIVY_CONFIG_ID)
-      .first<{ default_wallet_id: string | null }>();
-    expect(required(config).default_wallet_id).toBe("privy_wallet_a");
-  });
-
-  it("prevents a project-scoped caller from deleting an organization wallet", async () => {
-    const res = await app.request(
-      "/v1/wallets",
-      {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          provider: "privy",
-          walletId: "privy_wallet_b",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(404);
-    const wallet = await getDb(env)
-      .prepare("SELECT status FROM custody_wallets WHERE wallet_id = ?")
-      .bind("privy_wallet_b")
-      .first<{ status: string }>();
-    expect(required(wallet).status).toBe("active");
-  });
-
   describe("wallet-scoped key lifecycle mutations", () => {
     let originalPrivyAppId: string | undefined;
     let originalPrivyAppSecret: string | undefined;
@@ -1734,69 +1645,8 @@ describe("Custody wallet scope routes", () => {
       env.PRIVY_APP_SECRET = originalPrivyAppSecret;
     });
 
-    it("lets a wallet-scoped key re-default to a wallet inside its bindings", async () => {
-      await seedCachedKey({
-        projectId: undefined,
-        walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:write"] }],
-      });
-
-      const res = await app.request(
-        "/v1/wallets/default-wallet",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            provider: "privy",
-            walletId: "privy_wallet_b",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(200);
-      const config = await getDb(env)
-        .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
-        .bind(PRIVY_CONFIG_ID)
-        .first<{ default_wallet_id: string | null }>();
-      expect(required(config).default_wallet_id).toBe("privy_wallet_b");
-    });
-
-    it("masks re-defaulting to a wallet outside the key bindings as unknown", async () => {
-      await seedCachedKey({
-        projectId: undefined,
-        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
-      });
-
-      const res = await app.request(
-        "/v1/wallets/default-wallet",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            provider: "privy",
-            walletId: "privy_wallet_b",
-          }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(400);
-      const config = await getDb(env)
-        .prepare("SELECT default_wallet_id FROM custody_configs WHERE id = ?")
-        .bind(PRIVY_CONFIG_ID)
-        .first<{ default_wallet_id: string | null }>();
-      expect(required(config).default_wallet_id).toBe("privy_wallet_a");
-    });
-
     it("returns 404 when a wallet-scoped key deletes a wallet outside its bindings", async () => {
       await seedCachedKey({
-        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
       });
 
@@ -1817,6 +1667,10 @@ describe("Custody wallet scope routes", () => {
       );
 
       expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({
+        error: { code: "NOT_FOUND", message: "Custody wallet not found" },
+        meta: { requestId: expect.any(String) },
+      });
       const wallet = await getDb(env)
         .prepare("SELECT status FROM custody_wallets WHERE wallet_id = ?")
         .bind("privy_wallet_b")
@@ -1826,7 +1680,6 @@ describe("Custody wallet scope routes", () => {
 
     it("lets a bound wallet through the delete binding gate", async () => {
       await seedCachedKey({
-        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:write"] }],
       });
 
@@ -1853,7 +1706,6 @@ describe("Custody wallet scope routes", () => {
 
     it("rejects wallet creation with a wallet-scoped key", async () => {
       await seedCachedKey({
-        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
       });
 
@@ -1875,7 +1727,6 @@ describe("Custody wallet scope routes", () => {
 
     it("rejects provider initialization with a wallet-scoped key", async () => {
       await seedCachedKey({
-        projectId: undefined,
         walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
       });
 
@@ -1888,28 +1739,6 @@ describe("Custody wallet scope routes", () => {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
           body: JSON.stringify({ provider: "privy" }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(403);
-    });
-
-    it("rejects provider switching with a wallet-scoped key", async () => {
-      await seedCachedKey({
-        projectId: undefined,
-        walletBindings: [{ walletId: "privy_wallet_a", permissions: ["*"] }],
-      });
-
-      const res = await app.request(
-        "/v1/wallets/switch",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-          body: JSON.stringify({ provider: "para" }),
         },
         env
       );

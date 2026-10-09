@@ -19,28 +19,22 @@ import {
   createWallet,
   deleteWallet,
   getApprovalRequest,
-  getConfig,
   getConfigs,
   getPublicKey,
-  getSwitchProviderOptions,
   getWalletAggregate,
   getWalletById,
   initializeSigning,
   listApprovalRequests,
   listWallets,
   rejectApprovalRequest,
-  setDefaultWallet,
   signerCheck,
-  switchSigning,
   updateWallet,
 } from "./handlers";
 import {
   createWalletSchema,
   deleteWalletSchema,
   initializeSigningSchema,
-  setDefaultWalletSchema,
   signerCheckSchema,
-  switchSigningSchema,
   updateWalletSchema,
 } from "./schemas";
 
@@ -95,12 +89,6 @@ wallets.post(
   initializeSigning
 );
 wallets.post(
-  "/switch",
-  requirePermissions("custody:admin"),
-  validateBody(switchSigningSchema),
-  switchSigning
-);
-wallets.post(
   "/",
   requirePermissions("custody:admin"),
   validateBody(createWalletSchema),
@@ -111,12 +99,6 @@ wallets.delete(
   requirePermissions("custody:admin"),
   validateBody(deleteWalletSchema),
   deleteWallet
-);
-wallets.post(
-  "/default-wallet",
-  requirePermissions("custody:admin"),
-  validateBody(setDefaultWalletSchema),
-  setDefaultWallet
 );
 wallets.patch(
   "/:walletId",
@@ -133,12 +115,10 @@ wallets.post(
 );
 
 // Read configuration and wallets
-wallets.get("/config", requirePermissions("wallets:read"), getConfig);
 wallets.get("/configs", requirePermissions("wallets:read"), getConfigs);
 wallets.get("/", requirePermissions("wallets:read"), listWallets);
 wallets.get("/aggregate", requirePermissions("wallets:read"), getWalletAggregate);
 wallets.get("/public-key", requirePermissions("wallets:read"), getPublicKey);
-wallets.get("/switch-options", requirePermissions("custody:admin"), getSwitchProviderOptions);
 wallets.get("/approval-requests", requirePermissions("wallets:read"), listApprovalRequests);
 wallets.get(
   "/approval-requests/:approvalRequestId",

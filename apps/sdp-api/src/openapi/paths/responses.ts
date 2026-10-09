@@ -17,7 +17,6 @@ import {
   counterpartyFieldOptionsResponseSchema,
   counterpartyRequirementsResponseSchema,
   counterpartyResponseSchema,
-  custodyConfigResponseSchema,
   custodyConfigsResponseSchema,
   custodyWalletAggregateResponseSchema,
   custodyWalletByIdResponseSchema,
@@ -78,13 +77,13 @@ import {
   prepareSeizeResponseSchema,
   prepareUpdateAuthorityResponseSchema,
   projectMemberResponseSchema,
+  projectProviderAvailabilityResponseSchema,
   projectResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
   rpcRelayResponseSchema,
   signerCheckResponseSchema,
   successResponseSchema,
-  switchProviderOptionsResponseSchema,
   tokenAllowlistEntrySchema,
   tokenAllowlistResponseSchema,
   tokenResponseSchema,
@@ -166,6 +165,15 @@ export const listProjectsResponse = successResponseSchema(listProjectsResponseSc
 export const listProjectMembersResponse = successResponseSchema(listProjectMembersResponseSchema);
 export const projectMemberResponse = successResponseSchema(projectMemberResponseSchema);
 export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKeysResponseSchema);
+/**
+ * The project provider availability envelope, with or without the Earn family.
+ *
+ * @param publishEarn - Whether the document carries the Earn family.
+ * @returns The success envelope around `projectProviderAvailabilityResponseSchema(publishEarn)`.
+ */
+export function projectProviderAvailabilityResponse(publishEarn: boolean) {
+  return successResponseSchema(projectProviderAvailabilityResponseSchema(publishEarn));
+}
 export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);
@@ -259,7 +267,6 @@ export const executeUpdateAuthorityResponse = successResponseSchema(
 export const executePauseResponse = successResponseSchema(executePauseResponseSchema);
 export const executeUnpauseResponse = successResponseSchema(executeUnpauseResponseSchema);
 
-export const custodyConfigResponse = successResponseSchema(custodyConfigResponseSchema);
 export const custodyConfigsResponse = successResponseSchema(custodyConfigsResponseSchema);
 export const custodyWalletResponse = successResponseSchema(custodyWalletResponseSchema);
 export const custodyWalletsResponse = successResponseSchema(custodyWalletsResponseSchema);
@@ -269,9 +276,6 @@ export const custodyWalletAggregateResponse = successResponseSchema(
 export const custodyWalletByIdResponse = successResponseSchema(custodyWalletByIdResponseSchema);
 export const custodyDeleteWalletResponse = successResponseSchema(deleteWalletResponseSchema);
 export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
-export const custodySwitchOptionsResponse = successResponseSchema(
-  switchProviderOptionsResponseSchema
-);
 export const walletApprovalRequestResponse = successResponseSchema(
   walletApprovalRequestResponseSchema
 );

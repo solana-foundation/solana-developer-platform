@@ -123,7 +123,6 @@ it("pins only exactly-one Payments identities without mutating live work", async
 
     await client.query(`INSERT INTO custody_configs (id, organization_id, project_id) VALUES
       ('cfg_project', 'org_a', 'prj_a'),
-      ('cfg_org', 'org_a', NULL),
       ('cfg_duplicate', 'org_a', 'prj_a'),
       ('cfg_foreign', 'org_a', 'prj_b')`);
     await client.query(`INSERT INTO custody_connections (id, organization_id, project_id) VALUES
@@ -132,7 +131,6 @@ it("pins only exactly-one Payments identities without mutating live work", async
     await client.query(`INSERT INTO custody_wallets
       (id, custody_config_id, custody_connection_id, wallet_id, public_key) VALUES
       ('cw_project', 'cfg_project', NULL, 'provider_project', 'addr_project'),
-      ('cw_org', 'cfg_org', NULL, 'provider_org', 'addr_org'),
       ('cw_connection', NULL, 'conn_project', 'provider_connection', 'addr_connection'),
       ('cw_duplicate_a', 'cfg_project', NULL, 'provider_duplicate', 'addr_duplicate'),
       ('cw_duplicate_b', 'cfg_duplicate', NULL, 'provider_duplicate', 'addr_duplicate'),
@@ -142,7 +140,7 @@ it("pins only exactly-one Payments identities without mutating live work", async
     await client.query(`INSERT INTO payment_transfers
       (id, organization_id, project_id, wallet_id, source_address, destination_address, direction) VALUES
       ('xfr_outbound', 'org_a', 'prj_a', 'provider_project', 'addr_project', 'dest', 'outbound'),
-      ('xfr_inbound', 'org_a', 'prj_a', 'provider_org', 'payer', 'addr_org', 'inbound'),
+      ('xfr_inbound', 'org_a', 'prj_a', 'provider_project', 'payer', 'addr_project', 'inbound'),
       ('xfr_ambiguous', 'org_a', 'prj_a', 'provider_duplicate', 'addr_duplicate', 'dest', 'outbound'),
       ('xfr_foreign', 'org_a', 'prj_a', 'provider_foreign', 'addr_foreign', 'dest', 'outbound'),
       ('xfr_org_connection', 'org_a', NULL, 'provider_org_connection', 'addr_org_connection', 'dest', 'outbound')`);
@@ -247,7 +245,7 @@ it("pins only exactly-one Payments identities without mutating live work", async
     expect(transfers.rows).toEqual([
       { id: "xfr_ambiguous", custody_wallet_id: null },
       { id: "xfr_foreign", custody_wallet_id: null },
-      { id: "xfr_inbound", custody_wallet_id: "cw_org" },
+      { id: "xfr_inbound", custody_wallet_id: "cw_project" },
       { id: "xfr_org_connection", custody_wallet_id: null },
       { id: "xfr_outbound", custody_wallet_id: "cw_project" },
     ]);

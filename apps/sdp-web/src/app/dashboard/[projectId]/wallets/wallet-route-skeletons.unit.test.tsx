@@ -6,14 +6,12 @@ import CustodyAuditLoading from "../custody/[walletId]/policy/audit/loading";
 import CustodyPolicyLoading from "../custody/[walletId]/policy/loading";
 import CustodyLoading from "../custody/loading";
 import CustodySetupLoading from "../custody/setup/loading";
-import CustodySwitchLoading from "../custody/switch/loading";
 import WalletDetailLoading from "./[walletId]/loading";
 import WalletAuditDetailLoading from "./[walletId]/policy/audit/[policyEvaluationId]/loading";
 import WalletAuditLoading from "./[walletId]/policy/audit/loading";
 import WalletPolicyLoading from "./[walletId]/policy/loading";
 import WalletsLoading from "./loading";
 import WalletSetupLoading from "./setup/loading";
-import WalletSwitchLoading from "./switch/loading";
 import {
   WalletDetailSkeleton,
   WalletPolicyAuditDetailSkeleton,
@@ -27,8 +25,6 @@ const routeLoaders = [
   ["custody overview alias", CustodyLoading, "wallets-overview"],
   ["wallet setup", WalletSetupLoading, "wallet-setup"],
   ["custody setup alias", CustodySetupLoading, "wallet-setup"],
-  ["wallet provider switch", WalletSwitchLoading, "wallet-setup"],
-  ["custody provider switch alias", CustodySwitchLoading, "wallet-setup"],
   ["wallet detail", WalletDetailLoading, "wallet-detail"],
   ["custody detail alias", CustodyDetailLoading, "wallet-detail"],
   ["wallet policy", WalletPolicyLoading, "wallet-policy"],

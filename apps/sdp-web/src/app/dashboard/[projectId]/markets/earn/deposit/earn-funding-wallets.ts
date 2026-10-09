@@ -87,8 +87,7 @@ export type EarnFundingWallet = z.infer<typeof earnFundingWalletSchema>;
  * from short-TTL caches on both sides. They are shown as context only — never
  * as a gate on what the user may deposit.
  */
-const WALLETS_PATH =
-  "/api/dashboard/wallets?view=summary&includeBalances=true&includeAllProviders=true";
+const WALLETS_PATH = "/api/dashboard/wallets?view=summary&includeBalances=true";
 
 export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
   const response = await dashboardRequest(WALLETS_PATH, {});

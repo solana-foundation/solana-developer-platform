@@ -74,7 +74,6 @@ export function listPrivateChannelCustodyWallets(
   return new CustodyRuntimeTargets(getDb(env), env, new Map()).listWallets({
     organizationId,
     projectId,
-    includeAllProviders: true,
   });
 }
 

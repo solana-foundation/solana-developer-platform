@@ -11,11 +11,7 @@ import type {
   EarnVaultWithdrawalsPage,
   SdpEnvironment,
 } from "@sdp/types";
-import {
-  type EarnProviderId,
-  earnDepositStyle,
-  earnWithdrawSlippageFloor,
-} from "@sdp/types/provider-access";
+import { type EarnProviderId, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
@@ -25,7 +21,7 @@ import {
   type EarnMovementRow,
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
-import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
   badRequest,
@@ -74,10 +70,6 @@ import {
   runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
-import {
-  assertEarnProviderSurfaced,
-  assertProviderAvailable,
-} from "@/services/provider-availability.service";
 import type { AppContext } from "../context";
 import {
   earnRuntime,
@@ -96,12 +88,7 @@ import {
   type earnVaultWithdrawalSchema,
   earnVaultWithdrawalsQuerySchema,
 } from "../schemas";
-import {
-  assertDepositFloorPresent,
-  assertStrategyDepositable,
-  assertVaultDepositAdmissible,
-  assertVaultDepositEnvironmentOpen,
-} from "./admission";
+import { assertDepositFloorPresent, assertVaultDepositAdmissible } from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
@@ -137,45 +124,24 @@ import {
  * `minSharesOut` floor from this quote, so the floor tracks the live share
  * rate instead of assuming one.
  *
- * A READ that takes the deposit's own money-in gates: the quote exists only
- * to open a NEW position, so surfacing, admission, and environment capability
- * always apply. Entitlement applies only when a credential supplies an
- * organization. There is no wallet, policy gate, persistence, or idempotency
+ * A READ that takes the deposit's own money-in gates through
+ * `assertVaultDepositAdmissible`, the function both deposit builds call: the
+ * quote exists only to open a NEW position, so surfacing, admission, and
+ * environment capability always apply, and an authenticated caller takes the
+ * project provider rule (an anonymous caller has no project for it to decide
+ * from). There is no wallet, policy gate, persistence, or idempotency
  * key because the preview moves and holds nothing.
  */
 export async function createEarnVaultDepositPreview(
   c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  const auth = getOptionalAuth(c);
   // The row names the shelf: a tenant caller must own it, an anonymous caller
   // chose it (PRO-1998).
   const { strategy, environment } = await requireEarnStrategyForCaller(c, body.strategyId);
-  if (earnDepositStyle(strategy.provider) !== "vault_direct") {
-    throw badRequest(
-      `${strategy.provider} is a custodial provider; use POST /v1/earn/programs instead.`
-    );
-  }
-  if (!isEarnProviderId(strategy.provider)) {
-    throw providerNotConfigured(
-      `Earn provider ${strategy.provider} is not available in this deployment`
-    );
-  }
-  const provider = strategy.provider;
-
-  assertVaultDepositEnvironmentOpen(environment, provider);
-  assertEarnProviderSurfaced(provider);
-  if (auth) {
-    await assertProviderAvailable(
-      c.env,
-      getDb(c.env),
-      auth.organizationId,
-      "earn",
-      provider,
-      environment === "sandbox"
-    );
-  }
-  assertStrategyDepositable(strategy, environment);
+  // No amount: the preview reports the cap below as a blocking issue instead
+  // of throwing it.
+  const provider = await assertVaultDepositAdmissible(c, strategy, undefined, { environment });
   // The exposure cap, evaluated WITHOUT throwing (the deposit's 409 becomes a
   // blocking issue here, ADR 0004 "previews are the contract"), but only after
   // the same gates the deposit takes and before the provider is asked: a
@@ -374,7 +340,7 @@ interface EarnVaultDepositResolved {
  * Everything the handler needs is resolved HERE, before the gate enforces, for
  * one reason: policy has to be decided from trusted, fully-resolved context —
  * the real custody wallet, the real amount, the real target — and it has to be
- * decided BEFORE `createOrgSigner` is reached. A gate that ran on the raw body
+ * decided BEFORE `createOrgSignerForCustodyWallet` is reached. A gate that ran on the raw body
  * could be argued out of a denial by a caller who names a wallet it does not
  * hold; a gate that ran after resolution but inside the handler would already
  * have touched custody.
@@ -398,7 +364,6 @@ export async function extractEarnVaultDepositPolicyCandidate(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
     projectId,
-    includeAllProviders: true,
   });
 
   // Resolve the strategy first: the caller names a catalogue row, never a raw
@@ -629,9 +594,8 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
     // keyed on `(organization_id, request_id)` — migration 0059's unique index —
     // so a key first used in a SIBLING project resolves that project's movement.
     // Returning it would both answer the wrong deposit and hand over its amount
-    // and signature. Reachable because organization-level custody configs give
-    // two projects the same `custody_wallets` row, so the rest of the request can
-    // legitimately match.
+    // and signature. Reachable because the key is unique per organization, not
+    // per project, so the rest of the request can legitimately match.
     //
     // Answered as the fingerprint conflict it is: the key really has been used by
     // a different request. The caller chose the key, so learning that its own key
@@ -727,7 +691,6 @@ export async function listReadableEarnVaultWallets(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
     projectId,
-    includeAllProviders: true,
   });
 
   const allowedProviderWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["earn:read"]);
@@ -750,11 +713,10 @@ export async function listReadableEarnVaultWallets(
 /**
  * PROJECT boundary for a recorded movement.
  *
- * Wallet scope alone does not close this. Custody configs may be
- * ORGANIZATION-level (`config.project_id IS NULL`), and `listWallets` hands
- * those to every project in the org — so a sibling project's deposit signed by a
- * shared org wallet passes the wallet check, and without this it would hand over
- * that deposit's amount, signature and failure reason.
+ * Wallet scope alone does not close this: the wallet check says the caller may
+ * use the wallet, not that the movement belongs to the caller's project, and
+ * without this it would hand over another project's amount, signature and
+ * failure reason.
  *
  * This is deliberately STRICTER than `GET /vault-positions`, which scopes by
  * wallet alone, and the asymmetry is the point: a POSITION is a holding the
@@ -768,7 +730,7 @@ export async function listReadableEarnVaultWallets(
  * of `ON DELETE SET NULL` (migration 0059) — the insert requires a real project
  * id — so a null means the owning project was DELETED. Treating that as
  * readable-by-anyone was a hole: it handed a deleted project's deposits to every
- * sibling project that shares an org-level wallet, which is exactly the leak
+ * sibling project with access to the wallet, which is exactly the leak
  * this guard exists to close. The row survives for forensics in the database;
  * it is simply no longer addressable through a project-scoped API, and there is
  * no caller who legitimately needs a deleted project's deposit. Nothing about
@@ -807,9 +769,9 @@ function isMovementInProject(movement: { project_id: string | null }, projectId:
  *   environment  — a sandbox-scoped key must not read a production movement.
  *                  The row carries its own environment, so this is a
  *                  comparison, not a second query.
- *   project      — see `isMovementInProject`. Wallet scope does NOT imply it,
- *                  because an organization-level custody config is handed to
- *                  every project in the org. An EXACT match: a null
+ *   project      — see `isMovementInProject`. Wallet scope does NOT imply it:
+ *                  a wallet check says the caller may use the wallet, not which
+ *                  project recorded the movement. An EXACT match: a null
  *                  `project_id` means the project was deleted, not that the row
  *                  is public.
  *   direction    — a withdrawal is not a deposit. The column is the only thing
@@ -1243,9 +1205,7 @@ interface EarnVaultWithdrawalResolved {
  * every environment a position exists in. The only refusals left are the ones
  * that protect the org itself: the position must belong to the caller's org
  * and environment (404), the key binding must carry a write scope for the
- * signing wallet, and custody runtime admission precedes the org's wallet policy. A shared
- * organization-level custody wallet intentionally lets sibling projects exit
- * the same org-owned position, matching the deposit route's wallet boundary.
+ * signing wallet, and custody runtime admission precedes the org's wallet policy.
  */
 export async function extractEarnVaultWithdrawalPolicyCandidate(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalSchema>
@@ -1284,7 +1244,6 @@ export async function extractEarnVaultWithdrawalPolicyCandidate(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
     projectId,
-    includeAllProviders: true,
   });
   const wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
   assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);

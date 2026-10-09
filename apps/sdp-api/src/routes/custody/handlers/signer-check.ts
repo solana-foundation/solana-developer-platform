@@ -17,7 +17,7 @@ import {
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { getDb } from "@/db";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
@@ -60,6 +60,7 @@ async function isValidWalletSignature(
 export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSchema>) => {
   const body = c.req.valid("json");
   const auth = getAuth(c);
+  const projectId = requireProjectId(c);
 
   const resolvedWalletId = resolveApiKeySigningWalletId(auth, body.walletId, ["wallets:write"]);
   if (resolvedWalletId === null) {
@@ -81,18 +82,18 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
       kind: "wallet",
       organizationId: auth.organizationId,
-      projectId: auth.projectId ?? undefined,
+      projectId,
       walletId: resolvedWalletId,
     });
-    // A retained project Connection must not disappear into the org-Config inventory fallback.
+    // The legacy selector and the inventory must agree on the Connection; a mismatch is ambiguous ownership.
     if (target?.kind === "connection" && target.connectionId !== wallet.custodyConnectionId) {
       throw conflict("Custody wallet ownership is ambiguous");
     }
     // Resolve once to an exact row, then admit before any signer, Kora, or RPC work.
-    // The exact signer repeats its runtime guard; a default change cannot select another wallet.
+    // The exact signer repeats its runtime guard against the same wallet row.
     await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
       auth.organizationId,
-      auth.projectId ?? undefined,
+      projectId,
       wallet.id
     );
 
@@ -103,7 +104,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // simulation, and is never broadcast.
     const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const [signer, feePayer] = await Promise.all([
-      createOrgSignerForCustodyWallet(c.env, auth.organizationId, auth.projectId, wallet.id),
+      createOrgSignerForCustodyWallet(c.env, auth.organizationId, projectId, wallet.id),
       feePayment.getFeePayer(),
     ]);
 

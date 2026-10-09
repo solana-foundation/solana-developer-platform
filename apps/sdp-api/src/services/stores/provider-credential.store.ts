@@ -1,8 +1,4 @@
-import type {
-  CustodyConnectionCheckStatus,
-  CustodyProvider,
-  CustodyWalletStatus,
-} from "@sdp/types";
+import type { CustodyConnectionCheckStatus, CustodyProvider } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { parsePostgresJsonOr } from "@/db/postgres-utils";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
@@ -37,6 +33,7 @@ export interface ProviderCredentialRow {
 }
 
 export interface LifecycleCredentialRow extends ProviderCredentialRow {
+  provider: "privy";
   source: "stored" | "runtime";
   storage_backend: StoredCredentialSecret["storageBackend"];
   deactivated_at: string | null;
@@ -67,7 +64,6 @@ export interface CustodyConnectionRow {
   scope: "project";
   provider_credential_id: string;
   provider_credential_scope_key: string;
-  default_custody_wallet_id: string | null;
   provider_account_fingerprint: string | null;
   request_delay_ms: number | null;
   status: CustodyConnectionStatus;
@@ -93,11 +89,6 @@ export interface ProjectConnectionListRow {
   credential_label: string;
   credential_status: ProviderCredentialStatus;
   provider_account_fingerprint: string | null;
-  default_custody_wallet_id: string | null;
-  default_wallet_id: string | null;
-  default_wallet_public_key: string | null;
-  default_wallet_status: CustodyWalletStatus | null;
-  is_selected: boolean;
 }
 
 export interface ProjectConnectionState extends CustodyConnectionRow {
@@ -112,7 +103,6 @@ export interface InstallationConnectionState extends CustodyConnectionRow {
   credential_version: number;
   credential_scope: "organization" | "project";
   credential_project_id: string | null;
-  credential_source: "stored" | "runtime";
   credential_storage_backend: StoredCredentialSecret["storageBackend"];
   credential_secret_ref: string | null;
   credential_secret_version_ref: string | null;
@@ -121,7 +111,6 @@ export interface InstallationConnectionState extends CustodyConnectionRow {
   credential_created_at: string;
   has_owned_wallet: boolean;
   has_sibling_unfinished: boolean;
-  is_selected: boolean;
 }
 
 const CREATING_SUBMISSION = `creating.status = 'creating'
@@ -191,7 +180,7 @@ export class ProviderCredentialStore {
     return this.db.queryMany<ProjectConnectionState>(
       `SELECT c.id, c.organization_id, c.project_id, c.provider, c.scope,
               c.provider_credential_id, c.provider_credential_scope_key,
-              c.default_custody_wallet_id, c.provider_account_fingerprint,
+              c.provider_account_fingerprint,
               c.request_delay_ms,
               c.status, c.setup_metadata,
               c.last_check_status, c.last_check_at, c.last_check_failure_code,
@@ -614,23 +603,9 @@ export class ProviderCredentialStore {
               c.created_at,
               pc.label AS credential_label,
               pc.status AS credential_status,
-              c.provider_account_fingerprint,
-              c.default_custody_wallet_id,
-              default_wallet.wallet_id AS default_wallet_id,
-              default_wallet.public_key AS default_wallet_public_key,
-              default_wallet.status AS default_wallet_status,
-              EXISTS (
-                SELECT 1
-                FROM custody_scope_defaults selected
-                WHERE selected.organization_id = c.organization_id
-                  AND selected.project_id = c.project_id
-                  AND selected.default_custody_connection_id = c.id
-              ) AS is_selected
+              c.provider_account_fingerprint
          FROM custody_connections c
          JOIN provider_credentials pc ON pc.id = c.provider_credential_id
-         LEFT JOIN custody_wallets default_wallet
-           ON default_wallet.id = c.default_custody_wallet_id
-          AND default_wallet.custody_connection_id = c.id
         WHERE c.organization_id = ? AND c.project_id = ?${options.provider ? " AND c.provider = ?" : ""}
         ORDER BY c.created_at DESC, c.id DESC
         LIMIT ? OFFSET ?`,
@@ -717,7 +692,7 @@ export class ProviderCredentialStore {
              SELECT 1 FROM provider_credentials pc
              WHERE pc.id = c.provider_credential_id AND pc.organization_id = c.organization_id
                AND pc.provider = c.provider AND pc.scope_key = c.provider_credential_scope_key
-               AND (pc.scope = 'organization' OR pc.project_id = c.project_id)
+               AND pc.project_id = c.project_id
                AND pc.status = ?
            )
            AND NOT EXISTS (
@@ -745,7 +720,7 @@ export class ProviderCredentialStore {
     return this.db.queryOne<InstallationConnectionState>(
       `SELECT c.id, c.organization_id, c.project_id, c.provider, c.scope,
               c.provider_credential_id, c.provider_credential_scope_key,
-              c.default_custody_wallet_id, c.provider_account_fingerprint,
+              c.provider_account_fingerprint,
               c.request_delay_ms,
               c.status, c.setup_metadata, c.last_check_status, c.last_check_at,
               c.last_check_failure_code, c.activated_at, c.deactivated_at, c.created_at,
@@ -754,7 +729,6 @@ export class ProviderCredentialStore {
               pc.credential_version,
               pc.scope AS credential_scope,
               pc.project_id AS credential_project_id,
-              pc.source AS credential_source,
               pc.storage_backend AS credential_storage_backend,
               pc.secret_ref AS credential_secret_ref,
               pc.secret_version_ref AS credential_secret_version_ref,
@@ -779,13 +753,7 @@ export class ProviderCredentialStore {
                   AND creating.provider = c.provider
                   AND creating.id IS DISTINCT FROM ?
                   AND ${CREATING_SUBMISSION}
-              )) AS has_sibling_unfinished,
-              EXISTS (
-                SELECT 1 FROM custody_scope_defaults selected
-                WHERE selected.organization_id = c.organization_id
-                  AND selected.project_id = c.project_id
-                  AND selected.default_custody_connection_id = c.id
-              ) AS is_selected
+              )) AS has_sibling_unfinished
        FROM custody_connections c
        JOIN provider_credentials pc ON pc.id = c.provider_credential_id
        WHERE c.id = ?
@@ -800,7 +768,6 @@ export class ProviderCredentialStore {
   async acquireInstallationLease(params: {
     connectionId: string;
     providerCredentialId: string;
-    credentialSource: "stored" | "runtime";
     expectedStatus: "pending" | "checking";
     expectedLastCheckStatus: string | null;
     expectedLastCheckAt: string | null;
@@ -826,7 +793,6 @@ export class ProviderCredentialStore {
          AND c.status = ?
          AND c.last_check_status IS NOT DISTINCT FROM ?
          AND c.last_check_at IS NOT DISTINCT FROM ?
-         AND c.default_custody_wallet_id IS NULL
          AND c.activated_at IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM custody_wallets owned
@@ -836,7 +802,6 @@ export class ProviderCredentialStore {
            SELECT 1 FROM provider_credentials pc
            WHERE pc.id = c.provider_credential_id
              AND pc.status = 'pending'
-             AND pc.source = ?
              AND pc.scope = 'project'
              AND pc.project_id = c.project_id
          )
@@ -847,99 +812,9 @@ export class ProviderCredentialStore {
         params.expectedStatus,
         params.expectedLastCheckStatus,
         params.expectedLastCheckAt,
-        params.credentialSource,
       ]
     );
     return row?.last_check_at ?? null;
-  }
-
-  async acquireRuntimeFailureRetryLease(params: {
-    connectionId: string;
-    providerCredentialId: string;
-    expectedLastCheckAt: string;
-    expectedFailureCode: "invalid_credentials" | "provider_account_already_connected";
-  }): Promise<string | null> {
-    const row = await this.db.queryOne<{ last_check_at: string }>(
-      `UPDATE custody_connections c
-       SET status = 'checking',
-           last_check_status = 'running',
-           last_check_at = GREATEST(
-             sdp_iso_now(),
-             to_char(
-               timezone('UTC', c.last_check_at::timestamptz + interval '1 millisecond'),
-               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-             )
-           ),
-           last_check_failure_code = NULL,
-           updated_at = sdp_iso_now()
-       WHERE c.id = ?
-         AND c.provider_credential_id = ?
-         AND c.status = 'failed'
-         AND c.last_check_status = 'failed'
-         AND c.last_check_at = ?
-         AND c.last_check_failure_code = ?
-         AND c.provider_account_fingerprint IS NULL
-         AND c.default_custody_wallet_id IS NULL
-         AND c.activated_at IS NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM custody_wallets owned
-           WHERE owned.custody_connection_id = c.id
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM custody_connections sibling
-           WHERE sibling.organization_id = c.organization_id
-             AND sibling.project_id = c.project_id
-             AND sibling.provider = c.provider
-             AND sibling.id <> c.id
-             AND sibling.status IN ('pending', 'checking')
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM provider_credentials creating
-           WHERE creating.organization_id = c.organization_id
-             AND creating.project_id = c.project_id
-             AND creating.provider = c.provider
-             AND ${CREATING_SUBMISSION}
-         )
-         AND EXISTS (
-           SELECT 1 FROM provider_credentials pc
-           WHERE pc.id = c.provider_credential_id
-             AND pc.status = 'failed_validation'
-             AND pc.last_failure_code = ?
-             AND pc.source = 'runtime'
-             AND pc.storage_backend = 'runtime_env'
-             AND pc.scope = 'project'
-             AND pc.project_id = c.project_id
-         )
-       RETURNING c.last_check_at`,
-      [
-        params.connectionId,
-        params.providerCredentialId,
-        params.expectedLastCheckAt,
-        params.expectedFailureCode,
-        params.expectedFailureCode,
-      ]
-    );
-    if (!row) {
-      return null;
-    }
-
-    const resetCredential = await this.db.execute(
-      `UPDATE provider_credentials
-       SET status = 'pending',
-           last_failure_code = NULL,
-           updated_at = sdp_iso_now()
-       WHERE id = ?
-         AND status = 'failed_validation'
-         AND last_failure_code = ?
-         AND source = 'runtime'
-         AND storage_backend = 'runtime_env'
-         AND scope = 'project'`,
-      [params.providerCredentialId, params.expectedFailureCode]
-    );
-    if (resetCredential !== 1) {
-      throw new Error("Runtime installation Credential changed during retry admission");
-    }
-    return row.last_check_at;
   }
 
   async reserveProviderAccountFingerprint(params: {
@@ -990,6 +865,8 @@ export class ProviderCredentialStore {
       ]
     );
 
+    // Write-only: default_custody_wallet_id is set solely to satisfy
+    // custody_connections_active_lifecycle_check until HOO-1985 drops it; nothing reads it.
     const updatedConnection = await this.db.execute(
       `UPDATE custody_connections
        SET default_custody_wallet_id = ?,
@@ -1043,7 +920,6 @@ export class ProviderCredentialStore {
          AND status = 'checking'
          AND last_check_status = 'running'
          AND last_check_at = ?
-         AND default_custody_wallet_id IS NULL
          AND activated_at IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM custody_wallets owned
@@ -1094,7 +970,6 @@ export class ProviderCredentialStore {
            AND status = 'checking'
            AND last_check_status = 'running'
            AND last_check_at = ?
-           AND default_custody_wallet_id IS NULL
            AND activated_at IS NULL
            AND NOT EXISTS (
              SELECT 1 FROM custody_wallets owned
@@ -1108,7 +983,6 @@ export class ProviderCredentialStore {
   async cancelInstallation(params: {
     connectionId: string;
     providerCredentialId: string;
-    credentialSource: "stored" | "runtime";
     expectedStatus: "pending" | "checking";
     expectedLastCheckStatus: string | null;
     expectedLastCheckAt: string | null;
@@ -1133,7 +1007,6 @@ export class ProviderCredentialStore {
          AND last_check_status IS NOT DISTINCT FROM ?
          AND last_check_at IS NOT DISTINCT FROM ?
          AND provider_account_fingerprint IS NULL
-         AND default_custody_wallet_id IS NULL
          AND activated_at IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM custody_wallets owned
@@ -1161,9 +1034,8 @@ export class ProviderCredentialStore {
            updated_at = sdp_iso_now()
        WHERE id = ?
          AND status = 'pending'
-         AND source = ?
          AND scope = 'project'`,
-      [params.providerCredentialId, params.credentialSource]
+      [params.providerCredentialId]
     );
     if (updatedCredential !== 1) {
       throw new Error("Installation Credential changed during cancellation");
@@ -1313,7 +1185,7 @@ export class ProviderCredentialStore {
        ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, ?, 'pending', ?)
        RETURNING id, organization_id, project_id, provider, scope,
                  provider_credential_id, provider_credential_scope_key,
-                 default_custody_wallet_id, provider_account_fingerprint,
+                 provider_account_fingerprint,
                  request_delay_ms,
                  status, setup_metadata,
                  last_check_status, last_check_at, last_check_failure_code,
@@ -1360,7 +1232,6 @@ export class ProviderCredentialStore {
          AND provider_credential_id = ?
          AND status = 'failed'
          AND provider_account_fingerprint IS NULL
-         AND default_custody_wallet_id IS NULL
          AND activated_at IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM custody_wallets owned
@@ -1381,7 +1252,7 @@ export class ProviderCredentialStore {
          )
        RETURNING id, organization_id, project_id, provider, scope,
                  provider_credential_id, provider_credential_scope_key,
-                 default_custody_wallet_id, provider_account_fingerprint,
+                 provider_account_fingerprint,
                  request_delay_ms,
                  status, setup_metadata,
                  last_check_status, last_check_at, last_check_failure_code,

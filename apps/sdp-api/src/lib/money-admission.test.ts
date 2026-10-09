@@ -140,4 +140,44 @@ describe("money admission reads", () => {
       message: "Organization is not active",
     });
   });
+
+  it("refuses a production project on the next movement once its organization loses production access, uncached", async () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT.id };
+    const context = {
+      surface: "job",
+      operation: "recurring_payment.collect",
+      subjectId: "prp_test",
+    } as const;
+    const setSettings = (settings: string) =>
+      getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(settings, TEST_ORG.id)
+        .run();
+
+    await setSettings(ENTITLED);
+    await expect(
+      asSystem(() => assertMoneyStartAdmitted(env, scope, context))
+    ).resolves.toBeUndefined();
+
+    await setSettings(JSON.stringify({}));
+    const refusal = await asSystem(() => assertMoneyStartAdmitted(env, scope, context)).catch(
+      (error: unknown) => error
+    );
+
+    expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
+    expect(refusal).toMatchObject({
+      code: "FORBIDDEN",
+      reason: "production_not_enabled",
+      message: "Production is not enabled for this organization",
+    });
+    await expect(
+      asSystem(() =>
+        assertMoneyStartAdmitted(
+          env,
+          { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id },
+          context
+        )
+      )
+    ).resolves.toBeUndefined();
+  });
 });

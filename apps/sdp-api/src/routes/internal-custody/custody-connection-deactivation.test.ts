@@ -1,3 +1,8 @@
+import type {
+  CustodyConnectionCheckStatus,
+  CustodyConnectionLifecycle,
+  CustodyWalletStatus,
+} from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -9,6 +14,14 @@ import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { setupTestAuth } from "@/test/helpers/auth";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import {
+  activateTestCustodyConnection,
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  type TestStoredProviderCredential,
+} from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -16,13 +29,19 @@ import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import internalCustody from "./index";
 
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
+
 const ORG = "org_test_connection_deactivation";
 const USER = "usr_test_connection_deactivation";
 const PROJECT = "prj_connection_deactivation";
 const CONNECTION = "cconn_connection_deactivation";
 const CREDENTIAL = "pcred_connection_deactivation";
 let clerkToken: string;
-const ORIGINAL_PRIVY_BYOK_ENABLED = env.PRIVY_BYOK_ENABLED;
 
 const app = new Hono<{ Bindings: Env }>();
 app.use("*", databaseIdentityBoundary());
@@ -52,32 +71,63 @@ function request(
   );
 }
 
-async function seedConnection(status: "pending" | "checking" | "failed") {
+type SeededConnectionStatus = Extract<
+  CustodyConnectionLifecycle,
+  "pending" | "checking" | "failed"
+>;
+
+function seededLastCheckStatus(
+  status: SeededConnectionStatus
+): Extract<CustodyConnectionCheckStatus, "running" | "failed"> | null {
+  switch (status) {
+    case "pending":
+      return null;
+    case "checking":
+      return "running";
+    case "failed":
+      return "failed";
+    default: {
+      const exhaustive: never = status;
+      throw new Error(`Unknown seeded Connection status: ${String(exhaustive)}`);
+    }
+  }
+}
+
+async function seedConnection(status: SeededConnectionStatus) {
   const db = getDb(env);
-  await db.execute(
-    `INSERT INTO provider_credentials
-       (id, organization_id, project_id, provider, label, scope, source,
-        storage_backend, encrypted_secret_payload, status)
-     VALUES (?, ?, ?, 'privy', 'Deactivation test', 'project', 'stored',
-             'encrypted_db', 'retained-ciphertext', ?)`,
-    [CREDENTIAL, ORG, PROJECT, status === "failed" ? "failed_validation" : "pending"]
-  );
-  await db.execute(
-    `INSERT INTO custody_connections
-       (id, organization_id, project_id, provider, scope, provider_credential_id,
-        provider_credential_scope_key, status, last_check_status, last_check_at)
-     VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, ?, ?)`,
-    [
-      CONNECTION,
-      ORG,
-      PROJECT,
-      CREDENTIAL,
-      PROJECT,
-      status,
-      status === "checking" ? "running" : status === "failed" ? "failed" : null,
-      status === "pending" ? null : "2026-01-01T00:00:00.000Z",
-    ]
-  );
+  const credential: TestStoredProviderCredential = {
+    id: CREDENTIAL,
+    organizationId: ORG,
+    projectId: PROJECT,
+    provider: "privy",
+    label: "Deactivation test",
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "retained-ciphertext" },
+    displayMetadata: {},
+    status: status === "failed" ? "failed_validation" : "pending",
+    credentialVersion: 1,
+    rotatedFromProviderCredentialId: null,
+    lastValidatedAt: null,
+    deactivatedAt: null,
+    createdBy: null,
+  };
+  await insertTestStoredProviderCredential(db, credential);
+  await insertTestCustodyConnection(db, {
+    id: CONNECTION,
+    organizationId: ORG,
+    projectId: PROJECT,
+    provider: "privy",
+    credential,
+    status,
+    setupMetadata: {},
+    providerAccountFingerprint: null,
+    lastCheckStatus: seededLastCheckStatus(status),
+    lastCheckAt: status === "pending" ? null : "2026-01-01T00:00:00.000Z",
+    lastCheckFailureCode: null,
+    activatedAt: null,
+    deactivatedAt: null,
+    createdBy: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
 }
 
 async function lifecycleAudits() {
@@ -88,29 +138,24 @@ async function lifecycleAudits() {
   );
 }
 
-async function seedActiveConnection(walletStatus: "active" | "inactive") {
+async function seedActiveConnection(walletStatus: CustodyWalletStatus) {
   await seedConnection("pending");
   const db = getDb(env);
   await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [CREDENTIAL]);
-  await db.execute(
-    `INSERT INTO custody_wallets (id, custody_connection_id, wallet_id, public_key, status)
-     VALUES ('cwlt_connection_deactivation', ?, 'provider-wallet-deactivation', 'address-deactivation', ?)`,
-    [CONNECTION, walletStatus]
-  );
-  await db.execute(
-    `UPDATE custody_connections
-     SET status = 'active', last_check_status = 'success', last_check_at = sdp_iso_now(),
-         activated_at = sdp_iso_now(), provider_account_fingerprint = 'retained-fingerprint',
-         default_custody_wallet_id = 'cwlt_connection_deactivation'
-     WHERE id = ?`,
-    [CONNECTION]
-  );
-  await db.execute(
-    `INSERT INTO custody_scope_defaults
-       (id, organization_id, project_id, default_custody_connection_id)
-     VALUES ('csd_connection_deactivation', ?, ?, ?)`,
-    [ORG, PROJECT, CONNECTION]
-  );
+  await insertTestCustodyWalletRow(db, {
+    id: "cwlt_connection_deactivation",
+    owner: { kind: "connection", custodyConnectionId: CONNECTION },
+    walletId: "provider-wallet-deactivation",
+    publicKey: "address-deactivation",
+    label: null,
+    purpose: null,
+    status: walletStatus,
+  });
+  await activateTestCustodyConnection(db, {
+    connectionId: CONNECTION,
+    custodyWalletId: "cwlt_connection_deactivation",
+    providerAccountFingerprint: "retained-fingerprint",
+  });
 }
 
 async function persistedState() {
@@ -121,14 +166,12 @@ async function persistedState() {
     wallets: await db.queryMany("SELECT * FROM custody_wallets WHERE custody_connection_id = ?", [
       CONNECTION,
     ]),
-    selection: await db.queryOne("SELECT * FROM custody_scope_defaults WHERE project_id = ?", [
-      PROJECT,
-    ]),
   };
 }
 
 describe("custody Connection deactivation", () => {
   beforeEach(async () => {
+    custodyReleaseChannel.outOfChannelMode = null;
     await seedTestDatabase(env);
     const db = getDb(env);
     await db.execute(
@@ -163,7 +206,6 @@ describe("custody Connection deactivation", () => {
   });
 
   afterEach(async () => {
-    env.PRIVY_BYOK_ENABLED = ORIGINAL_PRIVY_BYOK_ENABLED;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     await clearKVStores(env);
@@ -263,7 +305,6 @@ describe("custody Connection deactivation", () => {
         label: "Deactivation test",
         status: "deactivated",
         completion: null,
-        isDefault: false,
         canComplete: false,
         canReplaceCredentials: false,
         canCancel: false,
@@ -293,7 +334,7 @@ describe("custody Connection deactivation", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("blocks active owned wallets without changing the Connection, Credential, wallets, or default", async () => {
+  it("blocks active owned wallets without changing the Connection, Credential, or wallets", async () => {
     await seedActiveConnection("active");
     const before = await persistedState();
     const result = await request(`/connections/${CONNECTION}/deactivate`, {
@@ -358,41 +399,55 @@ describe("custody Connection deactivation", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("preserves inactive wallets, the current Credential, and the selected default while runtime is off", async () => {
-    await seedActiveConnection("inactive");
-    env.PRIVY_BYOK_ENABLED = "false";
-    await getDb(env).execute("UPDATE organizations SET settings = ?::jsonb WHERE id = ?", [
-      JSON.stringify({ providerOverrides: { custody: { privy: false } } }),
-      ORG,
-    ]);
-    const before = await persistedState();
-    const result = await request(`/connections/${CONNECTION}/deactivate`, {
-      authenticated: true,
-      method: "POST",
-      projectId: PROJECT,
-      ...{},
-    });
-    expect(result.status).toBe(200);
-    expect((await result.json()).data.custodyConnection).toMatchObject({
-      id: CONNECTION,
-      status: "deactivated",
-      canComplete: false,
-      canCancel: false,
-      canReplaceCredentials: false,
-    });
-    const after = await persistedState();
-    expect(after.credential).toEqual(before.credential);
-    expect(after.wallets).toEqual(before.wallets);
-    expect(after.selection).toEqual(before.selection);
-    expect(after.connection).toMatchObject({
-      ...before.connection,
-      status: "deactivated",
-      deactivated_at: expect.any(String),
-      updated_at: expect.any(String),
-    });
-    expect(await lifecycleAudits()).toMatchObject([{ action: "deactivate", status: "success" }]);
-    expect(fetch).not.toHaveBeenCalled();
-  });
+  it.each([
+    {
+      withheld: "the BYOK pair is out of channel",
+      withhold: async () => {
+        custodyReleaseChannel.outOfChannelMode = "byok";
+      },
+    },
+    {
+      withheld: "the Provider is not entitled",
+      withhold: async () => {
+        await getDb(env).execute("UPDATE organizations SET settings = ?::jsonb WHERE id = ?", [
+          JSON.stringify({ providerOverrides: { custody: { privy: false } } }),
+          ORG,
+        ]);
+      },
+    },
+  ])(
+    "preserves inactive wallets and the current Credential while $withheld",
+    async ({ withhold }) => {
+      await seedActiveConnection("inactive");
+      await withhold();
+      const before = await persistedState();
+      const result = await request(`/connections/${CONNECTION}/deactivate`, {
+        authenticated: true,
+        method: "POST",
+        projectId: PROJECT,
+        ...{},
+      });
+      expect(result.status).toBe(200);
+      expect((await result.json()).data.custodyConnection).toMatchObject({
+        id: CONNECTION,
+        status: "deactivated",
+        canComplete: false,
+        canCancel: false,
+        canReplaceCredentials: false,
+      });
+      const after = await persistedState();
+      expect(after.credential).toEqual(before.credential);
+      expect(after.wallets).toEqual(before.wallets);
+      expect(after.connection).toMatchObject({
+        ...before.connection,
+        status: "deactivated",
+        deactivated_at: expect.any(String),
+        updated_at: expect.any(String),
+      });
+      expect(await lifecycleAudits()).toMatchObject([{ action: "deactivate", status: "success" }]);
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  );
 
   it("serializes simultaneous requests to one transition and one lifecycle audit", async () => {
     await seedConnection("failed");
@@ -484,11 +539,15 @@ describe("custody Connection deactivation", () => {
       await tx.queryOne("SELECT id FROM projects WHERE id = ? FOR UPDATE", [PROJECT]);
       signalLocked();
       await released;
-      await tx.execute(
-        `INSERT INTO custody_wallets (id, custody_connection_id, wallet_id, public_key, status)
-         VALUES ('cwlt_racing_creation', ?, 'racing-provider-wallet', 'racing-address', 'active')`,
-        [CONNECTION]
-      );
+      await insertTestCustodyWalletRow(tx, {
+        id: "cwlt_racing_creation",
+        owner: { kind: "connection", custodyConnectionId: CONNECTION },
+        walletId: "racing-provider-wallet",
+        publicKey: "racing-address",
+        label: null,
+        purpose: null,
+        status: "active",
+      });
     });
     await locked;
     const response = request(`/connections/${CONNECTION}/deactivate`, {

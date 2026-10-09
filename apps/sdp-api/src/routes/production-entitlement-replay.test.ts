@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
@@ -9,13 +9,16 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import {
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
   seedCachedKey,
   TEST_API_KEY,
-  TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
   TEST_PROJECT,
   TEST_USER,
@@ -30,6 +33,7 @@ import { readErrorResponse } from "@/test/helpers/payments-transfers";
  */
 
 const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
+const PRODUCTION_CUSTODY_WALLET_ID = "cwlt_payments_test_production";
 const PRODUCTION_NOT_ENABLED = "Production is not enabled for this organization";
 
 const approvalDetailsSchema = z.object({
@@ -70,13 +74,46 @@ async function setProductionEntitled(entitled: boolean): Promise<void> {
     .run();
 }
 
+/**
+ * A BYOK Privy wallet in the production project, which allows BYOK custody only.
+ * It carries the address the payments signer mock signs as.
+ */
+async function seedProductionCustodyWallet(): Promise<void> {
+  await seedTestPrivyConnection(getDb(env), {
+    organizationId: TEST_ORG.id,
+    projectId: PRODUCTION_PROJECT_ID,
+    connectionId: "cconn_production_replay",
+    credentialId: "pcred_production_replay",
+    createdBy: TEST_USER.id,
+    stored: await writeTestPrivyCredentialSecret(env, {
+      organizationId: TEST_ORG.id,
+      credentialId: "pcred_production_replay",
+      appId: "production-replay-app",
+      appSecret: "production-replay-secret",
+    }),
+    providerAccountFingerprint: "sha256:production-replay",
+    wallets: [
+      {
+        id: PRODUCTION_CUSTODY_WALLET_ID,
+        walletId: "privy_production_replay",
+        publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+        label: "Production Payments Wallet",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+    lastCheckStatus: "success",
+    defaultCustodyWalletId: PRODUCTION_CUSTODY_WALLET_ID,
+  });
+}
+
 /** Every payment out of the seeded wallet in the production project needs approval. */
 async function seedProductionApprovalPolicy(): Promise<void> {
   const repo = policyRepository();
   const profile = await repo.createWalletControlProfile({
     organizationId: TEST_ORG.id,
     projectId: PRODUCTION_PROJECT_ID,
-    custodyWalletId: TEST_CUSTODY_WALLET_ID,
+    custodyWalletId: PRODUCTION_CUSTODY_WALLET_ID,
     name: "Production payment controls",
     createdBy: TEST_USER.id,
   });
@@ -135,7 +172,7 @@ async function openHeldProductionTransfer(actor: Actor) {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceCustodyWalletId: PRODUCTION_CUSTODY_WALLET_ID,
         destination: TEST_SOLANA_ADDRESSES.wallet2,
         token: "SOL",
         amount: "0.1",
@@ -176,7 +213,19 @@ async function approveAndReplay(approvalRequestId: string): Promise<void> {
 describe("approved-operation replay into production (APE-351)", () => {
   installPaymentsRouteTestHooks();
 
+  let originalEncryptionKey: string | undefined;
+
+  beforeEach(() => {
+    originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
+  });
+
+  afterEach(() => {
+    env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
+  });
+
   async function setUp(actor: Actor) {
+    await seedProductionCustodyWallet();
     await seedProductionApprovalPolicy();
     if (actor === "api_key") {
       await rehomeApiKeyToProduction();

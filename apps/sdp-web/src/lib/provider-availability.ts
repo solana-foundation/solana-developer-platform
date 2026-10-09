@@ -1,17 +1,16 @@
 import type {
   ComplianceProviderId,
+  CustodyMode,
+  CustodyProvider,
   OrganizationProviderAvailabilityResponse,
+  ProjectProviderAvailability,
+  ProjectProviderAvailabilityEntry,
   ProviderAvailabilityEntry,
   RampProviderId,
 } from "@sdp/types";
-import {
-  isKnownCustodyProvider,
-  type KnownCustodyProvider,
-} from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 export interface DashboardProviderAvailability extends OrganizationProviderAvailabilityResponse {
-  enabledCustodyProviders: KnownCustodyProvider[];
   enabledComplianceProviders: ComplianceProviderId[];
   rampProviderAccess: RampProviderAccess;
 }
@@ -64,13 +63,112 @@ export async function fetchProviderAvailability(
 
   return {
     ...data,
-    enabledCustodyProviders: Object.entries(data.providers.custody)
-      .filter(([, entry]) => entry.enabled)
-      .map(([provider]) => provider)
-      .filter(isKnownCustodyProvider),
     enabledComplianceProviders: Object.entries(data.providers.compliance)
       .filter(([, entry]) => entry.enabled)
       .map(([provider]) => provider as ComplianceProviderId),
     rampProviderAccess: data.providers.ramps,
   };
+}
+
+/** The custody modes a provider the project can use may be set up in. */
+export type AvailableCustodyModes = readonly [CustodyMode, ...CustodyMode[]];
+
+/** A custody provider the project can set up in at least one mode. */
+export type ProjectCustodyAvailability = Omit<
+  Extract<ProjectProviderAvailabilityEntry, { family: "custody" }>,
+  "modes"
+> & { modes: AvailableCustodyModes };
+
+/**
+ * Whether a provider offers at least one custody mode.
+ *
+ * @param modes - The modes a project availability entry reports.
+ * @returns True when `modes` is not empty.
+ */
+function hasCustodyMode(modes: readonly CustodyMode[]): modes is AvailableCustodyModes {
+  return modes.length > 0;
+}
+
+/**
+ * The custody providers the project can set up in at least one mode.
+ *
+ * @param availability - The project's provider availability.
+ * @returns The custody entries whose `modes` are not empty, in tuple order.
+ */
+export function availableCustodyProviders(
+  availability: ProjectProviderAvailability
+): ProjectCustodyAvailability[] {
+  return availability.providers.flatMap((entry): ProjectCustodyAvailability[] => {
+    if (entry.family !== "custody") {
+      return [];
+    }
+    const { modes } = entry;
+    return hasCustodyMode(modes) ? [{ ...entry, modes }] : [];
+  });
+}
+
+/**
+ * The ramp providers the project can use.
+ *
+ * @param availability - The project's provider availability.
+ * @returns The available ramp providers, in tuple order.
+ */
+export function availableRampProviders(
+  availability: ProjectProviderAvailability
+): RampProviderId[] {
+  return availability.providers.flatMap((entry) =>
+    entry.family === "ramps" && entry.available ? [entry.provider] : []
+  );
+}
+
+/**
+ * The compliance providers the project can use.
+ *
+ * @param availability - The project's provider availability.
+ * @returns The available compliance providers, in tuple order.
+ */
+export function availableComplianceProviders(
+  availability: ProjectProviderAvailability
+): ComplianceProviderId[] {
+  return availability.providers.flatMap((entry) =>
+    entry.family === "compliance" && entry.available ? [entry.provider] : []
+  );
+}
+
+/**
+ * Whether the project can use a provider in any family: a custody provider in
+ * at least one mode, any other provider when it is available.
+ *
+ * @param availability - The project's provider availability.
+ * @param provider - A provider id from any family.
+ * @returns False for a provider the project cannot use or the deployment does not know.
+ */
+export function isProviderAvailableForProject(
+  availability: ProjectProviderAvailability,
+  provider: string
+): boolean {
+  return availability.providers.some(
+    (entry) =>
+      entry.provider === provider &&
+      (entry.family === "custody" ? entry.modes.length > 0 : entry.available)
+  );
+}
+
+/**
+ * Whether the project may set a custody provider up in a mode.
+ *
+ * @param availability - The project's provider availability.
+ * @param provider - The custody provider.
+ * @param mode - The custody mode.
+ * @returns True when the provider's `modes` include `mode`.
+ */
+export function offersCustodyMode(
+  availability: ProjectProviderAvailability,
+  provider: CustodyProvider,
+  mode: CustodyMode
+): boolean {
+  return availability.providers.some(
+    (entry) =>
+      entry.family === "custody" && entry.provider === provider && entry.modes.includes(mode)
+  );
 }

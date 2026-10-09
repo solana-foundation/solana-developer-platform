@@ -735,23 +735,26 @@ describe("value-moving authorization and replay conformance", () => {
     const localRecord = {
       id: "cfg_local",
       organizationId: "org_1",
-      projectId: null,
+      projectId: "prj_1",
       provider: "local",
       config: JSON.stringify({ provider: "local", encryptedPrivateKey: "ciphertext" }),
       encryptionVersion: "v2",
-      defaultWalletId: null,
       status: "active",
       createdAt: "2026-10-02T00:00:00.000Z",
       updatedAt: "2026-10-02T00:00:00.000Z",
     } as const;
     const decrypt = vi.fn().mockRejectedValue(new Error("decrypt reached"));
-    // SAFETY: the guard reads only SDP_DEPLOYMENT_MODE, and decrypt is the one
-    // cipher method these paths can reach; the fakes implement exactly that.
+    // SAFETY: the guards read only SDP_RELEASE_CHANNEL and SDP_DEPLOYMENT_MODE, and
+    // decrypt is the one cipher method these paths can reach; the fakes implement exactly that.
     const managedEnv = {
+      SDP_RELEASE_CHANNEL: "stable",
       SDP_DEPLOYMENT_MODE: "managed",
       DATABASE_URL: "postgres://unused",
     } as never;
-    const selfHostedEnv = { SDP_DEPLOYMENT_MODE: "self_hosted" } as never;
+    const selfHostedEnv = {
+      SDP_RELEASE_CHANNEL: "stable",
+      SDP_DEPLOYMENT_MODE: "self_hosted",
+    } as never;
     const cipher = { decrypt } as never;
 
     await expect(
@@ -768,7 +771,7 @@ describe("value-moving authorization and replay conformance", () => {
     // SAFETY: initializeLocalSigning must refuse before its first store call;
     // the fake only records whether that call happened.
     const service = new SigningService(configStore as never, managedEnv);
-    await expect(service.initializeLocalSigning("org_1")).rejects.toThrow(/Local signing/);
+    await expect(service.initializeLocalSigning("org_1", "prj_1")).rejects.toThrow(/Local signing/);
     expect(configStore.findActiveByProvider).not.toHaveBeenCalled();
   });
 

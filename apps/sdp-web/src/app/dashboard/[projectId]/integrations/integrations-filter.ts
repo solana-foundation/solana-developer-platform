@@ -12,25 +12,17 @@ export const INTEGRATION_FAMILIES: IntegrationFamily[] = [
 export type FamilyFilter = IntegrationFamily | "all";
 
 /**
- * What a reader is actually asking when they filter: is this thing on, is it
- * not, or does getting it require asking someone.
- *
- * Six statuses answered three questions, and two of the chips split hairs the
- * page never needed to draw -- `available` and `not_configured` both mean "not
- * running", and `active` and `enabled` both mean "running", differing only in
- * whether the switch is per organization or deployment-wide. That distinction
- * is real in the data and belongs on the detail page; as a filter it produced
- * a "Connected" chip that hid providers the catalog had just painted as
- * connected.
+ * What a reader is actually asking when they filter: is this thing on or not.
+ * `active` and `enabled` both mean "running", differing only in whether the
+ * switch is per project or deployment-wide; that distinction belongs on the
+ * detail page, not in a chip.
  */
-export type ConnectionState = "connected" | "not_connected" | "on_request" | "unknown";
+export type ConnectionState = "connected" | "not_connected" | "unknown";
 
 export const CONNECTION_STATE_BY_STATUS: Record<IntegrationStatus, ConnectionState> = {
   active: "connected",
   enabled: "connected",
   available: "not_connected",
-  not_configured: "not_connected",
-  request_access: "on_request",
   unknown: "unknown",
 };
 
@@ -43,7 +35,7 @@ export function connectionState(status: IntegrationStatus): ConnectionState {
  * not a category anyone browses for, and a chip that usually matches nothing
  * reads as broken.
  */
-export const STATUS_FILTERS = ["all", "connected", "not_connected", "on_request"] as const;
+export const STATUS_FILTERS = ["all", "connected", "not_connected"] as const;
 
 export type StatusFilter = (typeof STATUS_FILTERS)[number];
 

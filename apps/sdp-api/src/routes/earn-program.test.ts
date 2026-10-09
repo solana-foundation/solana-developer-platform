@@ -580,7 +580,13 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       },
       {}
     );
-    expect(noCredentials.status).toBe(403);
+    expect(noCredentials.status).toBe(503);
+    expect(await noCredentials.json()).toMatchObject({
+      error: {
+        code: "PROVIDER_NOT_CONFIGURED",
+        message: "Upshift is not configured for sandbox projects in this deployment.",
+      },
+    });
     expect(updateStrategy).not.toHaveBeenCalled();
   });
 
@@ -727,7 +733,13 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
       createProgramBody({ requestId: crypto.randomUUID() }),
       {}
     );
-    expect(unconfigured.status).toBe(403);
+    expect(unconfigured.status).toBe(503);
+    expect(await unconfigured.json()).toMatchObject({
+      error: {
+        code: "PROVIDER_NOT_CONFIGURED",
+        message: "Upshift is not configured for sandbox projects in this deployment.",
+      },
+    });
     expect(createWallet).not.toHaveBeenCalled();
   });
 
@@ -1400,10 +1412,14 @@ describe("Earn program — un-surfaced provider", () => {
     );
 
     expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-
-    expect(body.error.message).toContain("not currently offered");
-    expect(body.error.message).not.toContain("manual activation");
+    expect(await res.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "Upshift is not currently offered.",
+        details: { reason: "provider_not_offered" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
 
     expect(createWallet).not.toHaveBeenCalled();
   });
@@ -2532,17 +2548,11 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
         });
         const path = `/v1/wallets/approval-requests/${heldBody.error.details.approvalRequestId}/approve`;
         const headers = { Authorization: `Bearer ${approverKey}` };
-        const flag = env.PRIVY_BYOK_ENABLED;
-        env.PRIVY_BYOK_ENABLED = "false";
-        try {
-          const response = await app.request(path, { method: "POST", headers }, env);
-          expect(response.status).toBe(200);
-          expect(await response.json()).toMatchObject({
-            data: { approvalRequest: { status: "approved", operation: { status: "completed" } } },
-          });
-        } finally {
-          env.PRIVY_BYOK_ENABLED = flag;
-        }
+        const response = await app.request(path, { method: "POST", headers }, env);
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: { approvalRequest: { status: "approved", operation: { status: "completed" } } },
+        });
       }
 
       expect(createWithdrawal).toHaveBeenCalledTimes(1);

@@ -1,5 +1,11 @@
-import type { SdpEnvironment } from "./api-keys";
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
+import { z } from "zod";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "./api-keys";
+import {
+  CUSTODY_MODES,
+  CUSTODY_PROVIDERS,
+  CUSTODY_SETUP_REFUSAL_REASONS,
+  type CustodyProvider,
+} from "./custody";
 import { EARN_EXECUTION_MODELS, type EarnPortfolioToken } from "./earn";
 import { HASTRA_DEPLOYMENTS } from "./hastra-programs";
 import { JUPITER_LEND_EARN_PROGRAM_IDS } from "./jupiter-lend-programs";
@@ -593,6 +599,89 @@ export interface OrganizationProviderAvailabilityResponse {
   tier: OrganizationTier;
   providers: OrganizationProviderAvailability;
 }
+
+/**
+ * Why the project provider rule refused a provider (or a custody mode) for a
+ * project: the custody setup rule's reasons plus the staged-provider checks.
+ * Carried as `details.reason` on the refusal and as `reason` in project
+ * provider availability.
+ */
+export const PROJECT_PROVIDER_REFUSAL_REASONS = [
+  ...CUSTODY_SETUP_REFUSAL_REASONS,
+  "provider_not_in_release_channel",
+  "provider_not_offered",
+  "provider_not_configured",
+] as const;
+export type ProjectProviderRefusalReason = (typeof PROJECT_PROVIDER_REFUSAL_REASONS)[number];
+
+const projectProviderRefusalReasonSchema = z.enum(PROJECT_PROVIDER_REFUSAL_REASONS);
+
+/**
+ * A ramps, compliance or Earn provider's availability for a project: available,
+ * or unavailable with the first check that refused it.
+ *
+ * @param family - The provider family.
+ * @param providers - The family's provider tuple.
+ * @returns The family's entry schema, discriminated on `available`.
+ */
+function stagedProviderAvailabilityEntrySchema<
+  const Family extends string,
+  const Providers extends readonly [string, ...string[]],
+>(family: Family, providers: Providers) {
+  return z.discriminatedUnion("available", [
+    z.object({
+      family: z.literal(family),
+      provider: z.enum(providers),
+      available: z.literal(true),
+    }),
+    z.object({
+      family: z.literal(family),
+      provider: z.enum(providers),
+      available: z.literal(false),
+      reason: projectProviderRefusalReasonSchema,
+    }),
+  ]);
+}
+
+/**
+ * One provider's availability for a project. Custody entries carry the custody
+ * modes the project may set the provider up in (`[]` = none) and, for every
+ * other mode, the first check that refused it; every other family carries
+ * whether the project may use the provider and, when not, why.
+ */
+export const projectProviderAvailabilityEntrySchema = z.discriminatedUnion("family", [
+  z.object({
+    family: z.literal("custody"),
+    provider: z.enum(CUSTODY_PROVIDERS),
+    modes: z.array(z.enum(CUSTODY_MODES)),
+    unavailableModes: z.array(
+      z.object({
+        mode: z.enum(CUSTODY_MODES),
+        reason: projectProviderRefusalReasonSchema,
+      })
+    ),
+  }),
+  stagedProviderAvailabilityEntrySchema("compliance", COMPLIANCE_PROVIDERS),
+  stagedProviderAvailabilityEntrySchema("ramps", RAMP_PROVIDERS),
+  stagedProviderAvailabilityEntrySchema("earn", EARN_PROVIDERS),
+]);
+
+export type ProjectProviderAvailabilityEntry = z.infer<
+  typeof projectProviderAvailabilityEntrySchema
+>;
+
+/**
+ * Which providers a project can use: every provider the deployment knows, in
+ * `ORGANIZATION_PROVIDER_FAMILIES` order and each family's provider tuple order,
+ * so a missing provider is never mistaken for an unavailable one.
+ */
+export const projectProviderAvailabilitySchema = z.object({
+  projectId: z.string(),
+  environment: z.enum(SDP_ENVIRONMENTS),
+  providers: z.array(projectProviderAvailabilityEntrySchema),
+});
+
+export type ProjectProviderAvailability = z.infer<typeof projectProviderAvailabilitySchema>;
 
 function createBooleanRecord<const T extends readonly string[]>(
   values: T,

@@ -19,6 +19,7 @@ import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
@@ -26,7 +27,6 @@ import {
   seedCachedKey,
   sendTransactionMock,
   TEST_API_KEY,
-  TEST_CONFIG_ID,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
   TEST_PROJECT,
@@ -74,24 +74,29 @@ const approvalErrorDetailsSchema = z.object({
 
 async function seedExactIdProviderAliasWallet(): Promise<void> {
   const configId = "cust_cfg_payments_alias_authorized_test";
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(`INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted,
-            encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', ?, 'active')`)
-      .bind(configId, TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET_ID),
-    getDb(env)
-      .prepare(`INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, 'Alias-authorized wallet', 'transfer', 'active')`)
-      .bind(
-        TEST_ALIAS_AUTHORIZED_CUSTODY_WALLET_ID,
-        configId,
-        TEST_CUSTODY_WALLET_ID,
-        TEST_SOLANA_ADDRESSES.wallet1
-      ),
-  ]);
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: configId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "privy",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: TEST_ALIAS_AUTHORIZED_CUSTODY_WALLET_ID,
+        owner: { kind: "config", custodyConfigId: configId },
+        walletId: TEST_CUSTODY_WALLET_ID,
+        publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+        label: "Alias-authorized wallet",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+  });
 }
 
 describe("Payments routes — transfer policy", () => {
@@ -114,10 +119,6 @@ describe("Payments routes — transfer policy", () => {
     });
   });
   it("activates immutable wallet control profile revisions from wallet policy updates", async () => {
-    await getDb(env)
-      .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
-      .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
-      .run();
     const rules = [
       {
         id: "deny-issuance",

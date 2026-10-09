@@ -38,15 +38,12 @@ export function resetVaultDepositTrackingStateForTests(): void {
  * deposit, not a retry — which is exactly the distinction an idempotency key
  * has to encode.
  *
- * The project is in here for a reason that only shows up once the key is
- * durable. A custody config may be ORGANIZATION-level, so two projects can
- * resolve the same `custody_wallets` row; without the project, switching
- * project in one tab and re-submitting the same strategy and amount reuses the
- * first project's key. The API's replay lookup is keyed on
- * `(organization_id, request_id)`, so that reused key resolves the FIRST
- * project's movement — returning it as a replay instead of making the deposit.
- * A ref-scoped key never survived a project switch, so this only became
- * reachable when the key started outliving the component.
+ * The project is in here because the key outlives the component and the API's
+ * replay lookup is keyed on `(organization_id, request_id)`: a key reused under
+ * another project would resolve the FIRST project's movement as a replay
+ * instead of making the deposit. Custody wallets belong to one project, so the
+ * wallet already implies the project; naming it keeps the fingerprint from
+ * depending on that.
  */
 export function vaultDepositRequestFingerprint(input: {
   /** `null` only before a project resolves; it still discriminates. */

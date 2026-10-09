@@ -22,7 +22,11 @@ vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   createSdpApiClient: mocks.createSdpApiClient,
 }));
 
-import { createCustodySetupWalletAction, requestDevnetSolanaFaucetAction } from "./actions";
+import {
+  createCustodySetupWalletAction,
+  initializeCustodySetupAction,
+  requestDevnetSolanaFaucetAction,
+} from "./actions";
 
 beforeEach(() => setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_one`));
 
@@ -37,6 +41,32 @@ function walletForm(fields: Record<string, string>): FormData {
 function requestBody(client: { fetch: ReturnType<typeof vi.fn> }): Record<string, unknown> {
   return JSON.parse(String(client.fetch.mock.calls[0]?.[1]?.body));
 }
+
+describe("initializeCustodySetupAction", () => {
+  const client = { fetch: vi.fn() };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.createSdpApiClient.mockResolvedValue(client);
+  });
+
+  it("reports an already set up provider and makes no other API call", async () => {
+    client.fetch.mockRejectedValue(
+      new Error('SDP API request failed (409): {"error":{"message":"Signing already initialized"}}')
+    );
+
+    const result = await initializeCustodySetupAction(
+      walletForm({ provider: "privy", walletLabel: "Treasury" })
+    );
+
+    expect(result).toEqual({ status: "provider_already_set_up" });
+    expect(client.fetch).toHaveBeenCalledExactlyOnceWith(
+      "/v1/wallets/initialize",
+      expect.anything()
+    );
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+});
 
 describe("createCustodySetupWalletAction", () => {
   const client = { fetch: vi.fn() };
@@ -67,7 +97,7 @@ describe("createCustodySetupWalletAction", () => {
     expect(requestBody(client)).not.toHaveProperty("provider");
   });
 
-  it("falls back to the provider when no connection is chosen", async () => {
+  it("names the provider's Managed config when no connection is chosen", async () => {
     await createCustodySetupWalletAction(walletForm({ provider: "privy", label: "Treasury" }));
 
     expect(requestBody(client)).toEqual({ provider: "privy", label: "Treasury" });
@@ -80,6 +110,13 @@ describe("createCustodySetupWalletAction", () => {
     );
 
     expect(requestBody(client)).toEqual({ provider: "privy", label: "Treasury" });
+  });
+
+  it("refuses a wallet that names neither a provider nor a connection", async () => {
+    const result = await createCustodySetupWalletAction(walletForm({ label: "Treasury" }));
+
+    expect(result.status).toBe("error");
+    expect(client.fetch).not.toHaveBeenCalled();
   });
 
   it("reports a failure instead of throwing", async () => {

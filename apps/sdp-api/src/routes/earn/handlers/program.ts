@@ -48,7 +48,6 @@ import { approvedWalletOperationId } from "@/services/policy/approved-operation-
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import {
   assertEarnProviderConfigured,
-  assertEarnProviderSurfaced,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
@@ -471,28 +470,14 @@ export const createEarnProgram = async (
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
 
-  // Platform-level "we do not offer this provider", ahead of the org-level
-  // entitlement check below: no override lifts it, so answering "requires
-  // manual activation" would send the caller to a door that does not exist.
-  // Creation is the ONLY route that takes this gate — an organization holding a
-  // program with an un-surfaced provider keeps every read, re-target,
-  // withdrawal and ledger route (ADR 0002).
-  assertEarnProviderSurfaced(client.provider);
-
-  // Money-in gate: full entitlement + mode-specific credential check.
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    auth.organizationId,
-    "earn",
-    client.provider,
-    environment === "sandbox"
-  );
+  // Money-in gate: release channel, surfacing, entitlement and credentials.
+  // A new position is the only program route that checks surfacing; re-target
+  // passes `program: "existing"`, and reads, withdrawals and ledger routes take
+  // no provider gate (ADR 0002).
+  await assertProviderAvailable(c, { family: "earn", provider: client.provider });
   await assertKnownYieldSources(c, client.provider, body.allocations);
 
-  if (!auth.projectId) {
-    throw internalError("Could not resolve project scope");
-  }
+  const projectId = requireProjectId(c);
 
   // Key resolution runs LAST on purpose: an unentitled caller still gets 403 and
   // a provider without the portfolio capability still gets 501, rather than a
@@ -515,7 +500,7 @@ export const createEarnProgram = async (
   try {
     row = await repo.insertProviderWallet({
       organizationId: auth.organizationId,
-      projectId: auth.projectId,
+      projectId,
       environment,
       provider: client.provider,
       providerWalletRef: createdWallet.providerWalletRef,
@@ -542,7 +527,7 @@ export const createEarnProgram = async (
       // and linking it would expose their funds. Refuse rather than adopt it.
       throw conflict("Earn program wallet is already linked to another account");
     }
-    if (row.project_id !== auth.projectId) {
+    if (row.project_id !== projectId) {
       // Same organization, different project. The derivation is deliberately
       // organization-wide (see `resolveProgramCreateRequestId`), so a sibling
       // project reusing a caller key lands on the first project's program —
@@ -574,17 +559,12 @@ export const retargetEarnProgram = async (
   const { programId } = parseParams(c, earnProgramParamsSchema);
   const body = c.req.valid("json");
   const { row, client } = await requireProgramContext(c, programId);
-  const auth = getAuth(c);
-  const environment = resolveSdpEnvironment(c);
 
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    auth.organizationId,
-    "earn",
-    client.provider,
-    environment === "sandbox"
-  );
+  await assertProviderAvailable(c, {
+    family: "earn",
+    provider: client.provider,
+    program: "existing",
+  });
   await assertKnownYieldSources(c, client.provider, body.allocations);
 
   // Same two accepted key sources as create and withdrawals — a header-keyed

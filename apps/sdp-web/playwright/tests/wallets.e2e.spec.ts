@@ -455,6 +455,9 @@ test.describe
       await expect(nextButton).toBeEnabled();
       await nextButton.click();
       await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
+      const custodyModeSelect = page.getByRole("combobox", { name: "Custody mode" });
+      await custodyModeSelect.click();
+      await page.getByRole("option", { name: "Managed", exact: true }).click();
       await expect(page.getByLabel("Wallet label")).toBeVisible();
 
       const detailsScreenshotPath = testInfo.outputPath("wallet-create-details-desktop.png");
@@ -471,9 +474,12 @@ test.describe
       await expect(page).toHaveURL(projectHref(projectId, "/dashboard/wallets"));
 
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup?provider=privy");
-      await expect(page.getByLabel("Wallet label")).toBeVisible({
+      await expect(custodyModeSelect).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
+      await custodyModeSelect.click();
+      await page.getByRole("option", { name: "Managed", exact: true }).click();
+      await expect(page.getByLabel("Wallet label")).toBeVisible();
 
       await page.setViewportSize({ width: 390, height: 844 });
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
@@ -514,14 +520,6 @@ test.describe
         path: mobileScreenshotPath,
         contentType: "image/png",
       });
-
-      for (const switchHref of ["/dashboard/wallets/switch", "/dashboard/custody/switch"]) {
-        await gotoProjectPage(page, projectId, switchHref);
-        await expect(page).toHaveURL(projectHref(projectId, "/dashboard/wallets/setup"));
-        await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible({
-          timeout: E2E_POLL_TIMEOUT_MS,
-        });
-      }
     });
 
     test("wallet setup Enter advances without creating and final Enter creates once", async ({
@@ -549,8 +547,7 @@ test.describe
       const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken, projectId);
       const walletLabel = `Wallet Enter ${Date.now().toString(36).toUpperCase()}`;
       const countMatchingWallets = async () => {
-        // biome-ignore lint/security/noSecrets: Local API path with query params for wallet listing.
-        const { wallets } = await api.get<WalletsResponse>("/v1/wallets?includeAllProviders=true");
+        const { wallets } = await api.get<WalletsResponse>("/v1/wallets");
         return wallets.filter((wallet) => wallet.label === walletLabel).length;
       };
       expect(await countMatchingWallets()).toBe(0);

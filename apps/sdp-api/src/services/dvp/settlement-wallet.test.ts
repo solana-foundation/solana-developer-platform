@@ -12,12 +12,21 @@ import { Context } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import {
+  insertTestCustodyConfigRow,
+  insertTestCustodyWalletRow,
+  type TestCustodyWalletOwner,
+} from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
-const provisionApiKeyWallet = vi.hoisted(() => vi.fn());
+type ProvisionApiKeyWallet =
+  typeof import("@/services/api-key-wallet-provisioning.service").provisionApiKeyWallet;
+
+const provisionApiKeyWallet = vi.hoisted(() => vi.fn<ProvisionApiKeyWallet>());
 vi.mock("@/services/api-key-wallet-provisioning.service", () => ({ provisionApiKeyWallet }));
 
 const { getOrCreateDvpSettlementWallet } = await import("./settlement-wallet");
@@ -25,8 +34,44 @@ const { getOrCreateDvpSettlementWallet } = await import("./settlement-wallet");
 const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/dvp"), { env });
 
 const PROJECT_ID = "prj_dvp_settlement";
+const PRODUCTION_PROJECT_ID = `${PROJECT_ID}_production`;
 const CUSTODY_CONFIG_ID = "cust_dvp_settlement";
 const scope = { organizationId: TEST_ORG.id, projectId: PROJECT_ID };
+const productionScope = { organizationId: TEST_ORG.id, projectId: PRODUCTION_PROJECT_ID };
+
+const ADDRESSES = {
+  first: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
+  second: "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn",
+  third: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
+  settlement: "FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU",
+} as const;
+
+async function resetTenant(): Promise<void> {
+  await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  const db = getDb(env);
+  await db.prepare("DELETE FROM dvp_settlement_wallets").run();
+  await db.prepare("DELETE FROM custody_wallets").run();
+  await db.prepare("DELETE FROM custody_configs").run();
+  await db.prepare("DELETE FROM projects").run();
+  await db
+    .prepare(
+      "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+    )
+    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+    .run();
+  await db
+    .prepare(
+      "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+    )
+    .bind(TEST_USER.id, TEST_USER.email)
+    .run();
+  await seedDefaultProjects(db, {
+    organizationId: TEST_ORG.id,
+    createdBy: TEST_USER.id,
+    members: [],
+    ids: { sandbox: PROJECT_ID, production: PRODUCTION_PROJECT_ID },
+  });
+}
 
 /** Registers a custody wallet the provisioner can pretend it just minted. */
 /**
@@ -39,52 +84,29 @@ const scope = { organizationId: TEST_ORG.id, projectId: PROJECT_ID };
  * until it failed against a real project.
  */
 async function seedCustodyWallet(id: string, publicKey: string): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-       VALUES (?, ?, ?, ?, 'active')`
-    )
-    .bind(id, CUSTODY_CONFIG_ID, `provider_${id}`, publicKey)
-    .run();
+  await insertTestCustodyWalletRow(getDb(env), {
+    id,
+    owner: { kind: "config", custodyConfigId: CUSTODY_CONFIG_ID },
+    walletId: `provider_${id}`,
+    publicKey,
+    label: null,
+    purpose: null,
+    status: "active",
+  });
 }
 
 describe("getOrCreateDvpSettlementWallet", () => {
   beforeEach(async () => {
-    // reset, not clear: clearAllMocks wipes call history but leaves queued
-    // `mockResolvedValueOnce` values, and a leftover one hands the next test a
-    // wallet id that test never seeded.
     provisionApiKeyWallet.mockReset();
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-    const db = getDb(env);
-    await db.prepare("DELETE FROM dvp_settlement_wallets").run();
-    await db.prepare("DELETE FROM custody_wallets").run();
-    await db.prepare("DELETE FROM custody_configs").run();
-    await db.prepare("DELETE FROM projects").run();
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
-      )
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
-    await seedDefaultProjects(db, {
+    await resetTenant();
+    await insertTestCustodyConfigRow(getDb(env), {
+      id: CUSTODY_CONFIG_ID,
       organizationId: TEST_ORG.id,
-      createdBy: TEST_USER.id,
-      members: [],
-      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+      projectId: PROJECT_ID,
+      provider: "privy",
+      configEncrypted: "x",
+      status: "active",
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-         VALUES (?, ?, 'local', 'x', 'active')`
-      )
-      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id)
-      .run();
   });
 
   it("provisions a wallet on first use", async () => {
@@ -95,31 +117,6 @@ describe("getOrCreateDvpSettlementWallet", () => {
 
     expect(wallet.custodyWalletId).toBe("cwlt_first");
     expect(provisionApiKeyWallet).toHaveBeenCalledTimes(1);
-  });
-
-  // `projectId` and `legacyConfigProjectId` are NOT the same argument: the first
-  // scopes the custody CONNECTION lookup, the second the custody CONFIG one.
-  // Passing only the first makes the config fallback ask for the organization
-  // -wide default (`project_id IS NULL`), which almost no organization has —
-  // the dashboard writes a project-scoped row. The result was "Custody not
-  // initialized" on an organization whose custody works, failing every first
-  // DvP trade in a project.
-  it("scopes the legacy config lookup to the project, not the organization", async () => {
-    await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
-    provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });
-
-    await getOrCreateDvpSettlementWallet(env, auditContext, scope);
-
-    expect(provisionApiKeyWallet).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        projectId: scope.projectId,
-        legacyConfigProjectId: scope.projectId,
-        auditContext,
-        creationReason: "dvp_settlement_authority",
-      })
-    );
   });
 
   it("returns the same wallet on every later call, without provisioning again", async () => {
@@ -216,6 +213,242 @@ describe("getOrCreateDvpSettlementWallet", () => {
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ purpose: "dvp_settlement_authority" })
+    );
+  });
+});
+
+describe("DvP settlement owner", () => {
+  beforeEach(async () => {
+    provisionApiKeyWallet.mockReset();
+    await resetTenant();
+  });
+
+  async function seedManagedConfig(params: {
+    id: string;
+    projectId: string;
+    provider: "privy" | "local";
+    status: "active" | "inactive";
+  }): Promise<void> {
+    await insertTestCustodyConfigRow(getDb(env), {
+      ...params,
+      organizationId: TEST_ORG.id,
+      configEncrypted: "x",
+    });
+  }
+
+  async function seedPrivyConnection(params: {
+    connectionId: string;
+    projectId: string;
+    publicKey: string;
+    lastCheckStatus: "success" | "retry_unknown";
+  }): Promise<void> {
+    const walletRecordId = `cwlt_${params.connectionId}`;
+    const shared = {
+      organizationId: TEST_ORG.id,
+      projectId: params.projectId,
+      connectionId: params.connectionId,
+      credentialId: `pcred_${params.connectionId}`,
+      createdBy: TEST_USER.id,
+      stored: { storageBackend: "encrypted_db" as const, encryptedSecretPayload: "ciphertext" },
+      providerAccountFingerprint: `sha256:${params.connectionId}`,
+      wallets: [
+        {
+          id: walletRecordId,
+          walletId: `privy_${params.connectionId}`,
+          publicKey: params.publicKey,
+          label: null,
+          purpose: null,
+          status: "active" as const,
+        },
+      ],
+    };
+    await getDb(env).transaction(async (tx) => {
+      if (params.lastCheckStatus === "success") {
+        await seedTestPrivyConnection(tx, {
+          ...shared,
+          lastCheckStatus: "success",
+          defaultCustodyWalletId: walletRecordId,
+        });
+      } else {
+        await seedTestPrivyConnection(tx, { ...shared, lastCheckStatus: "retry_unknown" });
+      }
+    });
+  }
+
+  function provisionUnder(owner: TestCustodyWalletOwner): void {
+    provisionApiKeyWallet.mockImplementation(async () => {
+      await insertTestCustodyWalletRow(getDb(env), {
+        id: "cwlt_settlement_new",
+        owner,
+        walletId: "privy_settlement_new",
+        publicKey: ADDRESSES.settlement,
+        label: "DvP settlement authority",
+        purpose: "dvp_settlement_authority",
+        status: "active",
+      });
+      return { id: "cwlt_settlement_new", walletId: "privy_settlement_new" };
+    });
+  }
+
+  async function custodyWalletIds(): Promise<string[]> {
+    const rows = await getDb(env).queryMany<{ id: string }>(
+      "SELECT id FROM custody_wallets ORDER BY id"
+    );
+    return rows.map((row) => row.id);
+  }
+
+  async function expectSettlementMapped(projectId: string): Promise<void> {
+    expect(
+      await getDb(env).queryMany(
+        "SELECT project_id, custody_wallet_id FROM dvp_settlement_wallets ORDER BY project_id"
+      )
+    ).toEqual([{ project_id: projectId, custody_wallet_id: "cwlt_settlement_new" }]);
+  }
+
+  async function expectRefusedWithoutSpend(target: typeof scope, message: string): Promise<void> {
+    const walletsBefore = await custodyWalletIds();
+
+    await expect(getOrCreateDvpSettlementWallet(env, auditContext, target)).rejects.toMatchObject({
+      code: "CONFLICT",
+      statusCode: 409,
+      message,
+      details: { reason: "dvp_settlement_privy_unavailable" },
+    });
+
+    expect(provisionApiKeyWallet).not.toHaveBeenCalled();
+    expect(await custodyWalletIds()).toEqual(walletsBefore);
+    expect(await getDb(env).queryMany("SELECT project_id FROM dvp_settlement_wallets")).toEqual([]);
+  }
+
+  it("creates a Production settlement wallet under the project's one active Privy connection", async () => {
+    await seedPrivyConnection({
+      connectionId: "cconn_dvp_production",
+      projectId: PRODUCTION_PROJECT_ID,
+      publicKey: ADDRESSES.first,
+      lastCheckStatus: "success",
+    });
+    provisionUnder({ kind: "connection", custodyConnectionId: "cconn_dvp_production" });
+
+    const wallet = await getOrCreateDvpSettlementWallet(env, auditContext, productionScope);
+
+    expect(wallet).toEqual({
+      custodyWalletId: "cwlt_settlement_new",
+      address: ADDRESSES.settlement,
+      providerWalletId: "privy_settlement_new",
+    });
+    expect(provisionApiKeyWallet).toHaveBeenCalledOnce();
+    expect(provisionApiKeyWallet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        organizationId: TEST_ORG.id,
+        projectId: PRODUCTION_PROJECT_ID,
+        owner: { connectionId: "cconn_dvp_production" },
+      })
+    );
+    await expectSettlementMapped(PRODUCTION_PROJECT_ID);
+  });
+
+  it("creates a Sandbox settlement wallet under Managed Privy even when a Privy connection is active", async () => {
+    await seedManagedConfig({
+      id: CUSTODY_CONFIG_ID,
+      projectId: PROJECT_ID,
+      provider: "privy",
+      status: "active",
+    });
+    await seedPrivyConnection({
+      connectionId: "cconn_dvp_sandbox",
+      projectId: PROJECT_ID,
+      publicKey: ADDRESSES.first,
+      lastCheckStatus: "success",
+    });
+    provisionUnder({ kind: "config", custodyConfigId: CUSTODY_CONFIG_ID });
+
+    const wallet = await getOrCreateDvpSettlementWallet(env, auditContext, scope);
+
+    expect(wallet.custodyWalletId).toBe("cwlt_settlement_new");
+    expect(provisionApiKeyWallet).toHaveBeenCalledOnce();
+    expect(provisionApiKeyWallet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ projectId: PROJECT_ID, owner: { provider: "privy" } })
+    );
+    await expectSettlementMapped(PROJECT_ID);
+  });
+
+  it("creates a Sandbox settlement wallet under the one active Privy connection when there is no Managed Privy", async () => {
+    await seedPrivyConnection({
+      connectionId: "cconn_dvp_sandbox",
+      projectId: PROJECT_ID,
+      publicKey: ADDRESSES.first,
+      lastCheckStatus: "success",
+    });
+    provisionUnder({ kind: "connection", custodyConnectionId: "cconn_dvp_sandbox" });
+
+    const wallet = await getOrCreateDvpSettlementWallet(env, auditContext, scope);
+
+    expect(wallet.custodyWalletId).toBe("cwlt_settlement_new");
+    expect(provisionApiKeyWallet).toHaveBeenCalledOnce();
+    expect(provisionApiKeyWallet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        projectId: PROJECT_ID,
+        owner: { connectionId: "cconn_dvp_sandbox" },
+      })
+    );
+    await expectSettlementMapped(PROJECT_ID);
+  });
+
+  it.each([
+    { environment: "sandbox", target: scope },
+    { environment: "production", target: productionScope },
+  ])(
+    "refuses a $environment project with two active Privy connections and no Managed Privy",
+    async ({ target }) => {
+      await seedPrivyConnection({
+        connectionId: "cconn_dvp_one",
+        projectId: target.projectId,
+        publicKey: ADDRESSES.first,
+        lastCheckStatus: "success",
+      });
+      await seedPrivyConnection({
+        connectionId: "cconn_dvp_two",
+        projectId: target.projectId,
+        publicKey: ADDRESSES.second,
+        lastCheckStatus: "success",
+      });
+
+      await expectRefusedWithoutSpend(
+        target,
+        "DvP settlement needs exactly one active Privy connection for this project"
+      );
+    }
+  );
+
+  it("refuses a project with no active Privy backend", async () => {
+    await seedManagedConfig({
+      id: "cust_dvp_local",
+      projectId: PROJECT_ID,
+      provider: "local",
+      status: "active",
+    });
+    await seedManagedConfig({
+      id: "cust_dvp_inactive_privy",
+      projectId: PROJECT_ID,
+      provider: "privy",
+      status: "inactive",
+    });
+    await seedPrivyConnection({
+      connectionId: "cconn_dvp_pending",
+      projectId: PROJECT_ID,
+      publicKey: ADDRESSES.third,
+      lastCheckStatus: "retry_unknown",
+    });
+
+    await expectRefusedWithoutSpend(
+      scope,
+      "DvP settlement needs a Privy custody backend for this project"
     );
   });
 });

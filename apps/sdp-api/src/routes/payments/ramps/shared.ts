@@ -2,7 +2,12 @@ import { SdpPaymentsError } from "@sdp/payments";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { redactCredentialString } from "@sdp/redaction";
-import type { PaymentRampEstimate, PaymentRampQuote, RampProviderEstimateResult } from "@sdp/types";
+import {
+  isStagedProviderRefusalReason,
+  type PaymentRampEstimate,
+  type PaymentRampQuote,
+  type RampProviderEstimateResult,
+} from "@sdp/types";
 import {
   OFFRAMP_SUPPORT,
   ONRAMP_SUPPORT,
@@ -18,7 +23,6 @@ import type {
 import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import type { z } from "zod";
-import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import type {
@@ -34,14 +38,14 @@ import {
   redactErrorForCapture,
   unsupportedRampCorridor,
 } from "@/lib/errors";
-import { assertRampProviderInChannel, isRampProviderInChannel } from "@/middleware/require-module";
+import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import {
   assertProviderAvailable,
-  assertRampProviderSurfaced,
+  loadProjectProviderVerdict,
 } from "@/services/provider-availability.service";
 import {
   type AppContext,
@@ -86,15 +90,6 @@ function isRampProviderOffered(c: AppContext, provider: RampProviderId): boolean
 }
 
 /**
- * Refuses a request that names a ramp provider SDP does not offer: outside the
- * release channel, or not surfaced for the request's environment.
- */
-export function assertRampProviderOffered(c: AppContext, provider: RampProviderId): void {
-  assertRampProviderInChannel(c, provider);
-  assertRampProviderSurfaced(provider, resolveSdpEnvironment(c));
-}
-
-/**
  * The offered providers among `providers`, narrowed to `provider` when the
  * request names one. A request naming a provider outside the release channel is
  * refused before this (`assertRampProviderInChannel`), not answered with nothing.
@@ -132,23 +127,6 @@ export function providersFromPairs(
   return uniqueSorted(pairs.flatMap((row) => row.providers));
 }
 
-/** Throws unless the org has the ramp provider enabled for the request's environment. */
-export async function assertRampProviderAvailable(
-  c: AppContext,
-  providerId: RampProviderId,
-  organizationId: string
-): Promise<void> {
-  await assertProviderAvailable(
-    c.env,
-    getDb(c.env),
-    organizationId,
-    "ramps",
-    providerId,
-    resolveSdpEnvironment(c) === "sandbox",
-    { rampProviderStages: c.get("rampProviderStages") }
-  );
-}
-
 type RampQuoteDirection = "onramp" | "offramp";
 
 /**
@@ -156,6 +134,8 @@ type RampQuoteDirection = "onramp" | "offramp";
  * selects providers from) lists the provider for the requested crypto/fiat pair.
  * When fiatCurrency is omitted (off-ramp quotes may defer fiat selection to the
  * provider), the provider must support the crypto rail for at least one fiat.
+ * Surfacing is not checked here: `assertProviderAvailable` refuses an un-offered
+ * provider; only the error's `supportedProviders` hint is narrowed to offered ones.
  */
 function assertRampCorridorSupported(
   c: AppContext,
@@ -171,12 +151,12 @@ function assertRampCorridorSupported(
     const fiatSide = direction === "onramp" ? pair.source : pair.dest;
     return railSide === assetRail && (fiat === undefined || fiatSide === fiat);
   });
-  const supportedProviders = providersFromPairs(matched).filter((p) => isRampProviderOffered(c, p));
-  if (!supportedProviders.includes(input.provider)) {
+  const matchedProviders = providersFromPairs(matched);
+  if (!matchedProviders.includes(input.provider)) {
     throw unsupportedRampCorridor(input.provider, direction, {
       assetRail,
       fiatCurrency: fiat,
-      supportedProviders,
+      supportedProviders: matchedProviders.filter((p) => isRampProviderOffered(c, p)),
     });
   }
 }
@@ -228,10 +208,9 @@ export async function resolveRampQuoteRequest(
   input: CreateOnrampQuoteBody | CreateOfframpQuoteBody,
   custodyWalletId: string
 ): Promise<RampQuotePolicyResolved> {
-  assertRampProviderOffered(c, input.provider);
   assertRampCorridorSupported(c, direction, input);
   const scope = await resolveScope(c);
-  await assertRampProviderAvailable(c, input.provider, scope.auth.organizationId);
+  await assertProviderAvailable(c, { family: "ramps", provider: input.provider });
 
   const projectId = requireProjectId(c);
   const counterparty = await getCounterpartiesRepository(c).getCounterpartyById({
@@ -380,13 +359,31 @@ export async function estimateAcrossProviders(
 ): Promise<RampProviderEstimateResult[]> {
   const scope = await resolveScope(c);
   const ctx = rampRuntime(c);
+  const verdict = await loadProjectProviderVerdict(c);
 
   const settled = await mapSettledWithConcurrency(
     [...providers],
     RAMP_ESTIMATE_PROVIDER_CONCURRENCY,
     async (provider): Promise<RampProviderEstimateResult> => {
       try {
-        await assertRampProviderAvailable(c, provider, scope.auth.organizationId);
+        const decision = verdict.decide({ family: "ramps", provider });
+        if (!decision.admitted) {
+          if (!isStagedProviderRefusalReason(decision.reason)) {
+            throw decision.error;
+          }
+          logEvent("info", {
+            event: "sdp_api_ramp_provider_refused",
+            provider,
+            organization_id: scope.auth.organizationId,
+            reason: decision.reason,
+          });
+          return {
+            provider,
+            status: "error",
+            error: decision.error.message,
+            reason: decision.reason,
+          };
+        }
         const estimate = await runProvider(provider, ctx);
         return { provider, status: "ok", estimate };
       } catch (error) {

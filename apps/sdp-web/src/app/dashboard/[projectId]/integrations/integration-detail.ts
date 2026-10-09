@@ -19,14 +19,9 @@ export interface IntegrationDetail {
   family: IntegrationFamily;
   provider: string;
   label: string;
-  /**
-   * `unknown` only when the connection lookup failed, so the page can say it
-   * cannot read the state rather than guessing one and offering a wrong action.
-   */
-  status: IntegrationStatus | "unknown";
+  status: IntegrationStatus;
   descriptionKey?: MessageKey;
   custodyEntry?: CustodyProviderCatalogEntry;
-  requestAccessUrl?: string;
 }
 
 /**
@@ -50,37 +45,18 @@ export function isKnownIntegrationProvider(id: string): boolean {
  *
  * @param input - The provider and the resolved family entries.
  * @param input.provider - The provider id from the route.
- * @param input.custody - Custody availability, or `null` when the connection lookup failed.
+ * @param input.custody - Custody availability.
  * @param input.ramps - Ramp integration entries.
  * @param input.compliance - Compliance integration entries.
  * @returns The provider's detail, or `null` when no family lists it.
  */
 export function resolveIntegrationDetail(input: {
   provider: string;
-  custody: CustodyProviderAvailability[] | null;
+  custody: CustodyProviderAvailability[];
   ramps: IntegrationEntry<RampProviderId>[];
   compliance: IntegrationEntry<ComplianceProviderId>[];
 }): IntegrationDetail | null {
-  // A failed connection lookup must not turn a known custody provider into a
-  // 404: the page renders from the catalog entry with its state marked
-  // unknown, and offers no action that depends on the state it cannot see.
-  if (input.custody === null) {
-    const entry = CUSTODY_PROVIDER_CATALOG.find(
-      (candidate) => candidate.id === input.provider && candidate.visible
-    );
-    if (entry) {
-      return {
-        family: "custody",
-        provider: entry.id,
-        label: entry.label,
-        status: "unknown",
-        descriptionKey: entry.descriptionKey,
-        custodyEntry: entry,
-      };
-    }
-  }
-
-  const custodyMatch = (input.custody ?? []).find((entry) => entry.entry.id === input.provider);
+  const custodyMatch = input.custody.find((entry) => entry.entry.id === input.provider);
   if (custodyMatch) {
     return {
       family: "custody",
@@ -89,11 +65,6 @@ export function resolveIntegrationDetail(input: {
       status: custodyMatch.status,
       descriptionKey: custodyMatch.entry.descriptionKey,
       custodyEntry: custodyMatch.entry,
-      requestAccessUrl:
-        custodyMatch.status === "request_access" &&
-        custodyMatch.entry.storedCredentialSetup.mode === "request_access"
-          ? custodyMatch.entry.storedCredentialSetup.requestAccessUrl
-          : undefined,
     };
   }
 

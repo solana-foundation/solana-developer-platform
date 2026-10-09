@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { deriveDvpSettlementAvailability } from "@/services/dvp/observe";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -125,27 +126,38 @@ describe("DvpTradeRepository (postgres)", () => {
       members: [],
       ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-         VALUES (?, ?, 'local', 'x', 'active')`
-      )
-      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, 'w1', ?, 'active')`
-      )
-      .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID, WALLET_A_PUBKEY)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, 'w2', ?, 'active')`
-      )
-      .bind(OTHER_CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID, WALLET_B_PUBKEY)
-      .run();
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: CUSTODY_CONFIG_ID,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          provider: "local",
+          configEncrypted: "x",
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: CUSTODY_WALLET_ID,
+          owner: { kind: "config", custodyConfigId: CUSTODY_CONFIG_ID },
+          walletId: "w1",
+          publicKey: WALLET_A_PUBKEY,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+        {
+          id: OTHER_CUSTODY_WALLET_ID,
+          owner: { kind: "config", custodyConfigId: CUSTODY_CONFIG_ID },
+          walletId: "w2",
+          publicKey: WALLET_B_PUBKEY,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+    });
 
     repo = createPostgresDvpTradeRepository(db);
   });

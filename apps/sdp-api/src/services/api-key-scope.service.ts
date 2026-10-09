@@ -39,7 +39,6 @@ export type ParsedWalletBindingPatch = {
 type WalletScopeInput = WalletBindingPatchInput & {
   walletScope?: ApiKeyWalletScope;
   provisionWallet?: boolean;
-  connectionId?: string;
 };
 
 function trimWalletId(walletId: string): string {
@@ -187,9 +186,6 @@ export function resolveCreateWalletScope(input: WalletScopeInput): {
   if (!walletScope) {
     throw badRequest("walletScope is required");
   }
-  if (input.connectionId && !input.provisionWallet) {
-    throw badRequest("connectionId requires provisionWallet");
-  }
 
   const walletBindingPatch = parseWalletBindingPatch(input);
 
@@ -315,7 +311,7 @@ export async function resolveWalletBindingsInScope(
        WHERE c.organization_id = ?
          AND c.status = 'active'
          AND w.status = 'active'
-         AND (c.project_id IS NULL OR c.project_id = ?)
+         AND c.project_id = ?
          AND w.wallet_id IN (${placeholders})
 
        UNION ALL
@@ -390,6 +386,34 @@ export function assertGrantableApiKeyPermissions(
   }
 }
 
+const API_KEY_WALLET_ACCESS_DENIED_REASON = "api_key_wallet_access_denied";
+
+/**
+ * The 403 for an API key whose wallet bindings do not reach the requested wallet.
+ *
+ * @param message - What the binding check found.
+ * @returns A 403 tagged `api_key_wallet_access_denied`.
+ */
+function apiKeyWalletAccessDenied(message: string): AppError {
+  return new AppError("FORBIDDEN", message, { reason: API_KEY_WALLET_ACCESS_DENIED_REASON });
+}
+
+/**
+ * Whether `error` is an API key's wallet-binding refusal, as opposed to any
+ * other 403 a wallet route can raise (release channel, entitlement, custody mode).
+ *
+ * @param error - The caught error.
+ * @returns True for a refusal from `assertApiKeyWalletAccess`,
+ *   `resolveApiKeySigningWalletId` or `resolveApiKeyCustodyWalletId`.
+ */
+export function isApiKeyWalletAccessDenied(error: unknown): boolean {
+  return (
+    error instanceof AppError &&
+    error.code === "FORBIDDEN" &&
+    error.details?.reason === API_KEY_WALLET_ACCESS_DENIED_REASON
+  );
+}
+
 /**
  * A key may not mint or rotate a key with wider Allowed Operations than its
  * own (ADR 0006). A dashboard actor and an unrestricted key pass `null`.
@@ -438,12 +462,11 @@ export function assertApiKeyWalletAccess(
 
   const binding = getBindingForWallet(auth, walletId);
   if (!binding) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+    throw apiKeyWalletAccessDenied("API key is not authorized for the requested wallet");
   }
 
   if (!hasBindingPermission(binding, requiredPermissions)) {
-    throw new AppError(
-      "FORBIDDEN",
+    throw apiKeyWalletAccessDenied(
       `API key does not include required wallet permissions: ${requiredPermissions.join(", ")}`
     );
   }
@@ -469,7 +492,7 @@ export function resolveApiKeySigningWalletId(
   }
 
   if (auth.signingWalletId) {
-    throw new AppError("FORBIDDEN", "API key has no usable wallet bindings");
+    throw apiKeyWalletAccessDenied("API key has no usable wallet bindings");
   }
 
   if (bindings.length === 1) {
@@ -485,7 +508,7 @@ export function resolveApiKeySigningWalletId(
   }
 
   if (hasSelectedWalletScope(auth)) {
-    throw new AppError("FORBIDDEN", "API key has no usable wallet bindings");
+    throw apiKeyWalletAccessDenied("API key has no usable wallet bindings");
   }
 
   return null;
@@ -714,11 +737,10 @@ export function resolveApiKeyCustodyWalletId(
     if (!requestedWalletId && bindings.length > 1) {
       throw badRequest("Multiple signing wallets are bound to this API key. Specify a walletId.");
     }
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+    throw apiKeyWalletAccessDenied("API key is not authorized for the requested wallet");
   }
   if (!hasBindingPermission(binding, requiredPermissions)) {
-    throw new AppError(
-      "FORBIDDEN",
+    throw apiKeyWalletAccessDenied(
       `API key does not include required wallet permissions: ${requiredPermissions.join(", ")}`
     );
   }

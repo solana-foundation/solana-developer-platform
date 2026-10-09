@@ -37,7 +37,7 @@ export async function seedCachedApiKey(
               (
                 cfg.status = 'active'
                 AND cfg.organization_id = ?
-                AND (cfg.project_id IS NULL OR cfg.project_id = ?)
+                AND cfg.project_id = ?
               )
               OR (
                 conn.status = 'active'

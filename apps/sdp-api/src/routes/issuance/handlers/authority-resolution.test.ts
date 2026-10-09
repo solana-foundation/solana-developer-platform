@@ -96,10 +96,10 @@ async function seedConfigWallet(input: {
       .prepare(
         `INSERT INTO custody_configs (
            id, organization_id, project_id, provider, config_encrypted,
-           encryption_version, default_wallet_id, status
-         ) VALUES (?, ?, ?, 'local', 'encrypted', 'test', ?, 'active')`
+           encryption_version, status
+         ) VALUES (?, ?, ?, 'local', 'encrypted', 'test', 'active')`
       )
-      .bind(`cfg_${input.id}`, organizationId, projectId, input.walletId),
+      .bind(`cfg_${input.id}`, organizationId, projectId),
     getDb(testEnv)
       .prepare(
         `INSERT INTO custody_wallets (

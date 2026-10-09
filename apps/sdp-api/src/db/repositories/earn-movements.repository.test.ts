@@ -9,6 +9,7 @@ import {
 } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { asTransactionalClient, getDb } from "@/db";
+import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import type { EarnRepository } from "./earn.repository";
@@ -120,20 +121,23 @@ describe("Unified earn movement ledger (postgres)", () => {
       members: [],
       ids: { sandbox: "prj_earn_mv_other", production: "prj_earn_mv_other_production" },
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
-         VALUES (?, ?, NULL, 'local', 'encrypted')`
-      )
-      .bind(CONFIG, ORG)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label)
-         VALUES (?, ?, 'earn-mv-wallet', ?, 'Earn movements wallet')`
-      )
-      .bind(WALLET, CONFIG, WALLET_PUBKEY)
-      .run();
+    await insertTestCustodyConfigRow(db, {
+      id: CONFIG,
+      organizationId: ORG,
+      projectId: PROJECT,
+      provider: "local",
+      configEncrypted: "encrypted",
+      status: "active",
+    });
+    await insertTestCustodyWalletRow(db, {
+      id: WALLET,
+      owner: { kind: "config", custodyConfigId: CONFIG },
+      walletId: "earn-mv-wallet",
+      publicKey: WALLET_PUBKEY,
+      label: "Earn movements wallet",
+      purpose: null,
+      status: "active",
+    });
 
     ledger = createPostgresEarnMovementsRepository(db);
     earnRepo = createPostgresEarnRepository(db);
@@ -901,19 +905,23 @@ describe("Unified earn movement ledger (postgres)", () => {
       // 0059's founding constraint: a public vault is not claimable by whoever
       // deposits first. The unified holdings table must not quietly reintroduce a
       // global unique that would refuse the second organization.
-      await db
-        .prepare(
-          `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
-           VALUES ('cc_earn_mv_other', ?, NULL, 'local', 'encrypted')`
-        )
-        .bind(ORG_OTHER)
-        .run();
-      await db
-        .prepare(
-          `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label)
-           VALUES ('cw_earn_mv_other', 'cc_earn_mv_other', 'other-wallet', 'OtherPubkey1111', 'Other')`
-        )
-        .run();
+      await insertTestCustodyConfigRow(db, {
+        id: "cc_earn_mv_other",
+        organizationId: ORG_OTHER,
+        projectId: "prj_earn_mv_other",
+        provider: "local",
+        configEncrypted: "encrypted",
+        status: "active",
+      });
+      await insertTestCustodyWalletRow(db, {
+        id: "cw_earn_mv_other",
+        owner: { kind: "config", custodyConfigId: "cc_earn_mv_other" },
+        walletId: "other-wallet",
+        publicKey: "OtherPubkey1111",
+        label: "Other",
+        purpose: null,
+        status: "active",
+      });
 
       const mine = await ledger.createSignedVaultDepositIntent(intent());
       const theirs = await ledger.createSignedVaultDepositIntent(

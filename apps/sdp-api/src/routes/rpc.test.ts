@@ -16,6 +16,7 @@ import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env, resetManagedRpcEnv } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -35,39 +36,46 @@ async function clearKvStore(store: KVStore) {
 }
 
 /**
- * Register `publicKey` as a custody wallet of `organizationId`, the ownership
- * the faucet guard proves airdrop destinations against. Rows cascade away with
- * the organization delete in beforeEach.
+ * Register `publicKey` as a custody wallet of one of `organizationId`'s projects,
+ * the ownership the faucet guard proves airdrop destinations against. Rows
+ * cascade away with the project and organization deletes in beforeEach.
+ * @param organizationId - Organization that owns the project.
+ * @param projectId - Project whose config owns the wallet.
+ * @param publicKey - The wallet address.
+ * @param suffix - Distinguishes the seeded row ids.
+ * @param walletStatus - The wallet row status.
+ * @returns Resolves once the config and wallet are written.
  */
-async function seedCustodyWalletForOrg(
+async function seedCustodyWalletForProject(
   organizationId: string,
+  projectId: string,
   publicKey: string,
   suffix: string,
   walletStatus: CustodyWallet["status"]
 ): Promise<void> {
-  const db = getDb(env);
-  await db
-    .prepare(
-      `INSERT INTO custody_configs
-         (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-       VALUES (?, ?, NULL, 'local', 'test-config', 'sdp-custody-encryption-v1', NULL, 'active')`
-    )
-    .bind(`cfg_faucet_${suffix}`, organizationId)
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO custody_wallets
-         (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-       VALUES (?, ?, ?, ?, 'Faucet Wallet', 'transfer', ?)`
-    )
-    .bind(
-      `cw_faucet_${suffix}`,
-      `cfg_faucet_${suffix}`,
-      `wallet_faucet_${suffix}`,
-      publicKey,
-      walletStatus
-    )
-    .run();
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: `cfg_faucet_${suffix}`,
+        organizationId,
+        projectId,
+        provider: "local",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: `cw_faucet_${suffix}`,
+        owner: { kind: "config", custodyConfigId: `cfg_faucet_${suffix}` },
+        walletId: `wallet_faucet_${suffix}`,
+        publicKey,
+        label: "Faucet Wallet",
+        purpose: "transfer",
+        status: walletStatus,
+      },
+    ],
+  });
 }
 
 function jsonRpcResponse(body: unknown, status: number): Response {
@@ -269,7 +277,13 @@ describe("RPC Relay Routes", () => {
     }
 
     beforeEach(async () => {
-      await seedCustodyWalletForOrg(TEST_ORG.id, OWNED_FAUCET_ADDRESS, "failover", "active");
+      await seedCustodyWalletForProject(
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        OWNED_FAUCET_ADDRESS,
+        "failover",
+        "active"
+      );
       env.SOLANA_RPC_TRITON_URL = "https://rpc.triton.test";
       env.SOLANA_RPC_HELIUS_URL = "https://rpc.helius.test/";
     });
@@ -394,6 +408,7 @@ describe("RPC Relay Routes", () => {
   describe("faucet destination binding", () => {
     const UNOWNED_ADDRESS = "So11111111111111111111111111111111111111112";
     const OTHER_ORG_ID = "org_other_faucet_tenant";
+    const OTHER_ORG_PROJECT_ID = "prj_other_faucet_tenant";
     const OTHER_ORG_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
     function airdropRequest(destination: unknown) {
@@ -428,7 +443,19 @@ describe("RPC Relay Routes", () => {
         )
         .bind(OTHER_ORG_ID)
         .run();
-      await seedCustodyWalletForOrg(OTHER_ORG_ID, OTHER_ORG_ADDRESS, "other_org", "active");
+      await seedDefaultProjects(db, {
+        organizationId: OTHER_ORG_ID,
+        createdBy: TEST_USER.id,
+        members: [],
+        ids: { sandbox: OTHER_ORG_PROJECT_ID, production: `${OTHER_ORG_PROJECT_ID}_production` },
+      });
+      await seedCustodyWalletForProject(
+        OTHER_ORG_ID,
+        OTHER_ORG_PROJECT_ID,
+        OTHER_ORG_ADDRESS,
+        "other_org",
+        "active"
+      );
 
       const response = await relayProxy(airdropRequest(OTHER_ORG_ADDRESS));
       expect(response.status).toBe(403);
@@ -447,8 +474,9 @@ describe("RPC Relay Routes", () => {
     });
 
     it("refuses the tenant's own wallet once it is no longer active", async () => {
-      await seedCustodyWalletForOrg(
+      await seedCustodyWalletForProject(
         TEST_ORG.id,
+        TEST_PROJECT_ID,
         "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T",
         "inactive_wallet",
         "inactive"
@@ -474,7 +502,13 @@ describe("RPC Relay Routes", () => {
 
     it("relays an airdrop bound to the tenant's own wallet inside a batch array", async () => {
       env.SOLANA_RPC_TRITON_API_KEY = "triton_key";
-      await seedCustodyWalletForOrg(TEST_ORG.id, OWNED_FAUCET_ADDRESS, "batch_owned", "active");
+      await seedCustodyWalletForProject(
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        OWNED_FAUCET_ADDRESS,
+        "batch_owned",
+        "active"
+      );
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
         .mockResolvedValue(

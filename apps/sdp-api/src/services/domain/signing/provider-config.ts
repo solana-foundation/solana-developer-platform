@@ -53,7 +53,6 @@ export interface TurnkeyProviderConfig {
   apiBaseUrl?: string;
   requestDelayMs?: number;
   privateKeyId?: string;
-  defaultWalletPublicKey?: string;
 }
 
 export interface DfnsProviderConfig {

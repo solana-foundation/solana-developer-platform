@@ -14,6 +14,7 @@ import {
   withOpenApi,
   z,
 } from "./base";
+import { custodyWalletOwnerRequestSchema } from "./custody";
 import { policyRuleSchema } from "./payments";
 
 export const apiKeyRoleSchema = z
@@ -472,9 +473,9 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       description:
         "Optional wallet-level permission bindings. Use this to attach multiple wallets with scoped permissions.",
     }),
-    provisionWallet: withOpenApi(apiKeyCreateSchemaBase.shape.provisionWallet, {
+    provisionWallet: withOpenApi(custodyWalletOwnerRequestSchema.optional(), {
       description:
-        "Set true to provision for the effective custody target, or provide a connectionId object to provision for an exact Custody Connection.",
+        "Provision a new wallet for this key under exactly one provider account: { provider } for the project's Managed config for that provider, or { connectionId } for a Custody Connection.",
       example: { connectionId: "cconn_123" },
     }),
     walletLabel: withOpenApi(apiKeyCreateSchemaBase.shape.walletLabel, {

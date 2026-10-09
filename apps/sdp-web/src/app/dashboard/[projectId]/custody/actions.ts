@@ -1,7 +1,6 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigsResponse, InitializeSigningResponse } from "@sdp/types";
 import {
   commitmentComparator,
   decimalFixedPointToNumber,
@@ -11,10 +10,15 @@ import {
   solToLamports,
 } from "@solana/kit";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { extractPolicyDenialReason, withPolicyDenialReason } from "@/lib/policy-denial-reason";
-import { createSdpApiClient, requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
+import {
+  createSdpApiClient,
+  extractSdpApiError,
+  requestProjectHref,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
+import { isKnownCustodyProvider, type KnownCustodyProvider } from "./provider-catalog";
 
 const DEVNET_FAUCET_SOL = sol("1");
 
@@ -25,6 +29,21 @@ function getString(formData: FormData, key: string): string {
 function getOptionalString(formData: FormData, key: string): string | undefined {
   const value = getString(formData, key);
   return value ? value : undefined;
+}
+
+/**
+ * Reads the custody provider a wallet form names. Every wallet form submits
+ * one, so a missing or unknown value is a broken form and fails loudly.
+ *
+ * @param formData - The submitted wallet form.
+ * @returns The named custody provider.
+ */
+function requireCustodyProvider(formData: FormData): KnownCustodyProvider {
+  const provider = getString(formData, "provider");
+  if (!isKnownCustodyProvider(provider)) {
+    throw new Error(`Unknown custody provider: "${provider}"`);
+  }
+  return provider;
 }
 
 function extractErrorMessage(error: unknown): string {
@@ -78,43 +97,13 @@ function toApiActionErrorMessage(
   });
 }
 
-function parseApiActionError(error: unknown): { status: number; message: string } | null {
-  const raw = extractErrorMessage(error).trim();
-  const match = /^SDP API request failed \((\d+)\):\s*([\s\S]*)$/.exec(raw);
-  if (!match) {
-    return null;
-  }
-
-  const status = Number.parseInt(match[1] ?? "", 10);
-  if (!Number.isFinite(status)) {
-    return null;
-  }
-
-  return {
-    status,
-    message: getApiErrorMessageFromText(match[2] ?? ""),
-  };
-}
-
-export async function initializeCustody(formData: FormData) {
-  await initializeCustodyWallet(formData);
-  await revalidateWalletPaths();
-  redirect(await requestProjectHref("/dashboard/wallets"));
-}
-
-/** Returns the wallet provisioned by a custody initialization request. */
-async function initializeCustodyWallet(formData: FormData): Promise<ProvisionedWallet> {
-  const provider = (getString(formData, "provider") || "privy") as
-    | "privy"
-    | "local"
-    | "fireblocks"
-    | "coinbase_cdp"
-    | "para"
-    | "turnkey"
-    | "dfns"
-    | "ibm_haven"
-    | "anchorage"
-    | "utila";
+/**
+ * Connects the provider the form names and provisions its first wallet.
+ *
+ * @param formData - The submitted setup form: `provider`, optional `walletLabel`, `network`, `accountPolicy`.
+ */
+async function initializeCustodyWallet(formData: FormData): Promise<void> {
+  const provider = requireCustodyProvider(formData);
   const walletLabel = getOptionalString(formData, "walletLabel");
   const network = getOptionalString(formData, "network");
   const accountPolicy = getOptionalString(formData, "accountPolicy");
@@ -134,70 +123,10 @@ async function initializeCustodyWallet(formData: FormData): Promise<ProvisionedW
   }
 
   const client = await createSdpApiClient();
-
-  try {
-    const initialized = await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    return { publicKey: initialized.publicKey, walletId: initialized.walletId };
-  } catch (error) {
-    const apiError = parseApiActionError(error);
-
-    if (
-      apiError?.status === 409 &&
-      apiError.message.includes("Signing already initialized for org")
-    ) {
-      const configurations = await client.fetch<CustodyConfigsResponse>("/v1/wallets/configs");
-
-      // Repair must never cross providers. If another provider already owns the
-      // default configuration, "repairing" with setDefault would silently flip
-      // the organization's signing default to whatever provider this caller
-      // submitted; changing providers is the switch flow's decision, behind its
-      // own confirmation. Surface the conflict instead.
-      const defaultConfiguration = configurations.configs.find(
-        (configuration) => configuration.isDefault
-      );
-      if (defaultConfiguration && defaultConfiguration.provider !== provider) {
-        throw error;
-      }
-
-      const readyConfiguration = configurations.configs.find(
-        (configuration) =>
-          configuration.provider === provider &&
-          configuration.isDefault &&
-          configuration.defaultWalletId !== null
-      );
-
-      if (readyConfiguration) {
-        // Already provisioned by an earlier attempt; the configuration carries
-        // the wallet, so completion can still show it.
-        return {
-          publicKey: readyConfiguration.publicKey,
-          walletId: readyConfiguration.defaultWalletId as string,
-        };
-      }
-
-      // Repair a provider connection whose first wallet did not finish
-      // persisting instead of leaving the organization without a usable wallet.
-      // This endpoint nests its wallet, unlike initialize.
-      const repaired = await client.fetch<{ wallet: { walletId: string; publicKey: string } }>(
-        "/v1/wallets",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            provider,
-            label: walletLabel,
-            purpose: "root",
-            setDefault: true,
-          }),
-        }
-      );
-      return { publicKey: repaired.wallet.publicKey, walletId: repaired.wallet.walletId };
-    } else {
-      throw error;
-    }
-  }
+  await client.fetch("/v1/wallets/initialize", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 async function revalidateWalletPaths() {
@@ -205,42 +134,27 @@ async function revalidateWalletPaths() {
   revalidatePath(await requestProjectHref("/dashboard/wallets"));
 }
 
-export async function createCustodyWallet(formData: FormData) {
-  await createCustodyWalletForProvider(formData);
-  await revalidateWalletPaths();
-  redirect(await requestProjectHref("/dashboard/wallets"));
-}
-
+/**
+ * Creates a wallet in the provider account the form names: the connection
+ * when one is chosen (BYOK), otherwise the provider's Managed config. The
+ * request always names exactly one of them; there is no default to fall to.
+ *
+ * @param formData - The submitted wallet form: `provider`, optional `connectionId`, optional `label`.
+ */
 async function createCustodyWalletForProvider(formData: FormData) {
-  const provider = getOptionalString(formData, "provider") as
-    | "privy"
-    | "local"
-    | "fireblocks"
-    | "coinbase_cdp"
-    | "para"
-    | "turnkey"
-    | "dfns"
-    | "ibm_haven"
-    | "anchorage"
-    | "utila"
-    | undefined;
   const label = getOptionalString(formData, "label");
   // A Connection pins the wallet to one specific stored credential, which
   // `provider` alone cannot do once a project holds several connections of the
   // same provider. Sending both would leave the API to guess, so the explicit
   // choice wins and `provider` is dropped.
   const connectionId = getOptionalString(formData, "connectionId");
+  const target = connectionId ? { connectionId } : { provider: requireCustodyProvider(formData) };
 
   const client = await createSdpApiClient();
   await client.fetch("/v1/wallets", {
     method: "POST",
-    body: JSON.stringify(connectionId ? { connectionId, label } : { provider, label }),
+    body: JSON.stringify({ ...target, label }),
   });
-}
-
-interface ProvisionedWallet {
-  publicKey: string;
-  walletId: string;
 }
 
 export type WalletSetupActionResult =
@@ -252,15 +166,32 @@ export type WalletSetupActionResult =
       message: string;
     };
 
+export type InitializeCustodySetupActionResult =
+  | WalletSetupActionResult
+  | {
+      status: "provider_already_set_up";
+    };
+
+/**
+ * Connects a provider from the setup flow. `/initialize` answers 409 only when
+ * the project already holds this provider's Managed config; that is reported
+ * as its own result so the flow can send the user to add a wallet instead.
+ *
+ * @param formData - The submitted setup form.
+ * @returns The setup outcome.
+ */
 export async function initializeCustodySetupAction(
   formData: FormData
-): Promise<WalletSetupActionResult> {
+): Promise<InitializeCustodySetupActionResult> {
   const t = await getTranslations();
   try {
     await initializeCustodyWallet(formData);
     await revalidateWalletPaths();
     return { status: "success" };
   } catch (error) {
+    if (extractSdpApiError(error).status === 409) {
+      return { status: "provider_already_set_up" };
+    }
     return {
       status: "error",
       message: toApiActionErrorMessage(error, t),

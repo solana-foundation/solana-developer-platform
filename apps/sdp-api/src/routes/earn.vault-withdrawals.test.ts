@@ -19,9 +19,19 @@ import { AuditService } from "@/services/audit.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import {
+  activateTestCustodyConnection,
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -43,6 +53,13 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/types/provider-access")>()),
   isEarnProviderSurfaced: () => surfacingEnabled.value,
 }));
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 /**
  * Per-test override for the withdraw-capable client, delegating to the REAL
@@ -109,10 +126,11 @@ const SHARE_MINT = "So11111111111111111111111111111111111111112";
 const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const CUSTODY_WALLET_ID = "cwlt_earn_vw";
+const CONNECTION_ID = "cconn_earn_vw";
 
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
-let originalPrivyByokEnabled: string | undefined;
+let originalEncryptionKey: string | undefined;
 
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -180,39 +198,56 @@ async function seedAuth(): Promise<void> {
 }
 
 async function useConnectionWallet(): Promise<void> {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO provider_credentials (
-         id, organization_id, project_id, provider, label, scope, source,
-         storage_backend, status, created_by
-       ) VALUES ('pcred_earn_vw', ?, ?, 'privy', 'Exit BYOK', 'project',
-                 'runtime', 'runtime_env', 'active', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_connections (
-         id, organization_id, project_id, provider, scope, provider_credential_id,
-         provider_credential_scope_key, status, provider_account_fingerprint, created_by
-       ) VALUES ('cconn_earn_vw', ?, ?, 'privy', 'project', 'pcred_earn_vw', ?,
-                 'pending', 'sha256:test', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `UPDATE custody_wallets SET custody_config_id = NULL, custody_connection_id = 'cconn_earn_vw'
-       WHERE id = ?`
-      )
-      .bind(CUSTODY_WALLET_ID),
-    getDb(env)
-      .prepare(
-        `UPDATE custody_connections SET default_custody_wallet_id = ?, status = 'active',
-         last_check_status = 'success', last_check_at = sdp_iso_now(), activated_at = sdp_iso_now()
-       WHERE id = 'cconn_earn_vw'`
-      )
-      .bind(CUSTODY_WALLET_ID),
-  ]);
+  env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
+  const db = getDb(env);
+  await insertTestStoredProviderCredential(db, {
+    id: "pcred_earn_vw",
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    provider: "privy",
+    label: "Exit BYOK",
+    stored: await writeTestPrivyCredentialSecret(env, {
+      organizationId: TEST_ORG.id,
+      credentialId: "pcred_earn_vw",
+      appId: "earn-vw-connection-app",
+      appSecret: "earn-vw-connection-secret",
+    }),
+    displayMetadata: {},
+    status: "active",
+    credentialVersion: 1,
+    rotatedFromProviderCredentialId: null,
+    lastValidatedAt: null,
+    deactivatedAt: null,
+    createdBy: TEST_USER.id,
+  });
+  await insertTestCustodyConnection(db, {
+    id: CONNECTION_ID,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    provider: "privy",
+    credential: { id: "pcred_earn_vw", projectId: TEST_PROJECT.id },
+    status: "pending",
+    setupMetadata: {},
+    providerAccountFingerprint: "sha256:test",
+    lastCheckStatus: null,
+    lastCheckAt: null,
+    lastCheckFailureCode: null,
+    activatedAt: null,
+    deactivatedAt: null,
+    createdBy: TEST_USER.id,
+    createdAt: new Date().toISOString(),
+  });
+  await db
+    .prepare(
+      "UPDATE custody_wallets SET custody_config_id = NULL, custody_connection_id = ? WHERE id = ?"
+    )
+    .bind(CONNECTION_ID, CUSTODY_WALLET_ID)
+    .run();
+  await activateTestCustodyConnection(db, {
+    connectionId: CONNECTION_ID,
+    custodyWalletId: CUSTODY_WALLET_ID,
+    providerAccountFingerprint: "sha256:test",
+  });
 }
 
 async function seedPosition(
@@ -356,10 +391,11 @@ function getWithdrawal(pathSuffix: string, apiKey = TEST_API_KEY.raw) {
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
-  originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
+  originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   surfacingEnabled.value = true;
+  custodyReleaseChannel.outOfChannelMode = null;
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
@@ -373,23 +409,28 @@ beforeEach(async () => {
 afterEach(() => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
-  env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
+  env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   vaultWithdrawClientOverride.current = null;
   vi.restoreAllMocks();
 });
 
-describe("POST /v1/earn/vault-withdrawals — custody runtime admission", () => {
-  it("refuses a runtime-paused wallet before creating a withdrawal operation", async () => {
+describe("POST /v1/earn/vault-withdrawals — custody release channel", () => {
+  it("refuses an out-of-channel wallet before creating a withdrawal operation", async () => {
     await seedAuth();
     await useConnectionWallet();
     const positionId = await seedPosition();
-    env.PRIVY_BYOK_ENABLED = "false";
+    custodyReleaseChannel.outOfChannelMode = "byok";
 
     const response = await postVaultWithdrawal({ positionId, shares: "10" });
 
     expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({
-      error: { code: "FORBIDDEN", details: { reason: "runtime_execution_paused" } },
+    expect(await response.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
+      },
+      meta: { requestId: expect.any(String) },
     });
     const operations = await getDb(env)
       .prepare("SELECT id FROM wallet_operations WHERE organization_id = ?")
@@ -399,11 +440,11 @@ describe("POST /v1/earn/vault-withdrawals — custody runtime admission", () => 
     expect(withdrawFromVault).not.toHaveBeenCalled();
   });
 
-  it("allows an advisory dry-run while custody execution is paused", async () => {
+  it("allows an advisory dry-run while the BYOK pair is out of channel", async () => {
     await seedAuth();
     await useConnectionWallet();
     const positionId = await seedPosition();
-    env.PRIVY_BYOK_ENABLED = "false";
+    custodyReleaseChannel.outOfChannelMode = "byok";
 
     const response = await app.request(
       "/v1/earn/vault-withdrawals",
@@ -423,12 +464,12 @@ describe("POST /v1/earn/vault-withdrawals — custody runtime admission", () => 
     expect(withdrawFromVault).not.toHaveBeenCalled();
   });
 
-  it("returns an ordinary recorded withdrawal while custody execution is paused", async () => {
+  it("returns an ordinary recorded withdrawal while the BYOK pair is out of channel", async () => {
     await seedAuth();
     await useConnectionWallet();
     const positionId = await seedPosition();
     const recorded = await recordConnectionWithdrawal(positionId, "recorded-withdrawal");
-    env.PRIVY_BYOK_ENABLED = "false";
+    custodyReleaseChannel.outOfChannelMode = "byok";
 
     const response = await postVaultWithdrawal(
       { positionId, shares: "10" },
@@ -458,27 +499,32 @@ describe("POST /v1/earn/vault-withdrawals — custody runtime admission", () => 
         getDb(env),
         createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
       );
-      const profile = await repo.createApiKeyControlProfile({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        apiKeyId: TEST_API_KEY.id,
-        name: "Approve vault withdrawals",
-      });
-      if (!profile) throw new Error("Failed to create approval profile");
-      const revision = await repo.createApiKeyControlProfileRevision({
-        profileId: profile.id,
-        rules: [
-          { id: "approve-withdrawal", kind: "approval", operationTypes: ["earn_vault_withdrawal"] },
-        ],
-        defaultAction: "allow",
-        createdBy: TEST_USER.id,
-      });
-      if (!revision) throw new Error("Failed to create approval revision");
+      const profile = required(
+        await repo.createApiKeyControlProfile({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          apiKeyId: TEST_API_KEY.id,
+          name: "Approve vault withdrawals",
+        })
+      );
+      const revision = required(
+        await repo.createApiKeyControlProfileRevision({
+          profileId: profile.id,
+          rules: [
+            {
+              id: "approve-withdrawal",
+              kind: "approval",
+              operationTypes: ["earn_vault_withdrawal"],
+            },
+          ],
+          defaultAction: "allow",
+          createdBy: TEST_USER.id,
+        })
+      );
       await repo.activateApiKeyControlProfileRevision({
         profileId: profile.id,
         revisionId: revision.id,
       });
-      env.PRIVY_BYOK_ENABLED = "true";
       const requestId = "approved-recorded-withdrawal";
       const held = await postVaultWithdrawal(
         { positionId, shares: "10" },
@@ -503,22 +549,22 @@ describe("POST /v1/earn/vault-withdrawals — custody runtime admission", () => 
         operationStatus: "executing",
         resolvedBy: TEST_USER.id,
       });
-      env.PRIVY_BYOK_ENABLED = "false";
+      custodyReleaseChannel.outOfChannelMode = "byok";
       const actual = await vi.importActual<typeof import("@/services/earn/vault-withdraw.service")>(
         "@/services/earn/vault-withdraw.service"
       );
       withdrawFromVault.mockImplementation(actual.withdrawFromVault);
 
       expect(await recoverApprovedWalletOperations(env)).toBe(1);
-      const operation = await repo.getWalletOperationById(details.walletOperationId);
+      const operation = required(await repo.getWalletOperationById(details.walletOperationId));
       if (recorded) {
         expect(operation).toMatchObject({ status: "completed", execution_error: null });
-        expect(operation?.execution_effect_started_at).toEqual(expect.any(String));
+        expect(operation.execution_effect_started_at).toEqual(expect.any(String));
         expect(withdrawFromVault).toHaveBeenCalledTimes(1);
       } else {
         expect(operation).toMatchObject({
           status: "failed",
-          execution_error: "Wallet execution is paused. Retry after wallet execution is available.",
+          execution_error: custodyProviderNotInReleaseChannel("privy", "byok").message,
           execution_effect_started_at: null,
         });
         expect(withdrawFromVault).not.toHaveBeenCalled();
@@ -757,20 +803,33 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
       environment: "production",
     });
     await seedAuth();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
-         VALUES ('cfg_earn_vw_prod', ?, ?, 'privy', 'encrypted', 'active')`
-      )
-      .bind(TEST_ORG.id, TEST_PRODUCTION_PROJECT.id)
-      .run();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES ('cwlt_earn_vw_prod', 'cfg_earn_vw_prod', 'privy_earn_vw_prod', ?, 'active')`
-      )
-      .bind(WALLET_ADDRESS)
-      .run();
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
+    await seedTestPrivyConnection(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PRODUCTION_PROJECT.id,
+      connectionId: "cconn_earn_vw_prod",
+      credentialId: "pcred_earn_vw_prod",
+      createdBy: TEST_USER.id,
+      stored: await writeTestPrivyCredentialSecret(env, {
+        organizationId: TEST_ORG.id,
+        credentialId: "pcred_earn_vw_prod",
+        appId: "earn-vw-prod-app",
+        appSecret: "earn-vw-prod-secret",
+      }),
+      providerAccountFingerprint: "sha256:earn-vw-prod",
+      wallets: [
+        {
+          id: "cwlt_earn_vw_prod",
+          walletId: "privy_earn_vw_prod",
+          publicKey: WALLET_ADDRESS,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+      lastCheckStatus: "success",
+      defaultCustodyWalletId: "cwlt_earn_vw_prod",
+    });
     const positionId = await seedPosition({
       environment: "production",
       projectId: TEST_PRODUCTION_PROJECT.id,
@@ -1096,7 +1155,6 @@ describe("POST /v1/earn/vault-withdrawals — the exit slippage floor", () => {
   it("refuses a floor-less exit for a provider with a withdrawal slippage policy", async () => {
     await seedAuth();
     await useConnectionWallet();
-    env.PRIVY_BYOK_ENABLED = "false";
     const positionId = await seedPosition({ provider: "jupiter_lend" });
 
     const res = await postVaultWithdrawal({ positionId, shares: "5" });
