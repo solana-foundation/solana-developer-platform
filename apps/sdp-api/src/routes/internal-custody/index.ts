@@ -8,7 +8,6 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, badRequestParams } from "@/lib/errors";
-import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import { created, success } from "@/lib/response";
 import { credentialAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
@@ -103,11 +102,9 @@ internalCustody.get("/connections", async (c) => {
       provider: row.provider,
       label: row.credential_label,
       status: row.connection_status,
-      isDefault: isCustodyProviderAvailable(c.env, row.provider, "byok") && row.is_selected,
       isRuntimeExecutionAllowed:
         isCustodyConnectionRuntimeAvailable(c.env, row.provider, row) &&
         isCustodyProviderEntitled(availability, row.provider),
-      defaultCustodyWalletId: row.default_custody_wallet_id,
       createdAt: row.created_at,
       activatedAt: row.activated_at,
       lastCheck: row.last_check_status

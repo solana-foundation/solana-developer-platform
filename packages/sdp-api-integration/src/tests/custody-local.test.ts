@@ -1,10 +1,12 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import type { CustodyConfigsResponse } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { TokenApiResponse } from "../helpers/api-types";
 import {
   cleanupIntegrationSuite,
   env,
   INTEGRATION_CUSTODY_PROVIDER,
+  type IntegrationCustodyWallet,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
   request as rawRequest,
@@ -19,15 +21,15 @@ const describeIfIntegrationConfigured = describe.skipIf(
   !SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS
 );
 
-describeIfIntegrationConfigured("Custody Access and Default Signing", () => {
+describeIfIntegrationConfigured("Custody Access and Explicit Signing", () => {
   let apiKeyHash: string;
-  let custodyWalletId = "";
+  let custodyWallet: IntegrationCustodyWallet;
   const request = requestWithApiKey();
 
   beforeAll(async () => {
     const init = await initIntegrationSuite();
     apiKeyHash = init.apiKeyHash;
-    custodyWalletId = init.custodyWallet.id;
+    custodyWallet = init.custodyWallet;
   });
 
   afterAll(async () => {
@@ -36,24 +38,23 @@ describeIfIntegrationConfigured("Custody Access and Default Signing", () => {
 
   beforeEach(async () => {
     const state = await resetIntegrationState(apiKeyHash);
-    custodyWalletId = state.custodyWallet.id;
+    custodyWallet = state.custodyWallet;
   });
 
-  it("uses the configured default signer for deployments", { timeout: 120000 }, async () => {
-    const configRes = await request("/v1/wallets/config");
+  it("deploys with the named custody wallet", { timeout: 120000 }, async () => {
+    const configsRes = await request("/v1/wallets/configs");
 
-    expect(configRes.status).toBe(200);
-    const configBody = (await configRes.json()) as {
-      data: { config: { id: string; provider: string; publicKey: string } };
-    };
-
-    const { id: configId, provider, publicKey } = configBody.data.config;
-    expect(provider).toBe(INTEGRATION_CUSTODY_PROVIDER);
-    expect(publicKey).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    expect(configsRes.status).toBe(200);
+    const configsBody = (await configsRes.json()) as { data: CustodyConfigsResponse };
+    const providerConfigs = configsBody.data.configs.filter(
+      (config) => config.provider === INTEGRATION_CUSTODY_PROVIDER
+    );
+    expect(providerConfigs).toHaveLength(1);
+    expect(custodyWallet.address).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
 
     const configRow = await getDb(env)
       .prepare("SELECT config_encrypted FROM custody_configs WHERE id = ?")
-      .bind(configId)
+      .bind(providerConfigs[0].id)
       .first<{ config_encrypted: string }>();
 
     expect(configRow?.config_encrypted).toBeTruthy();
@@ -67,7 +68,7 @@ describeIfIntegrationConfigured("Custody Access and Default Signing", () => {
       body: JSON.stringify({
         name: "Custody Token",
         symbol: "CUST",
-        signingCustodyWalletId: custodyWalletId,
+        signingCustodyWalletId: custodyWallet.id,
         decimals: 6,
         isMintable: true,
         isFreezable: true,
@@ -81,17 +82,17 @@ describeIfIntegrationConfigured("Custody Access and Default Signing", () => {
     const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
+      body: JSON.stringify({ signingCustodyWalletId: custodyWallet.id }),
     });
 
     expect(deployRes.status).toBe(200);
     const deployed = (await deployRes.json()) as TokenApiResponse;
-    expect(deployed.data.token.mintAuthority).toBe(publicKey);
+    expect(deployed.data.token.mintAuthority).toBe(custodyWallet.address);
   });
 
   it("requires auth for custody endpoints", async () => {
-    const configRes = await rawRequest("/v1/wallets/config");
-    expect(configRes.status).toBe(401);
+    const configsRes = await rawRequest("/v1/wallets/configs");
+    expect(configsRes.status).toBe(401);
 
     const initRes = await rawRequest("/v1/wallets", {
       method: "POST",

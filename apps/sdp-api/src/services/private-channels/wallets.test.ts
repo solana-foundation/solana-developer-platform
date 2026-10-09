@@ -108,11 +108,9 @@ beforeEach(async () => {
     db.prepare(
       "INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES ('prj_1', 'org_test_pc_wallet', 'PC', 'pc-verify', 'sandbox', 'active', 'usr_test_pc_wallet')"
     ),
-    db
-      .prepare(
-        "INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, default_wallet_id, status) VALUES ('cfg_verify', 'org_test_pc_wallet', 'prj_1', 'privy', '{}', ?, 'active')"
-      )
-      .bind(WALLET_ID),
+    db.prepare(
+      "INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status) VALUES ('cfg_verify', 'org_test_pc_wallet', 'prj_1', 'privy', '{}', 'active')"
+    ),
     db
       .prepare(
         "INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status) VALUES ('cw_verify', 'cfg_verify', ?, ?, 'active')"
@@ -235,7 +233,6 @@ describe("verifyPrivateChannelWallet", () => {
   it("verifies through the exact Connection's stored credential", async () => {
     env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 29).toString("base64");
     const db = getDb(env);
-    await db.execute("UPDATE custody_configs SET default_wallet_id = NULL WHERE id = 'cfg_verify'");
     await insertTestStoredProviderCredential(db, {
       id: "pcred_verify",
       organizationId: "org_test_pc_wallet",

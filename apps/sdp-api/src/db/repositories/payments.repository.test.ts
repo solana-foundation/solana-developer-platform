@@ -22,7 +22,6 @@ const CANCELABLE = ["pending", "awaiting_payment"] as const;
 
 async function resetPaymentFixtures(): Promise<SeededDefaultProjects> {
   const db = getDb(env);
-  await db.prepare("DELETE FROM custody_scope_defaults").run();
   await db.prepare("DELETE FROM payment_transfers").run();
   await db.prepare("DELETE FROM custody_wallets").run();
   await db.prepare("DELETE FROM custody_configs").run();
@@ -54,7 +53,6 @@ async function resetPaymentFixtures(): Promise<SeededDefaultProjects> {
         projectId: TEST_PROJECT_ID,
         provider: "local",
         configEncrypted: "encrypted",
-        defaultWalletId: null,
         status: "active",
       },
     ],
@@ -69,7 +67,6 @@ async function resetPaymentFixtures(): Promise<SeededDefaultProjects> {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
   return projects;
 }
@@ -1254,7 +1251,6 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
           projectId: TEST_PROJECT_ID,
           provider: "privy",
           configEncrypted: "encrypted",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -1278,7 +1274,6 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
     const repo = createPostgresPaymentsRepository(getDb(env));
     await repo.createTransfer(

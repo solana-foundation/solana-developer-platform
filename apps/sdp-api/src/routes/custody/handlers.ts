@@ -5,15 +5,8 @@ export {
   listApprovalRequests,
   rejectApprovalRequest,
 } from "./handlers/approval-requests";
-export {
-  getConfig,
-  getConfigs,
-} from "./handlers/configs";
-export {
-  getSwitchProviderOptions,
-  initializeSigning,
-  switchSigning,
-} from "./handlers/provider";
+export { getConfigs } from "./handlers/configs";
+export { initializeSigning } from "./handlers/provider";
 export { signerCheck } from "./handlers/signer-check";
 export {
   createWallet,
@@ -22,6 +15,5 @@ export {
   getWalletAggregate,
   getWalletById,
   listWallets,
-  setDefaultWallet,
   updateWallet,
 } from "./handlers/wallets";

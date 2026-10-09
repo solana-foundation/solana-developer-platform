@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
-import { insertTestCustodyScopeDefault, insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import { insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -186,16 +186,6 @@ async function seedRuntimeReadyConnection(connectionId: string, createdAt: strin
   await makeConnectionRuntimeReady(connectionId, `cwlt_${connectionId}`);
 }
 
-async function selectConnection(connectionId: string): Promise<void> {
-  await insertTestCustodyScopeDefault(getDb(env), {
-    id: "csd_connections_read",
-    organizationId: ORG.id,
-    projectId: PROJECT.id,
-    defaultCustodyConfigId: null,
-    defaultCustodyConnectionId: connectionId,
-  });
-}
-
 async function requestConnections(query: string): Promise<Response> {
   const { app, token } = buildApp({ injectJwt: true });
   return app.request(
@@ -266,9 +256,7 @@ describe("internal custody connections", () => {
           provider: "privy",
           label: "Pending treasury",
           status: "pending",
-          isDefault: false,
           isRuntimeExecutionAllowed: false,
-          defaultCustodyWalletId: null,
           createdAt: "2026-08-02T00:00:00.000Z",
           activatedAt: null,
           lastCheck: null,
@@ -279,9 +267,7 @@ describe("internal custody connections", () => {
           provider: "privy",
           label: "Failed treasury",
           status: "failed",
-          isDefault: false,
           isRuntimeExecutionAllowed: false,
-          defaultCustodyWalletId: null,
           createdAt: "2026-08-01T00:00:00.000Z",
           activatedAt: null,
           lastCheck: {
@@ -317,45 +303,36 @@ describe("internal custody connections", () => {
     expect(data.connections[0]?.lastCheck).toMatchObject({ failureCode: null });
   });
 
-  it("separates effective default selection from runtime eligibility", async () => {
-    await seedRuntimeReadyConnection("ccon_read_selected", "2026-08-01T00:00:00.000Z");
-    await seedRuntimeReadyConnection("ccon_read_unselected", "2026-08-02T00:00:00.000Z");
-    await selectConnection("ccon_read_selected");
+  it("reports runtime eligibility from each Connection's own lifecycle, not from any of its wallets", async () => {
+    await seedRuntimeReadyConnection("ccon_read_first", "2026-08-01T00:00:00.000Z");
+    await seedRuntimeReadyConnection("ccon_read_second", "2026-08-02T00:00:00.000Z");
 
-    const data = await listConnections("");
-    const selected = data.connections.find((connection) => connection.id === "ccon_read_selected");
-    const unselected = data.connections.find(
-      (connection) => connection.id === "ccon_read_unselected"
-    );
-
-    expect(selected).toMatchObject({
+    const activeConnection = (id: string, createdAt: string) => ({
+      id,
+      provider: "privy",
       label: "Shared label",
       status: "active",
-      isDefault: true,
       isRuntimeExecutionAllowed: true,
-      defaultCustodyWalletId: "cwlt_ccon_read_selected",
+      createdAt,
+      activatedAt: expect.any(String),
+      lastCheck: { status: "success", at: expect.any(String), failureCode: null },
+      pendingWalletLabel: null,
     });
-    expect(unselected).toMatchObject({
-      label: "Shared label",
-      status: "active",
-      isDefault: false,
-      isRuntimeExecutionAllowed: true,
-      defaultCustodyWalletId: "cwlt_ccon_read_unselected",
-    });
+    expect((await listConnections("")).connections).toEqual([
+      activeConnection("ccon_read_second", "2026-08-02T00:00:00.000Z"),
+      activeConnection("ccon_read_first", "2026-08-01T00:00:00.000Z"),
+    ]);
 
     await getDb(env)
       .prepare(
         `UPDATE custody_wallets SET status = 'inactive'
-         WHERE id = 'cwlt_ccon_read_selected'`
+         WHERE id = 'cwlt_ccon_read_first'`
       )
       .run();
-    const unavailableDefault = (await listConnections("")).connections.find(
-      (connection) => connection.id === "ccon_read_selected"
-    );
-    expect(unavailableDefault).toMatchObject({
-      isDefault: true,
-      isRuntimeExecutionAllowed: false,
-    });
+    expect((await listConnections("")).connections).toEqual([
+      activeConnection("ccon_read_second", "2026-08-02T00:00:00.000Z"),
+      activeConnection("ccon_read_first", "2026-08-01T00:00:00.000Z"),
+    ]);
   });
 
   it("narrows the page and the total to one provider together", async () => {

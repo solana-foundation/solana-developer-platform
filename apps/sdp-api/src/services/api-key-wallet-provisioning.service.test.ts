@@ -11,11 +11,7 @@ import * as custodyProvisioning from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
 import { getOrCreateDvpSettlementWallet } from "@/services/dvp/settlement-wallet";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
-import {
-  insertTestCustodyConfigRow,
-  insertTestCustodyScopeDefault,
-  insertTestCustodyWalletRow,
-} from "@/test/helpers/custody";
+import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import {
   insertTestCustodyConnection,
   insertTestStoredProviderCredential,
@@ -84,65 +80,74 @@ describe("provisionApiKeyWallet", () => {
     await clearKVStores(env);
   });
 
-  it.each([undefined, CONNECTION_ID])(
-    "uses the effective or exact Connection without changing defaults (%s)",
-    async (connectionId) => {
-      if (connectionId) {
-        await getDb(env)
-          .prepare(
-            `UPDATE custody_scope_defaults
-             SET default_custody_connection_id = NULL
-             WHERE organization_id = ? AND project_id = ?`
-          )
-          .bind(ORGANIZATION_ID, PROJECT_ID)
-          .run();
-      }
-      provisionPrivyWalletMock.mockResolvedValueOnce({
-        walletId: connectionId ? "exact_api_key_wallet" : "effective_api_key_wallet",
-        address: "Vote111111111111111111111111111111111111111",
-      });
+  it("provisions a wallet under the named Connection", async () => {
+    provisionPrivyWalletMock.mockResolvedValueOnce({
+      walletId: "exact_api_key_wallet",
+      address: "Vote111111111111111111111111111111111111111",
+    });
 
-      const wallet = await provisionApiKeyWallet(getDb(env), env, {
-        auditContext,
-        creationReason: "api_key",
-        organizationId: ORGANIZATION_ID,
-        projectId: PROJECT_ID,
-        connectionId,
-        label: "API key wallet",
-        purpose: "transfer",
-      });
+    const wallet = await provisionApiKeyWallet(getDb(env), env, {
+      auditContext,
+      creationReason: "api_key",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      owner: { connectionId: CONNECTION_ID },
+      label: "API key wallet",
+      purpose: "transfer",
+    });
 
-      expect(wallet.walletId).toBe(
-        connectionId ? "privy_exact_api_key_wallet" : "privy_effective_api_key_wallet"
-      );
-      expect(
-        await getDb(env)
-          .prepare(
-            `SELECT custody_connection_id, custody_config_id FROM custody_wallets WHERE id = ?`
-          )
-          .bind(wallet.id)
-          .first()
-      ).toEqual({ custody_connection_id: CONNECTION_ID, custody_config_id: null });
-      expect(
-        await getDb(env)
-          .prepare("SELECT default_custody_wallet_id FROM custody_connections WHERE id = ?")
-          .bind(CONNECTION_ID)
-          .first()
-      ).toEqual({ default_custody_wallet_id: "cwlt_api_key_provisioning_default" });
-      expect(
-        await getDb(env)
-          .prepare(
-            `SELECT default_custody_config_id, default_custody_connection_id
-             FROM custody_scope_defaults WHERE organization_id = ? AND project_id = ?`
-          )
-          .bind(ORGANIZATION_ID, PROJECT_ID)
-          .first()
-      ).toEqual({
-        default_custody_config_id: CONFIG_ID,
-        default_custody_connection_id: connectionId ? null : CONNECTION_ID,
-      });
-    }
-  );
+    expect(wallet.walletId).toBe("privy_exact_api_key_wallet");
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT custody_connection_id, custody_config_id, label, purpose, status
+           FROM custody_wallets WHERE id = ?`
+        )
+        .bind(wallet.id)
+        .first()
+    ).toEqual({
+      custody_connection_id: CONNECTION_ID,
+      custody_config_id: null,
+      label: "API key wallet",
+      purpose: "transfer",
+      status: "active",
+    });
+    expect(createConfigWalletMock).not.toHaveBeenCalled();
+  });
+
+  it("provisions a wallet under the named provider's Managed config", async () => {
+    createConfigWalletMock.mockResolvedValueOnce({
+      id: "cwlt_api_key_managed_provisioned",
+      custodyConfigId: CONFIG_ID,
+      walletId: "para_api_key_managed_provisioned",
+      publicKey: "Vote111111111111111111111111111111111111111",
+      label: "API key wallet",
+      purpose: "transfer",
+      status: "active",
+      createdAt: new Date().toISOString(),
+    });
+
+    const wallet = await provisionApiKeyWallet(getDb(env), env, {
+      auditContext,
+      creationReason: "api_key",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      owner: { provider: "para" },
+      label: "API key wallet",
+      purpose: "transfer",
+    });
+
+    expect(wallet).toMatchObject({
+      id: "cwlt_api_key_managed_provisioned",
+      walletId: "para_api_key_managed_provisioned",
+    });
+    expect(createConfigWalletMock).toHaveBeenCalledExactlyOnceWith(ORGANIZATION_ID, PROJECT_ID, {
+      provider: "para",
+      label: "API key wallet",
+      purpose: "transfer",
+    });
+    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+  });
 
   it("audits first-use DVP wallet creation with its initiating actor, and does not create on reuse", async () => {
     provisionPrivyWalletMock.mockResolvedValueOnce({
@@ -228,14 +233,6 @@ describe("provisionApiKeyWallet", () => {
   it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
     "provisions and binds a Connection wallet through %s",
     async (path) => {
-      await getDb(env)
-        .prepare(
-          `UPDATE custody_scope_defaults
-           SET default_custody_connection_id = NULL
-           WHERE organization_id = ? AND project_id = ?`
-        )
-        .bind(ORGANIZATION_ID, PROJECT_ID)
-        .run();
       provisionPrivyWalletMock.mockResolvedValueOnce({
         walletId: "endpoint_api_key_wallet",
         address: "Vote111111111111111111111111111111111111111",
@@ -312,28 +309,30 @@ describe("provisionApiKeyWallet", () => {
           },
         ],
       });
-      expect(
-        await getDb(env)
-          .prepare("SELECT default_custody_wallet_id FROM custody_connections WHERE id = ?")
-          .bind(CONNECTION_ID)
-          .first()
-      ).toEqual({ default_custody_wallet_id: "cwlt_api_key_provisioning_default" });
-      expect(
-        await getDb(env)
-          .prepare(
-            `SELECT default_custody_connection_id
-             FROM custody_scope_defaults
-             WHERE organization_id = ? AND project_id = ?`
-          )
-          .bind(ORGANIZATION_ID, PROJECT_ID)
-          .first()
-      ).toEqual({ default_custody_connection_id: null });
+      expect(createConfigWalletMock).not.toHaveBeenCalled();
     }
   );
 
-  it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
-    "rejects the obsolete top-level Connection selector through %s",
-    async (path) => {
+  it.each([
+    ["/v1/api-keys", { provisionWallet: true }],
+    [`/v1/projects/${PROJECT_ID}/api-keys`, { provisionWallet: true }],
+    [
+      "/v1/api-keys",
+      { provisionWallet: { connectionId: CONNECTION_ID }, connectionId: CONNECTION_ID },
+    ],
+    [
+      `/v1/projects/${PROJECT_ID}/api-keys`,
+      { provisionWallet: { connectionId: CONNECTION_ID }, connectionId: CONNECTION_ID },
+    ],
+    ["/v1/api-keys", { provisionWallet: { connectionId: CONNECTION_ID, provider: "privy" } }],
+    ["/v1/api-keys", { provisionWallet: {} }],
+  ] as const)(
+    "rejects a provisioning request that names no single owner through %s (%j)",
+    async (path, provisioning) => {
+      const db = getDb(env);
+      const keyCountBefore = await db.queryOne("SELECT COUNT(*) AS count FROM api_keys");
+      const walletCountBefore = await db.queryOne("SELECT COUNT(*) AS count FROM custody_wallets");
+
       const response = await app.request(
         path,
         {
@@ -343,10 +342,9 @@ describe("provisionApiKeyWallet", () => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            name: `Invalid Connection key ${path}`,
+            name: "Ownerless provisioning key",
             walletScope: "selected",
-            provisionWallet: true,
-            connectionId: CONNECTION_ID,
+            ...provisioning,
           }),
         },
         env
@@ -355,6 +353,10 @@ describe("provisionApiKeyWallet", () => {
       expect(response.status).toBe(400);
       expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
       expect(createConfigWalletMock).not.toHaveBeenCalled();
+      expect(await db.queryOne("SELECT COUNT(*) AS count FROM api_keys")).toEqual(keyCountBefore);
+      expect(await db.queryOne("SELECT COUNT(*) AS count FROM custody_wallets")).toEqual(
+        walletCountBefore
+      );
     }
   );
 
@@ -470,15 +472,9 @@ describe("provisionApiKeyWallet", () => {
   });
 
   it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
-    "provisions on the key's project Config through %s when connectionId is omitted",
+    "provisions and binds a Managed wallet under the named provider through %s",
     async (path) => {
       const db = getDb(env);
-      await db.execute(
-        `UPDATE custody_scope_defaults
-       SET default_custody_connection_id = NULL
-       WHERE organization_id = ? AND project_id = ?`,
-        [ORGANIZATION_ID, PROJECT_ID]
-      );
       await insertTestCustodyWalletRow(db, {
         id: "cwlt_api_key_config_provisioned",
         owner: { kind: "config", custodyConfigId: CONFIG_ID },
@@ -508,16 +504,17 @@ describe("provisionApiKeyWallet", () => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            name: `Config compatibility key ${path}`,
+            name: `Managed provider key ${path}`,
             walletScope: "selected",
-            provisionWallet: true,
+            provisionWallet: { provider: "para" },
           }),
         },
         env
       );
 
       expect(response.status).toBe(201);
-      expect(createConfigWalletMock).toHaveBeenCalledWith(ORGANIZATION_ID, PROJECT_ID, {
+      expect(createConfigWalletMock).toHaveBeenCalledExactlyOnceWith(ORGANIZATION_ID, PROJECT_ID, {
+        provider: "para",
         label: undefined,
         purpose: undefined,
       });
@@ -532,6 +529,23 @@ describe("provisionApiKeyWallet", () => {
           .bind(body.data.apiKey.id)
           .first()
       ).toEqual({ wallet_id: "para_api_key_config_provisioned" });
+      await expect(
+        loadApiKeyWalletAuthorization(
+          db,
+          body.data.apiKey.id,
+          ORGANIZATION_ID,
+          PROJECT_ID,
+          "para_api_key_config_provisioned"
+        )
+      ).resolves.toMatchObject({
+        walletScope: "selected",
+        walletBindings: [
+          {
+            walletId: "para_api_key_config_provisioned",
+            custodyWalletId: "cwlt_api_key_config_provisioned",
+          },
+        ],
+      });
       expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
     }
   );
@@ -581,7 +595,6 @@ async function seedFixture(): Promise<void> {
       projectId: PROJECT_ID,
       provider: "para",
       configEncrypted: "test",
-      defaultWalletId: null,
       status: "active",
     });
     await seedTestPrivyConnection(tx, {
@@ -636,13 +649,6 @@ async function seedFixture(): Promise<void> {
       deactivatedAt: null,
       createdBy: USER_ID,
       createdAt: new Date().toISOString(),
-    });
-    await insertTestCustodyScopeDefault(tx, {
-      id: "csd_api_key_provisioning",
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      defaultCustodyConfigId: CONFIG_ID,
-      defaultCustodyConnectionId: CONNECTION_ID,
     });
   });
 }

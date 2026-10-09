@@ -371,7 +371,6 @@ describe("GET /v1/earn/vault-positions", () => {
           projectId: PROJECT_A,
           provider: "para",
           configEncrypted: "encrypted",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -386,7 +385,6 @@ describe("GET /v1/earn/vault-positions", () => {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
     await createPosition({ providerReference: "vault_project_binding" });
     await createPosition({

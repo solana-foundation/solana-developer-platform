@@ -179,9 +179,7 @@ export async function fetchConnectionWallets(
   request: SdpApiClient["request"],
   connectionId: string
 ): Promise<CustodyWalletSummary[]> {
-  const res = await request(
-    "/v1/wallets?includeAllProviders=true&includeBalances=true&view=summary"
-  );
+  const res = await request("/v1/wallets?includeBalances=true&view=summary");
   if (!res.ok) {
     throw new ConnectionDetailRequestError(res.status);
   }

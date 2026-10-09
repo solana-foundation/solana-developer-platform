@@ -138,7 +138,6 @@ async function seedCustody(): Promise<void> {
         projectId: PROJECT_ID,
         provider: "local",
         configEncrypted: "encrypted",
-        defaultWalletId: null,
         status: "active",
       },
     ],
@@ -153,7 +152,6 @@ async function seedCustody(): Promise<void> {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
   await getDb(env).transaction((tx) =>
     seedTestPrivyConnection(tx, {

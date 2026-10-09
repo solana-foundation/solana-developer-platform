@@ -225,7 +225,6 @@ async function seedAuthAndWallet(): Promise<void> {
         projectId: TEST_PROJECT.id,
         provider: "local",
         configEncrypted: "test-config",
-        defaultWalletId: TEST_WALLET_ID,
         status: "active",
       },
     ],
@@ -238,15 +237,6 @@ async function seedAuthAndWallet(): Promise<void> {
         label: "Batch Payments Wallet",
         purpose: "transfer",
         status: "active",
-      },
-    ],
-    scopeDefaults: [
-      {
-        id: `csd_${TEST_CONFIG_ID}`,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        defaultCustodyConfigId: TEST_CONFIG_ID,
-        defaultCustodyConnectionId: null,
       },
     ],
   });
@@ -326,7 +316,6 @@ async function seedConfigOwnedDuplicateProviderWallet(): Promise<void> {
         projectId: TEST_PROJECT.id,
         provider: "privy",
         configEncrypted: "test-config",
-        defaultWalletId: TEST_WALLET_ID,
         status: "active",
       },
     ],
@@ -341,7 +330,6 @@ async function seedConfigOwnedDuplicateProviderWallet(): Promise<void> {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
 }
 

@@ -85,7 +85,6 @@ async function seedProductionCustodyWallet(): Promise<void> {
       projectId: PRODUCTION_PROJECT_ID,
       provider: "local",
       configEncrypted: "test-config",
-      defaultWalletId: null,
       status: "active",
     });
     await insertTestCustodyWalletRow(tx, {

@@ -60,7 +60,6 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
           projectId: TEST_PROJECT_ID,
           provider: "local",
           configEncrypted: "encrypted",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -75,7 +74,6 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
 
     repo = createPostgresPaymentTransferBatchesRepository(db);

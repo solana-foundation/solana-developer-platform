@@ -18,23 +18,13 @@ describe("signing.service ibm_haven (IBM Digital Asset Haven)", () => {
   it("resolves the IBM Haven adapter with a distinct provider id", async () => {
     const env = createTestEnv();
     const encryptedConfig = await encryptConfig(env, JSON.stringify({ walletId: "wa_haven_1" }));
-    const record = createRecord({ config: encryptedConfig, defaultWalletId: null });
+    const record = createRecord({ config: encryptedConfig });
 
     const adapter = await createAdapterFromEncryptedConfig(env, TEST_ORG_ID, record);
 
     // IBM Haven reuses the Dfns signing stack but must surface as its own provider.
     expect(adapter).toBeInstanceOf(KeychainIbmHavenAdapter);
     expect(adapter.providerId).toBe("ibm_haven");
-  });
-
-  it("throws when no default wallet id is configured", async () => {
-    const env = createTestEnv();
-    const encryptedConfig = await encryptConfig(env, JSON.stringify({}));
-    const record = createRecord({ config: encryptedConfig, defaultWalletId: null });
-
-    await expect(createAdapterFromEncryptedConfig(env, TEST_ORG_ID, record)).rejects.toThrow(
-      "IBM Digital Asset Haven configuration is missing a default wallet ID"
-    );
   });
 });
 
@@ -129,10 +119,7 @@ async function encryptConfig(env: Env, plaintext: string): Promise<string> {
   return encrypted.ciphertext;
 }
 
-function createRecord(params: {
-  config: string;
-  defaultWalletId: string | null;
-}): SigningConfigRecord {
+function createRecord(params: { config: string }): SigningConfigRecord {
   return {
     id: "cust_ibm_haven_test",
     organizationId: TEST_ORG_ID,
@@ -140,7 +127,6 @@ function createRecord(params: {
     provider: "ibm_haven",
     config: params.config,
     encryptionVersion: "sdp-custody-encryption-v1",
-    defaultWalletId: params.defaultWalletId,
     status: "active",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",

@@ -132,10 +132,6 @@ async function useConnectionSource() {
     deactivatedAt: null,
     createdBy: ACTOR_USER_ID,
   });
-  await db
-    .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = 'cust-pcv'")
-    .bind(COLLEAGUE_WALLET_ID)
-    .run();
   await insertTestCustodyConnection(db, {
     id: "conn-pcv",
     organizationId: ORGANIZATION_ID,
@@ -362,15 +358,8 @@ async function seedRouteState(): Promise<void> {
     db
       .prepare(
         `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, default_wallet_id, status)
-         VALUES ('cust-pcv', ?, ?, 'privy', '{}', ?, 'active')`
-      )
-      .bind(ORGANIZATION_ID, PROJECT_ID, ACTOR_WALLET_ID),
-    db
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES ('csd-pcv', ?, ?, 'cust-pcv')`
+           (id, organization_id, project_id, provider, config_encrypted, status)
+         VALUES ('cust-pcv', ?, ?, 'privy', '{}', 'active')`
       )
       .bind(ORGANIZATION_ID, PROJECT_ID),
     db

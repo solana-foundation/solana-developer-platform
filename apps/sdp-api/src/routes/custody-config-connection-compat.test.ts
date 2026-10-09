@@ -3,11 +3,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
-import {
-  insertTestCustodyConfigRow,
-  insertTestCustodyScopeDefault,
-  insertTestCustodyWalletRow,
-} from "@/test/helpers/custody";
+import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
@@ -53,7 +49,7 @@ const CACHED_API_KEY: CachedApiKey = {
   expiresAt: null,
 };
 
-describe("custody Config compatibility with an effective Connection", () => {
+describe("custody Config beside a BYOK Connection", () => {
   const original = {
     privyAppId: env.PRIVY_APP_ID,
     privyAppSecret: env.PRIVY_APP_SECRET,
@@ -76,54 +72,48 @@ describe("custody Config compatibility with an effective Connection", () => {
     await clearKVStores(env);
   });
 
-  it("projects the effective Connection without changing Config response shapes", async () => {
-    const config = await request("/v1/wallets/config");
-    expect(config.status).toBe(404);
-
+  it("lists only the Managed Config and gates the Connection wallet on its own credential", async () => {
     const configs = await request("/v1/wallets/configs");
     expect(configs.status).toBe(200);
-    expect(await configs.json()).toEqual(nonDefaultConfigsBody());
+    expect(await configs.json()).toEqual(configsBody());
 
-    const options = await request("/v1/wallets/switch-options");
-    expect(options.status).toBe(200);
-    expect(await readProviderOption(options, "privy")).toMatchObject({
-      provider: "privy",
-      hasReusableWallet: true,
-      needsWalletLabel: false,
-      isActive: true,
-      isDefault: true,
-    });
+    const available = await request(`/v1/wallets/${CONNECTION_WALLET_ID}?includeBalance=false`);
+    expect(available.status).toBe(200);
+    expect(await available.json()).toEqual(connectionWalletBody(true));
 
     await getDb(env)
       .prepare("UPDATE provider_credentials SET status = 'failed_validation' WHERE id = ?")
       .bind(CREDENTIAL_ID)
       .run();
 
-    const unavailableOptions = await request("/v1/wallets/switch-options");
-    expect(await readProviderOption(unavailableOptions, "privy")).toMatchObject({
-      provider: "privy",
-      hasReusableWallet: true,
-      needsWalletLabel: false,
-      isActive: false,
-      isDefault: true,
-    });
+    const unavailable = await request(`/v1/wallets/${CONNECTION_WALLET_ID}?includeBalance=false`);
+    expect(unavailable.status).toBe(200);
+    expect(await unavailable.json()).toEqual(connectionWalletBody(false));
   });
 
-  it("keeps implicit public-key resolution aligned with the effective target", async () => {
-    const connectionPublicKey = await request("/v1/wallets/public-key");
+  it("answers the named Connection wallet's public key and refuses a request that names none", async () => {
+    const connectionPublicKey = await request(
+      `/v1/wallets/public-key?walletId=${CONNECTION_WALLET_ID}`
+    );
     expect(connectionPublicKey.status).toBe(200);
     expect(await connectionPublicKey.json()).toEqual({
       data: { publicKey: CONNECTION_PUBLIC_KEY },
       meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
+
+    const unnamed = await request("/v1/wallets/public-key");
+    expect(unnamed.status).toBe(400);
+    expect(await unnamed.json()).toEqual({
+      error: { code: "BAD_REQUEST", message: "walletId is required" },
+      meta: { requestId: expect.any(String) },
+    });
   });
 
-  it("keeps a selected out-of-channel Connection effective instead of falling back to the Config", async () => {
+  it("hides an out-of-channel Connection wallet without touching the Config listing", async () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
 
-    expect((await request("/v1/wallets/config")).status).toBe(404);
-    expect(await (await request("/v1/wallets/configs")).json()).toEqual(nonDefaultConfigsBody());
-    const publicKey = await request("/v1/wallets/public-key");
+    expect(await (await request("/v1/wallets/configs")).json()).toEqual(configsBody());
+    const publicKey = await request(`/v1/wallets/public-key?walletId=${CONNECTION_WALLET_ID}`);
     expect(publicKey.status).toBe(404);
     expect(await publicKey.json()).toEqual({
       error: { code: "NOT_FOUND", message: "Wallet not found" },
@@ -132,7 +122,7 @@ describe("custody Config compatibility with an effective Connection", () => {
   });
 });
 
-function nonDefaultConfigsBody() {
+function configsBody() {
   return {
     data: {
       configs: [
@@ -141,14 +131,30 @@ function nonDefaultConfigsBody() {
           organizationId: ORGANIZATION_ID,
           projectId: PROJECT_ID,
           provider: "para",
-          publicKey: CONFIG_PUBLIC_KEY,
-          defaultWalletId: CONFIG_WALLET_ID,
           status: "active",
           createdAt: expect.any(String),
-          isDefault: false,
         },
       ],
-      defaultConfigId: null,
+    },
+    meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+  };
+}
+
+function connectionWalletBody(isRuntimeExecutionAllowed: boolean) {
+  return {
+    data: {
+      wallet: {
+        id: CONNECTION_WALLET_RECORD_ID,
+        custodyConnectionId: CONNECTION_ID,
+        provider: "privy",
+        isRuntimeExecutionAllowed,
+        walletId: CONNECTION_WALLET_ID,
+        publicKey: CONNECTION_PUBLIC_KEY,
+        label: "Connection wallet",
+        purpose: "root",
+        status: "active",
+        createdAt: expect.any(String),
+      },
     },
     meta: { requestId: expect.any(String), timestamp: expect.any(String) },
   };
@@ -163,13 +169,6 @@ async function request(path: string): Promise<Response> {
     },
     env
   );
-}
-
-async function readProviderOption(response: Response, provider: string) {
-  const body = (await response.json()) as {
-    data: { providers: Array<Record<string, unknown> & { provider: string }> };
-  };
-  return body.data.providers.find((option) => option.provider === provider);
 }
 
 async function seedScope(): Promise<void> {
@@ -219,7 +218,6 @@ async function seedScope(): Promise<void> {
       projectId: PROJECT_ID,
       provider: "para",
       configEncrypted: "test-config",
-      defaultWalletId: CONFIG_WALLET_ID,
       status: "active",
     });
     await insertTestCustodyWalletRow(tx, {
@@ -251,13 +249,6 @@ async function seedScope(): Promise<void> {
         },
       ],
       defaultCustodyWalletId: CONNECTION_WALLET_RECORD_ID,
-    });
-    await insertTestCustodyScopeDefault(tx, {
-      id: "csd_config_connection_compat",
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      defaultCustodyConfigId: CONFIG_ID,
-      defaultCustodyConnectionId: CONNECTION_ID,
     });
   });
 }

@@ -25,7 +25,6 @@ export const TEST_CUSTODY_CONFIG: SigningConfigRecord = {
     encryptedPrivateKey: "test_encrypted_key_placeholder",
   }),
   encryptionVersion: "sdp-custody-encryption-v1",
-  defaultWalletId: TEST_CUSTODY_PUBLIC_KEY,
   status: "active",
   createdAt: "2024-01-01T00:00:00.000Z",
   updatedAt: "2024-01-01T00:00:00.000Z",

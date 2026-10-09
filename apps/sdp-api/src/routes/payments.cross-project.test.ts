@@ -31,7 +31,7 @@ const WALLET_NOT_FOUND_BODY = {
 
 function readOtherProjectState() {
   return getDb(env).queryMany(
-    `SELECT w.*, c.default_wallet_id AS config_default_wallet_id, c.status AS config_status
+    `SELECT w.*, c.status AS config_status
        FROM custody_wallets w
        JOIN custody_configs c ON c.id = w.custody_config_id
       WHERE c.id = ?`,
@@ -66,7 +66,6 @@ describe("Payments routes — custody wallets of another project", () => {
           projectId: OTHER_PROJECT_ID,
           provider: "local",
           configEncrypted: "test-config",
-          defaultWalletId: OTHER_PROJECT_WALLET.walletId,
           status: "active",
         },
       ],
@@ -81,7 +80,6 @@ describe("Payments routes — custody wallets of another project", () => {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
   });
 

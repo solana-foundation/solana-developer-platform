@@ -125,10 +125,6 @@ async function useConnectionSource() {
     deactivatedAt: null,
     createdBy: ACTOR_USER_ID,
   });
-  await db
-    .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = 'cust-pct'")
-    .bind(OTHER_USER_WALLET_ID)
-    .run();
   await insertTestCustodyConnection(db, {
     id: "conn-pct",
     organizationId: ORGANIZATION_ID,
@@ -397,15 +393,8 @@ async function seedRouteState(): Promise<void> {
     db
       .prepare(
         `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, default_wallet_id, status)
-         VALUES ('cust-pct', ?, ?, 'privy', '{}', ?, 'active')`
-      )
-      .bind(ORGANIZATION_ID, PROJECT_ID, ACTOR_WALLET_ID),
-    db
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES ('csd-pct', ?, ?, 'cust-pct')`
+           (id, organization_id, project_id, provider, config_encrypted, status)
+         VALUES ('cust-pct', ?, ?, 'privy', '{}', 'active')`
       )
       .bind(ORGANIZATION_ID, PROJECT_ID),
     db
@@ -741,29 +730,6 @@ describe("Private Channels — transfer access and routes", () => {
       expect(createOrgSignerMock).toHaveBeenCalledTimes(1);
     }
   );
-
-  it("keeps the selected source when the default changes during signer preparation", async () => {
-    createOrgSignerMock.mockImplementationOnce(async (config) => {
-      await getDb(env)
-        .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = 'cust-pct'")
-        .bind(OTHER_USER_WALLET_ID)
-        .run();
-      return createProviderSigner(config);
-    });
-    const response = await postTransfer(
-      {
-        walletId: ACTOR_WALLET_ID,
-        recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
-        amount: "1.5",
-      },
-      humanHeaders({ "Idempotency-Key": "idem_route_transfer" })
-    );
-    expect(response.status).toBe(200);
-    expect(createOrgSignerMock).toHaveBeenCalledTimes(1);
-    expect(createOrgSignerMock).toHaveBeenCalledWith(
-      expect.objectContaining({ walletId: ACTOR_WALLET_ID })
-    );
-  });
 
   it("allows API keys to use the project's default identity", async () => {
     const recipients = await app.request(

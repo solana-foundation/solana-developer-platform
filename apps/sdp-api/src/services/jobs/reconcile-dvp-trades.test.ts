@@ -197,7 +197,6 @@ describe("reconcileDvpTrades", () => {
           projectId: PROJECT_ID,
           provider: "local",
           configEncrypted: "x",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -212,7 +211,6 @@ describe("reconcileDvpTrades", () => {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
   });
 

@@ -1,18 +1,7 @@
-import {
-  buildKeychainUtilaConfig,
-  denormalizeIbmHavenWalletId,
-  normalizeParaWalletId,
-  normalizePrivyWalletId,
-  normalizeTurnkeyWalletId,
-} from "@sdp/custody";
-import {
-  createDfnsApiClient,
-  createIbmHavenApiClient,
-  normalizeDfnsWalletId,
-} from "@sdp/custody/dfns";
+import { buildKeychainUtilaConfig } from "@sdp/custody";
+import { createDfnsApiClient, createIbmHavenApiClient } from "@sdp/custody/dfns";
 import { SigningError, type SigningPort } from "@sdp/custody/signing";
 import type { Address } from "@solana/kit";
-import { getDb } from "@/db";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import {
   KeychainCoinbaseAdapter,
@@ -39,7 +28,6 @@ import {
 type AdapterFactoryContext<TParsed extends ProviderConfigRecord = ProviderConfigRecord> = {
   env: Env;
   orgId: string;
-  record: SigningConfigRecord;
   parsed: TParsed;
   cipher: CustodyCipher;
 };
@@ -51,7 +39,7 @@ type AdapterFactory<TParsed extends ProviderConfigRecord = ProviderConfigRecord>
 export interface PrivyCredentialAdapterInput {
   appId: string;
   appSecret: string;
-  defaultWalletId: string;
+  walletId: string;
   requestDelayMs?: number;
 }
 
@@ -96,7 +84,7 @@ const providerAdapterFactories = {
       apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
     });
   },
-  privy: async ({ env, record, parsed }) => {
+  privy: async ({ env, parsed }) => {
     const appId = env.PRIVY_APP_ID ?? parsed.privyAppId;
     const appSecret = env.PRIVY_APP_SECRET;
 
@@ -113,31 +101,21 @@ const providerAdapterFactories = {
         envVarName: "PRIVY_REQUEST_DELAY_MS",
       });
 
-    const defaultWalletId =
-      record.defaultWalletId ??
-      (parsed.walletId ? normalizePrivyWalletId(parsed.walletId) : undefined);
-
-    if (!defaultWalletId) {
-      throw new SigningError("Privy config missing default wallet ID", "PROVIDER_NOT_CONFIGURED");
-    }
-
     return new KeychainPrivyAdapter({
       appId,
       appSecret,
       apiBaseUrl: env.PRIVY_API_BASE_URL,
       requestDelayMs,
-      defaultWalletId,
     });
   },
-  coinbase_cdp: async ({ env, record, parsed }) => {
+  coinbase_cdp: async ({ env, parsed }) => {
     const apiKeyId = env.COINBASE_CDP_API_KEY_ID;
     const apiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
     const walletSecret = env.COINBASE_CDP_WALLET_SECRET;
-    const defaultWalletId = record.defaultWalletId;
 
-    if (!apiKeyId || !apiKeySecret || !walletSecret || !defaultWalletId) {
+    if (!apiKeyId || !apiKeySecret || !walletSecret) {
       throw new SigningError(
-        "Coinbase CDP configuration is missing credentials or default wallet ID",
+        "Coinbase CDP configuration is missing credentials",
         "PROVIDER_NOT_CONFIGURED"
       );
     }
@@ -148,10 +126,9 @@ const providerAdapterFactories = {
       walletSecret,
       apiBaseUrl: env.COINBASE_CDP_API_BASE_URL,
       requestDelayMs: parsed.requestDelayMs,
-      defaultWalletId,
     });
   },
-  para: async ({ env, record, parsed }) => {
+  para: async ({ env, parsed }) => {
     const apiKey = env.PARA_API_KEY;
     const requestDelayMs =
       parsed.requestDelayMs ??
@@ -159,25 +136,17 @@ const providerAdapterFactories = {
         envVarName: "PARA_REQUEST_DELAY_MS",
       });
 
-    const defaultWalletId =
-      record.defaultWalletId ??
-      (parsed.walletId ? normalizeParaWalletId(parsed.walletId) : undefined);
-
-    if (!apiKey || !defaultWalletId) {
-      throw new SigningError(
-        "Para configuration is missing API key or default wallet ID",
-        "PROVIDER_NOT_CONFIGURED"
-      );
+    if (!apiKey) {
+      throw new SigningError("Para configuration is missing API key", "PROVIDER_NOT_CONFIGURED");
     }
 
     return new KeychainParaAdapter({
       apiKey,
       apiBaseUrl: env.PARA_API_BASE_URL,
       requestDelayMs,
-      defaultWalletId,
     });
   },
-  turnkey: async ({ env, record, parsed }) => {
+  turnkey: async ({ env, parsed }) => {
     const apiPublicKey = env.TURNKEY_API_PUBLIC_KEY;
     const apiPrivateKey = env.TURNKEY_API_PRIVATE_KEY;
     const organizationId = parsed.organizationId ?? env.TURNKEY_ORGANIZATION_ID;
@@ -187,33 +156,9 @@ const providerAdapterFactories = {
         envVarName: "TURNKEY_REQUEST_DELAY_MS",
       });
 
-    const defaultWalletId =
-      record.defaultWalletId ??
-      (parsed.privateKeyId ? normalizeTurnkeyWalletId(parsed.privateKeyId) : undefined);
-
-    let defaultWalletPublicKey = parsed.defaultWalletPublicKey ?? env.TURNKEY_PUBLIC_KEY;
-    if (!defaultWalletPublicKey && defaultWalletId) {
-      const wallet = await getDb(env)
-        .prepare(
-          `SELECT public_key
-         FROM custody_wallets
-         WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
-         LIMIT 1`
-        )
-        .bind(record.id, defaultWalletId)
-        .first<{ public_key: string }>();
-      defaultWalletPublicKey = wallet?.public_key;
-    }
-
-    if (
-      !apiPublicKey ||
-      !apiPrivateKey ||
-      !organizationId ||
-      !defaultWalletId ||
-      !defaultWalletPublicKey
-    ) {
+    if (!apiPublicKey || !apiPrivateKey || !organizationId) {
       throw new SigningError(
-        "Turnkey configuration is missing credentials or default wallet metadata",
+        "Turnkey configuration is missing credentials",
         "PROVIDER_NOT_CONFIGURED"
       );
     }
@@ -224,49 +169,22 @@ const providerAdapterFactories = {
       organizationId,
       apiBaseUrl: env.TURNKEY_API_BASE_URL,
       requestDelayMs,
-      defaultWalletId,
-      defaultWalletPublicKey,
     });
   },
-  dfns: async ({ env, record, parsed }) => {
-    const defaultWalletId =
-      record.defaultWalletId ??
-      (parsed.walletId ? normalizeDfnsWalletId(parsed.walletId) : undefined);
-
-    if (!defaultWalletId) {
-      throw new SigningError(
-        "DFNS configuration is missing a default wallet ID",
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
+  dfns: async ({ env }) => {
     return new KeychainDfnsAdapter({
       client: await createDfnsApiClient(env),
-      defaultWalletId,
     });
   },
-  ibm_haven: async ({ env, record, parsed }) => {
-    const defaultWalletId =
-      (record.defaultWalletId ? denormalizeIbmHavenWalletId(record.defaultWalletId) : undefined) ??
-      parsed.walletId;
-
-    if (!defaultWalletId) {
-      throw new SigningError(
-        "IBM Digital Asset Haven configuration is missing a default wallet ID",
-        "PROVIDER_NOT_CONFIGURED"
-      );
-    }
-
+  ibm_haven: async ({ env }) => {
     return new KeychainIbmHavenAdapter({
       client: await createIbmHavenApiClient(env),
-      defaultWalletId,
     });
   },
   anchorage: async () => new LifecycleOnlyAdapter("anchorage"),
-  utila: async ({ env, record, parsed }) => {
+  utila: async ({ env, parsed }) => {
     return new KeychainUtilaAdapter(
       buildKeychainUtilaConfig(env, {
-        defaultWalletId: record.defaultWalletId,
         network: parsed.network,
         vaultId: parsed.vaultId,
       })
@@ -308,10 +226,7 @@ export async function createAdapterFromEncryptedConfig(
   // their first await. Some runtimes report the adopted, briefly
   // handler-less promise as an unhandled rejection — dropping the await fails
   // shared-module test runs and would log rejection noise in production.
-  return instrumentVendorPort(
-    parsed.provider,
-    await factory({ env, orgId, record, parsed, cipher })
-  );
+  return instrumentVendorPort(parsed.provider, await factory({ env, orgId, parsed, cipher }));
 }
 
 /**
@@ -320,10 +235,10 @@ export async function createAdapterFromEncryptedConfig(
  * (privy, byok) pair when the release channel leaves it out, before reading the input.
  *
  * @param env - Process environment naming the release channel and Privy API settings.
- * @param input - The connection's decrypted Privy credential and default wallet.
+ * @param input - The connection's decrypted Privy credential and the exact wallet to sign with.
  * @param input.appId - The Privy app ID.
  * @param input.appSecret - The Privy app secret.
- * @param input.defaultWalletId - The Privy wallet the adapter signs with by default.
+ * @param input.walletId - The connection's Privy wallet the adapter signs with.
  * @param input.requestDelayMs - The connection's request delay, else `PRIVY_REQUEST_DELAY_MS`.
  * @returns The Privy signing adapter.
  * @throws 403 when the (privy, byok) pair is outside the release channel.
@@ -333,17 +248,14 @@ export function createPrivyAdapterFromCredential(
   input: PrivyCredentialAdapterInput
 ): SigningPort {
   assertCustodyProviderAvailable(env, "privy", "byok");
-  if (!input.appId || !input.appSecret || !input.defaultWalletId) {
-    throw new SigningError(
-      "Privy credential or default wallet is unavailable",
-      "PROVIDER_NOT_CONFIGURED"
-    );
+  if (!input.appId || !input.appSecret || !input.walletId) {
+    throw new SigningError("Privy credential or wallet is unavailable", "PROVIDER_NOT_CONFIGURED");
   }
 
   return new KeychainPrivyAdapter({
     appId: input.appId,
     appSecret: input.appSecret,
-    defaultWalletId: input.defaultWalletId,
+    defaultWalletId: input.walletId,
     apiBaseUrl: env.PRIVY_API_BASE_URL,
     requestDelayMs:
       input.requestDelayMs ??

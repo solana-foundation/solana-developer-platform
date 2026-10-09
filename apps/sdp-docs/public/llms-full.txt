@@ -5618,14 +5618,10 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 | `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/approve` | Approve wallet approval request |
 | `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/cancel` | Cancel wallet approval request |
 | `POST` | `/v1/wallets/approval-requests/{approvalRequestId}/reject` | Reject wallet approval request |
-| `GET` | `/v1/wallets/config` | Get wallet signing config |
 | `GET` | `/v1/wallets/configs` | List wallet signing configs |
-| `POST` | `/v1/wallets/default-wallet` | Set default wallet |
 | `POST` | `/v1/wallets/initialize` | Initialize wallet signing |
 | `GET` | `/v1/wallets/public-key` | Get wallet public key |
 | `POST` | `/v1/wallets/signer-check` | Check signer via simulated memo transaction |
-| `POST` | `/v1/wallets/switch` | Switch wallet signing provider |
-| `GET` | `/v1/wallets/switch-options` | List switch provider options |
 
 ---
 

@@ -14,7 +14,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
-  createOrgSignerMock,
+  createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   mockRecurringActivationRpc,
   seedCounterparty,
@@ -49,7 +49,7 @@ export function installRecurringExecutionHooks() {
   beforeEach(async () => {
     sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
-    createOrgSignerMock.mockResolvedValue(sourceSigner);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
     mockRecurringActivationRpc({});
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()
@@ -311,8 +311,8 @@ export async function seedRecurringDatabaseTenant(options: {
     db
       .prepare(
         `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, default_wallet_id, status)
-         VALUES (?, ?, ?, 'local', 'encrypted', NULL, 'active')`
+           (id, organization_id, project_id, provider, config_encrypted, status)
+         VALUES (?, ?, ?, 'local', 'encrypted', 'active')`
       )
       .bind(options.custodyConfigId, options.organizationId, options.projectId),
     db
@@ -327,9 +327,6 @@ export async function seedRecurringDatabaseTenant(options: {
         options.providerWalletId,
         options.publicKey
       ),
-    db
-      .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = ?")
-      .bind(options.providerWalletId, options.custodyConfigId),
   ]);
 }
 

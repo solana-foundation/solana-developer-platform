@@ -1,72 +1,39 @@
-import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/custody";
+import type { CustodyProvider } from "@sdp/custody";
 import { normalizePem } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { redactCredentialString } from "@sdp/redaction";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
-import { created, success } from "@/lib/response";
+import { AppError, badRequest } from "@/lib/errors";
+import { created } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
-import { getLogger } from "@/runtime/logger";
 import { assertApiKeyNotWalletScoped } from "@/services/api-key-scope.service";
-import { type AuditIntent, AuditService } from "@/services/audit.service";
+import { AuditService } from "@/services/audit.service";
 import { provisionFireblocksVaultAccount } from "@/services/custody/provisioning";
-import {
-  type CustodyConnectionSelectionResult,
-  CustodyRuntimeTargets,
-  type CustodyScopeSelection,
-  selectCustodyConnectionTarget,
-} from "@/services/domain/signing/custody-runtime-target";
 import {
   type FireblocksProviderConfig,
   parseConfigRecord,
 } from "@/services/domain/signing/provider-config";
-import { createSigningService, type ProviderReuseState } from "@/services/domain/signing.service";
+import { createSigningService } from "@/services/domain/signing.service";
 import {
   assertCustodyProviderAvailable,
-  assertCustodyProviderEntitled,
   assertProviderAvailable,
-  getEnabledProviders,
 } from "@/services/provider-availability.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
-import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
+import { type AppContext, resolveActor } from "../context";
 import type {
   InitializeSigningRequest,
   InitializeSigningResponse,
   initializeSigningSchema,
-  SwitchProviderOptionsResponse,
-  SwitchSigningResponse,
-  switchSigningSchema,
 } from "../schemas";
 
 type SigningInitializationResult = {
   configId: string;
   publicKey: string;
   walletId: string;
-  defaultSelection?: CustodyScopeSelection;
 };
-
-function hasReusableConfigWallet(
-  provider: CustodyProvider,
-  reuseState: ProviderReuseState
-): boolean {
-  switch (provider) {
-    case "privy":
-      return reuseState.privy;
-    case "coinbase_cdp":
-      return reuseState.coinbase_cdp;
-    case "para":
-      return reuseState.para;
-    case "turnkey":
-      return reuseState.turnkey;
-    case "utila":
-      return reuseState.utila;
-    default:
-      return false;
-  }
-}
 
 export const initializeSigning = async (
   c: ValidatedBodyContext<typeof initializeSigningSchema>
@@ -74,8 +41,8 @@ export const initializeSigning = async (
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
-  // Connecting a provider changes which wallet signs for the whole scope —
-  // outside any wallet-scoped key's bindings by definition.
+  // Connecting a provider creates a config and its root wallet — outside any
+  // wallet-scoped key's bindings by definition.
   assertApiKeyNotWalletScoped(getAuth(c), "initialize custody providers");
 
   const body = c.req.valid("json");
@@ -112,278 +79,6 @@ export const initializeSigning = async (
   } catch (error) {
     handleSigningInitializationError(error);
   }
-};
-
-export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigningSchema>) => {
-  const actor = resolveActor(c);
-
-  // Switching the default provider re-points the scope's default signer —
-  // outside any wallet-scoped key's bindings by definition.
-  assertApiKeyNotWalletScoped(getAuth(c), "switch custody providers");
-
-  const body = c.req.valid("json");
-
-  const signingService = createSigningService(c.env, getRequestTenantScope(c));
-  const auditService = new AuditService(getDb(c.env));
-  const projectId = requireProjectId(c);
-  const requestedProvider = body.provider;
-  const providerRequest = "connectionId" in body ? null : body;
-  let intent: AuditIntent | undefined;
-  let initializedConfig: SigningInitializationResult | undefined;
-
-  try {
-    let connectionId = "connectionId" in body ? body.connectionId : undefined;
-    if (!connectionId && requestedProvider) {
-      const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
-        kind: "provider",
-        organizationId: actor.organizationId,
-        projectId,
-        provider: requestedProvider,
-      });
-      if (target?.kind === "connection") {
-        connectionId = target.connectionId;
-      }
-    }
-
-    if (connectionId) {
-      const target = await admitConnectionSelection(
-        c,
-        actor.organizationId,
-        projectId,
-        connectionId,
-        requestedProvider
-      );
-      intent = await auditService.beginCritical(c, {
-        action: "update",
-        resourceType: "custody_connection",
-        resourceId: target.connectionId,
-        metadata: {
-          event: "default_provider_selection_started",
-          provider: target.provider,
-          projectId,
-          ownerKind: "connection",
-        },
-      });
-      const result = await selectCustodyConnectionTarget(getDb(c.env), c.env, {
-        organizationId: actor.organizationId,
-        projectId: target.projectId,
-        connectionId,
-        provider: requestedProvider,
-      });
-      await completeDefaultProviderSelection(c, auditService, intent, result.connectionId, [
-        result.selection,
-      ]);
-      clearWalletCaches();
-      return created(c, toSwitchSigningResponse(result));
-    }
-
-    if (!providerRequest) {
-      throw badRequest("Provider is required when connectionId is omitted");
-    }
-    const targetProvider = providerRequest.provider;
-    assertCustodyProviderAvailable(c.env, targetProvider, "managed");
-    const existingScopeConfig = await new CustodyConfigStore(getDb(c.env), c.env).findByProvider(
-      actor.organizationId,
-      projectId,
-      targetProvider
-    );
-    let result: SigningInitializationResult;
-
-    if (existingScopeConfig?.status === "active") {
-      await assertProviderAvailable(
-        c.env,
-        getDb(c.env),
-        actor.organizationId,
-        "custody",
-        targetProvider
-      );
-      result = await getActiveConfigInitializationResult(
-        c,
-        existingScopeConfig.id,
-        existingScopeConfig.defaultWalletId
-      );
-      intent = await beginConfigSelection(c, auditService, targetProvider, existingScopeConfig.id);
-      const selection = await signingService.setDefaultConfiguration(
-        actor.organizationId,
-        projectId,
-        existingScopeConfig.id
-      );
-      await completeDefaultProviderSelection(c, auditService, intent, result.configId, [selection]);
-    } else {
-      await assertProviderInitializationAllowed(c, actor.organizationId, targetProvider);
-      const organizationSlug = await resolveOrganizationSlug(c, actor.organizationId);
-      intent = await beginConfigSelection(c, auditService, targetProvider, existingScopeConfig?.id);
-      result = await initializeProviderConnection(
-        c,
-        signingService,
-        c.env,
-        actor.organizationId,
-        organizationSlug,
-        projectId,
-        providerRequest
-      );
-      initializedConfig = result;
-
-      // Initialization may itself persist a scope default. Preserve that confirmed
-      // substep even if the final explicit selection later fails. A preflight
-      // status cannot prove this request created or reactivated the Config.
-      try {
-        await auditService.log(c, {
-          action: "maintenance",
-          resourceType: "audit_ledger",
-          resourceId: intent.id,
-          metadata: {
-            event: "provider_initialization_completed",
-            configId: result.configId,
-            provider: targetProvider,
-            projectId,
-            commandAuditIntentId: intent.id,
-            defaultSelection: result.defaultSelection ?? null,
-          },
-        });
-      } catch {
-        getLogger().error({
-          event: "custody_switch_initialization_audit_failed",
-          auditIntentId: intent.id,
-          organizationId: actor.organizationId,
-          projectId,
-          configId: result.configId,
-          defaultSelection: result.defaultSelection ?? null,
-          reason: "audit_persistence_failed",
-        });
-      }
-
-      const selection = await signingService.setDefaultConfiguration(
-        actor.organizationId,
-        projectId,
-        result.configId
-      );
-      await completeDefaultProviderSelection(c, auditService, intent, result.configId, [
-        ...(result.defaultSelection ? [result.defaultSelection] : []),
-        selection,
-      ]);
-    }
-
-    clearWalletCaches();
-
-    return created(c, toSwitchSigningResponse(result));
-  } catch (error) {
-    if (intent) {
-      // A failed COMMIT response or nested Provider call is not proof of rollback.
-      // Keep the intent unresolved; a reread could observe another request's write.
-      getLogger().error({
-        event: "custody_default_selection_outcome_unknown",
-        auditIntentId: intent.id,
-        organizationId: actor.organizationId,
-        projectId,
-        initializedConfigId: initializedConfig?.configId ?? null,
-        initializationDefaultSelection: initializedConfig?.defaultSelection ?? null,
-        reason: "selection_outcome_unconfirmed",
-      });
-    }
-    handleSigningInitializationError(error);
-  }
-};
-
-async function admitConnectionSelection(
-  c: AppContext,
-  organizationId: string,
-  projectId: string,
-  connectionId: string,
-  provider: CustodyProvider | undefined
-) {
-  const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
-    kind: "connection",
-    organizationId,
-    projectId,
-    connectionId,
-  });
-  if (target?.kind !== "connection") throw notFound("Custody Connection");
-  if (provider && provider !== target.provider) {
-    throw badRequest("Provider does not match Custody Connection");
-  }
-  assertCustodyProviderAvailable(c.env, target.provider, "byok");
-  await assertCustodyProviderEntitled(c.env, getDb(c.env), organizationId, target.provider);
-  if (!target.isRuntimeAvailable) throw conflict("Custody Connection is unavailable");
-  return target;
-}
-
-export const getSwitchProviderOptions = async (c: AppContext) => {
-  const actor = resolveActor(c);
-  const projectId = requireProjectId(c);
-  const signingService = createSigningService(c.env, getRequestTenantScope(c));
-  const [enabled, reuseState, configurations, effectiveTarget] = await Promise.all([
-    getEnabledProviders(c.env, getDb(c.env), actor.organizationId, {
-      rampProviderStages: c.get("rampProviderStages"),
-    }),
-    signingService.getProviderReuseState(actor.organizationId, projectId),
-    signingService.getConfigurations(actor.organizationId, projectId),
-    new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
-      kind: "effective",
-      organizationId: actor.organizationId,
-      projectId,
-    }),
-  ]);
-  const enabledProviders = enabled.custody;
-
-  const activeProviders = new Set(configurations.configs.map((config) => config.provider));
-  const effectiveConnection = effectiveTarget?.kind === "connection" ? effectiveTarget : null;
-  const effectiveConnectionHasReusableWallet = effectiveConnection
-    ? Boolean(
-        await getDb(c.env)
-          .prepare(
-            `SELECT w.id
-             FROM custody_connections c
-             JOIN custody_wallets w
-               ON w.id = c.default_custody_wallet_id
-              AND w.custody_connection_id = c.id
-             WHERE c.id = ?
-               AND c.organization_id = ?
-               AND c.project_id = ?
-               AND c.status = 'active'
-               AND w.status = 'active'
-             LIMIT 1`
-          )
-          .bind(
-            effectiveConnection.connectionId,
-            effectiveConnection.organizationId,
-            effectiveConnection.projectId
-          )
-          .first<{ id: string }>()
-      )
-    : false;
-  const defaultProvider =
-    effectiveConnection?.provider ??
-    configurations.configs.find((config) => config.id === configurations.defaultConfigId)
-      ?.provider ??
-    null;
-
-  const response: SwitchProviderOptionsResponse = {
-    providers: CUSTODY_PROVIDERS.filter(
-      (provider) =>
-        enabledProviders.includes(provider) || effectiveConnection?.provider === provider
-    ).map((provider) => {
-      const isEffectiveConnection = effectiveConnection?.provider === provider;
-      const hasReusableWallet = isEffectiveConnection
-        ? effectiveConnectionHasReusableWallet
-        : hasReusableConfigWallet(provider, reuseState);
-
-      const needsWalletLabel =
-        provider === "fireblocks" ? false : provider === "local" ? true : !hasReusableWallet;
-
-      return {
-        provider,
-        hasReusableWallet,
-        needsWalletLabel,
-        isActive: isEffectiveConnection
-          ? effectiveConnection.isRuntimeAvailable
-          : activeProviders.has(provider),
-        isDefault: defaultProvider === provider,
-      };
-    }),
-  };
-
-  return success(c, response);
 };
 
 async function assertProviderInitializationAllowed(
@@ -487,26 +182,6 @@ async function initializeProviderConnection(
   }
 }
 
-async function getActiveConfigInitializationResult(
-  c: AppContext,
-  configId: string,
-  defaultWalletId: string | null
-): Promise<SigningInitializationResult> {
-  const preferredWallet = await getPreferredWalletForConfig(
-    getDb(c.env),
-    configId,
-    defaultWalletId
-  );
-  if (!preferredWallet) {
-    throw conflict("Active provider is missing an active wallet");
-  }
-  return {
-    configId,
-    publicKey: preferredWallet.publicKey,
-    walletId: preferredWallet.walletId,
-  };
-}
-
 async function findScopeFireblocksConfig(
   c: AppContext,
   organizationId: string,
@@ -535,49 +210,6 @@ async function resolveOrganizationSlug(c: AppContext, organizationId: string): P
   return row?.slug?.trim() || organizationId;
 }
 
-function beginConfigSelection(
-  c: AppContext,
-  auditService: AuditService,
-  provider: CustodyProvider,
-  configId: string | undefined
-): Promise<AuditIntent> {
-  return auditService.beginCritical(c, {
-    action: "update",
-    resourceType: "custody_config",
-    resourceId: configId,
-    metadata: {
-      event: "default_provider_selection_started",
-      provider,
-      projectId: requireProjectId(c),
-      ownerKind: "config",
-    },
-  });
-}
-
-async function completeDefaultProviderSelection(
-  c: AppContext,
-  auditService: AuditService,
-  intent: AuditIntent,
-  resourceId: string,
-  selections: CustodyScopeSelection[]
-): Promise<void> {
-  const changed = selections.some(
-    (selection) =>
-      selection.previousConfigId !== selection.selectedConfigId ||
-      selection.previousConnectionId !== selection.selectedConnectionId
-  );
-  await auditService.completeCritical(c, intent, {
-    ...(changed
-      ? { resourceId }
-      : { action: "maintenance", resourceType: "audit_ledger", resourceId: intent.id }),
-    metadata: {
-      event: changed ? "default_provider_changed" : "default_provider_selection_completed",
-      completionStatus: changed ? "success" : "noop",
-      selections,
-    },
-  });
-}
-
 function toInitializeSigningResponse(
   result: SigningInitializationResult
 ): InitializeSigningResponse {
@@ -586,19 +218,6 @@ function toInitializeSigningResponse(
     publicKey: result.publicKey,
     walletId: result.walletId,
   };
-}
-
-function toSwitchSigningResponse(
-  result: SigningInitializationResult | CustodyConnectionSelectionResult
-): SwitchSigningResponse {
-  if ("connectionId" in result) {
-    return {
-      connectionId: result.connectionId,
-      publicKey: result.publicKey,
-      walletId: result.walletId,
-    };
-  }
-  return toInitializeSigningResponse(result);
 }
 
 function handleSigningInitializationError(error: unknown): never {

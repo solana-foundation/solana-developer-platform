@@ -77,7 +77,6 @@ async function seed(): Promise<void> {
           projectId: `prj_${org}`,
           provider: "local",
           configEncrypted: "x",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -92,7 +91,6 @@ async function seed(): Promise<void> {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
   }
 

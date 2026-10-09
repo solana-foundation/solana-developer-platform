@@ -37,7 +37,6 @@ export async function readDvpActionWallets(
   const wallets = await targets.listWallets({
     organizationId: request.organizationId,
     projectId: request.projectId,
-    includeAllProviders: true,
   });
   const visible = new Map(
     wallets

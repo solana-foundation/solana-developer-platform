@@ -4,25 +4,23 @@
 
 import { CUSTODY_PROVIDERS } from "@sdp/custody";
 import type {
-  CustodyConfigResponse,
   CustodyConfigsResponse,
   CustodyWalletAggregateResponse,
   CustodyWalletByIdResponse,
   CustodyWalletMetadataResponse,
+  CustodyWalletOwnerTarget,
   CustodyWalletResponse,
   CustodyWalletsResponse,
   DeleteWalletResponse,
   InitializeSigningResponse,
   SignerCheckResponse,
-  SwitchProviderOptionsResponse,
-  SwitchSigningResponse,
 } from "@sdp/types";
 import { z } from "zod";
 
 const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
 
 // Provider API endpoints are deployment configuration, not tenant input.
-// Keep initialize/switch payloads limited to wallet-scoped choices.
+// Keep initialize payloads limited to wallet-scoped choices.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Initialize Signing
@@ -110,15 +108,43 @@ export type InitializeSigningRequest = z.infer<typeof initializeSigningSchema>;
 // Create Wallet
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const createWalletSchema = z.object({
-  connectionId: z.string().min(1).optional(),
-  provider: custodyProviderSchema.optional(),
+// A wallet lives under exactly one provider account: the provider's Managed
+// config (a project holds one per provider) or a BYOK connection. Each variant
+// forbids the other's key, so a body naming both, or neither, matches no variant.
+export const managedWalletOwnerSchema = z.object({
+  provider: custodyProviderSchema,
+  connectionId: z.never().optional(),
+});
+
+export const connectionWalletOwnerSchema = z.object({
+  connectionId: z.string().min(1),
+  provider: z.never().optional(),
+});
+
+const CUSTODY_WALLET_OWNER_ERROR =
+  "Name exactly one of provider (Managed) or connectionId (BYOK); custody defaults were removed";
+
+export const custodyWalletOwnerSchema = z.union(
+  [managedWalletOwnerSchema, connectionWalletOwnerSchema],
+  { error: CUSTODY_WALLET_OWNER_ERROR }
+) satisfies z.ZodType<CustodyWalletOwnerTarget>;
+
+const walletCreationFields = {
   label: z.string().max(100).optional(),
   purpose: z
     .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
     .optional(),
-  setDefault: z.boolean().optional(),
-});
+};
+
+export const createManagedWalletSchema = managedWalletOwnerSchema.extend(walletCreationFields);
+
+export const createConnectionWalletSchema =
+  connectionWalletOwnerSchema.extend(walletCreationFields);
+
+export const createWalletSchema = z.union(
+  [createManagedWalletSchema, createConnectionWalletSchema],
+  { error: CUSTODY_WALLET_OWNER_ERROR }
+);
 
 export type CreateWalletRequest = z.infer<typeof createWalletSchema>;
 
@@ -127,46 +153,6 @@ export const updateWalletSchema = z.object({
 });
 
 export type UpdateWalletRequest = z.infer<typeof updateWalletSchema>;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Switch Signing Provider
-// ═══════════════════════════════════════════════════════════════════════════
-
-const exactConnectionSwitchSchema = z
-  .object({
-    connectionId: z.string().min(1),
-    provider: custodyProviderSchema.optional(),
-  })
-  .strict();
-
-const providerSwitchSchema = z
-  .preprocess((value, ctx) => {
-    if (value !== null && typeof value === "object" && Object.hasOwn(value, "connectionId")) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["connectionId"],
-        message: "connectionId selects the exact-connection request variant",
-      });
-      return z.NEVER;
-    }
-    return value;
-  }, initializeSigningSchema)
-  .meta({ not: { required: ["connectionId"] } });
-
-export const switchSigningSchema = z.union([exactConnectionSwitchSchema, providerSwitchSchema]);
-
-export type SwitchSigningRequest = z.infer<typeof switchSigningSchema>;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Set Default Wallet
-// ═══════════════════════════════════════════════════════════════════════════
-
-export const setDefaultWalletSchema = z.object({
-  provider: custodyProviderSchema.optional(),
-  walletId: z.string().min(1),
-});
-
-export type SetDefaultWalletRequest = z.infer<typeof setDefaultWalletSchema>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Delete Wallet
@@ -216,7 +202,6 @@ export const approvalRequestParamsSchema = z.object({
 // ═══════════════════════════════════════════════════════════════════════════
 
 export type {
-  CustodyConfigResponse,
   CustodyConfigsResponse,
   CustodyWalletAggregateResponse,
   CustodyWalletByIdResponse,
@@ -226,6 +211,4 @@ export type {
   DeleteWalletResponse,
   InitializeSigningResponse,
   SignerCheckResponse,
-  SwitchProviderOptionsResponse,
-  SwitchSigningResponse,
 };

@@ -84,7 +84,6 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
           projectId: PROJECT,
           provider: "local",
           configEncrypted: "encrypted",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -108,7 +107,6 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
   });
 

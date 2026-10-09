@@ -125,7 +125,6 @@ describe("vault exposure cap: the ledger write gate", () => {
         projectId: project,
         provider: "local",
         configEncrypted: "encrypted",
-        defaultWalletId: null,
         status: "active",
       });
       await insertTestCustodyWalletRow(db, {

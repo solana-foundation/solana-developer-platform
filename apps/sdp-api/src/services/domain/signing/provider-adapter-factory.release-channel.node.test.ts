@@ -32,7 +32,6 @@ const FIREBLOCKS_RECORD: SigningConfigRecord = {
     assetId: "SOL_TEST",
   }),
   encryptionVersion: "v2",
-  defaultWalletId: null,
   status: "active",
   createdAt: "2026-10-08T00:00:00.000Z",
   updatedAt: "2026-10-08T00:00:00.000Z",
@@ -60,7 +59,7 @@ function createObservedCredential(read: () => void): PrivyCredentialAdapterInput
       read();
       return "privy-secret-factory-release-channel";
     },
-    get defaultWalletId() {
+    get walletId() {
       read();
       return "privy-wallet-factory-release-channel";
     },

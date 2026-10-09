@@ -63,7 +63,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
           projectId: TEST_PROJECT_ID,
           provider: "local",
           configEncrypted: "encrypted",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -78,7 +77,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
 
     repo = createPostgresPaymentRequestsRepository(db);

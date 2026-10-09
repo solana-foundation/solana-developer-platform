@@ -410,7 +410,7 @@ earn.get(
 // such a key ever meets when it names a wallet.
 //
 // `policyGate` is what makes this route governed at all. It reaches
-// `createOrgSigner` and broadcasts a value-moving transaction, so without the
+// `createOrgSignerForCustodyWallet` and broadcasts a value-moving transaction, so without the
 // gate an org's wallet deny rules, approval requirements, amount/asset limits
 // and destination controls were all bypassed — the handler simply never asked.
 // The gate must sit AFTER `requirePermissions` and `validateBody`, and
@@ -447,7 +447,7 @@ earn.get(
 );
 // The EXIT half (PRO-1702): redeem a position's shares back to the custody
 // wallet that holds them. Policy-gated for the same reason the deposit is —
-// it reaches `createOrgSigner` and broadcasts value-moving transactions, and
+// it reaches `createOrgSignerForCustodyWallet` and broadcasts value-moving transactions, and
 // wallet policy is the ORG'S control over its own custody, not a provider
 // gate. Beyond it this route takes only the capability answer (501 when the
 // provider cannot build an exit): ADR 0002 exit safety forbids money-out
@@ -567,7 +567,7 @@ earn.get(
 //
 // Deliberately NO `policyGate` and NO `wallets:read`, and that is not the
 // deposit route's cautionary tale repeating: wallet policy governs the org's
-// own custody and stands between a request and `createOrgSigner`. These routes
+// own custody and stands between a request and `createOrgSignerForCustodyWallet`. These routes
 // never resolve a signer and never touch custody — the owner's own
 // signature is the authorization, and there is no signing sink here for the
 // value-moving conformance inventory to find. `earn:write` gates both submits

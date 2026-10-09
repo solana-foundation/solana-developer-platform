@@ -90,7 +90,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
       throw conflict("Custody wallet ownership is ambiguous");
     }
     // Resolve once to an exact row, then admit before any signer, Kora, or RPC work.
-    // The exact signer repeats its runtime guard; a default change cannot select another wallet.
+    // The exact signer repeats its runtime guard against the same wallet row.
     await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
       auth.organizationId,
       projectId,

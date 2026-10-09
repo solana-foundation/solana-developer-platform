@@ -547,27 +547,30 @@ describe("OpenAPI spec", () => {
     );
   });
 
-  it("documents exact Connection wallet creation without requiring provider", () => {
+  it("documents wallet creation as exactly one owner: provider or connectionId", () => {
     const doc = createOpenApiDocument();
     const operation = doc.paths?.["/v1/wallets"]?.post;
     const requestSchema = getJsonSchema(operation?.requestBody);
 
-    expect(requestSchema.properties?.connectionId).toMatchObject({
+    expect(
+      requestSchema.anyOf?.map((variant) => ({ required: variant.required, not: variant.not }))
+    ).toEqual([
+      { required: ["provider"], not: { required: ["connectionId"] } },
+      { required: ["connectionId"], not: { required: ["provider"] } },
+    ]);
+    expect(requestSchema.anyOf?.[1]?.properties?.connectionId).toMatchObject({
       type: "string",
       minLength: 1,
     });
-    expect(requestSchema.properties?.connectionId?.example).toBeUndefined();
-    expect(requestSchema.required ?? []).not.toContain("connectionId");
-    expect(requestSchema.required ?? []).not.toContain("provider");
+    expect(requestSchema.properties).toBeUndefined();
     expect(requestSchema.example).toEqual({
       provider: "privy",
       label: "Mint authority wallet",
       purpose: "mint_authority",
-      setDefault: true,
     });
   });
 
-  it("documents optional exact Connection provisioning for both API-key create routes", () => {
+  it("documents optional exact-owner provisioning for both API-key create routes", () => {
     const doc = createOpenApiDocument();
 
     for (const path of ["/v1/api-keys", "/v1/projects/{projectId}/api-keys"]) {
@@ -575,8 +578,15 @@ describe("OpenAPI spec", () => {
       const requestSchema = getJsonSchema(operation?.requestBody);
 
       expect(requestSchema.properties?.connectionId).toBeUndefined();
-      expect(JSON.stringify(requestSchema.properties?.provisionWallet)).toContain("connectionId");
-      expect(JSON.stringify(requestSchema.properties?.provisionWallet)).toContain("boolean");
+      expect(
+        requestSchema.properties?.provisionWallet?.anyOf?.map((variant) => ({
+          required: variant.required,
+          not: variant.not,
+        }))
+      ).toEqual([
+        { required: ["provider"], not: { required: ["connectionId"] } },
+        { required: ["connectionId"], not: { required: ["provider"] } },
+      ]);
       expect(requestSchema.example).toMatchObject({
         provisionWallet: { connectionId: "cconn_123" },
       });

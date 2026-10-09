@@ -52,7 +52,7 @@ async function getCustodyWallets(
   request: SdpApiClient["request"]
 ): Promise<CustodyWalletSummary[]> {
   // Wallet cards refresh balances client-side; avoid blocking the overview render on balance RPCs.
-  const res = await request("/v1/wallets?includeAllProviders=true");
+  const res = await request("/v1/wallets");
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`SDP API request failed (${res.status}): ${body}`);

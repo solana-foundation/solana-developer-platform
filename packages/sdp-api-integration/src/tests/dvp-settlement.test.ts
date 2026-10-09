@@ -14,6 +14,7 @@ import {
   env,
   fundAddressToLamports,
   INTEGRATION_CUSTODY_PROVIDER,
+  type IntegrationCustodyWallet,
   initIntegrationSuite,
   RUN_INTEGRATION_TESTS,
   requestWithApiKey,
@@ -22,7 +23,8 @@ import {
   TEST_PROJECT,
 } from "../helpers/integration";
 
-const { createOrgSigner, createSigningService, CustodyConfigStore, getDb } = apiTestSupport;
+const { createOrgSignerForCustodyWallet, createSigningService, CustodyConfigStore, getDb } =
+  apiTestSupport;
 
 /** Covers the custody wallet's funding transaction and account rent. */
 const WALLET_FUNDING_LAMPORTS = 2_000_000_000;
@@ -84,37 +86,35 @@ async function tokenBalance(address: string): Promise<bigint> {
 describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and funding", () => {
   const originalMarketsEnabled = env.MARKETS_ENABLED;
   let localPartyWallet: ApiTestCustodyWallet | undefined;
+  let custodyWallet: IntegrationCustodyWallet;
 
   beforeAll(async () => {
     env.MARKETS_ENABLED = "true";
     const state = await initIntegrationSuite();
+    custodyWallet = state.custodyWallet;
     if (INTEGRATION_CUSTODY_PROVIDER === "local") {
       const signing = createSigningService(env as ApiTestEnv);
-      const partyWallet = await signing.getWalletById(
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        state.custodyWallet.id
-      );
-      if (!partyWallet) throw new Error("Local DvP party wallet was not initialized");
-      localPartyWallet = partyWallet;
-      await fundAddressToLamports(partyWallet.publicKey, WALLET_FUNDING_LAMPORTS);
-
       const localConfig = await signing.getConfigurationByProvider(
         TEST_ORG.id,
         TEST_PROJECT.id,
         "local"
       );
       if (!localConfig) throw new Error("Local DvP custody config was not initialized");
-      const authorityAddress = (await generateKeyPairSigner()).address;
-      const authority = await new CustodyConfigStore(getDb(env), env as ApiTestEnv).createWallet(
-        localConfig.id,
-        {
-          walletId: authorityAddress,
-          publicKey: authorityAddress,
-          label: "DvP settlement authority",
-          purpose: "dvp_settlement_authority",
-        }
+      const configStore = new CustodyConfigStore(getDb(env), env as ApiTestEnv);
+      const partyWallet = (await configStore.getWallets(localConfig.id)).find(
+        (wallet) => wallet.id === state.custodyWallet.id
       );
+      if (!partyWallet) throw new Error("Local DvP party wallet was not initialized");
+      localPartyWallet = partyWallet;
+      await fundAddressToLamports(partyWallet.publicKey, WALLET_FUNDING_LAMPORTS);
+
+      const authorityAddress = (await generateKeyPairSigner()).address;
+      const authority = await configStore.createWallet(localConfig.id, {
+        walletId: authorityAddress,
+        publicKey: authorityAddress,
+        label: "DvP settlement authority",
+        purpose: "dvp_settlement_authority",
+      });
       await getDb(env)
         .prepare(
           `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
@@ -137,7 +137,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
     { timeout: 240_000 },
     async (side) => {
       const api = requestWithApiKey();
-      const signer = await createOrgSigner(env as ApiTestEnv, TEST_ORG.id, TEST_PROJECT.id);
+      const signer = await createOrgSignerForCustodyWallet(
+        env as ApiTestEnv,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        custodyWallet.id
+      );
       const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
         environment: TEST_PROJECT.environment,
         organizationId: TEST_ORG.id,

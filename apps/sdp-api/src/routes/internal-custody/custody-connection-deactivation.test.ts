@@ -14,7 +14,7 @@ import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { setupTestAuth } from "@/test/helpers/auth";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
-import { insertTestCustodyScopeDefault, insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import { insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -156,13 +156,6 @@ async function seedActiveConnection(walletStatus: CustodyWalletStatus) {
     custodyWalletId: "cwlt_connection_deactivation",
     providerAccountFingerprint: "retained-fingerprint",
   });
-  await insertTestCustodyScopeDefault(db, {
-    id: "csd_connection_deactivation",
-    organizationId: ORG,
-    projectId: PROJECT,
-    defaultCustodyConfigId: null,
-    defaultCustodyConnectionId: CONNECTION,
-  });
 }
 
 async function persistedState() {
@@ -172,9 +165,6 @@ async function persistedState() {
     credential: await db.queryOne("SELECT * FROM provider_credentials WHERE id = ?", [CREDENTIAL]),
     wallets: await db.queryMany("SELECT * FROM custody_wallets WHERE custody_connection_id = ?", [
       CONNECTION,
-    ]),
-    selection: await db.queryOne("SELECT * FROM custody_scope_defaults WHERE project_id = ?", [
-      PROJECT,
     ]),
   };
 }
@@ -315,7 +305,6 @@ describe("custody Connection deactivation", () => {
         label: "Deactivation test",
         status: "deactivated",
         completion: null,
-        isDefault: false,
         canComplete: false,
         canReplaceCredentials: false,
         canCancel: false,
@@ -345,7 +334,7 @@ describe("custody Connection deactivation", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("blocks active owned wallets without changing the Connection, Credential, wallets, or default", async () => {
+  it("blocks active owned wallets without changing the Connection, Credential, or wallets", async () => {
     await seedActiveConnection("active");
     const before = await persistedState();
     const result = await request(`/connections/${CONNECTION}/deactivate`, {
@@ -427,7 +416,7 @@ describe("custody Connection deactivation", () => {
       },
     },
   ])(
-    "preserves inactive wallets, the current Credential, and the selected default while $withheld",
+    "preserves inactive wallets and the current Credential while $withheld",
     async ({ withhold }) => {
       await seedActiveConnection("inactive");
       await withhold();
@@ -449,7 +438,6 @@ describe("custody Connection deactivation", () => {
       const after = await persistedState();
       expect(after.credential).toEqual(before.credential);
       expect(after.wallets).toEqual(before.wallets);
-      expect(after.selection).toEqual(before.selection);
       expect(after.connection).toMatchObject({
         ...before.connection,
         status: "deactivated",

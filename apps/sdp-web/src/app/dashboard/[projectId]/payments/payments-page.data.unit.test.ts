@@ -35,7 +35,7 @@ describe("fetchPaymentsWallets", () => {
 
     const result = await fetchPaymentsWallets(request, { view: "summary" });
 
-    expect(request).toHaveBeenCalledWith("/v1/wallets?includeAllProviders=true&view=summary");
+    expect(request).toHaveBeenCalledWith("/v1/wallets?view=summary");
     expect(result).toEqual({ ok: true, data: wallets });
   });
 
@@ -72,9 +72,7 @@ describe("fetchPaymentsWallets", () => {
       ok: true,
       data: [wallet],
     });
-    expect(request).toHaveBeenCalledWith(
-      "/v1/wallets?includeAllProviders=true&includeBalances=true"
-    );
+    expect(request).toHaveBeenCalledWith("/v1/wallets?includeBalances=true");
   });
 
   it.each([
@@ -321,7 +319,7 @@ describe("fetchDashboardPaymentTransfers", () => {
     expect(request).toHaveBeenCalledTimes(2);
     expect(request.mock.calls.map(([path]) => path)).toEqual([
       "/v1/payments/transfers?page=1&pageSize=20&includeObserved=false",
-      "/v1/wallets?includeAllProviders=true&view=summary",
+      "/v1/wallets?view=summary",
     ]);
 
     answerWallets(Response.json({ data: { wallets: twoWallets.data } }));

@@ -141,7 +141,6 @@ async function seedWallet(params: {
         projectId: params.projectId,
         provider: params.provider,
         configEncrypted: "encrypted",
-        defaultWalletId: null,
         status: "active",
       },
     ],
@@ -156,7 +155,6 @@ async function seedWallet(params: {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
 }
 
@@ -614,18 +612,11 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
     await seedWallet({
       publicKey: WALLET_ADDRESS,
       projectId: TEST_PROJECT.id,
-      configId: "cust_approval_new_default",
+      configId: "cust_approval_same_address",
       provider: "privy",
-      custodyWalletId: "cwlt_approval_new_default",
-      providerWalletId: "privy_approval_new_default",
+      custodyWalletId: "cwlt_approval_same_address",
+      providerWalletId: "privy_approval_same_address",
     });
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
-       VALUES ('csd_approval_new_default', ?, ?, 'cust_approval_new_default')`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id)
-      .run();
     if (state === "retired-credential") {
       await getDb(env)
         .prepare("UPDATE provider_credentials SET status = 'retired' WHERE id = 'pcred_earn_vault'")

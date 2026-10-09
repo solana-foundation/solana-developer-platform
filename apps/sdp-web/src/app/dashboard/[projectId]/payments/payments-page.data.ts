@@ -77,11 +77,10 @@ export async function fetchPaymentsWallets(
 ): Promise<FetchResult<PaymentsDashboardWallet[]>> {
   try {
     const query = new URLSearchParams({
-      includeAllProviders: "true",
       ...(options.view === "summary" ? { view: "summary" } : {}),
       ...(options.includeBalances ? { includeBalances: "true" } : {}),
     }).toString();
-    const response = await request(`/v1/wallets?${query}`);
+    const response = await request(query === "" ? "/v1/wallets" : `/v1/wallets?${query}`);
     if (!response.ok) {
       const body = await response.text();
       return {
@@ -109,8 +108,7 @@ export async function fetchPaymentsAggregate(
   request: SdpApiClient["request"]
 ): Promise<FetchResult<CustodyWalletAggregate>> {
   try {
-    const query = new URLSearchParams({ includeAllProviders: "true" }).toString();
-    const response = await request(`/v1/wallets/aggregate?${query}`);
+    const response = await request("/v1/wallets/aggregate");
     if (!response.ok) {
       const body = await response.text();
       return {

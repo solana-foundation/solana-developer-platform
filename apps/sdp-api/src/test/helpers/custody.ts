@@ -13,10 +13,10 @@ import type { Env } from "@/types/env";
 export type TestCustodyConfigRecord = SigningConfigRecord & { projectId: string };
 
 /**
- * Insert a custody config and point its project's scope default at it when active.
- * @param db - Executor the inserts run on.
+ * Insert a custody config.
+ * @param db - Executor the insert runs on.
  * @param config - Custody config row to insert.
- * @returns Resolves once the config and scope default are written.
+ * @returns Resolves once the config is written.
  */
 async function insertTestCustodyConfig(
   db: DatabaseExecutor,
@@ -25,8 +25,8 @@ async function insertTestCustodyConfig(
   await db
     .prepare(
       `INSERT INTO custody_configs
-     (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     (id, organization_id, project_id, provider, config_encrypted, encryption_version, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       config.id,
@@ -35,43 +35,11 @@ async function insertTestCustodyConfig(
       config.provider,
       config.config,
       "sdp-custody-encryption-v1",
-      config.defaultWalletId,
       config.status,
       config.createdAt,
       config.updatedAt
     )
     .run();
-
-  if (config.status === "active") {
-    const existingDefault = await db
-      .prepare(
-        `SELECT id
-         FROM custody_scope_defaults
-         WHERE organization_id = ? AND project_id = ?
-         LIMIT 1`
-      )
-      .bind(config.organizationId, config.projectId)
-      .first<{ id: string }>();
-
-    if (existingDefault) {
-      await db
-        .prepare(
-          `UPDATE custody_scope_defaults
-         SET default_custody_config_id = ?, updated_at = datetime('now')
-         WHERE id = ?`
-        )
-        .bind(config.id, existingDefault.id)
-        .run();
-    } else {
-      await db
-        .prepare(
-          `INSERT INTO custody_scope_defaults (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-        )
-        .bind(`csd_${config.id}`, config.organizationId, config.projectId, config.id)
-        .run();
-    }
-  }
 }
 
 /**
@@ -101,9 +69,7 @@ async function insertTestCustodyWallet(db: DatabaseExecutor, wallet: CustodyWall
 }
 
 /**
- * Seed a custody config and its wallet in one transaction, so a config whose
- * `defaultWalletId` names that wallet satisfies the deferred
- * `custody_configs_default_wallet_fkey` at commit.
+ * Seed a custody config and its wallet in one transaction.
  * @param env - Test environment bindings.
  * @param config - Custody config row to insert.
  * @param wallet - Custody wallet row owned by `config`.
@@ -126,7 +92,6 @@ export interface TestCustodyConfigRow {
   projectId: string;
   provider: CustodyProvider;
   configEncrypted: string;
-  defaultWalletId: string | null;
   status: CustodyConfigStatus;
 }
 
@@ -144,22 +109,13 @@ export interface TestCustodyWalletRow {
   status: CustodyWalletStatus;
 }
 
-export interface TestCustodyScopeDefaultRow {
-  id: string;
-  organizationId: string;
-  projectId: string;
-  defaultCustodyConfigId: string | null;
-  defaultCustodyConnectionId: string | null;
-}
-
 export interface TestCustodyRows {
   configs: readonly TestCustodyConfigRow[];
   wallets: readonly TestCustodyWalletRow[];
-  scopeDefaults: readonly TestCustodyScopeDefaultRow[];
 }
 
 /**
- * Insert one `custody_configs` row exactly as given; no scope default is touched.
+ * Insert one `custody_configs` row exactly as given.
  * @param db - Executor the insert runs on.
  * @param config - The config row.
  * @returns Resolves once the row is written.
@@ -171,15 +127,14 @@ export async function insertTestCustodyConfigRow(
   await db.execute(
     `INSERT INTO custody_configs
        (id, organization_id, project_id, provider, config_encrypted,
-        encryption_version, default_wallet_id, status)
-     VALUES (?, ?, ?, ?, ?, 'sdp-custody-encryption-v1', ?, ?)`,
+        encryption_version, status)
+     VALUES (?, ?, ?, ?, ?, 'sdp-custody-encryption-v1', ?)`,
     [
       config.id,
       config.organizationId,
       config.projectId,
       config.provider,
       config.configEncrypted,
-      config.defaultWalletId,
       config.status,
     ]
   );
@@ -213,47 +168,18 @@ export async function insertTestCustodyWalletRow(
 }
 
 /**
- * Insert one `custody_scope_defaults` row.
- * @param db - Executor the insert runs on.
- * @param scopeDefault - The scope's selected config and connection.
- * @returns Resolves once the row is written.
- */
-export async function insertTestCustodyScopeDefault(
-  db: DatabaseExecutor,
-  scopeDefault: TestCustodyScopeDefaultRow
-): Promise<void> {
-  await db.execute(
-    `INSERT INTO custody_scope_defaults
-       (id, organization_id, project_id, default_custody_config_id, default_custody_connection_id)
-     VALUES (?, ?, ?, ?, ?)`,
-    [
-      scopeDefault.id,
-      scopeDefault.organizationId,
-      scopeDefault.projectId,
-      scopeDefault.defaultCustodyConfigId,
-      scopeDefault.defaultCustodyConnectionId,
-    ]
-  );
-}
-
-/**
- * Seed custody configs, their wallets and scope defaults in one transaction, so a
- * config naming its default wallet satisfies the deferred default-wallet FK at commit.
- * Connection-owned wallets need their connection seeded first.
+ * Seed custody configs and their wallets in one transaction. Connection-owned
+ * wallets need their connection seeded first.
  * @param env - Test environment bindings.
  * @param rows - The rows to insert.
  * @param rows.configs - Config rows, inserted first.
  * @param rows.wallets - Wallet rows, inserted after the configs.
- * @param rows.scopeDefaults - Scope default rows, inserted last.
  * @returns Resolves once the transaction commits.
  */
 export async function seedTestCustodyRows(env: Env, rows: TestCustodyRows): Promise<void> {
   await getDb(env).transaction(async (tx) => {
     for (const config of rows.configs) await insertTestCustodyConfigRow(tx, config);
     for (const wallet of rows.wallets) await insertTestCustodyWalletRow(tx, wallet);
-    for (const scopeDefault of rows.scopeDefaults) {
-      await insertTestCustodyScopeDefault(tx, scopeDefault);
-    }
   });
 }
 
@@ -266,7 +192,7 @@ export async function getTestCustodyConfig(
 ): Promise<SigningConfigRecord | null> {
   const row = await getDb(env)
     .prepare(
-      `SELECT id, organization_id, project_id, provider, config_encrypted as config, encryption_version, default_wallet_id, status, created_at, updated_at
+      `SELECT id, organization_id, project_id, provider, config_encrypted as config, encryption_version, status, created_at, updated_at
      FROM custody_configs WHERE id = ?`
     )
     .bind(configId)
@@ -277,7 +203,6 @@ export async function getTestCustodyConfig(
       provider: string;
       config: string;
       encryption_version: string;
-      default_wallet_id: string | null;
       status: string;
       created_at: string;
       updated_at: string;
@@ -298,7 +223,6 @@ export async function getTestCustodyConfig(
       | "turnkey",
     config: row.config,
     encryptionVersion: row.encryption_version,
-    defaultWalletId: row.default_wallet_id,
     status: row.status as CustodyConfigStatus,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

@@ -316,7 +316,6 @@ async function resolveCustodyQueueTarget(
     const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
       organizationId: auth.organizationId,
       projectId,
-      includeAllProviders: true,
     });
     wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
     assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);

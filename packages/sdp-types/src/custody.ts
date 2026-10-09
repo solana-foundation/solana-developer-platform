@@ -578,42 +578,19 @@ export type InitializeSigningRequest =
   | InitializeAnchorageSigningRequest
   | InitializeUtilaSigningRequest;
 
-export interface SwitchFireblocksSigningRequest extends FireblocksCustodyOptions {
+/**
+ * The provider account a new custody wallet lives under: the project's Managed
+ * config for a provider, or a BYOK connection. Exactly one is named.
+ */
+export type CustodyWalletOwnerTarget =
+  | { provider: CustodyProvider; connectionId?: never }
+  | { connectionId: string; provider?: never };
+
+export type CreateWalletRequest = CustodyWalletOwnerTarget & {
   projectId?: string;
-}
-
-export interface SwitchConnectionSigningRequest {
-  connectionId: string;
-  provider?: CustodyProvider;
-}
-
-export type SwitchSigningRequest =
-  | SwitchConnectionSigningRequest
-  | InitializeLocalSigningRequest
-  | SwitchFireblocksSigningRequest
-  | InitializePrivySigningRequest
-  | InitializeCoinbaseCdpSigningRequest
-  | InitializeParaSigningRequest
-  | InitializeTurnkeySigningRequest
-  | InitializeDfnsSigningRequest
-  | InitializeIbmHavenSigningRequest
-  | InitializeAnchorageSigningRequest
-  | InitializeUtilaSigningRequest;
-
-export interface CreateWalletRequest {
-  projectId?: string;
-  connectionId?: string;
-  provider?: CustodyProvider;
   label?: string;
   purpose?: CustodyWalletPurpose;
-  setDefault?: boolean;
-}
-
-export interface SetDefaultWalletRequest {
-  projectId?: string;
-  provider?: CustodyProvider;
-  walletId: string;
-}
+};
 
 export interface DeleteWalletRequest {
   projectId?: string;
@@ -630,8 +607,6 @@ export interface CustodyConfigSummary {
   organizationId: string;
   projectId: string | null;
   provider: CustodyProvider;
-  publicKey: string;
-  defaultWalletId: string | null;
   status: CustodyConfigStatus;
   createdAt: string;
 }
@@ -643,7 +618,6 @@ export type CustodyWalletOwner =
 export type CustodyWalletSummary = CustodyWalletOwner & {
   id: string;
   provider?: CustodyProvider;
-  isDefaultProvider?: boolean;
   isRuntimeExecutionAllowed: boolean;
   walletId: string;
   publicKey: string;
@@ -682,22 +656,6 @@ export type CustodyWalletWithBalance = CustodyWalletMetadata & {
   balance: CustodyWalletBalance;
 };
 
-export interface CustodyConfigWithDefault extends CustodyConfigSummary {
-  isDefault: boolean;
-}
-
-export interface SwitchProviderOption {
-  provider: CustodyProvider;
-  hasReusableWallet: boolean;
-  needsWalletLabel: boolean;
-  isActive: boolean;
-  isDefault: boolean;
-}
-
-export interface CustodyConfigResponse {
-  config: CustodyConfigSummary;
-}
-
 export interface CustodyWalletResponse {
   wallet: CustodyWalletSummary;
 }
@@ -724,12 +682,7 @@ export interface CustodyWalletMetadataResponse {
 }
 
 export interface CustodyConfigsResponse {
-  configs: CustodyConfigWithDefault[];
-  defaultConfigId: string | null;
-}
-
-export interface SwitchProviderOptionsResponse {
-  providers: SwitchProviderOption[];
+  configs: CustodyConfigSummary[];
 }
 
 export interface DeleteWalletResponse {
@@ -742,14 +695,6 @@ export interface InitializeSigningResponse {
   publicKey: string;
   walletId: string;
 }
-
-export type SwitchSigningResponse =
-  | InitializeSigningResponse
-  | {
-      connectionId: string;
-      publicKey: string;
-      walletId: string;
-    };
 
 export interface SignerCheckResponse {
   walletId: string;

@@ -464,21 +464,11 @@ describe("api key scope service", () => {
     ).toThrowError(AppError);
   });
 
-  it("rejects connectionId without wallet provisioning", () => {
-    expect(() =>
-      resolveCreateWalletScope({
-        walletScope: "selected",
-        connectionId: "cconn_selected",
-      })
-    ).toThrowError("connectionId requires provisionWallet");
-  });
-
-  it("accepts connectionId for selected wallet provisioning", () => {
+  it("accepts selected wallet provisioning without wallet bindings", () => {
     expect(
       resolveCreateWalletScope({
         walletScope: "selected",
         provisionWallet: true,
-        connectionId: "cconn_selected",
       })
     ).toMatchObject({ walletScope: "selected", bindings: [] });
   });

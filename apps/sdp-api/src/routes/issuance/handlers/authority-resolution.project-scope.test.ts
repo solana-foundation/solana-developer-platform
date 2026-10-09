@@ -71,7 +71,6 @@ async function seedOwnerProjectCustody(): Promise<void> {
         projectId: OWNER_PROJECT_ID,
         provider: "local",
         configEncrypted: "encrypted",
-        defaultWalletId: OWNER_WALLETS[0].providerWalletId,
         status: "active",
       },
     ],
@@ -84,15 +83,6 @@ async function seedOwnerProjectCustody(): Promise<void> {
         label: null,
         purpose: "root",
         status: "active",
-      },
-    ],
-    scopeDefaults: [
-      {
-        id: "csd_issuance_project_scope_owner",
-        organizationId: ORGANIZATION_ID,
-        projectId: OWNER_PROJECT_ID,
-        defaultCustodyConfigId: OWNER_CONFIG_ID,
-        defaultCustodyConnectionId: null,
       },
     ],
   });
@@ -121,7 +111,7 @@ async function seedOwnerProjectCustody(): Promise<void> {
   );
 }
 
-async function seedRequesterProjectDefault(): Promise<void> {
+async function seedRequesterProjectWallet(): Promise<void> {
   await seedTestCustodyRows(env, {
     configs: [
       {
@@ -130,7 +120,6 @@ async function seedRequesterProjectDefault(): Promise<void> {
         projectId: REQUESTER_PROJECT_ID,
         provider: "local",
         configEncrypted: "encrypted",
-        defaultWalletId: REQUESTER_WALLET.providerWalletId,
         status: "active",
       },
     ],
@@ -143,15 +132,6 @@ async function seedRequesterProjectDefault(): Promise<void> {
         label: null,
         purpose: "root",
         status: "active",
-      },
-    ],
-    scopeDefaults: [
-      {
-        id: "csd_issuance_project_scope_requester",
-        organizationId: ORGANIZATION_ID,
-        projectId: REQUESTER_PROJECT_ID,
-        defaultCustodyConfigId: REQUESTER_CONFIG_ID,
-        defaultCustodyConnectionId: null,
       },
     ],
   });
@@ -211,7 +191,7 @@ describe("issuance authority resolution across an organization's projects", () =
   );
 
   it("resolves an authority to the requester's own wallet when another project holds the same key", async () => {
-    await seedRequesterProjectDefault();
+    await seedRequesterProjectWallet();
 
     await expect(
       resolveAuthorityWallet({
@@ -238,8 +218,8 @@ describe("issuance authority resolution across an organization's projects", () =
     });
   });
 
-  it("signs a legacy deploy with no wallet through the project's own default", async () => {
-    await seedRequesterProjectDefault();
+  it("signs a legacy deploy with the named wallet from the requester's own project", async () => {
+    await seedRequesterProjectWallet();
     const signer = await generateKeyPairSigner();
     const exactSigner = vi
       .spyOn(solanaServices, "createOrgSignerForCustodyWallet")
@@ -249,7 +229,7 @@ describe("issuance authority resolution across an organization's projects", () =
       createLegacyResolvedAuthoritySigner({
         env,
         auth: clerkAuth(REQUESTER_PROJECT_ID),
-        walletId: null,
+        walletId: REQUESTER_WALLET.providerWalletId,
       })
     ).resolves.toBe(signer);
     expect(exactSigner).toHaveBeenCalledExactlyOnceWith(
@@ -260,7 +240,21 @@ describe("issuance authority resolution across an organization's projects", () =
     );
   });
 
-  it("refuses a legacy deploy with no wallet when only another project has a default", async () => {
+  it("refuses a legacy deploy naming a wallet only another project holds", async () => {
+    const exactSigner = vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet");
+
+    await expect(
+      createLegacyResolvedAuthoritySigner({
+        env,
+        auth: clerkAuth(REQUESTER_PROJECT_ID),
+        walletId: OWNER_WALLETS[0].providerWalletId,
+      })
+    ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
+    expect(exactSigner).not.toHaveBeenCalled();
+  });
+
+  it("refuses a legacy deploy that names no wallet before any signer is loaded", async () => {
+    await seedRequesterProjectWallet();
     const exactSigner = vi.spyOn(solanaServices, "createOrgSignerForCustodyWallet");
 
     await expect(
@@ -269,7 +263,11 @@ describe("issuance authority resolution across an organization's projects", () =
         auth: clerkAuth(REQUESTER_PROJECT_ID),
         walletId: null,
       })
-    ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      statusCode: 400,
+      message: "signingWalletId is required for the legacy issuance prepare flow",
+    });
     expect(exactSigner).not.toHaveBeenCalled();
   });
 });

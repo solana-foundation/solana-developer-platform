@@ -60,7 +60,6 @@ describe("PrivateChannelReferenceRepository wallet project scope (postgres)", ()
           projectId: OWNER_PROJECT_ID,
           provider: "local",
           configEncrypted: "encrypted",
-          defaultWalletId: null,
           status: "active",
         },
       ],
@@ -75,7 +74,6 @@ describe("PrivateChannelReferenceRepository wallet project scope (postgres)", ()
           status: "active",
         },
       ],
-      scopeDefaults: [],
     });
   });
 

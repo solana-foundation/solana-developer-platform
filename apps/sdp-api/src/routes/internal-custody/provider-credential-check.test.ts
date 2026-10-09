@@ -275,7 +275,7 @@ async function seedActiveFingerprintConnection(options: {
   });
 }
 
-async function seedManagedDefault(): Promise<void> {
+async function seedManagedConfig(): Promise<void> {
   await seedTestCustodySetup(
     env,
     {
@@ -285,7 +285,6 @@ async function seedManagedDefault(): Promise<void> {
       provider: "privy",
       config: "managed-config",
       encryptionVersion: "test",
-      defaultWalletId: "managed-wallet",
       status: "active",
       createdAt: SEEDED_AT,
       updatedAt: SEEDED_AT,
@@ -348,7 +347,6 @@ async function getState(connectionId: unknown): Promise<{
   last_check_status: string | null;
   last_check_at: string | null;
   last_check_failure_code: string | null;
-  default_custody_wallet_id: string | null;
   activated_at: string | null;
   deactivated_at: string | null;
 }> {
@@ -358,7 +356,7 @@ async function getState(connectionId: unknown): Promise<{
               c.status AS connection_status, c.setup_metadata,
               c.provider_account_fingerprint, c.last_check_status,
               c.last_check_at, c.last_check_failure_code,
-              c.default_custody_wallet_id, c.activated_at, c.deactivated_at
+              c.activated_at, c.deactivated_at
        FROM custody_connections c
        JOIN provider_credentials pc ON pc.id = c.provider_credential_id
        WHERE c.id = ?`
@@ -373,7 +371,6 @@ async function getState(connectionId: unknown): Promise<{
       last_check_status: string | null;
       last_check_at: string | null;
       last_check_failure_code: string | null;
-      default_custody_wallet_id: string | null;
       activated_at: string | null;
       deactivated_at: string | null;
     }>();
@@ -427,8 +424,8 @@ describe("exact Custody Connection installation routes", () => {
     await clearKVStores(env);
   });
 
-  it("completes an exact Connection and replays terminal success out of channel without changing the Config target", async () => {
-    await seedManagedDefault();
+  it("completes an exact Connection and replays terminal success out of channel beside an untouched Managed Config", async () => {
+    await seedManagedConfig();
     const providerFetch = successfulPrivyFetch(CONNECTION_ID);
     const { app, token } = buildApp();
 
@@ -481,34 +478,39 @@ describe("exact Custody Connection installation routes", () => {
       provider_account_fingerprint: PROVIDER_ACCOUNT_FINGERPRINT,
       last_check_status: "success",
       last_check_failure_code: null,
-      default_custody_wallet_id: expect.any(String),
       activated_at: expect.any(String),
     });
     expect(
-      await getDb(env)
-        .prepare(
-          `SELECT w.wallet_id, w.public_key, w.label, w.custody_config_id,
-                  w.custody_connection_id,
-                  d.default_custody_config_id, d.default_custody_connection_id,
-                  (SELECT COUNT(*) FROM custody_wallets) AS wallet_count
-           FROM custody_connections c
-           JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
-           LEFT JOIN custody_scope_defaults d
-             ON d.organization_id = c.organization_id AND d.project_id = c.project_id
-           WHERE c.id = ?`
-        )
-        .bind(CONNECTION_ID)
-        .first()
-    ).toMatchObject({
-      wallet_id: `privy_${PRIVY_WALLET_ID}`,
-      public_key: PRIVY_WALLET_ADDRESS,
-      label: WALLET_LABEL,
-      custody_config_id: null,
-      custody_connection_id: CONNECTION_ID,
-      default_custody_config_id: MANAGED_CONFIG_ID,
-      default_custody_connection_id: null,
-      wallet_count: 2,
-    });
+      await getDb(env).queryMany(
+        `SELECT id, wallet_id, public_key, label, custody_config_id, custody_connection_id, status
+         FROM custody_wallets
+         ORDER BY custody_connection_id NULLS FIRST, id`
+      )
+    ).toEqual([
+      {
+        id: "cwlt_provider_credential_installation_managed",
+        wallet_id: "managed-wallet",
+        public_key: "managed-wallet-address",
+        label: null,
+        custody_config_id: MANAGED_CONFIG_ID,
+        custody_connection_id: null,
+        status: "active",
+      },
+      {
+        id: expect.any(String),
+        wallet_id: `privy_${PRIVY_WALLET_ID}`,
+        public_key: PRIVY_WALLET_ADDRESS,
+        label: WALLET_LABEL,
+        custody_config_id: null,
+        custody_connection_id: CONNECTION_ID,
+        status: "active",
+      },
+    ]);
+    expect(
+      await getDb(env).queryOne("SELECT status FROM custody_configs WHERE id = ?", [
+        MANAGED_CONFIG_ID,
+      ])
+    ).toEqual({ status: "active" });
 
     custodyReleaseChannel.outOfChannelMode = "byok";
     providerFetch.mockClear();
@@ -717,7 +719,6 @@ describe("exact Custody Connection installation routes", () => {
       connection_status: "pending",
       last_check_status: null,
       provider_account_fingerprint: null,
-      default_custody_wallet_id: null,
     });
   });
 
@@ -850,7 +851,6 @@ describe("exact Custody Connection installation routes", () => {
       provider_account_fingerprint: null,
       last_check_status: "retry_unknown",
       last_check_failure_code: "provider_response_unknown",
-      default_custody_wallet_id: null,
     });
     expect(
       (
@@ -1382,7 +1382,6 @@ describe("exact Custody Connection installation routes", () => {
           status: "pending",
           completion: null,
           walletLabel: WALLET_LABEL,
-          isDefault: false,
           canComplete: true,
           canReplaceCredentials: false,
           canCancel: true,
@@ -1505,7 +1504,6 @@ describe("exact Custody Connection installation routes", () => {
       encrypted_secret_payload: null,
       connection_status: "deactivated",
       provider_account_fingerprint: null,
-      default_custody_wallet_id: null,
       deactivated_at: expect.any(String),
     });
   });
@@ -1534,7 +1532,6 @@ describe("exact Custody Connection installation routes", () => {
     expect(await getState(CONNECTION_ID)).toMatchObject({
       credential_status: "deactivated",
       connection_status: "deactivated",
-      default_custody_wallet_id: null,
     });
   });
 

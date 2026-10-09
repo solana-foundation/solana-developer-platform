@@ -188,7 +188,6 @@ export async function seedConfigOwnedDuplicateProviderWallet(): Promise<void> {
         projectId: TEST_PROJECT.id,
         provider: "privy",
         configEncrypted: "test-config",
-        defaultWalletId: TEST_WALLET_ID,
         status: "active",
       },
     ],
@@ -203,7 +202,6 @@ export async function seedConfigOwnedDuplicateProviderWallet(): Promise<void> {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
 }
 

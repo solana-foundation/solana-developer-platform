@@ -93,7 +93,6 @@ describe("Earn queued withdrawal repository", () => {
       projectId: PROJECT,
       provider: "local",
       configEncrypted: "encrypted",
-      defaultWalletId: null,
       status: "active",
     });
     await insertTestCustodyWalletRow(db, {

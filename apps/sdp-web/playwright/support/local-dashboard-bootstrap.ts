@@ -348,8 +348,7 @@ async function enableLocalCustodyForPlaywrightOrg(organizationId: string): Promi
 }
 
 async function listWallets(api: LocalApiClient): Promise<PaymentsDashboardWallet[]> {
-  // biome-ignore lint/security/noSecrets: Local API path with query params for wallet listing.
-  const data = await api.get<ListWalletsResponse>("/v1/wallets?includeAllProviders=true");
+  const data = await api.get<ListWalletsResponse>("/v1/wallets");
   return data.wallets;
 }
 

@@ -17,7 +17,6 @@ export interface SigningConfigRecord {
   provider: SigningProviderType;
   config: string;
   encryptionVersion: string;
-  defaultWalletId: string | null;
   status: CustodyConfigStatus;
   createdAt: string;
   updatedAt: string;

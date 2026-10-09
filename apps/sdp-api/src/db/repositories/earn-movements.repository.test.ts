@@ -127,7 +127,6 @@ describe("Unified earn movement ledger (postgres)", () => {
       projectId: PROJECT,
       provider: "local",
       configEncrypted: "encrypted",
-      defaultWalletId: null,
       status: "active",
     });
     await insertTestCustodyWalletRow(db, {
@@ -912,7 +911,6 @@ describe("Unified earn movement ledger (postgres)", () => {
         projectId: "prj_earn_mv_other",
         provider: "local",
         configEncrypted: "encrypted",
-        defaultWalletId: null,
         status: "active",
       });
       await insertTestCustodyWalletRow(db, {

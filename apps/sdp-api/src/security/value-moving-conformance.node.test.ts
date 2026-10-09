@@ -739,7 +739,6 @@ describe("value-moving authorization and replay conformance", () => {
       provider: "local",
       config: JSON.stringify({ provider: "local", encryptedPrivateKey: "ciphertext" }),
       encryptionVersion: "v2",
-      defaultWalletId: null,
       status: "active",
       createdAt: "2026-10-02T00:00:00.000Z",
       updatedAt: "2026-10-02T00:00:00.000Z",

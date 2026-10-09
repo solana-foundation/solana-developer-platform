@@ -46,7 +46,6 @@ async function seedBase(): Promise<void> {
         projectId: PROJECT,
         provider: "local",
         configEncrypted: "encrypted",
-        defaultWalletId: null,
         status: "active",
       },
     ],
@@ -61,7 +60,6 @@ async function seedBase(): Promise<void> {
         status: "active",
       },
     ],
-    scopeDefaults: [],
   });
   await db
     .prepare(

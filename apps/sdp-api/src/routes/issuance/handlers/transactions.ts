@@ -221,7 +221,6 @@ async function resolveWalletTransactionScope(
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
     organizationId: auth.organizationId,
     projectId: requireProjectId(c),
-    includeAllProviders: true,
   });
   const publicKeys = wallets
     .filter((wallet) => allowedWalletIdSet.has(wallet.id))

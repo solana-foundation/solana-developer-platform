@@ -3,7 +3,7 @@
     "source": "apps/sdp-api/src/openapi/**",
     "command": "pnpm -C apps/sdp-api playground:generate",
     "modules": {
-      "wallets": 19,
+      "wallets": 15,
       "payments": 39,
       "counterparties": 13,
       "issuance": 37
@@ -36,30 +36,6 @@
         }
       },
       {
-        "id": "switch-wallet-signing-provider",
-        "operationId": "switchWalletSigningProvider",
-        "title": "Switch wallet signing provider",
-        "method": "POST",
-        "path": "/v1/wallets/switch",
-        "pathFields": [],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"privy\"\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "connectionId": "cconn_example",
-          "publicKey": "So11111111111111111111111111111111111111112",
-          "walletId": "privy_wallet_123"
-        }
-      },
-      {
         "id": "create-wallet",
         "operationId": "createWallet",
         "title": "Create wallet",
@@ -73,7 +49,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
+            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\"\n}",
             "required": true
           }
         ],
@@ -83,7 +59,6 @@
               "id": "cw_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
-              "isDefaultProvider": true,
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
@@ -133,7 +108,7 @@
         "operationId": "listWallets",
         "title": "List wallets",
         "method": "GET",
-        "path": "/v1/wallets?provider={provider}&includeAllProviders={includeAllProviders}&includeBalances={includeBalances}&view={view}",
+        "path": "/v1/wallets?provider={provider}&includeBalances={includeBalances}&view={view}",
         "pathFields": [
           {
             "key": "provider",
@@ -178,25 +153,12 @@
               {
                 "label": "anchorage",
                 "value": "anchorage"
-              }
-            ]
-          },
-          {
-            "key": "includeAllProviders",
-            "label": "includeAllProviders",
-            "required": false,
-            "kind": "select",
-            "options": [
-              {
-                "label": "true",
-                "value": "true"
               },
               {
-                "label": "false",
-                "value": "false"
+                "label": "utila",
+                "value": "utila"
               }
-            ],
-            "valueType": "boolean"
+            ]
           },
           {
             "key": "includeBalances",
@@ -236,7 +198,6 @@
                 "id": "cw_example",
                 "custodyConfigId": "cfg_example",
                 "provider": "privy",
-                "isDefaultProvider": true,
                 "isRuntimeExecutionAllowed": true,
                 "walletId": "privy_wallet_123",
                 "publicKey": "So11111111111111111111111111111111111111112",
@@ -246,55 +207,6 @@
                 "createdAt": "2025-01-01T00:00:00.000Z"
               }
             ]
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "set-default-wallet",
-        "operationId": "setDefaultWallet",
-        "title": "Set default wallet",
-        "method": "POST",
-        "path": "/v1/wallets/default-wallet",
-        "pathFields": [],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "defaultWalletId": "privy_wallet_123"
-        }
-      },
-      {
-        "id": "get-wallet-config",
-        "operationId": "getWalletConfig",
-        "title": "Get wallet signing config",
-        "method": "GET",
-        "path": "/v1/wallets/config",
-        "pathFields": [],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "config": {
-              "id": "cfg_example",
-              "organizationId": "org_example",
-              "projectId": "prj_example",
-              "provider": "privy",
-              "publicKey": "So11111111111111111111111111111111111111112",
-              "defaultWalletId": "privy_wallet_123",
-              "status": "active",
-              "createdAt": "2025-01-01T00:00:00.000Z"
-            }
           },
           "meta": {
             "requestId": "req_example",
@@ -318,14 +230,10 @@
                 "organizationId": "org_example",
                 "projectId": "prj_example",
                 "provider": "privy",
-                "publicKey": "So11111111111111111111111111111111111111112",
-                "defaultWalletId": "privy_wallet_123",
                 "status": "active",
-                "createdAt": "2025-01-01T00:00:00.000Z",
-                "isDefault": true
+                "createdAt": "2025-01-01T00:00:00.000Z"
               }
-            ],
-            "defaultConfigId": "cfg_example"
+            ]
           },
           "meta": {
             "requestId": "req_example",
@@ -338,7 +246,7 @@
         "operationId": "aggregateWalletBalances",
         "title": "Aggregate wallet balances",
         "method": "GET",
-        "path": "/v1/wallets/aggregate?provider={provider}&includeAllProviders={includeAllProviders}",
+        "path": "/v1/wallets/aggregate?provider={provider}",
         "pathFields": [
           {
             "key": "provider",
@@ -383,25 +291,12 @@
               {
                 "label": "anchorage",
                 "value": "anchorage"
-              }
-            ]
-          },
-          {
-            "key": "includeAllProviders",
-            "label": "includeAllProviders",
-            "required": false,
-            "kind": "select",
-            "options": [
-              {
-                "label": "true",
-                "value": "true"
               },
               {
-                "label": "false",
-                "value": "false"
+                "label": "utila",
+                "value": "utila"
               }
-            ],
-            "valueType": "boolean"
+            ]
           }
         ],
         "bodyFields": [],
@@ -421,32 +316,6 @@
                 }
               ]
             }
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
-      {
-        "id": "list-switch-provider-options",
-        "operationId": "listSwitchProviderOptions",
-        "title": "List switch provider options",
-        "method": "GET",
-        "path": "/v1/wallets/switch-options",
-        "pathFields": [],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "providers": [
-              {
-                "provider": "privy",
-                "hasReusableWallet": true,
-                "needsWalletLabel": false,
-                "isActive": true,
-                "isDefault": false
-              }
-            ]
           },
           "meta": {
             "requestId": "req_example",
@@ -965,7 +834,6 @@
               "id": "cw_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
-              "isDefaultProvider": true,
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
@@ -1013,7 +881,6 @@
               "id": "cw_example",
               "custodyConfigId": "cfg_example",
               "provider": "privy",
-              "isDefaultProvider": true,
               "isRuntimeExecutionAllowed": true,
               "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",

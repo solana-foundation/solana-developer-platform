@@ -541,8 +541,7 @@ test.describe
       const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken, projectId);
       const walletLabel = `Wallet Enter ${Date.now().toString(36).toUpperCase()}`;
       const countMatchingWallets = async () => {
-        // biome-ignore lint/security/noSecrets: Local API path with query params for wallet listing.
-        const { wallets } = await api.get<WalletsResponse>("/v1/wallets?includeAllProviders=true");
+        const { wallets } = await api.get<WalletsResponse>("/v1/wallets");
         return wallets.filter((wallet) => wallet.label === walletLabel).length;
       };
       expect(await countMatchingWallets()).toBe(0);
