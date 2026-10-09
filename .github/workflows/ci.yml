@@ -85,7 +85,8 @@ jobs:
 
       - name: Require rollback-safe migrations
         env:
-          MIGRATION_COMPAT_BASE_REF: origin/${{ github.base_ref }}
+          # First parent of the PR merge ref; github.base_ref reads main on stacked PRs.
+          MIGRATION_COMPAT_BASE_REF: HEAD^1
         run: pnpm check:migration-compat
 
   module_boundaries:
