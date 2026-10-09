@@ -319,40 +319,52 @@ export async function runIdempotency(
       break;
   }
 
+  const freshClaim = claim.fresh;
+  // The lease is renewed until the outcome is written, not just until the
+  // handler returns: reading and saving a large response takes time too.
   const stopRenewal = startLeaseRenewal(repository, id, claimToken, leaseSeconds, operation);
   let thrown: { error: unknown } | null = null;
   try {
-    await next();
-  } catch (error) {
-    // Inside Hono's chain a thrown error reaches here as c.res; a composite
-    // caller's own checks (admission) can throw straight through.
-    thrown = { error };
-  }
-  await stopRenewal();
-
-  const response = thrown === null ? c.res : thrownResponse(thrown.error);
-  if (response === null) {
-    // An error the app maps itself (a 400 from a package error, a 500): the
-    // status is unknown here, so free the lease and keep the key bound to its
-    // request rather than store a guess. A same-key retry runs again.
-    await settle(() => repository.unlock(id, claimToken), operation);
-    throw (thrown as { error: unknown }).error;
-  }
-  const status = response.status;
-  if (UNSTORED_STATUSES.has(status)) {
-    await settle(
-      () => (claim.fresh ? repository.discard(id, claimToken) : repository.unlock(id, claimToken)),
-      operation
-    );
-  } else if (status >= 500 && options.serverErrors === "rerun") {
-    await settle(() => repository.unlock(id, claimToken), operation);
-  } else {
-    await record(repository, id, claimToken, await snapshot(response, operation), operation);
+    try {
+      await next();
+    } catch (error) {
+      // Inside Hono's chain a thrown error reaches here as c.res; a composite
+      // caller's own checks (admission) can throw straight through.
+      thrown = { error };
+    }
+    await settleOutcome(thrown === null ? c.res : thrownResponse(thrown.error));
+  } finally {
+    await stopRenewal();
   }
   if (thrown !== null) {
     throw thrown.error;
   }
   return undefined;
+
+  async function settleOutcome(response: Response | null): Promise<void> {
+    // Releasing stops renewal first, so no renewal can land after it.
+    const release = async (write: () => Promise<void>) => {
+      await stopRenewal();
+      await settle(write, operation);
+    };
+    if (response === null) {
+      // An error the app maps itself (a 400 from a package error, a 500): the
+      // status is unknown here, so free the lease and keep the key bound to
+      // its request rather than store a guess. A same-key retry runs again.
+      await release(() => repository.unlock(id, claimToken));
+      return;
+    }
+    if (UNSTORED_STATUSES.has(response.status)) {
+      await release(() =>
+        freshClaim ? repository.discard(id, claimToken) : repository.unlock(id, claimToken)
+      );
+    } else if (response.status >= 500 && options.serverErrors === "rerun") {
+      await release(() => repository.unlock(id, claimToken));
+    } else {
+      // Completing clears the claim token, so a late renewal matches nothing.
+      await record(repository, id, claimToken, await snapshot(response, operation), operation);
+    }
+  }
 }
 
 async function record(
