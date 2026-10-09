@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CustodyConfigStatus, CustodyProvider } from "@sdp/types";
+import type { ApprovalPolicyRule, CustodyConfigStatus, CustodyProvider } from "@sdp/types";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
@@ -46,6 +46,12 @@ interface ProfileRow {
   id: string;
   project_id: string | null;
   custody_wallet_id: string;
+}
+
+interface ApprovalGroupRow {
+  id: string;
+  project_id: string | null;
+  member_user_ids: string[];
 }
 
 async function restorePreProjectOnlySchema(): Promise<void> {
@@ -128,6 +134,61 @@ async function seedActiveProfile(profile: {
      ) VALUES ($1, $2, $3, $4, $1, 'active')`,
     [profile.id, profile.organizationId, profile.projectId, profile.custodyWalletId]
   );
+}
+
+async function seedProfileRevision(revision: {
+  id: string;
+  profileId: string;
+  approvalGroupId: string;
+}): Promise<void> {
+  const rules: ApprovalPolicyRule[] = [
+    { kind: "approval", families: ["transfer"], approvalGroupId: revision.approvalGroupId },
+  ];
+  await client.query(
+    `INSERT INTO wallet_control_profile_revisions (id, profile_id, revision_number, rules)
+     VALUES ($1, $2, 1, $3)`,
+    [revision.id, revision.profileId, JSON.stringify(rules)]
+  );
+}
+
+async function seedApprovalGroup(group: {
+  id: string;
+  organizationId: string;
+  projectId: string | null;
+  memberUserId: string;
+}): Promise<void> {
+  await client.query(
+    `INSERT INTO approval_groups (id, organization_id, project_id, name)
+     VALUES ($1, $2, $3, $1)`,
+    [group.id, group.organizationId, group.projectId]
+  );
+  await client.query(
+    `INSERT INTO approval_group_members (id, approval_group_id, user_id)
+     VALUES ($1, $2, $3)`,
+    [`${group.id}_member`, group.id, group.memberUserId]
+  );
+}
+
+async function approvalGroupsOf(organizationId: string): Promise<ApprovalGroupRow[]> {
+  const result = await client.query<ApprovalGroupRow>(
+    `SELECT grp.id,
+            grp.project_id,
+            ARRAY_AGG(member.user_id ORDER BY member.user_id) AS member_user_ids
+       FROM approval_groups grp
+       JOIN approval_group_members member ON member.approval_group_id = grp.id
+      WHERE grp.organization_id = $1
+      GROUP BY grp.id, grp.project_id
+      ORDER BY grp.id`,
+    [organizationId]
+  );
+  return result.rows;
+}
+
+async function recordedMigrations(): Promise<unknown[]> {
+  const result = await client.query("SELECT version FROM schema_migrations WHERE version = $1", [
+    migrationFile,
+  ]);
+  return result.rows;
 }
 
 async function configsOf(organizationId: string): Promise<ConfigRow[]> {
@@ -542,10 +603,197 @@ describe("0125 custody project-only migration", () => {
         updated_at: seededAt,
       },
     ]);
-    const applied = await client.query("SELECT version FROM schema_migrations WHERE version = $1", [
-      migrationFile,
+    expect(await recordedMigrations()).toEqual([]);
+  });
+
+  it("moves an org-level approval group a moved profile names into the Sandbox project with its members", async () => {
+    const tenant = await seedOrgProject(client, "0125_group_move");
+    await seedConfig({
+      id: "ccfg_0125_group_move",
+      organizationId: tenant.organizationId,
+      projectId: null,
+      provider: "privy",
+      status: "active",
+    });
+    await seedWallet({ id: "cwal_0125_group_move", custodyConfigId: "ccfg_0125_group_move" });
+    await seedActiveProfile({
+      id: "wcp_0125_group_move",
+      organizationId: tenant.organizationId,
+      projectId: null,
+      custodyWalletId: "cwal_0125_group_move",
+    });
+    await seedProfileRevision({
+      id: "wcpr_0125_group_move",
+      profileId: "wcp_0125_group_move",
+      approvalGroupId: "apg_0125_group_move",
+    });
+    await seedApprovalGroup({
+      id: "apg_0125_group_move",
+      organizationId: tenant.organizationId,
+      projectId: null,
+      memberUserId: tenant.userId,
+    });
+    await seedApprovalGroup({
+      id: "apg_0125_group_move_unnamed",
+      organizationId: tenant.organizationId,
+      projectId: null,
+      memberUserId: tenant.userId,
+    });
+
+    await runPostgresMigrations({ databaseUrl, migrationsDir });
+
+    expect(await approvalGroupsOf(tenant.organizationId)).toEqual([
+      {
+        id: "apg_0125_group_move",
+        project_id: tenant.projectId,
+        member_user_ids: [tenant.userId],
+      },
+      {
+        id: "apg_0125_group_move_unnamed",
+        project_id: null,
+        member_user_ids: [tenant.userId],
+      },
     ]);
-    expect(applied.rows).toEqual([]);
+    expect(await profilesOf(tenant.organizationId)).toEqual([
+      {
+        id: "wcp_0125_group_move",
+        project_id: tenant.projectId,
+        custody_wallet_id: "cwal_0125_group_move",
+      },
+    ]);
+  });
+
+  it("fails the migration and moves nothing when a moved profile names an approval group in another project", async () => {
+    const tenant = await seedOrgProject(client, "0125_group_foreign");
+    const productionProjectId = `${tenant.projectId}_production`;
+    await seedConfig({
+      id: "ccfg_0125_group_foreign",
+      organizationId: tenant.organizationId,
+      projectId: null,
+      provider: "privy",
+      status: "active",
+    });
+    await seedWallet({ id: "cwal_0125_group_foreign", custodyConfigId: "ccfg_0125_group_foreign" });
+    await seedActiveProfile({
+      id: "wcp_0125_group_foreign",
+      organizationId: tenant.organizationId,
+      projectId: productionProjectId,
+      custodyWalletId: "cwal_0125_group_foreign",
+    });
+    await seedProfileRevision({
+      id: "wcpr_0125_group_foreign",
+      profileId: "wcp_0125_group_foreign",
+      approvalGroupId: "apg_0125_group_foreign",
+    });
+    await seedApprovalGroup({
+      id: "apg_0125_group_foreign",
+      organizationId: tenant.organizationId,
+      projectId: productionProjectId,
+      memberUserId: tenant.userId,
+    });
+
+    await expect(runPostgresMigrations({ databaseUrl, migrationsDir })).rejects.toMatchObject({
+      code: RAISE_EXCEPTION,
+      message: "1 approval group(s) named by moved custody profiles belong to another project",
+    });
+
+    expect(await approvalGroupsOf(tenant.organizationId)).toEqual([
+      {
+        id: "apg_0125_group_foreign",
+        project_id: productionProjectId,
+        member_user_ids: [tenant.userId],
+      },
+    ]);
+    expect(await profilesOf(tenant.organizationId)).toEqual([
+      {
+        id: "wcp_0125_group_foreign",
+        project_id: productionProjectId,
+        custody_wallet_id: "cwal_0125_group_foreign",
+      },
+    ]);
+    expect(await recordedMigrations()).toEqual([]);
+  });
+
+  it("fails the migration and moves nothing when a profile staying outside the Sandbox project names the same org-level approval group", async () => {
+    const tenant = await seedOrgProject(client, "0125_group_shared");
+    const productionProjectId = `${tenant.projectId}_production`;
+    await seedConfig({
+      id: "ccfg_0125_group_shared_org",
+      organizationId: tenant.organizationId,
+      projectId: null,
+      provider: "privy",
+      status: "active",
+    });
+    await seedWallet({
+      id: "cwal_0125_group_shared_moved",
+      custodyConfigId: "ccfg_0125_group_shared_org",
+    });
+    await seedConfig({
+      id: "ccfg_0125_group_shared_sandbox",
+      organizationId: tenant.organizationId,
+      projectId: tenant.projectId,
+      provider: "fireblocks",
+      status: "active",
+    });
+    await seedWallet({
+      id: "cwal_0125_group_shared_staying",
+      custodyConfigId: "ccfg_0125_group_shared_sandbox",
+    });
+    await seedActiveProfile({
+      id: "wcp_0125_group_shared_moved",
+      organizationId: tenant.organizationId,
+      projectId: null,
+      custodyWalletId: "cwal_0125_group_shared_moved",
+    });
+    await seedProfileRevision({
+      id: "wcpr_0125_group_shared_moved",
+      profileId: "wcp_0125_group_shared_moved",
+      approvalGroupId: "apg_0125_group_shared",
+    });
+    await seedActiveProfile({
+      id: "wcp_0125_group_shared_staying",
+      organizationId: tenant.organizationId,
+      projectId: productionProjectId,
+      custodyWalletId: "cwal_0125_group_shared_staying",
+    });
+    await seedProfileRevision({
+      id: "wcpr_0125_group_shared_staying",
+      profileId: "wcp_0125_group_shared_staying",
+      approvalGroupId: "apg_0125_group_shared",
+    });
+    await seedApprovalGroup({
+      id: "apg_0125_group_shared",
+      organizationId: tenant.organizationId,
+      projectId: null,
+      memberUserId: tenant.userId,
+    });
+
+    await expect(runPostgresMigrations({ databaseUrl, migrationsDir })).rejects.toMatchObject({
+      code: RAISE_EXCEPTION,
+      message:
+        "1 org-level approval group(s) named by moved custody profiles are also named by profiles outside the Sandbox project",
+    });
+
+    expect(await approvalGroupsOf(tenant.organizationId)).toEqual([
+      {
+        id: "apg_0125_group_shared",
+        project_id: null,
+        member_user_ids: [tenant.userId],
+      },
+    ]);
+    expect(await profilesOf(tenant.organizationId)).toEqual([
+      {
+        id: "wcp_0125_group_shared_moved",
+        project_id: null,
+        custody_wallet_id: "cwal_0125_group_shared_moved",
+      },
+      {
+        id: "wcp_0125_group_shared_staying",
+        project_id: productionProjectId,
+        custody_wallet_id: "cwal_0125_group_shared_staying",
+      },
+    ]);
+    expect(await recordedMigrations()).toEqual([]);
   });
 });
 
