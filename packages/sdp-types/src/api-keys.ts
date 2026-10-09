@@ -110,25 +110,6 @@ export interface CachedApiKey {
 }
 
 // API Request/Response types
-export interface CreateApiKeyRequest {
-  name: string;
-  description?: string;
-  role?: ApiKeyRole;
-  permissions?: Permission[];
-  walletScope: ApiKeyWalletScope;
-  allowedIps?: string[]; // IPv4/IPv6 addresses or CIDR ranges for IP restriction
-  expiresAt?: string; // ISO date string
-  signingWalletId?: string;
-  signingWalletIds?: string[];
-  walletBindings?: Array<{
-    walletId: string;
-    permissions?: Permission[];
-  }>;
-  provisionWallet?: boolean | { connectionId: string };
-  walletLabel?: string;
-  walletPurpose?: string;
-}
-
 export interface UpdateApiKeyRequest {
   name?: string;
   description?: string;
