@@ -1,7 +1,12 @@
 import type { Address } from "@solana/addresses";
 import { z } from "zod";
 import type { CountryCode } from "./countries";
-import type { CustodyProvider, CustodyWalletAggregate, CustodyWalletTokenBalance } from "./custody";
+import type {
+  CustodyProvider,
+  CustodyWalletAggregate,
+  CustodyWalletTokenBalance,
+  StagedProviderRefusalReason,
+} from "./custody";
 import type { RampFiatCurrency } from "./generated/ramp.generated";
 import type { CryptoAssetSymbol, CryptoRailId, CryptoRailNetwork } from "./payment-rails";
 import type {
@@ -1354,16 +1359,30 @@ export interface RampProviderEstimateUnsupported {
   status: "unsupported";
 }
 
-export interface RampProviderEstimateError {
+/** The provider's estimate call failed. */
+export interface RampProviderEstimateFailure {
   provider: RampProviderId;
   status: "error";
   error: string;
 }
 
+/**
+ * The staged-provider rule refused the provider for the project, so it was
+ * never called: a policy outcome, not a fault. `reason` is the rule's
+ * machine-readable verdict, the same one its 403 carries as `details.reason`.
+ */
+export interface RampProviderEstimateRefusal {
+  provider: RampProviderId;
+  status: "error";
+  error: string;
+  reason: StagedProviderRefusalReason;
+}
+
 export type RampProviderEstimateResult =
   | RampProviderEstimateSuccess
   | RampProviderEstimateUnsupported
-  | RampProviderEstimateError;
+  | RampProviderEstimateFailure
+  | RampProviderEstimateRefusal;
 
 export interface PaymentRampEstimateEnvelope {
   data?: {

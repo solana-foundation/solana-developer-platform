@@ -29,8 +29,10 @@ import {
   type SdpEnvironment,
   type SdpRampProviderStages,
 } from "@sdp/types";
-import type { DatabaseExecutor } from "@/db";
+import type { Context } from "hono";
+import { type DatabaseExecutor, getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, forbidden } from "@/lib/errors";
 import {
   isCustodyProviderAvailable,
@@ -731,12 +733,20 @@ export interface CustodySetupRequest extends ProjectProviderScope {
   mode: CustodyMode;
 }
 
-/** A provider a project is about to use; custody names the mode it is used in. */
+/**
+ * A provider a project is about to use; custody names the mode it is used in.
+ * Earn has two arms: the plain one opens a NEW position (create, deposit and
+ * the availability read), and `program: "existing"` points a program that
+ * already exists at a provider (re-target). The existing-program arm skips
+ * only surfacing, so un-surfacing can never trap a position (ADR 0002); every
+ * other check still applies because it points money at the provider.
+ */
 export type ProjectProviderRequest =
   | { family: "custody"; provider: CustodyProvider; mode: CustodyMode }
   | { family: "compliance"; provider: ComplianceProviderId }
   | { family: "ramps"; provider: RampProviderId }
-  | { family: "earn"; provider: EarnProviderId };
+  | { family: "earn"; provider: EarnProviderId }
+  | { family: "earn"; provider: EarnProviderId; program: "existing" };
 
 /**
  * The custody setup rule's refusal of one pair: the 403 and the request and
@@ -979,10 +989,33 @@ function providerNotConfiguredForProject(
 }
 
 /**
+ * The 403 for a provider SDP does not offer.
+ *
+ * @param label - The provider's display label.
+ * @returns The `provider_not_offered` error.
+ */
+function providerNotOffered(label: string): AppError {
+  return forbidden(`${label} is not currently offered.`, { reason: "provider_not_offered" });
+}
+
+/**
+ * Whether SDP offers an Earn request's provider: a new position needs it
+ * surfaced, while an existing program ignores surfacing (ADR 0002 exit safety).
+ *
+ * @param request - The Earn provider being used.
+ * @returns Whether the provider is offered for the request.
+ */
+function isEarnRequestOffered(
+  request: Extract<ProjectProviderRequest, { family: "earn" }>
+): boolean {
+  return "program" in request || isEarnProviderSurfaced(request.provider);
+}
+
+/**
  * The staged-provider rule for ramps, compliance and Earn. A provider is
  * admitted for a project when, in order: the deployment's release channel
- * includes it; SDP offers it (its surfacing, the same check the ramp and Earn
- * entry points run before entitlement); the organization is entitled to it;
+ * includes it; SDP offers it (its surfacing, checked nowhere else for an
+ * authenticated caller); the organization is entitled to it;
  * and the deployment holds its credentials for the project's environment. The
  * channel alone decides which providers are offered, the same for Sandbox and
  * Production.
@@ -991,7 +1024,7 @@ function providerNotConfiguredForProject(
  * @param request - The provider being used.
  * @param checks - The provider's verdicts from its family's stage table, surfacing, access entry and credentials.
  * @param checks.inReleaseChannel - Whether the deployment's release channel includes it.
- * @param checks.offered - Whether SDP surfaces it for the project's environment.
+ * @param checks.offered - Whether SDP surfaces it for the project's environment (always true for an existing Earn program).
  * @param checks.entry - The organization's access entry for the provider.
  * @param checks.configured - Whether the deployment holds its credentials for the project's environment.
  * @returns Admitted, or the first failed check with its 403 (503 when not configured).
@@ -1022,7 +1055,7 @@ function decideStagedProvider(
       facts,
       request,
       "provider_not_offered",
-      forbidden(`${label} is not currently offered.`, { reason: "provider_not_offered" })
+      providerNotOffered(label)
     );
   }
   if (!checks.entry.entitled) {
@@ -1053,7 +1086,8 @@ function decideStagedProvider(
  * for a project. The availability read and every entry-point gate decide from
  * this, so they cannot disagree. Custody follows the custody setup rule; ramps
  * are staged per provider; compliance and Earn by their module stage; ramps and
- * Earn must also be surfaced, as their entry points require. Stages
+ * Earn must also be surfaced, as their entry points require, except an Earn
+ * request for an existing program, which skips surfacing alone. Stages
  * come from the `@sdp/types` manifests, as the custody stages do, so tests
  * override them by mocking that module. Every family that runs on deployment
  * credentials (all but BYOK custody) also needs the deployment to hold them
@@ -1111,7 +1145,7 @@ function decideProjectProvider(
     case "earn":
       return decideStagedProvider(facts, request, {
         inReleaseChannel: isEarnEnabled(env),
-        offered: isEarnProviderSurfaced(request.provider),
+        offered: isEarnRequestOffered(request),
         entry: facts.availability.providers.earn[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
@@ -1475,122 +1509,117 @@ function getAvailabilityMessage(
   return `${label} is unavailable for this organization.`;
 }
 
-export async function assertProviderAvailable(
+/**
+ * Refuses an organization using a custody provider it does not have enabled:
+ * entitled by its tier or overrides, and configured in this deployment. An
+ * organization-level check for the signing runtime, which has no project in
+ * scope; custody's release-channel and Production BYOK-only rules live in the custody setup gate.
+ *
+ * @param env - Process environment the provider access is evaluated against.
+ * @param db - Database client for the organization row.
+ * @param organizationId - The organization whose custody config is about to be used.
+ * @param provider - The custody provider.
+ * @throws 403 `FORBIDDEN` naming the missing entitlement or configuration.
+ */
+export async function assertCustodyProviderEnabled(
   env: Env,
-  db: DatabaseClient,
+  db: DatabaseExecutor,
   organizationId: string,
-  family: "custody",
-  providerId: CustodyProvider
-): Promise<void>;
-export async function assertProviderAvailable(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  family: "compliance",
-  providerId: ComplianceProviderId
-): Promise<void>;
-export async function assertProviderAvailable(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  family: "ramps",
-  providerId: RampProviderId,
-  testMode: boolean,
-  options: ProviderAvailabilityOptions
-): Promise<void>;
-export async function assertProviderAvailable(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  family: "earn",
-  providerId: EarnProviderId,
-  testMode: boolean
-): Promise<void>;
-export async function assertProviderAvailable(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  family: OrganizationProviderFamily,
-  providerId: string,
-  testMode?: boolean,
-  // Only the ramps overload takes options; the other families never read a ramp entry.
-  options: ProviderAvailabilityOptions = MANIFEST_RAMP_STAGES
+  provider: CustodyProvider
 ): Promise<void> {
-  const access = await getProviderAvailability(env, db, organizationId, options);
-  const entry = access.providers[family][
-    providerId as keyof (typeof access.providers)[typeof family]
-  ] as ProviderAvailabilityEntry | undefined;
-
-  if (!entry?.enabled) {
+  const access = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_STAGES);
+  const entry = access.providers.custody[provider];
+  if (!entry.enabled) {
     throw new AppError(
       "FORBIDDEN",
-      getAvailabilityMessage(
-        access.tier,
-        family,
-        providerId,
-        entry ?? {
-          entitled: false,
-          configured: false,
-          enabled: false,
-        }
-      )
+      getAvailabilityMessage(access.tier, "custody", provider, entry)
     );
   }
+}
 
-  // Secondary mode-specific check for ramps/earn: the general availability check
-  // uses a union of sandbox + production credentials, but the runtime handler only
-  // uses credentials for the requested mode. Re-check with the specific mode so
-  // callers get a clear PROVIDER_NOT_CONFIGURED (503) instead of a silent runtime
-  // failure.
-  if ((family === "ramps" || family === "earn") && testMode !== undefined) {
-    const definitions = PROVIDER_AVAILABILITY_DEFINITIONS[family] as Record<
-      string,
-      ProviderAvailabilityDefinition
-    >;
-    const def = definitions[providerId];
-    if (def && !def.isConfigured(env, testMode)) {
-      const mode = testMode ? "sandbox" : "production";
-      throw new AppError(
-        "PROVIDER_NOT_CONFIGURED",
-        `${def.label} is not configured for ${mode} mode.`
-      );
-    }
+/** A ramps or Earn provider a project is about to start provider work with. */
+export type StagedProviderGateRequest = Extract<
+  ProjectProviderRequest,
+  { family: "ramps" | "earn" }
+>;
+
+/**
+ * The project provider rule for one request's project: `decide` evaluates any
+ * provider without logging, and `availability` is the organization provider
+ * access it decides from, so a caller needing the organization's enabled set
+ * reads it here instead of loading it again.
+ */
+export interface ProjectProviderVerdict {
+  decide: (request: ProjectProviderRequest) => ProjectProviderDecision;
+  availability: OrganizationProviderAvailabilityResponse;
+}
+
+/**
+ * Loads the request's project facts once (its active project row and its
+ * organization's provider access) and returns the project provider rule over
+ * them with the access it read, so a request deciding several providers reads
+ * the database once. Evaluating is not refusing: a caller that refuses the
+ * request with a refusal throws `refuseProjectProvider(decision)`.
+ *
+ * @param c - Request context carrying the authenticated project scope.
+ * @returns The rule's non-logging `decide` for any provider of the project and
+ *   the organization provider access it decides from.
+ * @throws 404 when the project is not an active project of the organization.
+ */
+export async function loadProjectProviderVerdict(
+  c: Context<{ Bindings: Env }>
+): Promise<ProjectProviderVerdict> {
+  const facts = await loadProjectProviderFacts(c.env, getDb(c.env), {
+    organizationId: getAuth(c).organizationId,
+    projectId: requireProjectId(c),
+  });
+  return {
+    decide: (request) => decideProjectProvider(c.env, facts, request),
+    availability: facts.availability,
+  };
+}
+
+/**
+ * The provider gate for ramps and Earn money-in: every path that starts
+ * provider work for a project calls this before any provider call, claim or
+ * row write. Reads the project from the request's authenticated scope and
+ * applies the project provider rule (release channel, surfacing,
+ * entitlement and the deployment's credentials for the project's environment) through the same core the availability read
+ * uses, logging a refusal. Re-targeting an existing Earn program passes
+ * `program: "existing"`, which skips surfacing alone. Webhooks, reconcilers,
+ * reads and Earn exits (ADR 0002) never call it.
+ *
+ * @param c - Request context carrying the authenticated project scope.
+ * @param request - The ramps or Earn provider being used (Earn: a new position, or `program: "existing"`).
+ * @throws 403 `FORBIDDEN` whose `details.reason` is `provider_not_in_release_channel`,
+ *   `provider_not_offered` or `provider_not_entitled`; 503 `PROVIDER_NOT_CONFIGURED` when the deployment
+ *   lacks the provider's credentials for the project's environment; 404 when
+ *   the project is not an active project of the organization.
+ */
+export async function assertProviderAvailable(
+  c: Context<{ Bindings: Env }>,
+  request: StagedProviderGateRequest
+): Promise<void> {
+  const verdict = await loadProjectProviderVerdict(c);
+  const decision = verdict.decide(request);
+  if (!decision.admitted) {
+    throw refuseProjectProvider(decision);
   }
 }
 
 /**
- * Platform-level gate: opening a NEW position with a provider SDP does not
- * currently offer (`EARN_PROVIDER_SURFACING` in @sdp/types).
+ * The provider gate for an anonymous Earn money-in caller. With no project, the
+ * project provider rule has no entitlement or credentials to decide from, so
+ * only its offered check applies, answered with the same 403 an authenticated
+ * caller gets from `assertProviderAvailable`. Exits and reads never call it
+ * (ADR 0002).
  *
- * Deliberately NOT folded into `assertProviderAvailable`, which answers an
- * ORGANIZATION-scoped question and whose refusal tells the caller to ask for
- * manual activation. No override lifts this one, so it runs FIRST and says
- * something different — pointing a caller at an activation door that does not
- * exist is worse than a plain "not offered".
- *
- * This is the ONLY place surfacing is allowed to refuse anything. Every
- * money-out route, every read, and re-targeting an existing program ignore it
- * entirely, so un-surfacing a provider can never strand a position taken while
- * it was offered (ADR 0002).
+ * @param provider - The Earn provider a new position is being opened with.
+ * @throws 403 `FORBIDDEN` with `details.reason: "provider_not_offered"` when SDP does not surface the provider.
  */
-export function assertEarnProviderSurfaced(providerId: EarnProviderId): void {
-  if (!isEarnProviderSurfaced(providerId)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `${PROVIDER_AVAILABILITY_DEFINITIONS.earn[providerId].label} is not currently offered.`
-    );
-  }
-}
-
-export function assertRampProviderSurfaced(
-  providerId: RampProviderId,
-  environment: SdpEnvironment
-): void {
-  if (!isRampProviderSurfaced(providerId, environment)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `${PROVIDER_AVAILABILITY_DEFINITIONS.ramps[providerId].label} is not currently offered.`
-    );
+export function assertAnonymousEarnProviderOffered(provider: EarnProviderId): void {
+  if (!isEarnRequestOffered({ family: "earn", provider })) {
+    throw providerNotOffered(getProviderLabel("earn", provider));
   }
 }
 
@@ -1614,25 +1643,6 @@ export function assertEarnProviderConfigured(
       `${def?.label ?? providerId} is not configured for ${mode} mode.`
     );
   }
-}
-
-export async function getEnabledProviders(
-  env: Env,
-  db: DatabaseClient,
-  organizationId: string,
-  options: ProviderAvailabilityOptions
-) {
-  const access = await getProviderAvailability(env, db, organizationId, options);
-
-  return {
-    tier: access.tier,
-    custody: CUSTODY_PROVIDERS.filter((provider) => access.providers.custody[provider]?.enabled),
-    compliance: COMPLIANCE_PROVIDERS.filter(
-      (provider) => access.providers.compliance[provider]?.enabled
-    ),
-    ramps: RAMP_PROVIDERS.filter((provider) => access.providers.ramps[provider]?.enabled),
-    earn: EARN_PROVIDERS.filter((provider) => access.providers.earn[provider]?.enabled),
-  };
 }
 
 export async function syncProviderAccessFromClerk(

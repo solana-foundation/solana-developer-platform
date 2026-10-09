@@ -974,9 +974,12 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
       crypto.randomUUID(),
       PROD_API_KEY.raw
     );
-    expect(unconfigured.status).toBe(403);
+    expect(unconfigured.status).toBe(503);
     expect(await unconfigured.json()).toMatchObject({
-      error: { message: expect.stringContaining("Ondo is not configured") },
+      error: {
+        code: "PROVIDER_NOT_CONFIGURED",
+        message: "Ondo is not configured for production projects in this deployment.",
+      },
     });
     expect(depositIntoVault).not.toHaveBeenCalled();
 
@@ -1628,6 +1631,39 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
     expect(depositIntoVault).not.toHaveBeenCalled();
   });
 
+  it("refuses a deposit into a deployed but un-surfaced provider as provider_not_offered", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({
+      provider: "hastra",
+      name: "Hastra PRIME",
+      underlyingSource: undefined,
+      hostCluster: "mainnet-beta",
+      environment: "production",
+    });
+
+    const res = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_unsurfaced_hastra",
+        amount: "10",
+        minSharesOut: "9.9",
+      },
+      crypto.randomUUID(),
+      PROD_API_KEY.raw
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "Hastra / Figure is not currently offered.",
+        details: { reason: "provider_not_offered" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+
   it("dispatches a surfaced Veda row with the catalogue's own asset identity", async () => {
     await seedAuth();
     const strategy = await seedVedaStrategy();
@@ -1742,6 +1778,35 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     await expect(res.json()).resolves.toMatchObject({
       data: { strategyId: strategy.id, sharesOut: "9.99999" },
     });
+  });
+
+  it("refuses an anonymous quote for a deployed but un-surfaced provider", async () => {
+    const strategy = await seedStrategy({
+      provider: "hastra",
+      name: "Hastra PRIME",
+      underlyingSource: undefined,
+      hostCluster: "mainnet-beta",
+      environment: "production",
+    });
+    const client = quoteCapableClient({
+      sharesOut: "9.99999",
+      shareDecimals: 6,
+      blockingIssues: [],
+    });
+    vaultDirectClientOverride.current = client;
+
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "Hastra / Figure is not currently offered.",
+        details: { reason: "provider_not_offered" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(client.quoteVaultDeposit).not.toHaveBeenCalled();
   });
 
   it("quotes anonymously on the shelf the strategy names, not the deployment's", async () => {

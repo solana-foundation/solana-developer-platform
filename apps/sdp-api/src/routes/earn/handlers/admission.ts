@@ -6,13 +6,12 @@ import {
   earnDepositSlippagePolicy,
   earnDepositStyle,
 } from "@sdp/types/provider-access";
-import { getDb } from "@/db";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
-import { getAuth } from "@/lib/auth";
+import { getOptionalAuth } from "@/lib/auth";
 import { badRequest, forbidden } from "@/lib/errors";
 import { assertVaultExposureWithinCap } from "@/services/earn/vault-exposure";
 import {
-  assertEarnProviderSurfaced,
+  assertAnonymousEarnProviderOffered,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import { type AppContext, resolveSdpEnvironment } from "../context";
@@ -87,19 +86,22 @@ export function assertVaultDepositEnvironmentOpen(
 
 /**
  * The ONE vault money-in gate sequence for every handler that commits a
- * strategy to the vault-deposit path: `POST /vault-deposits` (custody) and
- * `POST /external-wallet/deposit-transactions` (caller-signed). Runs, in
+ * strategy to the vault-deposit path: `POST /vault-deposits` (custody),
+ * `POST /external-wallet/deposit-transactions` (caller-signed), and
+ * `POST /vault-deposit-previews` (the quote that opens either). Runs, in
  * order: deposit-style shape, provider registration, environment capability,
- * surfacing, entitlement/credentials, catalogue admission, and LAST, when the caller
- * passes the deposit `amount`, the SDP-wide vault exposure cap (ADR 0004
- * layer 1, `services/earn/vault-exposure.ts`). Keep it shared: a second copy
+ * the project provider rule for an authenticated caller (an anonymous caller
+ * has no project for it to decide from, so only its surfacing check applies),
+ * catalogue admission,
+ * and LAST, when the caller passes the deposit `amount`, the SDP-wide vault
+ * exposure cap (ADR 0004 layer 1, `services/earn/vault-exposure.ts`). Keep it shared: a second copy
  * is a second thing that can drift toward permissive.
  *
  * The cap runs last on purpose: it is the only step that reads the ledger,
  * and a caller refused by a cheaper gate should hear that reason, not "the
  * vault is full". Omitting `amount` skips the cap; only callers that are not
- * about to move money (none today) may do that, and a new money-in caller
- * must pass it.
+ * about to move money may do that (the deposit preview, which reports the cap
+ * as a blocking issue instead), and a new money-in caller must pass it.
  *
  * Money OUT never reaches this function (ADR 0002): withdrawals take none of
  * these gates, the exposure cap included. A vault over its cap is exit-only,
@@ -114,7 +116,6 @@ export async function assertVaultDepositAdmissible(
   amount?: string,
   options: {
     environment?: SdpEnvironment;
-    organizationId?: string | null;
   } = {}
 ): Promise<EarnProviderId> {
   const environment = options.environment ?? resolveSdpEnvironment(c);
@@ -132,18 +133,10 @@ export async function assertVaultDepositAdmissible(
   const provider = strategy.provider;
 
   assertVaultDepositEnvironmentOpen(environment, provider);
-  assertEarnProviderSurfaced(provider);
-  const organizationId =
-    options.organizationId === undefined ? getAuth(c).organizationId : options.organizationId;
-  if (organizationId !== null) {
-    await assertProviderAvailable(
-      c.env,
-      getDb(c.env),
-      organizationId,
-      "earn",
-      provider,
-      environment === "sandbox"
-    );
+  if (getOptionalAuth(c)) {
+    await assertProviderAvailable(c, { family: "earn", provider });
+  } else {
+    assertAnonymousEarnProviderOffered(provider);
   }
   assertStrategyDepositable(strategy, environment);
 

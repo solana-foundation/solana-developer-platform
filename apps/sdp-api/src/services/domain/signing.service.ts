@@ -59,8 +59,8 @@ import {
 } from "@/services/domain/signing/provider-wallet-lifecycle";
 import {
   assertCustodyProviderAvailable,
+  assertCustodyProviderEnabled,
   assertManagedCustodyUseAllowed,
-  assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
@@ -274,7 +274,7 @@ export class SigningService {
     assertCustodyProviderAvailable(this.env, provider, "managed");
     await assertManagedCustodyUseAllowed(getDb(this.env), { organizationId, projectId, provider });
     try {
-      await assertProviderAvailable(this.env, getDb(this.env), organizationId, "custody", provider);
+      await assertCustodyProviderEnabled(this.env, getDb(this.env), organizationId, provider);
     } catch (error) {
       if (error instanceof AppError) {
         throw new SigningError(error.message, "INVALID_REQUEST", error);

@@ -91,6 +91,8 @@ export const TEST_PROJECT = {
   slug: "test-payments-policy-project",
 };
 
+export const TEST_PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
+
 export const TEST_USER = {
   id: "usr_payments_policy_test",
   email: "payments-policy-test@example.com",
@@ -228,7 +230,7 @@ async function seedAuthAndWallet(): Promise<void> {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
     members: [TEST_USER.id],
-    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT_ID },
   });
   await getDb(env).batch([
     getDb(env)

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AppError } from "@/lib/errors";
 import type { SigningConfigRecord } from "@/services/adapters";
 import {
   provisionCoinbaseCdpAccount,
@@ -6,6 +7,7 @@ import {
   provisionUtilaWallet,
 } from "@/services/custody/provisioning";
 import { SigningService } from "@/services/domain/signing.service";
+import * as providerAvailability from "@/services/provider-availability.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
@@ -133,6 +135,55 @@ describe("signing.service provider reuse", () => {
       provider: "utila",
       configJson: expect.objectContaining({ provider: "utila" }),
     });
+  });
+});
+
+describe("signing.service custody provider enablement", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("refuses a Managed custody operation through the organization-level provider check", async () => {
+    const orgId = "org_signing_provider_disabled";
+    const configRecord = createConfigRecord({
+      id: "cust_privy_disabled",
+      orgId,
+      provider: "privy",
+    });
+    const { service, configStore } = createService({
+      configRecord,
+      wallets: [],
+      envOverrides: { SDP_RELEASE_CHANNEL: "experimental" },
+    });
+    configStore.findActiveByProvider.mockResolvedValue(configRecord);
+    const assertManagedCustodyUseAllowed = vi
+      .spyOn(providerAvailability, "assertManagedCustodyUseAllowed")
+      .mockResolvedValue();
+    const assertCustodyProviderEnabled = vi
+      .spyOn(providerAvailability, "assertCustodyProviderEnabled")
+      .mockRejectedValue(
+        new AppError("FORBIDDEN", "Privy requires manual activation for this organization.")
+      );
+
+    await expect(
+      service.createWallet(orgId, PROJECT_ID, { provider: "privy" })
+    ).rejects.toMatchObject({
+      name: "SigningError",
+      code: "INVALID_REQUEST",
+      message: "Privy requires manual activation for this organization.",
+    });
+    expect(assertManagedCustodyUseAllowed).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      organizationId: orgId,
+      projectId: PROJECT_ID,
+      provider: "privy",
+    });
+    expect(assertCustodyProviderEnabled).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ SDP_RELEASE_CHANNEL: "experimental" }),
+      expect.anything(),
+      orgId,
+      "privy"
+    );
+    expect(configStore.createWallet).not.toHaveBeenCalled();
   });
 });
 

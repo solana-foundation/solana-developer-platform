@@ -848,10 +848,7 @@ export async function createEarnExternalWalletDepositTransaction(
   // wording; the shared predicate re-checks them for free. `body.amount` is
   // the SOURCE stablecoin's units on a swap-funded build, which the cap treats
   // dollar-for-dollar by design.
-  await assertVaultDepositAdmissible(c, strategy, body.amount, {
-    environment,
-    organizationId: authenticated?.auth.organizationId ?? null,
-  });
+  await assertVaultDepositAdmissible(c, strategy, body.amount, { environment });
 
   const swap = resolveDepositSwapRequest(
     {

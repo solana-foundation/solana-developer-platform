@@ -10,7 +10,7 @@ import type { Env } from "@/types/env";
 import events from "./events";
 import { listOfframpCurrencies } from "./offramp/handlers";
 import { listOnrampCurrencies } from "./onramp/handlers";
-import { filterProviders, resolveRampQuoteRequest } from "./shared";
+import { filterProviders } from "./shared";
 
 // Today every provider is `experimental`, so a `beta` deployment leaves them all
 // out. These stages put MoonPay in `beta` and keep every other provider out.
@@ -38,22 +38,6 @@ function buildApp(stages: SdpRampProviderStages) {
   app.get("/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
   app.get("/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
   app.get("/offered", (c) => c.json({ providers: filterProviders(c, RAMP_PROVIDERS, undefined) }));
-  app.post("/onramp/quote", async (c) => {
-    await resolveRampQuoteRequest(
-      c,
-      "onramp",
-      {
-        provider: "lightspark",
-        counterpartyId: "cp_ramp_channel_test",
-        destinationCustodyWalletId: "cw_ramp_channel_test",
-        assetRail: "usdc.solana",
-        fiatCurrency: "USD",
-        fiatAmount: "100",
-      },
-      "cw_ramp_channel_test"
-    );
-    return c.body(null, 204);
-  });
   app.get("/counterparties/:counterpartyId/requirements", getCounterpartyRequirements);
   app.get("/counterparties/:counterpartyId/provider-accounts", listCounterpartyProviderAccounts);
   app.route("/", events);
@@ -90,7 +74,6 @@ describe("ramp providers outside the release channel", () => {
   it.each([
     ["GET", "/onramp/currency?provider=lightspark"],
     ["GET", "/offramp/currency?provider=lightspark"],
-    ["POST", "/onramp/quote"],
     [
       "GET",
       "/counterparties/cp_1/requirements?provider=lightspark&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=cw_1",
