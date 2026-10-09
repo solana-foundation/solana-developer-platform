@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { BYOK_CUSTODY_PROVIDERS, type CustodyConfigSummary } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { availableCustodyProviders } from "@/lib/provider-availability";
 import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -54,7 +55,7 @@ async function getConnectedCustodyProviders(
 }
 
 export default async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
-  const { userId, orgId } = await auth();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -65,6 +66,18 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
   const trace = createTimedTrace("dashboard.custody.setup.page");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const initialProvider = parseProvider(getSearchParamValue(resolvedSearchParams, "provider"));
+
+  // The custody reads below are `custody:admin`, so a member would hit a 403 on
+  // each one. Send them to the provider page, which names the role they need.
+  if (!resolveDashboardAccess(orgRole).capabilities.canManageCustody) {
+    redirect(
+      await requestProjectHref(
+        initialProvider === null
+          ? "/dashboard/integrations"
+          : `/dashboard/integrations/${initialProvider}`
+      )
+    );
+  }
 
   const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
     createRequestScopedSdpApiClients({

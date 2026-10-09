@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
+import { setPageRequest } from "@/test/request-project";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
@@ -34,7 +36,8 @@ import { WalletSetupFlow } from "./wallet-setup-flow";
 describe("custody setup page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+    setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/custody/setup`);
+    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
     mocks.organizationFetch.mockResolvedValue({
       linked: true,
       organization: { id: "org_test" },
@@ -90,5 +93,20 @@ describe("custody setup page", () => {
     await expect(CustodySetupPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
       "SDP API request failed (503): unavailable"
     );
+  });
+
+  it.each([
+    [{ provider: "privy" }, `/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy`],
+    [{}, `/dashboard/${PRODUCTION_PROJECT.id}/integrations`],
+  ])("redirects a member given %o to %s before any API read", async (searchParams, destination) => {
+    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:member" });
+
+    await expect(
+      CustodySetupPage({ searchParams: Promise.resolve(searchParams) })
+    ).rejects.toMatchObject({ message: `NEXT_REDIRECT ${destination}` });
+
+    expect(mocks.organizationFetch).not.toHaveBeenCalled();
+    expect(mocks.projectRequest).not.toHaveBeenCalled();
+    expect(mocks.fetchProjectProviderAvailability).not.toHaveBeenCalled();
   });
 });
