@@ -741,25 +741,36 @@ describe("Compliance routes", () => {
     expect(loadProjectProviderVerdict).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses a Production project a compliance provider below stable before calling it", async () => {
+  it("screens a Production project with a compliance provider below stable the release channel offers", async () => {
     providerStages.moduleStageOverride = { module: "compliance", stage: "beta" };
     env.RANGE_API_KEY = "range_test_api_key";
     await seedProductionApiKey();
     const loadProjectProviderVerdict = vi.spyOn(providerAvailability, "loadProjectProviderVerdict");
-    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ riskScore: 2, riskLevel: "Low risk" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
 
     const res = await screenAddress(TEST_PRODUCTION_API_KEY.raw);
 
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: "Range is not stable yet, so a production project cannot use it.",
-        details: { reason: "provider_stage_not_allowed" },
-      },
-      meta: { requestId: expect.any(String) },
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    const body: {
+      data: {
+        screening: {
+          providers: Array<{ provider: string; status: string; riskScore: number | null }>;
+        };
+      };
+    } = await res.json();
+    expect(
+      body.data.screening.providers.map(({ provider, status, riskScore }) => ({
+        provider,
+        status,
+        riskScore,
+      }))
+    ).toEqual([{ provider: "range", status: "ok", riskScore: 2 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(loadProjectProviderVerdict).toHaveBeenCalledTimes(1);
   });
 

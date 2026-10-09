@@ -1499,7 +1499,7 @@ describe("BVNK ramp webhook", () => {
     });
     await expectNoBvnkWebhookEvents();
   });
-  it("settles a Production project's on-ramp pay-in while BVNK is not stable", async () => {
+  it("settles a Production project's on-ramp pay-in from a provider below stable", async () => {
     providerStages.rampStageOverride = { provider: "bvnk", stage: "beta" };
     const transferId = "xfr_123e4567-e89b-12d3-a456-426614174099";
     const productionProjectId = `${PROJECT_ID}_production`;

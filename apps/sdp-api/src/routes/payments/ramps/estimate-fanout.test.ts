@@ -19,6 +19,7 @@ vi.mock("../wallets", async (importOriginal) => ({
   resolveScope: vi.fn().mockResolvedValue({ auth: { organizationId: "org_fanout_test" } }),
 }));
 
+import { estimateNotAvailable } from "@sdp/payments";
 import {
   COMPLIANCE_PROVIDERS,
   CUSTODY_PROVIDERS,
@@ -171,6 +172,45 @@ describe("estimateAcrossProviders", () => {
       });
     }
   );
+
+  it("answers an entitlement refusal beside an admitted provider from one verdict load, logging only the refusal at info", async () => {
+    const refusal: ProjectProviderRefusal = {
+      ...MOONPAY_NOT_CONFIGURED,
+      reason: "provider_not_entitled",
+      error: forbidden("MoonPay requires manual activation for this organization.", {
+        reason: "provider_not_entitled",
+      }),
+    };
+    vi.mocked(loadProjectProviderVerdict).mockResolvedValue({
+      decide: (request) => (request.provider === "moonpay" ? refusal : { admitted: true }),
+      availability: FANOUT_AVAILABILITY,
+    });
+    const runProvider = vi.fn().mockRejectedValue(estimateNotAvailable());
+
+    const results = await estimateAcrossProviders(
+      buildContext(),
+      ["moonpay", "stripe"],
+      runProvider
+    );
+
+    expect(results).toEqual([
+      {
+        provider: "moonpay",
+        status: "error",
+        error: "MoonPay requires manual activation for this organization.",
+        reason: "provider_not_entitled",
+      },
+      { provider: "stripe", status: "unsupported" },
+    ]);
+    expect(loadProjectProviderVerdict).toHaveBeenCalledTimes(1);
+    expect(runProvider).toHaveBeenCalledExactlyOnceWith("stripe", {});
+    expect(logEvent).toHaveBeenCalledExactlyOnceWith("info", {
+      event: "sdp_api_ramp_provider_refused",
+      provider: "moonpay",
+      organization_id: "org_fanout_test",
+      reason: "provider_not_entitled",
+    });
+  });
 
   it("does not log when a provider succeeds or is merely unsupported", async () => {
     const estimate = { provider: "moonpay" } as unknown as PaymentRampEstimate;

@@ -12,8 +12,7 @@ import { required } from "@/test/helpers/required";
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
 
 vi.mock("@sdp/types", async (importOriginal) => {
-  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
-  const actual = mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+  const actual = await importOriginal<typeof import("@sdp/types")>();
   return {
     ...actual,
     isEarnProviderSurfaced: (provider: string) =>
@@ -47,8 +46,6 @@ import {
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { providerStages } from "@/test/helpers/provider-stages";
-import { countTableRows } from "@/test/helpers/row-counts";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -434,8 +431,6 @@ beforeEach(async () => {
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   custodyReleaseChannel.outOfChannelMode = null;
-  providerStages.rampStageOverride = null;
-  providerStages.moduleStageOverride = null;
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
@@ -814,7 +809,6 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
 describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
   it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
-    providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
     await seedProductionConnectionWallet({
       connectionId: "cconn_earn_vault_kamino_prod",
       credentialId: "pcred_earn_vault_kamino_prod",
@@ -896,7 +890,6 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
-    providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
     await seedProductionConnectionWallet({
       connectionId: "cconn_earn_vault_jupiter",
       credentialId: "pcred_earn_vault_jupiter",
@@ -952,7 +945,6 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("opens Ondo USDY only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
-    providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
     await seedProductionConnectionWallet({
       connectionId: "cconn_earn_vault_ondo",
       credentialId: "pcred_earn_vault_ondo",
@@ -1085,77 +1077,6 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("mainnet-beta");
-  });
-});
-
-describe("POST /v1/earn/vault-deposits — Production stable bar", () => {
-  beforeEach(() => {
-    providerStages.moduleStageOverride = { module: "earn", stage: "beta" };
-  });
-
-  it("refuses a Production deposit while Earn is not stable, before any approval, claim or provider call", async () => {
-    await seedAuth();
-    await seedProductionConnectionWallet({
-      connectionId: "cconn_earn_vault_stage_prod",
-      credentialId: "pcred_earn_vault_stage_prod",
-      custodyWalletId: "cwlt_earn_vault_stage_prod",
-      providerWalletId: "privy_earn_vault_stage_prod",
-    });
-    const strategy = await seedStrategy({ hostCluster: "mainnet-beta", environment: "production" });
-
-    const res = await postVaultDeposit(
-      {
-        strategyId: strategy.id,
-        custodyWalletId: "cwlt_earn_vault_stage_prod",
-        amount: "10",
-        minSharesOut: "9.99",
-      },
-      crypto.randomUUID(),
-      PROD_API_KEY.raw
-    );
-
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: "Kamino is not stable yet, so a production project cannot use it.",
-        details: { reason: "provider_stage_not_allowed" },
-      },
-      meta: { requestId: expect.any(String) },
-    });
-    expect(depositIntoVault).not.toHaveBeenCalled();
-    expect(await countTableRows("approval_requests")).toBe(0);
-    expect(await countTableRows("wallet_operations")).toBe(0);
-  });
-
-  it("admits the same provider from a Sandbox project while Earn is not stable", async () => {
-    await seedAuth();
-    await seedWallet({
-      publicKey: WALLET_ADDRESS,
-      configId: "cfg_earn_vault_stage_sandbox",
-      provider: "privy",
-      custodyWalletId: "cwlt_earn_vault_stage_sandbox",
-      providerWalletId: "privy_earn_vault_stage_sandbox",
-      projectId: TEST_PROJECT.id,
-    });
-    const strategy = await seedStrategy({});
-
-    const res = await postVaultDeposit(
-      {
-        strategyId: strategy.id,
-        custodyWalletId: "cwlt_earn_vault_stage_sandbox",
-        amount: "10",
-      },
-      crypto.randomUUID(),
-      TEST_API_KEY.raw
-    );
-
-    expect(res.status).toBe(200);
-    expect(depositIntoVault).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ environment: "sandbox", provider: "kamino" }),
-      expect.anything()
-    );
   });
 });
 
@@ -1827,7 +1748,6 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
   });
 
   it("quotes anonymously on the shelf the strategy names, not the deployment's", async () => {
-    providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
     const strategy = await seedStrategy({
       provider: "kamino",
       environment: "production",
@@ -1845,34 +1765,6 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     await expect(res.json()).resolves.toMatchObject({
       data: { strategyId: strategy.id, sharesOut: "9.99999" },
     });
-  });
-
-  it("refuses an anonymous preview of a Production strategy while Earn is not stable", async () => {
-    providerStages.moduleStageOverride = { module: "earn", stage: "beta" };
-    const strategy = await seedStrategy({
-      provider: "kamino",
-      environment: "production",
-      hostCluster: "mainnet-beta",
-    });
-    const client = quoteCapableClient({
-      sharesOut: "9.99999",
-      shareDecimals: 6,
-      blockingIssues: [],
-    });
-    vaultDirectClientOverride.current = client;
-
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
-
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: "Earn is not stable yet, so a production strategy cannot take deposits.",
-        details: { reason: "provider_stage_not_allowed" },
-      },
-      meta: { requestId: expect.any(String) },
-    });
-    expect(client.quoteVaultDeposit).not.toHaveBeenCalled();
   });
 
   it("answers the provider's own quote for a surfaced, quotable strategy", async () => {
