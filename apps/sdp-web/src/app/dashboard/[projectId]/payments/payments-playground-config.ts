@@ -41,15 +41,6 @@ const examplePolicyRules = [
   },
 ];
 
-function buildProviderWalletOptions(
-  wallets: PaymentsPlaygroundWalletView[]
-): ApiPlaygroundFieldOption[] {
-  return wallets.map((wallet) => ({
-    value: wallet.walletId,
-    label: wallet.label?.trim() ? `${wallet.label} (${wallet.walletId})` : wallet.walletId,
-  }));
-}
-
 function buildCustodyWalletOptions(
   wallets: PaymentsPlaygroundWalletView[]
 ): ApiPlaygroundFieldOption[] {
@@ -110,14 +101,13 @@ export function buildPaymentsPlaygroundEndpointConfigs(
   t: (key: MessageKey, values?: TranslationValues) => string
 ): ApiPlaygroundEndpointConfig[] {
   const rampProviderOptions = buildRampProviderOptions(t);
-  const providerWalletOptions = buildProviderWalletOptions(wallets);
   const custodyWalletOptions = buildCustodyWalletOptions(wallets);
   const transferOptions = buildTransferOptions(transfers);
   const walletIdField = buildSelectBackedField(
     "walletId",
     "{walletId}",
-    t("DashboardPayments.playground.walletIdPlaceholder"),
-    providerWalletOptions
+    t("DashboardPayments.playground.custodyWalletIdPlaceholder"),
+    custodyWalletOptions
   );
   const transferIdField = buildSelectBackedField(
     "transferId",
@@ -140,6 +130,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
   const firstWallet = wallets[0];
   const firstTransfer = transfers[0];
   const exampleWalletId = firstWallet?.walletId ?? "wal_ops_123";
+  const exampleCustodyWalletId = firstWallet?.id ?? "cwlt_ops_123";
   const exampleWalletAddress = firstWallet?.publicKey ?? exampleWalletAddressFallback;
   const exampleTransferId = firstTransfer?.id ?? "xfr_live_123";
 
@@ -153,6 +144,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       bodyFields: [],
       expectedResponse: {
         data: {
+          custodyWalletId: exampleCustodyWalletId,
           walletId: exampleWalletId,
           address: exampleWalletAddress,
           balances: [
@@ -177,6 +169,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       expectedResponse: {
         data: {
           policy: {
+            custodyWalletId: exampleCustodyWalletId,
             walletId: exampleWalletId,
             defaultAction: "allow",
             rules: [
@@ -221,6 +214,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       expectedResponse: {
         data: {
           policy: {
+            custodyWalletId: exampleCustodyWalletId,
             walletId: exampleWalletId,
             defaultAction: "allow",
             rules: examplePolicyRules,

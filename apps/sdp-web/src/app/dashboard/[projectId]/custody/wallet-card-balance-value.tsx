@@ -15,7 +15,7 @@ const WALLET_BALANCE_CACHE_TTL_MS = 30_000;
 
 interface WalletCardBalanceValueProps {
   walletId: string;
-  initialBalances: CustodyWalletTokenBalance[];
+  initialBalances: CustodyWalletTokenBalance[] | undefined;
 }
 
 export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
@@ -35,7 +35,7 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     {
       key: "wallet-card-balances",
       ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
-      version: 2,
+      version: 3,
     }
   );
   const batchFailed =
@@ -62,6 +62,9 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     ? (fallbackBalances ?? batchBalances?.[walletId] ?? initialBalances)
     : (batchBalances?.[walletId] ?? initialBalances);
   const hasError = batchFailed && (fallbackBalances === undefined || Boolean(fallbackError));
+  if (balances === undefined) {
+    return <span className="font-medium text-muted">{t("DashboardCustody.unavailable")}</span>;
+  }
   const totalBalance = resolveTotalBalance(balances);
 
   return (

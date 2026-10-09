@@ -85,7 +85,7 @@
     "unavailable": "Không khả dụng",
     "unableToLoadWalletProviders": "Không tải được Provider Wallet",
     "unableToLoadWallets": "Không tải được Wallet",
-    "trackedBalancesUnavailable": "Số dư theo dõi tạm thời không khả dụng. Hiển thị số dư từ Wallet.",
+    "trackedBalancesUnavailable": "Số dư theo dõi tạm thời không khả dụng.",
     "walletControlsUnavailable": "Điều khiển Wallet tạm thời không khả dụng.",
     "createWallet": "Tạo Wallet",
     "walletSearchPlaceholder": "Tìm theo tên, ID Wallet, địa chỉ, Provider hoặc mục đích",
@@ -1009,6 +1009,8 @@
     "walletSetupConnectionHint": "Wallet được tạo trong kết nối này và ký bằng thông tin xác thực của kết nối.",
     "walletSetupConnectionDefault": "Mặc định của project",
     "walletSetupConnectionUnavailablePending": "Thiết lập chưa hoàn tất",
-    "walletSetupConnectionUnavailableFailed": "Cần xử lý"
+    "walletSetupConnectionUnavailableFailed": "Cần xử lý",
+    "policyDraftStorageUnavailable": "Không thể lưu trữ bản nháp trong trình duyệt. Các thay đổi chưa lưu có thể bị mất khi rời trang.",
+    "policyDraftCleanupIncomplete": "Đã lưu chính sách. Việc dọn dẹp bản nháp trong trình duyệt chưa hoàn tất."
   }
 }

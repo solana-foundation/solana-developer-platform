@@ -71,7 +71,7 @@ export async function PolicyAuditDetail({
   locale: string;
   t: PolicyTranslate;
 }) {
-  const encodedWalletId = encodeURIComponent(wallet.walletId);
+  const encodedWalletId = encodeURIComponent(wallet.id);
   const policyHref = await requestProjectHref(`/dashboard/wallets/${encodedWalletId}/policy`);
   const auditHref = `${policyHref}/audit`;
   const detailBaseHref = `${auditHref}/${encodeURIComponent(evaluation.id)}`;
@@ -640,7 +640,7 @@ async function EvaluationContextRail({
           <div className="mt-3 flex gap-2 pb-1">
             {activeRevisionId && activeRevisionNumber !== null ? (
               <RevisionHistoryDrawer
-                walletId={wallet.walletId}
+                walletId={wallet.id}
                 preloaded={{ history, userNames }}
                 defaultRevisionId={activeRevisionId}
                 trigger={
@@ -844,7 +844,7 @@ function NeighborButton({
 }
 
 function walletLabel(wallet: CustodyWalletMetadataResponse["wallet"]): string {
-  return wallet.label?.trim() || wallet.walletId;
+  return wallet.label?.trim() || wallet.id;
 }
 
 /**

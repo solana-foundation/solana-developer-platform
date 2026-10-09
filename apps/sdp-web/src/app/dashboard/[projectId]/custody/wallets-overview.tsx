@@ -91,10 +91,10 @@ function WalletCard({
   return (
     <article
       className="relative flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] transition hover:border-primary/30 hover:shadow-[0_4px_16px_rgba(28,28,29,0.08)]"
-      data-wallet-card={wallet.walletId}
+      data-wallet-card={wallet.id}
     >
       <Link
-        href={href(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`)}
+        href={href(`/dashboard/wallets/${encodeURIComponent(wallet.id)}`)}
         className="absolute inset-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
       >
         <span className="sr-only">{t("DashboardCustody.manage")}</span>
@@ -124,7 +124,7 @@ function WalletCard({
             </div>
             <div className="relative mt-0.5 min-w-0 text-2xl leading-tight font-medium tracking-tight text-primary">
               <WalletLabelInlineEditor
-                walletId={wallet.walletId}
+                walletId={wallet.id}
                 label={wallet.label}
                 canEdit={canManageCustody}
               />
@@ -132,10 +132,7 @@ function WalletCard({
           </div>
         </div>
         <div className="shrink-0 text-xl tracking-tight">
-          <WalletCardBalanceValue
-            walletId={wallet.walletId}
-            initialBalances={wallet.balances ?? []}
-          />
+          <WalletCardBalanceValue walletId={wallet.id} initialBalances={wallet.balances} />
         </div>
       </div>
 
@@ -153,14 +150,11 @@ function WalletCard({
         <div className="flex h-6 items-center justify-between gap-3 text-xs">
           <span className="text-tertiary">{t("DashboardCustody.walletId")}</span>
           <div className="relative flex min-w-0 items-center gap-1">
-            <WalletMetaValue
-              value={wallet.walletId}
-              displayValue={formatWalletMeta(wallet.walletId, 10, 6)}
-            />
+            <WalletMetaValue value={wallet.id} displayValue={formatWalletMeta(wallet.id, 10, 6)} />
             <WalletMetadataCopyButton
-              value={wallet.walletId}
+              value={wallet.id}
               label={t("DashboardCustody.walletId")}
-              tooltip={wallet.walletId}
+              tooltip={wallet.id}
             />
           </div>
         </div>
@@ -181,7 +175,7 @@ function WalletCardsGrid({
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {wallets.map((item) => (
-        <WalletCard key={item.wallet.walletId} item={item} canManageCustody={canManageCustody} />
+        <WalletCard key={item.wallet.id} item={item} canManageCustody={canManageCustody} />
       ))}
       {children}
     </div>

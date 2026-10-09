@@ -466,7 +466,7 @@ describe("Wallet policy audit detail routes", () => {
 
   it("lists immutable control profile revisions and marks the active revision", async () => {
     const response = await app.request(
-      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/revisions`,
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/revisions`,
       { headers: authHeaders() },
       env
     );
@@ -502,7 +502,7 @@ describe("Wallet policy audit detail routes", () => {
 
   it("returns one evaluation with decision context, status, revisions, and approval linkage", async () => {
     const response = await app.request(
-      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations/${evaluationIds.review}`,
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/evaluations/${evaluationIds.review}`,
       { headers: authHeaders() },
       env
     );
@@ -534,9 +534,66 @@ describe("Wallet policy audit detail routes", () => {
     });
   });
 
+  it("keeps legacy evaluation reads compatible with the exact stored wallet", async () => {
+    const exact = await app.request(
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/evaluations/${evaluationIds.review}`,
+      { headers: authHeaders() },
+      env
+    );
+    const legacy = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations/${evaluationIds.review}`,
+      { headers: authHeaders() },
+      env
+    );
+    expect(exact.status).toBe(200);
+    expect(legacy.status).toBe(200);
+    const exactBody = await exact.json();
+    expect((await legacy.json()).data).toEqual(exactBody.data);
+    expect(exactBody.data.policyEvaluation.evaluationContext.operation).toMatchObject({
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+    });
+  });
+
+  it.each(["null", "missing"])(
+    "preserves %s custody identity in a historical evaluation snapshot",
+    async (identity) => {
+      await getDb(env)
+        .prepare(
+          `UPDATE policy_evaluations
+         SET evaluation_context = CASE WHEN ? = 'missing'
+           THEN evaluation_context #- '{operation,custodyWalletId}'
+           ELSE jsonb_set(evaluation_context, '{operation,custodyWalletId}', 'null') END
+         WHERE id = ?`
+        )
+        .bind(identity, evaluationIds.review)
+        .run();
+
+      for (let read = 0; read < 2; read++) {
+        const response = await app.request(
+          `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/evaluations/${evaluationIds.review}`,
+          { headers: authHeaders() },
+          env
+        );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: {
+            policyEvaluation: {
+              id: evaluationIds.review,
+              policyRevisions: { wallet: { evaluatedRevisionId: activeRevisionId } },
+              evaluationContext: {
+                operation: { custodyWalletId: null, walletId: TEST_WALLET_ID },
+              },
+            },
+          },
+        });
+      }
+    }
+  );
+
   it("paginates and filters wallet evaluation history", async () => {
     const pageResponse = await app.request(
-      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations?page=1&pageSize=2`,
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/evaluations?page=1&pageSize=2`,
       { headers: authHeaders() },
       env
     );
@@ -552,7 +609,7 @@ describe("Wallet policy audit detail routes", () => {
     expect(pageBody.meta).toMatchObject({ total: 3, page: 1, pageSize: 2, hasMore: true });
 
     const filteredResponse = await app.request(
-      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations?decision=deny&status=failed&operationFamily=payment`,
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/evaluations?decision=deny&status=failed&operationFamily=payment`,
       { headers: authHeaders() },
       env
     );
@@ -569,14 +626,14 @@ describe("Wallet policy audit detail routes", () => {
 
   it("rejects unauthenticated reads and hides cross-organization evaluations", async () => {
     const unauthenticated = await app.request(
-      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations`,
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/evaluations`,
       undefined,
       env
     );
     expect(unauthenticated.status).toBe(401);
 
     const crossOrganization = await app.request(
-      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations/${evaluationIds.crossOrganization}`,
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/evaluations/${evaluationIds.crossOrganization}`,
       { headers: authHeaders() },
       env
     );
@@ -585,7 +642,7 @@ describe("Wallet policy audit detail routes", () => {
 
   it("returns 404 for a sandbox evaluation read with the production key", async () => {
     const response = await app.request(
-      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations/${evaluationIds.allow}`,
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/evaluations/${evaluationIds.allow}`,
       { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
       env
     );
@@ -594,7 +651,7 @@ describe("Wallet policy audit detail routes", () => {
 
   it("redacts credential fields and never returns raw or provider payloads", async () => {
     const response = await app.request(
-      `/v1/payments/wallets/${TEST_WALLET_ID}/policies/evaluations/${evaluationIds.review}`,
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/evaluations/${evaluationIds.review}`,
       { headers: authHeaders() },
       env
     );

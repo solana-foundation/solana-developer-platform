@@ -401,6 +401,7 @@ export async function getWalletBalances(c: AppContext) {
   return success(c, {
     ...(minimumSlot === undefined ? {} : { balanceReadContext: { minimumSlot } }),
     walletBalances: {
+      custodyWalletId: wallet.id,
       walletId: wallet.walletId,
       address: wallet.publicKey,
       balances,
@@ -412,17 +413,20 @@ export async function getWalletBalances(c: AppContext) {
  * Shape a wallet's control profile into the policies API response. A wallet
  * without an active profile is implicitly default-allow with no rules.
  *
- * @param walletId - The wallet the policy belongs to.
+ * @param custodyWalletId - The exact SDP wallet the policy belongs to.
+ * @param walletId - Legacy provider reference retained during the compatible rollout.
  * @param controlProfile - The wallet's active control profile, if any.
  * @param audit - The wallet's recent policy evaluations.
  * @returns The policy response payload.
  */
 function walletPolicyResponse(
+  custodyWalletId: string,
   walletId: string,
   controlProfile: PaymentWalletControlProfileSummary | null,
   audit: PaymentWalletPolicyAudit
 ): PaymentWalletPolicy {
   return {
+    custodyWalletId,
     walletId,
     defaultAction: controlProfile === null ? "allow" : controlProfile.defaultAction,
     rules: controlProfile === null ? [] : controlProfile.rules,
@@ -441,7 +445,9 @@ export async function getWalletPolicy(c: AppContext) {
     custodyWalletId: wallet.id,
   });
 
-  return success(c, { policy: walletPolicyResponse(wallet.walletId, controlProfile, audit) });
+  return success(c, {
+    policy: walletPolicyResponse(wallet.id, wallet.walletId, controlProfile, audit),
+  });
 }
 
 export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWalletPolicySchema>) {
@@ -535,7 +541,9 @@ export async function updateWalletPolicy(c: ValidatedBodyContext<typeof updateWa
     custodyWalletId: wallet.id,
   });
 
-  return success(c, { policy: walletPolicyResponse(wallet.walletId, controlProfile, audit) });
+  return success(c, {
+    policy: walletPolicyResponse(wallet.id, wallet.walletId, controlProfile, audit),
+  });
 }
 
 function mapRevisionHistory(
@@ -590,7 +598,7 @@ function publicEvaluationContext(
       id: context.operation.id,
       organizationId: context.operation.organizationId,
       projectId: context.operation.projectId,
-      custodyWalletId: context.operation.custodyWalletId,
+      custodyWalletId: context.operation.custodyWalletId ?? null,
       walletId: context.operation.walletId,
       apiKeyId: context.operation.apiKeyId,
       actor: context.operation.actor,

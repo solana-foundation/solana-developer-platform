@@ -11,6 +11,7 @@ import { fetchProviderAvailability } from "@/lib/provider-availability";
 import {
   createOrgSdpApiClient,
   createSdpApiClient,
+  requestProjectHref,
   requestProjectId,
   type SdpApiClient,
 } from "@/lib/sdp-api";
@@ -52,16 +53,14 @@ async function getWalletDetail(
   return wallet;
 }
 
-/**
- * A wallet without an active control profile: the implicit default-allow
- * policy the API also reports for unconfigured wallets.
- *
- * @param walletId - The wallet the policy describes.
- * @returns The implicit default-allow policy.
- */
-function implicitDefaultAllowPolicy(walletId: string): PaymentWalletPolicy {
+/** Form placeholder only; policyError prevents activation after an unavailable read. */
+function unavailablePolicyPlaceholder(
+  custodyWalletId: string,
+  providerWalletId: string
+): PaymentWalletPolicy {
   return {
-    walletId,
+    custodyWalletId,
+    walletId: providerWalletId,
     defaultAction: "allow",
     rules: [],
     controlProfile: null,
@@ -70,35 +69,35 @@ function implicitDefaultAllowPolicy(walletId: string): PaymentWalletPolicy {
 
 async function getWalletPolicy(
   request: SdpApiClient["request"],
-  walletId: string
+  walletId: string,
+  providerWalletId: string
 ): Promise<WalletPolicyResult> {
   try {
     const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/policies`);
-    if (response.status === 404) {
-      return {
-        policy: implicitDefaultAllowPolicy(walletId),
-        error: null,
-      };
-    }
     if (!response.ok) {
       return {
-        policy: implicitDefaultAllowPolicy(walletId),
+        policy: unavailablePolicyPlaceholder(walletId, providerWalletId),
         error: "Wallet controls are unavailable right now.",
       };
     }
 
     const json = (await response.json()) as { data?: { policy?: PaymentWalletPolicy } };
     const policy = json.data?.policy;
-    if (!policy) {
+    if (
+      !policy ||
+      policy.custodyWalletId !== walletId ||
+      !Array.isArray(policy.rules) ||
+      typeof policy.defaultAction !== "string"
+    ) {
       return {
-        policy: implicitDefaultAllowPolicy(walletId),
+        policy: unavailablePolicyPlaceholder(walletId, providerWalletId),
         error: "Wallet controls are unavailable right now.",
       };
     }
     return { policy, error: null };
   } catch {
     return {
-      policy: implicitDefaultAllowPolicy(walletId),
+      policy: unavailablePolicyPlaceholder(walletId, providerWalletId),
       error: "Wallet controls are unavailable right now.",
     };
   }
@@ -160,19 +159,33 @@ export default async function WalletPolicyPage({
   const resolvedWalletId = decodeURIComponent(walletId);
   const initialRevisionId = firstSearchParam(resolvedSearchParams.revision);
   const [projectId, apiClient] = await Promise.all([requestProjectId(), createSdpApiClient()]);
-  const [wallet, policyResult, walletAssets, issuedTokens, complianceScreeningEnabled] =
-    await Promise.all([
-      getWalletDetail(apiClient.request, resolvedWalletId),
-      getWalletPolicy(apiClient.request, resolvedWalletId),
-      getWalletAssets(apiClient.request, resolvedWalletId),
-      getIssuedPolicyTokens(apiClient.request),
-      getComplianceScreeningEnabled(),
-    ]);
+  const wallet = await getWalletDetail(apiClient.request, resolvedWalletId);
+  if (wallet.id !== resolvedWalletId) {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(resolvedSearchParams)) {
+      for (const entry of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+        query.append(key, entry);
+      }
+    }
+    redirect(
+      await requestProjectHref(
+        `/dashboard/wallets/${encodeURIComponent(wallet.id)}/policy${query.size ? `?${query}` : ""}`
+      )
+    );
+  }
+  const [policyResult, walletAssets, issuedTokens, complianceScreeningEnabled] = await Promise.all([
+    getWalletPolicy(apiClient.request, wallet.id, wallet.walletId),
+    getWalletAssets(apiClient.request, wallet.id),
+    getIssuedPolicyTokens(apiClient.request),
+    getComplianceScreeningEnabled(),
+  ]);
 
   return (
     <WalletPolicyStartingProfileFlow
+      key={`${projectId}:${wallet.id}`}
       projectId={projectId}
       wallet={{
+        id: wallet.id,
         walletId: wallet.walletId,
         publicKey: wallet.publicKey,
         label: wallet.label,

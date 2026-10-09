@@ -20,7 +20,7 @@ describe("buildPaymentsPlaygroundEndpointConfigs", () => {
     );
   });
 
-  it("uses exact wallet identity only for the Transfer contract", () => {
+  it("uses exact SDP identity for wallet reads, policies and transfer selectors", () => {
     const messages = getMessages("en");
     const t = (
       key: Parameters<typeof translate<typeof messages>>[1],
@@ -33,6 +33,17 @@ describe("buildPaymentsPlaygroundEndpointConfigs", () => {
       },
       t
     );
+
+    for (const id of ["wallet-balances", "get-wallet-policy", "update-wallet-policy"]) {
+      expect(configs.find((config) => config.id === id)?.pathFields[0]?.defaultValue).toBe(
+        "cwlt_1"
+      );
+    }
+    expect(
+      configs.find((config) => config.id === "get-wallet-policy")?.expectedResponse
+    ).toMatchObject({
+      data: { policy: { custodyWalletId: "cwlt_1", walletId: "privy_1" } },
+    });
 
     const execute = configs.find(({ id }) => id === "execute-transfer");
     const onramp = configs.find(({ id }) => id === "create-onramp-quote");

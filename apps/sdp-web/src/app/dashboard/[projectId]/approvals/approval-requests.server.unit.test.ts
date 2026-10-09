@@ -1,7 +1,34 @@
 import type { WalletApprovalRequestSummary } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import { fetchApprovalRequests } from "./approval-requests.server";
+import { fetchApprovalPolicyEvaluation, fetchApprovalRequests } from "./approval-requests.server";
+
+describe("fetchApprovalPolicyEvaluation", () => {
+  it.each(["cwlt_a", null])(
+    "uses the stored custody pin %s without an alias fallback",
+    async (custodyWalletId) => {
+      const approval = {
+        policyEvaluation: { id: "evaluation_a" },
+        operation: { custodyWalletId, walletId: "provider_a" },
+      } as WalletApprovalRequestSummary;
+      const evaluation = { id: "evaluation_a" };
+      const fetch = vi.fn().mockResolvedValue({ policyEvaluation: evaluation });
+      const result = await fetchApprovalPolicyEvaluation(
+        { fetch } as unknown as SdpApiClient,
+        approval
+      );
+      if (custodyWalletId) {
+        expect(result).toEqual(evaluation);
+        expect(fetch).toHaveBeenCalledWith(
+          "/v1/payments/wallets/cwlt_a/policies/evaluations/evaluation_a"
+        );
+      } else {
+        expect(result).toBeNull();
+        expect(fetch).not.toHaveBeenCalled();
+      }
+    }
+  );
+});
 
 describe("fetchApprovalRequests", () => {
   it("keeps pending requests even when they are outside the recent mixed result", async () => {

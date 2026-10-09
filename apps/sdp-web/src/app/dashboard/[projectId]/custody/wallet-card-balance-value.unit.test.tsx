@@ -48,13 +48,44 @@ afterEach(() => {
 });
 
 describe("WalletCardBalanceValue", () => {
+  it("shows unavailable instead of zero when no successful balance read exists", () => {
+    mockUsePersistedDashboardSWR
+      .mockReturnValueOnce({ data: undefined, error: new Error("batch unavailable") })
+      .mockReturnValueOnce({ data: undefined, error: new Error("wallet unavailable") });
+    const markup = renderToStaticMarkup(
+      <WalletCardBalanceValue walletId={WALLET_ID} initialBalances={undefined} />
+    );
+    expect(markup).toContain("DashboardCustody.unavailable");
+    expect(markup).not.toContain("$0.00");
+  });
+
+  it("keeps balance snapshots separate for SDP wallets sharing a provider reference", async () => {
+    mockUsePersistedDashboardSWR.mockReturnValue({ data: undefined });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          data: {
+            wallets: [
+              { id: "cwlt_a", walletId: "provider_shared", balances: [balance(3)] },
+              { id: "cwlt_b", walletId: "provider_shared", balances: [balance(7)] },
+            ],
+          },
+        })
+      )
+    );
+    renderBalance();
+    const fetchBatch = mockUsePersistedDashboardSWR.mock.calls[0]?.[1];
+    expect(await fetchBatch()).toEqual({ cwlt_a: [balance(3)], cwlt_b: [balance(7)] });
+  });
+
   it("excludes unavailable balances while preserving a known empty wallet", async () => {
     mockUsePersistedDashboardSWR.mockReturnValue({ data: undefined });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
         Response.json({
-          data: { wallets: [{ walletId: WALLET_ID }, { walletId: "empty-wallet", balances: [] }] },
+          data: { wallets: [{ id: WALLET_ID }, { id: "empty-wallet", balances: [] }] },
         })
       )
     );

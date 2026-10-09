@@ -4,11 +4,11 @@ import type { Permission } from "@sdp/types";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { AppError, conflict, walletNotFound } from "@/lib/errors";
+import { findAuthorizedOperationalWallet } from "@/routes/custody/handlers/wallets";
 import {
   assertApiKeyWalletAccess,
   assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
-  resolveApiKeyCustodyWalletId,
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -100,20 +100,17 @@ export async function resolvePolicyWalletFromParams(
   if (!walletId) {
     throw walletNotFound();
   }
-  const targets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
-  const custodyWalletId = resolveApiKeyCustodyWalletId(auth, walletId, requiredWalletPermissions);
-  const wallet = custodyWalletId
-    ? await targets.findOperationalWalletById({
-        organizationId: auth.organizationId,
-        projectId: auth.projectId ?? undefined,
-        custodyWalletId,
-      })
-    : await targets.findOperationalWallet({
-        organizationId: auth.organizationId,
-        projectId: auth.projectId ?? undefined,
-        walletId,
-      });
-  if (!wallet) {
+  const wallet = await findAuthorizedOperationalWallet(
+    c,
+    walletId,
+    requiredWalletPermissions,
+    true
+  );
+  if (
+    !wallet ||
+    (wallet.id !== walletId &&
+      (walletId.startsWith("cwlt_") || (await findRetainedPaymentWallet(c, walletId))))
+  ) {
     throw walletNotFound();
   }
   return { auth, wallet };

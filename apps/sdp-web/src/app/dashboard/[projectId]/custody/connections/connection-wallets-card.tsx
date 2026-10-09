@@ -80,11 +80,11 @@ export function ConnectionWalletsCard({
           </TableHeader>
           <TableBody>
             {wallets.map((wallet) => (
-              <TableRow key={wallet.walletId} data-wallet-id={wallet.walletId}>
+              <TableRow key={wallet.id} data-wallet-id={wallet.id}>
                 <TableCell className="font-medium">
                   <span className="flex min-w-0 items-center gap-2">
                     <Link
-                      href={href(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`)}
+                      href={href(`/dashboard/wallets/${encodeURIComponent(wallet.id)}`)}
                       className="truncate hover:underline"
                     >
                       {wallet.label?.trim() || wallet.walletId}

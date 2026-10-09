@@ -161,7 +161,7 @@ export async function refreshFundingWalletBalances(
     wallets.map(async (wallet) => {
       const slot =
         typeof minimumSlot === "number" ? minimumSlot : slotsByAddress.get(wallet.publicKey);
-      const balances = await fetchLiveFundingWalletBalance(wallet.walletId, slot);
+      const balances = await fetchLiveFundingWalletBalance(wallet.id, slot);
       return { ...wallet, balances };
     })
   );

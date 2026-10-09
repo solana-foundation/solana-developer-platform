@@ -24,7 +24,7 @@ const LABELS: PolicyFieldLabels = {
 
 function payload(overrides: Partial<WalletPolicyWritePayload>): WalletPolicyWritePayload {
   return {
-    walletId: "wallet-1",
+    custodyWalletId: "cwlt-1",
     defaultAction: "allow",
     rules: [],
     ...overrides,

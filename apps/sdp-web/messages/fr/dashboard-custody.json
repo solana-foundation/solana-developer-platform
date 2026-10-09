@@ -83,7 +83,7 @@
     "unavailable": "Indisponible",
     "unableToLoadWalletProviders": "Impossible de charger les fournisseurs de Wallet",
     "unableToLoadWallets": "Impossible de charger les Wallets",
-    "trackedBalancesUnavailable": "Les soldes suivis sont indisponibles pour le moment. Affichage du solde indiqué par le Wallet.",
+    "trackedBalancesUnavailable": "Les soldes suivis sont indisponibles pour le moment.",
     "walletControlsUnavailable": "Les contrôles du Wallet sont indisponibles pour le moment.",
     "createWallet": "Créer un Wallet",
     "wallet": "Wallet",
@@ -1039,6 +1039,8 @@
     "walletSetupConnectionHint": "Le Wallet est créé dans cette connexion et signe avec ses identifiants.",
     "walletSetupConnectionDefault": "Par défaut du projet",
     "walletSetupConnectionUnavailablePending": "Configuration inachevée",
-    "walletSetupConnectionUnavailableFailed": "Nécessite votre attention"
+    "walletSetupConnectionUnavailableFailed": "Nécessite votre attention",
+    "policyDraftStorageUnavailable": "Le stockage du brouillon est indisponible. Les modifications non enregistrées peuvent être perdues en quittant cette page.",
+    "policyDraftCleanupIncomplete": "Politique enregistrée. Le nettoyage du brouillon du navigateur est incomplet."
   }
 }

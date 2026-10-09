@@ -5,6 +5,7 @@ import {
   createTransfer,
   createTransferBatch,
   estimateTransferBatch,
+  fetchWalletBalances,
   TransferRequestError,
 } from "./payments-workspace.data";
 
@@ -20,6 +21,39 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("Payments write requests", () => {
   beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/pay"));
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each([true, false])(
+    "reads a custody balance response with legacy metadata present=%s",
+    async (legacy) => {
+      const walletBalances = {
+        custodyWalletId: "cwlt_a",
+        ...(legacy ? { walletId: "provider_a" } : {}),
+        address: "wallet_address",
+        balances: [],
+      };
+      const fetch = vi.fn().mockResolvedValue(jsonResponse({ data: { walletBalances } }));
+      vi.stubGlobal("fetch", fetch);
+      await expect(fetchWalletBalances("cwlt_a", t)).resolves.toMatchObject({
+        custodyWalletId: "cwlt_a",
+        address: "wallet_address",
+        balances: [],
+      });
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/dashboard/payments/wallets/cwlt_a/balances",
+        expect.anything()
+      );
+    }
+  );
+
+  it.each([
+    { custodyWalletId: "cwlt_b", address: "wallet_address", balances: [] },
+    { custodyWalletId: "cwlt_a" },
+  ])("rejects a wrong-wallet or incomplete balance response", async (walletBalances) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ data: { walletBalances } })));
+    await expect(fetchWalletBalances("cwlt_a", t)).rejects.toThrow(
+      "DashboardPayments.workspace.walletBalancesMissing"
+    );
+  });
 
   const transferInput = {
     sourceCustodyWalletId: "cwlt_1",

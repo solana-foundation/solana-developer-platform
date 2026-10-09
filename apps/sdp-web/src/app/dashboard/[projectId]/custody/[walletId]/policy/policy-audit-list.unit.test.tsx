@@ -174,6 +174,6 @@ describe("policy audit presentation", () => {
     expect(html).toContain('class="min-w-0 flex-1 truncate"');
     expect(html).toContain(`title="User · ${LONG_ACTOR_ID}"`);
     expect(html).toContain("inline-flex min-w-0 max-w-full items-center gap-2");
-    expect(html).toContain('href="/dashboard/prj_test_sandbox/wallets/wallet-1/policy"');
+    expect(html).toContain('href="/dashboard/prj_test_sandbox/wallets/custody-wallet-1/policy"');
   });
 });

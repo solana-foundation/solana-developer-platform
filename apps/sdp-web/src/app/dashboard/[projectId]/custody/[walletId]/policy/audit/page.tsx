@@ -39,30 +39,43 @@ export default async function WalletPolicyAuditPage({
   );
   const filters = parsePolicyAuditFilters(resolvedSearchParams);
 
+  let canonicalHref = "";
   try {
     const apiClient = await createSdpApiClient();
-    const [context, result, issuedTokensByMint] = await Promise.all([
-      fetchPolicyAuditContext(apiClient.request, resolvedWalletId),
-      fetchPolicyAuditList(apiClient.request, resolvedWalletId, filters),
-      fetchIssuedTokensByMint(apiClient.request),
-    ]);
+    const context = await fetchPolicyAuditContext(apiClient.request, resolvedWalletId);
+    if (context.wallet.id !== resolvedWalletId) {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(resolvedSearchParams)) {
+        for (const entry of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+          query.append(key, entry);
+        }
+      }
+      canonicalHref = await requestProjectHref(
+        `/dashboard/wallets/${encodeURIComponent(context.wallet.id)}/policy/audit${query.size ? `?${query}` : ""}`
+      );
+    } else {
+      const [result, issuedTokensByMint] = await Promise.all([
+        fetchPolicyAuditList(apiClient.request, context.wallet.id, filters),
+        fetchIssuedTokensByMint(apiClient.request),
+      ]);
 
-    return (
-      <DashboardWorkspaceOverviewPanel className="flex flex-col">
-        <PolicyAuditList
-          walletId={resolvedWalletId}
-          walletLabel={context.wallet.label?.trim() || context.wallet.walletId}
-          result={result}
-          filters={filters}
-          revisionHistory={context.revisionHistory}
-          apiKeyNames={context.apiKeyNames}
-          userNames={context.userNames}
-          issuedTokensByMint={issuedTokensByMint}
-          locale={locale}
-          t={t}
-        />
-      </DashboardWorkspaceOverviewPanel>
-    );
+      return (
+        <DashboardWorkspaceOverviewPanel className="flex flex-col">
+          <PolicyAuditList
+            walletId={context.wallet.id}
+            walletLabel={context.wallet.label?.trim() || context.wallet.id}
+            result={result}
+            filters={filters}
+            revisionHistory={context.revisionHistory}
+            apiKeyNames={context.apiKeyNames}
+            userNames={context.userNames}
+            issuedTokensByMint={issuedTokensByMint}
+            locale={locale}
+            t={t}
+          />
+        </DashboardWorkspaceOverviewPanel>
+      );
+    }
   } catch (error) {
     if (error instanceof PolicyAuditRequestError && error.status === 404) notFound();
     return (
@@ -75,4 +88,5 @@ export default async function WalletPolicyAuditPage({
       </DashboardWorkspaceOverviewPanel>
     );
   }
+  redirect(canonicalHref);
 }

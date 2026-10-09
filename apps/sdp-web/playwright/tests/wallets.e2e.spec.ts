@@ -169,7 +169,7 @@ async function bootstrapWalletRouteFixture(
         session.getBearerToken,
         fixtures.projectId
       );
-      await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
+      await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.id)}/policies`, {
         defaultAction: "allow",
         rules: [
           {
@@ -226,7 +226,7 @@ test.describe
         labelPrefix: "Wallet Routes",
       });
 
-      const encodedWalletId = encodeURIComponent(wallet.walletId);
+      const encodedWalletId = encodeURIComponent(wallet.id);
       const walletHref = projectHref(projectId, `/dashboard/wallets/${encodedWalletId}`);
       const custodyHref = projectHref(projectId, `/dashboard/custody/${encodedWalletId}`);
 
@@ -299,11 +299,7 @@ test.describe
         labelPrefix: "Wallet Action Geometry",
       });
       await page.setViewportSize({ width: 1280, height: 500 });
-      await gotoProjectPage(
-        page,
-        projectId,
-        `/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`
-      );
+      await gotoProjectPage(page, projectId, `/dashboard/wallets/${encodeURIComponent(wallet.id)}`);
       await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
@@ -374,7 +370,7 @@ test.describe
 
       const walletHref = projectHref(
         projectId,
-        `/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`
+        `/dashboard/wallets/${encodeURIComponent(wallet.id)}`
       );
       const policyHref = `${walletHref}/policy`;
       const auditHref = `${policyHref}/audit`;
@@ -675,7 +671,7 @@ test.describe
         }
       );
 
-      await gotoProjectPage(page, projectId, `/dashboard/wallets/${wallet.walletId}`);
+      await gotoProjectPage(page, projectId, `/dashboard/wallets/${wallet.id}`);
       await page.locator("[data-wallet-activity-state]").scrollIntoViewIfNeeded();
 
       const expectedActivityRows = [
@@ -756,7 +752,7 @@ test.describe
       });
 
       await page.setViewportSize({ width: 1280, height: 500 });
-      await gotoProjectPage(page, fixtures.projectId, `/dashboard/wallets/${wallet.walletId}`);
+      await gotoProjectPage(page, fixtures.projectId, `/dashboard/wallets/${wallet.id}`);
       await expect(page.getByRole("heading", { name: wallet.label ?? "Treasury" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });

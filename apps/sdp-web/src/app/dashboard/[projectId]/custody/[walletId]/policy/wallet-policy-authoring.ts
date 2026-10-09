@@ -163,13 +163,18 @@ export interface PolicyAuthoringState {
 }
 
 export interface StoredPolicyDraft {
-  version: 1;
+  version: 2;
   projectId: string;
-  walletId: string;
+  custodyWalletId: string;
   step: PolicyFlowStep;
   state: PolicyAuthoringState;
   updatedAt: string;
 }
+
+type LegacyPolicyDraft = Omit<StoredPolicyDraft, "version" | "custodyWalletId"> & {
+  version: 1;
+  walletId: string;
+};
 
 export interface PolicyValidationErrors {
   intent?: "restriction_required";
@@ -534,11 +539,11 @@ function groupedValuesByAction<TValue extends string>(
  */
 export type WalletPolicyWritePayload = Pick<
   PaymentWalletPolicy,
-  "walletId" | "defaultAction" | "rules"
+  "custodyWalletId" | "defaultAction" | "rules"
 >;
 
 export function buildPolicyPayload(
-  walletId: string,
+  custodyWalletId: string,
   state: PolicyAuthoringState
 ): WalletPolicyWritePayload {
   const categories = new Set(state.categories);
@@ -623,15 +628,15 @@ export function buildPolicyPayload(
   }
 
   return {
-    walletId,
+    custodyWalletId,
     defaultAction: state.defaultAction,
     rules,
   };
 }
 
-export function buildDisabledPolicyPayload(walletId: string): WalletPolicyWritePayload {
+export function buildDisabledPolicyPayload(custodyWalletId: string): WalletPolicyWritePayload {
   return {
-    walletId,
+    custodyWalletId,
     defaultAction: "allow",
     rules: [],
   };
@@ -676,8 +681,16 @@ export function validatePolicyState(state: PolicyAuthoringState): PolicyValidati
   return errors;
 }
 
-export function policyDraftStorageKey(projectId: string, walletId: string): string {
-  return `sdp.wallet-policy-authoring.v1.${projectId}.${walletId}`;
+export function policyDraftStorageKey(projectId: string, custodyWalletId: string): string {
+  return `sdp.wallet-policy-authoring.v2.${projectId}.${custodyWalletId}`;
+}
+
+function legacyDraftConsumedKey(projectId: string, providerWalletId: string): string {
+  return `sdp.wallet-policy-authoring.v1-consumed.${projectId}.${providerWalletId}`;
+}
+
+function legacyDraftClearFencePrefix(projectId: string): string {
+  return `sdp.wallet-policy-authoring.v1-cleared.${projectId}.`;
 }
 
 function hasOnlyKnownValues<TValue extends string>(
@@ -690,15 +703,16 @@ function hasOnlyKnownValues<TValue extends string>(
 function isStoredPolicyDraft(
   value: unknown,
   projectId: string,
-  walletId: string
-): value is StoredPolicyDraft {
+  walletId: string,
+  version: 1 | 2
+): value is StoredPolicyDraft | LegacyPolicyDraft {
   if (!value || typeof value !== "object") return false;
-  const draft = value as Partial<StoredPolicyDraft>;
+  const draft = value as Partial<StoredPolicyDraft & { walletId: string }>;
   const state = draft.state as Partial<PolicyAuthoringState> | undefined;
   return (
-    draft.version === 1 &&
+    draft.version === version &&
     draft.projectId === projectId &&
-    draft.walletId === walletId &&
+    (version === 2 ? draft.custodyWalletId : draft.walletId) === walletId &&
     hasOnlyKnownValues([draft.step], POLICY_FLOW_STEPS) &&
     typeof draft.updatedAt === "string" &&
     Boolean(state) &&
@@ -716,13 +730,69 @@ function isStoredPolicyDraft(
     typeof state.destinationAllowText === "string" &&
     typeof state.destinationBlockText === "string" &&
     Boolean(state.familyActions) &&
+    typeof state.familyActions === "object" &&
+    !Array.isArray(state.familyActions) &&
+    hasOnlyKnownValues(Object.values(state.familyActions), AUTHORING_RULE_ACTIONS) &&
     Array.isArray(state.operationTypeRules) &&
-    Array.isArray(state.passthroughRules)
+    state.operationTypeRules.every(
+      (entry) =>
+        entry &&
+        typeof entry.value === "string" &&
+        hasOnlyKnownValues([entry.action], AUTHORING_RULE_ACTIONS)
+    ) &&
+    Array.isArray(state.passthroughRules) &&
+    state.passthroughRules.every(isStoredPolicyRule)
+  );
+}
+
+function isStoredPolicyRule(value: unknown): value is PolicyRule {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const rule = value as Record<string, unknown>;
+  return (
+    typeof rule.id === "string" &&
+    hasOnlyKnownValues(
+      [rule.kind],
+      [
+        "operation_family",
+        "operation_type",
+        "asset",
+        "destination",
+        "amount",
+        "velocity",
+        "approval",
+        "always",
+      ]
+    ) &&
+    (rule.action === undefined ||
+      hasOnlyKnownValues(
+        [rule.action],
+        ["allow", "deny", "approval_required", "provider_approval_required", "review"]
+      )) &&
+    ["families", "operationTypes", "assets", "allowlist", "blocklist", "destinations"].every(
+      (key) =>
+        rule[key] === undefined ||
+        (Array.isArray(rule[key]) && rule[key].every((entry) => typeof entry === "string"))
+    ) &&
+    [
+      "name",
+      "family",
+      "operationType",
+      "asset",
+      "destination",
+      "min",
+      "max",
+      "window",
+      "scope",
+      "approvalGroupId",
+    ].every((key) => rule[key] === undefined || typeof rule[key] === "string")
   );
 }
 
 export function savePolicyDraft(storage: StorageLike, draft: StoredPolicyDraft): void {
-  storage.setItem(policyDraftStorageKey(draft.projectId, draft.walletId), JSON.stringify(draft));
+  storage.setItem(
+    policyDraftStorageKey(draft.projectId, draft.custodyWalletId),
+    JSON.stringify(draft)
+  );
 }
 
 /**
@@ -791,29 +861,131 @@ function sanitizeStoredPolicyState(state: PolicyAuthoringState): PolicyAuthoring
   };
 }
 
-export function loadPolicyDraft(
-  storage: StorageLike,
-  projectId: string,
-  walletId: string
-): StoredPolicyDraft | null {
-  const key = policyDraftStorageKey(projectId, walletId);
+function normalizedPolicyDraft(
+  draft: StoredPolicyDraft | LegacyPolicyDraft,
+  custodyWalletId: string
+): StoredPolicyDraft {
+  return {
+    version: 2,
+    projectId: draft.projectId,
+    custodyWalletId,
+    step: draft.step,
+    state: sanitizeStoredPolicyState(draft.state),
+    updatedAt: draft.updatedAt,
+  };
+}
+
+function parseStoredDraft(raw: string | null): unknown {
   try {
-    const raw = storage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!isStoredPolicyDraft(parsed, projectId, walletId)) {
-      storage.removeItem(key);
-      return null;
-    }
-    return { ...parsed, state: sanitizeStoredPolicyState(parsed.state) };
+    return raw ? JSON.parse(raw) : null;
   } catch {
-    storage.removeItem(key);
     return null;
   }
 }
 
-export function clearPolicyDraft(storage: StorageLike, projectId: string, walletId: string): void {
-  storage.removeItem(policyDraftStorageKey(projectId, walletId));
+/** Undefined permits fallback; null is a persisted clear that stops it. */
+function readExactPolicyDraft(
+  storage: StorageLike,
+  projectId: string,
+  custodyWalletId: string
+): StoredPolicyDraft | null | undefined {
+  const parsed = parseStoredDraft(
+    storage.getItem(policyDraftStorageKey(projectId, custodyWalletId))
+  );
+  const cleared = parsed as (Partial<StoredPolicyDraft> & { cleared?: boolean }) | null;
+  if (
+    cleared?.cleared === true &&
+    cleared.version === 2 &&
+    cleared.projectId === projectId &&
+    cleared.custodyWalletId === custodyWalletId
+  ) {
+    return null;
+  }
+  return isStoredPolicyDraft(parsed, projectId, custodyWalletId, 2)
+    ? normalizedPolicyDraft(parsed, custodyWalletId)
+    : undefined;
+}
+
+export function loadPolicyDraft(
+  storage: StorageLike,
+  projectId: string,
+  custodyWalletId: string,
+  providerWalletId?: string
+): { draft: StoredPolicyDraft | null; storageError: boolean } {
+  const key = policyDraftStorageKey(projectId, custodyWalletId);
+  try {
+    const current = readExactPolicyDraft(storage, projectId, custodyWalletId);
+    if (current !== undefined) return { draft: current, storageError: false };
+
+    const imported = parseStoredDraft(storage.getItem(`${key}.legacy`)) as {
+      draft?: unknown;
+      clearFenceKey?: unknown;
+    } | null;
+    const fencePrefix = legacyDraftClearFencePrefix(projectId);
+    if (
+      typeof imported?.clearFenceKey === "string" &&
+      imported.clearFenceKey.startsWith(fencePrefix) &&
+      imported.clearFenceKey.length > fencePrefix.length &&
+      isStoredPolicyDraft(imported.draft, projectId, custodyWalletId, 2)
+    ) {
+      return {
+        draft: storage.getItem(imported.clearFenceKey)
+          ? null
+          : normalizedPolicyDraft(imported.draft, custodyWalletId),
+        storageError: false,
+      };
+    }
+    if (!providerWalletId) return { draft: null, storageError: false };
+    const consumedKey = legacyDraftConsumedKey(projectId, providerWalletId);
+    const clearFenceKey = `${fencePrefix}${providerWalletId}`;
+    if (storage.getItem(consumedKey) || storage.getItem(clearFenceKey))
+      return { draft: null, storageError: false };
+    const legacyKey = `sdp.wallet-policy-authoring.v1.${projectId}.${providerWalletId}`;
+    const legacy = parseStoredDraft(storage.getItem(legacyKey));
+    if (!isStoredPolicyDraft(legacy, projectId, providerWalletId, 1)) {
+      return { draft: null, storageError: false };
+    }
+    const draft = normalizedPolicyDraft(legacy, custodyWalletId);
+    let storageError = false;
+    try {
+      // A transfer never writes the authored slot or the clear-only fence.
+      storage.setItem(`${key}.legacy`, JSON.stringify({ draft, clearFenceKey }));
+      storage.setItem(consumedKey, "1");
+      storage.removeItem(legacyKey);
+    } catch {
+      storageError = true;
+    }
+    const latest = readExactPolicyDraft(storage, projectId, custodyWalletId);
+    return {
+      draft: latest !== undefined ? latest : storage.getItem(clearFenceKey) ? null : draft,
+      storageError,
+    };
+  } catch {
+    return { draft: null, storageError: true };
+  }
+}
+
+export function clearPolicyDraft(
+  storage: StorageLike,
+  projectId: string,
+  custodyWalletId: string,
+  providerWalletId?: string
+): void {
+  if (providerWalletId) {
+    storage.setItem(`${legacyDraftClearFencePrefix(projectId)}${providerWalletId}`, "1");
+    storage.setItem(legacyDraftConsumedKey(projectId, providerWalletId), "1");
+  }
+  storage.setItem(
+    policyDraftStorageKey(projectId, custodyWalletId),
+    JSON.stringify({
+      version: 2,
+      projectId,
+      custodyWalletId,
+      cleared: true,
+    })
+  );
+  if (providerWalletId)
+    storage.removeItem(`sdp.wallet-policy-authoring.v1.${projectId}.${providerWalletId}`);
 }
 
 export function policyStateFingerprint(walletId: string, state: PolicyAuthoringState): string {

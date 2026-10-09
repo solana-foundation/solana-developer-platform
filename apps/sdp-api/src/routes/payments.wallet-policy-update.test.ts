@@ -2,15 +2,18 @@ import type { PolicyRule } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import { env } from "@/test/helpers/env";
 import {
   installPaymentsRouteTestHooks,
   seedCachedKey,
   TEST_API_KEY,
   TEST_CONFIG_ID,
+  TEST_CUSTODY_WALLET_ID,
   TEST_PROJECT,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { clearKVStores } from "@/test/mocks/kv";
 
 interface WalletPolicyBody {
   data: {
@@ -35,9 +38,12 @@ const PATCHED_RULES: PolicyRule[] = [
   { id: "deny-ramp", kind: "operation_family", family: "ramp", action: "deny" },
 ];
 
-async function putPolicy(body: Record<string, unknown>): Promise<Response> {
+async function putPolicy(
+  body: Record<string, unknown>,
+  walletId = TEST_WALLET_ID
+): Promise<Response> {
   return app.request(
-    `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+    `/v1/payments/wallets/${walletId}/policies`,
     {
       method: "PUT",
       headers: {
@@ -50,14 +56,40 @@ async function putPolicy(body: Record<string, unknown>): Promise<Response> {
   );
 }
 
-async function getPolicy(): Promise<WalletPolicyBody["data"]["policy"]> {
+async function getPolicy(walletId = TEST_WALLET_ID): Promise<WalletPolicyBody["data"]["policy"]> {
   const res = await app.request(
-    `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+    `/v1/payments/wallets/${walletId}/policies`,
     { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
     env
   );
   expect(res.status).toBe(200);
   return ((await res.json()) as WalletPolicyBody).data.policy;
+}
+
+async function seedOrganizationWalletWithSharedReference(): Promise<string> {
+  const walletId = "cwlt_policy_shared_org";
+  const configId = "cfg_policy_shared_org";
+  const db = getDb(env);
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO custody_configs
+         (id, organization_id, project_id, provider, config_encrypted,
+          encryption_version, default_wallet_id, status)
+       SELECT ?, organization_id, NULL, provider, config_encrypted,
+              encryption_version, default_wallet_id, 'active'
+       FROM custody_configs WHERE id = ?`
+      )
+      .bind(configId, TEST_CONFIG_ID),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+       SELECT ?, ?, wallet_id, public_key, 'active'
+       FROM custody_wallets WHERE id = ?`
+      )
+      .bind(walletId, configId, TEST_CUSTODY_WALLET_ID),
+  ]);
+  return walletId;
 }
 
 /** An active deny-default profile, established through the endpoint itself. */
@@ -93,6 +125,183 @@ describe("Payments routes — wallet policy concurrent updates", () => {
       .prepare("UPDATE custody_configs SET project_id = ? WHERE id = ?")
       .bind(TEST_PROJECT.id, TEST_CONFIG_ID)
       .run();
+  });
+
+  it("reads the exact SDP wallet while retaining its legacy response identity", async () => {
+    const res = await app.request(
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      data: {
+        policy: {
+          custodyWalletId: TEST_CUSTODY_WALLET_ID,
+          walletId: TEST_WALLET_ID,
+          defaultAction: "allow",
+          rules: [],
+          controlProfile: null,
+        },
+      },
+    });
+  });
+
+  it.each([TEST_CUSTODY_WALLET_ID, TEST_WALLET_ID])(
+    "returns additive balance identity for wallet selector %s",
+    async (walletId) => {
+      const res = await app.request(
+        `/v1/payments/wallets/${walletId}/balances`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        data: {
+          walletBalances: {
+            custodyWalletId: TEST_CUSTODY_WALLET_ID,
+            walletId: TEST_WALLET_ID,
+            balances: expect.arrayContaining([
+              expect.objectContaining({ token: "SOL", amount: "4200000000", uiAmount: "4.2" }),
+            ]),
+          },
+        },
+      });
+    }
+  );
+
+  it("refuses a selected grant whose provider reference collides with another SDP wallet ID", async () => {
+    const otherWalletId = "cwlt_policy_namespace_collision";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         SELECT ?, custody_config_id, ?, public_key, 'active'
+         FROM custody_wallets WHERE id = ?`
+      )
+      .bind(otherWalletId, TEST_CUSTODY_WALLET_ID, TEST_CUSTODY_WALLET_ID)
+      .run();
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: TEST_CUSTODY_WALLET_ID,
+      walletBindings: [
+        {
+          walletId: TEST_CUSTODY_WALLET_ID,
+          custodyWalletId: otherWalletId,
+          permissions: ["wallets:read"],
+        },
+      ],
+    });
+
+    const res = await app.request(
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).not.toHaveProperty("data.policy");
+  });
+
+  it("keeps policies and revisions on exact project and organization wallets with shared references", async () => {
+    const otherWalletId = await seedOrganizationWalletWithSharedReference();
+    const written = await putPolicy(
+      { defaultAction: "deny", rules: SEED_RULES, expectedRevisionId: null },
+      TEST_CUSTODY_WALLET_ID
+    );
+    expect(written.status).toBe(200);
+    const policy = ((await written.json()) as WalletPolicyBody).data.policy;
+    expect(await getPolicy(TEST_CUSTODY_WALLET_ID)).toMatchObject({
+      defaultAction: "deny",
+      rules: SEED_RULES,
+      controlProfile: { id: policy.controlProfile?.id },
+    });
+    expect(await getPolicy(otherWalletId)).toMatchObject({
+      defaultAction: "allow",
+      rules: [],
+      controlProfile: null,
+    });
+    const revisions = await app.request(
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies/revisions`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(revisions.status).toBe(200);
+    expect(await revisions.json()).toMatchObject({
+      data: {
+        profile: { custodyWalletId: TEST_CUSTODY_WALLET_ID },
+        revisions: [expect.objectContaining({ rules: SEED_RULES })],
+      },
+    });
+    const ambiguous = await app.request(
+      `/v1/payments/wallets/${TEST_WALLET_ID}/policies`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(ambiguous.status).toBe(409);
+  });
+
+  it("does not substitute an active alias when the exact wallet becomes inactive", async () => {
+    const otherWalletId = await seedOrganizationWalletWithSharedReference();
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(TEST_CUSTODY_WALLET_ID)
+      .run();
+
+    const read = await app.request(
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(read.status).toBe(404);
+    expect(
+      (await putPolicy({ defaultAction: "deny", rules: SEED_RULES }, TEST_CUSTODY_WALLET_ID)).status
+    ).toBe(404);
+    expect(await getPolicy(otherWalletId)).toMatchObject({ defaultAction: "allow", rules: [] });
+  });
+
+  it("does not reinterpret an inactive SDP wallet ID as an active provider reference", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         SELECT 'cwlt_policy_inactive_collision', custody_config_id, ?, public_key, 'active'
+         FROM custody_wallets WHERE id = ?`
+      )
+      .bind(TEST_CUSTODY_WALLET_ID, TEST_CUSTODY_WALLET_ID)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+      .bind(TEST_CUSTODY_WALLET_ID)
+      .run();
+
+    const res = await app.request(
+      `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/policies`,
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).not.toHaveProperty("data.policy");
+  });
+
+  it("keeps ambiguous provider grants deny-only for exact and legacy requests", async () => {
+    await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
+      walletId: TEST_WALLET_ID,
+      permissions: ["wallets:read"],
+    });
+    await seedOrganizationWalletWithSharedReference();
+    await clearKVStores(env);
+
+    for (const walletId of [TEST_CUSTODY_WALLET_ID, TEST_WALLET_ID]) {
+      const res = await app.request(
+        `/v1/payments/wallets/${walletId}/policies`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).not.toHaveProperty("data.policy");
+    }
   });
 
   it("refuses policy authoring from a non-admin API key", async () => {

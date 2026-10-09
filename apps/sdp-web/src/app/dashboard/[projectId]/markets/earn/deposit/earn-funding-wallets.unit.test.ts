@@ -84,9 +84,9 @@ describe("live funding wallet balances", () => {
     vi.stubGlobal("fetch", fetchMock);
     await refreshFundingWalletBalances([affected, alias, unrelated], new Map([[affected.id, 101]]));
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/dashboard/payments/wallets/provider-affected/balances?minimumSlot=101",
-      "/api/dashboard/payments/wallets/provider-alias/balances?minimumSlot=101",
-      "/api/dashboard/payments/wallets/provider-unrelated/balances",
+      "/api/dashboard/payments/wallets/affected/balances?minimumSlot=101",
+      "/api/dashboard/payments/wallets/alias/balances?minimumSlot=101",
+      "/api/dashboard/payments/wallets/unrelated/balances",
     ]);
   });
   it("requires the wallet API to acknowledge the position confirmation slot", async () => {
@@ -154,7 +154,7 @@ describe("live funding wallet balances", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes("provider-unavailable")) {
+        if (String(input).includes("/wallets/unavailable/")) {
           return Response.json({ error: { message: "RPC unavailable" } }, { status: 503 });
         }
         return Response.json({

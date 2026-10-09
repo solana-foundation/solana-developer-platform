@@ -82,7 +82,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet balances",
     operationId: "getPaymentWalletBalances",
     description:
-      "Retrieves balances for a custody wallet. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets.",
+      "Retrieves balances for the exact SDP Wallet ID (`id` from GET /v1/wallets); legacy provider wallet IDs remain supported during the compatible rollout. The response includes custodyWalletId alongside the legacy walletId. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -115,7 +115,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet policy",
     operationId: "getPaymentWalletPolicy",
     description:
-      "Retrieves payment policy rules for a custody wallet. Policies are payment controls layered on top of custody-managed wallets.",
+      "Retrieves payment policy rules for the exact SDP Wallet ID (`id` from GET /v1/wallets); legacy provider wallet IDs remain supported during the compatible rollout. The response includes custodyWalletId alongside the legacy walletId. Policies are payment controls layered on top of custody-managed wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

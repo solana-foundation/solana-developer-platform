@@ -33,7 +33,7 @@ test.describe("policies responsive table", () => {
         session.getBearerToken,
         fixtures.projectId
       );
-      await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`, {
+      await api.put(`/v1/payments/wallets/${encodeURIComponent(wallet.id)}/policies`, {
         defaultAction: "allow",
         rules: [
           {

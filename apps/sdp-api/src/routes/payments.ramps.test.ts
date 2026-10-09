@@ -470,7 +470,7 @@ describe("Payments routes — ramps", () => {
         return [];
       });
       const res = await app.request(
-        `/v1/payments/wallets/${TEST_WALLET_ID}/balances?minimumSlot=101`,
+        `/v1/payments/wallets/${TEST_CUSTODY_WALLET_ID}/balances?minimumSlot=101`,
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );

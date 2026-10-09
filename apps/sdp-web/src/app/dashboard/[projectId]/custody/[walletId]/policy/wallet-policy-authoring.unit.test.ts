@@ -4,6 +4,7 @@ import {
   buildDisabledPolicyPayload,
   buildPolicyAssetOptions,
   buildPolicyPayload,
+  clearPolicyDraft,
   createPolicyAuthoringState,
   hasLimitsAndAssetsControls,
   loadPolicyDraft,
@@ -37,7 +38,13 @@ class MemoryStorage {
 }
 
 function emptyPolicy(): PaymentWalletPolicy {
-  return { walletId: WALLET_ID, defaultAction: "allow", rules: [], controlProfile: null };
+  return {
+    custodyWalletId: WALLET_ID,
+    walletId: WALLET_ID,
+    defaultAction: "allow",
+    rules: [],
+    controlProfile: null,
+  };
 }
 
 describe("wallet policy authoring", () => {
@@ -62,6 +69,7 @@ describe("wallet policy authoring", () => {
     ];
 
     const state = createPolicyAuthoringState({
+      custodyWalletId: WALLET_ID,
       walletId: WALLET_ID,
       defaultAction: "allow",
       controlProfile: null,
@@ -154,9 +162,9 @@ describe("wallet policy authoring", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     state.defaultAction = "deny";
     const draft: StoredPolicyDraft = {
-      version: 1,
+      version: 2,
       projectId: PROJECT_ID,
-      walletId: WALLET_ID,
+      custodyWalletId: WALLET_ID,
       step: "limits-assets",
       state,
       updatedAt: "2026-07-15T20:00:00.000Z",
@@ -165,8 +173,428 @@ describe("wallet policy authoring", () => {
     savePolicyDraft(storage, draft);
 
     expect(policyDraftStorageKey(PROJECT_ID, WALLET_ID)).toContain(`${PROJECT_ID}.${WALLET_ID}`);
-    expect(loadPolicyDraft(storage, PROJECT_ID, WALLET_ID)).toEqual(draft);
-    expect(loadPolicyDraft(storage, "another-project", WALLET_ID)).toBeNull();
+    expect(loadPolicyDraft(storage, PROJECT_ID, WALLET_ID).draft).toEqual(draft);
+    expect(loadPolicyDraft(storage, "another-project", WALLET_ID).draft).toBeNull();
+  });
+
+  it("transfers legacy fields and step to the selected SDP wallet before removing the old copy", () => {
+    const storage = new MemoryStorage();
+    const state = createPolicyAuthoringState(emptyPolicy());
+    state.defaultAction = "deny";
+    const legacyKey = `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`;
+    storage.setItem(
+      legacyKey,
+      JSON.stringify({
+        version: 1,
+        projectId: PROJECT_ID,
+        walletId: WALLET_ID,
+        step: "review",
+        state,
+        updatedAt: "2026-10-09T10:00:00.000Z",
+      })
+    );
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toEqual({
+      draft: {
+        version: 2,
+        projectId: PROJECT_ID,
+        custodyWalletId: "cwlt_selected",
+        step: "review",
+        state,
+        updatedAt: "2026-10-09T10:00:00.000Z",
+      },
+      storageError: false,
+    });
+    expect(
+      storage.getItem("sdp.wallet-policy-authoring.v2.project_test.cwlt_selected.legacy")
+    ).not.toBeNull();
+    expect(storage.getItem(legacyKey)).toBeNull();
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected").draft?.state).toEqual(state);
+  });
+
+  it("does not resurrect a consumed legacy draft recreated by an old tab", () => {
+    const storage = new MemoryStorage();
+    const legacyKey = `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`;
+    const legacy = JSON.stringify({
+      version: 1,
+      projectId: PROJECT_ID,
+      walletId: WALLET_ID,
+      step: "review",
+      state: createPolicyAuthoringState(emptyPolicy()),
+      updatedAt: "2026-10-09T10:00:00.000Z",
+    });
+    storage.setItem(legacyKey, legacy);
+    loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID);
+    clearPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID);
+    storage.setItem(legacyKey, legacy);
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID).draft).toBeNull();
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_other", WALLET_ID).draft).toBeNull();
+  });
+
+  it("honors a clear from another tab during a legacy read", () => {
+    const legacyKey = `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`;
+    class InterleavedStorage extends MemoryStorage {
+      getItem(key: string) {
+        const value = super.getItem(key);
+        if (key === legacyKey && value) {
+          clearPolicyDraft(this, PROJECT_ID, "cwlt_selected", WALLET_ID);
+        }
+        return value;
+      }
+    }
+    const storage = new InterleavedStorage();
+    storage.setItem(
+      legacyKey,
+      JSON.stringify({
+        version: 1,
+        projectId: PROJECT_ID,
+        walletId: WALLET_ID,
+        step: "review",
+        state: createPolicyAuthoringState(emptyPolicy()),
+        updatedAt: "2026-10-09T10:00:00.000Z",
+      })
+    );
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID).draft).toBeNull();
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID).draft).toBeNull();
+  });
+
+  it("does not overwrite a clear that interleaves with the final copy check", () => {
+    const v2Key = policyDraftStorageKey(PROJECT_ID, "cwlt_selected");
+    let reads = 0;
+    class ClearingStorage extends MemoryStorage {
+      getItem(key: string) {
+        const raw = super.getItem(key);
+        if (key === v2Key && ++reads === 2) {
+          clearPolicyDraft(this, PROJECT_ID, "cwlt_selected", WALLET_ID);
+        }
+        return raw;
+      }
+    }
+    const storage = new ClearingStorage();
+    storage.setItem(
+      `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`,
+      JSON.stringify({
+        version: 1,
+        projectId: PROJECT_ID,
+        walletId: WALLET_ID,
+        step: "review",
+        state: createPolicyAuthoringState(emptyPolicy()),
+        updatedAt: "2026-10-09T10:00:00.000Z",
+      })
+    );
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID).draft).toBeNull();
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID).draft).toBeNull();
+  });
+
+  it("keeps a fresh exact draft written while the legacy copy is being saved", () => {
+    const v2Key = policyDraftStorageKey(PROJECT_ID, "cwlt_selected");
+    const fresh: StoredPolicyDraft = {
+      version: 2,
+      projectId: PROJECT_ID,
+      custodyWalletId: "cwlt_selected",
+      step: "review",
+      state: { ...createPolicyAuthoringState(emptyPolicy()), defaultAction: "deny" },
+      updatedAt: "2026-10-09T11:00:00.000Z",
+    };
+    class WritingStorage extends MemoryStorage {
+      setItem(key: string, value: string) {
+        if (key === `${v2Key}.legacy`) savePolicyDraft(this, fresh);
+        super.setItem(key, value);
+      }
+    }
+    const storage = new WritingStorage();
+    storage.setItem(
+      `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`,
+      JSON.stringify({
+        version: 1,
+        projectId: PROJECT_ID,
+        walletId: WALLET_ID,
+        step: "intent",
+        state: createPolicyAuthoringState(emptyPolicy()),
+        updatedAt: "2026-10-09T10:00:00.000Z",
+      })
+    );
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toEqual({
+      draft: fresh,
+      storageError: false,
+    });
+    expect(JSON.parse(storage.getItem(v2Key) ?? "null")).toEqual(fresh);
+  });
+
+  it("does not delete a fresh exact draft after reading invalid older data", () => {
+    const v2Key = policyDraftStorageKey(PROJECT_ID, "cwlt_selected");
+    const fresh: StoredPolicyDraft = {
+      version: 2,
+      projectId: PROJECT_ID,
+      custodyWalletId: "cwlt_selected",
+      step: "review",
+      state: createPolicyAuthoringState(emptyPolicy()),
+      updatedAt: "2026-10-09T11:00:00.000Z",
+    };
+    class WritingStorage extends MemoryStorage {
+      getItem(key: string) {
+        const value = super.getItem(key);
+        if (key === v2Key && value === "invalid") savePolicyDraft(this, fresh);
+        return value;
+      }
+    }
+    const storage = new WritingStorage();
+    storage.setItem(v2Key, "invalid");
+
+    loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected");
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected").draft).toEqual(fresh);
+  });
+
+  it.each([true, false])(
+    "keeps an interleaved clear authoritative when provider metadata is %s",
+    (includeProvider) => {
+      const v2Key = policyDraftStorageKey(PROJECT_ID, "cwlt_selected");
+      class ClearingStorage extends MemoryStorage {
+        setItem(key: string, value: string) {
+          if (key === `${v2Key}.legacy`)
+            clearPolicyDraft(
+              this,
+              PROJECT_ID,
+              "cwlt_selected",
+              includeProvider ? WALLET_ID : undefined
+            );
+          super.setItem(key, value);
+        }
+      }
+      const storage = new ClearingStorage();
+      storage.setItem(
+        `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`,
+        JSON.stringify({
+          version: 1,
+          projectId: PROJECT_ID,
+          walletId: WALLET_ID,
+          step: "review",
+          state: createPolicyAuthoringState(emptyPolicy()),
+          updatedAt: "2026-10-09T10:00:00.000Z",
+        })
+      );
+
+      expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID).draft).toBeNull();
+      expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected").draft).toBeNull();
+    }
+  );
+
+  it("invalidates another wallet's concurrent legacy copy through the shared clear fence", () => {
+    const otherKey = `${policyDraftStorageKey(PROJECT_ID, "cwlt_other")}.legacy`;
+    class ClearingStorage extends MemoryStorage {
+      setItem(key: string, value: string) {
+        if (key === otherKey) clearPolicyDraft(this, PROJECT_ID, "cwlt_selected", WALLET_ID);
+        super.setItem(key, value);
+      }
+    }
+    const storage = new ClearingStorage();
+    storage.setItem(
+      `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`,
+      JSON.stringify({
+        version: 1,
+        projectId: PROJECT_ID,
+        walletId: WALLET_ID,
+        step: "review",
+        state: createPolicyAuthoringState(emptyPolicy()),
+        updatedAt: "2026-10-09T10:00:00.000Z",
+      })
+    );
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_other", WALLET_ID).draft).toBeNull();
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_other").draft).toBeNull();
+    const fresh: StoredPolicyDraft = {
+      version: 2,
+      projectId: PROJECT_ID,
+      custodyWalletId: "cwlt_other",
+      step: "review",
+      state: { ...createPolicyAuthoringState(emptyPolicy()), defaultAction: "deny" },
+      updatedAt: "2026-10-09T11:00:00.000Z",
+    };
+    savePolicyDraft(storage, fresh);
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_other").draft).toEqual(fresh);
+  });
+
+  it("keeps parallel legacy copies readable without mistaking transfer for clearing", () => {
+    const selectedKey = `${policyDraftStorageKey(PROJECT_ID, "cwlt_selected")}.legacy`;
+    let copied = false;
+    class CopyingStorage extends MemoryStorage {
+      setItem(key: string, value: string) {
+        if (key === selectedKey && !copied) {
+          copied = true;
+          loadPolicyDraft(this, PROJECT_ID, "cwlt_other", WALLET_ID);
+        }
+        super.setItem(key, value);
+      }
+    }
+    const storage = new CopyingStorage();
+    storage.setItem(
+      `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`,
+      JSON.stringify({
+        version: 1,
+        projectId: PROJECT_ID,
+        walletId: WALLET_ID,
+        step: "review",
+        state: createPolicyAuthoringState(emptyPolicy()),
+        updatedAt: "2026-10-09T10:00:00.000Z",
+      })
+    );
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID).draft).not.toBeNull();
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected").draft).not.toBeNull();
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_other").draft).not.toBeNull();
+  });
+
+  it("rejects an imported copy whose clear fence belongs to another project", () => {
+    const key = policyDraftStorageKey(PROJECT_ID, "cwlt_selected");
+    const storage = new MemoryStorage();
+    storage.setItem(
+      `${key}.legacy`,
+      JSON.stringify({
+        draft: {
+          version: 2,
+          projectId: PROJECT_ID,
+          custodyWalletId: "cwlt_selected",
+          step: "review",
+          state: createPolicyAuthoringState(emptyPolicy()),
+          updatedAt: "2026-10-09T10:00:00.000Z",
+        },
+        clearFenceKey: "sdp.wallet-policy-authoring.v1-cleared.other-project.provider",
+      })
+    );
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected").draft).toBeNull();
+    expect(storage.getItem(`${key}.legacy`)).not.toBeNull();
+  });
+
+  it("rejects malformed legacy operation inputs before restoring the editor", () => {
+    const storage = new MemoryStorage();
+    const legacyKey = `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`;
+    const state = createPolicyAuthoringState(emptyPolicy());
+    storage.setItem(
+      legacyKey,
+      JSON.stringify({
+        version: 1,
+        projectId: PROJECT_ID,
+        walletId: WALLET_ID,
+        step: "review",
+        state: { ...state, operationTypeRules: [{ value: 123, action: "deny" }] },
+        updatedAt: "2026-10-09T10:00:00.000Z",
+      })
+    );
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID).draft).toBeNull();
+  });
+
+  it("prefers an exact-wallet draft over an older provider copy", () => {
+    const storage = new MemoryStorage();
+    const oldState = createPolicyAuthoringState(emptyPolicy());
+    oldState.defaultAction = "deny";
+    storage.setItem(
+      `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`,
+      JSON.stringify({
+        version: 1,
+        projectId: PROJECT_ID,
+        walletId: WALLET_ID,
+        step: "intent",
+        state: oldState,
+        updatedAt: "2026-10-08T10:00:00.000Z",
+      })
+    );
+    const draft: StoredPolicyDraft = {
+      version: 2,
+      projectId: PROJECT_ID,
+      custodyWalletId: "cwlt_selected",
+      step: "review",
+      state: createPolicyAuthoringState(emptyPolicy()),
+      updatedAt: "2026-10-09T10:00:00.000Z",
+    };
+    savePolicyDraft(storage, draft);
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toEqual({
+      draft,
+      storageError: false,
+    });
+  });
+
+  it.each(["copy", "marker", "remove"])(
+    "retains recoverable edits when legacy transfer fails at %s",
+    (failure) => {
+      const legacyKey = `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`;
+      class RefusingStorage extends MemoryStorage {
+        setItem(key: string, value: string) {
+          if (
+            (failure === "copy" && key.startsWith("sdp.wallet-policy-authoring.v2.")) ||
+            (failure === "marker" && key.includes("v1-consumed"))
+          )
+            throw new Error("Storage refused write");
+          super.setItem(key, value);
+        }
+        removeItem(key: string) {
+          if (failure === "remove") throw new Error("Storage refused removal");
+          super.removeItem(key);
+        }
+      }
+      const storage = new RefusingStorage();
+      const legacy = JSON.stringify({
+        version: 1,
+        projectId: PROJECT_ID,
+        walletId: WALLET_ID,
+        step: "review",
+        state: createPolicyAuthoringState(emptyPolicy()),
+        updatedAt: "2026-10-09T10:00:00.000Z",
+      });
+      storage.setItem(legacyKey, legacy);
+
+      expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toMatchObject({
+        draft: { custodyWalletId: "cwlt_selected", step: "review" },
+        storageError: true,
+      });
+      expect(storage.getItem(legacyKey)).toBe(legacy);
+    }
+  );
+
+  it("reports refused storage reads without throwing or trying to remove data", () => {
+    const storage = {
+      getItem: () => {
+        throw new Error("Storage blocked");
+      },
+      setItem: () => {
+        throw new Error("Storage blocked");
+      },
+      removeItem: () => {
+        throw new Error("Must not remove unread data");
+      },
+    };
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toEqual({
+      draft: null,
+      storageError: true,
+    });
+  });
+
+  it("keeps a committed draft consumed when writes work but removal is refused", () => {
+    class RemovalRefused extends MemoryStorage {
+      removeItem() {
+        throw new Error("Removal refused");
+      }
+    }
+    const storage = new RemovalRefused();
+    savePolicyDraft(storage, {
+      version: 2,
+      projectId: PROJECT_ID,
+      custodyWalletId: "cwlt_selected",
+      step: "review",
+      state: createPolicyAuthoringState(emptyPolicy()),
+      updatedAt: "2026-10-09T10:00:00.000Z",
+    });
+
+    expect(() => clearPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toThrow(
+      "Removal refused"
+    );
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID).draft).toBeNull();
   });
 
   it("drops a retired maxDailyAmount field from a draft saved by an older build", () => {
@@ -175,16 +603,16 @@ describe("wallet policy authoring", () => {
     state.categories = ["limits"];
     state.limits = [{ asset: ADDRESS_A, max: "100" }];
     const legacyDraft = {
-      version: 1,
+      version: 2,
       projectId: PROJECT_ID,
-      walletId: WALLET_ID,
+      custodyWalletId: WALLET_ID,
       step: "limits-assets",
       state: { ...state, maxDailyAmount: "500" },
       updatedAt: "2026-07-15T20:00:00.000Z",
     };
     storage.setItem(policyDraftStorageKey(PROJECT_ID, WALLET_ID), JSON.stringify(legacyDraft));
 
-    const loaded = loadPolicyDraft(storage, PROJECT_ID, WALLET_ID);
+    const loaded = loadPolicyDraft(storage, PROJECT_ID, WALLET_ID).draft;
 
     expect(loaded?.state).toEqual(state);
     expect(loaded?.state).not.toHaveProperty("maxDailyAmount");
@@ -195,9 +623,9 @@ describe("wallet policy authoring", () => {
     const state = createPolicyAuthoringState(emptyPolicy());
     const { limits: _limits, ...stateWithoutLimits } = state;
     const legacyDraft = {
-      version: 1,
+      version: 2,
       projectId: PROJECT_ID,
-      walletId: WALLET_ID,
+      custodyWalletId: WALLET_ID,
       step: "limits-assets",
       state: { ...stateWithoutLimits, maxTransferAmount: "100" },
       updatedAt: "2026-07-15T20:00:00.000Z",
@@ -205,8 +633,8 @@ describe("wallet policy authoring", () => {
     const key = policyDraftStorageKey(PROJECT_ID, WALLET_ID);
     storage.setItem(key, JSON.stringify(legacyDraft));
 
-    expect(loadPolicyDraft(storage, PROJECT_ID, WALLET_ID)).toBeNull();
-    expect(storage.getItem(key)).toBeNull();
+    expect(loadPolicyDraft(storage, PROJECT_ID, WALLET_ID).draft).toBeNull();
+    expect(storage.getItem(key)).not.toBeNull();
   });
 
   it("filters erased rules out of a stale draft's passthrough", () => {
@@ -226,15 +654,15 @@ describe("wallet policy authoring", () => {
       liveRule,
     ];
     savePolicyDraft(storage, {
-      version: 1,
+      version: 2,
       projectId: PROJECT_ID,
-      walletId: WALLET_ID,
+      custodyWalletId: WALLET_ID,
       step: "review",
       state,
       updatedAt: "2026-07-15T20:00:00.000Z",
     });
 
-    expect(loadPolicyDraft(storage, PROJECT_ID, WALLET_ID)?.state.passthroughRules).toEqual([
+    expect(loadPolicyDraft(storage, PROJECT_ID, WALLET_ID).draft?.state.passthroughRules).toEqual([
       liveRule,
     ]);
   });
@@ -253,7 +681,7 @@ describe("wallet policy authoring", () => {
     const payload = buildPolicyPayload(WALLET_ID, state);
 
     expect(payload).toMatchObject({
-      walletId: WALLET_ID,
+      custodyWalletId: WALLET_ID,
       defaultAction: "approval_required",
     });
     expect(payload).not.toHaveProperty("destinationAllowlist");
@@ -359,7 +787,7 @@ describe("wallet policy authoring", () => {
 
   it("disables controls by returning the wallet to default allow", () => {
     expect(buildDisabledPolicyPayload(WALLET_ID)).toEqual({
-      walletId: WALLET_ID,
+      custodyWalletId: WALLET_ID,
       defaultAction: "allow",
       rules: [],
     });
@@ -367,6 +795,7 @@ describe("wallet policy authoring", () => {
 
   it("loads existing policies into equivalent form state without dropping rule capabilities", () => {
     const existing: PaymentWalletPolicy = {
+      custodyWalletId: WALLET_ID,
       walletId: WALLET_ID,
       defaultAction: "review",
       controlProfile: null,
@@ -438,6 +867,7 @@ describe("wallet policy authoring", () => {
 
   it("expands a grouped legacy amount rule into one limit row per asset", () => {
     const existing: PaymentWalletPolicy = {
+      custodyWalletId: WALLET_ID,
       walletId: WALLET_ID,
       defaultAction: "allow",
       controlProfile: null,
@@ -481,6 +911,7 @@ describe("wallet policy authoring", () => {
       },
     ];
     const existing: PaymentWalletPolicy = {
+      custodyWalletId: WALLET_ID,
       walletId: WALLET_ID,
       defaultAction: "allow",
       controlProfile: null,
@@ -498,6 +929,7 @@ describe("wallet policy authoring", () => {
       { id: "denied", kind: "amount", asset: ADDRESS_B, max: "50", action: "deny" },
     ];
     const state = createPolicyAuthoringState({
+      custodyWalletId: WALLET_ID,
       walletId: WALLET_ID,
       defaultAction: "allow",
       controlProfile: null,
@@ -510,6 +942,7 @@ describe("wallet policy authoring", () => {
 
   it("drops asset-less amount rules so the policy stays writable", () => {
     const state = createPolicyAuthoringState({
+      custodyWalletId: WALLET_ID,
       walletId: WALLET_ID,
       defaultAction: "allow",
       controlProfile: null,
@@ -543,6 +976,7 @@ describe("wallet policy authoring", () => {
       action: "allow",
     };
     const state = createPolicyAuthoringState({
+      custodyWalletId: WALLET_ID,
       walletId: WALLET_ID,
       defaultAction: "allow",
       controlProfile: null,
@@ -569,6 +1003,7 @@ describe("wallet policy authoring", () => {
         action: "deny",
       };
       const state = createPolicyAuthoringState({
+        custodyWalletId: WALLET_ID,
         walletId: WALLET_ID,
         defaultAction: "allow",
         controlProfile: null,
@@ -602,6 +1037,7 @@ describe("wallet policy authoring", () => {
       action: "approval_required",
     };
     const state = createPolicyAuthoringState({
+      custodyWalletId: WALLET_ID,
       walletId: WALLET_ID,
       defaultAction: "allow",
       controlProfile: null,
@@ -618,9 +1054,9 @@ describe("wallet policy authoring", () => {
     const storage = new MemoryStorage();
     const state = createPolicyAuthoringState(emptyPolicy());
     const draft = {
-      version: 1,
+      version: 2,
       projectId: PROJECT_ID,
-      walletId: WALLET_ID,
+      custodyWalletId: WALLET_ID,
       step: "destinations-operations",
       state: {
         ...state,
@@ -630,13 +1066,14 @@ describe("wallet policy authoring", () => {
     };
     storage.setItem(policyDraftStorageKey(PROJECT_ID, WALLET_ID), JSON.stringify(draft));
 
-    const loaded = loadPolicyDraft(storage, PROJECT_ID, WALLET_ID);
+    const loaded = loadPolicyDraft(storage, PROJECT_ID, WALLET_ID).draft;
 
     expect(loaded?.state.familyActions).toEqual({ payment: "deny" });
   });
 
   it("preserves conflicting destination modes without merging their semantics", () => {
     const existing: PaymentWalletPolicy = {
+      custodyWalletId: WALLET_ID,
       walletId: WALLET_ID,
       defaultAction: "allow",
       controlProfile: null,

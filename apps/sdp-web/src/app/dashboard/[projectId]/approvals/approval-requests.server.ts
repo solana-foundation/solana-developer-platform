@@ -47,13 +47,13 @@ export async function fetchApprovalPolicyEvaluation(
   approvalRequest: WalletApprovalRequestSummary
 ): Promise<WalletPolicyEvaluationDetail | null> {
   const evaluationId = approvalRequest.policyEvaluation?.id;
-  if (!evaluationId) return null;
+  if (!evaluationId || !approvalRequest.operation.custodyWalletId) return null;
 
   try {
     const response = await apiClient.fetch<{
       policyEvaluation: WalletPolicyEvaluationDetail;
     }>(
-      `/v1/payments/wallets/${encodeURIComponent(approvalRequest.operation.walletId)}/policies/evaluations/${encodeURIComponent(evaluationId)}`
+      `/v1/payments/wallets/${encodeURIComponent(approvalRequest.operation.custodyWalletId)}/policies/evaluations/${encodeURIComponent(evaluationId)}`
     );
     return response.policyEvaluation;
   } catch {

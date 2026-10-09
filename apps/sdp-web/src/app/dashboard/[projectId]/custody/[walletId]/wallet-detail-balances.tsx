@@ -9,6 +9,7 @@ import {
   fetchWalletBalance,
 } from "@/app/dashboard/[projectId]/custody/wallet-balances.data";
 import { TokenMark } from "@/components/token-mark";
+import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   formatCurrencyAmount,
@@ -37,9 +38,10 @@ function useWalletDetailBalances(
   walletId: string,
   initial: WalletTrackedBalancesResult
 ): WalletTrackedBalancesResult {
+  const t = useTranslations();
   // A per-read key rather than seeding the cache in an effect (as the issuance list
   // does): effects run after paint, so a return visit would still flash the old balance.
-  const { data } = useSWR(
+  const { data, error } = useSWR(
     custodyQueryKeys.walletBalances({ walletId, readAt: initial.readAt }),
     () => fetchWalletBalance(walletId),
     {
@@ -55,6 +57,9 @@ function useWalletDetailBalances(
       // would keep the previous key's balance instead of the fresh fallback.
     }
   );
+  if (error) {
+    return { ...initial, balances: [], error: t("DashboardCustody.trackedBalancesUnavailable") };
+  }
   // A successful refresh supersedes a failed server read.
   return data ? { ...initial, balances: data, error: null } : initial;
 }
@@ -124,11 +129,11 @@ export function WalletBalanceRows({
             );
           })}
         </div>
-      ) : (
+      ) : !error ? (
         <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-4 text-sm text-secondary">
           {emptyLabel}
         </div>
-      )}
+      ) : null}
     </>
   );
 }

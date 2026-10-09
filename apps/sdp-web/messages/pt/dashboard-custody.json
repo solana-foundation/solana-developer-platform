@@ -84,7 +84,7 @@
     "unavailable": "Indisponível",
     "unableToLoadWalletProviders": "Não foi possível carregar os provedores de Wallet",
     "unableToLoadWallets": "Não foi possível carregar as Wallets",
-    "trackedBalancesUnavailable": "Os saldos rastreados estão indisponíveis no momento. Exibindo o saldo informado pela Wallet.",
+    "trackedBalancesUnavailable": "Os saldos rastreados estão indisponíveis no momento.",
     "walletControlsUnavailable": "Os controles da Wallet estão indisponíveis no momento.",
     "createWallet": "Criar Wallet",
     "walletSearchPlaceholder": "Buscar por nome, ID da Wallet, endereço, provedor ou finalidade",
@@ -1024,6 +1024,8 @@
     "walletSetupConnectionHint": "A Wallet é criada nesta conexão e assina com as credenciais dela.",
     "walletSetupConnectionDefault": "Padrão do projeto",
     "walletSetupConnectionUnavailablePending": "Configuração incompleta",
-    "walletSetupConnectionUnavailableFailed": "Requer atenção"
+    "walletSetupConnectionUnavailableFailed": "Requer atenção",
+    "policyDraftStorageUnavailable": "O armazenamento do rascunho está indisponível. Alterações não salvas podem ser perdidas ao sair desta página.",
+    "policyDraftCleanupIncomplete": "Política salva. A limpeza do rascunho do navegador está incompleta."
   }
 }

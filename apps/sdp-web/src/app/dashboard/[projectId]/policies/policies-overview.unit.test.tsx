@@ -98,6 +98,13 @@ function renderSurface(props: Partial<Parameters<typeof PoliciesOverviewSurface>
 }
 
 describe("PoliciesOverviewSurface", () => {
+  it("opens the exact SDP wallet from the inventory target ID", () => {
+    const target = { ...wallet("cwlt_inventory", "active"), walletId: "provider_inventory" };
+    const markup = renderSurface({ inventory: inventory([target]) });
+    expect(markup).toContain("/wallets/cwlt_inventory");
+    expect(markup).not.toContain("/wallets/provider_inventory");
+  });
+
   it("renders every status and both API-key binding scopes from inventory data", () => {
     const markup = renderSurface({
       inventory: inventory([

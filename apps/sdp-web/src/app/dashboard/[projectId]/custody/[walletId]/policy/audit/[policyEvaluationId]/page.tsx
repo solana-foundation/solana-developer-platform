@@ -40,29 +40,47 @@ export default async function WalletPolicyAuditDetailPage({
   );
   const filters = parsePolicyAuditFilters(resolvedSearchParams);
 
+  let canonicalHref = "";
   try {
     const apiClient = await createSdpApiClient();
-    const [context, evaluation, neighbors] = await Promise.all([
-      fetchPolicyAuditContext(apiClient.request, walletId),
-      fetchPolicyEvaluation(apiClient.request, walletId, policyEvaluationId),
-      fetchPolicyEvaluationNeighbors(apiClient.request, walletId, policyEvaluationId, filters),
-    ]);
+    const context = await fetchPolicyAuditContext(apiClient.request, walletId);
+    if (context.wallet.id !== walletId) {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(resolvedSearchParams)) {
+        for (const entry of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+          query.append(key, entry);
+        }
+      }
+      canonicalHref = await requestProjectHref(
+        `/dashboard/wallets/${encodeURIComponent(context.wallet.id)}/policy/audit/${encodeURIComponent(policyEvaluationId)}${query.size ? `?${query}` : ""}`
+      );
+    } else {
+      const [evaluation, neighbors] = await Promise.all([
+        fetchPolicyEvaluation(apiClient.request, context.wallet.id, policyEvaluationId),
+        fetchPolicyEvaluationNeighbors(
+          apiClient.request,
+          context.wallet.id,
+          policyEvaluationId,
+          filters
+        ),
+      ]);
 
-    return (
-      <DashboardWorkspaceOverviewPanel>
-        <PolicyAuditDetail
-          wallet={context.wallet}
-          evaluation={evaluation}
-          revisionHistory={context.revisionHistory}
-          apiKeyNames={context.apiKeyNames}
-          userNames={context.userNames}
-          neighbors={neighbors}
-          filters={filters}
-          locale={locale}
-          t={t}
-        />
-      </DashboardWorkspaceOverviewPanel>
-    );
+      return (
+        <DashboardWorkspaceOverviewPanel>
+          <PolicyAuditDetail
+            wallet={context.wallet}
+            evaluation={evaluation}
+            revisionHistory={context.revisionHistory}
+            apiKeyNames={context.apiKeyNames}
+            userNames={context.userNames}
+            neighbors={neighbors}
+            filters={filters}
+            locale={locale}
+            t={t}
+          />
+        </DashboardWorkspaceOverviewPanel>
+      );
+    }
   } catch (error) {
     if (error instanceof PolicyAuditRequestError && error.status === 404) notFound();
     return (
@@ -75,4 +93,5 @@ export default async function WalletPolicyAuditDetailPage({
       </DashboardWorkspaceOverviewPanel>
     );
   }
+  redirect(canonicalHref);
 }

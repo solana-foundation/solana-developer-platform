@@ -18,6 +18,7 @@ export interface WalletAssetOption {
 }
 
 export interface PolicyFlowWallet {
+  id: string;
   walletId: string;
   publicKey: string;
   label: string | null;

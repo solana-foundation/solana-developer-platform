@@ -136,6 +136,9 @@ describe("policy audit data", () => {
     const result = await fetchPolicyAuditContext(request, "wallet/one");
 
     expect(request).toHaveBeenCalledWith("/v1/wallets/wallet%2Fone?includeBalance=false");
+    expect(request).toHaveBeenCalledWith(
+      "/v1/payments/wallets/custody-wallet-1/policies/revisions"
+    );
     expect(result.wallet).not.toHaveProperty("balance");
   });
 
@@ -315,6 +318,7 @@ describe("policy audit data", () => {
         return Response.json({
           data: {
             wallet: {
+              id: "wallet-1",
               walletId: "wallet-1",
               publicKey: "wallet-address",
               label: "Treasury",

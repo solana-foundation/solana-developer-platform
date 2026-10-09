@@ -24,7 +24,7 @@ async function fetchWalletControlBaseline(
   wallet: PaymentsDashboardWallet
 ): Promise<ApiKeyAuthoringWallet> {
   const { policy } = await client.fetch<{ policy: PaymentWalletPolicy }>(
-    `/v1/payments/wallets/${encodeURIComponent(wallet.walletId)}/policies`
+    `/v1/payments/wallets/${encodeURIComponent(wallet.id)}/policies`
   );
   const profile = policy.controlProfile;
   return {

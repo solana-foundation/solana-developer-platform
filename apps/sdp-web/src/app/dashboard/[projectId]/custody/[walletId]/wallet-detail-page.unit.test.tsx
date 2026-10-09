@@ -71,10 +71,11 @@ vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", async (impor
 import WalletDetailPage, {
   WalletBalanceSummary,
   WalletBalancesSection,
+  WalletControlsPanel,
 } from "./wallet-detail-page";
 
-function renderPage() {
-  return WalletDetailPage({ params: Promise.resolve({ walletId: "wallet%2Fone" }) });
+function renderPage(walletId = "wallet_record") {
+  return WalletDetailPage({ params: Promise.resolve({ walletId }) });
 }
 
 let walletOverrides: Record<string, unknown> = {};
@@ -170,12 +171,14 @@ beforeEach(() => {
     },
   });
   mockRequest.mockImplementation(async (path: string) => {
-    if (path.startsWith("/v1/wallets/wallet%2Fone")) {
+    if (path.startsWith("/v1/wallets/")) {
       return walletMetadataResponse();
     }
 
     if (path.includes("/balances")) {
-      return Response.json({ data: { walletBalances: { balances: [solBalance("0")] } } });
+      return Response.json({
+        data: { walletBalances: { custodyWalletId: "wallet_record", balances: [solBalance("0")] } },
+      });
     }
 
     if (path.includes("/policies")) {
@@ -209,6 +212,56 @@ beforeEach(() => {
 });
 
 describe("WalletDetailPage critical path", () => {
+  it.each([404, 403, 503, "malformed", "network", "wrong wallet"] as const)(
+    "shows unavailable balances and controls after a %s read failure",
+    async (failure) => {
+      mockRequest.mockImplementation(async (path: string) => {
+        if (path.startsWith("/v1/wallets/")) return walletMetadataResponse();
+        if (path.startsWith("/v1/issuance/tokens")) return Response.json({ data: [] });
+        if (failure === "network") throw new Error("Unavailable");
+        if (failure === "malformed") return Response.json({ data: {} });
+        if (failure === "wrong wallet")
+          return Response.json({
+            data: {
+              walletBalances: { custodyWalletId: "another_wallet", balances: [] },
+              policy: {
+                custodyWalletId: "another_wallet",
+                walletId: "wallet/one",
+                defaultAction: "allow",
+                rules: [],
+                controlProfile: null,
+              },
+            },
+          });
+        return new Response(null, { status: failure });
+      });
+      const page = await renderPage();
+      const summary = findElementProps(page, WalletBalanceSummary);
+      const controls = findElementProps(page, WalletControlsPanel);
+      expect(summary).not.toBeNull();
+      expect(controls).not.toBeNull();
+      await expect(summary?.balancesPromise).resolves.toMatchObject({
+        balances: [],
+        error: "DashboardCustody.trackedBalancesUnavailable",
+      });
+      if (!controls) throw new Error("Wallet controls panel was not rendered");
+      const controlMarkup = renderToStaticMarkup(await WalletControlsPanel(controls));
+      expect(controlMarkup).toContain("DashboardCustody.walletControlsUnavailable");
+      expect(controlMarkup).not.toContain("DashboardCustody.walletDefaultAllow");
+      expect(mockRequest).toHaveBeenCalledWith("/v1/payments/wallets/wallet_record/balances");
+      expect(mockRequest).toHaveBeenCalledWith("/v1/payments/wallets/wallet_record/policies");
+    }
+  );
+
+  it("canonicalizes a provider bookmark before making Payments reads", async () => {
+    await expect(renderPage("wallet%2Fone")).rejects.toThrow(
+      `NEXT_REDIRECT /dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_record`
+    );
+    expect(mockRequest.mock.calls.some(([path]) => String(path).startsWith("/v1/payments/"))).toBe(
+      false
+    );
+  });
+
   it.each([
     ["an admin while BYOK is off", "org:admin", false],
     ["a member", "org:member", true],
@@ -252,7 +305,7 @@ describe("WalletDetailPage critical path", () => {
       walletOverrides = { custodyConnectionId: "connection_one" };
       mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
       mockRequest.mockImplementation(async (path: string) => {
-        if (path.startsWith("/v1/wallets/wallet%2Fone")) return walletMetadataResponse();
+        if (path.startsWith("/v1/wallets/")) return walletMetadataResponse();
         if (path === "/internal/dashboard/custody/connections/connection_one") {
           if (failure === "network") throw new Error("Connection unavailable");
           if (failure === "invalid response") return Response.json({ data: {} });
@@ -265,7 +318,7 @@ describe("WalletDetailPage critical path", () => {
 
       const markup = renderWalletIdentity(page);
       expect(markup).toContain("Fast wallet");
-      expect(markup).toContain("wallet/one");
+      expect(markup).toContain("wallet_record");
       expect(markup).toContain("connection_one");
     }
   );
@@ -297,7 +350,13 @@ describe("WalletDetailPage critical path", () => {
       }),
     ]);
     const markup = [summary, populatedBalances, emptyBalances]
-      .map((surface) => renderToStaticMarkup(surface))
+      .map((surface) =>
+        renderToStaticMarkup(
+          <I18nProvider locale="en" messages={getMessages("en")}>
+            {surface}
+          </I18nProvider>
+        )
+      )
       .join("\n");
 
     expect(markup.match(/bg-surface-raised/g)).toHaveLength(3);
@@ -316,7 +375,7 @@ describe("WalletDetailPage critical path", () => {
       canEdit,
       emptyLabel: "DashboardCustody.untitledWallet",
       label: "Fast wallet",
-      walletId: "wallet/one",
+      walletId: "wallet_record",
     });
   });
 
@@ -337,7 +396,7 @@ describe("WalletDetailPage critical path", () => {
     await renderPage();
 
     expect(mockLoadWalletActivity).not.toHaveBeenCalled();
-    expect(mockRequest).toHaveBeenCalledWith("/v1/wallets/wallet%2Fone?includeBalance=false");
+    expect(mockRequest).toHaveBeenCalledWith("/v1/wallets/wallet_record?includeBalance=false");
   });
 
   it("does not load or render policy controls when Policies is disabled", async () => {
@@ -354,7 +413,7 @@ describe("WalletDetailPage critical path", () => {
     const policy = deferred<Response>();
     const ownedTokens = deferred<Response>();
     mockRequest.mockImplementation((path: string) => {
-      if (path === "/v1/wallets/wallet%2Fone?includeBalance=false") {
+      if (path === "/v1/wallets/wallet_record?includeBalance=false") {
         return Promise.resolve(walletMetadataResponse());
       }
       if (path.includes("/balances")) return balances.promise;
@@ -374,7 +433,11 @@ describe("WalletDetailPage critical path", () => {
       expect(result).toBe("resolved");
     } finally {
       balances.resolve(
-        Response.json({ data: { walletBalances: { balances: [solBalance("0")] } } })
+        Response.json({
+          data: {
+            walletBalances: { custodyWalletId: "wallet_record", balances: [solBalance("0")] },
+          },
+        })
       );
       policy.resolve(new Response(null, { status: 404 }));
       ownedTokens.resolve(Response.json({ data: [] }));

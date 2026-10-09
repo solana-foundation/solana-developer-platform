@@ -4,7 +4,7 @@ import type { PaymentWalletPolicy } from "@sdp/types";
 import { ArrowLeft, ArrowRight, MoreHorizontal, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { updateWalletPolicy } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
@@ -88,7 +88,7 @@ export function WalletPolicyStartingProfileFlow({
   const [state, setState] = useState(initialState);
   const [currentPolicy, setCurrentPolicy] = useState(initialPolicy);
   const [activeFingerprint, setActiveFingerprint] = useState(() =>
-    policyStateFingerprint(wallet.walletId, initialState)
+    policyStateFingerprint(wallet.id, initialState)
   );
   const [stepIndex, setStepIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -97,43 +97,56 @@ export function WalletPolicyStartingProfileFlow({
   const [disableOpen, setDisableOpen] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
+  const skipNextAutosave = useRef(true);
+  const autosaveTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    const draft = loadPolicyDraft(window.localStorage, projectId, wallet.walletId);
-    if (draft) {
-      setState(draft.state);
-      const savedStepIndex = FLOW_STEPS.indexOf(draft.step);
-      setStepIndex(
-        savedStepIndex === 1 && !hasLimitsAndAssetsControls(draft.state)
-          ? 2
-          : savedStepIndex < 0
-            ? 0
-            : savedStepIndex
+    if (isLoaded) return;
+    try {
+      const { draft, storageError } = loadPolicyDraft(
+        window.localStorage,
+        projectId,
+        wallet.id,
+        wallet.walletId
       );
+      if (draft) {
+        setState(draft.state);
+        const savedStepIndex = FLOW_STEPS.indexOf(draft.step);
+        setStepIndex(
+          savedStepIndex === 1 && !hasLimitsAndAssetsControls(draft.state)
+            ? 2
+            : savedStepIndex < 0
+              ? 0
+              : savedStepIndex
+        );
+      }
+      if (storageError) toast.warning(t("DashboardCustody.policyDraftStorageUnavailable"));
+    } catch {
+      toast.warning(t("DashboardCustody.policyDraftStorageUnavailable"));
     }
     setIsLoaded(true);
-  }, [projectId, wallet.walletId]);
+  }, [isLoaded, projectId, wallet.id, wallet.walletId, t]);
 
   const currentStep = FLOW_STEPS[stepIndex] ?? "intent";
   const currentStepCopy = STEP_COPY[currentStep];
   const validation = useMemo(() => validatePolicyState(state), [state]);
   const visibleValidation = validationRequestedSteps.includes(currentStep) ? validation : {};
   const stateFingerprint = useMemo(
-    () => policyStateFingerprint(wallet.walletId, state),
-    [state, wallet.walletId]
+    () => policyStateFingerprint(wallet.id, state),
+    [state, wallet.id]
   );
   const isDirty = stateFingerprint !== activeFingerprint;
 
   const createDraft = useCallback(
     (): StoredPolicyDraft => ({
-      version: 1,
+      version: 2,
       projectId,
-      walletId: wallet.walletId,
+      custodyWalletId: wallet.id,
       step: currentStep,
       state,
       updatedAt: new Date().toISOString(),
     }),
-    [currentStep, projectId, state, wallet.walletId]
+    [currentStep, projectId, state, wallet.id]
   );
 
   function persistDraft(notify = false) {
@@ -154,8 +167,25 @@ export function WalletPolicyStartingProfileFlow({
     }
   }
 
+  function clearDraftAfterCommit() {
+    skipNextAutosave.current = true;
+    window.clearTimeout(autosaveTimer.current);
+    try {
+      clearPolicyDraft(window.localStorage, projectId, wallet.id, wallet.walletId);
+    } catch {
+      toast.warning(t("DashboardCustody.policyDraftCleanupIncomplete"), {
+        position: "bottom-right",
+      });
+    }
+  }
+
   useEffect(() => {
-    if (!isLoaded || !isDirty) return;
+    if (!isLoaded) return;
+    if (skipNextAutosave.current) {
+      skipNextAutosave.current = false;
+      return;
+    }
+    if (!isDirty) return;
     const draft = createDraft();
     const timeout = window.setTimeout(() => {
       try {
@@ -164,6 +194,7 @@ export function WalletPolicyStartingProfileFlow({
         // Manual Save draft surfaces storage failures without interrupting editing on every keystroke.
       }
     }, 300);
+    autosaveTimer.current = timeout;
     return () => window.clearTimeout(timeout);
   }, [createDraft, isDirty, isLoaded]);
 
@@ -180,7 +211,7 @@ export function WalletPolicyStartingProfileFlow({
 
   function goBack() {
     if (stepIndex === 0) {
-      router.push(href(walletDetailHref(pathname, wallet.walletId)));
+      router.push(href(walletDetailHref(pathname, wallet.id)));
       return;
     }
     if (currentStep === "destinations-operations" && !hasLimitsAndAssetsControls(state)) {
@@ -214,14 +245,15 @@ export function WalletPolicyStartingProfileFlow({
   }
 
   async function activateControls() {
+    if (policyError) return;
     setIsSubmitting(true);
     const toastId = toast.loading(t("DashboardCustody.policyActivating"), {
       position: "bottom-right",
     });
     try {
       const updated = await updateWalletPolicy(
-        wallet.walletId,
-        buildPolicyPayload(wallet.walletId, state),
+        wallet.id,
+        buildPolicyPayload(wallet.id, state),
         t,
         commitMessage,
         // Stale base 409s instead of replacing another session's controls.
@@ -232,20 +264,16 @@ export function WalletPolicyStartingProfileFlow({
       setState(returnedState);
       setCommitMessage("");
       setReviewDrawerOpen(false);
-      void mutate(
-        custodyQueryKeys.walletPolicyRevisions({ walletId: wallet.walletId }),
-        undefined,
-        {
-          revalidate: false,
-        }
-      );
-      setActiveFingerprint(policyStateFingerprint(wallet.walletId, returnedState));
-      clearPolicyDraft(window.localStorage, projectId, wallet.walletId);
+      void mutate(custodyQueryKeys.walletPolicyRevisions({ walletId: wallet.id }), undefined, {
+        revalidate: false,
+      });
+      setActiveFingerprint(policyStateFingerprint(wallet.id, returnedState));
       toast.success(t("DashboardCustody.policyActive"), {
         id: toastId,
         description: t("DashboardCustody.policyActiveDescription"),
         position: "bottom-right",
       });
+      clearDraftAfterCommit();
     } catch (error) {
       toast.error(t("DashboardCustody.policyActivationFailed"), {
         id: toastId,
@@ -259,14 +287,15 @@ export function WalletPolicyStartingProfileFlow({
   }
 
   async function disableControls() {
+    if (policyError) return;
     setIsSubmitting(true);
     const toastId = toast.loading(t("DashboardCustody.policyDisabling"), {
       position: "bottom-right",
     });
     try {
       const updated = await updateWalletPolicy(
-        wallet.walletId,
-        buildDisabledPolicyPayload(wallet.walletId),
+        wallet.id,
+        buildDisabledPolicyPayload(wallet.id),
         t,
         undefined,
         { expectedRevisionId: currentPolicy.controlProfile?.revisionId ?? null }
@@ -274,15 +303,15 @@ export function WalletPolicyStartingProfileFlow({
       const returnedState = createPolicyAuthoringState(updated);
       setCurrentPolicy(updated);
       setState(returnedState);
-      setActiveFingerprint(policyStateFingerprint(wallet.walletId, returnedState));
+      setActiveFingerprint(policyStateFingerprint(wallet.id, returnedState));
       setStepIndex(0);
-      clearPolicyDraft(window.localStorage, projectId, wallet.walletId);
       setDisableOpen(false);
       toast.success(t("DashboardCustody.policyDisabled"), {
         id: toastId,
         description: t("DashboardCustody.policyDisabledDescription"),
         position: "bottom-right",
       });
+      clearDraftAfterCommit();
     } catch (error) {
       toast.error(t("DashboardCustody.policyDisableFailed"), {
         id: toastId,
@@ -298,7 +327,7 @@ export function WalletPolicyStartingProfileFlow({
   const canActivate =
     isDirty && !isSubmitting && !policyError && Object.keys(validation).length === 0;
   const hasActiveControls =
-    Boolean(currentPolicy.controlProfile) && hasActiveRestrictions(currentPolicy);
+    !policyError && Boolean(currentPolicy.controlProfile) && hasActiveRestrictions(currentPolicy);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -312,12 +341,13 @@ export function WalletPolicyStartingProfileFlow({
         description={t(currentStepCopy.descriptionKey)}
         maxWidthClassName="max-w-6xl"
         toolbarActions={
-          <RevisionHistoryDrawer walletId={wallet.walletId} initialRevisionId={initialRevisionId} />
+          <RevisionHistoryDrawer walletId={wallet.id} initialRevisionId={initialRevisionId} />
         }
         aside={
           <PolicySummaryRail
             wallet={wallet}
             policy={currentPolicy}
+            policyError={policyError}
             state={state}
             stepIndex={stepIndex}
             assetOptions={assetOptions}
@@ -453,7 +483,7 @@ export function WalletPolicyStartingProfileFlow({
 
       <DisableControlsDialog
         open={disableOpen}
-        walletName={wallet.label || wallet.walletId}
+        walletName={wallet.label || wallet.id}
         submitting={isSubmitting}
         onClose={() => setDisableOpen(false)}
         onConfirm={disableControls}
@@ -462,7 +492,7 @@ export function WalletPolicyStartingProfileFlow({
       <PolicyCommitDrawer
         open={reviewDrawerOpen}
         onOpenChange={setReviewDrawerOpen}
-        walletId={wallet.walletId}
+        walletId={wallet.id}
         activePolicy={currentPolicy}
         pendingState={state}
         assetOptions={assetOptions}

@@ -136,13 +136,13 @@ export function buildPoliciesHref(
 
 function targetHref(item: PolicyControlInventoryItem): string {
   return item.targetType === "wallet"
-    ? `/dashboard/wallets/${encodeURIComponent(item.walletId)}`
+    ? `/dashboard/wallets/${encodeURIComponent(item.targetId)}`
     : "/dashboard/api-keys";
 }
 
 function walletPolicyHref(item: PolicyControlInventoryItem): string {
   return item.targetType === "wallet"
-    ? `/dashboard/wallets/${encodeURIComponent(item.walletId)}/policy`
+    ? `/dashboard/wallets/${encodeURIComponent(item.targetId)}/policy`
     : "/dashboard/api-keys";
 }
 

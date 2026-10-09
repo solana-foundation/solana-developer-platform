@@ -547,7 +547,13 @@ export interface PolicyEvaluationContext {
 }
 
 export type PublicPolicyEvaluationContext = Omit<PolicyEvaluationContext, "operation"> & {
-  operation: Omit<PolicyEvaluationContext["operation"], "providerExtensions" | "rawPayload">;
+  operation: Omit<
+    PolicyEvaluationContext["operation"],
+    "providerExtensions" | "rawPayload" | "walletId"
+  > & {
+    /** Legacy provider reference; new clients use custodyWalletId. */
+    walletId?: string;
+  };
 };
 
 /**

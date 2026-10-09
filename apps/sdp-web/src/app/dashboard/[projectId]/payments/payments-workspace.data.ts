@@ -58,7 +58,8 @@ export interface PaymentWalletBalance {
 }
 
 export interface PaymentWalletBalancesSnapshot {
-  walletId: string;
+  custodyWalletId: string;
+  walletId?: string;
   address: string;
   balances: PaymentWalletBalance[];
 }
@@ -252,6 +253,7 @@ interface WalletBalancesEnvelope {
         walletBalances?: PaymentWalletBalancesSnapshot;
       }
     | {
+        custodyWalletId?: string;
         walletId?: string;
         address?: string;
         balances?: PaymentWalletBalance[];
@@ -268,20 +270,22 @@ function resolveWalletBalancesSnapshot(
     envelope.data &&
     "walletBalances" in envelope.data &&
     envelope.data.walletBalances &&
-    typeof envelope.data.walletBalances.walletId === "string"
+    typeof envelope.data.walletBalances.custodyWalletId === "string" &&
+    typeof envelope.data.walletBalances.address === "string" &&
+    Array.isArray(envelope.data.walletBalances.balances)
   ) {
     return envelope.data.walletBalances;
   }
 
   if (
     envelope.data &&
-    "walletId" in envelope.data &&
-    typeof envelope.data.walletId === "string" &&
+    "custodyWalletId" in envelope.data &&
+    typeof envelope.data.custodyWalletId === "string" &&
     typeof envelope.data.address === "string" &&
     Array.isArray(envelope.data.balances)
   ) {
     return {
-      walletId: envelope.data.walletId,
+      custodyWalletId: envelope.data.custodyWalletId,
       address: envelope.data.address,
       balances: envelope.data.balances,
     };
@@ -458,7 +462,7 @@ export async function fetchWalletBalances(
   }
 
   const snapshot = resolveWalletBalancesSnapshot(body);
-  if (!snapshot) {
+  if (!snapshot || snapshot.custodyWalletId !== walletId) {
     throw new Error(t("DashboardPayments.workspace.walletBalancesMissing"));
   }
 

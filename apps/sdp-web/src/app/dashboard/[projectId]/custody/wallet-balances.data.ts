@@ -12,7 +12,7 @@ interface ApiErrorEnvelope {
 interface WalletBalancesEnvelope extends ApiErrorEnvelope {
   data?: {
     wallets?: Array<{
-      walletId?: string;
+      id?: string;
       balances?: CustodyWalletTokenBalance[];
     }>;
   };
@@ -22,10 +22,12 @@ interface WalletBalanceEnvelope extends ApiErrorEnvelope {
   data?:
     | {
         walletBalances?: {
+          custodyWalletId?: string;
           balances?: CustodyWalletTokenBalance[];
         };
       }
     | {
+        custodyWalletId?: string;
         balances?: CustodyWalletTokenBalance[];
       };
 }
@@ -59,10 +61,10 @@ export async function fetchWalletBalances(): Promise<Record<string, CustodyWalle
   return Object.fromEntries(
     body.data.wallets
       .filter(
-        (wallet): wallet is { walletId: string; balances: CustodyWalletTokenBalance[] } =>
-          Boolean(wallet.walletId) && Array.isArray(wallet.balances)
+        (wallet): wallet is { id: string; balances: CustodyWalletTokenBalance[] } =>
+          Boolean(wallet.id) && Array.isArray(wallet.balances)
       )
-      .map((wallet) => [wallet.walletId, wallet.balances])
+      .map((wallet) => [wallet.id, wallet.balances])
   );
 }
 
@@ -81,12 +83,15 @@ export async function fetchWalletBalance(walletId: string): Promise<CustodyWalle
   }
 
   let balances: CustodyWalletTokenBalance[] | undefined;
+  let custodyWalletId: string | undefined;
   if (body.data && "walletBalances" in body.data) {
     balances = body.data.walletBalances?.balances;
+    custodyWalletId = body.data.walletBalances?.custodyWalletId;
   } else if (body.data && "balances" in body.data) {
     balances = body.data.balances;
+    custodyWalletId = body.data.custodyWalletId;
   }
-  if (!Array.isArray(balances)) {
+  if (!Array.isArray(balances) || custodyWalletId !== walletId) {
     throw new Error("Wallet balance response did not include balances.");
   }
 

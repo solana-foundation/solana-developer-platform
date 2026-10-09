@@ -80,7 +80,9 @@ export interface PaymentsWalletAggregateEnvelope {
 }
 
 export interface PaymentWalletPolicy {
-  walletId: string;
+  custodyWalletId: string;
+  /** Legacy provider reference; new clients use custodyWalletId. */
+  walletId?: string;
   defaultAction: PolicyDefaultAction;
   rules: PolicyRule[];
   controlProfile: PaymentWalletControlProfileSummary | null;

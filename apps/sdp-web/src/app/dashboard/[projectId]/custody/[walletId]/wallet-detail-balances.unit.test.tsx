@@ -1,81 +1,103 @@
-import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
 
-const { mockUseSWR } = vi.hoisted(() => ({ mockUseSWR: vi.fn() }));
-
-vi.mock("swr", () => ({ default: mockUseSWR }));
-vi.mock("next/navigation", () => import("@/test/next-navigation"));
-
-import { BALANCE_REFRESH_INTERVAL_MS } from "@/app/dashboard/[projectId]/custody/wallet-balances.data";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { SWRConfig, useSWRConfig } from "swr";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  READ_AT,
   solBalance,
   trackedBalances,
 } from "@/app/dashboard/[projectId]/custody/wallet-balances.fixtures";
-import { formatDisplayAmount } from "../../payments/payments-overview.utils";
-import { WalletBalanceRows, WalletBalanceTotal } from "./wallet-detail-balances";
+import { getMessages } from "@/i18n/messages";
+import { I18nProvider } from "@/i18n/provider";
+import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
+import {
+  WalletBalanceRows,
+  WalletBalanceTotal,
+  type WalletTrackedBalancesResult,
+} from "./wallet-detail-balances";
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+const walletId = "cwlt_selected";
+const balance = { ...solBalance("1"), usdValue: 150 };
+const unavailable = "Tracked balances are unavailable right now.";
+
+function RefreshBalances() {
+  const { mutate } = useSWRConfig();
+  return (
+    <button type="button" onClick={() => void mutate(() => true)}>
+      Refresh balances
+    </button>
+  );
+}
+
+function renderBalances(initial: WalletTrackedBalancesResult) {
+  return render(
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      <SWRConfig value={{ provider: () => new Map(), shouldRetryOnError: false }}>
+        <RefreshBalances />
+        <WalletBalanceTotal walletId={walletId} initial={initial} />
+        <WalletBalanceRows
+          walletId={walletId}
+          initial={initial}
+          tokenRoutes={{}}
+          issuanceEnabled={false}
+          emptyLabel="No assets"
+        />
+      </SWRConfig>
+    </I18nProvider>
+  );
+}
+
+beforeEach(() => {
+  resetDashboardNavigation();
+  setDashboardUrl(`/dashboard/prj_test_sandbox/wallets/${walletId}`, { walletId });
+});
 afterEach(() => {
-  mockUseSWR.mockReset();
+  cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe("wallet detail balances", () => {
-  it("polls the wallet's balances on the same cadence as the overview cards", () => {
-    const balance = { ...solBalance("1"), usdValue: 150 };
-    mockUseSWR.mockReturnValue({ data: undefined });
+  it.each([503, 404, "wrong wallet"] as const)(
+    "shows unavailable rather than an old balance or empty wallet after a %s refresh",
+    async (failure) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          failure === "wrong wallet"
+            ? Response.json({
+                data: { walletBalances: { custodyWalletId: "cwlt_other", balances: [] } },
+              })
+            : Response.json({ error: { message: "Read failed" } }, { status: failure })
+        )
+      );
+      const view = renderBalances(trackedBalances([balance], null));
+      expect(view.getByText("$150.00")).toBeTruthy();
+      fireEvent.click(view.getByRole("button", { name: "Refresh balances" }));
 
-    renderToStaticMarkup(
-      <WalletBalanceTotal walletId="wallet-1" initial={trackedBalances([balance], null)} />
+      await waitFor(() => expect(view.getAllByText(unavailable)).toHaveLength(2));
+      expect(view.getByText("—")).toBeTruthy();
+      expect(view.queryByText("$150.00")).toBeNull();
+      expect(view.queryByText("$0.00")).toBeNull();
+      expect(view.queryByText("No assets")).toBeNull();
+      expect(view.queryByText("1.00 SOL")).toBeNull();
+    }
+  );
+
+  it("clears an initial server error once a refresh succeeds", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          data: { walletBalances: { custodyWalletId: walletId, balances: [balance] } },
+        })
+      )
     );
+    const view = renderBalances(trackedBalances([], unavailable));
 
-    expect(mockUseSWR).toHaveBeenCalledWith(
-      ["wallet-balances", "wallet-1", READ_AT],
-      expect.any(Function),
-      expect.objectContaining({
-        fallbackData: [balance],
-        refreshInterval: BALANCE_REFRESH_INTERVAL_MS,
-        revalidateOnFocus: true,
-        revalidateOnMount: false,
-      })
-    );
-  });
-
-  it("shows polled balances instead of the server-rendered ones", () => {
-    const initial = trackedBalances([{ ...solBalance("1"), usdValue: 150 }], null);
-    mockUseSWR.mockReturnValue({ data: [{ ...solBalance("2"), usdValue: 300 }] });
-
-    const total = renderToStaticMarkup(
-      <WalletBalanceTotal walletId="wallet-1" initial={initial} />
-    );
-    const rows = renderToStaticMarkup(
-      <WalletBalanceRows
-        walletId="wallet-1"
-        initial={initial}
-        tokenRoutes={{}}
-        issuanceEnabled={false}
-        emptyLabel="No balances"
-      />
-    );
-
-    expect(total).toContain("300");
-    expect(total).not.toContain("150");
-    expect(rows).toContain(formatDisplayAmount("2", "SOL"));
-  });
-
-  it("replaces a failed server read once a poll succeeds", () => {
-    const initial = trackedBalances([], "Balances unavailable");
-
-    mockUseSWR.mockReturnValue({ data: undefined });
-    expect(
-      renderToStaticMarkup(<WalletBalanceTotal walletId="wallet-1" initial={initial} />)
-    ).toContain("Balances unavailable");
-    expect(mockUseSWR.mock.calls[0]?.[2]).toMatchObject({ revalidateOnMount: true });
-
-    mockUseSWR.mockReturnValue({ data: [{ ...solBalance("1"), usdValue: 150 }] });
-    const recovered = renderToStaticMarkup(
-      <WalletBalanceTotal walletId="wallet-1" initial={initial} />
-    );
-    expect(recovered).not.toContain("Balances unavailable");
-    expect(recovered).toContain("150");
+    await waitFor(() => expect(view.getByText("$150.00")).toBeTruthy());
+    expect(view.queryByText(unavailable)).toBeNull();
+    expect(view.queryByText("No assets")).toBeNull();
   });
 });

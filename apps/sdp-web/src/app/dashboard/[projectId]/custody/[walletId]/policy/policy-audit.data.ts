@@ -408,10 +408,8 @@ export async function fetchPolicyRevisionContext(
   request: SdpApiClient["request"],
   walletId: string
 ): Promise<PolicyRevisionContext> {
-  const [wallet, revisionHistory] = await Promise.all([
-    fetchWallet(request, walletId),
-    fetchRevisionHistory(request, walletId),
-  ]);
+  const wallet = await fetchWallet(request, walletId);
+  const revisionHistory = await fetchRevisionHistory(request, wallet.id);
   return { wallet, revisionHistory };
 }
 

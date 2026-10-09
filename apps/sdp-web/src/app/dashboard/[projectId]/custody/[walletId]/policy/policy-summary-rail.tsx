@@ -29,12 +29,14 @@ import {
 export function PolicySummaryRail({
   wallet,
   policy,
+  policyError,
   state,
   stepIndex,
   assetOptions,
 }: {
   wallet: PolicyFlowWallet;
   policy: PaymentWalletPolicy;
+  policyError: string | null;
   state: PolicyAuthoringState;
   stepIndex: number;
   assetOptions: PolicyAssetOption[];
@@ -50,12 +52,17 @@ export function PolicySummaryRail({
     value: ReactNode;
     collapsedCount?: number;
   }> = [
-    { label: t("DashboardCustody.policySummaryStatus"), value: formatProfileStatus(status, t) },
+    {
+      label: t("DashboardCustody.policySummaryStatus"),
+      value: policyError ? t("DashboardCustody.unavailable") : formatProfileStatus(status, t),
+    },
     {
       label: t("DashboardCustody.policyRevision"),
-      value: policy.controlProfile?.revisionNumber
-        ? `#${policy.controlProfile.revisionNumber}`
-        : t("DashboardCustody.policyStatusNotActivated"),
+      value: policyError
+        ? t("DashboardCustody.unavailable")
+        : policy.controlProfile?.revisionNumber
+          ? `#${policy.controlProfile.revisionNumber}`
+          : t("DashboardCustody.policyStatusNotActivated"),
     },
     {
       label: t("DashboardCustody.policySummaryDefaultAction"),
@@ -216,7 +223,7 @@ export function PolicySummaryRail({
         <div className="flex items-center justify-between gap-4 py-3">
           <dt className="text-sm text-muted">{t("DashboardCustody.policySummaryWallet")}</dt>
           <dd className="max-w-48 truncate text-right text-sm font-medium text-primary">
-            {wallet.label || wallet.walletId}
+            {wallet.label || wallet.id}
           </dd>
         </div>
         <div className="flex items-center justify-between gap-4 py-3">
