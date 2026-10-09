@@ -1,19 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterparty } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../payments-page.data";
-import RedesignRecurringPaymentsPage from "./page.redesign";
 import {
   fetchRecurringPayments,
   parseRecurringPaymentsListParams,
-} from "./recurring-payments.data";
-import { RecurringPaymentsWorkspace } from "./recurring-payments-workspace";
-
-export const dynamic = "force-dynamic";
+} from "./recurring-payments.data.redesign";
+import { RecurringPaymentsWorkspace } from "./recurring-payments-workspace.redesign";
 
 interface RecurringPaymentsPageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -106,4 +102,4 @@ async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProp
   );
 }
 
-export default withLegacyDesign(RedesignRecurringPaymentsPage, RecurringPaymentsPage, "activity");
+export default RecurringPaymentsPage;

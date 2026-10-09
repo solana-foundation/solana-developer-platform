@@ -1,10 +1,17 @@
+import { DesignSwitch } from "@/components/new-design";
 import { CounterpartyMenuLoading } from "../counterparty-menu-loading";
+import RedesignPaymentRequestsLoading from "./loading.redesign";
 
 export function PreviousPaymentRequestsLoading() {
   return <CounterpartyMenuLoading overview="payment-requests" />;
 }
 
-// Requests is still the previous design's page, so it loads as one with new-design-activity on.
 export default function PaymentRequestsLoading() {
-  return <PreviousPaymentRequestsLoading />;
+  return (
+    <DesignSwitch
+      designModule="activity"
+      current={<RedesignPaymentRequestsLoading />}
+      legacy={<PreviousPaymentRequestsLoading />}
+    />
+  );
 }
