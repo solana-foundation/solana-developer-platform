@@ -244,6 +244,15 @@ export const deleteOrganization = async (c: AppContext) => {
         `UPDATE organizations SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`
       )
       .bind(orgId),
+    // A pending invitation is a way back in: accepting one re-activates a
+    // removed membership in this organization. Invitations lock before
+    // memberships, the same order acceptInvitation takes them, so a
+    // concurrent acceptance cannot deadlock the deletion.
+    db
+      .prepare(
+        "UPDATE invitations SET status = 'revoked' WHERE organization_id = ? AND status = 'pending'"
+      )
+      .bind(orgId),
     db
       .prepare("UPDATE organization_members SET status = 'removed' WHERE organization_id = ?")
       .bind(orgId),
@@ -251,13 +260,6 @@ export const deleteOrganization = async (c: AppContext) => {
       .prepare(
         `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now')
          WHERE organization_id = ? AND status = 'active'`
-      )
-      .bind(orgId),
-    // A pending invitation is a way back in: accepting one re-activates a
-    // removed membership in this organization.
-    db
-      .prepare(
-        "UPDATE invitations SET status = 'revoked' WHERE organization_id = ? AND status = 'pending'"
       )
       .bind(orgId),
   ]);
