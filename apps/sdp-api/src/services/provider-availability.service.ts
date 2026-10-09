@@ -20,6 +20,7 @@ import {
   type OrganizationTier,
   type ProjectProviderAvailability,
   type ProjectProviderAvailabilityEntry,
+  type ProjectProviderRefusalReason,
   type ProviderAvailabilityEntry,
   RAMP_PROVIDERS,
   type RampProviderId,
@@ -752,12 +753,6 @@ export interface CustodySetupRefusal {
 /** The custody setup rule's verdict on one (provider, mode) pair for a project. */
 export type CustodySetupAdmission = { admitted: true } | CustodySetupRefusal;
 
-type ProjectProviderRefusalReason =
-  | CustodySetupRefusalReason
-  | "provider_not_in_release_channel"
-  | "provider_not_offered"
-  | "provider_not_configured";
-
 /**
  * The project provider rule's refusal of one provider: its error and the
  * project, environment and request it was decided for, so whoever refuses the
@@ -1184,6 +1179,54 @@ export function refuseCustodySetup(refusal: CustodySetupRefusal): CustodySetupRe
 }
 
 /**
+ * A custody provider's entry for a project: the modes the project provider rule
+ * admits, and the first failed check for each mode it refuses.
+ *
+ * @param env - Process environment naming the release channel.
+ * @param facts - The project's environment and its organization's provider access.
+ * @param provider - The custody provider.
+ * @returns The provider's custody entry.
+ */
+function custodyProviderEntry(
+  env: Env,
+  facts: ProjectProviderFacts,
+  provider: CustodyProvider
+): ProjectProviderAvailabilityEntry {
+  const decisions = CUSTODY_MODES.map((mode) => ({
+    mode,
+    decision: decideProjectProvider(env, facts, { family: "custody", provider, mode }),
+  }));
+  return {
+    family: "custody",
+    provider,
+    modes: decisions.filter(({ decision }) => decision.admitted).map(({ mode }) => mode),
+    unavailableModes: decisions.flatMap(({ mode, decision }) =>
+      decision.admitted ? [] : [{ mode, reason: decision.reason }]
+    ),
+  };
+}
+
+/**
+ * A ramps, compliance or Earn provider's entry for a project: available, or
+ * unavailable with the project provider rule's first failed check.
+ *
+ * @param env - Process environment naming the release channel.
+ * @param facts - The project's environment and its organization's provider access.
+ * @param request - The provider.
+ * @returns The provider's entry.
+ */
+function stagedProviderEntry(
+  env: Env,
+  facts: ProjectProviderFacts,
+  request: Exclude<ProjectProviderRequest, { family: "custody" }>
+): ProjectProviderAvailabilityEntry {
+  const decision = decideProjectProvider(env, facts, request);
+  return decision.admitted
+    ? { ...request, available: true }
+    : { ...request, available: false, reason: decision.reason };
+}
+
+/**
  * Every family's entries for a project, in each family's provider tuple order.
  *
  * @param env - Process environment naming the release channel.
@@ -1198,31 +1241,19 @@ function projectProviderEntries(
 ): ProjectProviderAvailabilityEntry[] {
   switch (family) {
     case "custody":
-      return CUSTODY_PROVIDERS.map((provider) => ({
-        family,
-        provider,
-        modes: CUSTODY_MODES.filter(
-          (mode) => decideProjectProvider(env, facts, { family, provider, mode }).admitted
-        ),
-      }));
+      return CUSTODY_PROVIDERS.map((provider) => custodyProviderEntry(env, facts, provider));
     case "compliance":
-      return COMPLIANCE_PROVIDERS.map((provider) => ({
-        family,
-        provider,
-        available: decideProjectProvider(env, facts, { family, provider }).admitted,
-      }));
+      return COMPLIANCE_PROVIDERS.map((provider) =>
+        stagedProviderEntry(env, facts, { family, provider })
+      );
     case "ramps":
-      return RAMP_PROVIDERS.map((provider) => ({
-        family,
-        provider,
-        available: decideProjectProvider(env, facts, { family, provider }).admitted,
-      }));
+      return RAMP_PROVIDERS.map((provider) =>
+        stagedProviderEntry(env, facts, { family, provider })
+      );
     case "earn":
-      return EARN_PROVIDERS.map((provider) => ({
-        family,
-        provider,
-        available: decideProjectProvider(env, facts, { family, provider }).admitted,
-      }));
+      return EARN_PROVIDERS.map((provider) =>
+        stagedProviderEntry(env, facts, { family, provider })
+      );
     default: {
       const exhaustive: never = family;
       throw new Error(`Unknown provider family: ${String(exhaustive)}`);
