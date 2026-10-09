@@ -19,6 +19,11 @@
       "import": "./src/errors.ts",
       "default": "./src/errors.ts"
     },
+    "./factory": {
+      "types": "./src/factory.ts",
+      "import": "./src/factory.ts",
+      "default": "./src/factory.ts"
+    },
     "./relay": {
       "types": "./src/relay.ts",
       "import": "./src/relay.ts",

@@ -1,5 +1,9 @@
 import { spawn } from "node:child_process";
-import { safeHostname, selectHealthySolanaRpcUrl } from "./lib/solana-rpc-health.mjs";
+import {
+  safeHostname,
+  selectHealthySolanaRpcUrl,
+  useSolanaRpcCandidateAsDefault,
+} from "./lib/solana-rpc-health.mjs";
 
 const [command, ...args] = process.argv.slice(2);
 
@@ -15,6 +19,7 @@ try {
   if (selected) {
     env.SOLANA_RPC_URL = selected.url;
     env.SOLANA_RPC_DEFAULT_PROVIDER = "default";
+    useSolanaRpcCandidateAsDefault(env, selected);
     console.log(`Using ${selected.id} Solana RPC (${safeHostname(selected.url)}).`);
   }
 
