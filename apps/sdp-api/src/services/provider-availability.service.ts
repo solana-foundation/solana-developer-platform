@@ -1491,7 +1491,7 @@ function getAvailabilityMessage(
  * Refuses an organization using a custody provider it does not have enabled:
  * entitled by its tier or overrides, and configured in this deployment. An
  * organization-level check for the signing runtime, which has no project in
- * scope; custody's environment and stage rules live in the custody setup gate.
+ * scope; custody's release-channel and Production BYOK-only rules live in the custody setup gate.
  *
  * @param env - Process environment the provider access is evaluated against.
  * @param db - Database client for the organization row.
