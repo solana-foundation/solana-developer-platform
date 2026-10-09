@@ -174,13 +174,13 @@ function unwrapParent(node) {
 
 /**
  * Whether a reference inside an owner or allowlisted file only uses the
- * capability: calls or constructs it, calls one of its static or instance
- * methods, names it in an import or re-export (the checker follows those
+ * capability: calls or constructs it, calls one of its instance methods or a
+ * static method it declares, names it in an import or re-export (the checker follows those
  * aliases), declares it, or names it as a type. Anything else (assigning it,
  * passing or returning it, putting it in an object, subclassing it) hands the
  * constructor out under a symbol the check no longer pins.
  */
-function isPinnedUse(node) {
+function isPinnedUse(checker, node) {
   const parent = node.parent;
   if (!parent) return false;
   if (
@@ -215,6 +215,16 @@ function isPinnedUse(node) {
     (ts.isPropertyAccessExpression(callee.parent) || ts.isElementAccessExpression(callee.parent)) &&
     callee.parent.expression === callee
   ) {
+    // Only a static method the capability itself declares: `bind`, `call` and
+    // `apply` come from `Function` and hand the constructor back out.
+    const member = checker.getSymbolAtLocation(
+      ts.isPropertyAccessExpression(callee.parent)
+        ? callee.parent.name
+        : callee.parent.argumentExpression
+    );
+    if (!member?.declarations?.some((declaration) => ts.isClassLike(declaration.parent))) {
+      return false;
+    }
     callee = unwrapParent(callee.parent);
   }
   return Boolean(
@@ -315,7 +325,7 @@ export function findValueMovementViolations({
         violations.push(
           `${relativePath}:${line + 1}: references ${capability.id} (${label}). ${capability.why}`
         );
-      } else if (!module && !isPinnedUse(node)) {
+      } else if (!module && !isPinnedUse(checker, node)) {
         violations.push(
           `${relativePath}:${line + 1}: hands ${capability.id} out as a value (${label}); an allowlisted file may only call it, construct it or re-export it by name, so every reference elsewhere still resolves to it. ${capability.why}`
         );

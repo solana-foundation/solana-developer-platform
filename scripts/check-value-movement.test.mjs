@@ -39,7 +39,10 @@ const CAPABILITY = {
 };
 
 const CAP_SOURCE = `export function mint(): number { return 1; }
-export class Signer { sign(): void {} }
+export class Signer {
+  static create(): Signer { return new Signer(); }
+  sign(): void {}
+}
 `;
 
 function violations(files, capabilities = [CAPABILITY]) {
@@ -178,6 +181,7 @@ mint();
 (mint as () => number)();
 const signer: Signer = new Signer();
 signer.sign();
+Signer.create();
 `,
     },
     [CAPABILITY, SIGNER]
@@ -193,6 +197,7 @@ export const table = { privy: Signer };
 export class Sub extends Signer {}
 export function give() { return mint; }
 register(Signer);
+export const bound = mint.bind(null);
 declare function register(value: unknown): void;
 `,
       "src/user.ts": `import { Direct } from "./allowed";\nnew Direct();\n`,
@@ -206,5 +211,6 @@ declare function register(value: unknown): void;
     "src/allowed.ts:5",
     "src/allowed.ts:6",
     "src/allowed.ts:7",
+    "src/allowed.ts:8",
   ]);
 });
