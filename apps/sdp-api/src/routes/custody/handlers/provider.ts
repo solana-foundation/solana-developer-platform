@@ -1,4 +1,3 @@
-import type { CustodyProvider } from "@sdp/custody";
 import { normalizePem } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
 import { redactCredentialString } from "@sdp/redaction";
