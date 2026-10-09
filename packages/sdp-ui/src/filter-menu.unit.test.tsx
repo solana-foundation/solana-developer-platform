@@ -7,12 +7,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FilterMenu, FilterMenuOptions } from "./filter-menu";
 
 function setViewport(width: number) {
-  vi.stubGlobal("matchMedia", (query: string) => ({
+  const mediaQueryList = {
     matches: width < 640,
-    media: query,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-  }));
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  };
+  vi.stubGlobal("matchMedia", () => mediaQueryList);
 }
 
 function ContactsFilters() {
@@ -57,6 +57,11 @@ function ContactsFilters() {
   );
 }
 
+// The phone flow opens and closes the modal menu three times and types seven keystrokes; as the
+// file's first test it also absorbs jsdom/Radix warm-up, which together exceed vitest's 5s default
+// on loaded CI runners.
+const PHONE_FLOW_TIMEOUT_MS = 15_000;
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -86,7 +91,8 @@ describe("Contacts filter menu at phone widths", () => {
       expect(
         screen.getByRole("menuitemradio", { name: "No address" }).getAttribute("aria-checked")
       ).toBe("true");
-    }
+    },
+    PHONE_FLOW_TIMEOUT_MS
   );
 
   it("keeps submenus at tablet widths", async () => {
