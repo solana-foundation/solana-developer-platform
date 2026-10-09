@@ -187,8 +187,8 @@ async function seedAuthAndWallet() {
     getDb(env)
       .prepare(
         `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_CONFIG_ID,
@@ -197,16 +197,8 @@ async function seedAuthAndWallet() {
         "local",
         "test-config",
         "sdp-custody-encryption-v1",
-        TEST_WALLET_ID,
         "active"
       ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind("csd_policy_audit_routes", TEST_ORG_ID, TEST_PROJECT_ID, TEST_CONFIG_ID),
     getDb(env)
       .prepare(
         `INSERT INTO custody_wallets

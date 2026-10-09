@@ -1,12 +1,23 @@
 // @vitest-environment jsdom
 
+import { RAMP_PROVIDERS } from "@sdp/types";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveCustodyIntegrations } from "@/app/dashboard/[projectId]/integrations/integrations-status";
+import {
+  resolveComplianceIntegrations,
+  resolveCustodyIntegrations,
+  resolveRampIntegrations,
+} from "@/app/dashboard/[projectId]/integrations/integrations-status";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import {
+  availableComplianceProviders,
+  availableCustodyProviders,
+  availableRampProviders,
+} from "@/lib/provider-availability";
 import { SANDBOX_PROJECT } from "@/test/projects";
+import { projectProviderAvailability } from "@/test/provider-availability";
 import { IntegrationsCatalog } from "./integrations-catalog";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -15,6 +26,17 @@ const urlState = vi.hoisted(() => ({ tab: null as string | null }));
 vi.mock("@/lib/dashboard-url-state", () => ({
   useDashboardTab: () => urlState.tab,
 }));
+
+const AVAILABILITY = projectProviderAvailability({
+  project: SANDBOX_PROJECT,
+  custody: [
+    { provider: "privy", modes: ["managed", "byok"] },
+    { provider: "para", modes: ["managed"] },
+  ],
+  compliance: ["range"],
+  ramps: ["moonpay", "lightspark"],
+  earn: [],
+});
 
 function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>[0]>) {
   return render(
@@ -25,19 +47,11 @@ function renderCatalog(overrides: Partial<Parameters<typeof IntegrationsCatalog>
             ? overrides.custody
             : resolveCustodyIntegrations({
                 connectedProviders: ["privy"],
-                enabledProviders: ["privy", "para"],
+                custodyAvailability: availableCustodyProviders(AVAILABILITY),
               })
         }
-        ramps={[
-          {
-            provider: "moonpay",
-            label: "MoonPay",
-            status: "enabled",
-            descriptionKey: "Shared.integrations.rampMoonpayDescription",
-          },
-          { provider: "lightspark", label: "Lightspark", status: "enabled" },
-        ]}
-        compliance={[{ provider: "range", label: "Range", status: "request_access" }]}
+        ramps={resolveRampIntegrations(availableRampProviders(AVAILABILITY), RAMP_PROVIDERS)}
+        compliance={resolveComplianceIntegrations(availableComplianceProviders(AVAILABILITY))}
         privacy={overrides.privacy}
         enabledFamilies={overrides.enabledFamilies}
       />
@@ -65,7 +79,7 @@ describe("IntegrationsCatalog", () => {
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
     expect(screen.queryByRole("searchbox")).toBeNull();
     expect(screen.queryByText("All")).toBeNull();
-    for (const removed of ["All", "Connected", "Not connected", "Available on request"]) {
+    for (const removed of ["All", "Connected", "Not connected"]) {
       expect(screen.queryByRole("button", { name: removed })).toBeNull();
     }
   });
@@ -77,6 +91,17 @@ describe("IntegrationsCatalog", () => {
     expect(visibleRowLabels()).toEqual(["MoonPay", "Lightspark"]);
     expect(document.querySelector("[data-integrations-hub='true']")).toBeNull();
     expect(screen.getByRole("searchbox")).toBeTruthy();
+  });
+
+  it("lists only the providers the project can use in each category", () => {
+    urlState.tab = "custody";
+    renderCatalog({});
+    expect(visibleRowLabels()).toEqual(["Privy", "Para"]);
+    cleanup();
+
+    urlState.tab = "compliance";
+    renderCatalog({});
+    expect(visibleRowLabels()).toEqual(["Range"]);
   });
 
   it("returns disabled and unknown categories to the hub", () => {
@@ -119,7 +144,6 @@ describe("IntegrationsCatalog", () => {
     expect(screen.queryAllByRole("link", { name: "Change in Settings" })).toHaveLength(0);
     expect(screen.queryAllByRole("link", { name: "Manage" })).toHaveLength(0);
     expect(screen.queryAllByRole("link", { name: "Configure" })).toHaveLength(0);
-    expect(screen.queryAllByRole("link", { name: "Request access" })).toHaveLength(0);
     const privy = screen.getByRole("link", { name: "Privy" });
     expect(privy.getAttribute("href")).toBe(`/dashboard/${SANDBOX_PROJECT.id}/integrations/privy`);
   });

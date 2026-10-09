@@ -36,11 +36,9 @@ export function CustodyConnectionCount({ count }: { count: number }) {
 /**
  * The project's custody connections, on the provider page that owns them.
  *
- * Three banners can appear above the table, and they answer three different
+ * Two banners can appear above the table, and they answer two different
  * questions:
  *
- * - No default: requests that do not name a wallet have nowhere to go, which is
- *   a live failure rather than a tidiness problem, so it is stated as one.
  * - Signing paused: the organization is not permitted to sign through its own
  *   credentials right now. The connections are untouched and still maintainable,
  *   and saying so is the whole point — an unexplained loss of signing reads as
@@ -48,10 +46,9 @@ export function CustodyConnectionCount({ count }: { count: number }) {
  * - Read-only viewer: naming the role and where to ask for it is more use than
  *   hiding the controls silently.
  *
- * The first two are claims about the project, so they read `summary` rather
- * than the rows on screen: inferred from the visible page, a default sitting on
- * page 2 raised "No default connection" over a project that had one, and one
- * paused connection among twenty paused the whole table's banner.
+ * Signing paused is a claim about the project, so it reads `summary` rather
+ * than the rows on screen: inferred from the visible page, one paused
+ * connection among twenty paused the whole table's banner.
  */
 export function CustodyConnectionsSection({
   result,
@@ -74,10 +71,9 @@ export function CustodyConnectionsSection({
   const projectName = useSelectedProjectName();
   const [addOpen, setAddOpen] = useState(false);
 
-  // A summary that could not see every connection supports neither banner:
-  // both are statements about all of them, and silence beats a false alarm.
+  // A summary that could not see every connection does not support the banner:
+  // it is a statement about all of them, and silence beats a false alarm.
   const signingPaused = summary.complete && summary.signingPaused;
-  const noDefault = summary.complete && summary.activeCount > 0 && !summary.defaultConnection;
 
   const addConnectionButton = canManageCustody ? (
     <Button size="sm" onClick={() => setAddOpen(true)} iconLeft={<PlusIcon className="size-4" />}>
@@ -105,20 +101,12 @@ export function CustodyConnectionsSection({
           </Callout>
         ) : null}
 
-        {noDefault ? (
-          <Callout variant="warning" title={t("DashboardCustody.noDefaultTitle")}>
-            {t("DashboardCustody.noDefaultBody")}
-          </Callout>
-        ) : null}
-
         <div className="overflow-hidden rounded-xl border border-border-default">
           <ConnectionsList
             result={result}
             filters={filters}
-            summary={summary}
             walletsByConnection={walletsByConnection}
             walletsUnavailable={walletsUnavailable}
-            canManageCustody={canManageCustody}
             provider={provider}
             projectName={projectName}
             emptyStateAction={addConnectionButton}

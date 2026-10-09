@@ -35,10 +35,9 @@ export interface TreasuryAllocationWallet {
   id: string;
   /**
    * The on-chain address. Load-bearing, not decoration: one wallet can appear
-   * as SEVERAL custody rows (an org-level config and a project-level one both
-   * describe it, and nothing constrains `public_key` to be unique), and the
-   * balance read keys off the address, so every row carries the SAME balances.
-   * Summing per row would count the same dollars once per configuration.
+   * as SEVERAL custody rows (nothing constrains `public_key` to be unique), and
+   * the balance read keys off the address, so every row carries the SAME
+   * balances. Summing per row would count the same dollars once per row.
    */
   publicKey: string;
   balances?: readonly TreasuryAllocationBalance[];

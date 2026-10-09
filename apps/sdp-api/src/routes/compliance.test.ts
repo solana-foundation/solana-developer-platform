@@ -3,11 +3,19 @@ import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import * as providerAvailability from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { providerStages } from "@/test/helpers/provider-stages";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
+
+vi.mock("@sdp/types", async (importOriginal) => {
+  const { mockProviderStages } = await import("@/test/helpers/provider-stages");
+  return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
+});
 
 const TEST_ORG = {
   id: "org_compliance_test",
@@ -39,6 +47,12 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
   signingWalletId: null,
   status: "active",
   expiresAt: null,
+};
+const TEST_PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
+const TEST_PRODUCTION_API_KEY = {
+  id: "key_compliance_production",
+  raw: "sk_live_compliance_fixture",
+  prefix: "sk_live_com",
 };
 
 let originalRangeApiKey: string | undefined;
@@ -82,7 +96,7 @@ async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promi
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
     members: [],
-    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT_ID },
   });
   await getDb(env).batch([
     getDb(env)
@@ -104,6 +118,39 @@ async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promi
         "active"
       ),
   ]);
+}
+
+async function seedProductionApiKey(): Promise<void> {
+  const keyHash = await seedProjectApiKey(getDb(env), env, {
+    key: TEST_PRODUCTION_API_KEY,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PRODUCTION_PROJECT_ID,
+    createdBy: TEST_USER.id,
+    role: "api_developer",
+    permissions: ["payments:read"],
+  });
+  await seedCachedApiKey(env, keyHash, {
+    ...TEST_CACHED_API_KEY,
+    id: TEST_PRODUCTION_API_KEY.id,
+    projectId: TEST_PRODUCTION_PROJECT_ID,
+    environment: "production",
+  });
+}
+
+function screenAddress(apiKey: string) {
+  return app.request(
+    "/v1/compliance/address-screenings",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        address: TEST_SOLANA_ADDRESSES.wallet1,
+        network: "solana",
+        intent: "transfer_destination",
+      }),
+    },
+    env
+  );
 }
 
 describe("Compliance routes", () => {
@@ -131,6 +178,8 @@ describe("Compliance routes", () => {
     env.CHAINALYSIS_API_KEY = undefined;
     env.CHAINALYSIS_API_BASE_URL = undefined;
     env.SDP_DEPLOYMENT_MODE = undefined;
+    providerStages.rampStageOverride = null;
+    providerStages.moduleStageOverride = null;
 
     await seedTestDatabase(env);
     await seedAuth();
@@ -662,6 +711,67 @@ describe("Compliance routes", () => {
     expect((init as RequestInit | undefined)?.headers).toMatchObject({
       Token: "chainalysis_test_api_key",
     });
+  });
+
+  it("decides every enabled provider from one project facts load", async () => {
+    env.RANGE_API_KEY = "range_test_api_key";
+    env.CHAINALYSIS_API_KEY = "chainalysis_test_api_key";
+    const loadProjectProviderVerdict = vi.spyOn(providerAvailability, "loadProjectProviderVerdict");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input) =>
+        new Response(
+          JSON.stringify(
+            new URL(String(input)).hostname === "api.range.org"
+              ? { riskScore: 2, riskLevel: "Low risk" }
+              : { address: TEST_SOLANA_ADDRESSES.wallet1, risk: "Low", status: "COMPLETE" }
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+    );
+
+    const res = await screenAddress(TEST_API_KEY.raw);
+
+    expect(res.status).toBe(200);
+    const body: { data: { screening: { providers: Array<{ provider: string }> } } } =
+      await res.json();
+    expect(body.data.screening.providers.map((entry) => entry.provider).sort()).toEqual([
+      "chainalysis",
+      "range",
+    ]);
+    expect(loadProjectProviderVerdict).toHaveBeenCalledTimes(1);
+  });
+
+  it("screens a Production project with a compliance provider below stable the release channel offers", async () => {
+    providerStages.moduleStageOverride = { module: "compliance", stage: "beta" };
+    env.RANGE_API_KEY = "range_test_api_key";
+    await seedProductionApiKey();
+    const loadProjectProviderVerdict = vi.spyOn(providerAvailability, "loadProjectProviderVerdict");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ riskScore: 2, riskLevel: "Low risk" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const res = await screenAddress(TEST_PRODUCTION_API_KEY.raw);
+
+    expect(res.status).toBe(200);
+    const body: {
+      data: {
+        screening: {
+          providers: Array<{ provider: string; status: string; riskScore: number | null }>;
+        };
+      };
+    } = await res.json();
+    expect(
+      body.data.screening.providers.map(({ provider, status, riskScore }) => ({
+        provider,
+        status,
+        riskScore,
+      }))
+    ).toEqual([{ provider: "range", status: "ok", riskScore: 2 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(loadProjectProviderVerdict).toHaveBeenCalledTimes(1);
   });
 
   it("returns 400 for invalid Solana address", async () => {

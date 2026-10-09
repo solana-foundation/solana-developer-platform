@@ -1,5 +1,17 @@
-import { RAMP_PROVIDERS } from "@sdp/types";
+import {
+  COMPLIANCE_PROVIDERS,
+  CUSTODY_PROVIDERS,
+  type ProjectProviderAvailability,
+  RAMP_PROVIDERS,
+} from "@sdp/types";
 import { describe, expect, it } from "vitest";
+import {
+  availableComplianceProviders,
+  availableCustodyProviders,
+  availableRampProviders,
+} from "@/lib/provider-availability";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { projectProviderAvailability } from "@/test/provider-availability";
 import { isKnownIntegrationProvider, resolveIntegrationDetail } from "./integration-detail";
 import {
   resolveComplianceIntegrations,
@@ -7,16 +19,39 @@ import {
   resolveRampIntegrations,
 } from "./integrations-status";
 
-const on = { entitled: true, configured: true, enabled: true };
+function detailInputs(availability: ProjectProviderAvailability) {
+  return {
+    custody: resolveCustodyIntegrations({
+      connectedProviders: ["privy"],
+      custodyAvailability: availableCustodyProviders(availability),
+    }),
+    ramps: resolveRampIntegrations(availableRampProviders(availability), RAMP_PROVIDERS),
+    compliance: resolveComplianceIntegrations(availableComplianceProviders(availability)),
+  };
+}
 
-const INPUTS = {
-  custody: resolveCustodyIntegrations({
-    connectedProviders: ["privy"],
-    enabledProviders: ["privy", "para"],
-  }),
-  ramps: resolveRampIntegrations({ moonpay: on }, RAMP_PROVIDERS),
-  compliance: resolveComplianceIntegrations({}),
-};
+const INPUTS = detailInputs(
+  projectProviderAvailability({
+    project: SANDBOX_PROJECT,
+    custody: [
+      { provider: "privy", modes: ["managed", "byok"] },
+      { provider: "para", modes: ["managed"] },
+    ],
+    compliance: ["range"],
+    ramps: ["moonpay"],
+    earn: [],
+  })
+);
+
+const EVERY_PROVIDER_INPUTS = detailInputs(
+  projectProviderAvailability({
+    project: SANDBOX_PROJECT,
+    custody: CUSTODY_PROVIDERS.map((provider) => ({ provider, modes: ["managed"] })),
+    compliance: COMPLIANCE_PROVIDERS,
+    ramps: RAMP_PROVIDERS,
+    earn: [],
+  })
+);
 
 describe("integration detail", () => {
   it("resolves a custody provider with its catalog entry and status", () => {
@@ -26,18 +61,10 @@ describe("integration detail", () => {
     expect(detail?.custodyEntry?.useCases.length).toBeGreaterThan(0);
   });
 
-  it("carries the request access route for a gated provider", () => {
-    const detail = resolveIntegrationDetail({ provider: "fireblocks", ...INPUTS });
-    expect(detail?.status).toBe("request_access");
-    expect(detail?.requestAccessUrl).toContain("typeform");
-  });
-
-  it("holds a gated provider without an established route at not-configured", () => {
-    // IBM Haven's request route is HOO-775; until it exists the page must not
-    // say access is requestable, and must not borrow another provider's form.
-    const detail = resolveIntegrationDetail({ provider: "ibm_haven", ...INPUTS });
-    expect(detail?.status).toBe("not_configured");
-    expect(detail?.requestAccessUrl).toBeUndefined();
+  it("resolves no detail for a provider the project cannot use", () => {
+    for (const provider of ["fireblocks", "bvnk", "trm"]) {
+      expect(resolveIntegrationDetail({ provider, ...INPUTS })).toBeNull();
+    }
   });
 
   it("resolves every non-custody family", () => {
@@ -45,22 +72,16 @@ describe("integration detail", () => {
     expect(resolveIntegrationDetail({ provider: "range", ...INPUTS })?.family).toBe("compliance");
   });
 
-  it("keeps a known custody provider reachable when connection state is unknown", () => {
-    const detail = resolveIntegrationDetail({ ...INPUTS, provider: "privy", custody: null });
-    expect(detail).not.toBeNull();
-    expect(detail?.status).toBe("unknown");
-    expect(detail?.custodyEntry?.id).toBe("privy");
-  });
-
   it("recognises every provider the catalog can render, without a hand-written list", () => {
     // Guards the drift Opeyemi flagged: a newly added ramp used to get a card
     // that 404'd on click, because the id lists here were literals.
-    for (const family of [INPUTS.ramps, INPUTS.compliance]) {
+    for (const family of [EVERY_PROVIDER_INPUTS.ramps, EVERY_PROVIDER_INPUTS.compliance]) {
       for (const row of family) {
         expect(isKnownIntegrationProvider(row.provider)).toBe(true);
       }
     }
-    for (const row of INPUTS.custody) {
+    expect(EVERY_PROVIDER_INPUTS.custody).toHaveLength(CUSTODY_PROVIDERS.length);
+    for (const row of EVERY_PROVIDER_INPUTS.custody) {
       expect(isKnownIntegrationProvider(row.entry.id)).toBe(true);
     }
   });

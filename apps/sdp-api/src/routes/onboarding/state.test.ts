@@ -6,14 +6,14 @@ describe("resolveOnboardingSetup", () => {
     expect(
       resolveOnboardingSetup({
         completedAt: null,
-        custodyProvider: null,
+        custodyProviders: [],
         canManage: true,
         version: 1,
       })
     ).toEqual({
       status: "not_started",
       currentStep: "custody",
-      custodyProvider: null,
+      custodyProviders: [],
       completedAt: null,
       canManage: true,
       version: 1,
@@ -24,14 +24,14 @@ describe("resolveOnboardingSetup", () => {
     expect(
       resolveOnboardingSetup({
         completedAt: null,
-        custodyProvider: "privy",
+        custodyProviders: ["privy"],
         canManage: true,
         version: 1,
       })
     ).toEqual({
       status: "in_progress",
       currentStep: "custody",
-      custodyProvider: "privy",
+      custodyProviders: ["privy"],
       completedAt: null,
       canManage: true,
       version: 1,
@@ -42,14 +42,14 @@ describe("resolveOnboardingSetup", () => {
     expect(
       resolveOnboardingSetup({
         completedAt: "2026-07-21 12:00:00",
-        custodyProvider: null,
+        custodyProviders: [],
         canManage: false,
         version: 1,
       })
     ).toEqual({
       status: "complete",
       currentStep: "complete",
-      custodyProvider: null,
+      custodyProviders: [],
       completedAt: "2026-07-21 12:00:00",
       canManage: false,
       version: 1,

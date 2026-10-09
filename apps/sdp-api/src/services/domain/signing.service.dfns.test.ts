@@ -7,6 +7,7 @@ import { createEncryptionService } from "@/services/encryption.service";
 import type { Env } from "@/types/env";
 
 const TEST_ORG_ID = "org_dfns_legacy";
+const TEST_PROJECT_ID = "prj_dfns";
 
 describe("signing.service dfns compatibility", () => {
   it("resolves DFNS adapter when encrypted config omits provider field", async () => {
@@ -14,7 +15,6 @@ describe("signing.service dfns compatibility", () => {
     const encryptedConfig = await encryptConfig(env, JSON.stringify({ walletId: "wa_legacy_1" }));
     const record = createRecord({
       config: encryptedConfig,
-      defaultWalletId: null,
     });
 
     const adapter = await createAdapterFromEncryptedConfig(env, TEST_ORG_ID, record);
@@ -26,10 +26,7 @@ describe("signing.service dfns compatibility", () => {
   it("rejects encrypted non-JSON payloads for clean custody configuration flow", async () => {
     const env = createTestEnv();
     const encryptedConfig = await encryptConfig(env, "legacy-config-placeholder");
-    const record = createRecord({
-      config: encryptedConfig,
-      defaultWalletId: "dfns_wa_legacy_2",
-    });
+    const record = createRecord({ config: encryptedConfig });
 
     await expect(createAdapterFromEncryptedConfig(env, TEST_ORG_ID, record)).rejects.toThrow(
       "Custody configuration must be a valid JSON object"
@@ -43,10 +40,7 @@ describe("signing.service dfns compatibility", () => {
       JSON.stringify({ apiBaseUrl: "https://example.com" })
     );
     const record = {
-      ...createRecord({
-        config: encryptedConfig,
-        defaultWalletId: "anchorage_wa_123",
-      }),
+      ...createRecord({ config: encryptedConfig }),
       provider: "anchorage" as const,
     };
 
@@ -66,6 +60,7 @@ function createTestEnv(overrides?: Partial<Env>): Env {
     DFNS_PRIVATE_KEY: "dfns-test-private-key",
     ENVIRONMENT: "development",
     API_VERSION: "v1",
+    SDP_RELEASE_CHANNEL: "stable",
     ...overrides,
   } as Env;
 }
@@ -76,18 +71,14 @@ async function encryptConfig(env: Env, plaintext: string): Promise<string> {
   return encrypted.ciphertext;
 }
 
-function createRecord(params: {
-  config: string;
-  defaultWalletId: string | null;
-}): SigningConfigRecord {
+function createRecord(params: { config: string }): SigningConfigRecord {
   return {
     id: "cust_dfns_legacy_test",
     organizationId: TEST_ORG_ID,
-    projectId: null,
+    projectId: TEST_PROJECT_ID,
     provider: "dfns",
     config: params.config,
     encryptionVersion: "sdp-custody-encryption-v1",
-    defaultWalletId: params.defaultWalletId,
     status: "active",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",

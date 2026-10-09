@@ -12,6 +12,8 @@ import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import * as credentialSecretStoreModule from "@/services/credential-secret-store";
 import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup-provider-credential-secrets";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { insertTestCustodyWalletRow, seedTestCustodySetup } from "@/test/helpers/custody";
+import { activateTestCustodyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -24,6 +26,7 @@ let clerkToken: string;
 const ORGANIZATION_ID = "org_test_provider_credential_submit";
 const PROJECT_ID = "prj_provider_credential_submit";
 const USER_ID = "usr_test_provider_credential_submit";
+const SEEDED_AT = "2026-01-01T00:00:00.000Z";
 const VALID_BODY = {
   provider: "privy",
   fields: {
@@ -191,7 +194,8 @@ async function getDomainCounts(): Promise<{
          (SELECT COUNT(*) FROM custody_wallets) AS wallets`
     )
     .first<{ credentials: number; connections: number; wallets: number }>();
-  return counts ?? { credentials: 0, connections: 0, wallets: 0 };
+  if (!counts) throw new Error("Domain count query returned no row");
+  return counts;
 }
 
 type StoredConnection = {
@@ -314,16 +318,12 @@ function mockSubmissionGcp(addVersion?: (versionRef: string) => Promise<Response
 describe("POST /internal/dashboard/custody/provider-credentials", () => {
   const original = {
     deploymentMode: env.SDP_DEPLOYMENT_MODE,
-    selfHostedStoredSetup: env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED,
     backend: env.CREDENTIAL_SECRET_STORE_BACKEND,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
-    provisioningFlag: env.PRIVY_BYOK_ENABLED,
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
     gcpProjectId: env.GCP_SECRET_MANAGER_PROJECT_ID,
     gcpSecretPrefix: env.GCP_SECRET_MANAGER_SECRET_PREFIX,
     gcpApiBaseUrl: env.GCP_SECRET_MANAGER_API_BASE_URL,
-    privyAppId: env.PRIVY_APP_ID,
-    privyAppSecret: env.PRIVY_APP_SECRET,
   };
 
   beforeEach(async () => {
@@ -335,23 +335,18 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     env.SDP_DEPLOYMENT_MODE = "managed";
     env.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
     env.CUSTODY_ENCRYPTION_KEY = testEncryptionKey();
-    env.PRIVY_BYOK_ENABLED = "true";
     env.CREDENTIAL_FINGERPRINT_PEPPER = "test-credential-fingerprint-pepper-for-unit-tests";
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
     env.SDP_DEPLOYMENT_MODE = original.deploymentMode;
-    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = original.selfHostedStoredSetup;
     env.CREDENTIAL_SECRET_STORE_BACKEND = original.backend;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
-    env.PRIVY_BYOK_ENABLED = original.provisioningFlag;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
     env.GCP_SECRET_MANAGER_PROJECT_ID = original.gcpProjectId;
     env.GCP_SECRET_MANAGER_SECRET_PREFIX = original.gcpSecretPrefix;
     env.GCP_SECRET_MANAGER_API_BASE_URL = original.gcpApiBaseUrl;
-    env.PRIVY_APP_ID = original.privyAppId;
-    env.PRIVY_APP_SECRET = original.privyAppSecret;
     await clearKVStores(env);
   });
 
@@ -409,10 +404,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       status: "pending",
       setup_metadata: { pendingWalletLabel: "Treasury Wallet" },
     });
-    const defaults = await getDb(env)
-      .prepare("SELECT COUNT(*) AS count FROM custody_scope_defaults")
-      .first<{ count: number }>();
-    expect(defaults?.count).toBe(0);
   });
 
   it("keeps a committed submission replayable when its audit outcome cannot be persisted", async () => {
@@ -617,6 +608,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       },
     ],
     ["empty opaque secret", { ...VALID_BODY, fields: { ...VALID_BODY.fields, appSecret: "" } }],
+    ["missing credential fields", { provider: "privy" }],
   ])("rejects %s without persistence", async (_name, body) => {
     const { app, token } = buildApp();
     const response = await submit(app, token, {
@@ -721,7 +713,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       appSecret: " exact secret ",
     });
 
-    env.PRIVY_BYOK_ENABLED = undefined;
     await getDb(env)
       .prepare(
         `UPDATE organizations
@@ -751,11 +742,13 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       key: "new-intent-after-gates",
     });
     expect(deniedNewIntent.status).toBe(403);
-    expect(await deniedNewIntent.json()).toMatchObject({
+    expect(await deniedNewIntent.json()).toEqual({
       error: {
         code: "FORBIDDEN",
-        message: "Custody Connection setup is disabled for this provider",
+        message: "Privy requires manual activation for this organization.",
+        details: { reason: "provider_not_entitled" },
       },
+      meta: { requestId: "req_provider_credential_submit" },
     });
     expect(await getDomainCounts()).toEqual({
       credentials: 1,
@@ -831,213 +824,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       )
       .first<{ resource_id: string | null }>();
     expect(failureAudit?.resource_id).toBeNull();
-  });
-
-  it("denies an unseen key before constructing the secret store when the flag is off", async () => {
-    env.PRIVY_BYOK_ENABLED = undefined;
-    env.CREDENTIAL_FINGERPRINT_PEPPER = undefined;
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-    const { app, token } = buildApp();
-
-    const response = await submit(app, token, {
-      projectId: PROJECT_ID,
-      body: VALID_BODY,
-      key: "disabled-new-intent",
-    });
-
-    expect(response.status).toBe(403);
-    expect(factory).not.toHaveBeenCalled();
-    expect(await getDomainCounts()).toEqual({
-      credentials: 0,
-      connections: 0,
-      wallets: 0,
-    });
-    const auditCount = await getDb(env)
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM audit_logs
-         WHERE resource_type = 'provider_credential'`
-      )
-      .first<{ count: number }>();
-    expect(auditCount?.count).toBe(0);
-  });
-
-  it("creates a metadata-only runtime Credential and pending Connection for self-hosted setup", async () => {
-    env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
-    env.PRIVY_APP_ID = "runtime-app-1234";
-    env.PRIVY_APP_SECRET = "runtime-secret";
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-    const { app, token } = buildApp();
-
-    const response = await submit(app, token, {
-      projectId: PROJECT_ID,
-      key: "self-hosted-runtime-submission",
-      body: {
-        provider: "privy",
-        requestDelayMs: 125,
-        walletLabel: "Runtime treasury",
-      },
-    });
-
-    expect(response.status).toBe(201);
-    const body = (await response.json()) as {
-      data: { providerCredential: { id: string; label: string }; connectionId: string };
-    };
-    expect(body.data).toMatchObject({
-      connectionId: expect.stringMatching(/^cconn_/),
-      providerCredential: {
-        id: expect.stringMatching(/^pcred_/),
-        label: "Privy runtime credentials",
-      },
-    });
-    expect(factory).not.toHaveBeenCalled();
-    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
-
-    const credential = await getDb(env)
-      .prepare(
-        `SELECT source, storage_backend, secret_ref, secret_version_ref,
-                encrypted_secret_payload, idempotency_fingerprint
-         FROM provider_credentials
-         WHERE id = ?`
-      )
-      .bind(body.data.providerCredential.id)
-      .first<{
-        source: string;
-        storage_backend: string;
-        secret_ref: string | null;
-        secret_version_ref: string | null;
-        encrypted_secret_payload: string | null;
-        idempotency_fingerprint: string;
-      }>();
-    expect(credential).toEqual({
-      source: "runtime",
-      storage_backend: "runtime_env",
-      secret_ref: null,
-      secret_version_ref: null,
-      encrypted_secret_payload: null,
-      idempotency_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
-    });
-    expect(await getConnectionForCredential(body.data.providerCredential.id)).toMatchObject({
-      id: body.data.connectionId,
-      request_delay_ms: 125,
-      setup_metadata: { pendingWalletLabel: "Runtime treasury" },
-      status: "pending",
-    });
-  });
-
-  it.each([
-    {
-      name: "submitted fields for runtime setup",
-      configure: () => {
-        env.SDP_DEPLOYMENT_MODE = "self_hosted";
-        env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
-        env.PRIVY_APP_ID = "runtime-app-1234";
-        env.PRIVY_APP_SECRET = "runtime-secret";
-      },
-      body: VALID_BODY,
-      key: "runtime-fields-mismatch",
-      message: "Credential fields are not accepted for runtime setup",
-    },
-    {
-      name: "missing fields for stored setup",
-      configure: () => {
-        env.SDP_DEPLOYMENT_MODE = "managed";
-      },
-      body: { provider: "privy" },
-      key: "stored-fields-missing",
-      message: "Credential fields are required for stored setup",
-    },
-  ])("rejects $name before secret or domain writes", async ({ configure, body, key, message }) => {
-    configure();
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-    const { app, token } = buildApp();
-
-    const response = await submit(app, token, {
-      projectId: PROJECT_ID,
-      key,
-      body,
-    });
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({
-      error: { code: "BAD_REQUEST", message },
-    });
-    expect(factory).not.toHaveBeenCalled();
-    expect(await getDomainCounts()).toEqual({ credentials: 0, connections: 0, wallets: 0 });
-  });
-
-  it("replays a runtime submission before a later stored-source preference", async () => {
-    env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
-    env.PRIVY_APP_ID = "runtime-app-replay";
-    env.PRIVY_APP_SECRET = "runtime-secret";
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-    const { app, token } = buildApp();
-    const runtimeBody = { provider: "privy", walletLabel: "Runtime replay" } as const;
-
-    const first = await submit(app, token, {
-      projectId: PROJECT_ID,
-      key: "runtime-replay-before-policy",
-      body: runtimeBody,
-    });
-    expect(first.status).toBe(201);
-    const firstBody = (await first.json()) as { data: unknown };
-
-    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = "true";
-    const replay = await submit(app, token, {
-      projectId: PROJECT_ID,
-      key: "runtime-replay-before-policy",
-      body: runtimeBody,
-    });
-    expect(replay.status).toBe(201);
-    expect(((await replay.json()) as { data: unknown }).data).toEqual(firstBody.data);
-
-    const freshStoredIntent = await submit(app, token, {
-      projectId: PROJECT_ID,
-      key: "stored-after-runtime-policy",
-      body: runtimeBody,
-    });
-    expect(freshStoredIntent.status).toBe(400);
-    expect(await freshStoredIntent.json()).toMatchObject({
-      error: {
-        code: "BAD_REQUEST",
-        message: "Credential fields are required for stored setup",
-      },
-    });
-    expect(factory).not.toHaveBeenCalled();
-    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
-  });
-
-  it("rejects stored Credential replacement for a failed runtime Connection", async () => {
-    env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
-    env.PRIVY_APP_ID = "runtime-replacement-app";
-    env.PRIVY_APP_SECRET = "runtime-replacement-secret";
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-    const { app, token } = buildApp();
-    const created = await submit(app, token, {
-      projectId: PROJECT_ID,
-      key: "runtime-replacement-v1",
-      body: { provider: "privy" },
-    });
-    const createdBody = (await created.json()) as {
-      data: { providerCredential: { id: string }; connectionId: string };
-    };
-    await markInitialValidationFailed(getDb(env), {
-      credentialId: createdBody.data.providerCredential.id,
-      connectionId: createdBody.data.connectionId,
-    });
-
-    const response = await replace(app, token, createdBody.data.connectionId, {
-      projectId: PROJECT_ID,
-      key: "runtime-replacement-v2",
-      body: VALID_BODY,
-    });
-
-    expect(response.status).toBe(409);
-    expect(factory).not.toHaveBeenCalled();
-    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
   });
 
   it("replaces credentials only on the exact eligible failed connection", async () => {
@@ -1464,8 +1250,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
             .all<Record<string, unknown>>(),
           db
             .prepare(
-              `SELECT id, project_id, status, provider_credential_id,
-                      default_custody_wallet_id, setup_metadata,
+              `SELECT id, project_id, status, provider_credential_id, setup_metadata,
                       last_check_status, last_check_at, last_check_failure_code,
                       activated_at
                FROM custody_connections
@@ -1534,32 +1319,27 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
         await markInitialValidationFailed(getDb(env), ids);
       } else {
         const historyWalletId = "cwlt_active_history";
-        await getDb(env).batch([
-          getDb(env)
-            .prepare(
-              `INSERT INTO custody_wallets (
-               id, custody_connection_id, wallet_id, public_key, status
-             ) VALUES (?, ?, 'privy_active_history', 'active_history_public_key', 'active')`
-            )
-            .bind(historyWalletId, ids.connectionId),
-          getDb(env)
-            .prepare(
-              `UPDATE provider_credentials
-               SET status = 'active', last_validated_at = sdp_iso_now()
-               WHERE id = ?`
-            )
-            .bind(ids.credentialId),
-          getDb(env)
-            .prepare(
-              `UPDATE custody_connections
-               SET status = 'active', last_check_status = 'success',
-                   last_check_at = sdp_iso_now(), activated_at = sdp_iso_now(),
-                   default_custody_wallet_id = ?,
-                   provider_account_fingerprint = 'sha256:active-history'
-               WHERE id = ?`
-            )
-            .bind(historyWalletId, ids.connectionId),
-        ]);
+        const db = getDb(env);
+        await insertTestCustodyWalletRow(db, {
+          id: historyWalletId,
+          owner: { kind: "connection", custodyConnectionId: ids.connectionId },
+          walletId: "privy_active_history",
+          publicKey: "active_history_public_key",
+          label: null,
+          purpose: null,
+          status: "active",
+        });
+        await db.execute(
+          `UPDATE provider_credentials
+           SET status = 'active', last_validated_at = sdp_iso_now()
+           WHERE id = ?`,
+          [ids.credentialId]
+        );
+        await activateTestCustodyConnection(db, {
+          connectionId: ids.connectionId,
+          custodyWalletId: historyWalletId,
+          providerAccountFingerprint: "sha256:active-history",
+        });
       }
 
       const fresh = await submit(app, token, {
@@ -1670,146 +1450,103 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
-  it.each([
-    { source: "stored", body: VALID_BODY },
-    { source: "runtime", body: { provider: "privy" } },
-  ] as const)(
-    "admits a pending $source Connection beside the selected active Project Config",
-    async ({ source, body }) => {
-      if (source === "runtime") {
-        env.SDP_DEPLOYMENT_MODE = "self_hosted";
-        env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
-        env.PRIVY_APP_ID = "runtime-active-config-app";
-        env.PRIVY_APP_SECRET = "runtime-active-config-secret";
-      }
-      const db = getDb(env);
-      const configId = "cust_active_exact_project";
-      await db.batch([
-        db
-          .prepare(
-            `INSERT INTO custody_configs (
-             id, organization_id, project_id, provider, config_encrypted,
-             encryption_version, default_wallet_id, status
-           ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'legacy-wallet', 'active')`
-          )
-          .bind(configId, ORGANIZATION_ID, PROJECT_ID),
-        db
-          .prepare(
-            `INSERT INTO custody_wallets (
-             id, custody_config_id, wallet_id, public_key, label, status
-           ) VALUES (
-             'cwal_active_exact_project', ?, 'legacy-wallet',
-             'legacy-public-key', 'Legacy wallet', 'active'
-           )`
-          )
-          .bind(configId),
-        db
-          .prepare(
-            `INSERT INTO custody_scope_defaults (
-             id, organization_id, project_id, default_custody_config_id
-           ) VALUES ('csd_active_exact_project', ?, ?, ?)`
-          )
-          .bind(ORGANIZATION_ID, PROJECT_ID, configId),
-      ]);
-      const readLegacyState = () =>
-        db
-          .prepare(
-            `SELECT c.id AS config_id, c.config_encrypted, c.default_wallet_id,
-                  c.status AS config_status, w.id AS custody_wallet_id,
-                  w.wallet_id, w.public_key, w.status AS wallet_status,
-                  w.custody_config_id, w.custody_connection_id,
-                  d.default_custody_config_id, d.default_custody_connection_id
-           FROM custody_configs c
-           JOIN custody_wallets w ON w.custody_config_id = c.id
-           JOIN custody_scope_defaults d
-             ON d.organization_id = c.organization_id AND d.project_id = c.project_id
-           WHERE c.id = ?`
-          )
-          .bind(configId)
-          .first();
-      const legacyBefore = await readLegacyState();
-      const { app, token } = buildApp();
-
-      const response = await submit(app, token, {
+  it("admits a pending BYOK Connection beside an active Managed Privy Config in a Sandbox project", async () => {
+    const configId = "cust_active_exact_project";
+    await seedTestCustodySetup(
+      env,
+      {
+        id: configId,
+        organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
-        key: `legacy-active-${source}-coexistence`,
-        body,
-      });
-      expect(response.status).toBe(201);
-      const responseBody = (await response.json()) as {
-        data: { providerCredential: { id: string } };
-      };
-      expect(responseBody.data.providerCredential).toMatchObject({
         provider: "privy",
-        projectId: PROJECT_ID,
-        status: "pending",
-      });
-      expect(
-        await getConnectionForCredential(responseBody.data.providerCredential.id)
-      ).toMatchObject({
-        project_id: PROJECT_ID,
-        provider: "privy",
-        status: "pending",
-      });
-      expect(await getDomainCounts()).toEqual({
-        credentials: 1,
-        connections: 1,
-        wallets: 1,
-      });
-      expect(await readLegacyState()).toEqual(legacyBefore);
-      if (source === "runtime") {
-        const audits = await db
-          .prepare("SELECT metadata FROM audit_logs WHERE resource_type = 'provider_credential'")
-          .all();
-        expect(JSON.stringify(audits.results)).not.toContain("runtime-active-config-app");
-        expect(JSON.stringify(audits.results)).not.toContain("runtime-active-config-secret");
+        config: "managed",
+        encryptionVersion: "test",
+        status: "active",
+        createdAt: SEEDED_AT,
+        updatedAt: SEEDED_AT,
+      },
+      {
+        id: "cwal_active_exact_project",
+        custodyConfigId: configId,
+        walletId: "managed-wallet",
+        publicKey: "managed-public-key",
+        label: "Managed wallet",
+        purpose: null,
+        status: "active",
+        createdAt: SEEDED_AT,
       }
-    }
-  );
-
-  it("allows an inactive exact-project config and active organization fallback", async () => {
-    await getDb(env).batch([
-      getDb(env)
+    );
+    const db = getDb(env);
+    const readManagedState = () =>
+      db
         .prepare(
-          `INSERT INTO custody_configs (
-             id, organization_id, project_id, provider, config_encrypted,
-             encryption_version, status
-           ) VALUES (?, ?, ?, 'privy', 'legacy', 'test', 'inactive')`
+          `SELECT c.id AS config_id, c.config_encrypted,
+                c.status AS config_status, w.id AS custody_wallet_id,
+                w.wallet_id, w.public_key, w.status AS wallet_status,
+                w.custody_config_id, w.custody_connection_id
+         FROM custody_configs c
+         JOIN custody_wallets w ON w.custody_config_id = c.id
+         WHERE c.id = ?`
         )
-        .bind("cust_inactive_exact_project", ORGANIZATION_ID, PROJECT_ID),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs (
-             id, organization_id, project_id, provider, config_encrypted,
-             encryption_version, status
-           ) VALUES (?, ?, NULL, 'privy', 'legacy', 'test', 'active')`
-        )
-        .bind("cust_active_org_fallback", ORGANIZATION_ID),
-    ]);
+        .bind(configId)
+        .first();
+    const managedBefore = await readManagedState();
+    expect(managedBefore).toEqual({
+      config_id: configId,
+      config_encrypted: "managed",
+      config_status: "active",
+      custody_wallet_id: "cwal_active_exact_project",
+      wallet_id: "managed-wallet",
+      public_key: "managed-public-key",
+      wallet_status: "active",
+      custody_config_id: configId,
+      custody_connection_id: null,
+    });
     const { app, token } = buildApp();
 
     const response = await submit(app, token, {
       projectId: PROJECT_ID,
+      key: "managed-privy-coexistence",
       body: VALID_BODY,
-      key: "legacy-nonblocking",
     });
+
     expect(response.status).toBe(201);
+    const responseBody = (await response.json()) as {
+      data: { providerCredential: { id: string }; connectionId: string };
+    };
+    expect(responseBody).toEqual({
+      data: {
+        connectionId: expect.stringMatching(/^cconn_/),
+        providerCredential: {
+          id: expect.stringMatching(/^pcred_/),
+          provider: "privy",
+          label: "Treasury Privy",
+          scope: "project",
+          projectId: PROJECT_ID,
+          status: "pending",
+          createdAt: expect.any(String),
+          displayMetadata: { appIdSuffix: "1234" },
+        },
+      },
+      meta: {
+        requestId: "req_provider_credential_submit",
+        timestamp: expect.any(String),
+      },
+    });
+    expect(await getConnectionForCredential(responseBody.data.providerCredential.id)).toMatchObject(
+      {
+        id: responseBody.data.connectionId,
+        project_id: PROJECT_ID,
+        provider: "privy",
+        status: "pending",
+      }
+    );
     expect(await getDomainCounts()).toEqual({
       credentials: 1,
       connections: 1,
-      wallets: 0,
+      wallets: 1,
     });
-    const legacy = await getDb(env)
-      .prepare(
-        `SELECT id, status
-         FROM custody_configs
-         ORDER BY id`
-      )
-      .all<{ id: string; status: string }>();
-    expect(legacy.results).toEqual([
-      { id: "cust_active_org_fallback", status: "active" },
-      { id: "cust_inactive_exact_project", status: "inactive" },
-    ]);
+    expect(await readManagedState()).toEqual(managedBefore);
   });
 
   it.each([
@@ -2258,22 +1995,12 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(outcome?.count).toBe(0);
   });
 
-  it.each([
-    { source: "stored", body: VALID_BODY },
-    { source: "runtime", body: { provider: "privy" } },
-  ] as const)("converges concurrent same-key $source submissions", async ({ source, body }) => {
-    if (source === "runtime") {
-      env.SDP_DEPLOYMENT_MODE = "self_hosted";
-      env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
-      env.PRIVY_APP_ID = "runtime-concurrent-app";
-      env.PRIVY_APP_SECRET = "runtime-concurrent-secret";
-    }
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
+  it("converges concurrent same-key submissions", async () => {
     const { app, token } = buildApp();
-    const key = `concurrent-same-key-${source}`;
+    const key = "concurrent-same-key";
     const [left, right] = await Promise.all([
-      submit(app, token, { projectId: PROJECT_ID, key, body }),
-      submit(app, token, { projectId: PROJECT_ID, key, body }),
+      submit(app, token, { projectId: PROJECT_ID, key, body: VALID_BODY }),
+      submit(app, token, { projectId: PROJECT_ID, key, body: VALID_BODY }),
     ]);
 
     expect(left.status).toBe(201);
@@ -2299,36 +2026,6 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       )
       .first<{ count: number }>();
     expect(auditCount?.count).toBe(1);
-    if (source === "runtime") {
-      expect(factory).not.toHaveBeenCalled();
-    }
-  });
-
-  it("allows only one runtime submission across concurrent different keys", async () => {
-    env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = undefined;
-    env.PRIVY_APP_ID = "runtime-concurrent-different-app";
-    env.PRIVY_APP_SECRET = "runtime-concurrent-different-secret";
-    const factory = vi.spyOn(credentialSecretStoreModule, "createCredentialSecretStore");
-    const { app, token } = buildApp();
-    const body = { provider: "privy" } as const;
-
-    const responses = await Promise.all([
-      submit(app, token, {
-        projectId: PROJECT_ID,
-        key: "runtime-concurrent-left",
-        body,
-      }),
-      submit(app, token, {
-        projectId: PROJECT_ID,
-        key: "runtime-concurrent-right",
-        body,
-      }),
-    ]);
-
-    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
-    expect(factory).not.toHaveBeenCalled();
-    expect(await getDomainCounts()).toEqual({ credentials: 1, connections: 1, wallets: 0 });
   });
 
   it("writes only the winning secret when concurrent fresh GCP installations race", async () => {

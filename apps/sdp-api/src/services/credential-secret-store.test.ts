@@ -6,7 +6,6 @@ import {
   EncryptedDbCredentialSecretStore,
   GcpSecretManagerCredentialSecretStore,
   prepareGcpCredentialSecret,
-  RuntimeEnvCredentialSecretStore,
   resolveCredentialSecretStoreBackend,
 } from "./credential-secret-store";
 import { createCustodyCipher } from "./custody-cipher/cipher-router";
@@ -1113,64 +1112,6 @@ describe("EncryptedDbCredentialSecretStore", () => {
   });
 });
 
-describe("RuntimeEnvCredentialSecretStore", () => {
-  it("resolves configured runtime env vars without a persisted secret ref", async () => {
-    const env = {
-      PRIVY_APP_ID: "runtime-app-id",
-      PRIVY_APP_SECRET: "runtime-app-secret",
-    } as Env;
-    const store = new RuntimeEnvCredentialSecretStore(env);
-
-    await expect(
-      store.read({
-        orgId: "org_123",
-        stored: {
-          storageBackend: "runtime_env",
-          runtimeEnvFields: {
-            appId: "PRIVY_APP_ID",
-            appSecret: "PRIVY_APP_SECRET",
-          },
-        },
-      })
-    ).resolves.toEqual({
-      appId: "runtime-app-id",
-      appSecret: "runtime-app-secret",
-    });
-  });
-
-  it("is read-only and fails closed when runtime metadata or env vars are missing", async () => {
-    const store = new RuntimeEnvCredentialSecretStore({} as Env);
-
-    await expect(
-      store.write({
-        orgId: "org_123",
-        provider: "privy",
-        providerCredentialId: "pcred_123",
-        payload: { appSecret: "secret" },
-      })
-    ).rejects.toMatchObject({ code: "UNSUPPORTED_OPERATION" });
-
-    await expect(
-      store.read({
-        orgId: "org_123",
-        stored: { storageBackend: "runtime_env" },
-      })
-    ).rejects.toMatchObject({ code: "MISSING_SECRET" });
-
-    await expect(
-      store.read({
-        orgId: "org_123",
-        stored: {
-          storageBackend: "runtime_env",
-          runtimeEnvFields: {
-            appSecret: "PRIVY_APP_SECRET",
-          },
-        },
-      })
-    ).rejects.toMatchObject({ code: "MISSING_SECRET" });
-  });
-});
-
 describe("resolveCredentialSecretStoreBackend", () => {
   it("defaults managed SDP to GCP Secret Manager and self-hosted SDP to encrypted DB", () => {
     expect(resolveCredentialSecretStoreBackend({ SDP_DEPLOYMENT_MODE: "managed" } as Env)).toBe(
@@ -1179,14 +1120,6 @@ describe("resolveCredentialSecretStoreBackend", () => {
     expect(resolveCredentialSecretStoreBackend({ SDP_DEPLOYMENT_MODE: "self_hosted" } as Env)).toBe(
       "encrypted_db"
     );
-  });
-
-  it("allows runtime env as an explicit override", () => {
-    expect(
-      resolveCredentialSecretStoreBackend({
-        CREDENTIAL_SECRET_STORE_BACKEND: "runtime_env",
-      } as Env)
-    ).toBe("runtime_env");
   });
 
   it("wraps invalid deployment mode defaults in CredentialSecretStoreError", () => {

@@ -135,11 +135,10 @@ async function activateConnection(id: string, walletId: string): Promise<void> {
        SET status = 'active',
            last_check_status = 'success',
            last_check_at = ?,
-           default_custody_wallet_id = ?,
            activated_at = ?
        WHERE id = ?`
     )
-    .bind(CHECKED_AT, walletId, CHECKED_AT, id)
+    .bind(CHECKED_AT, CHECKED_AT, id)
     .run();
 }
 
@@ -185,23 +184,10 @@ describe("custody Connection constraints", () => {
     ).rejects.toThrow(/custody_wallets_exactly_one_owner/);
   });
 
-  it("allows a Connection to default only to one of its own wallets", async () => {
+  it("refuses to delete a Connection that still owns wallets", async () => {
     await insertCredential("pcred_default_one", "active");
-    await insertCredential("pcred_default_two", "active");
     await insertConnection("cconn_default_one", "pcred_default_one", { status: "failed" });
     await activateConnection("cconn_default_one", "cwlt_default_one");
-    await insertConnection("cconn_default_two", "pcred_default_two", { status: "failed" });
-    await activateConnection("cconn_default_two", "cwlt_default_two");
-
-    await expect(
-      getDb(env)
-        .prepare(
-          `UPDATE custody_connections
-           SET default_custody_wallet_id = 'cwlt_default_two'
-           WHERE id = 'cconn_default_one'`
-        )
-        .run()
-    ).rejects.toThrow(/custody_connections_default_wallet_owner_fkey/);
 
     await expect(
       getDb(env).prepare("DELETE FROM custody_connections WHERE id = 'cconn_default_one'").run()
@@ -292,20 +278,8 @@ describe("custody Connection constraints", () => {
       getDb(env)
         .prepare(
           `UPDATE custody_connections
-           SET status = 'active', last_check_status = 'success', activated_at = ?
-           WHERE id = 'cconn_lifecycle'`
-        )
-        .bind(CHECKED_AT)
-        .run()
-    ).rejects.toThrow(/custody_connections_active_lifecycle_check/);
-
-    await insertConnectionWallet("cwlt_lifecycle", "cconn_lifecycle");
-    await expect(
-      getDb(env)
-        .prepare(
-          `UPDATE custody_connections
            SET status = 'active', last_check_status = NULL, last_check_at = ?,
-               default_custody_wallet_id = 'cwlt_lifecycle', activated_at = ?
+               activated_at = ?
            WHERE id = 'cconn_lifecycle'`
         )
         .bind(CHECKED_AT, CHECKED_AT)
@@ -316,7 +290,7 @@ describe("custody Connection constraints", () => {
       .prepare(
         `UPDATE custody_connections
          SET status = 'active', last_check_status = 'success', last_check_at = ?,
-             default_custody_wallet_id = 'cwlt_lifecycle', activated_at = ?
+             activated_at = ?
          WHERE id = 'cconn_lifecycle'`
       )
       .bind(CHECKED_AT, CHECKED_AT)
@@ -355,71 +329,5 @@ describe("custody Connection constraints", () => {
         )
         .run()
     ).rejects.toThrow(/idx_custody_connections_live_provider_account/);
-  });
-
-  it("supports Config-only, dual, and Connection-only scope defaults", async () => {
-    await insertCredential("pcred_scope_default");
-    await insertConnection("cconn_scope_default", "pcred_scope_default");
-
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults (
-           id, organization_id, project_id, default_custody_config_id
-         ) VALUES ('csd_scope_default', ?, ?, ?)`
-      )
-      .bind(ORGANIZATION_ID, PROJECT_ID, CONFIG_ID)
-      .run();
-
-    await getDb(env)
-      .prepare(
-        `UPDATE custody_scope_defaults
-         SET default_custody_connection_id = 'cconn_scope_default'
-         WHERE id = 'csd_scope_default'`
-      )
-      .run();
-    await getDb(env)
-      .prepare(
-        `UPDATE custody_scope_defaults
-         SET default_custody_config_id = NULL
-         WHERE id = 'csd_scope_default'`
-      )
-      .run();
-
-    await expect(
-      getDb(env)
-        .prepare(
-          `UPDATE custody_scope_defaults
-           SET default_custody_connection_id = NULL
-           WHERE id = 'csd_scope_default'`
-        )
-        .run()
-    ).rejects.toThrow(/custody_scope_defaults_has_target/);
-  });
-
-  it("does not cascade-delete retained Config or Connection targets", async () => {
-    await insertCredential("pcred_retained_target");
-    await insertConnection("cconn_retained_target", "pcred_retained_target");
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults (
-           id, organization_id, project_id,
-           default_custody_config_id, default_custody_connection_id
-         ) VALUES ('csd_retained_target', ?, ?, ?, 'cconn_retained_target')`
-      )
-      .bind(ORGANIZATION_ID, PROJECT_ID, CONFIG_ID)
-      .run();
-
-    await expect(
-      getDb(env).prepare("DELETE FROM custody_configs WHERE id = ?").bind(CONFIG_ID).run()
-    ).rejects.toThrow(/custody_scope_defaults_default_custody_config_id_fkey/);
-    await expect(
-      getDb(env).prepare("DELETE FROM custody_connections WHERE id = 'cconn_retained_target'").run()
-    ).rejects.toThrow(/custody_scope_defaults_default_custody_connection_id_fkey/);
-
-    expect(
-      await getDb(env)
-        .prepare("SELECT id FROM custody_scope_defaults WHERE id = 'csd_retained_target'")
-        .first()
-    ).not.toBeNull();
   });
 });

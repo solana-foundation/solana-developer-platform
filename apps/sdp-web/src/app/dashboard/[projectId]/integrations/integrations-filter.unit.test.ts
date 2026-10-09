@@ -3,7 +3,7 @@ import { type FilterableIntegration, matchesFilters, NO_FILTERS } from "./integr
 
 const ROWS: FilterableIntegration[] = [
   { family: "custody", provider: "privy", label: "Privy", status: "active" },
-  { family: "custody", provider: "fireblocks", label: "Fireblocks", status: "request_access" },
+  { family: "custody", provider: "fireblocks", label: "Fireblocks", status: "available" },
   { family: "privacy", provider: "private-channels", label: "Private Channels", status: "active" },
   { family: "ramps", provider: "moonpay", label: "MoonPay", status: "enabled" },
 ];
@@ -27,30 +27,24 @@ describe("integration filters", () => {
     expect(connected.map((row) => row.provider)).toEqual(["privy", "private-channels", "moonpay"]);
   });
 
-  it("folds the two off states into one chip", () => {
-    // `available` and `not_configured` both mean "not running"; the difference
-    // is whether it could be switched on, which is the detail page's business.
-    const rows: FilterableIntegration[] = [
-      { family: "compliance", provider: "elliptic", label: "Elliptic", status: "not_configured" },
-      { family: "custody", provider: "turnkey", label: "Turnkey", status: "available" },
-    ];
-
-    expect(
-      rows.filter((row) => matchesFilters(row, { ...NO_FILTERS, status: "not_connected" }))
-    ).toHaveLength(2);
+  it("selects only the providers that are off for not connected", () => {
+    const notConnected = ROWS.filter((row) =>
+      matchesFilters(row, { ...NO_FILTERS, status: "not_connected" })
+    );
+    expect(notConnected.map((row) => row.provider)).toEqual(["fireblocks"]);
   });
 
-  it("keeps a request-only provider out of both on and off", () => {
-    const gated: FilterableIntegration = {
-      family: "custody",
-      provider: "fireblocks",
-      label: "Fireblocks",
-      status: "request_access",
+  it("keeps a provider of unknown state out of both on and off", () => {
+    const unread: FilterableIntegration = {
+      family: "privacy",
+      provider: "private-channels",
+      label: "Private Channels",
+      status: "unknown",
     };
 
-    expect(matchesFilters(gated, { ...NO_FILTERS, status: "connected" })).toBe(false);
-    expect(matchesFilters(gated, { ...NO_FILTERS, status: "not_connected" })).toBe(false);
-    expect(matchesFilters(gated, { ...NO_FILTERS, status: "on_request" })).toBe(true);
+    expect(matchesFilters(unread, { ...NO_FILTERS, status: "connected" })).toBe(false);
+    expect(matchesFilters(unread, { ...NO_FILTERS, status: "not_connected" })).toBe(false);
+    expect(matchesFilters(unread, NO_FILTERS)).toBe(true);
   });
 
   it("searches label and provider id case-insensitively", () => {

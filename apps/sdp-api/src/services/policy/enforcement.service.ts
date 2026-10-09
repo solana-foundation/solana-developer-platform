@@ -13,7 +13,6 @@ import type {
 } from "@sdp/types";
 import { SDP_RAMP_PROVIDER_STAGES, WALLET_OPERATION_HUMAN_ACTOR_TYPES } from "@sdp/types";
 import { z } from "zod";
-import { getDb } from "@/db";
 import {
   type ApprovalRequestRow,
   createPolicyRepository,
@@ -23,10 +22,6 @@ import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, conflict } from "@/lib/errors";
 import { isModuleAvailable } from "@/lib/feature-flags";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
-import {
-  CustodyConfigStore,
-  type CustodyWalletLookup,
-} from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { PostgresPolicyEnforcementStore } from "./enforcement.store";
 
@@ -362,27 +357,6 @@ export function walletOperationActorFromAuth(auth: ApiKeyContext): WalletOperati
       throw new Error(`Unhandled auth type: ${JSON.stringify(exhaustive)}`);
     }
   }
-}
-
-/**
- * Resolve the custody wallet a policy-gated route references.
- *
- * @param env - The runtime environment.
- * @param auth - The authenticated API context.
- * @param walletId - The wallet identifier from the request.
- * @returns The custody wallet, or null when none matches.
- */
-export async function resolvePolicyCustodyWallet(
-  env: Env,
-  auth: ApiKeyContext,
-  walletId: string
-): Promise<CustodyWalletLookup | null> {
-  const store = new CustodyConfigStore(getDb(env), env);
-  return store.findActiveWalletByIdentifier(
-    auth.organizationId,
-    auth.projectId === null ? undefined : auth.projectId,
-    walletId
-  );
 }
 
 function requireApprovalRequestStatus<TStatus extends ApprovalRequestRow["status"]>(

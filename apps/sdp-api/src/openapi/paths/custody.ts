@@ -9,20 +9,14 @@ import {
   initializeSigningRequestSchema,
   initializeSigningResponseSchema,
   orgCustodyProviderSchema,
-  setDefaultWalletRequestSchema,
-  setDefaultWalletResponseSchema,
   signerCheckRequestSchema,
-  switchSigningRequestSchema,
-  switchSigningResponseSchema,
   updateCustodyWalletRequestSchema,
 } from "../schemas/custody";
 import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
-  custodyConfigResponse,
   custodyConfigsResponse,
   custodyDeleteWalletResponse,
   custodySignerCheckResponse,
-  custodySwitchOptionsResponse,
   custodyWalletAggregateResponse,
   custodyWalletByIdResponse,
   custodyWalletResponse,
@@ -39,7 +33,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Initialize wallet signing",
     operationId: "initializeWalletSigning",
     description:
-      "Initializes wallet signing for the organization or project by creating an active signing configuration.",
+      "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -52,31 +46,17 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet signing initialized",
         content: jsonContent(initializeSigningResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/wallets/switch",
-    tags: ["Wallets"],
-    summary: "Switch wallet signing provider",
-    operationId: "switchWalletSigningProvider",
-    description:
-      "Selects an active provider config or exact Custody Connection as the default signing target for the requested scope. Existing on-chain authorities are not rotated.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      body: {
-        required: true,
-        content: jsonContent(switchSigningRequestSchema),
+      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 500]),
+      403: {
+        description:
+          "Forbidden: the API key lacks permission or is wallet-scoped, or custody setup was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when a Production project names Managed custody (Production is BYOK only), custody_provider_not_in_release_channel, or provider_not_entitled.",
+        content: jsonContent(errorResponseSchema),
       },
-    },
-    responses: {
-      201: {
-        description: "Wallet signing provider switched",
-        content: jsonContent(switchSigningResponseSchema),
+      503: {
+        description:
+          "PROVIDER_NOT_CONFIGURED: the deployment holds no credentials for the provider in the project's environment (details.reason provider_not_configured).",
+        content: jsonContent(errorResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -87,7 +67,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Create wallet",
     operationId: "createWallet",
     description:
-      "Provisions a new wallet for the effective custody target, a provider-only resolved target, or an exact Custody Connection selected by connectionId.",
+      "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -100,7 +80,12 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet created",
         content: jsonContent(custodyWalletResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 500, 503]),
+      403: {
+        description:
+          "Forbidden: the API key lacks permission or is wallet-scoped, or the provider account was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when provider names a Managed config in a Production project (Production is BYOK only: create the wallet in a Custody Connection with connectionId), custody_provider_not_in_release_channel, or provider_not_entitled.",
+        content: jsonContent(errorResponseSchema),
+      },
     },
   });
 
@@ -129,58 +114,13 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
-    method: "post",
-    path: "/v1/wallets/default-wallet",
-    tags: ["Wallets"],
-    summary: "Set default wallet",
-    operationId: "setDefaultWallet",
-    description:
-      "Resolves walletId to its exact Config or Connection owner and changes only that owner's default wallet. Provider, when supplied, is a consistency assertion.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      body: {
-        required: true,
-        content: jsonContent(setDefaultWalletRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Default wallet updated",
-        content: jsonContent(setDefaultWalletResponseSchema),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/wallets/config",
-    tags: ["Wallets"],
-    summary: "Get wallet signing config",
-    operationId: "getWalletConfig",
-    description:
-      "Returns the resolved Config when the effective custody target is Config-owned. An effective Connection does not fabricate a Config and returns 404.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-    },
-    responses: {
-      200: {
-        description: "Wallet signing config",
-        content: jsonContent(custodyConfigResponse),
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
     method: "get",
     path: "/v1/wallets/configs",
     tags: ["Wallets"],
     summary: "List wallet signing configs",
     operationId: "listWalletConfigs",
     description:
-      "Returns active Config-owned wallet signing configurations for the requested scope. When a Connection is effective, defaultConfigId is null rather than a fabricated Config ID.",
+      "Returns the active Config-owned wallet signing configurations for the requested scope, one per provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -201,13 +141,12 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "List wallets",
     operationId: "listWallets",
     description:
-      "Lists active wallets under active Config and Connection owners. Omitted or true includeAllProviders includes every eligible owner; false uses target-selection semantics. Provider narrows either mode.",
+      "Lists active wallets under active Config and Connection owners, oldest first. Provider narrows the list to one custody provider.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       query: z.object({
         provider: orgCustodyProviderSchema.optional(),
-        includeAllProviders: z.boolean().optional(),
         includeBalances: z.boolean().optional(),
         view: z.enum(["summary"]).optional(),
       }),
@@ -234,7 +173,6 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       headers: projectScopeHeaders,
       query: z.object({
         provider: orgCustodyProviderSchema.optional(),
-        includeAllProviders: z.boolean().optional(),
       }),
     },
     responses: {
@@ -248,33 +186,12 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/wallets/switch-options",
-    tags: ["Wallets"],
-    summary: "List switch provider options",
-    operationId: "listSwitchProviderOptions",
-    description:
-      "Returns Provider-level switching metadata for the effective Config or Connection target while preserving durable wallet-reuse facts during temporary runtime unavailability.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-    },
-    responses: {
-      200: {
-        description: "Provider switch options",
-        content: jsonContent(custodySwitchOptionsResponse),
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
     path: "/v1/wallets/public-key",
     tags: ["Wallets"],
     summary: "Get wallet public key",
     operationId: "getWalletPublicKey",
     description:
-      "Returns the persisted public key for an exact active walletId, or for the effective active custody target when walletId is omitted. Resolution is DB-backed only.",
+      "Returns the persisted public key for an exact active walletId. walletId may be omitted only by an API key whose own signing-wallet binding names the wallet; otherwise the request is rejected with 400. Resolution is DB-backed only.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -287,7 +204,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet public key",
         content: jsonContent(custodyPublicKeyResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

@@ -185,7 +185,7 @@ export async function fetchDvpCreateContext(
       // Without balances. Reading them costs a chain read per wallet, which
       // held the whole form back by five to seven seconds, and no field shows
       // one. Funding still refuses a short balance with the amount named.
-      request("/v1/wallets?includeAllProviders=true"),
+      request("/v1/wallets"),
       request("/v1/issuance/tokens?pageSize=100"),
       // The registered crypto-wallet accounts a slot can name, address resolved
       // server-side the same way create will resolve `counterpartyAccountId`.

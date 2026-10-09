@@ -275,10 +275,10 @@ nothing else; the program create still sends the body `requestId` form.
     remembered separately and replayed verbatim (the API's own fingerprint
     includes `minSharesOut` and refuses a replay whose floor changed); see
     `rememberVaultDepositFloor` in earn-vault-deposit-tracking.ts. The PROJECT is in
-    there because an organization-level custody config gives two projects the same
-    `custody_wallets` row: without it, switching project in one tab and
-    re-submitting the same strategy and amount reuses the first project's key, and
-    the API's org-scoped replay lookup then resolves the FIRST project's movement.
+    there because the API's replay lookup is org-scoped: a key reused under
+    another project would resolve the FIRST project's movement. Custody wallets
+    belong to one project, so the wallet already implies it; naming it keeps the
+    key from depending on that.
     A ref-scoped key never survived a project switch, so this only became
     reachable once the key outlived the component. The API refuses that case too
     (see `routes/earn/CLAUDE.md`) — this keeps the client from asking.

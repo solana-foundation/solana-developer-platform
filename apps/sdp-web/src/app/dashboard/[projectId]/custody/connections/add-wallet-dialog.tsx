@@ -81,10 +81,9 @@ function AddWalletForm({
     event.preventDefault();
     const formData = new FormData();
     formData.set("connectionId", connectionId);
-    formData.set("provider", provider);
     formData.set("label", label);
 
-    const result = await run(() => createConnectionWalletAction(formData), {
+    const result = await run(() => createConnectionWalletAction(formData, provider), {
       successTitle: t("DashboardCustody.addWalletSuccessTitle"),
       successDescription: t("DashboardCustody.addWalletSuccessDescription"),
       failedTitle: t("DashboardCustody.addWalletFailedTitle"),

@@ -48,13 +48,11 @@ export function ConnectionWalletsCard({
   walletsUnavailable,
   isDeactivated,
   pendingWalletLabel,
-  defaultWalletId,
 }: {
   wallets: CustodyWalletSummary[];
   walletsUnavailable: boolean;
   isDeactivated: boolean;
   pendingWalletLabel: string | null;
-  defaultWalletId: string | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -89,9 +87,6 @@ export function ConnectionWalletsCard({
                     >
                       {wallet.label?.trim() || wallet.walletId}
                     </Link>
-                    {defaultWalletId === wallet.walletId ? (
-                      <Badge variant="outline">{t("DashboardCustody.defaultBadge")}</Badge>
-                    ) : null}
                   </span>
                   <span className="mt-1 flex items-center gap-1">
                     <span className="truncate font-mono text-[11px] font-normal text-tertiary">

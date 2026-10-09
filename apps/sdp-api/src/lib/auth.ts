@@ -169,6 +169,22 @@ export function requireProjectId(c: Context<{ Bindings: Env }>): string {
 }
 
 /**
+ * Get the project ID from an already-resolved auth context. For helpers that
+ * hold only `auth` (no request context) on a project-scoped route; the
+ * projectContextMiddleware has already rejected requests without one.
+ *
+ * @param auth - The normalized auth context for the request.
+ * @returns The project the request is scoped to.
+ * @throws AppError BAD_REQUEST if the auth context carries no project scope.
+ */
+export function requireAuthProjectId(auth: ApiKeyContext): string {
+  if (!auth.projectId) {
+    throw badRequest("Project scope is required");
+  }
+  return auth.projectId;
+}
+
+/**
  * Whether a dashboard identity may manage organization-wide credentials.
  *
  * Clerk contexts carry both the normalized organization role and its derived

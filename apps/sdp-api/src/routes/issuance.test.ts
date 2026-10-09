@@ -9,12 +9,12 @@ import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
 import type { Address } from "@sdp/solana/address";
 import type { CachedApiKey } from "@sdp/types";
-import { address, createNoopSigner, getBase58Decoder } from "@solana/kit";
+import { address, getBase58Decoder } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as TokenAclSdk from "@solana/token-acl-sdk";
 import * as Token2022 from "@solana-program/token-2022";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
@@ -44,8 +44,10 @@ import {
   TEST_SOLANA_ADDRESSES,
 } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -211,18 +213,15 @@ function toTestIdPart(value: string): string {
   return value.replace(/[^A-Za-z0-9_]/g, "_").slice(0, 64);
 }
 
-async function seedIssuanceActivityWallet(
-  walletId = "wal_issuance_activity",
-  publicKey = TEST_SOLANA_ADDRESSES.wallet1
-) {
+async function seedIssuanceActivityWallet(walletId: string, publicKey: string) {
   const walletRowId = `cwlt_issuance_activity_${toTestIdPart(walletId)}`;
 
   await getDb(env).batch([
     getDb(env)
       .prepare(
         `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT DO NOTHING`
       )
       .bind(
@@ -232,7 +231,6 @@ async function seedIssuanceActivityWallet(
         "local",
         "test-config",
         "sdp-custody-encryption-v1",
-        walletId,
         "active"
       ),
     getDb(env)
@@ -253,10 +251,6 @@ async function seedIssuanceActivityWallet(
   ]);
 
   if (walletId !== DEFAULT_ISSUANCE_PROVIDER_WALLET_ID) {
-    await getDb(env)
-      .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = ?")
-      .bind(walletId, "cust_cfg_issuance_activity")
-      .run();
     await getDb(env)
       .prepare("DELETE FROM custody_wallets WHERE id = ?")
       .bind(DEFAULT_ISSUANCE_CUSTODY_WALLET_ID)
@@ -279,17 +273,11 @@ describe("Issuance Routes", () => {
   let apiKeyHash: string;
 
   beforeAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
-
     // Pre-compute API key hash
     apiKeyHash = await hashString(
       TEST_PROJECT_API_KEY.raw,
       (env as { API_KEY_PEPPER: string }).API_KEY_PEPPER
     );
-  });
-
-  afterAll(async () => {
-    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
   });
 
   beforeEach(async () => {
@@ -302,51 +290,7 @@ describe("Issuance Routes", () => {
       await kv.rateLimits.delete(key.name);
     }
 
-    // Clear token-related tables
-    await db
-      .prepare("DELETE FROM wallet_operations")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM frozen_accounts")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM token_allowlist_statuses")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM token_allowlists")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issuance_transaction_statuses")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issuance_transactions")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issued_token_extensions")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issued_tokens")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM project_members")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM projects")
-      .run()
-      .catch(() => {});
+    await seedTestDatabase(env);
 
     // Seed organization
     await db
@@ -423,7 +367,7 @@ describe("Issuance Routes", () => {
     } as never);
 
     vi.spyOn(SolanaServices, "createOrgSignerForCustodyWallet").mockImplementation(
-      async (runtimeEnv, organizationId, projectId, custodyWalletId) => {
+      async (runtimeEnv, _organizationId, _projectId, custodyWalletId) => {
         const wallet = await getDb(runtimeEnv)
           .prepare(
             `SELECT wallet_id, public_key
@@ -435,15 +379,6 @@ describe("Issuance Routes", () => {
         if (!wallet) {
           throw new Error(`Missing test custody wallet ${custodyWalletId}`);
         }
-
-        // Preserve the existing route assertions around the legacy signer seam
-        // while K5a routes now enter through the exact-row signer seam.
-        await SolanaServices.createOrgSigner(
-          runtimeEnv,
-          organizationId,
-          projectId,
-          wallet.wallet_id
-        ).catch(() => undefined);
         return { address: wallet.public_key } as never;
       }
     );
@@ -609,43 +544,40 @@ describe("Issuance Routes", () => {
         signingWalletId: wallet.walletId,
         mintAuthority: policyMintAuthority,
       });
-      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+      const exactSignerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      exactSignerSpy.mockClear();
 
-      try {
-        const response = await app.request(
-          `/v1/issuance/tokens/${token.id}/mint`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-              "Dry-Run": "true",
-            },
-            body: JSON.stringify({
-              mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
-            }),
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}/mint`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            "Dry-Run": "true",
           },
-          env
-        );
+          body: JSON.stringify({
+            mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+          }),
+        },
+        env
+      );
 
-        const responseBody = await response.json();
-        expect(response.status, JSON.stringify(responseBody)).toBe(200);
-        expect(responseBody).toMatchObject({
-          data: { decision: "allow", criteria: [] },
-        });
-        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+      const responseBody = await response.json();
+      expect(response.status, JSON.stringify(responseBody)).toBe(200);
+      expect(responseBody).toMatchObject({
+        data: { decision: "allow", criteria: [] },
+      });
+      expect(exactSignerSpy).not.toHaveBeenCalled();
 
-        const transactionCount = await getDb(env)
-          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
-          .first<{ count: number }>();
-        const operationCount = await getDb(env)
-          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
-          .first<{ count: number }>();
-        expect(transactionCount).toEqual({ count: 0 });
-        expect(operationCount).toEqual({ count: 0 });
-      } finally {
-        createOrgSignerSpy.mockRestore();
-      }
+      const transactionCount = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+        .first<{ count: number }>();
+      const operationCount = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+        .first<{ count: number }>();
+      expect(transactionCount).toEqual({ count: 0 });
+      expect(operationCount).toEqual({ count: 0 });
     });
 
     it("rejects minting to a wallet whose Token-2022 account is frozen", async () => {
@@ -700,45 +632,42 @@ describe("Issuance Routes", () => {
         signingWalletId: wallet.walletId,
         mintAuthority: policyMintAuthority,
       });
-      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+      const exactSignerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      exactSignerSpy.mockClear();
 
-      try {
-        const response = await app.request(
-          `/v1/issuance/tokens/${token.id}/authority`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-              "Dry-Run": "true",
-            },
-            body: JSON.stringify({
-              authority: {
-                role: "mint",
-                newAuthority: TEST_SOLANA_ADDRESSES.wallet2,
-              },
-            }),
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}/authority`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            "Dry-Run": "true",
           },
-          env
-        );
+          body: JSON.stringify({
+            authority: {
+              role: "mint",
+              newAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+            },
+          }),
+        },
+        env
+      );
 
-        expect(response.status).toBe(200);
-        expect(await response.json()).toMatchObject({
-          data: { decision: "allow", criteria: [] },
-        });
-        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: { decision: "allow", criteria: [] },
+      });
+      expect(exactSignerSpy).not.toHaveBeenCalled();
 
-        const transactionCount = await getDb(env)
-          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
-          .first<{ count: number }>();
-        const operationCount = await getDb(env)
-          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
-          .first<{ count: number }>();
-        expect(transactionCount).toEqual({ count: 0 });
-        expect(operationCount).toEqual({ count: 0 });
-      } finally {
-        createOrgSignerSpy.mockRestore();
-      }
+      const transactionCount = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+        .first<{ count: number }>();
+      const operationCount = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+        .first<{ count: number }>();
+      expect(transactionCount).toEqual({ count: 0 });
+      expect(operationCount).toEqual({ count: 0 });
     });
 
     it("stops a denied burn before signer and issuance side effects", async () => {
@@ -1825,33 +1754,30 @@ describe("Issuance Routes", () => {
         env
       );
       expect(policyResponse.status).toBe(200);
-      const createOrgSignerSpy = vi.spyOn(SolanaServices, "createOrgSigner");
+      const exactSignerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      exactSignerSpy.mockClear();
 
-      try {
-        const response = await app.request(
-          `/v1/issuance/tokens/${token.id}/mint`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-            },
-            body: JSON.stringify({
-              mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
-            }),
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}/mint`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
           },
-          env
-        );
+          body: JSON.stringify({
+            mint: { destination: TEST_SOLANA_ADDRESSES.wallet2, amount: "1" },
+          }),
+        },
+        env
+      );
 
-        expect(response.status).toBe(403);
-        expect(createOrgSignerSpy).not.toHaveBeenCalled();
-        const transactionCount = await getDb(env)
-          .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
-          .first<{ count: number }>();
-        expect(transactionCount).toEqual({ count: 0 });
-      } finally {
-        createOrgSignerSpy.mockRestore();
-      }
+      expect(response.status).toBe(403);
+      expect(exactSignerSpy).not.toHaveBeenCalled();
+      const transactionCount = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM issuance_transactions")
+        .first<{ count: number }>();
+      expect(transactionCount).toEqual({ count: 0 });
     });
 
     it("resolves and governs the current authority without a deployment-wallet mirror", async () => {
@@ -1859,9 +1785,8 @@ describe("Issuance Routes", () => {
         id: "tok_issuance_ungoverned_mint",
         signingWalletId: null,
       });
-      const createOrgSignerSpy = vi
-        .spyOn(SolanaServices, "createOrgSigner")
-        .mockResolvedValue(createNoopSigner(address(policyMintAuthority)));
+      const exactSignerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      exactSignerSpy.mockClear();
       const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo").mockResolvedValue({
         signature: "sig_ungoverned_mint",
         slot: 321n,
@@ -1889,7 +1814,7 @@ describe("Issuance Routes", () => {
         expect(await dryRun.json()).toMatchObject({
           data: { decision: "allow", criteria: [] },
         });
-        expect(createOrgSignerSpy).not.toHaveBeenCalled();
+        expect(exactSignerSpy).not.toHaveBeenCalled();
 
         const executed = await app.request(
           `/v1/issuance/tokens/${token.id}/mint`,
@@ -1904,7 +1829,12 @@ describe("Issuance Routes", () => {
           env
         );
         expect(executed.status).toBe(200);
-        expect(createOrgSignerSpy).toHaveBeenCalledTimes(1);
+        expect(exactSignerSpy).toHaveBeenCalledExactlyOnceWith(
+          env,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          DEFAULT_ISSUANCE_CUSTODY_WALLET_ID
+        );
         expect(mintToSpy).toHaveBeenCalledTimes(1);
 
         const operation = await getDb(env)
@@ -1912,7 +1842,6 @@ describe("Issuance Routes", () => {
           .first<{ custody_wallet_id: string | null }>();
         expect(operation?.custody_wallet_id).toBe(DEFAULT_ISSUANCE_CUSTODY_WALLET_ID);
       } finally {
-        createOrgSignerSpy.mockRestore();
         mintToSpy.mockRestore();
       }
     });
@@ -2976,38 +2905,51 @@ describe("Issuance Routes", () => {
       async (operation) => {
         const request = await prepareAction(operation);
         await seedOrganization({ id: "org_other_selector", name: "Other", slug: "other-selector" });
-        for (const organizationId of [TEST_ORG.id, "org_other_selector"]) {
-          const projectId =
-            organizationId === TEST_ORG.id
-              ? TEST_PRODUCTION_PROJECT.id
-              : `prj_other_${organizationId}`;
-          const configId = `cfg_other_${organizationId}`;
-          const custodyWalletId = `cwlt_other_${organizationId}`;
-          if (organizationId !== TEST_ORG.id) {
-            await seedProject({
-              id: projectId,
-              organizationId,
-              name: "Other project",
-              slug: "other-project",
-              environment: "sandbox",
-            });
-          }
-          await getDb(env)
-            .prepare(
-              `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-           VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', 'active')`
-            )
-            .bind(configId, organizationId, projectId)
-            .run();
-          await getDb(env)
-            .prepare(
-              `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, purpose, status)
-           VALUES (?, ?, ?, ?, 'transfer', 'active')`
-            )
-            .bind(custodyWalletId, configId, custodyWalletId, TEST_ACTIVE_TOKEN.mintAuthority)
-            .run();
-          expect((await request(custodyWalletId)).status).toBe(404);
-        }
+        await getDb(env).transaction((tx) =>
+          seedTestPrivyConnection(tx, {
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PRODUCTION_PROJECT.id,
+            connectionId: "cconn_other_production_project",
+            credentialId: "pcred_other_production_project",
+            createdBy: TEST_USER.id,
+            stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "not-read" },
+            providerAccountFingerprint: "sha256:other-production-project",
+            lastCheckStatus: "success",
+            wallets: [
+              {
+                id: "cwlt_other_production_project",
+                walletId: "cwlt_other_production_project",
+                publicKey: required(TEST_ACTIVE_TOKEN.mintAuthority),
+                label: null,
+                purpose: "transfer",
+                status: "active",
+              },
+            ],
+            defaultCustodyWalletId: "cwlt_other_production_project",
+          })
+        );
+        expect((await request("cwlt_other_production_project")).status).toBe(404);
+        await seedProject({
+          id: "prj_other_org_other_selector",
+          organizationId: "org_other_selector",
+          name: "Other project",
+          slug: "other-project",
+          environment: "sandbox",
+        });
+        await getDb(env)
+          .prepare(
+            `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+         VALUES ('cfg_other_org_other_selector', 'org_other_selector', 'prj_other_org_other_selector', 'local', 'test-config', 'sdp-custody-encryption-v1', 'active')`
+          )
+          .run();
+        await getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, purpose, status)
+         VALUES ('cwlt_other_org_other_selector', 'cfg_other_org_other_selector', 'cwlt_other_org_other_selector', ?, 'transfer', 'active')`
+          )
+          .bind(TEST_ACTIVE_TOKEN.mintAuthority)
+          .run();
+        expect((await request("cwlt_other_org_other_selector")).status).toBe(404);
         expect(SolanaServices.createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
         const history = await app.request(
           "/v1/issuance/tokens/tok_explicit_authority/transactions",
@@ -3151,7 +3093,10 @@ describe("Issuance Routes", () => {
     });
 
     it("rejects exact and legacy wallet filters together", async () => {
-      const wallet = await seedIssuanceActivityWallet();
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_activity",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
       const res = await app.request(
         `/v1/issuance/transactions?custodyWalletId=${wallet.custodyWalletId}&walletId=${wallet.walletId}`,
         {
@@ -3165,7 +3110,10 @@ describe("Issuance Routes", () => {
 
     it("returns matching wallet transactions across all types when type is omitted", async () => {
       const token = await seedIssuedToken();
-      const wallet = await seedIssuanceActivityWallet();
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_activity",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
       const tokenAccount = await deriveAssociatedTokenAccount(
         wallet.publicKey,
         token.mintAddress ?? TEST_SOLANA_ADDRESSES.mint
@@ -3350,7 +3298,10 @@ describe("Issuance Routes", () => {
 
     it("returns an empty page for selected-wallet keys with no token-readable bindings", async () => {
       await seedIssuedToken();
-      const wallet = await seedIssuanceActivityWallet();
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_activity",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
       await seedIssuanceTransaction({
         id: "ttx_no_token_binding",
         type: "burn",
@@ -3545,7 +3496,10 @@ describe("Issuance Routes", () => {
 
     it("paginates wallet-filtered transactions with stable totals and no duplicate rows", async () => {
       await seedIssuedToken();
-      const wallet = await seedIssuanceActivityWallet();
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_activity",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
 
       for (let index = 1; index <= 12; index += 1) {
         await seedIssuanceTransaction({
@@ -3600,7 +3554,10 @@ describe("Issuance Routes", () => {
 
     it("uses transaction id as a deterministic pagination tiebreaker", async () => {
       await seedIssuedToken();
-      const wallet = await seedIssuanceActivityWallet();
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_activity",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
 
       for (let index = 1; index <= 7; index += 1) {
         await seedIssuanceTransaction({
@@ -3653,7 +3610,10 @@ describe("Issuance Routes", () => {
         id: "tok_no_mint_candidates",
         mintAddress: null,
       });
-      const wallet = await seedIssuanceActivityWallet();
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_activity",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
 
       await seedIssuanceTransaction({
         id: "ttx_public_key_only_force_burn",
@@ -3750,7 +3710,10 @@ describe("Issuance Routes", () => {
 
     it("allows explicit wallet filters for selected-wallet keys with wallet-level tokens:read", async () => {
       await seedIssuedToken();
-      const wallet = await seedIssuanceActivityWallet();
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_activity",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
       await seedIssuanceTransaction({
         id: "ttx_explicit_wallet_bound",
         type: "burn",
@@ -3797,7 +3760,10 @@ describe("Issuance Routes", () => {
     });
 
     it("enforces wallet-level tokens:read for wallet filters", async () => {
-      const wallet = await seedIssuanceActivityWallet();
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_activity",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
       await cacheProjectApiKey({
         permissions: ["tokens:read"],
         walletBindings: [{ walletId: wallet.walletId, permissions: ["payments:read"] }],
@@ -3928,9 +3894,9 @@ describe("Issuance Routes", () => {
           .prepare(
             `INSERT INTO custody_configs
                (id, organization_id, project_id, provider, config_encrypted,
-                encryption_version, default_wallet_id, status)
+                encryption_version, status)
              VALUES (?, ?, ?, 'local', 'test-config',
-                     'sdp-custody-encryption-v1', 'wal_foreign_issuance', 'active')`
+                     'sdp-custody-encryption-v1', 'active')`
           )
           .bind(foreignConfigId, foreignOrgId, foreignProjectId),
         getDb(env)
@@ -4750,7 +4716,10 @@ describe("Issuance Routes", () => {
     });
 
     it("rejects a selector-only patch after deploy without changing deployment attribution", async () => {
-      const deploymentWallet = await seedIssuanceActivityWallet("wal_selector_only_deployment");
+      const deploymentWallet = await seedIssuanceActivityWallet(
+        "wal_selector_only_deployment",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
       const metadataWallet = await seedIssuanceActivityWallet(
         "wal_selector_only_patch",
         TEST_SOLANA_ADDRESSES.wallet2
@@ -5548,9 +5517,6 @@ describe("Issuance Routes", () => {
     });
 
     it("prepares mint transaction", async () => {
-      const createOrgSignerSpy = vi
-        .spyOn(SolanaServices, "createOrgSigner")
-        .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
       const prepareMintToSpy = vi
         .spyOn(MosaicService.prototype, "prepareMintTo")
         .mockResolvedValueOnce({
@@ -5588,7 +5554,6 @@ describe("Issuance Routes", () => {
         expect(body.data.transaction.status).toBe("pending");
         expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
       } finally {
-        createOrgSignerSpy.mockRestore();
         prepareMintToSpy.mockRestore();
       }
     });
@@ -5724,9 +5689,6 @@ describe("Issuance Routes", () => {
         .bind(activeTokenId)
         .run();
 
-      const createOrgSignerSpy = vi
-        .spyOn(SolanaServices, "createOrgSigner")
-        .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
       const prepareMintToSpy = vi
         .spyOn(MosaicService.prototype, "prepareMintTo")
         .mockResolvedValueOnce({
@@ -5771,7 +5733,6 @@ describe("Issuance Routes", () => {
           .first<{ custody_wallet_id: string | null }>();
         expect(transaction?.custody_wallet_id).toBe(DEFAULT_ISSUANCE_CUSTODY_WALLET_ID);
       } finally {
-        createOrgSignerSpy.mockRestore();
         prepareMintToSpy.mockRestore();
       }
     });
@@ -5789,9 +5750,6 @@ describe("Issuance Routes", () => {
         .bind(activeTokenId)
         .run();
 
-      const createOrgSignerSpy = vi
-        .spyOn(SolanaServices, "createOrgSigner")
-        .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
       const prepareMintToSpy = vi
         .spyOn(MosaicService.prototype, "prepareMintTo")
         .mockResolvedValueOnce({
@@ -5849,7 +5807,6 @@ describe("Issuance Routes", () => {
         expect(tx?.serialized_tx).toBeNull();
       } finally {
         getTokenSpy.mockRestore();
-        createOrgSignerSpy.mockRestore();
         prepareMintToSpy.mockRestore();
       }
     });
@@ -6115,9 +6072,8 @@ describe("Issuance Routes", () => {
           .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
           .run();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const exactSignerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        exactSignerSpy.mockClear();
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockResolvedValueOnce(undefined as never);
@@ -6140,13 +6096,17 @@ describe("Issuance Routes", () => {
           );
 
           expect(res.status).toBe(201);
-          expect(createOrgSignerSpy).toHaveBeenCalled();
+          expect(exactSignerSpy).toHaveBeenCalledWith(
+            env,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            DEFAULT_ISSUANCE_CUSTODY_WALLET_ID
+          );
           expect(addToListSpy).toHaveBeenCalledWith({
             list: TEST_SOLANA_ADDRESSES.wallet3,
             wallet: TEST_SOLANA_ADDRESSES.wallet1,
           });
         } finally {
-          createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
         }
       });
@@ -6268,9 +6228,6 @@ describe("Issuance Routes", () => {
           .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
           .run();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockRejectedValueOnce(new Error("on-chain add failed"))
@@ -6337,7 +6294,6 @@ describe("Issuance Routes", () => {
             .first<{ status: string }>();
           expect(reconciled?.status).toBe("active");
         } finally {
-          createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           deleteAllowlistEntrySpy.mockRestore();
@@ -6351,9 +6307,6 @@ describe("Issuance Routes", () => {
           .bind(TEST_SOLANA_ADDRESSES.wallet3, tokenId)
           .run();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
@@ -6389,7 +6342,6 @@ describe("Issuance Routes", () => {
             .first<{ id: string; status: string }>();
           expect(entry?.status).toBe("active");
         } finally {
-          createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           deleteAllowlistEntrySpy.mockRestore();
@@ -6444,9 +6396,6 @@ describe("Issuance Routes", () => {
         });
         await tokenService.revokeAllowlistEntry(entry.id);
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const addToListSpy = vi
           .spyOn(MosaicService.prototype, "addToList")
           .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
@@ -6482,7 +6431,6 @@ describe("Issuance Routes", () => {
           expect(row?.id).toBe(entry.id);
           expect(row?.status).toBe("pending");
         } finally {
-          createOrgSignerSpy.mockRestore();
           addToListSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           deleteAllowlistEntrySpy.mockRestore();
@@ -6600,9 +6548,8 @@ describe("Issuance Routes", () => {
         const listBody = await listRes.json();
         const entryId = listBody.data[0].id;
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const exactSignerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        exactSignerSpy.mockClear();
         const removeFromListSpy = vi
           .spyOn(MosaicService.prototype, "removeFromList")
           .mockResolvedValueOnce(undefined as never);
@@ -6618,13 +6565,17 @@ describe("Issuance Routes", () => {
           );
 
           expect(res.status).toBe(204);
-          expect(createOrgSignerSpy).toHaveBeenCalled();
+          expect(exactSignerSpy).toHaveBeenCalledWith(
+            env,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            DEFAULT_ISSUANCE_CUSTODY_WALLET_ID
+          );
           expect(removeFromListSpy).toHaveBeenCalledWith({
             list: TEST_SOLANA_ADDRESSES.wallet3,
             wallet: TEST_SOLANA_ADDRESSES.wallet1,
           });
         } finally {
-          createOrgSignerSpy.mockRestore();
           removeFromListSpy.mockRestore();
         }
       });
@@ -6706,9 +6657,6 @@ describe("Issuance Routes", () => {
         const listBody = await listRes.json();
         const entryId = listBody.data[0].id;
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const removeFromListSpy = vi
           .spyOn(MosaicService.prototype, "removeFromList")
           .mockRejectedValueOnce(new Error("mosaic removal failed"))
@@ -6752,7 +6700,6 @@ describe("Issuance Routes", () => {
             .first<{ status: string }>();
           expect(revoked?.status).toBe("revoked");
         } finally {
-          createOrgSignerSpy.mockRestore();
           removeFromListSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
         }
@@ -6772,9 +6719,6 @@ describe("Issuance Routes", () => {
           initialStatus: "pending",
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const removeFromListSpy = vi
           .spyOn(MosaicService.prototype, "removeFromList")
           .mockRejectedValueOnce(new Error("RPC confirmation timeout"));
@@ -6799,7 +6743,6 @@ describe("Issuance Routes", () => {
             .first<{ status: string }>();
           expect(revoked?.status).toBe("revoked");
         } finally {
-          createOrgSignerSpy.mockRestore();
           removeFromListSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
         }
@@ -7308,9 +7251,6 @@ describe("Issuance Routes", () => {
     });
 
     it("allows mint to allowlisted address", async () => {
-      const createOrgSignerSpy = vi
-        .spyOn(SolanaServices, "createOrgSigner")
-        .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
       const prepareMintToSpy = vi
         .spyOn(MosaicService.prototype, "prepareMintTo")
         .mockResolvedValueOnce({
@@ -7358,7 +7298,6 @@ describe("Issuance Routes", () => {
         expect(res.status).toBe(200);
         expect(prepareMintToSpy).toHaveBeenCalledTimes(1);
       } finally {
-        createOrgSignerSpy.mockRestore();
         prepareMintToSpy.mockRestore();
       }
     });
@@ -7368,7 +7307,6 @@ describe("Issuance Routes", () => {
     // succeeds when the destination is already on-chain.
     describe("on-chain allowlist auto-add on mint", () => {
       const ablList = TEST_SOLANA_ADDRESSES.wallet3;
-      const signerAddress = TEST_SOLANA_ADDRESSES.wallet2;
       const freshDestination = TEST_SOLANA_ADDRESSES.wallet1;
 
       const mockPreparedMint = {
@@ -7395,9 +7333,6 @@ describe("Issuance Routes", () => {
       it("rejects prepare mint without mutating an absent on-chain allowlist entry", async () => {
         await seedAblListAddress();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(false);
@@ -7438,7 +7373,6 @@ describe("Issuance Routes", () => {
             .first<{ id: string }>();
           expect(entry).toBeNull();
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           prepareMintToSpy.mockRestore();
@@ -7448,9 +7382,6 @@ describe("Issuance Routes", () => {
       it("prepares for an existing on-chain entry without mutating the DB mirror", async () => {
         await seedAblListAddress();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(true);
@@ -7507,7 +7438,6 @@ describe("Issuance Routes", () => {
           expect(meta.mode).toBe("prepare");
           expect(meta.addedToAllowlist).toBe(false);
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           prepareMintToSpy.mockRestore();
@@ -7517,9 +7447,6 @@ describe("Issuance Routes", () => {
       it("re-asserts the DB row after a successful on-chain add when the original insert was not ours", async () => {
         await seedAblListAddress();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(false);
@@ -7569,7 +7496,6 @@ describe("Issuance Routes", () => {
           expect(addAllowlistEntryStrictSpy).toHaveBeenCalledTimes(2);
           expect(mintToSpy).toHaveBeenCalledTimes(1);
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
@@ -7605,9 +7531,6 @@ describe("Issuance Routes", () => {
           .bind(allowlistTokenId)
           .run();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(true);
@@ -7657,7 +7580,6 @@ describe("Issuance Routes", () => {
           expect(await latestMintTransaction(allowlistTokenId)).toBeNull();
         } finally {
           getTokenSpy.mockRestore();
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           mintToSpy.mockRestore();
         }
@@ -7672,9 +7594,6 @@ describe("Issuance Routes", () => {
           .bind(allowlistTokenId)
           .run();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(true);
@@ -7715,7 +7634,6 @@ describe("Issuance Routes", () => {
           // supply reconciliation proves whether the mint landed.
           expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("pending");
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           mintToSpy.mockRestore();
         }
@@ -7730,9 +7648,6 @@ describe("Issuance Routes", () => {
           .bind(allowlistTokenId)
           .run();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(true);
@@ -7765,7 +7680,6 @@ describe("Issuance Routes", () => {
           expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("100000000000");
           expect(await latestMintTransaction(allowlistTokenId)).toBeNull();
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           mintToSpy.mockRestore();
         }
@@ -7774,9 +7688,6 @@ describe("Issuance Routes", () => {
       it("auto-adds destination to on-chain allowlist on execute mint", async () => {
         await seedAblListAddress();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(false);
@@ -7837,7 +7748,6 @@ describe("Issuance Routes", () => {
           expect(meta.mode).toBe("execute");
           expect(meta.addedToAllowlist).toBe(true);
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
@@ -7848,9 +7758,6 @@ describe("Issuance Routes", () => {
         await seedAblListAddress();
 
         const idempotencyKey = `idem_${crypto.randomUUID()}`;
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValue({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValue(true);
@@ -7957,7 +7864,6 @@ describe("Issuance Routes", () => {
             signature: mockMintResult.signature,
           });
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           mintToSpy.mockRestore();
           updateTransactionSpy.mockRestore();
@@ -7978,9 +7884,6 @@ describe("Issuance Routes", () => {
           addedBy: TEST_PROJECT_API_KEY.id,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(true);
@@ -8029,7 +7932,6 @@ describe("Issuance Routes", () => {
           expect(meta.mode).toBe("prepare");
           expect(meta.addedToAllowlist).toBe(false);
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           prepareMintToSpy.mockRestore();
@@ -8046,9 +7948,6 @@ describe("Issuance Routes", () => {
           addedBy: TEST_PROJECT_API_KEY.id,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
           .mockResolvedValueOnce(true);
@@ -8097,7 +7996,6 @@ describe("Issuance Routes", () => {
           expect(meta.mode).toBe("execute");
           expect(meta.addedToAllowlist).toBe(false);
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
@@ -8116,9 +8014,6 @@ describe("Issuance Routes", () => {
         });
         await tokenService.revokeAllowlistEntry(entry.id);
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi.spyOn(MosaicService.prototype, "isWalletOnList");
         const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
         const prepareMintToSpy = vi.spyOn(MosaicService.prototype, "prepareMintTo");
@@ -8155,7 +8050,6 @@ describe("Issuance Routes", () => {
             .first<{ status: string }>();
           expect(row?.status).toBe("revoked");
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           prepareMintToSpy.mockRestore();
@@ -8173,9 +8067,6 @@ describe("Issuance Routes", () => {
         });
         await tokenService.revokeAllowlistEntry(entry.id);
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         const isWalletOnListSpy = vi.spyOn(MosaicService.prototype, "isWalletOnList");
         const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
         const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
@@ -8210,7 +8101,6 @@ describe("Issuance Routes", () => {
             .first<{ status: string }>();
           expect(row?.status).toBe("revoked");
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
@@ -8230,9 +8120,6 @@ describe("Issuance Routes", () => {
 
         const idempotencyKey = `idem_${crypto.randomUUID()}`;
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValue({ address: signerAddress } as never);
         const mintToSpy = vi
           .spyOn(MosaicService.prototype, "mintTo")
           .mockResolvedValue(mockMintResult as never);
@@ -8306,7 +8193,6 @@ describe("Issuance Routes", () => {
             addToListSpy.mockRestore();
           }
         } finally {
-          createOrgSignerSpy.mockRestore();
           mintToSpy.mockRestore();
         }
       });
@@ -8314,9 +8200,6 @@ describe("Issuance Routes", () => {
       it("rolls back the DB row when on-chain add fails and membership is not confirmed, leaving the address mintable on retry", async () => {
         await seedAblListAddress();
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValue({ address: signerAddress } as never);
         // Initial check (no wallet on-chain) and recheck after the failure
         // (still not on-chain) → true rollback branch, not TOCTOU recovery.
         const isWalletOnListSpy = vi
@@ -8386,7 +8269,6 @@ describe("Issuance Routes", () => {
             .first<{ id: string; status: string }>();
           expect(rowAfterRetry?.status).toBe("active");
         } finally {
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
@@ -8413,9 +8295,6 @@ describe("Issuance Routes", () => {
         const statusSpy = vi
           .spyOn(TokenService.prototype, "getAllowlistEntryStatusByAddress")
           .mockResolvedValueOnce("active");
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: signerAddress } as never);
         // Force the not-on-chain branch so we exercise the strict insert path.
         const isWalletOnListSpy = vi
           .spyOn(MosaicService.prototype, "isWalletOnList")
@@ -8456,7 +8335,6 @@ describe("Issuance Routes", () => {
           expect(mintToSpy).not.toHaveBeenCalled();
         } finally {
           statusSpy.mockRestore();
-          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
@@ -9526,9 +9404,6 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockResolvedValueOnce(mockDeployResult as never);
@@ -9570,7 +9445,6 @@ describe("Issuance Routes", () => {
             custody_wallet_id: wallet.custodyWalletId,
           });
         } finally {
-          createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
         }
       });
@@ -9587,9 +9461,6 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockResolvedValueOnce(mockDeployResult as never);
@@ -9616,7 +9487,6 @@ describe("Issuance Routes", () => {
             })
           );
         } finally {
-          createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
         }
       });
@@ -9630,9 +9500,6 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockResolvedValue(mockDeployResult as never);
@@ -9657,7 +9524,6 @@ describe("Issuance Routes", () => {
           expect(createTokenSpy).not.toHaveBeenCalled();
         } finally {
           (env as { PUBLIC_API_ORIGIN?: string }).PUBLIC_API_ORIGIN = savedOrigin;
-          createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
         }
       });
@@ -9672,9 +9538,6 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockResolvedValueOnce(mockDeployResult as never);
@@ -9700,7 +9563,6 @@ describe("Issuance Routes", () => {
             })
           );
         } finally {
-          createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
         }
       });
@@ -9714,9 +9576,6 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const getAccountInfoSpy = vi
           .spyOn(SolanaRpc, "getAccountInfo")
           .mockResolvedValueOnce(null as never);
@@ -9741,7 +9600,6 @@ describe("Issuance Routes", () => {
           expect(payload.error.message).toMatch(/pay deployment rent and fees/);
           expect(createTokenSpy).not.toHaveBeenCalled();
         } finally {
-          createOrgSignerSpy.mockRestore();
           getAccountInfoSpy.mockRestore();
           createTokenSpy.mockRestore();
         }
@@ -9756,9 +9614,6 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const getAccountInfoSpy = vi
           .spyOn(SolanaRpc, "getAccountInfo")
           .mockResolvedValueOnce({ lamports: 20_000_000n } as never);
@@ -9786,7 +9641,6 @@ describe("Issuance Routes", () => {
           expect(createTokenSpy).toHaveBeenCalled();
           expect(feePaymentAdapterSpy).not.toHaveBeenCalled();
         } finally {
-          createOrgSignerSpy.mockRestore();
           getAccountInfoSpy.mockRestore();
           createTokenSpy.mockRestore();
           feePaymentAdapterSpy.mockRestore();
@@ -9802,9 +9656,6 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockResolvedValueOnce(mockDeployResult as never);
@@ -9827,7 +9678,6 @@ describe("Issuance Routes", () => {
           expect(res.status).toBe(200);
           expect(feePaymentAdapterSpy).toHaveBeenCalled();
         } finally {
-          createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
           feePaymentAdapterSpy.mockRestore();
         }
@@ -9842,9 +9692,6 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         // Mint is live on-chain but the follow-up metadata-URI update failed.
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
@@ -9890,7 +9737,6 @@ describe("Issuance Routes", () => {
           // The DB failure was logged rather than escaping the recovery block.
           expect(consoleErrorSpy).toHaveBeenCalled();
         } finally {
-          createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
           setTokenDeployedSpy.mockRestore();
           consoleErrorSpy.mockRestore();
@@ -9913,9 +9759,6 @@ describe("Issuance Routes", () => {
           template: "arcade",
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockRejectedValueOnce(
@@ -9956,7 +9799,6 @@ describe("Issuance Routes", () => {
             permanentDelegate: TEST_ACTIVE_TOKEN.mintAuthority,
           });
         } finally {
-          createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
           updateTokenAuthoritiesSpy.mockRestore();
         }
@@ -9972,9 +9814,6 @@ describe("Issuance Routes", () => {
         });
 
         const onChainDetail = 'Transaction failed: {"InstructionError":[0,{"Custom":6001}]}';
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockRejectedValueOnce(new AppError("TRANSACTION_FAILED", onChainDetail));
@@ -9998,7 +9837,6 @@ describe("Issuance Routes", () => {
           expect(payload.error.code).toBe("TRANSACTION_FAILED");
           expect(payload.error.message).toBe(onChainDetail);
         } finally {
-          createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
         }
       });
@@ -10013,9 +9851,6 @@ describe("Issuance Routes", () => {
         });
 
         const timeoutDetail = "Transaction 5timeoutSig confirmation timed out after 60000ms";
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const createTokenSpy = vi
           .spyOn(MosaicService.prototype, "createToken")
           .mockRejectedValueOnce(new AppError("SOLANA_RPC_ERROR", timeoutDetail));
@@ -10039,7 +9874,6 @@ describe("Issuance Routes", () => {
           expect(payload.error.code).toBe("SOLANA_RPC_ERROR");
           expect(payload.error.message).toBe(timeoutDetail);
         } finally {
-          createOrgSignerSpy.mockRestore();
           createTokenSpy.mockRestore();
         }
       });
@@ -10080,6 +9914,48 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("refuses a prepare that names no signing wallet before writes or secrets", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_prepare_no_signing_wallet",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          signingCustodyWalletId: null,
+          signingWalletId: null,
+          requiresAllowlist: false,
+        });
+        const updateTokenSpy = vi.spyOn(TokenService.prototype, "updateToken");
+        const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        signerSpy.mockClear();
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          expect(await res.json()).toMatchObject({
+            error: {
+              code: "BAD_REQUEST",
+              message: "signingWalletId is required for the legacy issuance prepare flow",
+            },
+          });
+          expect(updateTokenSpy).not.toHaveBeenCalled();
+          expect(signerSpy).not.toHaveBeenCalled();
+        } finally {
+          updateTokenSpy.mockRestore();
+        }
+      });
+
       it("falls back to the SDP-hosted metadata URL when the token has no uri", async () => {
         if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
           (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
@@ -10094,9 +9970,6 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const prepareCreateTokenSpy = vi
           .spyOn(MosaicService.prototype, "prepareCreateToken")
           .mockResolvedValueOnce({
@@ -10136,7 +10009,6 @@ describe("Issuance Routes", () => {
             })
           );
         } finally {
-          createOrgSignerSpy.mockRestore();
           prepareCreateTokenSpy.mockRestore();
           simulateTransactionSpy.mockRestore();
         }
@@ -10160,9 +10032,6 @@ describe("Issuance Routes", () => {
         const oversizedTx = "A".repeat(1644);
         const slimTx = "ZmFrZS1zZXJpYWxpemVkLXR4";
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const prepareCreateTokenSpy = vi
           .spyOn(MosaicService.prototype, "prepareCreateToken")
           .mockResolvedValueOnce({
@@ -10224,7 +10093,6 @@ describe("Issuance Routes", () => {
             uri: expectedMetadataUrl(token.id),
           });
         } finally {
-          createOrgSignerSpy.mockRestore();
           prepareCreateTokenSpy.mockRestore();
           simulateTransactionSpy.mockRestore();
         }
@@ -10246,9 +10114,6 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const prepareUpdateMetadataSpy = vi
           .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
           .mockResolvedValueOnce({
@@ -10289,7 +10154,6 @@ describe("Issuance Routes", () => {
           expect(payload.data.transaction?.serialized).toBe("ZmFrZS1tZXRhZGF0YS10eA");
           expect(payload.data.uri).toBe(expectedMetadataUrl(token.id));
         } finally {
-          createOrgSignerSpy.mockRestore();
           prepareUpdateMetadataSpy.mockRestore();
           simulateTransactionSpy.mockRestore();
         }
@@ -10310,9 +10174,8 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
-          .spyOn(SolanaServices, "createOrgSigner")
-          .mockResolvedValueOnce({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const exactSignerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        exactSignerSpy.mockClear();
         const prepareUpdateMetadataSpy = vi
           .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
           .mockResolvedValueOnce({
@@ -10342,16 +10205,57 @@ describe("Issuance Routes", () => {
           expect(res.status).toBe(200);
           // The update-authority signer comes from the pinned wallet, not the body —
           // otherwise the follow-up tx would be signed by the wrong authority.
-          expect(createOrgSignerSpy).toHaveBeenCalledWith(
-            expect.anything(),
-            expect.anything(),
-            expect.anything(),
-            "wallet_pinned"
+          expect(exactSignerSpy).toHaveBeenCalledWith(
+            env,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            "cwlt_issuance_activity_wallet_pinned"
           );
         } finally {
-          createOrgSignerSpy.mockRestore();
           prepareUpdateMetadataSpy.mockRestore();
           simulateTransactionSpy.mockRestore();
+        }
+      });
+
+      it("refuses a metadata follow-up for a token with no signing wallet before any signer", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_prepare_metadata_no_signing_wallet",
+          mintAddress: TEST_SOLANA_ADDRESSES.mint,
+          status: "active",
+          uri: null,
+          signingCustodyWalletId: null,
+          signingWalletId: null,
+          requiresAllowlist: false,
+        });
+        const prepareUpdateMetadataSpy = vi.spyOn(MosaicService.prototype, "prepareUpdateMetadata");
+        const signerSpy = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+        signerSpy.mockClear();
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({}),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          expect(await res.json()).toMatchObject({
+            error: {
+              code: "BAD_REQUEST",
+              message: "signingWalletId is required for the legacy issuance prepare flow",
+            },
+          });
+          expect(signerSpy).not.toHaveBeenCalled();
+          expect(prepareUpdateMetadataSpy).not.toHaveBeenCalled();
+        } finally {
+          prepareUpdateMetadataSpy.mockRestore();
         }
       });
 
@@ -10400,7 +10304,7 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
+        const exactSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSignerForCustodyWallet")
           .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const getSignatureStatusesSpy = vi
@@ -10485,7 +10389,7 @@ describe("Issuance Routes", () => {
             simulateTransactionSpy.mockRestore();
           }
         } finally {
-          createOrgSignerSpy.mockRestore();
+          exactSignerSpy.mockRestore();
           getSignatureStatusesSpy.mockRestore();
           accountExistsSpy.mockRestore();
           getTransactionSpy.mockRestore();
@@ -10509,7 +10413,7 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
+        const exactSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSignerForCustodyWallet")
           .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const getSignatureStatusesSpy = vi
@@ -10567,7 +10471,7 @@ describe("Issuance Routes", () => {
           expect(payload.data.token.status).toBe("active");
           expect(consoleErrorSpy).toHaveBeenCalled();
         } finally {
-          createOrgSignerSpy.mockRestore();
+          exactSignerSpy.mockRestore();
           getSignatureStatusesSpy.mockRestore();
           accountExistsSpy.mockRestore();
           getTransactionSpy.mockRestore();
@@ -10661,7 +10565,7 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
+        const exactSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSignerForCustodyWallet")
           .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const getSignatureStatusesSpy = vi
@@ -10714,7 +10618,7 @@ describe("Issuance Routes", () => {
           expect(stillPending?.mintAddress).toBeNull();
           expect(stillPending?.status).toBe("pending");
         } finally {
-          createOrgSignerSpy.mockRestore();
+          exactSignerSpy.mockRestore();
           getSignatureStatusesSpy.mockRestore();
           accountExistsSpy.mockRestore();
           getTransactionSpy.mockRestore();
@@ -10801,7 +10705,7 @@ describe("Issuance Routes", () => {
           ablListAddress: null,
         });
 
-        const createOrgSignerSpy = vi
+        const exactSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSignerForCustodyWallet")
           .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const getSignatureStatusesSpy = vi
@@ -10868,7 +10772,7 @@ describe("Issuance Routes", () => {
           expect(stored?.ablListAddress).toBe(TEST_SOLANA_ADDRESSES.wallet3);
           expect(stored?.ablListAddress).not.toBe(TEST_SOLANA_ADDRESSES.wallet1);
         } finally {
-          createOrgSignerSpy.mockRestore();
+          exactSignerSpy.mockRestore();
           getSignatureStatusesSpy.mockRestore();
           accountExistsSpy.mockRestore();
           getTransactionSpy.mockRestore();
@@ -10890,7 +10794,7 @@ describe("Issuance Routes", () => {
           requiresAllowlist: false,
         });
 
-        const createOrgSignerSpy = vi
+        const exactSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSignerForCustodyWallet")
           .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const prepareCreateTokenSpy = vi
@@ -10955,7 +10859,7 @@ describe("Issuance Routes", () => {
           // 2. confirmDeploy with a DIVERGENT signingWalletId in the body — it
           // must be ignored in favor of the wallet prepareDeploy pinned, or the
           // custody address (and recorded authorities) would silently differ.
-          createOrgSignerSpy.mockClear();
+          exactSignerSpy.mockClear();
           const confirmRes = await app.request(
             `/v1/issuance/tokens/${token.id}/deploy/confirm`,
             {
@@ -10973,14 +10877,14 @@ describe("Issuance Routes", () => {
             env
           );
           expect(confirmRes.status).toBe(200);
-          expect(createOrgSignerSpy).toHaveBeenCalledWith(
+          expect(exactSignerSpy).toHaveBeenCalledWith(
             expect.anything(),
             expect.anything(),
             expect.anything(),
             "cwlt_issuance_activity_wallet_custom_pin"
           );
         } finally {
-          createOrgSignerSpy.mockRestore();
+          exactSignerSpy.mockRestore();
           prepareCreateTokenSpy.mockRestore();
           simulateTransactionSpy.mockRestore();
           getSignatureStatusesSpy.mockRestore();
@@ -11177,7 +11081,7 @@ describe("Issuance Routes", () => {
               .run();
             return { ...token, status: "deploying", isFreezable: false } as never;
           });
-        const createOrgSignerSpy = vi
+        const exactSignerSpy = vi
           .spyOn(SolanaServices, "createOrgSignerForCustodyWallet")
           .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
         const getSignatureStatusesSpy = vi
@@ -11234,7 +11138,7 @@ describe("Issuance Routes", () => {
           expect(after?.freezeAuthority).toBeNull();
         } finally {
           beginTokenDeploySpy.mockRestore();
-          createOrgSignerSpy.mockRestore();
+          exactSignerSpy.mockRestore();
           getSignatureStatusesSpy.mockRestore();
           accountExistsSpy.mockRestore();
           getTransactionSpy.mockRestore();

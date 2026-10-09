@@ -43,7 +43,6 @@ type DashboardCustodyProviderSetupField = CustodyProviderSetupField & {
 
 type DashboardCustodyProviderStoredCredentialSetup =
   | { mode: "self_service"; fields: readonly DashboardCustodyProviderSetupField[] }
-  | { mode: "request_access"; requestAccessUrl: string }
   | { mode: "none" };
 
 export interface CustodyProviderCatalogEntry {
@@ -129,8 +128,8 @@ export function getCustodyProvidersByCategory(
  *
  * Read off `storedCredentialSetup.mode` rather than named providers: the
  * connections surface exists exactly where that setup form exists, and a
- * provider whose route is `request_access` or `none` has no connections to
- * list, no credentials to rotate, and nowhere to send an App Secret. Privy is
+ * provider whose route is `none` has no connections to list, no credentials to
+ * rotate, and nowhere to send an App Secret. Privy is
  * the only `self_service` entry today, and the next one inherits the surface by
  * appearing in the catalog rather than by editing a condition.
  */

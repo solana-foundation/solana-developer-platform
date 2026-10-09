@@ -1274,9 +1274,9 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       const result = await db
         .prepare(
           // An EXACT project match. `project_id` is nullable only through
-          // ON DELETE SET NULL, so a null means the project was deleted — and
-          // accepting it here would expose that project's movements to every
-          // sibling project sharing an organization-level custody wallet.
+          // ON DELETE SET NULL, so a null means the project was deleted, and a
+          // deleted project's movements are not addressable through a
+          // project-scoped read.
           `SELECT * FROM earn_movements
              WHERE organization_id = ?
                AND environment = ?
@@ -3313,13 +3313,13 @@ async function claimVaultPosition(
            (
              wallet.custody_config_id IS NOT NULL
              AND config.organization_id = project.organization_id
-             AND (config.project_id IS NULL OR config.project_id = project.id)
+             AND config.project_id = project.id
            )
            OR
            (
              wallet.custody_connection_id IS NOT NULL
              AND connection.organization_id = project.organization_id
-             AND (connection.project_id IS NULL OR connection.project_id = project.id)
+             AND connection.project_id = project.id
            )
          )
        ON CONFLICT (organization_id, environment, provider, vault_address, custody_wallet_id)

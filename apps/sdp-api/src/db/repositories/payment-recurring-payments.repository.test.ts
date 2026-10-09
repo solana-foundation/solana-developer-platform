@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedRecurringDatabaseTenant } from "@/test/helpers/recurring-payments";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -47,34 +48,29 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       providerWalletId: TEST_PROVIDER_WALLET_ID,
       publicKey: TEST_SOURCE_ADDRESS,
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted)
-         VALUES
-           ('cfg_recurring_payments_exact', ?, NULL, 'test_recurring_exact', 'encrypted'),
-           ('cfg_recurring_payments_sibling', ?, ?, 'test_recurring_sibling', 'encrypted')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(TEST_ORG.id, TEST_ORG.id, TEST_PROJECT_ID)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
-         VALUES
-           (?, 'cfg_recurring_payments_exact', ?, ?),
-           (?, 'cfg_recurring_payments_sibling', ?, ?)
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(
-        TEST_CUSTODY_WALLET_ID,
-        TEST_PROVIDER_WALLET_ID,
-        TEST_SOURCE_ADDRESS,
-        TEST_SIBLING_CUSTODY_WALLET_ID,
-        TEST_PROVIDER_WALLET_ID,
-        TEST_SOURCE_ADDRESS
-      )
-      .run();
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cfg_recurring_payments_sibling",
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          provider: "privy",
+          configEncrypted: "encrypted",
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: TEST_SIBLING_CUSTODY_WALLET_ID,
+          owner: { kind: "config", custodyConfigId: "cfg_recurring_payments_sibling" },
+          walletId: TEST_PROVIDER_WALLET_ID,
+          publicKey: TEST_SOURCE_ADDRESS,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+    });
 
     repo = createPostgresPaymentRecurringPaymentsRepository(db);
   });

@@ -1,8 +1,15 @@
 "use client";
 
+import {
+  type ByokCustodyProvider,
+  CUSTODY_MODES,
+  type CustodyMode,
+  isByokCustodyProvider,
+  type SdpEnvironment,
+} from "@sdp/types";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { type FormEvent, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import {
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
@@ -22,8 +29,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { completeQuickStartStep, quickStartKey } from "@/lib/dashboard-quick-start";
+import type {
+  AvailableCustodyModes,
+  ProjectCustodyAvailability,
+} from "@/lib/provider-availability";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 type SetupStep = "provider" | "details";
@@ -31,6 +43,16 @@ type SetupStep = "provider" | "details";
 const SETUP_STEPS = ["provider", "details"] as const satisfies readonly SetupStep[];
 const PROVIDER_FORM_ID = "wallet-provider-form";
 const DETAILS_FORM_ID = "wallet-details-form";
+const WALLET_TARGET_FIELD = "walletTarget";
+const MANAGED_WALLET_TARGET = "managed";
+const ENVIRONMENT_LABEL_KEYS = {
+  sandbox: "DashboardCustody.sandbox",
+  production: "DashboardCustody.production",
+} as const satisfies Record<SdpEnvironment, MessageKey>;
+const CUSTODY_MODE_LABEL_KEYS = {
+  managed: "DashboardCustody.walletSetupModeManaged",
+  byok: "DashboardCustody.walletSetupModeByok",
+} as const satisfies Record<CustodyMode, MessageKey>;
 
 // Keep Enter available to controls that own it (newlines, option selection,
 // navigation, and action buttons). The already-selected provider card opts in
@@ -68,27 +90,44 @@ function ignoresEnterToSubmit(target: HTMLElement): boolean {
 
 interface WalletSetupFlowProps {
   connectedProviders: KnownCustodyProvider[];
-  enabledProviders: KnownCustodyProvider[];
-  initialProvider?: KnownCustodyProvider | null;
-  /** Stored-credential install for Privy; ships dark until the flag is on. */
-  privyByokEnabled?: boolean;
+  /** The custody providers the project can use, each with the modes it may be set up in. */
+  custodyAvailability: ProjectCustodyAvailability[];
+  environment: SdpEnvironment;
+  initialProvider: KnownCustodyProvider | null;
   /**
-   * Connections the wallet can be created in. Empty whenever the project has
-   * none, the provider predates Connections, or the reader lacks
-   * `custody:admin` — in every one of those the wizard keeps its old shape.
+   * Connections the wallet can be created in. Offered only for a provider whose
+   * modes include `byok`, and empty whenever the project has none or the reader
+   * lacks `custody:admin`; in each case the wizard keeps its Managed shape.
    */
-  connections?: CustodyConnectionListItem[];
+  connections: CustodyConnectionListItem[];
 }
 
 /**
- * One frozen empty list for the absent-connections case.
+ * Narrows a select value to a custody mode.
  *
- * A `connections = []` default literal is a different array on every render, so
- * it would invalidate the memo that narrows the list by provider every time the
- * wizard re-rendered — on each keystroke in the wallet name — for a value that
- * never changes.
+ * @param value - The value the mode select reported.
+ * @returns True when `value` is one of `CUSTODY_MODES`.
  */
-const NO_CONNECTIONS: CustodyConnectionListItem[] = [];
+function isCustodyMode(value: string | null): value is CustodyMode {
+  return CUSTODY_MODES.some((mode) => mode === value);
+}
+
+/**
+ * The mode a provider that is not set up yet gets set up in: its only mode,
+ * or the user's choice when it offers more than one.
+ *
+ * @param input - What the selected provider offers and what the user chose.
+ * @param input.modes - The modes the project may set the provider up in.
+ * @param input.chosenMode - The mode the user picked, if any.
+ * @returns The setup mode, or `null` while the user still has to choose.
+ */
+function resolveSetupMode(input: {
+  modes: AvailableCustodyModes;
+  chosenMode: CustodyMode | null;
+}): CustodyMode | null {
+  const [firstMode, ...otherModes] = input.modes;
+  return otherModes.length === 0 ? firstMode : input.chosenMode;
+}
 
 /** Only an active connection holds verified credentials, so only it can take a wallet. */
 function isSelectableConnection(connection: CustodyConnectionListItem): boolean {
@@ -96,17 +135,31 @@ function isSelectableConnection(connection: CustodyConnectionListItem): boolean 
 }
 
 /**
- * The connection a wallet lands in unless the user says otherwise: the project
- * default when it is usable, else the first active one. Picking nothing when a
- * usable connection exists would make the wizard fail on submit for no reason.
+ * Moves the picker's choice onto the field the create action reads: a
+ * connection id as `connectionId`, and Managed as no connection at all, so the
+ * action names the provider's Managed config.
+ *
+ * @param formData - The submitted details form, edited in place.
+ * @returns False when the user has not picked where the wallet lives.
  */
-function defaultConnectionId(connections: CustodyConnectionListItem[]): string {
-  const selectable = connections.filter(isSelectableConnection);
-  return selectable.find((connection) => connection.isDefault)?.id ?? selectable[0]?.id ?? "";
+function applyWalletTarget(formData: FormData): boolean {
+  const walletTarget = formData.get(WALLET_TARGET_FIELD);
+  formData.delete(WALLET_TARGET_FIELD);
+  if (typeof walletTarget !== "string" || walletTarget === "") {
+    return false;
+  }
+  if (walletTarget !== MANAGED_WALLET_TARGET) {
+    formData.set("connectionId", walletTarget);
+  }
+  return true;
 }
 
 /**
- * Picks the connection a new wallet is created in.
+ * Picks the provider account a new wallet is created in: the provider's
+ * Managed config, when the project has one, or one of its connections.
+ *
+ * Nothing is preselected. There is no default custody, so the user names the
+ * account every time, even when only one is selectable.
  *
  * Unusable connections stay on the list, disabled and annotated, rather than
  * being filtered out: a user who came here to add a wallet to the connection
@@ -115,14 +168,16 @@ function defaultConnectionId(connections: CustodyConnectionListItem[]): string {
  */
 function WalletConnectionField({
   connections,
+  hasManagedConfig,
   t,
 }: {
   connections: CustodyConnectionListItem[];
+  hasManagedConfig: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
   const annotate = (connection: CustodyConnectionListItem): string | null => {
     if (isSelectableConnection(connection)) {
-      return connection.isDefault ? t("DashboardCustody.walletSetupConnectionDefault") : null;
+      return null;
     }
     return connection.status === "failed"
       ? t("DashboardCustody.walletSetupConnectionUnavailableFailed")
@@ -133,11 +188,16 @@ function WalletConnectionField({
     <div className="space-y-2">
       <Label htmlFor="wallet-connection">{t("DashboardCustody.walletSetupConnection")}</Label>
       <Select
-        name="connectionId"
+        name={WALLET_TARGET_FIELD}
         ariaLabel={t("DashboardCustody.walletSetupConnection")}
-        defaultValue={defaultConnectionId(connections)}
+        placeholder={t("DashboardCustody.walletSetupConnectionPlaceholder")}
         size="xl"
       >
+        {hasManagedConfig ? (
+          <SelectItem value={MANAGED_WALLET_TARGET}>
+            {t("DashboardCustody.walletSetupConnectionManaged")}
+          </SelectItem>
+        ) : null}
         {connections.map((connection) => {
           const annotation = annotate(connection);
           return (
@@ -170,11 +230,170 @@ function WalletFixedField({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * Picks how a provider the project may set up either way is set up: Managed on
+ * the deployment's provider account, or BYOK on the project's own credentials.
+ * Nothing is preselected.
+ *
+ * @param props - The component props.
+ * @param props.disabled - Locks the choice while a setup request is pending or a
+ *   BYOK submission awaits recovery.
+ * @param props.mode - The chosen mode, or `null` before the user picks.
+ * @param props.modes - The modes the provider may be set up in, one option each.
+ * @param props.onModeChange - Called with the newly chosen mode.
+ * @param props.t - The translator.
+ * @returns The mode select.
+ */
+function CustodyModeField({
+  disabled,
+  mode,
+  modes,
+  onModeChange,
+  t,
+}: {
+  disabled: boolean;
+  mode: CustodyMode | null;
+  modes: AvailableCustodyModes;
+  onModeChange: (mode: CustodyMode | null) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const selectId = useId();
+  const hintId = useId();
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={selectId}>{t("DashboardCustody.walletSetupMode")}</Label>
+      <Select
+        id={selectId}
+        ariaLabel={t("DashboardCustody.walletSetupMode")}
+        ariaDescribedBy={hintId}
+        placeholder={t("DashboardCustody.walletSetupModePlaceholder")}
+        size="xl"
+        value={mode}
+        onValueChange={(value) => onModeChange(isCustodyMode(value) ? value : null)}
+        disabled={disabled}
+      >
+        {modes.map((option) => (
+          <SelectItem key={option} value={option}>
+            {t(CUSTODY_MODE_LABEL_KEYS[option])}
+          </SelectItem>
+        ))}
+      </Select>
+      <p id={hintId} className="text-sm leading-6 text-tertiary">
+        {t("DashboardCustody.walletSetupModeHint")}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The credential form a BYOK provider is set up with.
+ *
+ * @param props - The component props.
+ * @param props.provider - The BYOK provider being set up.
+ * @param props.formId - The id the footer's submit button targets.
+ * @param props.onPendingChange - Called with whether a submit, replay or re-check request is in flight.
+ * @param props.onRecoveryLockChange - Called with whether leaving the form would strand a stored credential or key.
+ * @returns The provider's credential form.
+ */
+function ByokCredentialForm({
+  provider,
+  formId,
+  onPendingChange,
+  onRecoveryLockChange,
+}: {
+  provider: ByokCustodyProvider;
+  formId: string;
+  onPendingChange: (pending: boolean) => void;
+  onRecoveryLockChange: (locked: boolean) => void;
+}) {
+  switch (provider) {
+    case "privy":
+      return (
+        <PrivyCredentialForm
+          formId={formId}
+          onPendingChange={onPendingChange}
+          onRecoveryLockChange={onRecoveryLockChange}
+        />
+      );
+    default: {
+      const unhandledProvider: never = provider;
+      throw new Error(`Unhandled BYOK custody provider: ${String(unhandledProvider)}`);
+    }
+  }
+}
+
+interface SetupOptions {
+  /** The BYOK provider whose credential form step 2 shows, or `null` when it shows none. */
+  byokSetupProvider: ByokCustodyProvider | null;
+  connectionOptions: CustodyConnectionListItem[];
+  hasManagedConfig: boolean;
+  isConnected: boolean;
+  setupMode: CustodyMode | null;
+  /** The modes the user picks between, or `null` when the wizard picks the mode itself. */
+  modeChoices: AvailableCustodyModes | null;
+}
+
+/**
+ * What step 2 offers for the selected provider, from its modes, its Managed
+ * config and the project's connections. Managed is offered only where the
+ * modes include `managed`; connections are BYOK custody, so a provider whose
+ * modes leave out `byok` offers none.
+ *
+ * Switching provider on step 1 must not carry the previous provider's
+ * connections into step 2, so the list is narrowed here rather than trusted as
+ * delivered. The availability status comes from Managed configs; a BYOK-only
+ * project has none, so an active connection also shows the provider is
+ * installed. Without either, the wizard sets the provider up first.
+ *
+ * @param input - The selection and the project's connections.
+ * @param input.selectedAvailability - The selected provider's row, or `null` before one is picked.
+ * @param input.connections - Every connection the wallet could be created in.
+ * @param input.chosenMode - The mode the user picked for a provider offering both.
+ * @returns The connections, setup state, mode and BYOK credential form step 2 renders from.
+ */
+function resolveSetupOptions(input: {
+  selectedAvailability: CustodyProviderAvailability | null;
+  connections: CustodyConnectionListItem[];
+  chosenMode: CustodyMode | null;
+}): SetupOptions {
+  const { selectedAvailability, connections, chosenMode } = input;
+  if (selectedAvailability === null) {
+    return {
+      byokSetupProvider: null,
+      connectionOptions: [],
+      hasManagedConfig: false,
+      isConnected: false,
+      setupMode: null,
+      modeChoices: null,
+    };
+  }
+  const offersManaged = selectedAvailability.modes.includes("managed");
+  const offersByok = selectedAvailability.modes.includes("byok");
+  const connectionOptions = offersByok
+    ? connections.filter((connection) => connection.provider === selectedAvailability.entry.id)
+    : [];
+  const hasManagedConfig = offersManaged && selectedAvailability.status === "active";
+  const isConnected = hasManagedConfig || connectionOptions.some(isSelectableConnection);
+  const setupMode = resolveSetupMode({ modes: selectedAvailability.modes, chosenMode });
+  const providerId = selectedAvailability.entry.id;
+  return {
+    byokSetupProvider:
+      !isConnected && setupMode === "byok" && isByokCustodyProvider(providerId) ? providerId : null,
+    connectionOptions,
+    hasManagedConfig,
+    isConnected,
+    setupMode,
+    modeChoices: !isConnected && offersManaged && offersByok ? selectedAvailability.modes : null,
+  };
+}
+
 /** Step 2 of the wizard for a provider that is already installed. */
 function WalletDetailsFields({
   canProvisionWallet,
   connectionOptions,
+  environment,
   errorMessage,
+  hasManagedConfig,
   isConnected,
   onWalletLabelChange,
   providerEntry,
@@ -184,7 +403,9 @@ function WalletDetailsFields({
 }: {
   canProvisionWallet: boolean;
   connectionOptions: CustodyConnectionListItem[];
+  environment: SdpEnvironment;
   errorMessage: string | null;
+  hasManagedConfig: boolean;
   isConnected: boolean;
   onWalletLabelChange: (value: string) => void;
   providerEntry: { id: KnownCustodyProvider; label: string } | null;
@@ -208,7 +429,11 @@ function WalletDetailsFields({
         />
       </div>
       {showConnectionPicker ? (
-        <WalletConnectionField connections={connectionOptions} t={t} />
+        <WalletConnectionField
+          connections={connectionOptions}
+          hasManagedConfig={hasManagedConfig}
+          t={t}
+        />
       ) : null}
       <WalletFixedField
         label={t("DashboardCustody.project")}
@@ -216,7 +441,7 @@ function WalletDetailsFields({
       />
       <WalletFixedField
         label={t("DashboardCustody.environment")}
-        value={t("DashboardCustody.sandbox")}
+        value={t(ENVIRONMENT_LABEL_KEYS[environment])}
       />
       {canProvisionWallet ? null : (
         <div className="rounded-2xl border border-border-default bg-fill-subtle px-4 py-3 text-sm leading-6 text-tertiary">
@@ -237,9 +462,32 @@ function WalletDetailsFields({
   );
 }
 
+/**
+ * The wizard heading for the current step: the provider choice, BYOK provider
+ * details, or Managed and additional-wallet details.
+ *
+ * @param input - The step and what it shows.
+ * @param input.currentStep - The step on screen.
+ * @param input.isByokDetails - Whether the details step shows a BYOK credential form.
+ * @param input.t - The translator.
+ * @returns The translated heading.
+ */
+function resolveSetupHeading(input: {
+  currentStep: SetupStep;
+  isByokDetails: boolean;
+  t: ReturnType<typeof useTranslations>;
+}): string {
+  if (input.currentStep === "provider") {
+    return input.t("DashboardCustody.chooseProvider");
+  }
+  return input.isByokDetails
+    ? input.t("DashboardCustody.byokProviderDetails")
+    : input.t("DashboardCustody.walletDetails");
+}
+
 function getInitialSelection(input: {
   availability: CustodyProviderAvailability[];
-  initialProvider?: KnownCustodyProvider | null;
+  initialProvider: KnownCustodyProvider | null;
 }): {
   provider: KnownCustodyProvider | null;
   step: SetupStep;
@@ -249,7 +497,7 @@ function getInitialSelection(input: {
     ? availability.find((provider) => provider.entry.id === initialProvider)
     : undefined;
 
-  if (requested?.isSelectable) {
+  if (requested) {
     return {
       provider: requested.entry.id,
       step: "details",
@@ -264,10 +512,10 @@ function getInitialSelection(input: {
 
 export function WalletSetupFlow({
   connectedProviders,
-  enabledProviders,
-  initialProvider = null,
-  privyByokEnabled = false,
-  connections = NO_CONNECTIONS,
+  custodyAvailability,
+  environment,
+  initialProvider,
+  connections,
 }: WalletSetupFlowProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -276,8 +524,8 @@ export function WalletSetupFlow({
   const { dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
   const [isPending, startTransition] = useTransition();
   const availability = useMemo(
-    () => resolveCustodyProviderAvailability({ connectedProviders, enabledProviders }),
-    [connectedProviders, enabledProviders]
+    () => resolveCustodyProviderAvailability({ connectedProviders, custodyAvailability }),
+    [connectedProviders, custodyAvailability]
   );
   const initialSelection = useMemo(
     () =>
@@ -292,44 +540,43 @@ export function WalletSetupFlow({
     initialSelection.provider
   );
   const [walletLabel, setWalletLabel] = useState("");
+  const [chosenMode, setChosenMode] = useState<CustodyMode | null>(null);
   // While a BYOK submission is in an unknown state, leaving the step would
   // unmount the frozen payload and key that are the only path to recovery.
   const [byokRecoveryLocked, setByokRecoveryLocked] = useState(false);
+  const [byokRequestPending, setByokRequestPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submissionInFlightRef = useRef(false);
 
-  const selectedAvailability = useMemo(
-    () =>
-      availability.find(
-        (provider) => provider.isSelectable && provider.entry.id === selectedProvider
-      ) ?? null,
-    [availability, selectedProvider]
+  const selectedAvailability = useMemo(() => {
+    const match = availability.find((provider) => provider.entry.id === selectedProvider);
+    return match === undefined ? null : match;
+  }, [availability, selectedProvider]);
+  const selectedProviderEntry = selectedAvailability === null ? null : selectedAvailability.entry;
+  const {
+    byokSetupProvider,
+    connectionOptions,
+    hasManagedConfig,
+    isConnected,
+    setupMode,
+    modeChoices,
+  } = useMemo(
+    () => resolveSetupOptions({ selectedAvailability, connections, chosenMode }),
+    [selectedAvailability, connections, chosenMode]
   );
-  const selectedProviderEntry = selectedAvailability?.entry ?? null;
-  // Switching provider on step 1 must not carry the previous provider's
-  // connections into step 2, so the list is narrowed here rather than trusted
-  // as delivered. The picker earns its place only when the provider is already
-  // installed and something is actually selectable: a legacy Config-backed
-  // provider has no connections and keeps the original two-field form.
-  const connectionOptions = useMemo(
-    () => connections.filter((connection) => connection.provider === selectedProvider),
-    [connections, selectedProvider]
-  );
-  // The availability status comes from legacy Configs. A BYOK-only project has
-  // no legacy Config, so an active connection also shows that the provider is
-  // installed. Without it, the wizard asks for the credentials again.
-  const isConnected =
-    selectedAvailability !== null &&
-    (selectedAvailability.status === "active" || connectionOptions.some(isSelectableConnection));
-  const canProvisionWallet = selectedProviderEntry
-    ? !isConnected || selectedProviderEntry.supportsAdditionalWallets
-    : false;
+  const awaitingModeChoice = modeChoices !== null && setupMode === null;
+  const canProvisionWallet =
+    selectedProviderEntry !== null &&
+    (isConnected ? selectedProviderEntry.supportsAdditionalWallets : setupMode === "managed");
   const formAction = isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction;
   const showConnectionPicker = isConnected && connectionOptions.some(isSelectableConnection);
-  // An uninstalled Privy under BYOK goes through provider details (credential
-  // submission + connection check) instead of the legacy initialize path,
-  // which the API refuses once stored-credential setup is enforced.
-  const isByokDetails = privyByokEnabled && selectedProviderEntry?.id === "privy" && !isConnected;
+  // A BYOK setup goes through provider details (credential submission +
+  // connection check) instead of the Managed initialize path.
+  const isByokDetails = byokSetupProvider !== null;
+  // Every setup request, Managed or BYOK, holds the mode picker and Back: a
+  // BYOK request settling after its form unmounted could lock recovery with no
+  // form left to recover from.
+  const setupRequestInFlight = isPending || byokRequestPending;
 
   const continueFromProvider = () => {
     if (!selectedProviderEntry) {
@@ -364,17 +611,33 @@ export function WalletSetupFlow({
       return;
     }
 
-    submissionInFlightRef.current = true;
     const formData = new FormData(form);
+    if (showConnectionPicker && !applyWalletTarget(formData)) {
+      setErrorMessage(t("DashboardCustody.walletSetupConnectionRequired"));
+      return;
+    }
+
+    submissionInFlightRef.current = true;
     setErrorMessage(null);
 
     startTransition(async () => {
       try {
         const result = await formAction(formData);
 
-        if (result.status === "error") {
-          setErrorMessage(result.message);
-          return;
+        switch (result.status) {
+          case "error":
+            setErrorMessage(result.message);
+            return;
+          case "provider_already_set_up":
+            setErrorMessage(t("DashboardCustody.walletSetupProviderAlreadySetUp"));
+            router.refresh();
+            return;
+          case "success":
+            break;
+          default: {
+            const unhandledResult: never = result;
+            throw new Error(`Unhandled wallet setup result: ${JSON.stringify(unhandledResult)}`);
+          }
         }
 
         if (selectedProjectId) {
@@ -434,12 +697,7 @@ export function WalletSetupFlow({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const heading =
-    currentStep === "provider"
-      ? t("DashboardCustody.chooseProvider")
-      : isByokDetails
-        ? t("DashboardCustody.byokProviderDetails")
-        : t("DashboardCustody.walletDetails");
+  const heading = resolveSetupHeading({ currentStep, isByokDetails, t });
   const canContinue = Boolean(selectedProviderEntry);
   const stepIndex = SETUP_STEPS.indexOf(currentStep);
 
@@ -447,7 +705,9 @@ export function WalletSetupFlow({
     <WalletDetailsFields
       canProvisionWallet={canProvisionWallet}
       connectionOptions={connectionOptions}
+      environment={environment}
       errorMessage={errorMessage}
+      hasManagedConfig={hasManagedConfig}
       isConnected={isConnected}
       onWalletLabelChange={setWalletLabel}
       providerEntry={selectedProviderEntry}
@@ -487,20 +747,40 @@ export function WalletSetupFlow({
                   availability={availability}
                   onSelect={(provider) => {
                     setSelectedProvider(provider);
+                    setChosenMode(null);
                     setErrorMessage(null);
                   }}
                   selectedProvider={selectedProvider}
                 />
               </form>
-            ) : isByokDetails ? (
-              <PrivyCredentialForm
-                formId={DETAILS_FORM_ID}
-                onRecoveryLockChange={setByokRecoveryLocked}
-              />
             ) : (
-              <form id={DETAILS_FORM_ID} onSubmit={handleDetailsSubmit} className="grid gap-4">
-                {formContent}
-              </form>
+              <>
+                {modeChoices === null ? null : (
+                  <CustodyModeField
+                    disabled={byokRecoveryLocked || setupRequestInFlight}
+                    mode={chosenMode}
+                    modes={modeChoices}
+                    onModeChange={(mode) => {
+                      setChosenMode(mode);
+                      setErrorMessage(null);
+                    }}
+                    t={t}
+                  />
+                )}
+                {byokSetupProvider === null ? null : (
+                  <ByokCredentialForm
+                    provider={byokSetupProvider}
+                    formId={DETAILS_FORM_ID}
+                    onPendingChange={setByokRequestPending}
+                    onRecoveryLockChange={setByokRecoveryLocked}
+                  />
+                )}
+                {isByokDetails || awaitingModeChoice ? null : (
+                  <form id={DETAILS_FORM_ID} onSubmit={handleDetailsSubmit} className="grid gap-4">
+                    {formContent}
+                  </form>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -518,7 +798,7 @@ export function WalletSetupFlow({
               type="button"
               variant="secondary"
               onClick={goBack}
-              disabled={isPending}
+              disabled={setupRequestInFlight}
               iconLeft={currentStep === "details" ? <ArrowLeft className="size-4" /> : undefined}
             >
               {currentStep === "provider"

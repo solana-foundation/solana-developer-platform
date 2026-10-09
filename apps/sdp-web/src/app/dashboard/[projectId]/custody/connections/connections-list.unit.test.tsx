@@ -21,12 +21,7 @@ vi.mock("@/app/dashboard/[projectId]/custody/wallet-provider-mark", () => ({
   WalletProviderMark: () => <span>Provider mark</span>,
 }));
 
-import {
-  type ConnectionsPageResult,
-  type ConnectionsProjectSummary,
-  type CustodyConnectionListItem,
-  summarizeProviderConnections,
-} from "./connections.data";
+import type { ConnectionsPageResult, CustodyConnectionListItem } from "./connections.data";
 import { ConnectionsList } from "./connections-list";
 
 function makeConnection(
@@ -40,9 +35,7 @@ function makeConnection(
     lastCheck: { status: "success", at: "2026-08-10T09:05:00.000Z", failureCode: null },
     pendingWalletLabel: null,
     label: "Ops Privy app",
-    isDefault: false,
     isRuntimeExecutionAllowed: true,
-    defaultCustodyWalletId: `wallet-${overrides.id}`,
     ...overrides,
   };
 }
@@ -58,20 +51,14 @@ function makeResult(
 function renderList({
   result,
   page = 1,
-  // The project-level summary the section computes; defaults to the rows on
-  // screen, which is the single-page case.
-  summary = summarizeProviderConnections({ connections: result.connections, complete: true }),
   walletsByConnection = {},
   walletsUnavailable = false,
-  canManageCustody = true,
   emptyStateAction,
 }: {
   result: ConnectionsPageResult;
   page?: number;
-  summary?: ConnectionsProjectSummary;
   walletsByConnection?: Record<string, CustodyWalletSummary[]>;
   walletsUnavailable?: boolean;
-  canManageCustody?: boolean;
   emptyStateAction?: React.ReactNode;
 }): string {
   return renderToStaticMarkup(
@@ -79,10 +66,8 @@ function renderList({
       <ConnectionsList
         result={result}
         filters={{ page }}
-        summary={summary}
         walletsByConnection={walletsByConnection}
         walletsUnavailable={walletsUnavailable}
-        canManageCustody={canManageCustody}
         provider="privy"
         projectName="Acme Payments"
         emptyStateAction={emptyStateAction}

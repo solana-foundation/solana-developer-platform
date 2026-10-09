@@ -10,6 +10,10 @@ import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
+import {
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
 import { type EarnAuthzTenant, seedEarnApiKey, seedEarnAuthzTenant } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -43,6 +47,7 @@ let tenant: EarnAuthzTenant;
 let apiKeyRaw: string;
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
+let originalEncryptionKey: string | undefined;
 
 type Actor = "api_key" | "clerk";
 
@@ -93,20 +98,32 @@ async function expectNotEntitlementRefusal(res: Response): Promise<void> {
 
 async function seedProductionPosition(): Promise<string> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
-         VALUES ('cfg_earn_prod_entitlement', ?, ?, 'privy', 'encrypted', 'active')`
-      )
-      .bind(tenant.org.id, tenant.project.id),
-    db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, 'cfg_earn_prod_entitlement', 'privy_earn_prod_entitlement', ?, 'active')`
-      )
-      .bind(CUSTODY_WALLET_ID, WALLET_ADDRESS),
-  ]);
+  await seedTestPrivyConnection(db, {
+    organizationId: tenant.org.id,
+    projectId: tenant.project.id,
+    connectionId: "cconn_earn_prod_entitlement",
+    credentialId: "pcred_earn_prod_entitlement",
+    createdBy: tenant.user.id,
+    stored: await writeTestPrivyCredentialSecret(env, {
+      organizationId: tenant.org.id,
+      credentialId: "pcred_earn_prod_entitlement",
+      appId: "earn-prod-entitlement-app",
+      appSecret: "earn-prod-entitlement-secret",
+    }),
+    providerAccountFingerprint: "sha256:earn-prod-entitlement",
+    wallets: [
+      {
+        id: CUSTODY_WALLET_ID,
+        walletId: "privy_earn_prod_entitlement",
+        publicKey: WALLET_ADDRESS,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+    lastCheckStatus: "success",
+    defaultCustodyWalletId: CUSTODY_WALLET_ID,
+  });
   const id = generateEarnPositionId();
   await db
     .prepare(
@@ -171,8 +188,10 @@ function movementRow(positionId: string, requestId: string): EarnMovementRow {
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
+  originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
+  env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
@@ -198,6 +217,7 @@ beforeEach(async () => {
 afterEach(() => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
+  env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   vi.restoreAllMocks();
 });
 

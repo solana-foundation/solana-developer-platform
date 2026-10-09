@@ -129,7 +129,6 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       const api = createLocalApiClient(env.sdpApiBaseUrl, session.getBearerToken, project.id);
       const walletsPath = `/v1/wallets?${new URLSearchParams({
         includeBalances: "true",
-        includeAllProviders: "true",
         view: "summary",
       })}`;
       const issuancePath = `/v1/issuance/transactions?${new URLSearchParams({

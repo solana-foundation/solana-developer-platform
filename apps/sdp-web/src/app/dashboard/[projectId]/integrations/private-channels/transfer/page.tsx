@@ -2,10 +2,10 @@ import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
 import {
+  fetchCustodyWallets,
   fetchPrivateChannelPrincipals,
   fetchPrivateChannels,
   fetchPrivateChannelTokenEligibility,
-  fetchSignableCustodyWallets,
   fetchVerifiedWallets,
 } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage, requestProjectHref } from "@/lib/sdp-api";
@@ -44,7 +44,7 @@ export default async function PrivateChannelsTransferPage() {
       await Promise.all([
         fetchPrivateChannelPrincipals(client),
         fetchPrivateChannels(client),
-        fetchSignableCustodyWallets(client),
+        fetchCustodyWallets(client),
         fetchVerifiedWallets(client),
         fetchPrivateChannelTokenEligibility(client),
       ]);

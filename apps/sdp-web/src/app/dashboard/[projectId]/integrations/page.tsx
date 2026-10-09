@@ -7,7 +7,12 @@ import { custody, policies, privateChannels } from "@/flags";
 import { getOfferedRampProviders } from "@/flags/ramps";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { fetchProviderAvailability } from "@/lib/provider-availability";
+import {
+  availableComplianceProviders,
+  availableCustodyProviders,
+  availableRampProviders,
+} from "@/lib/provider-availability";
+import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
 import { isIntegrationFamilyEnabled } from "./integration-feature-gates";
@@ -45,7 +50,7 @@ async function getPrivateChannelsActive(client: SdpApiClient): Promise<boolean |
 
 /**
  * The integrations catalog for the selected project, gated by the dashboard's
- * module flags.
+ * module flags and listing only the providers the project can use.
  *
  * @returns The rendered catalog.
  */
@@ -71,7 +76,6 @@ export default async function IntegrationsPage() {
   if (!onboarding.linked || !onboarding.organization) {
     redirect("/dashboard");
   }
-  const organizationId = onboarding.organization.id;
   const [t, custodyEnabled, rampProviders, complianceEnabled, privateChannelsEnabled] =
     await Promise.all([
       getTranslations(),
@@ -87,8 +91,8 @@ export default async function IntegrationsPage() {
     privateChannels: privateChannelsEnabled,
   };
   const [availability, connectedProviders, privateChannelsActive] = await Promise.all([
-    trace.step("fetch_provider_access", () =>
-      fetchProviderAvailability(projectClient.request, organizationId)
+    trace.step("fetch_provider_availability", () =>
+      fetchProjectProviderAvailability(projectClient)
     ),
     // null, not [] — an empty list claims nothing is connected and offers
     // Configure for providers that are already active. Unknown must render as
@@ -114,17 +118,17 @@ export default async function IntegrationsPage() {
             ? null
             : resolveCustodyIntegrations({
                 connectedProviders,
-                enabledProviders: availability.enabledCustodyProviders,
+                custodyAvailability: availableCustodyProviders(availability),
               })
       }
       ramps={
         isIntegrationFamilyEnabled("ramps", integrationFlags)
-          ? resolveRampIntegrations(availability.providers.ramps, rampProviders)
+          ? resolveRampIntegrations(availableRampProviders(availability), rampProviders)
           : []
       }
       compliance={
         isIntegrationFamilyEnabled("compliance", integrationFlags)
-          ? resolveComplianceIntegrations(availability.providers.compliance)
+          ? resolveComplianceIntegrations(availableComplianceProviders(availability))
           : []
       }
       privacy={resolvePrivacyIntegrations({

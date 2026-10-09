@@ -135,9 +135,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     walletPurpose,
   } = body;
 
-  const connectionId =
-    typeof provisionWallet === "object" ? provisionWallet.connectionId : undefined;
-  const provisionWalletRequested = Boolean(provisionWallet);
+  const provisionWalletRequested = provisionWallet !== undefined;
 
   const walletSelection = resolveCreateWalletScope({
     walletScope,
@@ -145,7 +143,6 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     signingWalletIds,
     walletBindings,
     provisionWallet: provisionWalletRequested,
-    connectionId,
   });
 
   const actorApiKey = c.get("apiKey");
@@ -182,8 +179,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
         creationReason: "api_key",
         organizationId: auth.organizationId,
         projectId,
-        legacyConfigProjectId: projectId,
-        connectionId,
+        owner: provisionWallet,
         label: walletLabel,
         purpose: walletPurpose,
       });

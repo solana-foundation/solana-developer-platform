@@ -184,7 +184,6 @@ describe("Counterparties Routes", () => {
         provider: "local",
         config: "test-config",
         encryptionVersion: "sdp-custody-encryption-v1",
-        defaultWalletId: null,
         status: "active",
         createdAt: seededAt,
         updatedAt: seededAt,

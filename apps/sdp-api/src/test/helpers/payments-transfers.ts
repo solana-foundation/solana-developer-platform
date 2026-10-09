@@ -12,6 +12,7 @@ import { errorResponseSchema } from "@/openapi/schemas/base";
 import type { createTransferSchema } from "@/routes/payments/transfers/schemas";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   seedCachedKey,
@@ -172,21 +173,36 @@ export async function seedCustodyWalletFixture(params: {
     .run();
 }
 
+/**
+ * Seed a second wallet with the primary wallet's Provider ID under another provider's config in
+ * the same project, since a project holds one config per provider.
+ * @returns Resolves once the config and wallet are written.
+ */
 export async function seedConfigOwnedDuplicateProviderWallet(): Promise<void> {
   const configId = "cust_cfg_payments_exact_duplicate_test";
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(`INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted,
-            encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', ?, 'active')`)
-      .bind(configId, TEST_ORG.id, TEST_PROJECT.id, TEST_WALLET_ID),
-    getDb(env)
-      .prepare(`INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES ('cwlt_payments_duplicate_test', ?, ?, ?, 'Config duplicate', 'transfer', 'active')`)
-      .bind(configId, TEST_WALLET_ID, TEST_SOLANA_ADDRESSES.wallet3),
-  ]);
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: configId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "privy",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: "cwlt_payments_duplicate_test",
+        owner: { kind: "config", custodyConfigId: configId },
+        walletId: TEST_WALLET_ID,
+        publicKey: TEST_SOLANA_ADDRESSES.wallet3,
+        label: "Config duplicate",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+  });
 }
 
 export async function seedConnectionOwnedDuplicateProviderWallet(): Promise<void> {

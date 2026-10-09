@@ -57,8 +57,6 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
 
 export const createFeePaymentAdapterMock = vi.spyOn(feePaymentAdapters, "createFeePaymentAdapter");
 
-export const createOrgSignerMock = vi.spyOn(solanaServices, "createOrgSigner");
-
 export const createOrgSignerForCustodyWalletMock = vi.spyOn(
   solanaServices,
   "createOrgSignerForCustodyWallet"
@@ -92,6 +90,8 @@ export const TEST_PROJECT = {
   id: "prj_test_payments_policy",
   slug: "test-payments-policy-project",
 };
+
+export const TEST_PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
 
 export const TEST_USER = {
   id: "usr_payments_policy_test",
@@ -230,7 +230,7 @@ async function seedAuthAndWallet(): Promise<void> {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
     members: [TEST_USER.id],
-    ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
+    ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT_ID },
   });
   await getDb(env).batch([
     getDb(env)
@@ -254,26 +254,18 @@ async function seedAuthAndWallet(): Promise<void> {
     getDb(env)
       .prepare(
         `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         TEST_CONFIG_ID,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         "local",
         "test-config",
         "sdp-custody-encryption-v1",
-        TEST_WALLET_ID,
         "active"
       ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, null, TEST_CONFIG_ID),
     getDb(env)
       .prepare(
         `INSERT INTO custody_wallets
@@ -311,6 +303,7 @@ export async function seedCounterparty(params?: {
   id?: string;
   externalId?: string | null;
   providerData?: Record<string, unknown>;
+  projectId?: string;
 }): Promise<string> {
   const id = params?.id ?? `cpty_${crypto.randomUUID()}`;
   const externalId = params?.externalId ?? null;
@@ -332,7 +325,7 @@ export async function seedCounterparty(params?: {
     .bind(
       id,
       TEST_ORG.id,
-      TEST_PROJECT.id,
+      params?.projectId ?? TEST_PROJECT.id,
       externalId,
       "individual",
       "MoonPay Test Counterparty",
@@ -592,9 +585,6 @@ export function installPaymentsRouteTestHooks(): void {
           "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
         ),
     } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
-    createOrgSignerMock.mockResolvedValue(
-      createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
-    );
     createOrgSignerForCustodyWalletMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );

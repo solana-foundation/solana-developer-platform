@@ -96,7 +96,7 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
         : null;
   if (!prefix) return null;
   if (pathname === prefix) return "wallets-overview";
-  if (pathname === `${prefix}/setup` || pathname === `${prefix}/switch`) return "wallet-setup";
+  if (pathname === `${prefix}/setup`) return "wallet-setup";
   if (pathname === `${prefix}/connections`) return "wallet-connections";
 
   const suffix = pathname.slice(prefix.length).split("/").filter(Boolean);

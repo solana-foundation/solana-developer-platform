@@ -316,7 +316,6 @@ async function resolveCustodyQueueTarget(
     const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
       organizationId: auth.organizationId,
       projectId,
-      includeAllProviders: true,
     });
     wallet = resolveEarnVaultCustodyWallet(wallets, position.custodyWalletId);
     assertBoundWalletIdentifierIsUnique(auth, wallets, wallet);
@@ -688,11 +687,10 @@ async function requireReadableCustodyRequest(c: AppContext, withdrawalRequestId:
 
 /**
  * Cancellation is the custody recovery path, so its project boundary follows
- * the org-owned signing wallet rather than the request's historical project.
- * A deleted project sets `project_id` null, and an organization-level wallet
- * may intentionally be writable by a sibling project. The later write-target
- * resolution proves that this caller can use the exact custody wallet; list
- * and detail remain exact-project reads and therefore do not widen history.
+ * the signing wallet rather than the request's historical project, which a
+ * deleted project sets null. The later write-target resolution proves that the
+ * caller's project owns the exact custody wallet; list and detail remain
+ * exact-project reads and therefore do not widen history.
  */
 async function requireRecoverableCustodyRequest(c: AppContext, withdrawalRequestId: string) {
   const request = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(c.env)).getById({

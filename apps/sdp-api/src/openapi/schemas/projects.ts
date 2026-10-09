@@ -1,4 +1,9 @@
 import {
+  type ProjectProviderAvailabilityEntry,
+  projectProviderAvailabilityEntrySchema,
+  projectProviderAvailabilitySchema,
+} from "@sdp/types";
+import {
   addMemberSchema as addMemberSchemaBase,
   updateMemberSchema as updateMemberSchemaBase,
   updateProjectSchema as updateProjectSchemaBase,
@@ -127,6 +132,65 @@ export const listProjectApiKeysResponseSchema = z
     apiKeys: z.array(apiKeyListItemSchema).openapi({ description: "Project API keys." }),
   })
   .openapi({ description: "List of project API keys." });
+
+const PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS = [
+  {
+    family: "custody",
+    provider: "privy",
+    modes: ["byok"],
+    unavailableModes: [{ mode: "managed", reason: "custody_mode_not_allowed" }],
+  },
+  {
+    family: "custody",
+    provider: "fireblocks",
+    modes: [],
+    unavailableModes: [
+      { mode: "managed", reason: "custody_mode_not_allowed" },
+      { mode: "byok", reason: "custody_provider_not_in_release_channel" },
+    ],
+  },
+  { family: "compliance", provider: "range", available: true },
+  { family: "ramps", provider: "moonpay", available: false, reason: "provider_not_entitled" },
+] as const satisfies readonly ProjectProviderAvailabilityEntry[];
+
+/**
+ * The documented project provider availability, with or without the Earn
+ * family. While `EARN_PUBLIC_SURFACE_PUBLISHED` is false the public document
+ * leaves Earn out and the runtime response omits Earn entries to match it.
+ *
+ * @param publishEarn - Whether the document carries the Earn family.
+ * @returns The response schema, its description and example matching `publishEarn`.
+ */
+export function projectProviderAvailabilityResponseSchema(publishEarn: boolean) {
+  const [custodyEntry, complianceEntry, rampsEntry] =
+    projectProviderAvailabilityEntrySchema.options;
+  const schema = publishEarn
+    ? projectProviderAvailabilitySchema
+    : projectProviderAvailabilitySchema.extend({
+        providers: z.array(
+          z.discriminatedUnion("family", [custodyEntry, complianceEntry, rampsEntry])
+        ),
+      });
+  const nonCustodyFamilies = publishEarn ? "ramps, compliance and Earn" : "ramps and compliance";
+  return withOpenApi(schema, {
+    description: `Every provider the deployment knows, with whether this project can use it, so an absent provider is never mistaken for an unavailable one. Custody entries list the custody modes the project can set the provider up in (empty when none) in \`modes\`, and each refused mode with the first failed check in \`unavailableModes\`; ${nonCustodyFamilies} entries carry \`available\`, plus \`reason\` naming the first failed check when unavailable. A provider is available only when the deployment's release channel includes it, SDP currently offers it, the organization is entitled to it, and the deployment holds its credentials for the project's environment; the release channel offers the same providers to Sandbox and Production projects. Custody \`modes\` include \`managed\` only in a Sandbox project whose deployment holds the provider's credentials; \`byok\` runs on the organization's own credentials and is the only mode a Production project can use.`,
+    example: {
+      projectId: "prj_example",
+      environment: "production",
+      providers: publishEarn
+        ? [
+            ...PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS,
+            {
+              family: "earn",
+              provider: "kamino",
+              available: false,
+              reason: "provider_not_entitled",
+            },
+          ]
+        : PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS,
+    },
+  });
+}
 
 export const updateProjectRequestSchema = updateProjectSchemaBase
   .extend({

@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import type { CustodyConfigSummary, RampProviderId } from "@sdp/types";
+import type { CustodyConfigSummary, ProjectProviderAvailability, RampProviderId } from "@sdp/types";
 import { notFound, redirect } from "next/navigation";
 import {
   buildConnectionsPageUrl,
@@ -16,11 +16,18 @@ import {
   providerSupportsStoredCredentialSetup,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
-import { custody, policies, privyByok } from "@/flags";
+import { custody, policies } from "@/flags";
 import { getOfferedRampProviders } from "@/flags/ramps";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { fetchProviderAvailability } from "@/lib/provider-availability";
+import {
+  availableComplianceProviders,
+  availableCustodyProviders,
+  availableRampProviders,
+  isProviderAvailableForProject,
+  offersCustodyMode,
+} from "@/lib/provider-availability";
+import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import {
   createRequestScopedSdpApiClients,
   requestProjectHref,
@@ -35,7 +42,9 @@ import {
 } from "../integrations-status";
 import { type CustodyConnectionsContext, IntegrationDetailView } from "./integration-detail-view";
 
-async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
+async function getConnectedCustodyProviders(
+  request: SdpApiClient["request"]
+): Promise<KnownCustodyProvider[]> {
   const res = await request("/v1/wallets/configs");
   if (!res.ok) {
     const body = await res.text();
@@ -49,7 +58,7 @@ async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
 }
 
 /**
- * What the banners above the table assert, or a summary that admits it knows
+ * What the banner above the table asserts, or a summary that admits it knows
  * nothing. Degraded on its own because it costs several requests where the
  * table costs one, and a hiccup on the third of them is no reason to blank a
  * table that loaded: `complete: false` is already the signal every caller reads
@@ -62,7 +71,7 @@ async function getCustodyConnectionsSummary(
   try {
     return summarizeProviderConnections(await fetchProviderConnections(request, provider));
   } catch {
-    return { activeCount: 0, defaultConnection: null, signingPaused: false, complete: false };
+    return { signingPaused: false, complete: false };
   }
 }
 
@@ -70,7 +79,7 @@ async function getCustodyConnectionsSummary(
  * The project's custody connections for this provider, plus their wallets.
  *
  * Returns `null` when the section does not apply (not a custody provider, or
- * BYOK is off) and `"restricted"` when the viewer may not read them — the
+ * the project's modes for it leave out `byok`) and `"restricted"` when the viewer may not read them — the
  * internal routes are `custody:admin` for reads as well as writes, so asking on
  * a member's behalf returns 403 every time. Not permitted is its own answer,
  * not a failed request.
@@ -124,20 +133,30 @@ async function getCustodyConnections(
  * Which provider's connections this page owns, if any.
  *
  * Connections exist only where a tenant can install its own credentials from
- * the Dashboard, which is what `self_service` means in the catalog. Gated on
+ * the Dashboard, which is what `self_service` means in the catalog, and only
+ * while the project may set the provider up in `byok` mode. Gated on
  * `isKnownCustodyProvider` instead, this provider's connections list appeared
  * on every custody provider's page, and each row linked into the wrong
  * provider's detail route. `null` elsewhere, and the read is then skipped
  * entirely rather than fetched and discarded.
+ *
+ * @param provider - The provider id from the route.
+ * @param custodyEnabled - Whether the custody module flag is on.
+ * @param availability - The project's provider availability.
+ * @returns The provider whose connections the page lists, or `null`.
  */
 function resolveConnectionsProvider(
   provider: string,
-  custodyEnabled: boolean
+  custodyEnabled: boolean,
+  availability: ProjectProviderAvailability
 ): KnownCustodyProvider | null {
   if (!custodyEnabled || !isKnownCustodyProvider(provider)) {
     return null;
   }
-  return providerSupportsStoredCredentialSetup(provider) ? provider : null;
+  return offersCustodyMode(availability, provider, "byok") &&
+    providerSupportsStoredCredentialSetup(provider)
+    ? provider
+    : null;
 }
 
 /**
@@ -169,11 +188,8 @@ async function resolveRequestContext() {
   return {
     dashboardAccess,
     projectClient,
-    organizationId: onboarding.organization.id,
   };
 }
-
-type ProviderAvailability = Awaited<ReturnType<typeof fetchProviderAvailability>>;
 
 /**
  * Resolves the provider on this page against the same family inputs the
@@ -181,8 +197,8 @@ type ProviderAvailability = Awaited<ReturnType<typeof fetchProviderAvailability>
  *
  * @param params - The provider and the family inputs to resolve it against.
  * @param params.provider - The provider id from the route.
- * @param params.connectedProviders - Active custody providers, or `null` when the lookup failed.
- * @param params.availability - The organization's provider availability.
+ * @param params.connectedProviders - Active custody providers.
+ * @param params.availability - The project's provider availability.
  * @param params.rampProviders - The ramp providers offered (`getOfferedRampProviders`).
  * @returns The provider's detail, or `null` when no family lists it.
  */
@@ -193,27 +209,24 @@ function resolveDetail({
   rampProviders,
 }: {
   provider: string;
-  connectedProviders: KnownCustodyProvider[] | null;
-  availability: ProviderAvailability;
+  connectedProviders: KnownCustodyProvider[];
+  availability: ProjectProviderAvailability;
   rampProviders: readonly RampProviderId[];
 }) {
   return resolveIntegrationDetail({
     provider,
-    custody:
-      connectedProviders === null
-        ? null
-        : resolveCustodyIntegrations({
-            connectedProviders,
-            enabledProviders: availability.enabledCustodyProviders,
-          }),
-    ramps: resolveRampIntegrations(availability.providers.ramps, rampProviders),
-    compliance: resolveComplianceIntegrations(availability.providers.compliance),
+    custody: resolveCustodyIntegrations({
+      connectedProviders,
+      custodyAvailability: availableCustodyProviders(availability),
+    }),
+    ramps: resolveRampIntegrations(availableRampProviders(availability), rampProviders),
+    compliance: resolveComplianceIntegrations(availableComplianceProviders(availability)),
   });
 }
 
 /**
- * One provider's detail page, 404ing for unknown providers and for providers
- * whose module flag is off.
+ * One provider's detail page, 404ing for unknown providers, for providers
+ * whose module flag is off, and for providers the project cannot use.
  *
  * @param props - The route props.
  * @param props.params - The route params carrying the provider id.
@@ -249,26 +262,28 @@ export default async function IntegrationDetailPage({
     notFound();
   }
 
-  const { dashboardAccess, projectClient, organizationId } = await resolveRequestContext();
-
-  const connectionsProvider = resolveConnectionsProvider(provider, custodyEnabled);
-  const custodyConnectionsApply = connectionsProvider !== null && (await privyByok());
+  const { dashboardAccess, projectClient } = await resolveRequestContext();
   const resolvedSearchParams = (await searchParams) ?? {};
 
-  const [availability, connectedProviders, connectionsRead] = await Promise.all([
-    fetchProviderAvailability(projectClient.request, organizationId),
-    custodyEnabled
-      ? getConnectedCustodyProviders(projectClient.request).catch(() => null)
+  const [availability, connectedProviders] = await Promise.all([
+    fetchProjectProviderAvailability(projectClient),
+    custodyEnabled && isKnownCustodyProvider(provider)
+      ? getConnectedCustodyProviders(projectClient.request)
       : Promise.resolve([]),
-    custodyConnectionsApply && connectionsProvider
-      ? getCustodyConnections(
-          projectClient.request,
-          connectionsProvider,
-          dashboardAccess.capabilities.canManageCustody,
-          resolvedSearchParams
-        )
-      : Promise.resolve(null),
   ]);
+  if (!isProviderAvailableForProject(availability, provider)) {
+    notFound();
+  }
+
+  const connectionsProvider = resolveConnectionsProvider(provider, custodyEnabled, availability);
+  const connectionsRead = connectionsProvider
+    ? await getCustodyConnections(
+        projectClient.request,
+        connectionsProvider,
+        dashboardAccess.capabilities.canManageCustody,
+        resolvedSearchParams
+      )
+    : null;
 
   // A `?page=` past the end is answered with the address that page lives at,
   // not with its rows under the stale URL: served in place, the footer read

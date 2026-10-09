@@ -997,16 +997,6 @@ function getWalletSectionPageConfig(
       },
     };
   }
-  if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
-    return {
-      title: t("Shared.dashboardShell.activateProvider"),
-      contentWidthClass: "max-w-3xl",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
-    };
-  }
   return null;
 }
 

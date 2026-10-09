@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initializeSigningSchema, switchSigningSchema } from "./schemas";
+import { initializeSigningSchema } from "./schemas";
 
 const hostedProviderRequests = [
   { provider: "privy" },
@@ -22,12 +22,9 @@ const existingProviderObjectRequests = [
   { provider: "anchorage", walletId: "wallet_from_another_tenant" },
 ] as const;
 
-describe.each([
-  ["initialize", initializeSigningSchema],
-  ["switch", switchSigningSchema],
-] as const)("custody %s endpoint selection", (_operation, schema) => {
+describe("custody initialize endpoint selection", () => {
   it.each(hostedProviderRequests)("rejects a client endpoint for $provider", (request) => {
-    const parsed = schema.safeParse({
+    const parsed = initializeSigningSchema.safeParse({
       ...request,
       apiBaseUrl: "https://untrusted.example",
     });
@@ -38,12 +35,12 @@ describe.each([
   it.each(existingProviderObjectRequests)(
     "rejects client selection of an existing $provider object",
     (request) => {
-      expect(schema.safeParse(request).success).toBe(false);
+      expect(initializeSigningSchema.safeParse(request).success).toBe(false);
     }
   );
 
   it("preserves ordinary platform-managed provisioning requests", () => {
-    const parsed = schema.safeParse({
+    const parsed = initializeSigningSchema.safeParse({
       provider: "coinbase_cdp",
       network: "solana-devnet",
       walletLabel: "Treasury",
@@ -55,6 +52,6 @@ describe.each([
   it.each(["__proto__", "constructor"])("rejects the unknown provider %s", (provider) => {
     const request = { provider, walletId: "wallet_from_another_tenant" };
 
-    expect(schema.safeParse(request).success).toBe(false);
+    expect(initializeSigningSchema.safeParse(request).success).toBe(false);
   });
 });

@@ -265,34 +265,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets/initialize",
-            "description": "Initializes wallet signing for the organization or project by creating an active signing configuration.",
+            "description": "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"local\",\n  \"walletLabel\": \"\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Switch wallet signing provider",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/wallets/switch",
-            "description": "Selects an active provider config or exact Custody Connection as the default signing target for the requested scope. Existing on-chain authorities are not rotated.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"provider\": \"privy\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -307,7 +283,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets",
-            "description": "Lists active wallets under active Config and Connection owners. Omitted or true includeAllProviders includes every eligible owner; false uses target-selection semantics. Provider narrows either mode."
+            "description": "Lists active wallets under active Config and Connection owners, oldest first. Provider narrows the list to one custody provider."
           }
         },
         {
@@ -322,10 +298,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/wallets",
-            "description": "Provisions a new wallet for the effective custody target, a provider-only resolved target, or an exact Custody Connection selected by connectionId.",
+            "description": "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\",\n  \"setDefault\": true\n}",
+              "raw": "{\n  \"provider\": \"privy\",\n  \"label\": \"Mint authority wallet\",\n  \"purpose\": \"mint_authority\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -359,45 +335,12 @@
           }
         },
         {
-          "name": "Set default wallet",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/wallets/default-wallet",
-            "description": "Resolves walletId to its exact Config or Connection owner and changes only that owner's default wallet. Provider, when supplied, is a consistency assertion.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Get wallet signing config",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/config",
-            "description": "Returns the resolved Config when the effective custody target is Config-owned. An effective Connection does not fabricate a Config and returns 404."
-          }
-        },
-        {
           "name": "List wallet signing configs",
           "request": {
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/configs",
-            "description": "Returns active Config-owned wallet signing configurations for the requested scope. When a Connection is effective, defaultConfigId is null rather than a fabricated Config ID."
+            "description": "Returns the active Config-owned wallet signing configurations for the requested scope, one per provider."
           }
         },
         {
@@ -410,21 +353,12 @@
           }
         },
         {
-          "name": "List switch provider options",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/switch-options",
-            "description": "Returns Provider-level switching metadata for the effective Config or Connection target while preserving durable wallet-reuse facts during temporary runtime unavailability."
-          }
-        },
-        {
           "name": "Get wallet public key",
           "request": {
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/public-key",
-            "description": "Returns the persisted public key for an exact active walletId, or for the effective active custody target when walletId is omitted. Resolution is DB-backed only."
+            "description": "Returns the persisted public key for an exact active walletId. walletId may be omitted only by an API key whose own signing-wallet binding names the wallet; otherwise the request is rejected with 400. Resolution is DB-backed only."
           }
         },
         {
@@ -574,6 +508,15 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "Get project provider availability",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/projects/{{projectId}}/provider-availability",
+            "description": "Lists every provider the deployment knows across custody, compliance and ramps, with whether this project can use it, counting the deployment's provider credentials for the project's environment. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403, or 503 when the deployment does not hold its credentials. A project outside the caller's organization, or another project for a project-bound API key, returns 404."
           }
         },
         {
@@ -848,7 +791,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare",
-            "description": "Builds an unsigned deploy transaction for client-side signing."
+            "description": "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`, else the API key's preferred or sole wallet binding. The request is rejected with 400 when none resolves, or when the key has several bindings and no preferred one. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata."
           }
         },
         {
@@ -881,7 +824,7 @@
             "method": "POST",
             "header": [],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare-metadata",
-            "description": "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Returns a null transaction when the on-chain URI already matches."
+            "description": "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored), else the API key's preferred or sole wallet binding; the request is rejected with 400 when none resolves. Returns a null transaction when the on-chain URI already matches."
           }
         },
         {

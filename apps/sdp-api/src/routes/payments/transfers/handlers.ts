@@ -34,7 +34,7 @@ import {
   WALLET_TRANSFER_TYPES,
 } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
-import { getAuth } from "@/lib/auth";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
   AppError,
@@ -648,7 +648,7 @@ async function executeSponsoredTransfer(
   const signer = await solanaServices.createOrgSignerForCustodyWallet(
     c.env,
     auth.organizationId,
-    auth.projectId,
+    requireProjectId(c),
     params.sourceWallet.id
   );
 

@@ -1,4 +1,6 @@
 import {
+  type CustodyMode,
+  type CustodyProvider,
   EARN_PROVIDERS,
   RAMP_PROVIDERS,
   resolveOrganizationProviderEntitlements,
@@ -8,21 +10,46 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { getLogger } from "@/runtime/logger";
 import {
+  admitByokCustodySetup,
+  assertCustodyProviderEnabled,
   assertCustodyProviderEntitled,
+  assertCustodySetupAdmitted,
   assertEarnProviderConfigured,
-  assertProviderAvailable,
+  CustodySetupRefusedError,
+  custodyProviderNotInReleaseChannel,
+  getProjectProviderAvailability,
   getProviderAvailability,
-  isPersistedCustodyCompletionEnabled,
   parseClerkOrganizationTierMetadata,
   parseProviderOverridesFromClerkMetadata,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
+import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
+import {
+  type SeededDefaultProjects,
+  type SeededProject,
+  seedDefaultProjects,
+} from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 const MANIFEST_STAGES = { rampProviderStages: SDP_RAMP_PROVIDER_STAGES };
 
 const TEST_ORG_ID = "org_provider_availability_test";
+const TEST_USER_ID = "usr_provider_availability_test";
+const NOT_ENTITLED_REFUSAL = {
+  code: "FORBIDDEN",
+  statusCode: 403,
+  message: "Privy requires manual activation for this organization.",
+  details: { reason: "provider_not_entitled" },
+};
 
 const providerEnvKeys = [
   "CUSTODY_PRIVATE_KEY",
@@ -68,6 +95,8 @@ const providerEnvKeys = [
   "JUPITER_SWAP_API_KEY",
   "WISDOMTREE_API_KEY",
   "WISDOMTREE_SANDBOX_API_KEY",
+  "MARKETS_ENABLED",
+  "EARN_ENABLED",
 ] as const;
 
 type ProviderEnvKey = (typeof providerEnvKeys)[number];
@@ -101,6 +130,27 @@ function setBaseProviderEnv(): void {
     TURNKEY_API_PUBLIC_KEY: "turnkey_test_public_key",
     TURNKEY_API_PRIVATE_KEY: "turnkey_test_private_key",
     TURNKEY_ORGANIZATION_ID: "turnkey_test_org",
+    ...EARN_ENABLED_FLAGS,
+  });
+}
+
+async function disablePrivyEntitlement(): Promise<void> {
+  await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+    JSON.stringify({ providerOverrides: { custody: { privy: false } } }),
+    TEST_ORG_ID,
+  ]);
+}
+
+function admitCustodySetup(
+  project: SeededProject,
+  provider: CustodyProvider,
+  mode: CustodyMode
+): Promise<void> {
+  return assertCustodySetupAdmitted(env, getDb(env), {
+    organizationId: project.organizationId,
+    projectId: project.id,
+    provider,
+    mode,
   });
 }
 
@@ -114,14 +164,10 @@ async function setOrganizationTier(tier: "individual" | "enterprise"): Promise<v
 describe("provider-availability.service", () => {
   let originalProviderEnv: ProviderEnvSnapshot;
   let originalDeploymentMode: "managed" | "self_hosted" | undefined;
-  let originalPrivyByokEnabled: string | undefined;
-  let originalSelfHostedStoredSetupEnabled: string | undefined;
 
   beforeEach(async () => {
     originalProviderEnv = readProviderEnv();
     originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
-    originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
-    originalSelfHostedStoredSetupEnabled = env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED;
 
     writeProviderEnv({});
     setBaseProviderEnv();
@@ -145,8 +191,6 @@ describe("provider-availability.service", () => {
     vi.restoreAllMocks();
     writeProviderEnv(originalProviderEnv);
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
-    env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
-    env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = originalSelfHostedStoredSetupEnabled;
   });
 
   it("logs an attributable custody entitlement denial without changing its 403 response", async () => {
@@ -242,27 +286,33 @@ describe("provider-availability.service", () => {
     expect(availability.providers.ramps.lightspark.entitled).toBe(true);
   });
 
-  it("explains when a configured provider is not entitled for the organization", async () => {
+  it("admits an organization's enabled custody provider", async () => {
     await expect(
-      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "compliance", "range")
+      assertCustodyProviderEnabled(env, getDb(env), TEST_ORG_ID, "privy")
+    ).resolves.toBeUndefined();
+  });
+
+  it("explains when a configured custody provider is not entitled for the organization", async () => {
+    await disablePrivyEntitlement();
+
+    await expect(
+      assertCustodyProviderEnabled(env, getDb(env), TEST_ORG_ID, "privy")
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
-      message: "Range requires manual activation for this organization.",
+      statusCode: 403,
+      message: "Privy requires manual activation for this organization.",
     });
   });
 
-  it("explains when an entitled provider is not configured in the environment", async () => {
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ providerOverrides: { compliance: { range: true } } }), TEST_ORG_ID)
-      .run();
-    env.RANGE_API_KEY = undefined;
+  it("explains when an entitled custody provider is not configured in the deployment", async () => {
+    env.PRIVY_APP_SECRET = undefined;
 
     await expect(
-      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "compliance", "range")
+      assertCustodyProviderEnabled(env, getDb(env), TEST_ORG_ID, "privy")
     ).rejects.toMatchObject({
       code: "FORBIDDEN",
-      message: "Range is not configured in this environment.",
+      statusCode: 403,
+      message: "Privy is not configured in this environment.",
     });
   });
 
@@ -458,64 +508,6 @@ describe("provider-availability.service", () => {
     expect(availability.providers.compliance.range.entitled).toBe(false);
     expect(availability.providers.ramps.lightspark.entitled).toBe(true);
     expect(availability.providers.ramps.bvnk.entitled).toBe(true);
-  });
-
-  it("keeps persisted Privy sources eligible when the fresh setup preference changes", async () => {
-    env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    env.PRIVY_BYOK_ENABLED = "true";
-
-    for (const storedSetupEnabled of ["false", "true"]) {
-      env.SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED = storedSetupEnabled;
-
-      await expect(
-        isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
-      ).resolves.toBe(true);
-      await expect(
-        isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
-      ).resolves.toBe(true);
-    }
-  });
-
-  it("requires a configured runtime binding but not deployment credentials for a persisted stored source", async () => {
-    env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    env.PRIVY_BYOK_ENABLED = "true";
-    env.PRIVY_APP_ID = undefined;
-    env.PRIVY_APP_SECRET = undefined;
-
-    await expect(
-      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
-    ).resolves.toBe(true);
-    await expect(
-      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
-    ).resolves.toBe(false);
-  });
-
-  it("requires BYOK enablement for both persisted Credential sources", async () => {
-    env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    env.PRIVY_BYOK_ENABLED = "false";
-
-    await expect(
-      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
-    ).resolves.toBe(false);
-    await expect(
-      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
-    ).resolves.toBe(false);
-  });
-
-  it("requires custody entitlement for both persisted Credential sources", async () => {
-    env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    env.PRIVY_BYOK_ENABLED = "true";
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ providerOverrides: { custody: { privy: false } } }), TEST_ORG_ID)
-      .run();
-
-    await expect(
-      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "stored")
-    ).resolves.toBe(false);
-    await expect(
-      isPersistedCustodyCompletionEnabled(env, getDb(env), TEST_ORG_ID, "privy", "runtime")
-    ).resolves.toBe(false);
   });
 
   it("honors a custody override disabling local the same way in self-hosted mode", async () => {
@@ -766,6 +758,30 @@ describe("provider-availability.service", () => {
     });
   });
 
+  it.for(EARN_FLAG_OFF_CASES)(
+    "reports an entitled, configured earn provider as not enabled while $flag is off",
+    async ({ flags }) => {
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ providerOverrides: { earn: { upshift: true } } }), TEST_ORG_ID)
+        .run();
+      env.UPSHIFT_API_KEY = "upshift_test_key";
+
+      const availability = await getProviderAvailability(
+        { ...env, ...flags },
+        getDb(env),
+        TEST_ORG_ID,
+        MANIFEST_STAGES
+      );
+
+      expect(availability.providers.earn.upshift).toEqual({
+        entitled: true,
+        configured: true,
+        enabled: false,
+      });
+    }
+  );
+
   /**
    * Veda reaches its vaults on-chain through `@sdp/veda`, so it has no provider
    * API and no credential — the same shape as Kamino. Pinned here because
@@ -858,25 +874,6 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it("re-checks earn credentials for the requested mode like ramps", async () => {
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ providerOverrides: { earn: { upshift: true } } }), TEST_ORG_ID)
-      .run();
-    env.UPSHIFT_API_KEY = "upshift_production_key";
-
-    await expect(
-      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "upshift", false)
-    ).resolves.toBeUndefined();
-
-    await expect(
-      assertProviderAvailable(env, getDb(env), TEST_ORG_ID, "earn", "upshift", true)
-    ).rejects.toMatchObject({
-      code: "PROVIDER_NOT_CONFIGURED",
-      message: "Upshift is not configured for sandbox mode.",
-    });
-  });
-
   it("assertEarnProviderConfigured gates on credentials only, ignoring entitlement (exit safety)", () => {
     // No earn override is granted, so zero providers are entitled, but
     // withdrawals must still pass as long as the provider credentials exist
@@ -894,5 +891,200 @@ describe("provider-availability.service", () => {
     // Keyless, so the exit path is never blocked on a credential that does not
     // exist — the ADR 0002 "money out beats money off" half of the same rule.
     expect(() => assertEarnProviderConfigured(env, "veda", true)).not.toThrow();
+  });
+
+  describe("custody setup admission", () => {
+    let projects: SeededDefaultProjects;
+
+    beforeEach(async () => {
+      custodyReleaseChannel.outOfChannelMode = null;
+      custodyReleaseChannel.stageOverride = null;
+      await getDb(env).execute(
+        `INSERT INTO users (id, email, email_verified, status)
+         VALUES (?, 'provider-availability-test@example.com', 1, 'active')`,
+        [TEST_USER_ID]
+      );
+      projects = await seedDefaultProjects(getDb(env), {
+        organizationId: TEST_ORG_ID,
+        createdBy: TEST_USER_ID,
+        members: [],
+      });
+    });
+
+    it("admits Managed and BYOK Privy in a Sandbox project", async () => {
+      await expect(
+        admitCustodySetup(projects.sandbox, "privy", "managed")
+      ).resolves.toBeUndefined();
+      await expect(admitCustodySetup(projects.sandbox, "privy", "byok")).resolves.toBeUndefined();
+    });
+
+    it("admits only BYOK Privy in a Production project and logs the Managed refusal", async () => {
+      const logger = getLogger();
+      const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+
+      await expect(
+        admitCustodySetup(projects.production, "privy", "byok")
+      ).resolves.toBeUndefined();
+      await expect(
+        admitCustodySetup(projects.production, "privy", "managed")
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        statusCode: 403,
+        message: "Privy Managed custody is not allowed in a production project.",
+        details: { reason: "custody_mode_not_allowed" },
+      });
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        {
+          event: "sdp_api_project_provider_refused",
+          organization_id: TEST_ORG_ID,
+          project_id: projects.production.id,
+          environment: "production",
+          family: "custody",
+          provider: "privy",
+          mode: "managed",
+          reason: "custody_mode_not_allowed",
+        },
+        "sdp_api_project_provider_refused"
+      );
+    });
+
+    it("refuses a pair outside the release channel before the Production mode check", async () => {
+      custodyReleaseChannel.outOfChannelMode = "managed";
+
+      await expect(
+        admitCustodySetup(projects.production, "privy", "managed")
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        statusCode: 403,
+        message: custodyProviderNotInReleaseChannel("privy", "managed").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
+      });
+    });
+
+    it("admits a below-stable BYOK pair the channel offers in both a Production and a Sandbox project", async () => {
+      custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
+
+      await expect(
+        admitCustodySetup(projects.production, "privy", "byok")
+      ).resolves.toBeUndefined();
+      await expect(admitCustodySetup(projects.sandbox, "privy", "byok")).resolves.toBeUndefined();
+    });
+
+    it("refuses an unentitled provider after the Production mode check", async () => {
+      await disablePrivyEntitlement();
+
+      await expect(admitCustodySetup(projects.sandbox, "privy", "managed")).rejects.toMatchObject(
+        NOT_ENTITLED_REFUSAL
+      );
+      await expect(admitCustodySetup(projects.production, "privy", "byok")).rejects.toMatchObject(
+        NOT_ENTITLED_REFUSAL
+      );
+      await expect(
+        admitCustodySetup(projects.production, "privy", "managed")
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        details: { reason: "custody_mode_not_allowed" },
+      });
+    });
+
+    it("refuses Managed custody whose credentials the deployment lacks and admits BYOK without them", async () => {
+      env.PRIVY_APP_ID = undefined;
+      env.PRIVY_APP_SECRET = undefined;
+
+      await expect(admitCustodySetup(projects.sandbox, "privy", "managed")).rejects.toMatchObject({
+        code: "PROVIDER_NOT_CONFIGURED",
+        statusCode: 503,
+        message: "Privy is not configured for sandbox projects in this deployment.",
+        details: { reason: "provider_not_configured" },
+      });
+      await expect(admitCustodySetup(projects.sandbox, "privy", "byok")).resolves.toBeUndefined();
+    });
+
+    it("admits BYOK completion in a Production project without deployment Privy credentials", async () => {
+      env.PRIVY_APP_ID = undefined;
+      env.PRIVY_APP_SECRET = undefined;
+
+      await expect(
+        admitByokCustodySetup(
+          env,
+          getDb(env),
+          { organizationId: TEST_ORG_ID, projectId: projects.production.id },
+          "privy"
+        )
+      ).resolves.toEqual({ admitted: true });
+    });
+
+    it("returns the gate's refusal for BYOK completion with its request and environment, without logging it", async () => {
+      const logger = getLogger();
+      const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+      const project = { organizationId: TEST_ORG_ID, projectId: projects.production.id };
+
+      const notInChannel = await admitByokCustodySetup(env, getDb(env), project, "turnkey");
+      expect(notInChannel).toMatchObject({
+        admitted: false,
+        request: { ...project, provider: "turnkey", mode: "byok" },
+        environment: "production",
+        error: {
+          code: "FORBIDDEN",
+          statusCode: 403,
+          message: custodyProviderNotInReleaseChannel("turnkey", "byok").message,
+          details: { reason: "custody_provider_not_in_release_channel" },
+        },
+      });
+      expect(notInChannel).toMatchObject({ error: expect.any(CustodySetupRefusedError) });
+
+      await disablePrivyEntitlement();
+      await expect(admitByokCustodySetup(env, getDb(env), project, "privy")).resolves.toMatchObject(
+        {
+          admitted: false,
+          request: { ...project, provider: "privy", mode: "byok" },
+          environment: "production",
+          error: NOT_ENTITLED_REFUSAL,
+        }
+      );
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it("lists a Production project's admitted modes without logging the Managed refusal", async () => {
+      const logger = getLogger();
+      const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+      const project = { organizationId: TEST_ORG_ID, projectId: projects.production.id };
+
+      const availability = await getProjectProviderAvailability(env, getDb(env), project);
+      expect(availability.providers).toContainEqual({
+        family: "custody",
+        provider: "privy",
+        modes: ["byok"],
+        unavailableModes: [{ mode: "managed", reason: "custody_mode_not_allowed" }],
+      });
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it.each(["sandbox", "production"] as const)(
+      "treats an archived %s project as not found at every gate entry point, without logging",
+      async (environment) => {
+        const logger = getLogger();
+        const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
+        const project = projects[environment];
+        await getDb(env)
+          .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
+          .bind(project.id)
+          .run();
+        const notFound = { code: "NOT_FOUND", statusCode: 404, message: "Project not found" };
+        const scope = { organizationId: project.organizationId, projectId: project.id };
+
+        await expect(admitCustodySetup(project, "privy", "byok")).rejects.toMatchObject(notFound);
+        await expect(admitCustodySetup(project, "privy", "managed")).rejects.toMatchObject(
+          notFound
+        );
+        await expect(admitByokCustodySetup(env, getDb(env), scope, "privy")).rejects.toMatchObject(
+          notFound
+        );
+        await expect(getProjectProviderAvailability(env, getDb(env), scope)).rejects.toMatchObject(
+          notFound
+        );
+        expect(warn).not.toHaveBeenCalled();
+      }
+    );
   });
 });

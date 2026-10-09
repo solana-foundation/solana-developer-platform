@@ -5,11 +5,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
+import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
+import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
@@ -53,7 +64,7 @@ const TEST_CACHED_API_KEY: CachedApiKey = {
 
 const PRIVY_CONFIG_ID = "cust_cfg_wallet_by_id_privy";
 const PARA_CONFIG_ID = "cust_cfg_wallet_by_id_para";
-let originalPrivyByokEnabled: string | undefined;
+
 async function seedAuthAndConfigs(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
@@ -72,95 +83,63 @@ async function seedAuthAndConfigs(): Promise<void> {
     members: [],
     ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
   });
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_API_KEY.id,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        TEST_USER.id,
-        "Custody Wallet By ID Test Key",
-        TEST_API_KEY.prefix,
-        keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        PRIVY_CONFIG_ID,
-        TEST_ORG.id,
-        null,
-        "privy",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "privy_wallet_a",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        PARA_CONFIG_ID,
-        TEST_ORG.id,
-        null,
-        "para",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "para_wallet_a",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind("csd_wallet_by_id_org_default", TEST_ORG.id, null, PRIVY_CONFIG_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_wallet_by_id_privy_a",
-        PRIVY_CONFIG_ID,
-        "privy_wallet_a",
-        TEST_SOLANA_ADDRESSES.wallet1,
-        "Privy Wallet A",
-        "root",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        "cwlt_wallet_by_id_para_a",
-        PARA_CONFIG_ID,
-        "para_wallet_a",
-        TEST_SOLANA_ADDRESSES.wallet2,
-        "Para Wallet A",
-        "transfer",
-        "active"
-      ),
-  ]);
+  await getDb(env).execute(
+    `INSERT INTO api_keys
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      TEST_API_KEY.id,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_USER.id,
+      "Custody Wallet By ID Test Key",
+      TEST_API_KEY.prefix,
+      keyHash,
+      "api_admin",
+      JSON.stringify(["*"]),
+      "active",
+    ]
+  );
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: PRIVY_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "privy",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+      {
+        id: PARA_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        provider: "para",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: "cwlt_wallet_by_id_privy_a",
+        owner: { kind: "config", custodyConfigId: PRIVY_CONFIG_ID },
+        walletId: "privy_wallet_a",
+        publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+        label: "Privy Wallet A",
+        purpose: "root",
+        status: "active",
+      },
+      {
+        id: "cwlt_wallet_by_id_para_a",
+        owner: { kind: "config", custodyConfigId: PARA_CONFIG_ID },
+        walletId: "para_wallet_a",
+        publicKey: TEST_SOLANA_ADDRESSES.wallet2,
+        label: "Para Wallet A",
+        purpose: "transfer",
+        status: "active",
+      },
+    ],
+  });
 }
 
 async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
@@ -173,8 +152,7 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
 
 describe("Custody wallet by ID route", () => {
   beforeEach(async () => {
-    originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
-    env.PRIVY_BYOK_ENABLED = "true";
+    custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
     createRpcMock.mockReset();
     getAccountInfoMock.mockReset();
@@ -190,7 +168,6 @@ describe("Custody wallet by ID route", () => {
   });
 
   afterEach(async () => {
-    env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
     await clearKVStores(env);
   });
 
@@ -220,7 +197,7 @@ describe("Custody wallet by ID route", () => {
       });
     }
 
-    env.PRIVY_BYOK_ENABLED = "false";
+    custodyReleaseChannel.outOfChannelMode = "byok";
     const update = await app.request(
       `/v1/wallets/${connection.walletRecordId}`,
       {
@@ -234,20 +211,28 @@ describe("Custody wallet by ID route", () => {
       env
     );
     expect(update.status).toBe(200);
-    expect(await update.json()).toMatchObject({
+    expect(await update.json()).toEqual({
       data: {
         wallet: {
+          id: connection.walletRecordId,
           custodyConnectionId: connection.connectionId,
+          provider: "privy",
           isRuntimeExecutionAllowed: false,
+          walletId: connection.walletId,
+          publicKey: connection.publicKey,
           label: "Connection treasury",
+          purpose: null,
+          status: "active",
+          createdAt: expect.any(String),
         },
       },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
     });
   });
 
-  it("returns a persisted Connection public key while runtime is off", async () => {
+  it("refuses a persisted Connection public key while the BYOK pair is out of channel", async () => {
     const connection = await seedConnectionWallet();
-    env.PRIVY_BYOK_ENABLED = "false";
+    custodyReleaseChannel.outOfChannelMode = "byok";
 
     const response = await app.request(
       `/v1/wallets/public-key?walletId=${connection.walletId}`,
@@ -257,20 +242,15 @@ describe("Custody wallet by ID route", () => {
       },
       env
     );
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      data: { publicKey: connection.publicKey },
-    });
-
-    const alias = await app.request(
-      `/v1/wallets/public-key?walletId=${connection.walletRecordId}`,
-      {
-        method: "GET",
-        headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` },
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: custodyProviderNotInReleaseChannel("privy", "byok").message,
+        details: { reason: "custody_provider_not_in_release_channel" },
       },
-      env
-    );
-    expect(alias.status).toBe(404);
+      meta: { requestId: expect.any(String) },
+    });
   });
 
   it("returns 404 for a wallet under a non-active Connection", async () => {
@@ -309,14 +289,15 @@ describe("Custody wallet by ID route", () => {
 
   it("returns 409 when the record-ID alias collides with a canonical wallet ID", async () => {
     const connection = await seedConnectionWallet();
-    await getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_connection_id, wallet_id, public_key, status
-         ) VALUES (?, ?, 'privy_alias_collision_other', ?, 'active')`
-      )
-      .bind(connection.walletId, connection.connectionId, TEST_SOLANA_ADDRESSES.wallet1)
-      .run();
+    await insertTestCustodyWalletRow(getDb(env), {
+      id: connection.walletId,
+      owner: { kind: "connection", custodyConnectionId: connection.connectionId },
+      walletId: "privy_alias_collision_other",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+      label: null,
+      purpose: null,
+      status: "active",
+    });
 
     const detail = await app.request(
       `/v1/wallets/${connection.walletId}?includeBalance=false`,
@@ -624,49 +605,29 @@ async function seedConnectionWallet() {
   const walletId = "privy_wallet_by_id_connection";
   const publicKey = TEST_SOLANA_ADDRESSES.wallet3;
 
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO provider_credentials (
-           id, organization_id, project_id, provider, label, scope, source,
-           storage_backend, encrypted_secret_payload, status, created_by
-         ) VALUES (?, ?, ?, 'privy', 'Connection wallet', 'project', 'stored',
-                   'encrypted_db', 'ciphertext', 'active', ?)`
-      )
-      .bind(credentialId, TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_connections (
-           id, organization_id, project_id, provider, scope,
-           provider_credential_id, provider_credential_scope_key, status, created_by
-         ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'pending', ?)`
-      )
-      .bind(
-        connectionId,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        credentialId,
-        TEST_PROJECT.id,
-        TEST_USER.id
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_connection_id, wallet_id, public_key, label, status
-         ) VALUES (?, ?, ?, ?, 'Connection wallet', 'active')`
-      )
-      .bind(walletRecordId, connectionId, walletId, publicKey),
-    getDb(env)
-      .prepare(
-        `UPDATE custody_connections
-         SET default_custody_wallet_id = ?, status = 'active',
-             last_check_status = 'success', last_check_at = sdp_iso_now(),
-             provider_account_fingerprint = 'sha256:wallet-by-id',
-             activated_at = sdp_iso_now()
-         WHERE id = ?`
-      )
-      .bind(walletRecordId, connectionId),
-  ]);
+  await getDb(env).transaction((tx) =>
+    seedTestPrivyConnection(tx, {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      connectionId,
+      credentialId,
+      createdBy: TEST_USER.id,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+      providerAccountFingerprint: "sha256:wallet-by-id",
+      lastCheckStatus: "success",
+      wallets: [
+        {
+          id: walletRecordId,
+          walletId,
+          publicKey,
+          label: "Connection wallet",
+          purpose: null,
+          status: "active",
+        },
+      ],
+      defaultCustodyWalletId: walletRecordId,
+    })
+  );
 
   return { connectionId, walletId, walletRecordId, publicKey };
 }

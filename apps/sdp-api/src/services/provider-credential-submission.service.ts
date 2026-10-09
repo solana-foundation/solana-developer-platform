@@ -4,16 +4,7 @@ import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import {
-  AppError,
-  badRequest,
-  conflict,
-  forbidden,
-  internalError,
-  notFound,
-  providerUnavailable,
-} from "@/lib/errors";
-import { resolveNewCustodySetupMethod } from "@/lib/feature-flags";
+import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
@@ -23,7 +14,10 @@ import {
   CredentialSecretStoreError,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
-import { isPersistedCustodyCompletionEnabled } from "@/services/provider-availability.service";
+import {
+  admitByokCustodySetup,
+  refuseCustodySetup,
+} from "@/services/provider-availability.service";
 import {
   assertCredentialCreationSettled,
   recoverCredentialCreation,
@@ -43,8 +37,6 @@ import type { Env } from "@/types/env";
 const UNFINISHED_INSTALLATION_MESSAGE =
   "A Privy custody installation is already in progress for this project";
 const REPLACEMENT_CONFLICT_MESSAGE = "Custody Connection cannot accept replacement credentials";
-const PROVISIONING_DISABLED_MESSAGE = "Custody Connection setup is disabled for this provider";
-const RUNTIME_CREDENTIAL_LABEL = "Privy runtime credentials";
 
 interface PrivyCredentialFields {
   credentialLabel: string;
@@ -57,11 +49,8 @@ interface SubmitPrivyCredentialInput {
   provider: "privy";
   requestDelayMs?: number;
   walletLabel?: string;
-  fields?: PrivyCredentialFields;
+  fields: PrivyCredentialFields;
 }
-
-type StoredPrivyCredentialInput = SubmitPrivyCredentialInput & { fields: PrivyCredentialFields };
-type SubmissionSource = "stored" | "runtime";
 
 export interface SafeProviderCredential {
   id: string;
@@ -118,13 +107,12 @@ interface SubmissionContext {
 interface PreparedSubmission extends SubmissionContext {
   fingerprint: string;
   preflightPlan: SetupPlan;
-  credentialSource: SubmissionSource;
 }
 
 interface PersistedSubmission extends PreparedSubmission {
   providerCredentialId: string;
   connectionId: string;
-  secretStore?: CredentialSecretStore;
+  secretStore: CredentialSecretStore;
   stored: StoredCredentialSecret;
   existingSecretRef?: string;
 }
@@ -159,7 +147,7 @@ export async function submitProviderCredential(
 export async function replaceProviderCredential(
   c: Context<{ Bindings: Env }>,
   connectionId: string,
-  input: StoredPrivyCredentialInput,
+  input: SubmitPrivyCredentialInput,
   idempotencyKey: string
 ): Promise<ProviderCredentialSubmissionResult> {
   return submitProviderCredentialIntent(c, input, idempotencyKey, connectionId);
@@ -178,11 +166,10 @@ async function submitProviderCredentialIntent(
     return resolveReplayWithAudit(context, replay, fingerprint);
   }
 
-  const admission = await resolveSubmissionSource(context);
+  const admission = await admitSubmission(context);
   if (admission.kind === "replay") {
     return admission.result;
   }
-  const credentialSource = admission.source;
   const fingerprint = await computeSubmissionFingerprint(context);
 
   const setup = await prepareSetup(context, fingerprint);
@@ -194,7 +181,6 @@ async function submitProviderCredentialIntent(
     ...context,
     fingerprint,
     preflightPlan: setup.plan,
-    credentialSource,
   });
 }
 
@@ -280,39 +266,26 @@ async function loadReplay(context: SubmissionContext): Promise<ProviderCredentia
   }
 }
 
-async function resolveSubmissionSource(
+/**
+ * Admits a BYOK submission under the custody setup rule for the request's
+ * project, or serves the idempotent replay a refused retry is entitled to. A
+ * first submission that is not admitted gets the rule's refusal.
+ *
+ * @param context - The submission being admitted.
+ * @returns `admitted`, or the replayed result of an earlier identical submission.
+ * @throws 403 `FORBIDDEN` naming the failed custody setup check when there is no replay.
+ */
+async function admitSubmission(
   context: SubmissionContext
-): Promise<
-  | { kind: "source"; source: SubmissionSource }
-  | { kind: "replay"; result: ProviderCredentialSubmissionResult }
-> {
-  const setupMethod = resolveNewCustodySetupMethod(context.c.env, context.input.provider);
-  const source = context.replacementConnectionId
-    ? "stored"
-    : setupMethod === "deployment_credentials"
-      ? "runtime"
-      : setupMethod === "stored_credentials"
-        ? "stored"
-        : null;
-
-  if (source) {
-    if (source === "stored" && !context.input.fields) {
-      throw badRequest("Credential fields are required for stored setup");
-    }
-    if (source === "runtime" && context.input.fields) {
-      throw badRequest("Credential fields are not accepted for runtime setup");
-    }
-    if (
-      await isPersistedCustodyCompletionEnabled(
-        context.c.env,
-        context.db,
-        context.organizationId,
-        "privy",
-        source
-      )
-    ) {
-      return { kind: "source", source };
-    }
+): Promise<{ kind: "admitted" } | { kind: "replay"; result: ProviderCredentialSubmissionResult }> {
+  const admission = await admitByokCustodySetup(
+    context.c.env,
+    context.db,
+    { organizationId: context.organizationId, projectId: context.projectId },
+    context.input.provider
+  );
+  if (admission.admitted) {
+    return { kind: "admitted" };
   }
 
   const replay = await loadReplay(context);
@@ -326,7 +299,7 @@ async function resolveSubmissionSource(
       ),
     };
   }
-  throw forbidden(PROVISIONING_DISABLED_MESSAGE);
+  throw refuseCustodySetup(admission);
 }
 
 async function prepareSetup(
@@ -388,36 +361,34 @@ async function persistPreparedSubmission(
   });
 
   try {
-    let secretStore: CredentialSecretStore | undefined;
-    let stored: StoredCredentialSecret;
+    const secretStore = await createSubmissionSecretStore(
+      prepared,
+      providerCredentialId,
+      connectionId
+    );
     let existingSecretRef: string | undefined;
-    if (prepared.credentialSource === "stored") {
-      secretStore = await createSubmissionSecretStore(prepared, providerCredentialId, connectionId);
-      if (
-        secretStore.storageBackend === "gcp_secret_manager" &&
-        prepared.preflightPlan.kind === "replacement"
-      ) {
-        existingSecretRef =
-          (await prepared.store.findGcpContainerRef(
-            prepared.organizationId,
-            prepared.preflightPlan.currentCredential.id
-          )) ?? undefined;
-      }
-      stored =
-        secretStore.storageBackend === "gcp_secret_manager"
-          ? existingSecretRef
-            ? { storageBackend: "gcp_secret_manager", secretRef: existingSecretRef }
-            : credentialSecretStore.prepareGcpCredentialSecret(prepared.c.env, providerCredentialId)
-          : await writeSubmissionSecret(prepared, providerCredentialId, connectionId, secretStore);
-    } else {
-      stored = { storageBackend: "runtime_env" };
+    if (
+      secretStore.storageBackend === "gcp_secret_manager" &&
+      prepared.preflightPlan.kind === "replacement"
+    ) {
+      existingSecretRef =
+        (await prepared.store.findGcpContainerRef(
+          prepared.organizationId,
+          prepared.preflightPlan.currentCredential.id
+        )) ?? undefined;
     }
+    const stored =
+      secretStore.storageBackend === "gcp_secret_manager"
+        ? existingSecretRef
+          ? { storageBackend: "gcp_secret_manager" as const, secretRef: existingSecretRef }
+          : credentialSecretStore.prepareGcpCredentialSecret(prepared.c.env, providerCredentialId)
+        : await writeSubmissionSecret(prepared, providerCredentialId, connectionId, secretStore);
 
     const transaction = await commitSubmission({
       ...prepared,
       providerCredentialId,
       connectionId,
-      ...(secretStore ? { secretStore } : {}),
+      secretStore,
       stored,
       existingSecretRef,
     });
@@ -483,16 +454,6 @@ async function createSubmissionSecretStore(
     });
     throw internalError();
   }
-
-  if (store.storageBackend === "runtime_env") {
-    await auditFailure(context.c, context.audit, context.auditBase, {
-      reason: "unsupported_storage_backend",
-      resourceId: providerCredentialId,
-      connectionId,
-      storageBackend: store.storageBackend,
-    });
-    throw internalError();
-  }
   return store;
 }
 
@@ -503,7 +464,7 @@ async function writeSubmissionSecret(
   secretStore: CredentialSecretStore,
   existingSecretRef?: string
 ): Promise<StoredCredentialSecret> {
-  const fields = requireStoredFields(context.input);
+  const fields = context.input.fields;
   try {
     return await secretStore.write({
       orgId: context.organizationId,
@@ -554,7 +515,6 @@ async function commitSubmission(submission: PersistedSubmission): Promise<Transa
   if (transactionResult.kind === "reserved") {
     let stored: StoredCredentialSecret | undefined;
     try {
-      if (!submission.secretStore) throw internalError();
       stored = await writeSubmissionSecret(
         submission,
         submission.providerCredentialId,
@@ -639,9 +599,6 @@ async function runSubmissionTransaction(
     );
     assertSameSetupPlan(submission.preflightPlan, lockedPlan);
 
-    if (submission.credentialSource === "runtime" && lockedPlan.kind === "replacement") {
-      throw new SetupConflict(undefined, lockedPlan.connection.id);
-    }
     const providerCredential =
       phase === "finalize"
         ? await txStore.finalizeCredentialCreation({
@@ -669,19 +626,17 @@ async function insertSubmissionCredential(
   plan: SetupPlan,
   creating: boolean
 ): Promise<ProviderCredentialRow> {
-  const fields =
-    submission.credentialSource === "stored" ? requireStoredFields(submission.input) : null;
+  const fields = submission.input.fields;
   return store.insertCredential({
     id: submission.providerCredentialId,
     organizationId: submission.organizationId,
     projectId: submission.projectId,
     provider: "privy",
-    label: fields?.credentialLabel ?? RUNTIME_CREDENTIAL_LABEL,
+    label: fields.credentialLabel,
     scope: "project",
-    source: submission.credentialSource,
+    source: "stored",
     stored: submission.stored,
-    displayMetadata:
-      fields && fields.appId.length > 4 ? { appIdSuffix: fields.appId.slice(-4) } : {},
+    displayMetadata: fields.appId.length > 4 ? { appIdSuffix: fields.appId.slice(-4) } : {},
     version:
       plan.kind === "replacement"
         ? await store.nextCredentialVersion(submission.organizationId, plan.currentCredential.id)
@@ -866,13 +821,6 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
   return hashString(canonical, params.pepper);
 }
 
-function requireStoredFields(input: SubmitPrivyCredentialInput): PrivyCredentialFields {
-  if (!input.fields) {
-    throw internalError();
-  }
-  return input.fields;
-}
-
 async function resolveReplay(
   context: Pick<SubmissionContext, "store" | "organizationId" | "projectId">,
   replay: ProviderCredentialRow,
@@ -994,8 +942,9 @@ async function classifySetup(
     throw notFound("Custody Connection");
   }
   const nowMs = await context.store.getDatabaseNowMs();
+  // `admitSubmission` admitted this request before any setup is classified.
   const decision = decideInstallation(
-    installationFactsFromConnection(connection, nowMs, true)
+    installationFactsFromConnection(connection, nowMs, { admitted: true })
   ).replace;
   if (decision.kind !== "execute") {
     throw new SetupConflict(

@@ -119,3 +119,15 @@ export async function seedEarnApiKey(
     .run();
   return { id: key.id, raw, prefix: raw.slice(0, 11), permissions: key.permissions };
 }
+
+/** Deployment flags under which `isEarnEnabled` admits Earn: Markets and Earn both on. */
+export const EARN_ENABLED_FLAGS = {
+  MARKETS_ENABLED: "true",
+  EARN_ENABLED: "true",
+} as const satisfies Partial<Env>;
+
+/** Each Earn gating flag switched off while the other stays on. */
+export const EARN_FLAG_OFF_CASES = [
+  { flag: "MARKETS_ENABLED", flags: { ...EARN_ENABLED_FLAGS, MARKETS_ENABLED: undefined } },
+  { flag: "EARN_ENABLED", flags: { ...EARN_ENABLED_FLAGS, EARN_ENABLED: undefined } },
+] as const satisfies readonly { flag: keyof typeof EARN_ENABLED_FLAGS; flags: Partial<Env> }[];

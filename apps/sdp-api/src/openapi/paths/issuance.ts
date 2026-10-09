@@ -444,7 +444,8 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Prepare token deploy transaction",
     operationId: "prepareDeployToken",
-    description: "Builds an unsigned deploy transaction for client-side signing.",
+    description:
+      "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`, else the API key's preferred or sole wallet binding. The request is rejected with 400 when none resolves, or when the key has several bindings and no preferred one. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -496,7 +497,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "Prepare metadata-URI follow-up transaction",
     operationId: "prepareDeployMetadata",
     description:
-      "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Returns a null transaction when the on-chain URI already matches.",
+      "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored), else the API key's preferred or sole wallet binding; the request is rejected with 400 when none resolves. Returns a null transaction when the on-chain URI already matches.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

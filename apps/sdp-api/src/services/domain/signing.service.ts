@@ -2,7 +2,7 @@
  * Signing Service
  *
  * Domain service for managing signing operations and provider resolution.
- * Handles DB-backed config resolution (project default → org default) and Kit signer access.
+ * Handles DB-backed config resolution and Kit signer access for exact custody wallets.
  */
 
 import type { CustodyProvider } from "@sdp/custody";
@@ -27,25 +27,18 @@ import { SigningError } from "@sdp/custody/signing";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
-import type { Context } from "hono";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
-import { getLogger } from "@/runtime/logger";
 import { KeychainFireblocksAdapter, type SigningConfigRecord } from "@/services/adapters";
 import { assertLocalSigningAllowed } from "@/services/adapters/signing";
-import { AuditService } from "@/services/audit.service";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
   assertCustodyProviderCanCreateWallet,
   assertCustodyProviderCanDeleteWallet,
-  shouldSetCustodyScopeDefault,
 } from "@/services/custody-provider-lifecycle.service";
-import {
-  CustodyRuntimeTargets,
-  type CustodyScopeSelection,
-} from "@/services/domain/signing/custody-runtime-target";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createAdapterFromEncryptedConfig } from "@/services/domain/signing/provider-adapter-factory";
 import {
   type AnchorageProviderConfig,
@@ -64,12 +57,15 @@ import {
   createProviderWallet,
   deleteProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
-import { assertProviderAvailable } from "@/services/provider-availability.service";
+import {
+  assertCustodyProviderAvailable,
+  assertCustodyProviderEnabled,
+  assertManagedCustodyUseAllowed,
+} from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
   type CustodyConfigWallet,
   type CustodyWallet,
-  type CustodyWalletLookup,
   type WalletPurpose,
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -87,30 +83,18 @@ const base58 = getBase58Codec();
  * Abstracted to decouple from the underlying database implementation.
  */
 export interface SigningConfigStore {
-  findActive(orgId: string, projectId?: string): Promise<SigningConfigRecord | null>;
-  listActive(orgId: string, projectId?: string): Promise<SigningConfigRecord[]>;
+  listActive(orgId: string, projectId: string): Promise<SigningConfigRecord[]>;
   findByProvider(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     provider: SigningConfiguration["provider"]
   ): Promise<SigningConfigRecord | null>;
   findActiveByProvider(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     provider: SigningConfiguration["provider"]
   ): Promise<SigningConfigRecord | null>;
-  getDefaultConfig(orgId: string, projectId?: string): Promise<SigningConfigRecord | null>;
-  setDefaultConfig(
-    orgId: string,
-    projectId: string | undefined,
-    configId: string
-  ): Promise<CustodyScopeSelection>;
   getById(configId: string): Promise<SigningConfigRecord | null>;
-  upsert(
-    orgId: string,
-    projectId: string | undefined,
-    config: SigningConfiguration
-  ): Promise<string>;
 }
 
 /**
@@ -118,8 +102,6 @@ export interface SigningConfigStore {
  */
 export interface SigningConfiguration {
   provider: CustodyProvider;
-  defaultWalletId?: string;
-  // Provider-specific fields stored in encrypted config JSON
 }
 
 /**
@@ -221,7 +203,6 @@ export interface InitSigningResult {
   configId: string;
   publicKey: Address;
   walletId: string;
-  defaultSelection?: CustodyScopeSelection;
 }
 
 type ReusableSigningProvider = "privy" | "coinbase_cdp" | "para" | "turnkey" | "utila";
@@ -238,23 +219,6 @@ type ProviderConfigJson =
   | IbmHavenProviderConfig
   | AnchorageProviderConfig
   | UtilaProviderConfig;
-
-export type ProviderReuseState = Record<ReusableSigningProvider, boolean>;
-
-export interface SigningConfigurationsResult {
-  configs: SigningConfigRecord[];
-  defaultConfigId: string | null;
-}
-
-export type CustodyWalletWithProvider = CustodyConfigWallet & {
-  provider: SigningConfiguration["provider"];
-  isDefaultProvider: boolean;
-};
-
-interface ListWalletsOptions {
-  provider?: SigningConfiguration["provider"];
-  includeAllProviders?: boolean;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Service Implementation
@@ -273,10 +237,7 @@ export class SigningService {
     private configStore: SigningConfigStore & {
       saveProviderConfig: CustodyConfigStore["saveProviderConfig"];
       createWallet: CustodyConfigStore["createWallet"];
-      createDefaultWallet: CustodyConfigStore["createDefaultWallet"];
       getWallets: CustodyConfigStore["getWallets"];
-      getWalletsForConfigs: CustodyConfigStore["getWalletsForConfigs"];
-      findActiveWalletByIdentifier: CustodyConfigStore["findActiveWalletByIdentifier"];
       deactivateWallet: CustodyConfigStore["deactivateWallet"];
       deactivateWalletIfNotLast: CustodyConfigStore["deactivateWalletIfNotLast"];
       reactivateWallet: CustodyConfigStore["reactivateWallet"];
@@ -297,12 +258,23 @@ export class SigningService {
     return this.custodyCipher;
   }
 
-  private async assertProviderEnabled(
-    orgId: string,
-    provider: SigningConfiguration["provider"]
-  ): Promise<void> {
+  /**
+   * Refuses using a Managed custody config unless the (provider, managed) pair is
+   * in the release channel, the config's project allows Managed custody
+   * (Production is BYOK only) and the organization has the provider enabled.
+   * Every Managed use passes here before any decrypt or provider call: wallet
+   * creation and deletion, and the adapter every signer and public-key read
+   * builds. The channel and environment refusals keep their 403s; the
+   * entitlement refusal is a signing error.
+   *
+   * @param config - The Managed config about to be used.
+   */
+  private async assertManagedConfigUsable(config: SigningConfigRecord): Promise<void> {
+    const { organizationId, projectId, provider } = config;
+    assertCustodyProviderAvailable(this.env, provider, "managed");
+    await assertManagedCustodyUseAllowed(getDb(this.env), { organizationId, projectId, provider });
     try {
-      await assertProviderAvailable(this.env, getDb(this.env), orgId, "custody", provider);
+      await assertCustodyProviderEnabled(this.env, getDb(this.env), organizationId, provider);
     } catch (error) {
       if (error instanceof AppError) {
         throw new SigningError(error.message, "INVALID_REQUEST", error);
@@ -311,128 +283,17 @@ export class SigningService {
     }
   }
 
-  private async ensureScopeDefaultConfig(
-    orgId: string,
-    projectId: string | undefined,
-    configId: string,
-    provider: SigningConfiguration["provider"]
-  ): Promise<CustodyScopeSelection | undefined> {
-    const scopeDefault = await this.configStore.getDefaultConfig(orgId, projectId);
-
-    if (
-      !shouldSetCustodyScopeDefault({
-        candidateProvider: provider,
-        currentDefaultProvider: scopeDefault?.provider ?? null,
-      })
-    ) {
-      return;
-    }
-
-    return this.configStore.setDefaultConfig(orgId, projectId, configId);
-  }
-
-  private async ensureScopeDefaultConfigForExistingRecord(
-    orgId: string,
-    projectId: string | undefined,
-    configId: string
-  ): Promise<CustodyScopeSelection | undefined> {
-    const config = await this.configStore.getById(configId);
-    if (!config) {
-      return;
-    }
-
-    const scopeDefault = await this.configStore.getDefaultConfig(orgId, projectId);
-    if (
-      shouldSetCustodyScopeDefault({
-        candidateProvider: config.provider,
-        currentDefaultProvider: scopeDefault?.provider ?? null,
-      })
-    ) {
-      return this.configStore.setDefaultConfig(orgId, projectId, configId);
-    }
-  }
-
-  private async getScopeAndFallbackConfigs(
-    orgId: string,
-    projectId: string | undefined
-  ): Promise<SigningConfigRecord[]> {
-    const scopedConfigs = await this.configStore.listActive(orgId, projectId);
-    if (!projectId) {
-      return scopedConfigs;
-    }
-
-    const orgConfigs = await this.configStore.listActive(orgId, undefined);
-    const scopedConfigIds = new Set(scopedConfigs.map((config) => config.id));
-    return [...scopedConfigs, ...orgConfigs.filter((config) => !scopedConfigIds.has(config.id))];
-  }
-
   async getConfigurationByProvider(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     provider: SigningConfiguration["provider"]
   ): Promise<SigningConfigRecord | null> {
-    if (projectId) {
-      const scopedConfig = await this.configStore.findActiveByProvider(orgId, projectId, provider);
-      if (scopedConfig) {
-        return scopedConfig;
-      }
-    }
-
-    return this.configStore.findActiveByProvider(orgId, undefined, provider);
-  }
-
-  /**
-   * Resolve an active configuration for an administrative mutation without
-   * project-to-organization fallback. Shared organization configurations may
-   * be used by project workloads, but only organization-scoped callers may
-   * mutate them.
-   */
-  async getConfigurationForMutation(
-    orgId: string,
-    projectId: string | undefined,
-    provider?: SigningConfiguration["provider"]
-  ): Promise<SigningConfigRecord | null> {
-    const config = provider
-      ? await this.configStore.findActiveByProvider(orgId, projectId, provider)
-      : await this.configStore.getDefaultConfig(orgId, projectId);
-    return config?.projectId === (projectId ?? null) ? config : null;
-  }
-
-  async setDefaultConfiguration(
-    orgId: string,
-    projectId: string | undefined,
-    configId: string
-  ): Promise<CustodyScopeSelection> {
-    const config = await this.configStore.getById(configId);
-    if (!config || config.organizationId !== orgId || config.status !== "active") {
-      throw new SigningError("Custody configuration not found", "NOT_FOUND");
-    }
-
-    await this.assertProviderEnabled(orgId, config.provider);
-    const selection = await this.configStore.setDefaultConfig(orgId, projectId, configId);
-    this.providerCache.clear();
-    return selection;
-  }
-
-  async setDefaultProvider(
-    orgId: string,
-    projectId: string | undefined,
-    provider: SigningConfiguration["provider"]
-  ): Promise<SigningConfigRecord> {
-    await this.assertProviderEnabled(orgId, provider);
-
-    const scopeConfig = await this.configStore.findActiveByProvider(orgId, projectId, provider);
-    if (!scopeConfig) {
-      throw new SigningError("Custody not initialized for provider", "NOT_FOUND");
-    }
-
-    await this.setDefaultConfiguration(orgId, projectId, scopeConfig.id);
-    return scopeConfig;
+    return this.configStore.findActiveByProvider(orgId, projectId, provider);
   }
 
   private async findExistingProviderWallet(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     provider: ReusableSigningProvider
   ): Promise<{ config: SigningConfigRecord; wallet: CustodyWallet } | null> {
     const existingProviderConfig = await this.configStore.findByProvider(
@@ -444,25 +305,20 @@ export class SigningService {
       return null;
     }
 
-    const wallets = await this.configStore.getWallets(existingProviderConfig.id);
-    if (wallets.length === 0) {
+    const [rootWallet] = await this.configStore.getWallets(existingProviderConfig.id);
+    if (!rootWallet) {
       return null;
     }
 
-    const selectedWallet =
-      (existingProviderConfig.defaultWalletId
-        ? wallets.find((wallet) => wallet.walletId === existingProviderConfig.defaultWalletId)
-        : undefined) ?? wallets[0];
-
     return {
       config: existingProviderConfig,
-      wallet: selectedWallet,
+      wallet: rootWallet,
     };
   }
 
   private async findReusableProviderWallet(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     provider: ReusableSigningProvider
   ): Promise<{ configId: string; wallet: CustodyWallet } | null> {
     const existingProviderWallet = await this.findExistingProviderWallet(
@@ -482,13 +338,13 @@ export class SigningService {
 
   /**
    * Atomically persist a freshly provisioned provider: the config row with
-   * its full encrypted payload, the root wallet record, and the
-   * default-wallet pointer land in one transaction, so the config is never
-   * readable in a partially initialized state.
+   * its full encrypted payload and the root wallet record land in one
+   * transaction, so the config is never readable in a partially initialized
+   * state.
    */
   private async persistInitializedProvider(params: {
     orgId: string;
-    projectId: string | undefined;
+    projectId: string;
     configJson: ProviderConfigJson;
     walletId: string;
     publicKey: Address;
@@ -501,7 +357,6 @@ export class SigningService {
       projectId: params.projectId,
       provider,
       configJson: params.configJson,
-      defaultWalletId: params.walletId,
       wallet: {
         walletId: params.walletId,
         publicKey: params.publicKey,
@@ -510,19 +365,12 @@ export class SigningService {
       },
     });
 
-    const defaultSelection = await this.ensureScopeDefaultConfig(
-      params.orgId,
-      params.projectId,
-      configId,
-      provider
-    );
     this.providerCache.delete(configId);
 
     return {
       configId,
       publicKey: params.publicKey,
       walletId: params.walletId,
-      defaultSelection,
     };
   }
 
@@ -532,7 +380,7 @@ export class SigningService {
    */
   private async persistReusedProvider(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     configJson: ProviderConfigJson,
     reusable: { configId: string; wallet: CustodyWallet }
   ): Promise<InitSigningResult> {
@@ -541,42 +389,14 @@ export class SigningService {
       projectId,
       provider: configJson.provider,
       configJson,
-      defaultWalletId: reusable.wallet.walletId,
     });
 
-    const defaultSelection = await this.ensureScopeDefaultConfigForExistingRecord(
-      orgId,
-      projectId,
-      reusable.configId
-    );
     this.providerCache.delete(reusable.configId);
 
     return {
       configId: reusable.configId,
       publicKey: reusable.wallet.publicKey as Address,
       walletId: reusable.wallet.walletId,
-      defaultSelection,
-    };
-  }
-
-  async getProviderReuseState(
-    orgId: string,
-    projectId: string | undefined
-  ): Promise<ProviderReuseState> {
-    const [privy, coinbaseCdp, para, turnkey, utila] = await Promise.all([
-      this.findExistingProviderWallet(orgId, projectId, "privy"),
-      this.findExistingProviderWallet(orgId, projectId, "coinbase_cdp"),
-      this.findExistingProviderWallet(orgId, projectId, "para"),
-      this.findExistingProviderWallet(orgId, projectId, "turnkey"),
-      this.findExistingProviderWallet(orgId, projectId, "utila"),
-    ]);
-
-    return {
-      privy: Boolean(privy),
-      coinbase_cdp: Boolean(coinbaseCdp),
-      para: Boolean(para),
-      turnkey: Boolean(turnkey),
-      utila: Boolean(utila),
     };
   }
 
@@ -591,13 +411,13 @@ export class SigningService {
    * the configuration in the database.
    *
    * @param orgId - Organization ID
-   * @param projectId - Optional project ID for project-specific config
+   * @param projectId - The project that owns the config
    * @param options - Optional configuration options
    * @returns The new config ID, public key, and wallet ID
    */
   async initializeLocalSigning(
     orgId: string,
-    projectId?: string,
+    projectId: string,
     options?: InitLocalSigningOptions
   ): Promise<InitSigningResult> {
     assertLocalSigningAllowed(this.env);
@@ -605,7 +425,7 @@ export class SigningService {
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "local");
     if (existing) {
       throw new SigningError(
-        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        `Signing already initialized for org ${orgId} project ${projectId}`,
         "ALREADY_INITIALIZED"
       );
     }
@@ -646,20 +466,20 @@ export class SigningService {
    * Initialize signing for an organization with Fireblocks provider.
    *
    * @param orgId - Organization ID
-   * @param projectId - Optional project ID for project-specific config
+   * @param projectId - The project that owns the config
    * @param options - Fireblocks configuration
    * @returns The new config ID, public key, and wallet ID
    */
   async initializeFireblocksSigning(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     options: InitFireblocksSigningOptions
   ): Promise<InitSigningResult> {
     // Check if an active config already exists for this provider.
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "fireblocks");
     if (existing) {
       throw new SigningError(
-        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        `Signing already initialized for org ${orgId} project ${projectId}`,
         "ALREADY_INITIALIZED"
       );
     }
@@ -703,20 +523,20 @@ export class SigningService {
    * Initialize signing for an organization with Privy provider.
    *
    * @param orgId - Organization ID
-   * @param projectId - Optional project ID for project-specific config
+   * @param projectId - The project that owns the config
    * @param options - Privy configuration
    * @returns The new config ID, public key, and wallet ID
    */
   async initializePrivySigning(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     options: InitPrivySigningOptions
   ): Promise<InitSigningResult> {
     // Check if an active config already exists for this provider.
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "privy");
     if (existing) {
       throw new SigningError(
-        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        `Signing already initialized for org ${orgId} project ${projectId}`,
         "ALREADY_INITIALIZED"
       );
     }
@@ -763,13 +583,13 @@ export class SigningService {
    */
   async initializeCoinbaseCdpSigning(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     options: InitCoinbaseCdpSigningOptions
   ): Promise<InitSigningResult> {
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "coinbase_cdp");
     if (existing) {
       throw new SigningError(
-        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        `Signing already initialized for org ${orgId} project ${projectId}`,
         "ALREADY_INITIALIZED"
       );
     }
@@ -802,7 +622,7 @@ export class SigningService {
     // tenant's.
     const provisioned = await custodyProvisioning.provisionCoinbaseCdpAccount(this.env, {
       orgId,
-      projectId: projectId ?? null,
+      projectId,
       network: options.network,
       accountPolicy: options.accountPolicy,
       reuseExisting: true,
@@ -835,13 +655,13 @@ export class SigningService {
    */
   async initializeParaSigning(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     options: InitParaSigningOptions
   ): Promise<InitSigningResult> {
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "para");
     if (existing) {
       throw new SigningError(
-        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        `Signing already initialized for org ${orgId} project ${projectId}`,
         "ALREADY_INITIALIZED"
       );
     }
@@ -899,13 +719,13 @@ export class SigningService {
    */
   async initializeTurnkeySigning(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     options: InitTurnkeySigningOptions
   ): Promise<InitSigningResult> {
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "turnkey");
     if (existing) {
       throw new SigningError(
-        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        `Signing already initialized for org ${orgId} project ${projectId}`,
         "ALREADY_INITIALIZED"
       );
     }
@@ -928,7 +748,6 @@ export class SigningService {
         provider: "turnkey",
         organizationId: this.env.TURNKEY_ORGANIZATION_ID,
         requestDelayMs: options.requestDelayMs,
-        defaultWalletPublicKey: reusable.wallet.publicKey as Address,
       };
 
       return this.persistReusedProvider(orgId, projectId, configJson, reusable);
@@ -946,7 +765,6 @@ export class SigningService {
       provider: "turnkey",
       organizationId: this.env.TURNKEY_ORGANIZATION_ID,
       requestDelayMs: options.requestDelayMs,
-      defaultWalletPublicKey: publicKey,
     };
 
     return this.persistInitializedProvider({
@@ -966,13 +784,13 @@ export class SigningService {
    */
   async initializeDfnsSigning(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     options: InitDfnsSigningOptions
   ): Promise<InitSigningResult> {
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "dfns");
     if (existing) {
       throw new SigningError(
-        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        `Signing already initialized for org ${orgId} project ${projectId}`,
         "ALREADY_INITIALIZED"
       );
     }
@@ -1026,13 +844,13 @@ export class SigningService {
    */
   async initializeIbmHavenSigning(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     options: InitIbmHavenSigningOptions
   ): Promise<InitSigningResult> {
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "ibm_haven");
     if (existing) {
       throw new SigningError(
-        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        `Signing already initialized for org ${orgId} project ${projectId}`,
         "ALREADY_INITIALIZED"
       );
     }
@@ -1085,13 +903,13 @@ export class SigningService {
    */
   async initializeAnchorageWalletLifecycle(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     options: InitAnchorageSigningOptions
   ): Promise<InitSigningResult> {
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "anchorage");
     if (existing) {
       throw new SigningError(
-        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        `Signing already initialized for org ${orgId} project ${projectId}`,
         "ALREADY_INITIALIZED"
       );
     }
@@ -1124,7 +942,7 @@ export class SigningService {
    */
   async initializeAnchorageSigning(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     options: InitAnchorageSigningOptions
   ): Promise<InitSigningResult> {
     return this.initializeAnchorageWalletLifecycle(orgId, projectId, options);
@@ -1138,13 +956,13 @@ export class SigningService {
    */
   async initializeUtilaSigning(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     options: InitUtilaSigningOptions
   ): Promise<InitSigningResult> {
     const existing = await this.configStore.findActiveByProvider(orgId, projectId, "utila");
     if (existing) {
       throw new SigningError(
-        `Signing already initialized for org ${orgId}${projectId ? ` project ${projectId}` : ""}`,
+        `Signing already initialized for org ${orgId} project ${projectId}`,
         "ALREADY_INITIALIZED"
       );
     }
@@ -1194,107 +1012,40 @@ export class SigningService {
   }
 
   /**
-   * Get the wallets for an organization's custody config.
-   */
-  async getWallets(orgId: string, projectId?: string): Promise<CustodyWallet[]> {
-    const config = await this.configStore.findActive(orgId, projectId);
-    if (!config) {
-      return [];
-    }
-    return this.configStore.getWallets(config.id);
-  }
-
-  async getWalletsWithProviders(
-    orgId: string,
-    projectId: string | undefined,
-    options?: ListWalletsOptions
-  ): Promise<CustodyWalletWithProvider[]> {
-    const includeAllProviders = options?.includeAllProviders === true;
-    const providerFilter = options?.provider;
-    const resolvedDefaultConfig = await this.configStore.findActive(orgId, projectId);
-    const defaultConfigId = resolvedDefaultConfig?.id ?? null;
-
-    const configs = includeAllProviders
-      ? (await this.getScopeAndFallbackConfigs(orgId, projectId)).filter((config) =>
-          providerFilter ? config.provider === providerFilter : true
-        )
-      : [
-          providerFilter
-            ? await this.getConfigurationByProvider(orgId, projectId, providerFilter)
-            : resolvedDefaultConfig,
-        ].filter((config): config is SigningConfigRecord => Boolean(config));
-
-    if (configs.length === 0) {
-      return [];
-    }
-
-    const walletsByConfigId = await this.configStore.getWalletsForConfigs(
-      configs.map((config) => config.id)
-    );
-
-    return configs.flatMap((config) =>
-      (walletsByConfigId.get(config.id) ?? []).map((wallet) => ({
-        ...wallet,
-        provider: config.provider,
-        isDefaultProvider: defaultConfigId === config.id,
-      }))
-    );
-  }
-
-  async getWalletById(
-    orgId: string,
-    projectId: string | undefined,
-    walletId: string
-  ): Promise<CustodyWalletWithProvider | null> {
-    const wallet = await this.configStore.findActiveWalletByIdentifier(orgId, projectId, walletId);
-    if (!wallet) {
-      return null;
-    }
-
-    const defaultConfig = await this.configStore.findActive(orgId, projectId);
-    return this.mapWalletLookup(wallet, defaultConfig?.id ?? null);
-  }
-
-  /**
-   * Provision a new wallet in custody for the resolved provider configuration.
+   * Provision a new wallet under the project's Managed config for the named provider.
+   * A project holds one active config per provider, so the provider names it exactly.
    *
    * Providers that support wallet lifecycle are controlled by provider capability flags.
+   *
+   * @param orgId - The organization that owns the project.
+   * @param projectId - The project whose config the wallet lives under.
+   * @param params - The wallet to create.
+   * @param params.provider - The provider whose Managed config owns the new wallet.
+   * @param params.label - Optional wallet label.
+   * @param params.purpose - Optional wallet purpose.
+   * @returns The persisted config wallet.
    */
   async createWallet(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     params: {
+      provider: SigningConfiguration["provider"];
       label?: string;
       purpose?: WalletPurpose;
-      setDefault?: boolean;
-      provider?: SigningConfiguration["provider"];
-      auditContext?: Context<{ Bindings: Env }>;
     }
   ): Promise<CustodyConfigWallet> {
-    const config = await this.getConfigurationForMutation(orgId, projectId, params.provider);
+    const config = await this.configStore.findActiveByProvider(orgId, projectId, params.provider);
     if (!config) {
       throw new SigningError(
-        params.provider
-          ? `Custody not initialized for provider: ${params.provider}`
-          : "Custody not initialized",
+        `Custody not initialized for provider: ${params.provider}`,
         "NOT_FOUND"
       );
     }
-    const auditContext = params.setDefault ? params.auditContext : undefined;
-    if (params.setDefault && !auditContext) {
-      throw new SigningError("Default wallet changes require an audit context", "INVALID_REQUEST");
-    }
 
-    await this.assertProviderEnabled(orgId, config.provider);
+    await this.assertManagedConfigUsable(config);
     assertCustodyProviderCanCreateWallet(config.provider);
 
     const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
-    if (auditContext) {
-      return this.createDefaultWallet(auditContext, orgId, projectId, config, parsed, {
-        label: params.label,
-        purpose: params.purpose,
-      });
-    }
 
     const { walletId, publicKey } = await createProviderWallet({
       env: this.env,
@@ -1326,167 +1077,40 @@ export class SigningService {
     return wallet;
   }
 
-  private async createDefaultWallet(
-    c: Context<{ Bindings: Env }>,
-    orgId: string,
-    projectId: string | undefined,
-    config: SigningConfigRecord,
-    parsed: Parameters<typeof createProviderWallet>[0]["parsed"],
-    params: { label?: string; purpose?: WalletPurpose }
-  ): Promise<CustodyConfigWallet> {
-    const custodyWalletId = `cwlt_${crypto.randomUUID()}`;
-    const auditService = new AuditService(getDb(this.env));
-    const intent = await auditService.beginCritical(c, {
-      action: "update",
-      resourceType: "custody_config",
-      resourceId: config.id,
-      metadata: {
-        event: "default_wallet_change_started",
-        ownerKind: "config",
-        provider: config.provider,
-        custodyWalletId,
-        projectId: projectId ?? null,
-      },
-    });
-
-    let provisioned: { walletId: string; publicKey: string };
-    try {
-      provisioned = await createProviderWallet({
-        env: this.env,
-        orgId,
-        projectId,
-        params: { label: params.label },
-        parsed,
-        cipher: this.getCustodyCipher(),
-      });
-    } catch (error) {
-      if (!(error instanceof SigningError) || error.code === "NETWORK_ERROR") {
-        this.logWalletOrphanRisk(orgId, projectId, config, "provider_result_unknown", intent.id);
-      } else {
-        await auditService.completeCritical(c, intent, {
-          status: "failure",
-          metadata: { event: "default_wallet_change_failed", reason: "provider_rejected" },
-        });
-      }
-      throw error;
-    }
-
-    let created: Awaited<ReturnType<CustodyConfigStore["createDefaultWallet"]>>;
-    try {
-      created = await this.configStore.createDefaultWallet(config.id, orgId, projectId, {
-        id: custodyWalletId,
-        walletId: provisioned.walletId,
-        publicKey: provisioned.publicKey,
-        label: params.label,
-        purpose: params.purpose,
-      });
-    } catch (error) {
-      this.logWalletOrphanRisk(
-        orgId,
-        projectId,
-        config,
-        "persistence_failed",
-        intent.id,
-        provisioned.walletId
-      );
-      throw new SigningError(
-        `Failed to persist wallet record: ${error instanceof Error ? error.message : "Unknown error"}`,
-        "NETWORK_ERROR",
-        error instanceof Error ? error : undefined
-      );
-    }
-    if (!created) {
-      this.logWalletOrphanRisk(
-        orgId,
-        projectId,
-        config,
-        "persistence_failed",
-        intent.id,
-        provisioned.walletId
-      );
-      await auditService.completeCritical(c, intent, {
-        status: "failure",
-        metadata: {
-          event: "default_wallet_change_failed",
-          reason: "selection_unavailable",
-          walletId: provisioned.walletId,
-        },
-      });
-      throw new SigningError("Custody not initialized", "NOT_FOUND");
-    }
-
-    this.providerCache.delete(config.id);
-    await auditService.completeCritical(c, intent, {
-      metadata: {
-        event: "default_wallet_changed",
-        walletId: provisioned.walletId,
-        previousCustodyWalletId: created.previous.custody_wallet_id,
-        previousWalletId: created.previous.wallet_id,
-      },
-    });
-
-    return created.wallet;
-  }
-
-  private logWalletOrphanRisk(
-    orgId: string,
-    projectId: string | undefined,
-    config: SigningConfigRecord,
-    reason: "provider_result_unknown" | "persistence_failed",
-    auditIntentId: string,
-    walletId?: string
-  ): void {
-    getLogger().error(
-      {
-        organizationId: orgId,
-        projectId: projectId ?? null,
-        custodyConfigId: config.id,
-        provider: config.provider,
-        reason,
-        auditIntentId,
-        walletId,
-      },
-      "custody_wallet_orphan_risk"
-    );
-  }
-
   /**
-   * Delete a wallet from the resolved provider configuration.
+   * Delete a wallet from the config that owns it.
    *
    * Deletion support is provider-dependent. Providers without delete capability
    * will return INVALID_REQUEST.
+   *
+   * @param orgId - The organization that owns the project.
+   * @param projectId - The project the wallet belongs to.
+   * @param params - The wallet to delete.
+   * @param params.walletId - The provider wallet ID.
+   * @param params.configId - The config that owns the wallet row.
+   * @param params.provider - When set, asserted against the owning config's provider.
    */
   async deleteWallet(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     params: {
       walletId: string;
+      configId: string;
       provider?: SigningConfiguration["provider"];
-      configId?: string;
     }
   ): Promise<void> {
-    const config = params.configId
-      ? await this.configStore.getById(params.configId)
-      : await this.getConfigurationForMutation(orgId, projectId, params.provider);
+    const config = await this.configStore.getById(params.configId);
     if (!config) {
-      throw new SigningError(
-        params.provider
-          ? `Custody not initialized for provider: ${params.provider}`
-          : "Custody not initialized",
-        "NOT_FOUND"
-      );
+      throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
-    if (
-      config.organizationId !== orgId ||
-      (config.projectId !== null && config.projectId !== projectId)
-    ) {
+    if (config.organizationId !== orgId || config.projectId !== projectId) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
     if (params.provider && params.provider !== config.provider) {
       throw new SigningError("Provider does not match custody wallet", "INVALID_REQUEST");
     }
 
-    await this.assertProviderEnabled(orgId, config.provider);
+    await this.assertManagedConfigUsable(config);
     assertCustodyProviderCanDeleteWallet(config.provider);
 
     const wallets = await this.configStore.getWallets(config.id);
@@ -1523,29 +1147,6 @@ export class SigningService {
       }
       throw error;
     }
-
-    // Re-point the default at a surviving wallet in one conditional statement:
-    // the guard re-checks the live row (not the stale in-memory config) and the
-    // successor is elected inside the same statement, so concurrent deletes
-    // cannot both promote — or promote a wallet that just went inactive.
-    const reassigned = await getDb(this.env)
-      .prepare(
-        `UPDATE custody_configs
-         SET default_wallet_id = (
-           SELECT w.wallet_id
-           FROM custody_wallets w
-           WHERE w.custody_config_id = custody_configs.id AND w.status = 'active'
-           ORDER BY w.created_at ASC, w.id ASC
-           LIMIT 1
-         ), updated_at = datetime('now')
-         WHERE id = ? AND default_wallet_id = ?`
-      )
-      .bind(config.id, targetWallet.walletId)
-      .run();
-
-    if (reassigned > 0) {
-      this.providerCache.delete(config.id);
-    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1554,13 +1155,9 @@ export class SigningService {
 
   private async getAdapterForConfig(
     orgId: string,
-    config: SigningConfigRecord | null
+    config: SigningConfigRecord
   ): Promise<SigningPort> {
-    if (!config) {
-      throw new SigningError("Custody not initialized", "NOT_FOUND");
-    }
-
-    await this.assertProviderEnabled(orgId, config.provider);
+    await this.assertManagedConfigUsable(config);
 
     const cacheKey = config.id;
 
@@ -1580,56 +1177,32 @@ export class SigningService {
     return adapter;
   }
 
-  private async resolveAdapterForRequest(
-    orgId: string,
-    projectId: string | undefined,
-    walletId?: string | null
-  ): Promise<{ adapter: SigningPort; walletId?: string; walletPublicKey?: Address }> {
-    if (!walletId) {
-      const config = await this.configStore.findActive(orgId, projectId);
-      const adapter = await this.getAdapterForConfig(orgId, config);
-      return { adapter };
-    }
-
-    const walletRow = projectId
-      ? await getDb(this.env)
-          .prepare(
-            `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
-             FROM custody_wallets w
-             JOIN custody_configs c ON c.id = w.custody_config_id
-             WHERE c.organization_id = ?
-               AND w.wallet_id = ?
-               AND c.status = 'active'
-               AND w.status = 'active'
-               AND (c.project_id = ? OR c.project_id IS NULL)
-             ORDER BY CASE WHEN c.project_id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC
-             LIMIT 1`
-          )
-          .bind(orgId, walletId, projectId, projectId)
-          .first<{
-            custody_config_id: string;
-            project_id: string | null;
-            wallet_public_key: string;
-          }>()
-      : await getDb(this.env)
-          .prepare(
-            `SELECT c.id as custody_config_id, c.project_id as project_id, w.public_key as wallet_public_key
-             FROM custody_wallets w
-             JOIN custody_configs c ON c.id = w.custody_config_id
-             WHERE c.organization_id = ?
-               AND w.wallet_id = ?
-               AND c.status = 'active'
-               AND w.status = 'active'
-               AND c.project_id IS NULL
-             ORDER BY c.updated_at DESC, c.id DESC
-             LIMIT 1`
-          )
-          .bind(orgId, walletId)
-          .first<{
-            custody_config_id: string;
-            project_id: string | null;
-            wallet_public_key: string;
-          }>();
+  /**
+   * The public key of one of the project's active Managed config wallets. The
+   * config's adapter is built first, so a provider the release channel or the
+   * organization's entitlements leave out is refused before the key is answered.
+   *
+   * @param orgId - The organization that owns the project.
+   * @param projectId - The project the wallet belongs to.
+   * @param walletId - The provider wallet ID.
+   * @returns The wallet's Solana address.
+   */
+  async getPublicKey(orgId: string, projectId: string, walletId: string): Promise<Address> {
+    const walletRow = await getDb(this.env)
+      .prepare(
+        `SELECT c.id as custody_config_id, w.public_key as wallet_public_key
+         FROM custody_wallets w
+         JOIN custody_configs c ON c.id = w.custody_config_id
+         WHERE c.organization_id = ?
+           AND c.project_id = ?
+           AND w.wallet_id = ?
+           AND c.status = 'active'
+           AND w.status = 'active'
+         ORDER BY c.updated_at DESC, c.id DESC
+         LIMIT 1`
+      )
+      .bind(orgId, projectId, walletId)
+      .first<{ custody_config_id: string; wallet_public_key: string }>();
 
     if (!walletRow) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
@@ -1640,64 +1213,13 @@ export class SigningService {
       throw new SigningError("Custody configuration not found", "WALLET_NOT_FOUND");
     }
 
-    const adapter = await this.getAdapterForConfig(orgId, config);
-    return { adapter, walletId, walletPublicKey: walletRow.wallet_public_key as Address };
-  }
-
-  /**
-   * Get the public key for the signing wallet.
-   */
-  async getPublicKey(orgId: string, projectId?: string, walletId?: string): Promise<Address> {
-    if (!walletId) {
-      const config = await this.configStore.findActive(orgId, projectId);
-      if (!config) {
-        throw new SigningError("Custody not initialized", "NOT_FOUND");
-      }
-
-      const wallets = await this.configStore.getWallets(config.id);
-      const defaultWallet =
-        (config.defaultWalletId
-          ? wallets.find((wallet) => wallet.walletId === config.defaultWalletId)
-          : undefined) ?? wallets[0];
-
-      if (defaultWallet) {
-        return defaultWallet.publicKey as Address;
-      }
-    }
-
-    const resolved = await this.resolveAdapterForRequest(orgId, projectId, walletId);
-    if (resolved.walletPublicKey) {
-      return resolved.walletPublicKey;
-    }
-    return resolved.adapter.getPublicKey(resolved.walletId);
-  }
-
-  /**
-   * Get a transaction signer compatible with @solana/kit.
-   * Works with KeychainMemoryAdapter, KeychainFireblocksAdapter, KeychainPrivyAdapter,
-   * KeychainCoinbaseAdapter, KeychainParaAdapter, KeychainTurnkeyAdapter, and KeychainDfnsAdapter.
-   *
-   * Returns a TransactionSigner that can be used with:
-   * - signTransactionMessageWithSigners()
-   * - partiallySignTransactionMessageWithSigners()
-   * - addSignersToTransactionMessage()
-   */
-  async getTransactionSigner(
-    orgId: string,
-    projectId?: string,
-    walletId?: string | null
-  ): Promise<TransactionSigner> {
-    return this.runtimeTargets.getTransactionSigner(
-      orgId,
-      projectId,
-      walletId ?? undefined,
-      (organizationId, config) => this.getAdapterForConfig(organizationId, config)
-    );
+    await this.getAdapterForConfig(orgId, config);
+    return walletRow.wallet_public_key as Address;
   }
 
   async admitRuntimeExecution(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     custodyWalletId: string
   ): Promise<void> {
     return this.runtimeTargets.admitRuntimeExecution({
@@ -1709,7 +1231,7 @@ export class SigningService {
 
   async getTransactionSignerForWalletRecord(
     orgId: string,
-    projectId: string | undefined,
+    projectId: string,
     custodyWalletId: string
   ): Promise<TransactionSigner> {
     return this.runtimeTargets.getTransactionSignerForWalletRecord(
@@ -1720,53 +1242,15 @@ export class SigningService {
     );
   }
 
-  private mapWalletLookup(
-    wallet: CustodyWalletLookup,
-    defaultConfigId: string | null
-  ): CustodyWalletWithProvider {
-    return {
-      id: wallet.id,
-      custodyConfigId: wallet.custodyConfigId,
-      walletId: wallet.walletId,
-      publicKey: wallet.publicKey,
-      label: wallet.label,
-      purpose: wallet.purpose,
-      status: wallet.status,
-      createdAt: wallet.createdAt,
-      provider: wallet.provider,
-      isDefaultProvider: defaultConfigId === wallet.custodyConfigId,
-    };
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Configuration Management
-  // ═══════════════════════════════════════════════════════════════════════════
-
   /**
-   * Configure the signing provider for an org/project.
+   * The project's active Managed custody configs, most recently updated first.
+   *
+   * @param orgId - The organization that owns the project.
+   * @param projectId - The project whose configs are listed.
+   * @returns The active configs.
    */
-  async configureProvider(
-    orgId: string,
-    projectId: string | undefined,
-    config: SigningConfiguration
-  ): Promise<void> {
-    const configId = await this.configStore.upsert(orgId, projectId, config);
-    await this.ensureScopeDefaultConfig(orgId, projectId, configId, config.provider);
-
-    // Invalidate cache for this config.
-    this.providerCache.delete(configId);
-  }
-
-  async getConfigurations(orgId: string, projectId?: string): Promise<SigningConfigurationsResult> {
-    const [configs, resolvedDefault] = await Promise.all([
-      this.getScopeAndFallbackConfigs(orgId, projectId),
-      this.configStore.findActive(orgId, projectId),
-    ]);
-
-    return {
-      configs,
-      defaultConfigId: resolvedDefault?.id ?? null,
-    };
+  async getConfigurations(orgId: string, projectId: string): Promise<SigningConfigRecord[]> {
+    return this.configStore.listActive(orgId, projectId);
   }
 }
 
@@ -1793,10 +1277,6 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
 
   const tenantMethods = new Set([
     "getConfigurationByProvider",
-    "getConfigurationForMutation",
-    "setDefaultConfiguration",
-    "setDefaultProvider",
-    "getProviderReuseState",
     "initializeLocalSigning",
     "initializeFireblocksSigning",
     "initializePrivySigning",
@@ -1808,17 +1288,11 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
     "initializeAnchorageWalletLifecycle",
     "initializeAnchorageSigning",
     "initializeUtilaSigning",
-    "getWallets",
-    "getWalletsWithProviders",
-    // biome-ignore lint/security/noSecrets: public service method identifier, not a credential
-    "getWalletById",
     "createWallet",
     "deleteWallet",
     "getPublicKey",
-    "getTransactionSigner",
     "admitRuntimeExecution",
     "getTransactionSignerForWalletRecord",
-    "configureProvider",
     "getConfigurations",
   ]);
 
@@ -1829,13 +1303,10 @@ export function createSigningService(env: Env, scope?: TenantScope): SigningServ
         return value;
       }
 
-      return (...args: unknown[]) => {
+      return (...args: [organizationId: string, projectId: string, ...rest: unknown[]]) => {
         assertTenantClaim(
           scope,
-          {
-            organizationId: args[0],
-            projectId: args[1] ?? null,
-          },
+          { organizationId: args[0], projectId: args[1] },
           `SigningService.${String(property)}`
         );
         return Reflect.apply(value, target, args);

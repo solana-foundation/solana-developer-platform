@@ -375,12 +375,8 @@ function clipsDashboardHorizontalOverflow(pathname: string): boolean {
 
 function usesWorkspaceViewport(pathname: string): boolean {
   const isWalletDetailRoute =
-    (pathname.startsWith("/dashboard/wallets/") &&
-      pathname !== "/dashboard/wallets/setup" &&
-      pathname !== "/dashboard/wallets/switch") ||
-    (pathname.startsWith("/dashboard/custody/") &&
-      pathname !== "/dashboard/custody/setup" &&
-      pathname !== "/dashboard/custody/switch");
+    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
+    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
   const isWalletSetupRoute =
     pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup";
 

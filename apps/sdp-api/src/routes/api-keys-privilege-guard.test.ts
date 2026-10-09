@@ -391,7 +391,7 @@ describe("API key privilege guards", () => {
           name: "Provisioned escape",
           role: "api_readonly",
           walletScope: "selected",
-          provisionWallet: true,
+          provisionWallet: { provider: "privy" },
         }),
       },
       env

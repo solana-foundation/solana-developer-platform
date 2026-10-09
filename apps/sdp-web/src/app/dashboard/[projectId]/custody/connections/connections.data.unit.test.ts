@@ -25,9 +25,7 @@ function connection(id: string): CustodyConnectionListItem {
     provider: "privy",
     label: "Treasury",
     status: "active",
-    isDefault: true,
     isRuntimeExecutionAllowed: true,
-    defaultCustodyWalletId: "cwlt_treasury",
     createdAt: "2026-08-10T09:00:00.000Z",
     activatedAt: "2026-08-10T09:05:00.000Z",
     lastCheck: {
@@ -274,18 +272,7 @@ describe("fetchConnectionsPage", () => {
 describe("summarizeProviderConnections", () => {
   const paused = (id: string) => ({
     ...connection(id),
-    isDefault: false,
     isRuntimeExecutionAllowed: false,
-  });
-
-  it("finds a default that no single page would have shown", () => {
-    const summary = summarizeProviderConnections({
-      connections: [paused("conn-a"), connection("conn-default")],
-      complete: true,
-    });
-
-    expect(summary.defaultConnection).toEqual({ id: "conn-default", label: "Treasury" });
-    expect(summary.activeCount).toBe(2);
   });
 
   it("pauses signing only when every active connection is paused", () => {
@@ -313,9 +300,7 @@ describe("summarizeProviderConnections", () => {
       complete: true,
     });
 
-    expect(summary.activeCount).toBe(0);
-    expect(summary.defaultConnection).toBeNull();
-    expect(summary.signingPaused).toBe(false);
+    expect(summary).toEqual({ signingPaused: false, complete: true });
   });
 
   it("carries the incompleteness through, so callers can stay quiet", () => {
@@ -342,7 +327,7 @@ describe("fetchWalletsByConnection", () => {
 
     const byConnection = await fetchWalletsByConnection(request);
 
-    expect(request).toHaveBeenCalledWith("/v1/wallets?includeAllProviders=true");
+    expect(request).toHaveBeenCalledWith("/v1/wallets");
     expect([...byConnection.keys()].sort()).toEqual(["conn-1", "conn-2"]);
     expect(byConnection.get("conn-1")?.map((wallet) => wallet.walletId)).toEqual(["w-1", "w-2"]);
   });
@@ -384,16 +369,20 @@ describe("fetchConnectionPickerOptions", () => {
     expect(options.map((option) => option.id)).toEqual(["conn-active"]);
   });
 
-  // The endpoint needs custody:admin, which creating a wallet does not.
-  it("returns nothing rather than throwing when the read is refused", async () => {
+  it("throws when the read is refused", async () => {
     const request = vi.fn(async () => new Response("forbidden", { status: 403 }));
 
-    await expect(fetchConnectionPickerOptions(request, "privy")).resolves.toEqual([]);
+    await expect(fetchConnectionPickerOptions(request, "privy")).rejects.toMatchObject({
+      name: "ConnectionsRequestError",
+      status: 403,
+    });
   });
 
-  it("returns nothing when the payload does not match the schema", async () => {
+  it("throws when the payload does not match the schema", async () => {
     const request = vi.fn(async () => jsonResponse({ data: { connections: "nope" } }));
 
-    await expect(fetchConnectionPickerOptions(request, "privy")).resolves.toEqual([]);
+    await expect(fetchConnectionPickerOptions(request, "privy")).rejects.toMatchObject({
+      name: "ZodError",
+    });
   });
 });

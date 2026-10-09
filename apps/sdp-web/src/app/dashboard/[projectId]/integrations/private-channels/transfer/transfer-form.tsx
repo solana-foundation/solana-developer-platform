@@ -56,6 +56,7 @@ interface TransferFormState {
   recipientVerifiedWalletId: string;
   amount: string;
   showAmountError: boolean;
+  showWalletError: boolean;
   recipientLoad: RecipientLoadState;
   recipientReload: number;
   balances: WalletBalanceView;
@@ -141,10 +142,10 @@ function validateTransferSubmission({
   if (!recipientVerifiedWalletId) {
     return { ok: false, messageKey: "DashboardPrivateChannels.transfer.selectRecipient" };
   }
-  if (!channelId || !walletId) {
+  if (!channelId) {
     return { ok: false, messageKey: "DashboardPrivateChannels.transfer.incomplete" };
   }
-  if (getAmountError(amount)) {
+  if (!walletId || getAmountError(amount)) {
     return { ok: false, messageKey: null };
   }
   return { ok: true, token: selectedToken };
@@ -158,11 +159,12 @@ function TransferFormState({
   const t = useTranslations();
   const [state, updateState] = useReducer(transferFormReducer, {
     channelId: channels[0]?.id ?? "",
-    walletId: sourceWallets[0]?.walletId ?? "",
+    walletId: "",
     mint: tokens[0]?.mint ?? "",
     recipientVerifiedWalletId: "",
     amount: "",
     showAmountError: false,
+    showWalletError: false,
     recipientLoad: { status: "idle" },
     recipientReload: 0,
     balances: { channel: null, onChain: null },
@@ -187,6 +189,7 @@ function TransferFormState({
     recipientVerifiedWalletId,
     amount,
     showAmountError,
+    showWalletError,
     recipientLoad,
     recipientReload,
     balanceRefetchKey,
@@ -289,11 +292,12 @@ function TransferFormState({
     updateState((current) => ({
       submittedTransfer: null,
       channelId: channels[0]?.id ?? "",
-      walletId: sourceWallets[0]?.walletId ?? "",
+      walletId: "",
       mint: tokens[0]?.mint ?? "",
       recipientVerifiedWalletId: "",
       amount: "",
       showAmountError: false,
+      showWalletError: false,
       error: null,
       balanceRefetchKey: current.balanceRefetchKey + 1,
       recipientReload: current.recipientReload + 1,
@@ -313,6 +317,8 @@ function TransferFormState({
 
   const amountErrorKey = showAmountError ? getAmountError(amount) : null;
   const amountError = amountErrorKey ? t(amountErrorKey) : null;
+  const walletError =
+    showWalletError && !walletId ? t("DashboardPrivateChannels.transfer.selectWallet") : null;
   // Falls back to the first token so a `mint` left over from a changed token list
   // cannot leave the label and the payload disagreeing. Relevant here because the
   // remount key excludes the instance's RPC URL, so `tokens` can change in place.
@@ -322,7 +328,7 @@ function TransferFormState({
     if (submitting.current) {
       return;
     }
-    updateState({ showAmountError: true });
+    updateState({ showAmountError: true, showWalletError: true });
     const validation = validateTransferSubmission({
       amount,
       channelId,
@@ -331,7 +337,7 @@ function TransferFormState({
       walletId,
     });
     if (!validation.ok) {
-      // An amount problem already renders under the field, so it is not repeated here.
+      // Wallet and amount problems already render under their fields, so they are not repeated here.
       updateState({ error: validation.messageKey ? t(validation.messageKey) : null });
       return;
     }
@@ -413,6 +419,7 @@ function TransferFormState({
       t={t}
       tokens={tokens}
       updateState={updateState}
+      walletError={walletError}
       onSubmit={submit}
     />
   );
@@ -501,6 +508,7 @@ function TransferFields(props: {
   t: Translate;
   tokens: PrivateChannelTokenEligibility[];
   updateState: (update: TransferFormUpdate) => void;
+  walletError: string | null;
   onSubmit: () => void;
 }) {
   const {
@@ -563,6 +571,7 @@ function TransferFields(props: {
         <Select
           ariaLabel={props.t("DashboardPrivateChannels.transfer.fromWallet")}
           disabled={props.isSubmitting}
+          placeholder={props.t("DashboardPrivateChannels.transfer.selectWallet")}
           value={walletId}
           onValueChange={(value) => {
             if (props.submitting.current) return;
@@ -578,6 +587,11 @@ function TransferFields(props: {
             </SelectItem>
           ))}
         </Select>
+        {props.walletError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {props.walletError}
+          </p>
+        ) : null}
         <p className="text-secondary text-xs">
           {props.t("DashboardPrivateChannels.transfer.fromWalletHelp")}
         </p>
@@ -645,7 +659,6 @@ function TransferFields(props: {
         disabled={
           props.isSubmitting ||
           !channelId ||
-          !walletId ||
           props.tokens.length === 0 ||
           !recipientVerifiedWalletId ||
           !amount.trim()
