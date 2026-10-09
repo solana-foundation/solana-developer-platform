@@ -922,6 +922,7 @@
     "walletSetupConnectionUnavailablePending": "Setup unfinished",
     "walletSetupConnectionUnavailableFailed": "Needs attention",
     "policyDraftStorageUnavailable": "Browser draft storage is unavailable. Unsaved edits may not survive leaving this page.",
-    "policyDraftCleanupIncomplete": "Policy saved. Browser draft cleanup is incomplete."
+    "policyDraftCleanupIncomplete": "Policy saved. Browser draft cleanup is incomplete.",
+    "policyDraftUnreadable": "A saved draft could not be read. Review the form before applying changes."
   }
 }

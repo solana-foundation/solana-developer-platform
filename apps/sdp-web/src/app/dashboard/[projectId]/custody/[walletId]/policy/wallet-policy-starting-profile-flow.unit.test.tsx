@@ -2,7 +2,7 @@
 
 import { type PaymentWalletPolicy, SOL_MINT } from "@sdp/types";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
-import { toast } from "sonner";
+import { Toaster, toast } from "sonner";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages, loadMessages } from "@/i18n/messages";
@@ -77,6 +77,44 @@ afterEach(() => {
 });
 
 describe("wallet policy confirmation", () => {
+  it("warns about an unreadable saved draft while restoring older edits without applying them", async () => {
+    const projectId = "prj_test_sandbox";
+    const key = policyDraftStorageKey(projectId, wallet.id);
+    const unreadable = "{unfinished draft";
+    const state = createPolicyAuthoringState(policy);
+    state.categories = ["limits"];
+    state.limits = [{ asset: SOL_MINT, max: "3" }];
+    window.localStorage.setItem(key, unreadable);
+    window.localStorage.setItem(
+      `sdp.wallet-policy-authoring.v1.${projectId}.${wallet.walletId}`,
+      JSON.stringify({
+        version: 1,
+        projectId,
+        walletId: wallet.walletId,
+        step: "limits-assets",
+        state,
+        updatedAt: "2026-10-09T10:00:00.000Z",
+      })
+    );
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const view = render(
+      <>
+        {ui()}
+        <Toaster theme="light" />
+      </>
+    );
+
+    expect(await view.findByDisplayValue("3")).toBeTruthy();
+    expect(
+      await view.findByText(
+        "A saved draft could not be read. Review the form before applying changes."
+      )
+    ).toBeTruthy();
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    expect(window.localStorage.getItem(key)).toBe(unreadable);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("does not autosave restored legacy fields over a clear from another tab", async () => {
     const projectId = "prj_test_sandbox";
     const state = createPolicyAuthoringState(policy);

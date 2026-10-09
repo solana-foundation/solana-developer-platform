@@ -749,7 +749,7 @@ function isStoredPolicyRule(value: unknown): value is PolicyRule {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const rule = value as Record<string, unknown>;
   return (
-    typeof rule.id === "string" &&
+    (rule.id === undefined || typeof rule.id === "string") &&
     hasOnlyKnownValues(
       [rule.kind],
       [
@@ -876,34 +876,35 @@ function normalizedPolicyDraft(
 }
 
 function parseStoredDraft(raw: string | null): unknown {
+  if (raw === null) return undefined;
   try {
-    return raw ? JSON.parse(raw) : null;
+    return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 
-/** Undefined permits fallback; null is a persisted clear that stops it. */
+/** An undefined draft permits fallback; null is a persisted clear that stops it. */
 function readExactPolicyDraft(
   storage: StorageLike,
   projectId: string,
   custodyWalletId: string
-): StoredPolicyDraft | null | undefined {
+): { draft: StoredPolicyDraft | null | undefined; draftInvalid: boolean } {
   const parsed = parseStoredDraft(
     storage.getItem(policyDraftStorageKey(projectId, custodyWalletId))
   );
-  const cleared = parsed as (Partial<StoredPolicyDraft> & { cleared?: boolean }) | null;
+  const cleared = parsed as (Partial<StoredPolicyDraft> & { cleared?: boolean }) | null | undefined;
   if (
     cleared?.cleared === true &&
     cleared.version === 2 &&
     cleared.projectId === projectId &&
     cleared.custodyWalletId === custodyWalletId
   ) {
-    return null;
+    return { draft: null, draftInvalid: false };
   }
   return isStoredPolicyDraft(parsed, projectId, custodyWalletId, 2)
-    ? normalizedPolicyDraft(parsed, custodyWalletId)
-    : undefined;
+    ? { draft: normalizedPolicyDraft(parsed, custodyWalletId), draftInvalid: false }
+    : { draft: undefined, draftInvalid: parsed !== undefined };
 }
 
 export function loadPolicyDraft(
@@ -911,16 +912,22 @@ export function loadPolicyDraft(
   projectId: string,
   custodyWalletId: string,
   providerWalletId?: string
-): { draft: StoredPolicyDraft | null; storageError: boolean } {
+): { draft: StoredPolicyDraft | null; storageError: boolean; draftInvalid: boolean } {
   const key = policyDraftStorageKey(projectId, custodyWalletId);
+  let draftInvalid = false;
   try {
     const current = readExactPolicyDraft(storage, projectId, custodyWalletId);
-    if (current !== undefined) return { draft: current, storageError: false };
+    draftInvalid = current.draftInvalid;
+    if (current.draft !== undefined)
+      return { draft: current.draft, storageError: false, draftInvalid };
 
-    const imported = parseStoredDraft(storage.getItem(`${key}.legacy`)) as {
-      draft?: unknown;
-      clearFenceKey?: unknown;
-    } | null;
+    const imported = parseStoredDraft(storage.getItem(`${key}.legacy`)) as
+      | {
+          draft?: unknown;
+          clearFenceKey?: unknown;
+        }
+      | null
+      | undefined;
     const fencePrefix = legacyDraftClearFencePrefix(projectId);
     if (
       typeof imported?.clearFenceKey === "string" &&
@@ -933,35 +940,46 @@ export function loadPolicyDraft(
           ? null
           : normalizedPolicyDraft(imported.draft, custodyWalletId),
         storageError: false,
+        draftInvalid,
       };
     }
-    if (!providerWalletId) return { draft: null, storageError: false };
+    draftInvalid ||= imported !== undefined;
+    if (!providerWalletId) return { draft: null, storageError: false, draftInvalid };
     const consumedKey = legacyDraftConsumedKey(projectId, providerWalletId);
     const clearFenceKey = `${fencePrefix}${providerWalletId}`;
     if (storage.getItem(consumedKey) || storage.getItem(clearFenceKey))
-      return { draft: null, storageError: false };
+      return { draft: null, storageError: false, draftInvalid };
     const legacyKey = `sdp.wallet-policy-authoring.v1.${projectId}.${providerWalletId}`;
     const legacy = parseStoredDraft(storage.getItem(legacyKey));
     if (!isStoredPolicyDraft(legacy, projectId, providerWalletId, 1)) {
-      return { draft: null, storageError: false };
+      return {
+        draft: null,
+        storageError: false,
+        draftInvalid: draftInvalid || legacy !== undefined,
+      };
     }
     const draft = normalizedPolicyDraft(legacy, custodyWalletId);
     let storageError = false;
-    try {
-      // A transfer never writes the authored slot or the clear-only fence.
-      storage.setItem(`${key}.legacy`, JSON.stringify({ draft, clearFenceKey }));
-      storage.setItem(consumedKey, "1");
-      storage.removeItem(legacyKey);
-    } catch {
-      storageError = true;
+    // Keep an unreadable imported record and its legacy fallback available for recovery.
+    if (imported === undefined) {
+      try {
+        // A transfer never writes the authored slot or the clear-only fence.
+        storage.setItem(`${key}.legacy`, JSON.stringify({ draft, clearFenceKey }));
+        storage.setItem(consumedKey, "1");
+        storage.removeItem(legacyKey);
+      } catch {
+        storageError = true;
+      }
     }
     const latest = readExactPolicyDraft(storage, projectId, custodyWalletId);
     return {
-      draft: latest !== undefined ? latest : storage.getItem(clearFenceKey) ? null : draft,
+      draft:
+        latest.draft !== undefined ? latest.draft : storage.getItem(clearFenceKey) ? null : draft,
       storageError,
+      draftInvalid: draftInvalid || latest.draftInvalid,
     };
   } catch {
-    return { draft: null, storageError: true };
+    return { draft: null, storageError: true, draftInvalid };
   }
 }
 

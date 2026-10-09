@@ -177,6 +177,45 @@ describe("wallet policy authoring", () => {
     expect(loadPolicyDraft(storage, "another-project", WALLET_ID).draft).toBeNull();
   });
 
+  it.each([1, 2])("restores advanced rules without IDs from v%s drafts", (version) => {
+    const storage = new MemoryStorage();
+    const state = createPolicyAuthoringState({
+      ...emptyPolicy(),
+      rules: [{ kind: "always", action: "deny" }],
+    });
+    state.categories.push("limits");
+    state.limits.push({ asset: ADDRESS_B, max: "75" });
+    const draft: StoredPolicyDraft = {
+      version: 2,
+      projectId: PROJECT_ID,
+      custodyWalletId: "cwlt_selected",
+      step: "review",
+      state,
+      updatedAt: "2026-10-09T10:00:00.000Z",
+    };
+    if (version === 1) {
+      storage.setItem(
+        `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`,
+        JSON.stringify({
+          version: 1,
+          projectId: PROJECT_ID,
+          walletId: WALLET_ID,
+          step: draft.step,
+          state,
+          updatedAt: draft.updatedAt,
+        })
+      );
+    } else {
+      savePolicyDraft(storage, draft);
+    }
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toMatchObject({
+      draft,
+      storageError: false,
+    });
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected").draft).toEqual(draft);
+  });
+
   it("transfers legacy fields and step to the selected SDP wallet before removing the old copy", () => {
     const storage = new MemoryStorage();
     const state = createPolicyAuthoringState(emptyPolicy());
@@ -204,6 +243,7 @@ describe("wallet policy authoring", () => {
         updatedAt: "2026-10-09T10:00:00.000Z",
       },
       storageError: false,
+      draftInvalid: false,
     });
     expect(
       storage.getItem("sdp.wallet-policy-authoring.v2.project_test.cwlt_selected.legacy")
@@ -321,6 +361,7 @@ describe("wallet policy authoring", () => {
     expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toEqual({
       draft: fresh,
       storageError: false,
+      draftInvalid: false,
     });
     expect(JSON.parse(storage.getItem(v2Key) ?? "null")).toEqual(fresh);
   });
@@ -489,6 +530,107 @@ describe("wallet policy authoring", () => {
     expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID).draft).toBeNull();
   });
 
+  it.each([
+    { raw: null, draftInvalid: false },
+    { raw: "{", draftInvalid: true },
+    { raw: "null", draftInvalid: true },
+  ])("distinguishes a missing draft from invalid data: $raw", ({ raw, draftInvalid }) => {
+    const storage = new MemoryStorage();
+    const key = policyDraftStorageKey(PROJECT_ID, "cwlt_selected");
+    if (raw !== null) storage.setItem(key, raw);
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected")).toEqual({
+      draft: null,
+      storageError: false,
+      draftInvalid,
+    });
+    expect(storage.getItem(key)).toBe(raw);
+  });
+
+  it.each([
+    ["legacy", "json"],
+    ["legacy", "state"],
+    ["imported", "json"],
+    ["imported", "state"],
+  ])("reports invalid authored %s fallback with damaged %s data", (fallback, damage) => {
+    const storage = new MemoryStorage();
+    const state = createPolicyAuthoringState(emptyPolicy());
+    state.defaultAction = "deny";
+    const draft: StoredPolicyDraft = {
+      version: 2,
+      projectId: PROJECT_ID,
+      custodyWalletId: "cwlt_selected",
+      step: "review",
+      state,
+      updatedAt: "2026-10-09T10:00:00.000Z",
+    };
+    const key = policyDraftStorageKey(PROJECT_ID, "cwlt_selected");
+    const damaged =
+      damage === "json"
+        ? "{"
+        : JSON.stringify({ ...draft, state: { ...state, destinationAllowText: 123 } });
+    storage.setItem(key, damaged);
+    if (fallback === "legacy") {
+      storage.setItem(
+        `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`,
+        JSON.stringify({
+          version: 1,
+          projectId: PROJECT_ID,
+          walletId: WALLET_ID,
+          step: draft.step,
+          state,
+          updatedAt: draft.updatedAt,
+        })
+      );
+    } else {
+      storage.setItem(
+        `${key}.legacy`,
+        JSON.stringify({
+          draft,
+          clearFenceKey: `sdp.wallet-policy-authoring.v1-cleared.${PROJECT_ID}.${WALLET_ID}`,
+        })
+      );
+    }
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toMatchObject({
+      draft,
+      storageError: false,
+      draftInvalid: true,
+    });
+    expect(storage.getItem(key)).toBe(damaged);
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected")).toMatchObject({
+      draft,
+      draftInvalid: true,
+    });
+  });
+
+  it("restores legacy edits without replacing an unreadable imported copy", () => {
+    const storage = new MemoryStorage();
+    const key = policyDraftStorageKey(PROJECT_ID, "cwlt_selected");
+    const unreadable = "{unfinished imported draft";
+    const state = createPolicyAuthoringState(emptyPolicy());
+    state.defaultAction = "deny";
+    const legacyKey = `sdp.wallet-policy-authoring.v1.${PROJECT_ID}.${WALLET_ID}`;
+    const legacy = JSON.stringify({
+      version: 1,
+      projectId: PROJECT_ID,
+      walletId: WALLET_ID,
+      step: "review",
+      state,
+      updatedAt: "2026-10-09T10:00:00.000Z",
+    });
+    storage.setItem(`${key}.legacy`, unreadable);
+    storage.setItem(legacyKey, legacy);
+
+    expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toMatchObject({
+      draft: { custodyWalletId: "cwlt_selected", step: "review", state },
+      storageError: false,
+      draftInvalid: true,
+    });
+    expect(storage.getItem(`${key}.legacy`)).toBe(unreadable);
+    expect(storage.getItem(legacyKey)).toBe(legacy);
+  });
+
   it("prefers an exact-wallet draft over an older provider copy", () => {
     const storage = new MemoryStorage();
     const oldState = createPolicyAuthoringState(emptyPolicy());
@@ -517,6 +659,7 @@ describe("wallet policy authoring", () => {
     expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toEqual({
       draft,
       storageError: false,
+      draftInvalid: false,
     });
   });
 
@@ -572,6 +715,7 @@ describe("wallet policy authoring", () => {
     expect(loadPolicyDraft(storage, PROJECT_ID, "cwlt_selected", WALLET_ID)).toEqual({
       draft: null,
       storageError: true,
+      draftInvalid: false,
     });
   });
 

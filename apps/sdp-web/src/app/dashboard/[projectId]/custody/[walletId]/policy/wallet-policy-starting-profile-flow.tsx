@@ -103,7 +103,7 @@ export function WalletPolicyStartingProfileFlow({
   useEffect(() => {
     if (isLoaded) return;
     try {
-      const { draft, storageError } = loadPolicyDraft(
+      const { draft, storageError, draftInvalid } = loadPolicyDraft(
         window.localStorage,
         projectId,
         wallet.id,
@@ -121,6 +121,7 @@ export function WalletPolicyStartingProfileFlow({
         );
       }
       if (storageError) toast.warning(t("DashboardCustody.policyDraftStorageUnavailable"));
+      if (draftInvalid) toast.warning(t("DashboardCustody.policyDraftUnreadable"));
     } catch {
       toast.warning(t("DashboardCustody.policyDraftStorageUnavailable"));
     }

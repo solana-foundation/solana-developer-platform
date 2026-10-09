@@ -1026,6 +1026,7 @@
     "walletSetupConnectionUnavailablePending": "Configuração incompleta",
     "walletSetupConnectionUnavailableFailed": "Requer atenção",
     "policyDraftStorageUnavailable": "O armazenamento do rascunho está indisponível. Alterações não salvas podem ser perdidas ao sair desta página.",
-    "policyDraftCleanupIncomplete": "Política salva. A limpeza do rascunho do navegador está incompleta."
+    "policyDraftCleanupIncomplete": "Política salva. A limpeza do rascunho do navegador está incompleta.",
+    "policyDraftUnreadable": "Não foi possível ler um rascunho salvo. Revise o formulário antes de aplicar as alterações."
   }
 }

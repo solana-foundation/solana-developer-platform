@@ -1026,6 +1026,7 @@
     "walletSetupConnectionUnavailablePending": "Configuración sin terminar",
     "walletSetupConnectionUnavailableFailed": "Requiere atención",
     "policyDraftStorageUnavailable": "El almacenamiento del borrador no está disponible. Los cambios sin guardar podrían perderse al salir.",
-    "policyDraftCleanupIncomplete": "Política guardada. La limpieza del borrador del navegador está incompleta."
+    "policyDraftCleanupIncomplete": "Política guardada. La limpieza del borrador del navegador está incompleta.",
+    "policyDraftUnreadable": "No se pudo leer un borrador guardado. Revisa el formulario antes de aplicar los cambios."
   }
 }

@@ -1011,6 +1011,7 @@
     "walletSetupConnectionUnavailablePending": "Thiết lập chưa hoàn tất",
     "walletSetupConnectionUnavailableFailed": "Cần xử lý",
     "policyDraftStorageUnavailable": "Không thể lưu trữ bản nháp trong trình duyệt. Các thay đổi chưa lưu có thể bị mất khi rời trang.",
-    "policyDraftCleanupIncomplete": "Đã lưu chính sách. Việc dọn dẹp bản nháp trong trình duyệt chưa hoàn tất."
+    "policyDraftCleanupIncomplete": "Đã lưu chính sách. Việc dọn dẹp bản nháp trong trình duyệt chưa hoàn tất.",
+    "policyDraftUnreadable": "Không thể đọc một bản nháp đã lưu. Hãy kiểm tra biểu mẫu trước khi áp dụng các thay đổi."
   }
 }
