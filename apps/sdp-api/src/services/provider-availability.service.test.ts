@@ -1068,6 +1068,7 @@ describe("provider-availability.service", () => {
         family: "custody",
         provider: "privy",
         modes: ["byok"],
+        unavailableModes: [{ mode: "managed", reason: "custody_mode_not_allowed" }],
       });
       expect(warn).not.toHaveBeenCalled();
     });
