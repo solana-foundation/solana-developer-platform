@@ -99,6 +99,51 @@ describe("ApiKeyService.createApiKey and organization deletion (APE-358)", () =>
     expect(await keyCount()).toBe(0);
   });
 
+  it("waits for a deletion in flight before rotating, and then rotates nothing", async () => {
+    const created = (await createKey()) as { id: string };
+    expect(await keyCount()).toBe(1);
+    let releaseDeletion!: () => void;
+    const deletionReleased = new Promise<void>((resolve) => {
+      releaseDeletion = resolve;
+    });
+    let markDeletionWritten!: () => void;
+    const deletionWritten = new Promise<void>((resolve) => {
+      markDeletionWritten = resolve;
+    });
+    const deletion = runWithSystemDatabaseIdentity("test:api-key-lock", () =>
+      getDb(env).transaction(async (tx) => {
+        await tx
+          .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
+          .bind(TEST_ORG.id)
+          .run();
+        markDeletionWritten();
+        await deletionReleased;
+      })
+    );
+
+    try {
+      await deletionWritten;
+      const rotation = runWithTenantDatabaseIdentity({ organizationId: TEST_ORG.id }, () =>
+        new ApiKeyService(
+          getDb(env),
+          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+        ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, ["*"], null, null)
+      ).then(
+        (result) => result,
+        (error: unknown) => error
+      );
+      await waitForLockWait();
+      releaseDeletion();
+      await deletion;
+
+      expect(await rotation).toBeNull();
+      expect(await keyCount()).toBe(1);
+    } finally {
+      releaseDeletion();
+      await deletion.catch(() => {});
+    }
+  });
+
   it("waits for a deletion in flight and then refuses, rather than committing an active key", async () => {
     let releaseDeletion!: () => void;
     const deletionReleased = new Promise<void>((resolve) => {

@@ -1,3 +1,4 @@
+import { organizationStatusMayAuthenticate } from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
@@ -75,7 +76,7 @@ export async function enforceOrganizationAccess(
     .bind(organizationId)
     .first<{ status: string; settings: string | null }>();
 
-  if (row?.status !== "active") {
+  if (!row || !organizationStatusMayAuthenticate(row.status)) {
     throw organizationNotActive();
   }
   enforceIpAllowlist(c, row.settings);
@@ -113,7 +114,7 @@ export async function enforceApiKeyOrganizationAccess(
       )
     >();
 
-  if (row?.organization_status !== "active") {
+  if (!row || !organizationStatusMayAuthenticate(row.organization_status)) {
     throw new AppError("REVOKED_API_KEY");
   }
   const refusal = row.status === null ? null : apiKeyRowRefusal(row);

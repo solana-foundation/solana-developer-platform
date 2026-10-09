@@ -1,3 +1,5 @@
+import type { ApiKeyStatus } from "@sdp/types";
+
 export function isRotationDeadlineReached(
   rotationDeadline: string | null | undefined,
   now = Date.now()
@@ -14,7 +16,7 @@ export function isRotationDeadlineReached(
 
 /** The live `api_keys` columns that decide whether a key may still authenticate. */
 export interface ApiKeyLifecycleColumns {
-  status: string;
+  status: ApiKeyStatus;
   expires_at: string | null;
   rotation_deadline: string | null;
 }
@@ -35,8 +37,12 @@ export function apiKeyRowRefusal(
   if (row.status !== "active") {
     return "revoked";
   }
-  if (row.expires_at && new Date(row.expires_at).getTime() < now) {
-    return "expired";
+  if (row.expires_at !== null) {
+    // Like the rotation deadline below: a malformed expiry fails closed.
+    const expiresAt = Date.parse(row.expires_at);
+    if (!Number.isFinite(expiresAt) || expiresAt < now) {
+      return "expired";
+    }
   }
   if (isRotationDeadlineReached(row.rotation_deadline, now)) {
     return "expired";

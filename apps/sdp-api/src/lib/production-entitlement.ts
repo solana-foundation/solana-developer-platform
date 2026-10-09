@@ -1,4 +1,8 @@
-import { type OrganizationEntitlements, organizationEntitlementsSchema } from "@sdp/types";
+import {
+  type OrganizationEntitlements,
+  organizationEntitlementsSchema,
+  organizationStatusMayAuthenticate,
+} from "@sdp/types";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
@@ -44,7 +48,7 @@ export async function loadOrganizationEntitlements(
     .prepare("SELECT status, settings FROM organizations WHERE id = ?")
     .bind(organizationId)
     .first<{ status: string; settings: string | null }>();
-  if (row?.status !== "active") {
+  if (!row || !organizationStatusMayAuthenticate(row.status)) {
     throw organizationNotActive();
   }
   recordOrganizationEntitlements(c, row.settings);

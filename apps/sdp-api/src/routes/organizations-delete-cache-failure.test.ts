@@ -197,6 +197,18 @@ describe("organization deletion with failing cache invalidation", () => {
     expect(response.status).toBe(401);
   });
 
+  it("lets a cached key with no row through on its active organization's word", async () => {
+    const orphanHash = await hashString("sk_test_delete_cache_failure_orphan", env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, orphanHash, cachedKey("key_delete_cache_failure_orphan"));
+
+    const response = await app.request(
+      "/v1/api-keys",
+      { headers: { Authorization: "Bearer sk_test_delete_cache_failure_orphan" } },
+      env
+    );
+    expect(response.status).toBe(200);
+  });
+
   it("refuses a single revoked key at once when its cache write failed", async () => {
     const targetHash = await hashString(TARGET_KEY.raw, env.API_KEY_PEPPER);
     await getDb(env)
