@@ -77,7 +77,6 @@ function section(currentLifecycle: CustodyCredentialLifecycle | "restricted" | n
           label: "Production signing",
           status: "active",
           completion: null,
-          isDefault: true,
           canComplete: false,
           canReplaceCredentials: false,
           canCancel: false,

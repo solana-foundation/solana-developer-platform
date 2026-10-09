@@ -1,6 +1,8 @@
 "use server";
 
+import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient, extractSdpApiError, requestProjectHref } from "@/lib/sdp-api";
 import type { CustodyOutcomeKind } from "./verification-outcome";
@@ -10,7 +12,9 @@ import { resolveHttpOutcome, resolveRotationOutcome } from "./verification-outco
  * Every lifecycle action answers in one of three ways, and the third is the
  * point: `unknown` means the request may well have committed, so the UI must
  * offer a re-read rather than report a failure. Actions never throw — a
- * rejected promise would skip the branch that distinguishes the three.
+ * rejected promise would skip the branch that distinguishes the three. The one
+ * exception is a `provider` outside the custody catalog: that is a broken
+ * caller, refused before any request is sent.
  */
 export type CustodyActionResult =
   | { status: "success" }
@@ -22,15 +26,17 @@ interface RotationResponse {
   rotation: { status: "success" | "failed" | "retry_unknown"; code?: string };
 }
 
-async function revalidateCustody(provider: string, connectionId?: string) {
+const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
+
+async function revalidateCustody(provider: CustodyProvider, connectionId?: string) {
   revalidatePath(await requestProjectHref(`/dashboard/integrations/${provider}`));
   if (connectionId) {
     revalidatePath(
       await requestProjectHref(`/dashboard/integrations/${provider}/connections/${connectionId}`)
     );
   }
-  // Wallet surfaces read the same connections, and a default switch or a new
-  // wallet changes what they show.
+  // Wallet surfaces read the same connections, so a new wallet or a credential
+  // change shows there too.
   revalidatePath(await requestProjectHref("/dashboard/wallets"));
   revalidatePath(await requestProjectHref("/dashboard/custody"));
 }
@@ -64,16 +70,22 @@ function classifyThrown(
  * Note the rejection path — an invalid or foreign-account credential comes back
  * on an HTTP **200** with `rotation.status === "failed"`, so the result body is
  * what settles this, not the status code.
+ *
+ * @param formData - `credentialId`, `connectionId`, `idempotencyKey`, `appId`, `appSecret`.
+ * @param provider - The connection's provider, used to revalidate its integration pages.
+ * @param isRecoveryAttempt - Whether this replays an earlier submission whose outcome is unknown.
+ * @returns The rotation outcome.
  */
 export async function rotateCredentialsAction(
   formData: FormData,
-  isRecoveryAttempt = false
+  provider: CustodyProvider,
+  isRecoveryAttempt: boolean
 ): Promise<CustodyActionResult> {
+  const custodyProvider = custodyProviderSchema.parse(provider);
   const t = await getTranslations();
   const fallback = t("DashboardCustody.rotateFailed");
 
   const credentialId = String(formData.get("credentialId") ?? "").trim();
-  const provider = String(formData.get("provider") ?? "privy").trim();
   const connectionId = String(formData.get("connectionId") ?? "").trim();
   const idempotencyKey = String(formData.get("idempotencyKey") ?? "").trim();
   const appId = String(formData.get("appId") ?? "").trim();
@@ -107,13 +119,13 @@ export async function rotateCredentialsAction(
 
   const outcome = resolveRotationOutcome(result.rotation);
   if (!outcome) {
-    await revalidateCustody(provider, connectionId);
+    await revalidateCustody(custodyProvider, connectionId);
     return { status: "success" };
   }
   // A candidate now exists server-side even though it did not cut over, so the
   // page must be re-read either way: the credentials card has a pending
   // rotation to offer retry or cancel on.
-  await revalidateCustody(provider, connectionId);
+  await revalidateCustody(custodyProvider, connectionId);
   return outcome.kind === "unknown"
     ? { status: "unknown", message: t("DashboardCustody.rotateUnknown") }
     : { status: "failed", kind: outcome.kind, message: fallback };
@@ -122,9 +134,10 @@ export async function rotateCredentialsAction(
 /** Settles a rotation candidate left pending by an unknown outcome. */
 export async function completeRotationAction(
   candidateId: string,
-  provider: string,
+  provider: CustodyProvider,
   connectionId: string
 ): Promise<CustodyActionResult> {
+  const custodyProvider = custodyProviderSchema.parse(provider);
   const t = await getTranslations();
   let result: RotationResponse;
   try {
@@ -137,7 +150,7 @@ export async function completeRotationAction(
     return classifyThrown(error, t("DashboardCustody.rotateFailed"));
   }
 
-  await revalidateCustody(provider, connectionId);
+  await revalidateCustody(custodyProvider, connectionId);
   const outcome = resolveRotationOutcome(result.rotation);
   if (!outcome) return { status: "success" };
   return outcome.kind === "unknown"
@@ -152,7 +165,7 @@ export async function completeRotationAction(
  */
 export async function cancelRotationAction(
   candidateId: string,
-  provider: string,
+  provider: CustodyProvider,
   connectionId: string
 ): Promise<CustodyActionResult> {
   return deactivateCredentialAction(candidateId, provider, connectionId);
@@ -161,9 +174,10 @@ export async function cancelRotationAction(
 /** Restores the immediately previous credentials, inside the 24-hour window. */
 export async function rollbackCredentialAction(
   credentialId: string,
-  provider: string,
+  provider: CustodyProvider,
   connectionId: string
 ): Promise<CustodyActionResult> {
+  const custodyProvider = custodyProviderSchema.parse(provider);
   const t = await getTranslations();
   try {
     const client = await createSdpApiClient();
@@ -174,16 +188,17 @@ export async function rollbackCredentialAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.rollbackFailed"));
   }
-  await revalidateCustody(provider, connectionId);
+  await revalidateCustody(custodyProvider, connectionId);
   return { status: "success" };
 }
 
 /** Deactivates credentials nothing references any more; deletes the stored secret. */
 export async function deactivateCredentialAction(
   credentialId: string,
-  provider: string,
+  provider: CustodyProvider,
   connectionId: string
 ): Promise<CustodyActionResult> {
+  const custodyProvider = custodyProviderSchema.parse(provider);
   const t = await getTranslations();
   try {
     const client = await createSdpApiClient();
@@ -194,15 +209,16 @@ export async function deactivateCredentialAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.deactivateCredentialsFailed"));
   }
-  await revalidateCustody(provider, connectionId);
+  await revalidateCustody(custodyProvider, connectionId);
   return { status: "success" };
 }
 
 /** Permanently ends a connection. Refused by the API while it has active wallets. */
 export async function deactivateConnectionAction(
   connectionId: string,
-  provider: string
+  provider: CustodyProvider
 ): Promise<CustodyActionResult> {
+  const custodyProvider = custodyProviderSchema.parse(provider);
   const t = await getTranslations();
   try {
     const client = await createSdpApiClient();
@@ -213,7 +229,7 @@ export async function deactivateConnectionAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.deactivateConnectionFailed"));
   }
-  await revalidateCustody(provider, connectionId);
+  await revalidateCustody(custodyProvider, connectionId);
   return { status: "success" };
 }
 
@@ -223,8 +239,9 @@ export async function deactivateConnectionAction(
  */
 export async function cancelSetupAction(
   connectionId: string,
-  provider: string
+  provider: CustodyProvider
 ): Promise<CustodyActionResult> {
+  const custodyProvider = custodyProviderSchema.parse(provider);
   const t = await getTranslations();
   try {
     const client = await createSdpApiClient();
@@ -235,29 +252,7 @@ export async function cancelSetupAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.cancelSetupFailed"));
   }
-  await revalidateCustody(provider);
-  return { status: "success" };
-}
-
-/**
- * Points the project's wallet-less requests at this connection. Moves no
- * wallets, no funds, and no already-pinned operations.
- */
-export async function makeDefaultConnectionAction(
-  connectionId: string,
-  provider: string
-): Promise<CustodyActionResult> {
-  const t = await getTranslations();
-  try {
-    const client = await createSdpApiClient();
-    await client.fetch("/v1/wallets/switch", {
-      method: "POST",
-      body: JSON.stringify({ connectionId, provider }),
-    });
-  } catch (error) {
-    return classifyThrown(error, t("DashboardCustody.makeDefaultFailed"));
-  }
-  await revalidateCustody(provider, connectionId);
+  await revalidateCustody(custodyProvider);
   return { status: "success" };
 }
 
@@ -267,13 +262,18 @@ export async function makeDefaultConnectionAction(
  * Deliberately not auto-retried on an unknown outcome: wallet creation is not
  * idempotent here, so a silent retry could mint a second wallet. The dialog
  * tells the user to check the list first.
+ *
+ * @param formData - `connectionId` and an optional `label`.
+ * @param provider - The connection's provider, used to revalidate its integration pages.
+ * @returns The creation outcome.
  */
 export async function createConnectionWalletAction(
-  formData: FormData
+  formData: FormData,
+  provider: CustodyProvider
 ): Promise<CustodyActionResult> {
+  const custodyProvider = custodyProviderSchema.parse(provider);
   const t = await getTranslations();
   const connectionId = String(formData.get("connectionId") ?? "").trim();
-  const provider = String(formData.get("provider") ?? "privy").trim();
   const label = String(formData.get("label") ?? "").trim();
 
   if (!connectionId) {
@@ -293,6 +293,6 @@ export async function createConnectionWalletAction(
   } catch (error) {
     return classifyThrown(error, t("DashboardCustody.addWalletFailed"));
   }
-  await revalidateCustody(provider, connectionId);
+  await revalidateCustody(custodyProvider, connectionId);
   return { status: "success" };
 }

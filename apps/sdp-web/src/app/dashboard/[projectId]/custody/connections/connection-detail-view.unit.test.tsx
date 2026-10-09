@@ -26,7 +26,6 @@ function makeConnection(
     label: "Production signing",
     status: "pending",
     completion: null,
-    isDefault: false,
     canComplete: true,
     canReplaceCredentials: true,
     canCancel: true,

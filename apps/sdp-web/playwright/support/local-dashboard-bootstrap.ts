@@ -875,7 +875,6 @@ async function initializeOrCreateWallet(
     provider,
     label,
     purpose: "root",
-    setDefault: true,
   });
   return created.wallet.walletId;
 }

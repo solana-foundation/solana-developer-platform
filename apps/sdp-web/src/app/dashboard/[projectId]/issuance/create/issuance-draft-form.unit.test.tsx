@@ -64,3 +64,17 @@ it("does not show the setup prompt when wallets are available", () => {
   fireEvent.focus(window);
   expect(dashboardRouter.refresh).not.toHaveBeenCalled();
 });
+
+it("leaves every permission unassigned until the user picks a wallet", () => {
+  renderPermissions([
+    {
+      id: "cwlt_test",
+      walletId: "provider_test",
+      isRuntimeExecutionAllowed: true,
+      label: "Test wallet",
+      publicKey: "address_test",
+    },
+  ]);
+  const selects = screen.getAllByRole<HTMLSelectElement>("combobox");
+  expect(selects.map((select) => select.value)).toEqual(["", "", "", ""]);
+});

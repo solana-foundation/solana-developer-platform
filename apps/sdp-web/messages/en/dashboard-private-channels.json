@@ -291,6 +291,7 @@
       "selectChannel": "Select a channel.",
       "selectSourceWallet": "Select a verified source wallet.",
       "selectRecipient": "Select a verified recipient wallet.",
+      "selectWallet": "Select a wallet to transfer from.",
       "selectChannelForRecipients": "Select a channel to load verified recipients.",
       "incomplete": "Complete every transfer field.",
       "submit": "Transfer USDC",

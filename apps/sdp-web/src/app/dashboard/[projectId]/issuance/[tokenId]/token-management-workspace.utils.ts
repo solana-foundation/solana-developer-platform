@@ -898,9 +898,16 @@ export function getSignerSelectionForAction({
       };
     }
 
+    let deployWalletId = "";
+    if (preferredWallet) {
+      deployWalletId = preferredWallet.id;
+    } else if (availableWallets.length === 1) {
+      deployWalletId = availableWallets[0].id;
+    }
+
     return {
       wallets: availableWallets,
-      defaultWalletId: (preferredWallet ?? availableWallets[0]).id,
+      defaultWalletId: deployWalletId,
       unavailableReason: availableWallets.some(
         (wallet) => wallet.isRuntimeExecutionAllowed === true
       )
@@ -910,12 +917,9 @@ export function getSignerSelectionForAction({
   }
 
   if (action === "burn") {
-    const hasDuplicateAddress =
-      new Set(availableWallets.map((wallet) => wallet.publicKey)).size < availableWallets.length;
-
     return {
       wallets: availableWallets,
-      defaultWalletId: hasDuplicateAddress ? "" : availableWallets[0].id,
+      defaultWalletId: availableWallets.length === 1 ? availableWallets[0].id : "",
       unavailableReason: availableWallets.some(
         (wallet) => wallet.isRuntimeExecutionAllowed === true
       )

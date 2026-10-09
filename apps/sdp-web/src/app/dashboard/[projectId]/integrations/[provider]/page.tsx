@@ -49,7 +49,7 @@ async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
 }
 
 /**
- * What the banners above the table assert, or a summary that admits it knows
+ * What the banner above the table asserts, or a summary that admits it knows
  * nothing. Degraded on its own because it costs several requests where the
  * table costs one, and a hiccup on the third of them is no reason to blank a
  * table that loaded: `complete: false` is already the signal every caller reads
@@ -62,7 +62,7 @@ async function getCustodyConnectionsSummary(
   try {
     return summarizeProviderConnections(await fetchProviderConnections(request, provider));
   } catch {
-    return { activeCount: 0, defaultConnection: null, signingPaused: false, complete: false };
+    return { signingPaused: false, complete: false };
   }
 }
 

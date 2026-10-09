@@ -28,7 +28,6 @@ export function DeactivateConnectionDialog({
   label,
   provider,
   activeWalletCount,
-  isDefault,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -36,7 +35,6 @@ export function DeactivateConnectionDialog({
   label: string;
   provider: CustodyProvider;
   activeWalletCount: number;
-  isDefault: boolean;
 }) {
   const t = useTranslations();
   const { pending, run } = useCustodyAction();
@@ -83,7 +81,6 @@ export function DeactivateConnectionDialog({
           <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-secondary">
             <li>{t("DashboardCustody.deactivateConnectionPointIrreversible")}</li>
             <li>{t("DashboardCustody.deactivateConnectionPointProviderKey")}</li>
-            {isDefault ? <li>{t("DashboardCustody.deactivateConnectionPointDefault")}</li> : null}
           </ul>
         )}
 

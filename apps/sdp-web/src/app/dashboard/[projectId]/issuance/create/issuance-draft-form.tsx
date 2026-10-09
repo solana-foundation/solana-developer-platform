@@ -102,12 +102,7 @@ export function IssuanceDraftForm({
   const searchParams = useSearchParams();
   const initialStep = Math.min(4, Math.max(0, Number(searchParams.get("step") ?? 0) || 0));
   const [step, setStepState] = useState(initialStep);
-  const [draft, setDraft] = useState<DraftState>(() => ({
-    ...INITIAL_DRAFT,
-    authorities: Object.fromEntries(
-      Object.keys(authorityCopy).map((key) => [key, wallets[0]?.id ?? ""])
-    ) as Record<AuthorityKey, string>,
-  }));
+  const [draft, setDraft] = useState<DraftState>(INITIAL_DRAFT);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -265,12 +260,7 @@ function CreateSurface(props: CreateSurfaceProps) {
                 type="submit"
                 form="issuance-draft-step"
                 className={styles.primaryButton}
-                disabled={
-                  step === 3 &&
-                  !permissionKeys(props.draft).every((key) =>
-                    props.wallets.some((wallet) => wallet.id === props.draft.authorities[key])
-                  )
-                }
+                disabled={step === 3 && !props.wallets.length}
               >
                 {t("DashboardIssuance.draftForm.continue")} <ArrowRight size={14} />
               </button>

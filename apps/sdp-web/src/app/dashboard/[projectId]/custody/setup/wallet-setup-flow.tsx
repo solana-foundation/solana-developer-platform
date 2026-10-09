@@ -31,6 +31,8 @@ type SetupStep = "provider" | "details";
 const SETUP_STEPS = ["provider", "details"] as const satisfies readonly SetupStep[];
 const PROVIDER_FORM_ID = "wallet-provider-form";
 const DETAILS_FORM_ID = "wallet-details-form";
+const WALLET_TARGET_FIELD = "walletTarget";
+const MANAGED_WALLET_TARGET = "managed";
 
 // Keep Enter available to controls that own it (newlines, option selection,
 // navigation, and action buttons). The already-selected provider card opts in
@@ -96,17 +98,31 @@ function isSelectableConnection(connection: CustodyConnectionListItem): boolean 
 }
 
 /**
- * The connection a wallet lands in unless the user says otherwise: the project
- * default when it is usable, else the first active one. Picking nothing when a
- * usable connection exists would make the wizard fail on submit for no reason.
+ * Moves the picker's choice onto the field the create action reads: a
+ * connection id as `connectionId`, and Managed as no connection at all, so the
+ * action names the provider's Managed config.
+ *
+ * @param formData - The submitted details form, edited in place.
+ * @returns False when the user has not picked where the wallet lives.
  */
-function defaultConnectionId(connections: CustodyConnectionListItem[]): string {
-  const selectable = connections.filter(isSelectableConnection);
-  return selectable.find((connection) => connection.isDefault)?.id ?? selectable[0]?.id ?? "";
+function applyWalletTarget(formData: FormData): boolean {
+  const walletTarget = formData.get(WALLET_TARGET_FIELD);
+  formData.delete(WALLET_TARGET_FIELD);
+  if (typeof walletTarget !== "string" || walletTarget === "") {
+    return false;
+  }
+  if (walletTarget !== MANAGED_WALLET_TARGET) {
+    formData.set("connectionId", walletTarget);
+  }
+  return true;
 }
 
 /**
- * Picks the connection a new wallet is created in.
+ * Picks the provider account a new wallet is created in: the provider's
+ * Managed config, when the project has one, or one of its connections.
+ *
+ * Nothing is preselected. There is no default custody, so the user names the
+ * account every time, even when only one is selectable.
  *
  * Unusable connections stay on the list, disabled and annotated, rather than
  * being filtered out: a user who came here to add a wallet to the connection
@@ -115,14 +131,16 @@ function defaultConnectionId(connections: CustodyConnectionListItem[]): string {
  */
 function WalletConnectionField({
   connections,
+  hasManagedConfig,
   t,
 }: {
   connections: CustodyConnectionListItem[];
+  hasManagedConfig: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
   const annotate = (connection: CustodyConnectionListItem): string | null => {
     if (isSelectableConnection(connection)) {
-      return connection.isDefault ? t("DashboardCustody.walletSetupConnectionDefault") : null;
+      return null;
     }
     return connection.status === "failed"
       ? t("DashboardCustody.walletSetupConnectionUnavailableFailed")
@@ -133,11 +151,16 @@ function WalletConnectionField({
     <div className="space-y-2">
       <Label htmlFor="wallet-connection">{t("DashboardCustody.walletSetupConnection")}</Label>
       <Select
-        name="connectionId"
+        name={WALLET_TARGET_FIELD}
         ariaLabel={t("DashboardCustody.walletSetupConnection")}
-        defaultValue={defaultConnectionId(connections)}
+        placeholder={t("DashboardCustody.walletSetupConnectionPlaceholder")}
         size="xl"
       >
+        {hasManagedConfig ? (
+          <SelectItem value={MANAGED_WALLET_TARGET}>
+            {t("DashboardCustody.walletSetupConnectionManaged")}
+          </SelectItem>
+        ) : null}
         {connections.map((connection) => {
           const annotation = annotate(connection);
           return (
@@ -175,6 +198,7 @@ function WalletDetailsFields({
   canProvisionWallet,
   connectionOptions,
   errorMessage,
+  hasManagedConfig,
   isConnected,
   onWalletLabelChange,
   providerEntry,
@@ -185,6 +209,7 @@ function WalletDetailsFields({
   canProvisionWallet: boolean;
   connectionOptions: CustodyConnectionListItem[];
   errorMessage: string | null;
+  hasManagedConfig: boolean;
   isConnected: boolean;
   onWalletLabelChange: (value: string) => void;
   providerEntry: { id: KnownCustodyProvider; label: string } | null;
@@ -208,7 +233,11 @@ function WalletDetailsFields({
         />
       </div>
       {showConnectionPicker ? (
-        <WalletConnectionField connections={connectionOptions} t={t} />
+        <WalletConnectionField
+          connections={connectionOptions}
+          hasManagedConfig={hasManagedConfig}
+          t={t}
+        />
       ) : null}
       <WalletFixedField
         label={t("DashboardCustody.project")}
@@ -318,9 +347,11 @@ export function WalletSetupFlow({
   // The availability status comes from legacy Configs. A BYOK-only project has
   // no legacy Config, so an active connection also shows that the provider is
   // installed. Without it, the wizard asks for the credentials again.
+  const hasManagedConfig =
+    selectedAvailability !== null && selectedAvailability.status === "active";
   const isConnected =
     selectedAvailability !== null &&
-    (selectedAvailability.status === "active" || connectionOptions.some(isSelectableConnection));
+    (hasManagedConfig || connectionOptions.some(isSelectableConnection));
   const canProvisionWallet = selectedProviderEntry
     ? !isConnected || selectedProviderEntry.supportsAdditionalWallets
     : false;
@@ -364,17 +395,33 @@ export function WalletSetupFlow({
       return;
     }
 
-    submissionInFlightRef.current = true;
     const formData = new FormData(form);
+    if (showConnectionPicker && !applyWalletTarget(formData)) {
+      setErrorMessage(t("DashboardCustody.walletSetupConnectionRequired"));
+      return;
+    }
+
+    submissionInFlightRef.current = true;
     setErrorMessage(null);
 
     startTransition(async () => {
       try {
         const result = await formAction(formData);
 
-        if (result.status === "error") {
-          setErrorMessage(result.message);
-          return;
+        switch (result.status) {
+          case "error":
+            setErrorMessage(result.message);
+            return;
+          case "provider_already_set_up":
+            setErrorMessage(t("DashboardCustody.walletSetupProviderAlreadySetUp"));
+            router.refresh();
+            return;
+          case "success":
+            break;
+          default: {
+            const unhandledResult: never = result;
+            throw new Error(`Unhandled wallet setup result: ${JSON.stringify(unhandledResult)}`);
+          }
         }
 
         if (selectedProjectId) {
@@ -448,6 +495,7 @@ export function WalletSetupFlow({
       canProvisionWallet={canProvisionWallet}
       connectionOptions={connectionOptions}
       errorMessage={errorMessage}
+      hasManagedConfig={hasManagedConfig}
       isConnected={isConnected}
       onWalletLabelChange={setWalletLabel}
       providerEntry={selectedProviderEntry}

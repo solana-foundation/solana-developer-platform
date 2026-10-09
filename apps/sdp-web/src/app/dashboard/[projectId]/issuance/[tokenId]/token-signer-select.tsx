@@ -18,13 +18,8 @@ interface TokenSignerSelectProps {
   /** Overrides the default signing helper line when the selection is available. */
   helperText?: string;
   showSelectionSummary?: boolean;
-  /** When true, an empty wallet list is an expected/optional state (e.g. draft
-   *  creation, which falls back to the project's default signer) rather than a
-   *  blocking error — keeps the helper text neutral instead of red. */
-  optional?: boolean;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: availability, lock and message visibility are one decision about the same selection; splitting them would hide how they depend on each other.
 export function TokenSignerSelect({
   signerWallets,
   signerWalletId,
@@ -33,7 +28,6 @@ export function TokenSignerSelect({
   label,
   helperText,
   showSelectionSummary = false,
-  optional = false,
 }: TokenSignerSelectProps) {
   const t = useTranslations();
   const hasReason = Boolean(signerUnavailableReason);
@@ -42,9 +36,11 @@ export function TokenSignerSelect({
   const selectedWallet =
     signerWallets.find((wallet) => wallet.id === signerWalletId) ??
     (!signerWalletId && signerWallets.length === 1 ? signerWallets[0] : null);
-  const selectionUnavailableReason = optional
-    ? null
-    : getSignerWalletUnavailableReason(signerWallets, signerWalletId || selectedWallet?.id, t);
+  const selectionUnavailableReason = getSignerWalletUnavailableReason(
+    signerWallets,
+    signerWalletId || selectedWallet?.id,
+    t
+  );
   // ponytail: runtime disablement is recognised by its copy, not a kind flag —
   // every reason producer renders it through this same key.
   // TODO: at the next touch of getSignerWalletUnavailableReason, return
@@ -57,10 +53,7 @@ export function TokenSignerSelect({
   const isLocked = !structuralReason && signerWallets.length === 1 && selectedWallet !== null;
   const hasDuplicateAddress =
     new Set(signerWallets.map((wallet) => wallet.publicKey)).size < signerWallets.length;
-  // Red only signals a genuine problem: an explicit unavailable reason, or no
-  // wallets in a context that requires a signer. An empty list where the signer
-  // is optional (draft creation) is expected, so it stays neutral.
-  const isError = hasReason || Boolean(selectionUnavailableReason) || (hasNoWallets && !optional);
+  const isError = hasReason || Boolean(selectionUnavailableReason) || hasNoWallets;
   const defaultMessage = isLocked
     ? t("DashboardIssuance.signer.requiredAuthorityHint")
     : t("DashboardIssuance.signer.selectedWalletHint");
@@ -68,11 +61,7 @@ export function TokenSignerSelect({
   const message =
     signerUnavailableReason ??
     selectionUnavailableReason ??
-    (hasNoWallets
-      ? optional
-        ? t("DashboardIssuance.signer.defaultSignerHint")
-        : t("DashboardIssuance.signer.noneAvailable")
-      : availableMessage);
+    (hasNoWallets ? t("DashboardIssuance.signer.noneAvailable") : availableMessage);
   const isRuntimeOnly = message === runtimeReason;
   const summaryShown =
     showSelectionSummary && !isUnavailable && selectedWallet !== null && !isLocked;
@@ -110,7 +99,7 @@ export function TokenSignerSelect({
             <SelectItem
               key={wallet.id}
               value={wallet.id}
-              disabled={!optional && wallet.isRuntimeExecutionAllowed !== true}
+              disabled={wallet.isRuntimeExecutionAllowed !== true}
             >
               {getSignerWalletOptionLabel(wallet, t, hasDuplicateAddress)}
             </SelectItem>

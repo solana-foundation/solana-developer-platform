@@ -514,14 +514,6 @@ test.describe
         path: mobileScreenshotPath,
         contentType: "image/png",
       });
-
-      for (const switchHref of ["/dashboard/wallets/switch", "/dashboard/custody/switch"]) {
-        await gotoProjectPage(page, projectId, switchHref);
-        await expect(page).toHaveURL(projectHref(projectId, "/dashboard/wallets/setup"));
-        await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible({
-          timeout: E2E_POLL_TIMEOUT_MS,
-        });
-      }
     });
 
     test("wallet setup Enter advances without creating and final Enter creates once", async ({

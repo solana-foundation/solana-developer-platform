@@ -1,7 +1,16 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createCustodySetupWalletAction,
+  initializeCustodySetupAction,
+} from "@/app/dashboard/[projectId]/custody/actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -19,6 +28,32 @@ vi.mock("@/app/dashboard/[projectId]/custody/actions", () => ({
 }));
 
 type FlowProps = Parameters<typeof WalletSetupFlow>[0];
+
+beforeEach(() => {
+  vi.mocked(createCustodySetupWalletAction).mockReset();
+  vi.mocked(initializeCustodySetupAction).mockReset();
+});
+
+afterEach(() => {
+  cleanup();
+  resetDashboardNavigation();
+});
+
+function renderInteractiveFlow(props: FlowProps) {
+  return render(
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      <WalletSetupFlow {...props} />
+    </I18nProvider>
+  );
+}
+
+function submittedWalletForm(): FormData {
+  const call = vi.mocked(createCustodySetupWalletAction).mock.lastCall;
+  if (!call) {
+    throw new Error("Expected a wallet submission");
+  }
+  return call[0];
+}
 
 function renderFlowWith(props: Partial<FlowProps> = {}): string {
   return renderToStaticMarkup(
@@ -191,6 +226,27 @@ describe("WalletSetupFlow", () => {
     expect(markup).toContain("Turnkey");
   });
 
+  it("tells the user to add a wallet when the provider is already set up", async () => {
+    vi.mocked(initializeCustodySetupAction).mockResolvedValue({
+      status: "provider_already_set_up",
+    });
+    const user = userEvent.setup();
+    renderInteractiveFlow({
+      connectedProviders: [],
+      enabledProviders: ["privy"],
+      initialProvider: "privy",
+    });
+
+    await user.type(screen.getByLabelText("Wallet label"), "Treasury");
+    await user.click(screen.getByRole("button", { name: "Create wallet" }));
+
+    expect(
+      await screen.findByText("This provider is already set up. Add a wallet instead.")
+    ).toBeTruthy();
+    expect(initializeCustodySetupAction).toHaveBeenCalledTimes(1);
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
+  });
+
   it("explains why nothing can be selected instead of emptying the page", () => {
     const markup = renderFlowWith({ connectedProviders: [], enabledProviders: [] });
 
@@ -211,9 +267,7 @@ describe("WalletSetupFlow connection picker", () => {
       provider: "privy" as const,
       label: "Production signing",
       status: "active" as const,
-      isDefault: false,
       isRuntimeExecutionAllowed: true,
-      defaultCustodyWalletId: null,
       createdAt: "2026-08-10T09:00:00.000Z",
       activatedAt: "2026-08-10T09:05:00.000Z",
       lastCheck: null,
@@ -239,22 +293,69 @@ describe("WalletSetupFlow connection picker", () => {
     );
   }
 
-  it("offers the connection once the project has a usable one", () => {
+  it("offers the account picker once the project has a usable connection", () => {
     const markup = renderInstalledPrivy([connection()]);
 
-    expect(markup).toContain("The wallet is created in this connection");
-    expect(markup).toContain('name="connectionId"');
+    expect(markup).toContain("The wallet is created in this account");
+    expect(markup).toContain('name="walletTarget"');
   });
 
-  it("preselects the project default over the first connection", () => {
-    const markup = renderInstalledPrivy([
-      connection({ id: "conn-first" }),
-      connection({ id: "conn-default", isDefault: true }),
-    ]);
+  it("preselects no account, even when only one is selectable", () => {
+    const markup = renderInstalledPrivy([connection({ id: "conn-only" })], []);
 
-    // The non-default connection must not be what submits.
-    expect(markup).toContain("conn-default");
-    expect(markup).not.toContain("conn-first");
+    expect(markup).toContain('name="walletTarget"');
+    expect(markup).not.toContain("conn-only");
+  });
+
+  function renderInteractiveInstalledPrivy() {
+    return renderInteractiveFlow({
+      connectedProviders: ["privy"],
+      enabledProviders: ["privy"],
+      initialProvider: "privy",
+      privyByokEnabled: true,
+      connections: [connection()],
+    });
+  }
+
+  it("refuses to submit until the user picks the account", async () => {
+    const user = userEvent.setup();
+    renderInteractiveInstalledPrivy();
+
+    await user.type(screen.getByLabelText("Wallet label"), "Treasury");
+    await user.click(screen.getByRole("button", { name: "Create wallet" }));
+
+    expect(await screen.findByText("Choose the account the wallet is created in.")).toBeTruthy();
+    expect(createCustodySetupWalletAction).not.toHaveBeenCalled();
+  });
+
+  it("names the provider and no connection when Managed is picked", async () => {
+    vi.mocked(createCustodySetupWalletAction).mockResolvedValue({ status: "success" });
+    const user = userEvent.setup();
+    renderInteractiveInstalledPrivy();
+
+    await user.type(screen.getByLabelText("Wallet label"), "Treasury");
+    await user.click(screen.getByRole("combobox", { name: "Account" }));
+    await user.click(await screen.findByRole("option", { name: "Managed by SDP" }));
+    await user.click(screen.getByRole("button", { name: "Create wallet" }));
+
+    await waitFor(() => expect(createCustodySetupWalletAction).toHaveBeenCalledTimes(1));
+    const formData = submittedWalletForm();
+    expect(formData.get("provider")).toBe("privy");
+    expect(formData.get("connectionId")).toBeNull();
+  });
+
+  it("names the picked connection", async () => {
+    vi.mocked(createCustodySetupWalletAction).mockResolvedValue({ status: "success" });
+    const user = userEvent.setup();
+    renderInteractiveInstalledPrivy();
+
+    await user.type(screen.getByLabelText("Wallet label"), "Treasury");
+    await user.click(screen.getByRole("combobox", { name: "Account" }));
+    await user.click(await screen.findByRole("option", { name: "Production signing" }));
+    await user.click(screen.getByRole("button", { name: "Create wallet" }));
+
+    await waitFor(() => expect(createCustodySetupWalletAction).toHaveBeenCalledTimes(1));
+    expect(submittedWalletForm().get("connectionId")).toBe("conn-active");
   });
 
   // A project with only unfinished connections has nothing to choose between,
@@ -262,24 +363,23 @@ describe("WalletSetupFlow connection picker", () => {
   it("stays out of the way when nothing is selectable", () => {
     const markup = renderInstalledPrivy([connection({ status: "pending" })]);
 
-    expect(markup).not.toContain("The wallet is created in this connection");
+    expect(markup).not.toContain("The wallet is created in this account");
     expect(markup).toContain("Wallet details");
   });
 
   it("stays out of the way when the project has no connections at all", () => {
     const markup = renderInstalledPrivy([]);
 
-    expect(markup).not.toContain("The wallet is created in this connection");
+    expect(markup).not.toContain("The wallet is created in this account");
   });
 
   // A BYOK-only project has no legacy config, so `/v1/wallets/configs` reports
   // nothing connected; the active connection alone must mark privy installed.
-  it("offers an active connection when there is no legacy config and no default", () => {
-    const markup = renderInstalledPrivy([connection({ isDefault: false })], []);
+  it("offers an active connection when there is no legacy config", () => {
+    const markup = renderInstalledPrivy([connection()], []);
 
     expect(markup).toContain("Wallet details");
-    expect(markup).toContain('name="connectionId"');
-    expect(markup).toContain("conn-active");
+    expect(markup).toContain('name="walletTarget"');
     expect(markup).toContain('name="label"');
     expect(markup).not.toContain("data-privy-byok-form");
     expect(markup).not.toMatch(/type="password"/);
@@ -289,7 +389,7 @@ describe("WalletSetupFlow connection picker", () => {
     const markup = renderInstalledPrivy([connection({ status: "pending" })], []);
 
     expect(markup).toContain("data-privy-byok-form");
-    expect(markup).not.toContain('name="connectionId"');
+    expect(markup).not.toContain('name="walletTarget"');
   });
 
   // Connections belong to one provider; switching on step 1 must not carry them over.
@@ -305,6 +405,6 @@ describe("WalletSetupFlow connection picker", () => {
       </I18nProvider>
     );
 
-    expect(markup).not.toContain("The wallet is created in this connection");
+    expect(markup).not.toContain("The wallet is created in this account");
   });
 });
