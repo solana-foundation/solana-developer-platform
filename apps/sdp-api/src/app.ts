@@ -119,6 +119,7 @@ function mapErrorStatusCode(statusCode: number): ContentfulStatusCode {
     case 404:
     case 409:
     case 413:
+    case 422:
     case 429:
     case 500:
     case 501:
