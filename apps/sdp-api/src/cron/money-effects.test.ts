@@ -5,6 +5,7 @@ import { EARN_CATALOGUE_SYNC_MONITOR } from "./earn-catalogue-sync";
 import { EARN_METRICS_REFRESH_MONITOR } from "./earn-metrics-refresh";
 import { EARN_SPLIT_SWAPS_MONITOR } from "./earn-split-swaps";
 import { EARN_VAULT_MOVEMENTS_MONITOR } from "./earn-vault-movements";
+import { IDEMPOTENCY_KEY_PRUNE_MONITOR } from "./idempotency-keys";
 import { CRON_MONITOR_MONEY_EFFECTS } from "./money-effects";
 import { PENDING_DEPOSITS_MONITOR } from "./pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "./pending-transfers";
@@ -25,6 +26,7 @@ describe("cron money effects (HOO-1955)", () => {
         EARN_METRICS_REFRESH_MONITOR,
         EARN_SPLIT_SWAPS_MONITOR,
         EARN_VAULT_MOVEMENTS_MONITOR,
+        IDEMPOTENCY_KEY_PRUNE_MONITOR,
         PENDING_DEPOSITS_MONITOR,
         PENDING_TRANSFERS_MONITOR,
         PENDING_WITHDRAWALS_MONITOR,
