@@ -631,7 +631,8 @@ describe("DvP routes", () => {
       },
       env
     );
-    expect(res.status).toBe(403);
+    // Authentication reads the key's row fresh, so it refuses before the route's own check.
+    expect(res.status).toBe(401);
 
     const trades = await getDb(env).prepare("SELECT 1 FROM dvp_trades").all();
     expect(trades.results).toHaveLength(0);
@@ -706,7 +707,8 @@ describe("DvP routes", () => {
       },
       env
     );
-    expect(res.status).toBe(403);
+    // Authentication reads the key's row fresh, so it refuses before the route's own check.
+    expect(res.status).toBe(401);
 
     const trades = await getDb(env).prepare("SELECT 1 FROM dvp_trades").all();
     expect(trades.results).toHaveLength(0);

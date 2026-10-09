@@ -10,7 +10,7 @@ import {
   isAllowedOperationsWithin,
   type Permission,
 } from "@sdp/types";
-import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, insufficientPermissions } from "@/lib/errors";
 import {
@@ -779,12 +779,7 @@ export async function assertFreshApiKeyActive(
   // The same predicate request authentication applies: exists, active, not
   // past expiry, and not past its rotation grace period — a rotated key stays
   // `active` in the row and is retired by the deadline alone.
-  if (
-    !currentKey ||
-    currentKey.status !== "active" ||
-    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date()) ||
-    isRotationDeadlineReached(currentKey.rotation_deadline)
-  ) {
+  if (!currentKey || apiKeyRowRefusal(currentKey) !== null) {
     throw new AppError("FORBIDDEN", "API key is no longer active");
   }
 }
@@ -825,11 +820,7 @@ export async function assertFreshApiKeyCustodyWalletAccess(
   // key someone just revoked. The predicate request authentication applies:
   // active, not past expiry, not past its rotation grace period (a rotated key
   // stays `active` in the row and is retired by the deadline alone).
-  if (
-    currentKey.status !== "active" ||
-    (currentKey.expires_at && new Date(currentKey.expires_at) < new Date()) ||
-    isRotationDeadlineReached(currentKey.rotation_deadline)
-  ) {
+  if (apiKeyRowRefusal(currentKey) !== null) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
 

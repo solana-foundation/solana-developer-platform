@@ -86,6 +86,13 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
          WHERE organization_id = ? AND status = 'active'`
       )
       .bind(mapping.organization_id),
+    // A pending invitation is a way back in: accepting one re-activates a
+    // removed membership in this organization.
+    db
+      .prepare(
+        "UPDATE invitations SET status = 'revoked' WHERE organization_id = ? AND status = 'pending'"
+      )
+      .bind(mapping.organization_id),
   ]);
 
   // Everything below is post-commit, and each effect is isolated so that one

@@ -5,10 +5,13 @@
  * Revocation paths write the revoked state into the KV cache before
  * reporting success, but that write happens after the database commit and
  * can fail (e.g. a transient Redis outage during organization deletion).
- * When it does, the revoked key keeps authenticating from its cached
- * "active" entry for the rest of the cache TTL — and after an organization
+ * When it does, the cached entry still says "active". Request
+ * authentication refuses the key anyway, because it re-reads the
+ * organization and the key's row on every request
+ * (`lib/organization-access.ts`, APE-387); this sweep keeps the cache
+ * accurate so its cheap rejects and fills stay right. After an organization
  * deletion the administrator's own credentials are gone, so no client-side
- * retry can repair it.
+ * retry could repair the entry.
  *
  * Rotation has the same post-commit cache write with a harder constraint:
  * its request cannot be failed or retried when the write is lost, because
@@ -16,15 +19,16 @@
  * and a retried rotation would mint a second live credential. The rotation
  * handler therefore never 500s over this write, and this sweep is the
  * durable path that makes the old key's cached entry pick up its rotation
- * deadline.
+ * deadline (authentication already reads the deadline live).
  *
- * The sweep runs from the per-minute reconciliation cron and needs no
- * request credentials: it lists keys revoked within the last two hours
- * (cache TTL is one hour; the extra hour absorbs clock skew between
- * writers) and keys whose rotation deadline is still ahead or passed within
- * that same window, reads each one's cache entry, and rewrites any that
- * diverge. Divergence therefore heals within about a minute of Redis
- * recovering, no matter how the original request ended.
+ * The sweep runs from the reconciliation cron (every minute in process, and
+ * at most five minutes apart in the managed job) and needs no request
+ * credentials: it lists keys revoked within the last two hours (cache TTL is
+ * one hour; the extra hour absorbs clock skew between writers) and keys whose
+ * rotation deadline is still ahead or passed within that same window, reads
+ * each one's cache entry, and rewrites any that diverge. Divergence therefore
+ * heals within one tick of Redis recovering, no matter how the original
+ * request ended.
  *
  * A third pass starts from the cache instead of Postgres: every cached entry
  * whose key row is gone, or whose project is no longer active, is rewritten

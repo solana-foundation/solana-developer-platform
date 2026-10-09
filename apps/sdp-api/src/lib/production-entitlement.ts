@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { forbidden } from "@/lib/errors";
+import { organizationNotActive } from "@/lib/organization-access";
 import type { Env } from "@/types/env";
 
 /**
@@ -32,17 +33,21 @@ export function recordOrganizationEntitlements(
  * Loads and records the entitlements for an authentication door that does not
  * already read the organization row (an approved-operation replay, a Clerk
  * organization first provisioned by this request). Uncached, so revoking an
- * entitlement takes effect on the next request.
+ * entitlement takes effect on the next request; like every door's
+ * organization read, it refuses an organization that is no longer `active`.
  */
 export async function loadOrganizationEntitlements(
   c: Context<{ Bindings: Env }>,
   organizationId: string
 ): Promise<void> {
   const row = await getDb(c.env)
-    .prepare("SELECT settings FROM organizations WHERE id = ?")
+    .prepare("SELECT status, settings FROM organizations WHERE id = ?")
     .bind(organizationId)
-    .first<{ settings: string | null }>();
-  recordOrganizationEntitlements(c, row?.settings ?? null);
+    .first<{ status: string; settings: string | null }>();
+  if (row?.status !== "active") {
+    throw organizationNotActive();
+  }
+  recordOrganizationEntitlements(c, row.settings);
 }
 
 /** Whether this request's organization may act on production (APE-351). */
