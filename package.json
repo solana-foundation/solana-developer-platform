@@ -60,6 +60,7 @@
     "build": "turbo run build",
     "check:migration-compat": "node scripts/check-migration-compat.mjs",
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
+    "check:value-movement": "node scripts/check-value-movement.mjs",
     "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
     "check:ui-flow-coverage": "node scripts/check-ui-flow-coverage.mjs",
     "check:secretref-serialization": "node scripts/check-secretref-serialization.mjs",

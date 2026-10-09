@@ -523,6 +523,13 @@ jobs:
       - name: Check SecretRef serialization
         run: pnpm check:secretref-serialization
 
+      # Pins the constructors that turn a stored secret into signing authority
+      # to the custody signer and sponsorship waists, where money admission is
+      # enforced (HOO-1955). Needs the TypeScript checker, so it runs where
+      # dependencies are installed.
+      - name: Check value movement
+        run: pnpm check:value-movement
+
       - name: Check UI flow matrix
         run: pnpm check:ui-flow-coverage
 
