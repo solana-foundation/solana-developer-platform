@@ -8,7 +8,7 @@
 import type { CachedApiKey } from "@sdp/types";
 import { getDb } from "@/db/client";
 import { RATE_LIMIT_WINDOW_MS } from "@/middleware/rate-limit";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import type { Env } from "@/types/env";
 
 /**
@@ -87,6 +87,20 @@ export async function clearKVStores(env: Env): Promise<void> {
       await store.delete(key.name);
     }
   }
+}
+
+/**
+ * Empties this worker's Redis logical database. Every vitest worker shares one
+ * Redis server on its own logical database (src/test/helpers/env.ts), so a
+ * raw-Redis suite resets through FLUSHDB here and never FLUSHALL, which would
+ * wipe other workers' in-flight state mid-test.
+ *
+ * @param env - Test environment bindings carrying this worker's REDIS_URL.
+ * @returns Resolves once the worker's logical database is empty.
+ */
+export async function flushWorkerRedis(env: Env): Promise<void> {
+  const redis = await getRedisClient(env);
+  await redis.flushdb();
 }
 
 /**

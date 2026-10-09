@@ -1,7 +1,9 @@
 import Redis from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
-import type { Env } from "@/types/env";
+import { env } from "@/test/helpers/env";
+import { required } from "@/test/helpers/required";
+import { flushWorkerRedis } from "@/test/mocks/kv";
 import { closeAllRedisClients } from "./kv-redis";
 import { SponsorshipBudgetRedis } from "./sponsorship-budget-redis";
 
@@ -12,7 +14,6 @@ vi.mock("./money-path-events", async (importOriginal) => ({
   logEvent,
 }));
 
-const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 const EMPTY_USAGE = {
   hour: { global: 0, organization: 0, project: 0 },
   day: { global: 0, organization: 0, project: 0 },
@@ -45,8 +46,8 @@ describe("SponsorshipBudgetRedis", () => {
   let budget: SponsorshipBudgetRedis;
 
   beforeAll(() => {
-    raw = new Redis(REDIS_URL, { lazyConnect: false, maxRetriesPerRequest: 3 });
-    budget = new SponsorshipBudgetRedis({ REDIS_URL } as Env);
+    raw = new Redis(required(env.REDIS_URL), { lazyConnect: false, maxRetriesPerRequest: 3 });
+    budget = new SponsorshipBudgetRedis(env);
   });
 
   afterAll(async () => {
@@ -55,7 +56,7 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   beforeEach(async () => {
-    await raw.flushall();
+    await flushWorkerRedis(env);
   });
 
   it("admits organization-only scopes without corrupting Lua argument indexes", async () => {
