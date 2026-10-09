@@ -1,0 +1,40 @@
+Applies to: SeasonSans-Regular.woff2, SeasonSans-Medium.woff2
+
+Copyright (c) Displaay Type Foundry s.r.o., Prague
+
+This Font Software is proprietary and licensed under the Displaay License Agreement.
+The agreement and terms are available at:
+https://displaay.net/about/legal/terms-conditions/
+
+It is NOT covered by this repository's MIT License, and nothing in this repository
+grants you any right to it.
+
+
+-----------------------------------------------------------
+LICENSE SUMMARY
+-----------------------------------------------------------
+
+LICENSEE
+The Solana Foundation, for use in the Solana Developer Platform.
+
+LICENSED USAGES
+Desktop + Print, and Web. Web use is limited to the licensee's own websites,
+self-hosted through CSS @font-face.
+
+RESTRICTIONS
+You may not:
+
+1) Copy, redistribute, sublicense, sell, lend or lease the Font Software.
+
+2) Use the Font Software in any other project, website, app or product.
+
+3) Convert, rename, modify, decompile or reverse engineer the Font Software, or
+synthesise additional weights or styles from it.
+
+FORKS AND REUSE
+Forks and other reuse of this repository must remove these files, or buy their own
+license from Displaay and replace them. Leave --font-season-sans unset and the font
+stack in tokens.css falls back to the system sans-serif.
+
+CONTACT
+Displaay Type Foundry s.r.o., https://displaay.net, rgb@displaay.net

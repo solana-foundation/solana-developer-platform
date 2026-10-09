@@ -1,0 +1,93 @@
+/* The three pillars: a head, then a scene, a name, a line and a link each. */
+.section {
+  padding: var(--pad) 0;
+}
+
+.head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.86fr);
+  gap: 56px;
+  align-items: end;
+}
+
+.intro {
+  margin: 0;
+  max-width: 48ch;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: var(--sub);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 26px;
+  margin-top: var(--lead);
+}
+
+.pillar {
+  position: relative;
+  padding: 26px 0 40px;
+  cursor: default;
+}
+
+/* the hairline on top lights magenta under the pointer, or while its link has keyboard focus */
+.pillar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--line);
+  transition: background 420ms var(--e);
+}
+
+.pillar:hover::before,
+.pillar:has(a:focus-visible)::before {
+  background: var(--magenta);
+}
+
+.title {
+  font-size: clamp(24px, 2.3vw, 34px);
+  line-height: 1.1;
+  letter-spacing: -0.022em;
+}
+
+.body {
+  max-width: 34ch;
+  margin: 12px 0 0;
+  font-size: 15.5px;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--sub);
+}
+
+@media (min-width: 901px) {
+  /* the paragraph starts where the third pillar starts and sits on the headline's first line */
+  .head {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 26px;
+    align-items: first baseline;
+  }
+
+  .headline {
+    grid-column: 1 / 3;
+  }
+
+  .intro {
+    grid-column: 3;
+    max-width: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .head {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 34px;
+  }
+
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -1,0 +1,313 @@
+/*
+ * The first screen: the statement beside the globe, the two logo blocks along its floor. The
+ * page's arrival (on-tail 1500ms, on-sel1 1900ms, on-sel2 2900ms) runs on CSS animation delays
+ * from first paint, so nothing waits on hydration and under reduced motion everything is simply
+ * there.
+ */
+.hero {
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100svh - var(--nav-height));
+  padding: 0;
+}
+
+.inner {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  gap: 12px;
+  align-items: center;
+  padding: 0 0 12px;
+}
+
+/* the words sit above the globe's faint left edge, and are the stacking context the selection
+   boxes (z-index -1) paint behind the letters in */
+.words {
+  position: relative;
+  z-index: 2;
+}
+
+.title {
+  font-size: clamp(46px, 5.5vw, 86px);
+  line-height: 1.24;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  text-align: left;
+  color: #000;
+}
+
+/* the two selections: a dashed one on the phrase being pointed at, a glowing one on the phrase
+   chosen. Each box hugs its own words, so the two never touch */
+.sel {
+  position: relative;
+  display: inline-block;
+  padding: 0 0.12em;
+  border-radius: 0.2em;
+}
+
+.sel::before {
+  content: "";
+  position: absolute;
+  inset: 0.1em -0.03em 0.05em;
+  z-index: -1;
+  border-radius: 0.2em;
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+.selA::before {
+  border: 1.5px dashed #9945ff99;
+  background: var(--paper);
+  animation:
+    selectIn 420ms var(--e) 1900ms forwards,
+    selectRest 420ms var(--e) 2900ms forwards;
+}
+
+.selB::before {
+  background: #fff;
+  box-shadow:
+    inset 0 0 13px #8d54d266,
+    inset 0 0 34px #8d54d266,
+    inset 0 0 46px #8d54d233;
+  animation: selectIn 420ms var(--e) 2900ms forwards;
+}
+
+.selB {
+  animation: chosen 520ms var(--e) 2900ms both;
+}
+
+@keyframes selectIn {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes selectRest {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+
+  to {
+    opacity: 0.8;
+    transform: none;
+  }
+}
+
+@keyframes chosen {
+  from {
+    color: #000;
+  }
+
+  to {
+    color: #9a47ff;
+  }
+}
+
+.lede {
+  margin: 26px 0 0;
+  max-width: 38ch;
+  font-size: 20px;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  font-weight: 500;
+  color: var(--ink2);
+}
+
+.cta {
+  display: flex;
+  gap: 10px;
+  margin-top: 34px;
+  justify-content: flex-start;
+}
+
+.lede,
+.cta,
+.logobar {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: arrive 700ms var(--e) 1500ms forwards;
+}
+
+.cta {
+  animation-delay: 1590ms;
+}
+
+.logobar {
+  animation-delay: 1900ms;
+}
+
+@keyframes arrive {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.globe {
+  max-height: min(72vh, 820px);
+  width: calc(100% + 12vw);
+  margin: 0 -12vw 0 0;
+}
+
+/* the logo wall: two blocks, each its label above and its marks across the full width */
+.logobar {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: auto 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid #dedcdc;
+  border-bottom: 1px solid #dedcdc;
+}
+
+.logocell {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 18px;
+  min-width: 0;
+  padding: 26px clamp(24px, 3vw, 48px) 30px;
+  border-right: 1px solid #dedcdc;
+}
+
+.logocell:last-child {
+  border-right: 0;
+}
+
+.logoLabel {
+  flex: 0 0 auto;
+  font: 500 15px / 1.14 var(--font);
+  letter-spacing: 0.015em;
+  color: #0f0f1399;
+}
+
+.logoRow {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.logoRow li {
+  flex: 0 0 auto;
+}
+
+.logo {
+  width: auto;
+  filter: brightness(0);
+  opacity: 0.86;
+}
+
+/* the larger headline keeps its two lines on a wide screen (it may run over the globe's faint
+   left edge, which sits behind it) */
+@media (min-width: 1001px) {
+  .title {
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 1180px) {
+  .logobar {
+    grid-template-columns: 1fr;
+  }
+
+  .logocell {
+    border-right: 0;
+    border-bottom: 1px solid var(--line2);
+  }
+
+  .logocell:last-child {
+    border-bottom: 0;
+  }
+
+  .logoRow {
+    justify-content: flex-start;
+    gap: clamp(24px, 5vw, 56px);
+  }
+}
+
+@media (max-width: 1000px) {
+  .inner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* on a phone the globe sits under the words, centred in its column */
+  .globe {
+    width: 100%;
+    margin: 0 auto;
+  }
+}
+
+@media (max-width: 1000px) and (orientation: landscape) {
+  .globe {
+    width: min(100%, 70vh);
+  }
+}
+
+@media (max-width: 620px) {
+  .logoRow {
+    flex-wrap: wrap;
+    gap: 18px 28px;
+  }
+
+  .logo {
+    max-height: 20px;
+  }
+}
+
+@media (max-width: 600px) {
+  .title {
+    font-size: clamp(34px, 10.4vw, 46px);
+    line-height: 1.2;
+  }
+}
+
+@media (max-width: 360px) {
+  .cta {
+    flex-wrap: wrap;
+  }
+
+  .cta > a {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lede,
+  .cta,
+  .logobar,
+  .selB {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .selB {
+    color: #9a47ff;
+  }
+
+  .selA::before,
+  .selB::before {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .selA::before {
+    opacity: 0.8;
+  }
+}

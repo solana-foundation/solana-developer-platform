@@ -1,0 +1,58 @@
+/* payments: the text and the bubble side
+   by side, the bench of kinds under them across the band */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(56px, 6.6vw, 104px);
+  align-items: center;
+  padding: clamp(88px, 8.9vw, 128px) 0;
+  border-top: 1px solid var(--line);
+}
+
+.text {
+  order: 2;
+}
+
+.title {
+  margin-top: -6px;
+  font-size: clamp(32px, 3.9vw, 56px);
+  line-height: 1.04;
+  letter-spacing: -0.028em;
+}
+
+.body {
+  margin-top: 24px;
+  max-width: 42ch;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: #0f0f1399;
+}
+
+.vis {
+  min-width: 0;
+}
+
+.bench {
+  grid-column: 1 / -1;
+  order: 3;
+}
+
+@media (max-width: 1000px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .text {
+    order: 0;
+  }
+
+  .vis {
+    order: 1;
+  }
+}
+
+@media (max-width: 600px) {
+  .row {
+    padding: 64px 0;
+  }
+}

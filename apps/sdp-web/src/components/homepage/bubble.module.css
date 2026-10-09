@@ -1,0 +1,257 @@
+/*
+ * The page's bubble: a pill in two rings, shared by the stack, the pillars,
+ * payments and privacy. The bubble's root takes `.bubble` and a tone (`.violet`, `.mint`, `.grey`);
+ * its outer ring `.ring`, its inner ring `.inner`, its pill `.pill`. Each section keeps its own
+ * layout (sizes in cqw, the pill's width and what is in it) and may set `--ring-pad` and
+ * `--inner-pad` on the root. The script toggles data-beat (the pill swells, the wave runs out
+ * through the rings and a ripple leaves the outer one) and data-paused (off screen or tab hidden:
+ * the breathing stops).
+ */
+
+/* ── tones ──────────────────────────────────────────────────────────────── */
+.violet {
+  --ring-bg: radial-gradient(140% 170% at 18% 100%, #9945ff2b 0%, #9945ff11 48%, #9945ff05 100%);
+  --ring-edge: #9945ff10;
+  --ripple-bg: #9945ff10;
+  --ripple-shadow: 0 0 0 1px #9945ff24, 0 0 36px 6px #9945ff22;
+  --inner-bg: radial-gradient(140% 170% at 20% 100%, #9945ff47 0%, #9945ff1d 52%, #9945ff0b 100%);
+  --inner-edge: #9945ff1a;
+  --pill-bg: radial-gradient(
+    90% 150% at 32% 78%,
+    #b68bff 0%,
+    #c9a8ff 40%,
+    #ddcbff 78%,
+    #ebe1ff 100%
+  );
+  --pill-shadow: inset 0 0 18px #9945ff55, inset 0 0 44px #9945ff29, 0 10px 40px -18px #7a2fe066;
+  --pill-shadow-beat:
+    inset 0 0 22px #9945ff77, inset 0 0 54px #9945ff3d, 0 12px 56px -12px #7a2fe099;
+}
+
+.mint {
+  --ring-bg: radial-gradient(140% 170% at 18% 100%, #14f1953a 0%, #14f19517 48%, #14f19508 100%);
+  --ring-edge: #14f19512;
+  --ripple-bg: #14f19512;
+  --ripple-shadow: 0 0 0 1px #14f19529, 0 0 36px 6px #14f19526;
+  --inner-bg: radial-gradient(140% 170% at 20% 100%, #14f1955c 0%, #14f19526 52%, #14f1950f 100%);
+  --inner-edge: #14f1951c;
+  --pill-bg: radial-gradient(
+    90% 150% at 32% 78%,
+    #5cefb2 0%,
+    #86f3c6 40%,
+    #b8f8dc 78%,
+    #cffbe8 100%
+  );
+  --pill-shadow: inset 0 0 18px #14f19566, inset 0 0 44px #14f19533, 0 10px 40px -18px #05bf8666;
+  --pill-shadow-beat:
+    inset 0 0 22px #14f19588, inset 0 0 54px #14f19544, 0 12px 56px -12px #05bf8699;
+}
+
+/* the stack's partner services */
+.grey {
+  --ring-bg: radial-gradient(140% 170% at 18% 100%, #0f0f130e 0%, #0f0f1306 48%, #0f0f1302 100%);
+  --ring-edge: #0f0f130b;
+  --ripple-bg: #0f0f1305;
+  --ripple-shadow: 0 0 0 1px #0f0f130e, 0 0 30px 4px #0f0f1308;
+  --inner-bg: radial-gradient(140% 170% at 20% 100%, #0f0f1314 0%, #0f0f1309 52%, #0f0f1304 100%);
+  --inner-edge: #0f0f130f;
+  --pill-bg: radial-gradient(
+    90% 150% at 32% 78%,
+    #e6e6ea 0%,
+    #eeeef1 40%,
+    #f6f6f8 78%,
+    #fcfcfd 100%
+  );
+  --pill-shadow: inset 0 0 0 1px #0f0f130d, inset 0 0 16px #0f0f130c, 0 10px 30px -18px #0f0f1330;
+  --pill-shadow-beat:
+    inset 0 0 0 1px #0f0f1312, inset 0 0 20px #0f0f1314, 0 12px 40px -14px #0f0f1340;
+}
+
+/* ── the rings and the pill ─────────────────────────────────────────────── */
+.ring {
+  position: relative;
+  padding: var(--ring-pad, 7.2cqw);
+  border-radius: 999px;
+  background: var(--ring-bg);
+  box-shadow: inset 0 0 0 1px var(--ring-edge);
+  animation: ringBreath 7.5s ease-in-out infinite;
+}
+
+/* the ripple that leaves the outer ring on a beat */
+.ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--ripple-bg);
+  box-shadow: var(--ripple-shadow);
+  opacity: 0;
+}
+
+.inner {
+  position: relative;
+  padding: var(--inner-pad, 5cqw);
+  border-radius: 999px;
+  background: var(--inner-bg);
+  box-shadow: inset 0 0 0 1px var(--inner-edge);
+  animation: ringBreath 6s ease-in-out -1.4s infinite;
+}
+
+/* lit from the lower left, the light drifting slowly */
+.pill {
+  border-radius: 999px;
+  background: var(--pill-bg);
+  background-size: 160% 160%;
+  box-shadow: var(--pill-shadow);
+  animation: pillLight 9s ease-in-out infinite;
+}
+
+/* the beat: the pill swells, the wave runs out through the inner ring, then the outer, and a thin
+   ripple leaves past the edge; it uses `scale`, so the rings' slow breath (on transform) carries on */
+.bubble[data-beat] .pill {
+  animation:
+    pillLight 9s ease-in-out infinite,
+    beatPill 1500ms cubic-bezier(0.3, 0.7, 0.3, 1) 1;
+}
+
+.bubble[data-beat] .inner {
+  animation:
+    ringBreath 6s ease-in-out -1.4s infinite,
+    beatInner 1500ms cubic-bezier(0.3, 0.7, 0.3, 1) 120ms 1 both;
+}
+
+.bubble[data-beat] .ring {
+  animation:
+    ringBreath 7.5s ease-in-out infinite,
+    beatOuter 1500ms cubic-bezier(0.3, 0.7, 0.3, 1) 240ms 1 both;
+}
+
+.bubble[data-beat] .ring::after {
+  animation: ripple 1700ms cubic-bezier(0.2, 0.6, 0.3, 1) 300ms 1 both;
+}
+
+.bubble[data-paused] .pill,
+.bubble[data-paused] .ring,
+.bubble[data-paused] .inner,
+.bubble[data-paused] .ring::after {
+  animation-play-state: paused;
+}
+
+@keyframes ringBreath {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.028);
+  }
+}
+
+@keyframes pillLight {
+  0%,
+  100% {
+    background-position: 30% 70%;
+  }
+
+  50% {
+    background-position: 70% 30%;
+  }
+}
+
+@keyframes beatPill {
+  0% {
+    scale: 1;
+  }
+
+  20% {
+    scale: 1.05;
+    box-shadow: var(--pill-shadow-beat);
+  }
+
+  38% {
+    scale: 0.995;
+  }
+
+  54% {
+    scale: 1.018;
+  }
+
+  100% {
+    scale: 1;
+    box-shadow: var(--pill-shadow);
+  }
+}
+
+@keyframes beatInner {
+  0% {
+    scale: 1;
+  }
+
+  22% {
+    scale: 1.03;
+  }
+
+  42% {
+    scale: 0.998;
+  }
+
+  58% {
+    scale: 1.01;
+  }
+
+  100% {
+    scale: 1;
+  }
+}
+
+@keyframes beatOuter {
+  0% {
+    scale: 1;
+  }
+
+  24% {
+    scale: 1.018;
+  }
+
+  46% {
+    scale: 1;
+  }
+
+  62% {
+    scale: 1.006;
+  }
+
+  100% {
+    scale: 1;
+  }
+}
+
+@keyframes ripple {
+  0% {
+    opacity: 0;
+    scale: 0.96;
+  }
+
+  12% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    scale: 1.14;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring,
+  .inner,
+  .pill,
+  .bubble[data-beat] .pill,
+  .bubble[data-beat] .ring,
+  .bubble[data-beat] .inner,
+  .bubble[data-beat] .ring::after {
+    animation: none;
+  }
+}

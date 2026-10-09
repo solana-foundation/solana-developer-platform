@@ -88,6 +88,11 @@ files in `src/assets/fonts` and exposes them under those names. In Next.js, load
 on `:root`. Without either, the stack falls back to the installed family name, then the system
 stack. sdp-web loads them with `next/font/local` in `apps/sdp-web/src/app/layout.tsx`.
 
+The fonts are third-party and not under this repository's MIT licence. Season Sans is a
+proprietary Displaay face licensed to the Solana Foundation for SDP only. Don't copy it or
+reuse it elsewhere. See [`LICENSE-SeasonSans.txt`](src/assets/fonts/LICENSE-SeasonSans.txt).
+Geist Mono is SIL OFL 1.1. See [`LICENSE-GeistMono.txt`](src/assets/fonts/LICENSE-GeistMono.txt).
+
 ### Page column
 
 `max-w-page` is the design's content column (852px, which with 24px gutters is the design's
