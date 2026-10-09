@@ -7,6 +7,7 @@ import type { z } from "zod";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
@@ -958,6 +959,13 @@ export const executeMint = async (c: AppContext) => {
       tokenAccount: settledTokenAccount,
     });
   } catch (error) {
+    // The sponsor decides money admission again when it signs. A refusal there
+    // (a revocation racing the gate above) comes before Kora signs or sends, so
+    // the transaction can never land and its reservation goes back.
+    if (reservedSupply !== null && error instanceof MoneyMovementRefusedError) {
+      await tokenService.releaseUnsentMintReservation(tokenId, amountBaseUnits.toString());
+      reservedSupply = null;
+    }
     if (reservedSupply === null) {
       await recordPreSubmissionMintFailure({
         c,

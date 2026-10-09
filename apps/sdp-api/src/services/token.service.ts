@@ -1410,6 +1410,17 @@ export class TokenService {
   }
 
   /**
+   * Hand back a reservation whose transaction provably cannot land: the
+   * sponsor refused money admission (HOO-1955) before it signed, so the
+   * transaction lacks its fee payer signature and was never sent. This is the
+   * one case `reserveMintSupply`'s "never hand back" rule does not cover; an
+   * ambiguous send failure still keeps its reservation.
+   */
+  async releaseUnsentMintReservation(tokenId: string, deltaBaseUnits: string): Promise<void> {
+    await this._applySupplyDelta(tokenId, deltaBaseUnits, "subtract");
+  }
+
+  /**
    * Record a supply change that has already settled on-chain — today, a burn.
    *
    * A cache write, not an admission check: the balance is enforced against the

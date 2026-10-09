@@ -19,6 +19,7 @@ import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope } from "@/lib/tenant-scope";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
 import { buildIdempotencyMetadata } from "@/routes/issuance/handlers/idempotency";
@@ -7643,6 +7644,55 @@ describe("Issuance Routes", () => {
           // transaction pending and its durable audit intent unresolved until
           // supply reconciliation proves whether the mint landed.
           expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("pending");
+        } finally {
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("hands the reservation back when the sponsor refuses money admission", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '1000000000000', total_supply_cached = '100000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        // The organization is revoked between the gate and the sponsor's own
+        // decision: the sponsor refuses before it signs, so nothing was sent.
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementation(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            throw new MoneyMovementRefusedError("organization_inactive");
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(403);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+          // Handed back, and the unsent transaction row removed like any other
+          // pre-submission failure, so a supply refresh has nothing to wait on.
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("100000000000");
+          expect(await latestMintTransaction(allowlistTokenId)).toBeNull();
         } finally {
           isWalletOnListSpy.mockRestore();
           mintToSpy.mockRestore();
