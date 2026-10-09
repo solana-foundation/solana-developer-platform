@@ -7,6 +7,8 @@ export const MIGRATIONS_DIR = "apps/sdp-api/src/db/migrations/";
 const SQL_DIR = `${MIGRATIONS_DIR}postgres/`;
 const REPEATABLE_DIR = `${SQL_DIR}repeatable/`;
 const BREAKING_DIRECTIVE = /^--\s*sdp:migration-compat:\s*breaking\s*$/m;
+// Test files never run in the deployed image, so they cannot break a traffic rollback.
+const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const NAME = String.raw`(?:"[^"]+"|[^\s".(),;]+)(?:\.(?:"[^"]+"|[^\s".(),;]+))*`;
 const IF_EXISTS = String.raw`(?:IF\s+(?:NOT\s+)?EXISTS\s+)?`;
 const ALTER_TABLE = new RegExp(
@@ -439,7 +441,9 @@ export function findRemovedViewColumns(baseSql, headSql) {
 }
 
 export function checkMigrationChange(changedFiles, readFile, readBase = () => null) {
-  const outside = changedFiles.filter((file) => !file.startsWith(MIGRATIONS_DIR));
+  const outside = changedFiles.filter(
+    (file) => !file.startsWith(MIGRATIONS_DIR) && !TEST_FILE.test(file)
+  );
   const violations = [];
 
   for (const file of changedFiles) {
