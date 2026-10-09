@@ -7699,6 +7699,57 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("keeps the reservation when a refresh rewrote the supply before the sponsor refused", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '1000000000000', total_supply_cached = '100000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        // A refresh lands between the reservation and the refusal and records
+        // 150 from the chain, already folding this reservation away. Subtracting
+        // it again would undercount and let a later mint past the cap.
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementation(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            await getDb(env)
+              .prepare("UPDATE issued_tokens SET total_supply_cached = '150000000000' WHERE id = ?")
+              .bind(allowlistTokenId)
+              .run();
+            throw new MoneyMovementRefusedError("organization_inactive");
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(403);
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("150000000000");
+          expect(await latestMintTransaction(allowlistTokenId)).toBeNull();
+        } finally {
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
       it("reserves nothing when the mint fails before it is submitted", async () => {
         await seedAblListAddress();
         await getDb(env)
