@@ -15,7 +15,8 @@ import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 import type { KnownCustodyProvider } from "./provider-catalog";
-import { type CustodyAvailabilityResult, WalletsOverview } from "./wallets-overview";
+import type { CustodyAvailabilityResult } from "./wallets-create-area";
+import { WalletsOverview } from "./wallets-overview";
 
 const WalletsPlayground = dynamic(
   () => import("./wallets-playground").then((module) => module.WalletsPlayground),

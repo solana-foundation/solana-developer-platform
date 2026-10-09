@@ -23,7 +23,7 @@ import {
 } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 import type { OnboardingStatusResponse } from "../onboarding-status";
-import type { CustodyAvailabilityResult } from "./wallets-overview";
+import type { CustodyAvailabilityResult } from "./wallets-create-area";
 import { WalletsWorkspace } from "./wallets-workspace";
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
