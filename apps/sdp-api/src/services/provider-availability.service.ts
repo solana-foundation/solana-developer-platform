@@ -9,10 +9,7 @@ import {
   EARN_PROVIDERS,
   type EarnProviderId,
   isCustodyModeAllowedInEnvironment,
-  isCustodyProviderStageAllowedInEnvironment,
   isEarnProviderSurfaced,
-  isModuleStageAllowedInEnvironment,
-  isRampProviderStageAllowedInEnvironment,
   isRampProviderSurfaced,
   normalizeOrganizationTier,
   ORGANIZATION_PROVIDER_FAMILIES,
@@ -759,7 +756,6 @@ type ProjectProviderRefusalReason =
   | CustodySetupRefusalReason
   | "provider_not_in_release_channel"
   | "provider_not_offered"
-  | "provider_stage_not_allowed"
   | "provider_not_configured";
 
 /**
@@ -869,9 +865,9 @@ async function loadProjectProviderFacts(
 /**
  * The custody setup rule (ADR 0006). A (provider, mode) pair is admitted for a
  * project when, in order: the deployment's release channel offers it; the
- * project's environment allows the mode (Production = BYOK only); a Production
- * project runs only `stable` pairs, whatever the channel; and the organization
- * is entitled to the provider. Managed custody also needs the deployment to
+ * project's environment allows the mode (Production = BYOK only); and the
+ * organization is entitled to the provider. The channel alone decides which
+ * pairs are offered, the same for Sandbox and Production. Managed custody also needs the deployment to
  * hold the provider's credentials, which the project provider rule checks
  * after this one as it does for every family; BYOK needs self-service
  * credential setup, which the channel check already implies (the catalog types
@@ -903,15 +899,6 @@ function decideCustodySetup(
   }
   if (!isCustodyModeAllowedInEnvironment(facts.environment, mode)) {
     return refuse(custodyModeNotAllowed(provider, mode, facts.environment));
-  }
-  const label = `${getProviderLabel("custody", provider)} ${CUSTODY_MODE_LABELS[mode]} custody`;
-  if (!isCustodyProviderStageAllowedInEnvironment(facts.environment, provider, mode)) {
-    return refuse(
-      new CustodySetupRefusedError(
-        `${label} is not stable yet, so a ${facts.environment} project cannot use it.`,
-        "custody_mode_not_allowed"
-      )
-    );
   }
   const entry = facts.availability.providers.custody[provider];
   if (!entry.entitled) {
@@ -1000,16 +987,16 @@ function providerNotConfiguredForProject(
  * The staged-provider rule for ramps, compliance and Earn. A provider is
  * admitted for a project when, in order: the deployment's release channel
  * includes it; SDP offers it (its surfacing, the same check the ramp and Earn
- * entry points run before entitlement); a Production project runs it only at
- * `stable`, whatever the channel; the organization is entitled to it; and the
- * deployment holds its credentials for the project's environment.
+ * entry points run before entitlement); the organization is entitled to it;
+ * and the deployment holds its credentials for the project's environment. The
+ * channel alone decides which providers are offered, the same for Sandbox and
+ * Production.
  *
  * @param facts - The project's environment and its organization's provider access.
  * @param request - The provider being used.
  * @param checks - The provider's verdicts from its family's stage table, surfacing, access entry and credentials.
  * @param checks.inReleaseChannel - Whether the deployment's release channel includes it.
  * @param checks.offered - Whether SDP surfaces it for the project's environment.
- * @param checks.stageAllowed - Whether its stage meets the project environment's bar.
  * @param checks.entry - The organization's access entry for the provider.
  * @param checks.configured - Whether the deployment holds its credentials for the project's environment.
  * @returns Admitted, or the first failed check with its 403 (503 when not configured).
@@ -1020,7 +1007,6 @@ function decideStagedProvider(
   checks: {
     inReleaseChannel: boolean;
     offered: boolean;
-    stageAllowed: boolean;
     entry: ProviderAvailabilityEntry;
     configured: boolean;
   }
@@ -1042,16 +1028,6 @@ function decideStagedProvider(
       request,
       "provider_not_offered",
       forbidden(`${label} is not currently offered.`, { reason: "provider_not_offered" })
-    );
-  }
-  if (!checks.stageAllowed) {
-    return projectProviderRefusal(
-      facts,
-      request,
-      "provider_stage_not_allowed",
-      forbidden(`${label} is not stable yet, so a ${facts.environment} project cannot use it.`, {
-        reason: "provider_stage_not_allowed",
-      })
     );
   }
   if (!checks.entry.entitled) {
@@ -1126,11 +1102,6 @@ function decideProjectProvider(
       return decideStagedProvider(facts, request, {
         inReleaseChannel: isRampProviderAvailable(env, request.provider, SDP_RAMP_PROVIDER_STAGES),
         offered: isRampProviderSurfaced(request.provider, facts.environment),
-        stageAllowed: isRampProviderStageAllowedInEnvironment(
-          facts.environment,
-          request.provider,
-          SDP_RAMP_PROVIDER_STAGES
-        ),
         entry: facts.availability.providers.ramps[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
@@ -1139,11 +1110,6 @@ function decideProjectProvider(
         inReleaseChannel: isModuleAvailable(env, "compliance", SDP_RAMP_PROVIDER_STAGES),
         // Compliance has no surfacing table: every compliance provider is offered.
         offered: true,
-        stageAllowed: isModuleStageAllowedInEnvironment(
-          facts.environment,
-          "compliance",
-          SDP_RAMP_PROVIDER_STAGES
-        ),
         entry: facts.availability.providers.compliance[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
@@ -1151,11 +1117,6 @@ function decideProjectProvider(
       return decideStagedProvider(facts, request, {
         inReleaseChannel: isEarnEnabled(env),
         offered: isEarnProviderSurfaced(request.provider),
-        stageAllowed: isModuleStageAllowedInEnvironment(
-          facts.environment,
-          "earn",
-          SDP_RAMP_PROVIDER_STAGES
-        ),
         entry: facts.availability.providers.earn[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
@@ -1311,8 +1272,8 @@ export async function getProjectProviderAvailability(
  * @param request - The provider being used (and, for custody, its mode).
  * @throws 403 `FORBIDDEN` whose `details.reason` names the failed check. Custody:
  *   `CUSTODY_SETUP_REFUSAL_REASONS`. Ramps, compliance and Earn:
- *   `provider_not_in_release_channel`, `provider_not_offered`,
- *   `provider_stage_not_allowed` or `provider_not_entitled`. 503 `PROVIDER_NOT_CONFIGURED` with
+ *   `provider_not_in_release_channel`, `provider_not_offered` or
+ *   `provider_not_entitled`. 503 `PROVIDER_NOT_CONFIGURED` with
  *   `details.reason` `provider_not_configured` when the deployment lacks the
  *   provider's credentials for the project's environment (any family; custody
  *   Managed only). 404 when the project is not an active project of the
