@@ -121,10 +121,13 @@ export const connectionWalletOwnerSchema = z.object({
   provider: z.never().optional(),
 });
 
-export const custodyWalletOwnerSchema = z.union([
-  managedWalletOwnerSchema,
-  connectionWalletOwnerSchema,
-]) satisfies z.ZodType<CustodyWalletOwnerTarget>;
+const CUSTODY_WALLET_OWNER_ERROR =
+  "Name exactly one of provider (Managed) or connectionId (BYOK); custody defaults were removed";
+
+export const custodyWalletOwnerSchema = z.union(
+  [managedWalletOwnerSchema, connectionWalletOwnerSchema],
+  { error: CUSTODY_WALLET_OWNER_ERROR }
+) satisfies z.ZodType<CustodyWalletOwnerTarget>;
 
 const walletCreationFields = {
   label: z.string().max(100).optional(),
@@ -138,10 +141,10 @@ export const createManagedWalletSchema = managedWalletOwnerSchema.extend(walletC
 export const createConnectionWalletSchema =
   connectionWalletOwnerSchema.extend(walletCreationFields);
 
-export const createWalletSchema = z.union([
-  createManagedWalletSchema,
-  createConnectionWalletSchema,
-]);
+export const createWalletSchema = z.union(
+  [createManagedWalletSchema, createConnectionWalletSchema],
+  { error: CUSTODY_WALLET_OWNER_ERROR }
+);
 
 export type CreateWalletRequest = z.infer<typeof createWalletSchema>;
 

@@ -188,7 +188,14 @@ describe("Custody wallet owner contract", () => {
     const response = await createWallet(body);
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: expect.stringContaining(
+          "Name exactly one of provider (Managed) or connectionId (BYOK)"
+        ),
+      },
+    });
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
     expect(await readWalletRows()).toEqual(before);
   });
