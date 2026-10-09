@@ -468,14 +468,22 @@ export class CustodyConfigStore implements SigningConfigStore {
     params: CreateWalletParams & { id: string }
   ): Promise<{ wallet: CustodyConfigWallet; previous: PreviousDefaultWallet } | null> {
     const result = await this.db.transaction(async (tx) => {
+      // Lock first, read in a separate statement: a READ COMMITTED locking read
+      // that waited re-fetches only the locked row, not the joined wallet.
+      const configScope = [configId, orgId, projectId ?? null];
+      await tx.execute(
+        `SELECT id FROM custody_configs
+         WHERE id = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?
+         FOR UPDATE`,
+        configScope
+      );
       const current = await tx.queryOne<PreviousDefaultWallet>(
         `SELECT w.id AS custody_wallet_id, c.default_wallet_id AS wallet_id
          FROM custody_configs c
          LEFT JOIN custody_wallets w
            ON w.custody_config_id = c.id AND w.wallet_id = c.default_wallet_id
-         WHERE c.id = ? AND c.organization_id = ? AND c.project_id IS NOT DISTINCT FROM ?
-         FOR UPDATE OF c`,
-        [configId, orgId, projectId ?? null]
+         WHERE c.id = ? AND c.organization_id = ? AND c.project_id IS NOT DISTINCT FROM ?`,
+        configScope
       );
       if (!current) return null;
 

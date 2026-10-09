@@ -497,22 +497,33 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
   let previous: { custody_wallet_id: string | null; wallet_id: string | null };
   try {
     previous = await db.transaction(async (tx) => {
-      // Lock the owner before reading its previous default so concurrent
-      // selections cannot be attributed to this request in the audit outcome.
+      // Lock the owner, then read its previous default in a separate statement
+      // so concurrent selections cannot be attributed to this request in the
+      // audit outcome. A READ COMMITTED locking read that waited re-fetches only
+      // the locked row; a joined wallet would still come from the old snapshot.
+      const ownerScope = [ownerId, actor.organizationId, projectId ?? null];
+      await tx.execute(
+        wallet.custodyConnectionId
+          ? `SELECT id FROM custody_connections
+             WHERE id = ? AND organization_id = ? AND project_id = ?
+             FOR UPDATE`
+          : `SELECT id FROM custody_configs
+             WHERE id = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?
+             FOR UPDATE`,
+        ownerScope
+      );
       const current = await tx.queryOne<typeof previous>(
         wallet.custodyConnectionId
           ? `SELECT c.default_custody_wallet_id AS custody_wallet_id, w.wallet_id
              FROM custody_connections c
              LEFT JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
-             WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
-             FOR UPDATE OF c`
+             WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?`
           : `SELECT w.id AS custody_wallet_id, c.default_wallet_id AS wallet_id
              FROM custody_configs c
              LEFT JOIN custody_wallets w
                ON w.custody_config_id = c.id AND w.wallet_id = c.default_wallet_id
-             WHERE c.id = ? AND c.organization_id = ? AND c.project_id IS NOT DISTINCT FROM ?
-             FOR UPDATE OF c`,
-        [ownerId, actor.organizationId, projectId ?? null]
+             WHERE c.id = ? AND c.organization_id = ? AND c.project_id IS NOT DISTINCT FROM ?`,
+        ownerScope
       );
       if (!current) throw conflict("Wallet signing is not initialized");
 
