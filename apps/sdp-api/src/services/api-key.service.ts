@@ -1,4 +1,4 @@
-import { normalizeAllowedOperations } from "@sdp/types";
+import { normalizeAllowedOperations, upgradeStoredAllowedOperations } from "@sdp/types";
 /**
  * API Key Service
  *
@@ -186,7 +186,7 @@ function serializeAllowedOperationsColumn(
 
 /** API form of the column: an empty list when unrestricted. */
 export function parseAllowedOperationsColumn(value: string | null): AllowedOperation[] {
-  return parseOptionalPostgresJson<AllowedOperation[]>(value) ?? [];
+  return upgradeStoredAllowedOperations(parseOptionalPostgresJson<string[]>(value) ?? []);
 }
 
 function stringifyJsonb(value: unknown, fallback: unknown): string {

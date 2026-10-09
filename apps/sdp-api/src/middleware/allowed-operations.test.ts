@@ -6,6 +6,7 @@ import {
   OPERATION_FAMILIES,
   OPERATION_FAMILY_BY_TYPE,
   OPERATION_TYPES,
+  upgradeStoredAllowedOperations,
   WALLET_OPERATION_FAMILIES,
   WALLET_OPERATION_TYPES,
 } from "@sdp/types";
@@ -35,6 +36,17 @@ describe("allowed operations vocabulary", () => {
       expect(OPERATION_FAMILIES).toContain(OPERATION_FAMILY_BY_TYPE[type]);
     }
     expect(new Set(ALLOWED_OPERATIONS).size).toBe(ALLOWED_OPERATIONS.length);
+  });
+
+  it("translates a stored legacy family and keeps unknown values so the list never widens", () => {
+    expect(upgradeStoredAllowedOperations(["transfer"])).toEqual(["privacy"]);
+    expect(upgradeStoredAllowedOperations(["transfer", "privacy", "payment"])).toEqual([
+      "payment",
+      "privacy",
+    ]);
+    const kept = upgradeStoredAllowedOperations(["not_an_operation"]);
+    expect(kept).toEqual(["not_an_operation"]);
+    expect(isOperationAllowed(kept, "rings_shield")).toBe(false);
   });
 
   it("treats an empty or missing list as unrestricted", () => {

@@ -147,8 +147,8 @@ function unresolvedBindingRow(status: string): Record<string, unknown> {
 
 describe("isTrustedCachedApiKey allowed-operations vocabulary", () => {
   it("re-reads an entry cached with a family that has since been renamed", () => {
-    // SAFETY: `transfer` left the vocabulary in migration 0126; this is the
-    // shape an entry cached before that deploy still carries.
+    // SAFETY: `transfer` left the vocabulary when the family became `privacy`;
+    // this is the shape an entry cached before that deploy still carries.
     const legacy = ["transfer"] as unknown as CachedApiKey["allowedOperations"];
     expect(isTrustedCachedApiKey({ ...entryWithStatus("active"), allowedOperations: legacy })).toBe(
       false

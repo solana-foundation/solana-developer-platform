@@ -102,6 +102,28 @@ export const ALLOWED_OPERATIONS = [...OPERATION_FAMILIES, ...OPERATION_TYPES] as
 
 export type AllowedOperation = (typeof ALLOWED_OPERATIONS)[number];
 
+/**
+ * Values a stored list may still hold under an earlier name. Rows are not
+ * rewritten (a rewrite would break a traffic rollback), so every read
+ * translates them instead.
+ */
+export const LEGACY_ALLOWED_OPERATION_RENAMES = {
+  transfer: "privacy",
+} as const satisfies Record<string, AllowedOperation>;
+
+/**
+ * A stored list in the current vocabulary: legacy names translated, then
+ * deduped and sorted. Unknown values are kept, never dropped, so a list never
+ * widens to unrestricted; they match nothing and fail closed.
+ */
+export function upgradeStoredAllowedOperations(stored: readonly string[]): AllowedOperation[] {
+  const renames: Readonly<Record<string, AllowedOperation>> = LEGACY_ALLOWED_OPERATION_RENAMES;
+  // SAFETY: unknown values pass through on purpose (see above); every check
+  // compares by equality, so they can only narrow what the key may do.
+  const upgraded = stored.map((value) => renames[value] ?? value) as AllowedOperation[];
+  return normalizeAllowedOperations(upgraded);
+}
+
 export function isOperationFamily(value: string): value is OperationFamily {
   return (OPERATION_FAMILIES as readonly string[]).includes(value);
 }
