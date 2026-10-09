@@ -1,3 +1,4 @@
+import { lendingPda } from "@jup-ag/lend";
 import {
   getDepositContext,
   getLendingProgram,
@@ -24,18 +25,44 @@ import type {
   EarnVaultWithdrawQuoteInput,
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
-import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
+import { readStamp } from "@sdp/rpc/read-context";
 import type { SolanaCluster } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
-import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import {
+  type AccountInfo,
+  type Commitment,
+  type Connection,
+  type GetAccountInfoConfig,
+  PublicKey,
+  TransactionInstruction,
+} from "@solana/web3.js";
 import BN from "bn.js";
 import { fromAtoms, toAtoms } from "./amounts";
 import { SdpJupiterLendError } from "./errors";
 import { assertJupiterLendPlanPrograms, permittedJupiterLendPrograms } from "./guards";
+import { canJoinJupiterLendRead, jupiterLendConnection } from "./rpc";
 
 // biome-ignore lint/security/noSecrets: public Solana program address
 const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+// biome-ignore lint/security/noSecrets: public Solana program address
+const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const U64_MAX = new BN(1).ushln(64).subn(1);
+const ASSET_MINT = new PublicKey(JUPITER_LEND_USDT.assetMint);
+const SHARE_MINT = new PublicKey(JUPITER_LEND_USDT.shareMint);
+const DERIVED_SHARE_MINT = lendingPda.getLendingToken(ASSET_MINT, "main");
+const TOKEN_ACCOUNT_SIZE = 165;
+/** USDT and jlUSDT are classic SPL Token mints; the SDK reads only their owner. */
+const PINNED_MINT: AccountInfo<Buffer> = {
+  executable: false,
+  owner: TOKEN_PROGRAM,
+  lamports: 0,
+  data: Buffer.alloc(0),
+};
+
+let withdrawableAssetsInFlight:
+  | { stamp: number; sentAt: number; read: Promise<string> }
+  | undefined;
+
 export type JupiterLendVaultOperationRunner = <T>(
   label: string,
   operation: (assertActive: () => void) => Promise<T>
@@ -67,6 +94,26 @@ function rewriteAtaPayer(
     programId: instruction.programId,
     data: instruction.data,
     keys: [{ ...payer, pubkey: rentPayer }, ...instruction.keys.slice(1)],
+  });
+}
+
+function associatedTokenAddress(owner: PublicKey, mint: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), mint.toBuffer()],
+    new PublicKey(ATA_PROGRAM)
+  )[0];
+}
+
+/** The SDK's reads of the two pinned mints are answered from constants. Everything else is live. */
+function withPinnedMintOwners(connection: Connection): Connection {
+  return new Proxy(connection, {
+    get(target, property, receiver) {
+      if (property !== "getAccountInfo") return Reflect.get(target, property, receiver);
+      return async (address: PublicKey, config?: Commitment | GetAccountInfoConfig) => {
+        if (address.equals(ASSET_MINT) || address.equals(SHARE_MINT)) return PINNED_MINT;
+        return target.getAccountInfo(address, config);
+      };
+    },
   });
 }
 
@@ -142,10 +189,7 @@ export class JupiterLendVaultDirectClient
       }
       const rpcUrl = await this.resolveProvenRpcUrl(ctx, cluster);
       assertActive();
-      return operation(
-        new Connection(rpcUrl, { commitment: "confirmed", fetch: contextAwareRpcFetch }),
-        assertActive
-      );
+      return operation(jupiterLendConnection(rpcUrl), assertActive);
     });
   }
 
@@ -200,19 +244,47 @@ export class JupiterLendVaultDirectClient
     return { details, scale, withdrawableAssets, withdrawableShares };
   }
 
-  private async shareBalance(connection: Connection, account: PublicKey): Promise<BN | null> {
-    // The SDK's position helper collapses every `getTokenAccountBalance`
-    // failure to zero. Prove absence separately; once an account is known to
-    // exist, any balance failure remains unavailable and is never a loss.
-    if ((await connection.getAccountInfo(account)) === null) return null;
-    const balance = await connection.getTokenAccountBalance(account);
-    if (balance.value.decimals !== JUPITER_LEND_USDT.decimals) {
-      throw new SdpJupiterLendError(
-        "VAULT_UNREADABLE",
-        "Jupiter Lend returned a jlUSDT balance at an unexpected mint scale"
-      );
+  /**
+   * Concurrent reads share one in-flight catalogue request, but only one
+   * `canJoinJupiterLendRead` admits: never sent before the caller's read floor,
+   * never sent a join window or more ago.
+   */
+  protected override readUsdtWithdrawableAssets(): Promise<string> {
+    const inFlight = withdrawableAssetsInFlight;
+    if (inFlight && canJoinJupiterLendRead(inFlight)) return inFlight.read;
+    const entry = {
+      stamp: readStamp(),
+      sentAt: Date.now(),
+      read: super.readUsdtWithdrawableAssets(),
+    };
+    const forget = () => {
+      if (withdrawableAssetsInFlight === entry) withdrawableAssetsInFlight = undefined;
+    };
+    entry.read.then(forget, forget);
+    withdrawableAssetsInFlight = entry;
+    return entry.read;
+  }
+
+  /**
+   * The atoms in the owner's jlUSDT ATA from the account's own bytes, or null
+   * when the account is confirmed missing. Reads what `getTokenAccountBalance`
+   * reads, including an ATA whose token owner was reassigned. Anything else at
+   * that address (lamports sent to it, say) fails the read, never reads zero.
+   */
+  private async shareBalance(connection: Connection, owner: PublicKey): Promise<BN | null> {
+    const account = await connection.getAccountInfo(associatedTokenAddress(owner, SHARE_MINT));
+    if (account === null) return null;
+    const { data } = account;
+    const state = data[108];
+    if (
+      !account.owner.equals(TOKEN_PROGRAM) ||
+      data.length !== TOKEN_ACCOUNT_SIZE ||
+      !data.subarray(0, 32).equals(SHARE_MINT.toBuffer()) ||
+      (state !== 1 && state !== 2)
+    ) {
+      throw new Error("The owner's jlUSDT address does not hold a jlUSDT token account");
     }
-    return readU64Atoms("jlUSDT balance", balance.value.amount);
+    return new BN(data.readBigUInt64LE(64).toString());
   }
 
   async quoteVaultDeposit(
@@ -274,14 +346,15 @@ export class JupiterLendVaultDirectClient
         ctx,
         "Building the Jupiter Lend deposit",
         async (connection, assertActive) => {
+          const sdkConnection = withPinnedMintOwners(connection);
           const context = await getDepositContext({
             asset,
             signer: owner,
-            connection,
+            connection: sdkConnection,
             market: "main",
           });
           this.assertShareMint(context.fTokenMint);
-          const ataIxs = await getOrCreateATAInstruction(owner, context.fTokenMint, connection);
+          const ataIxs = await getOrCreateATAInstruction(owner, context.fTokenMint, sdkConnection);
           const createsShareAccount = ataIxs.length > 0;
           assertActive();
           // `getDepositIxs` still emits the legacy unbounded `deposit(assets)`
@@ -345,14 +418,15 @@ export class JupiterLendVaultDirectClient
         ctx,
         "Building the Jupiter Lend withdrawal",
         async (connection, assertActive) => {
+          const sdkConnection = withPinnedMintOwners(connection);
           const context = await getWithdrawContext({
             asset,
             signer: owner,
-            connection,
+            connection: sdkConnection,
             market: "main",
           });
           this.assertShareMint(context.fTokenMint);
-          const ataIxs = await getOrCreateATAInstruction(owner, asset, connection);
+          const ataIxs = await getOrCreateATAInstruction(owner, asset, sdkConnection);
           assertActive();
           // `getRedeemIxs` has the same legacy behavior on exits. The guarded
           // instruction compares the actual assets returned with this exact
@@ -447,21 +521,13 @@ export class JupiterLendVaultDirectClient
       throw badRequest("Jupiter Lend currently supports only the USDT earn market in SDP");
     }
     const owner = publicKey("owner", input.owner);
-    const asset = new PublicKey(JUPITER_LEND_USDT.assetMint);
     return this.withConnection(
       ctx,
       "Reading the Jupiter Lend position",
       async (connection, assertActive) => {
         try {
-          const context = await getWithdrawContext({
-            asset,
-            signer: owner,
-            connection,
-            market: "main",
-          });
-          assertActive();
-          this.assertShareMint(context.fTokenMint);
-          const shareAtoms = await this.shareBalance(connection, context.ownerTokenAccount);
+          this.assertShareMint(DERIVED_SHARE_MINT);
+          const shareAtoms = await this.shareBalance(connection, owner);
           assertActive();
           // A missing ATA is a confirmed zero. For full-shelf discovery that is
           // not a holding; an exact requested-vault read still returns the
@@ -477,7 +543,7 @@ export class JupiterLendVaultDirectClient
                 withdrawableShares: "0",
                 tokenValue: "0",
                 tokenMint: JUPITER_LEND_USDT.assetMint,
-                shareMint: context.fTokenMint.toBase58(),
+                shareMint: JUPITER_LEND_USDT.shareMint,
               },
             ];
           }
@@ -498,7 +564,7 @@ export class JupiterLendVaultDirectClient
               withdrawableShares: fromAtoms(immediatelyWithdrawable, JUPITER_LEND_USDT.decimals),
               tokenValue: fromAtoms(tokenValue, JUPITER_LEND_USDT.decimals),
               tokenMint: JUPITER_LEND_USDT.assetMint,
-              shareMint: context.fTokenMint.toBase58(),
+              shareMint: JUPITER_LEND_USDT.shareMint,
             },
           ];
         } catch (error) {
