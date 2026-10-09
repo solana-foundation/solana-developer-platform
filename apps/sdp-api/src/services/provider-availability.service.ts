@@ -1394,7 +1394,7 @@ export async function admitByokCustodySetup(
  */
 async function decideManagedCustodyUse(
   db: DatabaseExecutor,
-  project: CustodySetupProject
+  project: ProjectProviderScope
 ): Promise<{ environment: SdpEnvironment; allowed: boolean }> {
   const environment = await loadActiveProjectEnvironment(db, project);
   return { environment, allowed: isCustodyModeAllowedInEnvironment(environment, "managed") };
@@ -1413,7 +1413,7 @@ async function decideManagedCustodyUse(
  */
 export async function isManagedCustodyUseAllowed(
   db: DatabaseExecutor,
-  project: CustodySetupProject
+  project: ProjectProviderScope
 ): Promise<boolean> {
   return (await decideManagedCustodyUse(db, project)).allowed;
 }
