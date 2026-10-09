@@ -460,11 +460,11 @@ export function checkMigrationChange(changedFiles, readFile, readBase = () => nu
       violations.push(
         `${file}: the previous image cannot run against this schema, so a traffic rollback would break:\n  ${findings.join("\n  ")}\n` +
           "Expand first: add before use, stop using before drop, backfill only columns this file adds. " +
-          "If this contraction is intended, add `-- sdp:migration-compat: breaking` and ship it in a PR that touches only the migrations directory."
+          "If this contraction is intended, add `-- sdp:migration-compat: breaking` and ship it in a PR that touches only the migrations directory and test files."
       );
     } else if (outside.length > 0) {
       violations.push(
-        `${file} is marked breaking, so the PR must change nothing outside ${MIGRATIONS_DIR}; found ${outside.join(", ")}.`
+        `${file} is marked breaking, so the PR must change nothing outside ${MIGRATIONS_DIR} except test files; found ${outside.join(", ")}.`
       );
     }
   }
@@ -476,7 +476,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const base = process.env.MIGRATION_COMPAT_BASE_REF || "origin/main";
   const git = (args) =>
     execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  const changedFiles = git(["diff", "--name-only", `${base}...HEAD`])
+  const changedFiles = git(["diff", "--name-only", "--no-renames", `${base}...HEAD`])
     .split("\n")
     .filter(Boolean);
   const mergeBase = git(["merge-base", base, "HEAD"]).trim();
