@@ -9,7 +9,6 @@ import {
   EARN_PROVIDERS,
   type EarnProviderId,
   isCustodyModeAllowedInEnvironment,
-  isCustodyProviderStageAllowedInEnvironment,
   isEarnProviderSurfaced,
   isRampProviderSurfaced,
   normalizeOrganizationTier,
@@ -794,8 +793,8 @@ async function loadCustodySetupFacts(
  * The custody setup rule (ADR 0006), the one place it lives. A (provider, mode)
  * pair is admitted for a project when, in order: the deployment's release
  * channel offers it; the project's environment allows the mode (Production =
- * BYOK only); a Production project runs only `stable` pairs, whatever the
- * channel; and the organization is entitled to the provider. Managed custody
+ * BYOK only); and the organization is entitled to the provider. The channel
+ * alone decides which pairs are offered, the same for Sandbox and Production. Managed custody
  * also needs the deployment to hold the provider's credentials; BYOK needs
  * self-service credential setup, which the channel check already implies (the
  * catalog types every `BYOK_CUSTODY_PROVIDERS` entry as self-service).
@@ -829,14 +828,6 @@ function decideCustodySetup(
     return refuse(
       new CustodySetupRefusedError(
         `${label} is not allowed in a ${facts.environment} project.`,
-        "custody_mode_not_allowed"
-      )
-    );
-  }
-  if (!isCustodyProviderStageAllowedInEnvironment(facts.environment, provider, mode)) {
-    return refuse(
-      new CustodySetupRefusedError(
-        `${label} is not stable yet, so a ${facts.environment} project cannot use it.`,
         "custody_mode_not_allowed"
       )
     );
