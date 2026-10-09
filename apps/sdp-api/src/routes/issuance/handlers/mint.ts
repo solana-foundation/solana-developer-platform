@@ -963,7 +963,11 @@ export const executeMint = async (c: AppContext) => {
     // (a revocation racing the gate above) comes before Kora signs or sends, so
     // the transaction can never land and its reservation goes back.
     if (reservedSupply !== null && error instanceof MoneyMovementRefusedError) {
-      await tokenService.releaseUnsentMintReservation(tokenId, amountBaseUnits.toString());
+      await tokenService.releaseUnsentMintReservation(
+        tokenId,
+        amountBaseUnits.toString(),
+        reservedSupply
+      );
       reservedSupply = null;
     }
     if (reservedSupply === null) {
