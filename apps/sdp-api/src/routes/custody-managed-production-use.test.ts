@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
 import * as custodyProvisioning from "@/services/custody/provisioning";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-keys";
@@ -176,6 +177,35 @@ describe("Managed custody use by project environment", () => {
       )
     ).rejects.toMatchObject(REFUSAL_ERROR);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("lists a Managed wallet as runtime-executable only where the use gate admits it", async () => {
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    for (const [environment, isRuntimeExecutionAllowed] of [
+      ["production", false],
+      ["sandbox", true],
+    ] as const) {
+      expect(
+        await targets.listWallets({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_IDS[environment],
+        })
+      ).toEqual([
+        {
+          id: WALLET_RECORD_IDS[environment],
+          custodyConfigId: CONFIG_IDS[environment],
+          provider: "privy",
+          isRuntimeExecutionAllowed,
+          walletId: WALLET_IDS[environment],
+          publicKey: PUBLIC_KEYS[environment],
+          label: null,
+          purpose: null,
+          status: "active",
+          createdAt: expect.any(String),
+        },
+      ]);
+    }
   });
 
   it("creates, admits and reads Managed wallets in a Sandbox project", async () => {
