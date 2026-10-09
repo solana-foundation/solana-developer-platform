@@ -19,6 +19,11 @@ import {
   beginApprovedWalletOperationEffect,
   reserveMintSupplyAtApprovedEffectBoundary,
 } from "@/services/policy/approved-operation-replay";
+import { resolveRequestSponsorshipScope } from "@/services/sponsorship.service";
+import {
+  assertSponsorshipAdmitted,
+  readSponsorshipAdmissionFacts,
+} from "@/services/sponsorship-admission";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
@@ -906,6 +911,17 @@ export const executeMint = async (c: AppContext) => {
         feePayer: signer.address,
       },
       async () => {
+        // The sponsor decides money admission only after custody has signed,
+        // and a refusal there submits nothing. Decide it here first, so a
+        // refused mint never reserves supply it will not use (HOO-1955).
+        const sponsorshipScope = {
+          ...resolveRequestSponsorshipScope(c),
+          movement: "issuance.authority" as const,
+        };
+        assertSponsorshipAdmitted(
+          sponsorshipScope,
+          await readSponsorshipAdmissionFacts(c.env, sponsorshipScope)
+        );
         reservedSupply = await reserveMintSupplyAtApprovedEffectBoundary(
           c,
           tokenId,
