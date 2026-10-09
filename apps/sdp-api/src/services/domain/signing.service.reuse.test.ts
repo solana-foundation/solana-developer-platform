@@ -156,6 +156,9 @@ describe("signing.service custody provider enablement", () => {
       envOverrides: { SDP_RELEASE_CHANNEL: "experimental" },
     });
     configStore.findActiveByProvider.mockResolvedValue(configRecord);
+    const assertManagedCustodyUseAllowed = vi
+      .spyOn(providerAvailability, "assertManagedCustodyUseAllowed")
+      .mockResolvedValue();
     const assertCustodyProviderEnabled = vi
       .spyOn(providerAvailability, "assertCustodyProviderEnabled")
       .mockRejectedValue(
@@ -168,6 +171,11 @@ describe("signing.service custody provider enablement", () => {
       name: "SigningError",
       code: "INVALID_REQUEST",
       message: "Privy requires manual activation for this organization.",
+    });
+    expect(assertManagedCustodyUseAllowed).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      organizationId: orgId,
+      projectId: PROJECT_ID,
+      provider: "privy",
     });
     expect(assertCustodyProviderEnabled).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ SDP_RELEASE_CHANNEL: "experimental" }),
