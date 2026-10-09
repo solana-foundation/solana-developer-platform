@@ -259,9 +259,8 @@ function startLeaseRenewal(
 
 /**
  * Runs one request under its Idempotency-Key (HOO-1918; contract and prior art
- * in ADR 0008). Exported so a composite route step (HOO-1955's
- * `requireMovement`) can run it between its own checks; routes use
- * {@link idempotent}.
+ * in ADR 0008). Routes use {@link idempotent}; it is exported so a composite
+ * route declaration can run it between its own checks.
  *
  * Place it after authentication, project context, `requirePermissions` and
  * Allowed Operations, so a replay re-checks the caller, and before admission

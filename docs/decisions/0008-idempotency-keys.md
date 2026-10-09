@@ -32,7 +32,7 @@ one table, `idempotency_keys` (migration 0126). It follows three sources:
 
 **Scope.** Organization, project, and operation. The operation is the HTTP method plus the Hono
 route pattern, read with `routePath(c)`, so it needs no shared vocabulary that could drift from
-`OPERATION_TYPES` or `MOVEMENTS`.
+`OPERATION_TYPES`.
 
 - The step must sit in a route's own chain. It throws if the pattern is a `use("*")` wildcard.
 - Renaming a path resets that route's keys, which is acceptable with 24h retention.
@@ -70,7 +70,7 @@ step** → admission → validation → handler.
 
 - `rerun` is only for a route whose handler writes its own row under a unique key before it moves
   anything. That row recovers the earlier attempt.
-- An error thrown past a composite caller (such as `requireMovement`) is stored only if it is an
+- An error thrown past a caller that composes `runIdempotency` is stored only if it is an
   `AppError`, whose status is known. Any other error is mapped by the app's handler, so the key is
   unlocked and stays bound to its request instead of storing a guess.
 - A success is never unlocked. A body over 1 MiB is stored without its body, and a bodyless status
@@ -93,10 +93,8 @@ reconciliation job. A claim ignores an expired row.
 **Declaration.** The step carries `Symbol.for("sdp.idempotency")` with its mode. `IdempotencyKeyMode`
 lives in `@sdp/types`.
 
-- When HOO-1955's `requireMovement` lands, it composes `runIdempotency` between Allowed Operations
-  and admission. `MovementDefinition` gains `idempotencyKey: IdempotencyKeyMode`.
-- The route passes the API-only options as `requireMovement(id, { idempotency: { leaseSeconds,
-  canonicalize, serverErrors } })`.
+- A route mounts the step itself, directly after Allowed Operations. A future composite route
+  declaration can call the exported `runIdempotency` in the same position.
 - When the route-declarations primitive lands, the marker becomes `RouteDeclaration.idempotency`.
 
 ## Consequences

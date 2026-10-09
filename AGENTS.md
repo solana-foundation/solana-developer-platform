@@ -59,7 +59,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
   catalog. Do not commit cross-repository workspace, link, file, Git, or URL dependencies; see
   `docs/architecture/solana-earn-consumption.md`.
 - **Idempotency-Key goes through one step (hard rule).** Mutating routes of `stable` modules use
-  `idempotent()` (or `requireMovement`); money routes use `key: "required"` at any stage. No
+  `idempotent()`; money routes use `key: "required"` at any stage. No
   per-module key handling, and never on a route whose response carries a secret. See
   `docs/decisions/0008-idempotency-keys.md`.
 - **RPC is a budget (hard rule).** Every provider read, quote and build makes the fewest RPC calls
