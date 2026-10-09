@@ -39,7 +39,7 @@
  */
 
 import type { AllowedOperation, ApiKeyStatus, CachedApiKey } from "@sdp/types";
-import { getPermissionsForApiKeyRole, type Permission } from "@sdp/types";
+import { getPermissionsForApiKeyRole, isAllowedOperation, type Permission } from "@sdp/types";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
 import type { KVStore } from "@/runtime/kv";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
@@ -151,7 +151,9 @@ export async function loadCachedApiKeyFromDb(
  * drift. Rejects payloads written before rotation-deadline,
  * organization-status, or wallet-scope enforcement (a deploy must not extend
  * an old key's validity), bindings missing their custody-wallet resolution,
- * and pending installs — a fill's snapshot is not trustworthy until its
+ * allowed operations outside the current vocabulary (a renamed family, such
+ * as `transfer` before migration 0126, is re-read from Postgres instead of
+ * refusing the key for the rest of its TTL), and pending installs — a fill's snapshot is not trustworthy until its
  * post-install Postgres verification clears it.
  */
 export function isTrustedCachedApiKey(entry: CachedApiKey): boolean {
@@ -160,6 +162,7 @@ export function isTrustedCachedApiKey(entry: CachedApiKey): boolean {
     Object.hasOwn(entry, "rotationDeadline") &&
     Object.hasOwn(entry, "organizationStatus") &&
     (entry.walletScope === "all" || entry.walletScope === "selected") &&
+    (entry.allowedOperations ?? []).every(isAllowedOperation) &&
     (entry.walletBindings ?? []).every(
       (binding) => typeof binding.custodyWalletId === "string" && binding.custodyWalletId.length > 0
     )
