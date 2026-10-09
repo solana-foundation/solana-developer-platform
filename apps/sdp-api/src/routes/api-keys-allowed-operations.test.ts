@@ -260,7 +260,7 @@ describe("API key allowed operations", () => {
     const response = await createKey(PAYMENTS_ONLY_KEY.raw, {
       name: "Provisioned and wider",
       walletScope: "selected",
-      provisionWallet: true,
+      provisionWallet: { provider: "privy" },
       allowedOperations: ["issuance"],
     });
     expect(response.status).toBe(403);
