@@ -15,7 +15,10 @@
  * counts however it is spelled: `@/` alias or relative import, renamed import,
  * re-export, namespace access, or a value passed along. Any reference from a
  * file outside a capability's allowlist fails, and an allowlisted file that no
- * longer references it fails too, so the lists can only shrink. Tests may
+ * longer references it fails too, so the lists can only shrink. Inside an
+ * allowlisted file a constructor may only be called, constructed or
+ * re-exported by name; handing it out as a value under a new symbol (an alias
+ * constant, an object entry, a subclass, an argument) fails. Tests may
  * reference anything: they exercise these constructors.
  *
  * Adding a file to any list below is a security-reviewed change.
@@ -153,6 +156,74 @@ function isTestFile(relativePath) {
   );
 }
 
+/** Wrappers that leave an expression's value unchanged. */
+function unwrapParent(node) {
+  let current = node;
+  while (
+    current.parent &&
+    (ts.isParenthesizedExpression(current.parent) ||
+      ts.isAsExpression(current.parent) ||
+      ts.isNonNullExpression(current.parent) ||
+      ts.isSatisfiesExpression(current.parent) ||
+      ts.isTypeAssertionExpression(current.parent))
+  ) {
+    current = current.parent;
+  }
+  return current;
+}
+
+/**
+ * Whether a reference inside an owner or allowlisted file only uses the
+ * capability: calls or constructs it, calls one of its static or instance
+ * methods, names it in an import or re-export (the checker follows those
+ * aliases), declares it, or names it as a type. Anything else (assigning it,
+ * passing or returning it, putting it in an object, subclassing it) hands the
+ * constructor out under a symbol the check no longer pins.
+ */
+function isPinnedUse(node) {
+  const parent = node.parent;
+  if (!parent) return false;
+  if (
+    ts.isImportSpecifier(parent) ||
+    ts.isExportSpecifier(parent) ||
+    ts.isImportClause(parent) ||
+    ts.isNamespaceImport(parent)
+  ) {
+    return true;
+  }
+  if (
+    (ts.isClassDeclaration(parent) ||
+      ts.isFunctionDeclaration(parent) ||
+      ts.isMethodDeclaration(parent)) &&
+    parent.name === node
+  ) {
+    return true;
+  }
+  for (let ancestor = parent; ancestor && !ts.isStatement(ancestor); ancestor = ancestor.parent) {
+    if (ts.isTypeNode(ancestor) && !ts.isExpressionWithTypeArguments(ancestor)) return true;
+  }
+  // `x.sign()` / `X.fromBase58()`: the member access is what gets called.
+  let callee = node;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) {
+    callee = parent;
+  } else if (ts.isElementAccessExpression(node)) {
+    callee = node;
+  }
+  callee = unwrapParent(callee);
+  if (
+    callee.parent &&
+    (ts.isPropertyAccessExpression(callee.parent) || ts.isElementAccessExpression(callee.parent)) &&
+    callee.parent.expression === callee
+  ) {
+    callee = unwrapParent(callee.parent);
+  }
+  return Boolean(
+    callee.parent &&
+      (ts.isCallExpression(callee.parent) || ts.isNewExpression(callee.parent)) &&
+      callee.parent.expression === callee
+  );
+}
+
 /** Resolves a package specifier (an external constructor) the way the program does. */
 function resolveModuleSource(program, specifier) {
   const containingFile = program.getRootFileNames()[0];
@@ -230,20 +301,25 @@ export function findValueMovementViolations({
     if (!relativePath.startsWith(scanRoot)) continue;
     if (isTestFile(relativePath)) continue;
 
-    const report = (node, symbol, label) => {
+    const report = (node, symbol, label, { module = false } = {}) => {
       if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
         symbol = checker.getAliasedSymbol(symbol);
       }
       const capability = symbol ? targets.get(symbol) : undefined;
-      if (!capability || capability.owners.includes(relativePath)) return;
-      if (capability.allow.includes(relativePath)) {
-        used.get(capability.id).add(relativePath);
-        return;
-      }
+      if (!capability) return;
+      const owner = capability.owners.includes(relativePath);
+      const allowed = capability.allow.includes(relativePath);
+      if (allowed) used.get(capability.id).add(relativePath);
       const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
-      violations.push(
-        `${relativePath}:${line + 1}: references ${capability.id} (${label}). ${capability.why}`
-      );
+      if (!owner && !allowed) {
+        violations.push(
+          `${relativePath}:${line + 1}: references ${capability.id} (${label}). ${capability.why}`
+        );
+      } else if (!module && !isPinnedUse(node)) {
+        violations.push(
+          `${relativePath}:${line + 1}: hands ${capability.id} out as a value (${label}); an allowlisted file may only call it, construct it or re-export it by name, so every reference elsewhere still resolves to it. ${capability.why}`
+        );
+      }
     };
     // A whole module handed out as a value (namespace import, require, dynamic
     // import, export *) carries every pinned constructor it exports, including
@@ -258,7 +334,7 @@ export function findValueMovementViolations({
         const capability = targets.get(symbol);
         if (capability && !reported.has(capability.id)) {
           reported.add(capability.id);
-          report(node, symbol, `module ${specifier.text}`);
+          report(node, symbol, `module ${specifier.text}`, { module: true });
         }
       }
     };

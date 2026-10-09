@@ -160,3 +160,51 @@ test("checks every capability a whole module carries, not just the first", () =>
 
   assert.ok(found.some((violation) => /src\/allowed\.ts:1: references second/.test(violation)));
 });
+
+test("lets an allowlisted file call a capability but not hand it out under another name", () => {
+  const SIGNER = {
+    id: "signer",
+    why: "signer capability",
+    symbols: [{ file: "src/lib/cap.ts", name: "Signer" }],
+    owners: ["src/lib/cap.ts"],
+    allow: ["src/allowed.ts"],
+  };
+  const uses = violations(
+    {
+      "src/allowed.ts": `import { mint } from "./lib/cap";
+import { Signer } from "./lib/cap";
+export { Signer as Renamed } from "./lib/cap";
+mint();
+(mint as () => number)();
+const signer: Signer = new Signer();
+signer.sign();
+`,
+    },
+    [CAPABILITY, SIGNER]
+  );
+  assert.deepEqual(uses, []);
+
+  const escapes = violations(
+    {
+      "src/allowed.ts": `import { mint, Signer } from "./lib/cap";
+mint();
+export const Direct = Signer;
+export const table = { privy: Signer };
+export class Sub extends Signer {}
+export function give() { return mint; }
+register(Signer);
+declare function register(value: unknown): void;
+`,
+      "src/user.ts": `import { Direct } from "./allowed";\nnew Direct();\n`,
+    },
+    [CAPABILITY, SIGNER]
+  );
+  const lines = escapes.map((violation) => violation.split(": ")[0]).sort();
+  assert.deepEqual(lines, [
+    "src/allowed.ts:3",
+    "src/allowed.ts:4",
+    "src/allowed.ts:5",
+    "src/allowed.ts:6",
+    "src/allowed.ts:7",
+  ]);
+});
