@@ -12,7 +12,7 @@ import {
   notFound,
   providerUnavailable,
 } from "@/lib/errors";
-import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
+import { isCustodyProviderAvailable } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";
@@ -25,7 +25,6 @@ import {
 import {
   checkPrivyCredential,
   getPrivyProviderAccountFingerprint,
-  PRIVY_RUNTIME_ENV_FIELDS,
   type PrivyCredentialAuthentication,
 } from "@/services/custody/privy-credential";
 import {
@@ -322,15 +321,6 @@ export async function completeProviderCredentialInstallation(
       context.organizationId,
       loaded.target
     );
-    if (
-      loaded.target.credential_source === "runtime" &&
-      loaded.target.provider_account_fingerprint &&
-      (await getPrivyProviderAccountFingerprint(credential.appId)) !==
-        loaded.target.provider_account_fingerprint
-    ) {
-      failureCode = "provider_account_mismatch";
-      throw conflict("Custody runtime credential does not match the connected Provider account");
-    }
     failureCode = "completion_failed";
     const leaseToken = await acquireCompletionLease(context, loaded.target);
     if (!leaseToken) {
@@ -458,7 +448,6 @@ export async function cancelProviderCredentialInstallation(
         return new ProviderCredentialStore(tx).cancelInstallation({
           connectionId,
           providerCredentialId: loaded.target.provider_credential_id,
-          credentialSource: loaded.target.credential_source,
           expectedStatus: loaded.target.status as "pending" | "checking",
           expectedLastCheckStatus: loaded.target.last_check_status,
           expectedLastCheckAt: loaded.target.last_check_at,
@@ -563,8 +552,7 @@ async function loadInstallation(
       context.c.env,
       context.db,
       context.organizationId,
-      target.provider,
-      target.credential_source
+      target.provider
     );
     return {
       target,
@@ -590,7 +578,7 @@ function projectConnection(env: Env, loaded: LoadedInstallation): SafeInstallati
     completion: projectCompletion(loaded),
     ...(walletLabel ? { walletLabel } : {}),
     isDefault:
-      isCustodyConnectionRuntimeEnabled(env, loaded.target.provider) && loaded.target.is_selected,
+      isCustodyProviderAvailable(env, loaded.target.provider, "byok") && loaded.target.is_selected,
     canComplete: loaded.decisions.complete.kind === "execute",
     canReplaceCredentials: loaded.decisions.replace.kind === "execute",
     canCancel: loaded.decisions.cancel.kind === "execute",
@@ -695,9 +683,6 @@ function toStoredCredentialSecret(row: InstallationConnectionState): StoredCrede
     secretRef: row.credential_secret_ref ?? undefined,
     secretVersionRef: row.credential_secret_version_ref ?? undefined,
     encryptedSecretPayload: row.credential_encrypted_secret_payload ?? undefined,
-    ...(row.credential_storage_backend === "runtime_env"
-      ? { runtimeEnvFields: PRIVY_RUNTIME_ENV_FIELDS }
-      : {}),
   };
 }
 
@@ -794,35 +779,9 @@ async function acquireCompletionLease(
   context: InstallationContext,
   target: InstallationConnectionState
 ): Promise<string | null> {
-  if (target.status === "failed") {
-    const failureCode = target.last_check_failure_code;
-    const expectedLastCheckAt = target.last_check_at;
-    if (
-      target.credential_source !== "runtime" ||
-      !expectedLastCheckAt ||
-      (failureCode !== "invalid_credentials" &&
-        failureCode !== "provider_account_already_connected")
-    ) {
-      return null;
-    }
-    return context.db.transaction(async (tx) => {
-      const store = new ProviderCredentialStore(tx);
-      if (!(await store.lockProject(context.organizationId, context.projectId))) {
-        return null;
-      }
-      return store.acquireRuntimeFailureRetryLease({
-        connectionId: target.id,
-        providerCredentialId: target.provider_credential_id,
-        expectedLastCheckAt,
-        expectedFailureCode: failureCode,
-      });
-    });
-  }
-
   return context.store.acquireInstallationLease({
     connectionId: target.id,
     providerCredentialId: target.provider_credential_id,
-    credentialSource: target.credential_source,
     expectedStatus: target.status as "pending" | "checking",
     expectedLastCheckStatus: target.last_check_status,
     expectedLastCheckAt: target.last_check_at,

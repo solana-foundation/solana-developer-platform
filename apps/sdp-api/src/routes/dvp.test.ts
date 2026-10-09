@@ -6,11 +6,19 @@ import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
 import app from "@/index";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey, seedRateLimit } from "@/test/mocks/kv";
 import { deriveDvpTradeKind } from "./dvp/handlers";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 const TEST_ORG = { id: "org_dvp_test", name: "DvP Test Org", slug: "dvp-test-org" };
 const TEST_PROJECT = { id: "prj_dvp_test", slug: "dvp-test-project" };
@@ -510,6 +518,7 @@ describe("deriveDvpTradeKind", () => {
 
 describe("DvP routes", () => {
   beforeEach(async () => {
+    custodyReleaseChannel.outOfChannelMode = null;
     originalMarkets = env.MARKETS_ENABLED;
     env.MARKETS_ENABLED = "true";
     await seedTestDatabase(env);
@@ -959,7 +968,6 @@ describe("DvP routes", () => {
     ])(
       "refuses $action after $change revocation without switching wallets",
       async ({ action, change }) => {
-        const requestEnv = { ...env, PRIVY_BYOK_ENABLED: "true" };
         const fetch = vi
           .spyOn(globalThis, "fetch")
           .mockRejectedValue(new Error("Unexpected external request"));
@@ -996,7 +1004,7 @@ describe("DvP routes", () => {
         const view = await app.request(
           "/v1/dvp/trades/dvp_stale_action",
           { headers: partyAuthHeaders() },
-          requestEnv
+          env
         );
         expect(view.status).toBe(200);
         const viewBody = await view.json();
@@ -1037,7 +1045,7 @@ describe("DvP routes", () => {
             headers: partyAuthHeaders(),
             body: JSON.stringify({ side: "a", walletId: actionWallet.id }),
           },
-          requestEnv
+          env
         );
         expect(res.status).toBe(403);
         expect(await res.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
@@ -1060,7 +1068,7 @@ describe("DvP routes", () => {
         const refreshed = await app.request(
           "/v1/dvp/trades/dvp_stale_action",
           { headers: partyAuthHeaders() },
-          requestEnv
+          env
         );
         expect(refreshed.status).toBe(200);
         expect(await refreshed.json()).toMatchObject({
@@ -1755,16 +1763,14 @@ describe("DvP routes", () => {
     });
 
     it.each([false, true])(
-      "keeps the Connection action wallet with BYOK=%s",
-      async (byokEnabled) => {
-        const requestEnv = { ...env, PRIVY_BYOK_ENABLED: String(byokEnabled) };
+      "keeps the Connection action wallet with BYOK in channel=%s",
+      async (byokInChannel) => {
+        custodyReleaseChannel.outOfChannelMode = byokInChannel ? null : "byok";
         const fetch = vi
           .spyOn(globalThis, "fetch")
           .mockRejectedValue(new Error("RPC unavailable in the route fixture"));
         await seedTradeFor({ tradeId: "dvp_inbound_seen" });
         await seedPartyOrg();
-        // A nondefault Connection holds the same party address. Funding chooses
-        // its older record in both flag states; only runtime admission changes.
         await seedPartyConnectionWallet("dvp_inbound", "2020-01-01");
         // The party org ITSELF issued mint B with artwork: the inbound view
         // resolves images against the reader's organization, so its own token
@@ -1779,7 +1785,7 @@ describe("DvP routes", () => {
         const res = await app.request(
           "/v1/dvp/trades/inbound",
           { headers: partyAuthHeaders() },
-          requestEnv
+          env
         );
         expect(res.status).toBe(200);
         expect(fetch).not.toHaveBeenCalled();
@@ -1815,7 +1821,7 @@ describe("DvP routes", () => {
             actionWallet: {
               id: "cwlt_dvp_inbound",
               name: "Connection desk",
-              isRuntimeExecutionAllowed: byokEnabled,
+              isRuntimeExecutionAllowed: byokInChannel,
             },
           },
           mint: "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1",
@@ -1862,7 +1868,7 @@ describe("DvP routes", () => {
         const detail = await app.request(
           "/v1/dvp/trades/dvp_inbound_seen",
           { headers: partyAuthHeaders() },
-          requestEnv
+          env
         );
         expect(detail.status).toBe(200);
         expect(await detail.json()).toMatchObject({
@@ -1874,7 +1880,7 @@ describe("DvP routes", () => {
                     actionWallet: {
                       id: "cwlt_dvp_inbound",
                       name: "Connection desk",
-                      isRuntimeExecutionAllowed: byokEnabled,
+                      isRuntimeExecutionAllowed: byokInChannel,
                     },
                   },
                 },

@@ -117,6 +117,7 @@ function createTestEnv(overrides?: Partial<Env>): Env {
     IBM_HAVEN_PRIVATE_KEY: "ibm-haven-test-private-key",
     ENVIRONMENT: "development",
     API_VERSION: "v1",
+    SDP_RELEASE_CHANNEL: "stable",
     ...overrides,
   } as Env;
 }

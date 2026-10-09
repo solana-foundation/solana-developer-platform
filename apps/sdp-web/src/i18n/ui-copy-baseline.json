@@ -86,7 +86,7 @@
   "src/flags/definitions.ts:163:5:Show the Policies module, wallet-policy workspaces, and Approvals inbox. API key authoring remains available independently.",
   "src/flags/definitions.ts:166:23:Hidden",
   "src/flags/definitions.ts:167:22:Enabled",
-  "src/flags/definitions.ts:176:5:Install Privy from stored project credentials instead of the legacy env-backed initialize path. Requires PRIVY_BYOK_ENABLED on the API.",
+  "src/flags/definitions.ts:176:5:Install Privy from stored project credentials instead of the legacy env-backed initialize path.",
   "src/flags/definitions.ts:179:23:Legacy initialize",
   "src/flags/definitions.ts:180:22:Stored credentials",
   "src/flags/definitions.ts:189:5:Show the Asset Profiles issuance wizard and per-token asset management workspace. Requires the Issuance module flag.",

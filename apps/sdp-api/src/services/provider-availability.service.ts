@@ -1,8 +1,10 @@
 import {
   COMPLIANCE_PROVIDERS,
   type ComplianceProviderId,
+  CUSTODY_MODES,
   CUSTODY_PROVIDER_CATALOG_BY_ID,
   CUSTODY_PROVIDERS,
+  type CustodyMode,
   type CustodyProvider,
   EARN_PROVIDERS,
   type EarnProviderId,
@@ -24,9 +26,9 @@ import {
 } from "@sdp/types";
 import type { DatabaseExecutor } from "@/db";
 import { parsePostgresJson } from "@/db/postgres-utils";
-import { AppError } from "@/lib/errors";
+import { AppError, forbidden } from "@/lib/errors";
 import {
-  isCustodyConnectionRuntimeEnabled,
+  isCustodyProviderAvailable,
   isModuleAvailable,
   isRampProviderAvailable,
 } from "@/lib/feature-flags";
@@ -599,8 +601,10 @@ export async function getProviderAvailability(
   return {
     tier: resolved.tier,
     providers: {
-      custody: buildAvailabilityEntries(resolved.providers.custody, configured.custody, () =>
-        isModuleAvailable(env, "custody", options.rampProviderStages)
+      custody: buildAvailabilityEntries(
+        resolved.providers.custody,
+        configured.custody,
+        (provider) => CUSTODY_MODES.some((mode) => isCustodyProviderAvailable(env, provider, mode))
       ),
       compliance: buildAvailabilityEntries(
         resolved.providers.compliance,
@@ -657,29 +661,66 @@ export async function assertCustodyProviderEntitled(
   }
 }
 
+/**
+ * The refusal for a (custody provider, mode) pair the deployment's release channel leaves out.
+ *
+ * @param provider - The custody provider.
+ * @param mode - The custody mode the provider is used in.
+ * @returns A 403 naming the pair, the same shape as the module and ramp provider gates.
+ */
+export function custodyProviderNotInReleaseChannel(
+  provider: CustodyProvider,
+  mode: CustodyMode
+): AppError {
+  return forbidden(
+    `The ${provider} custody provider is not available in this release channel for ${mode} custody.`,
+    { reason: "custody_provider_not_in_release_channel" }
+  );
+}
+
+/**
+ * Refuses a (custody provider, mode) pair the deployment's release channel leaves out.
+ *
+ * @param env - Process environment naming the release channel.
+ * @param provider - The custody provider.
+ * @param mode - The custody mode the provider is used in.
+ */
+export function assertCustodyProviderAvailable(
+  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
+  provider: CustodyProvider,
+  mode: CustodyMode
+): void {
+  if (!isCustodyProviderAvailable(env, provider, mode)) {
+    throw custodyProviderNotInReleaseChannel(provider, mode);
+  }
+}
+
+/**
+ * Whether a BYOK custody connection for `provider` may be submitted or completed
+ * in this deployment for `organizationId`: the (provider, byok) pair is in the
+ * release channel, the provider takes self-service credentials, and the
+ * organization is entitled to it.
+ *
+ * @param env - Process environment naming the release channel.
+ * @param db - Database client for the organization's entitlement state.
+ * @param organizationId - The organization submitting the connection.
+ * @param provider - The custody provider the connection names.
+ * @returns True when every check passes.
+ */
 export async function isPersistedCustodyCompletionEnabled(
   env: Env,
   db: DatabaseClient,
   organizationId: string,
-  provider: CustodyProvider,
-  source: "stored" | "runtime"
+  provider: CustodyProvider
 ): Promise<boolean> {
-  if (!isCustodyConnectionRuntimeEnabled(env, provider)) {
+  if (!isCustodyProviderAvailable(env, provider, "byok")) {
     return false;
   }
-
-  if (
-    source === "stored" &&
-    CUSTODY_PROVIDER_CATALOG_BY_ID[provider].storedCredentialSetup.mode !== "self_service"
-  ) {
+  if (CUSTODY_PROVIDER_CATALOG_BY_ID[provider].storedCredentialSetup.mode !== "self_service") {
     return false;
   }
-
   const availability = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_STAGES);
-  const providerAvailability = availability.providers.custody[provider];
-  return source === "runtime"
-    ? providerAvailability?.enabled === true
-    : providerAvailability?.entitled === true;
+  return isCustodyProviderEntitled(availability, provider);
 }
 
 function getAvailabilityMessage(

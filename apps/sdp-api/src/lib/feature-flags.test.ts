@@ -1,16 +1,25 @@
 import {
+  BYOK_CUSTODY_PROVIDERS,
+  CUSTODY_PROVIDERS,
+  isByokCustodyProvider,
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
   resolveSdpReleaseChannel,
+  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RELEASE_CHANNEL_NAMES,
   SDP_RELEASE_CHANNELS,
   type SdpRampProviderStages,
 } from "@sdp/types";
+import {
+  SDP_BYOK_CUSTODY_PROVIDER_STAGES,
+  SDP_MANAGED_CUSTODY_PROVIDER_STAGES,
+} from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
 import {
   assertSdpReleaseChannelConfigured,
   isAssetProfilesEnabled,
-  isCustodyConnectionRuntimeEnabled,
+  isCustodyProviderAvailable,
   isDvpEnabled,
   isEarnEnabled,
   isEarnHastraDexExitConfigured,
@@ -19,8 +28,6 @@ import {
   isHeliusRingsEnabled,
   isMarketsEnabled,
   isPrivateChannelsEnabled,
-  isPrivyByokEnabled,
-  resolveNewCustodySetupMethod,
 } from "./feature-flags";
 
 // The channel with every module, so these cases exercise each flag on its own.
@@ -94,59 +101,29 @@ describe("isPrivateChannelsEnabled", () => {
   });
 });
 
-describe("isPrivyByokEnabled", () => {
-  it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
-    expect(
-      isPrivyByokEnabled({
-        PRIVY_BYOK_ENABLED: flag,
-      })
-    ).toBe(false);
-  });
+describe("isCustodyProviderAvailable", () => {
+  const nonByokCustodyProviders = CUSTODY_PROVIDERS.filter(
+    (provider) => !isByokCustodyProvider(provider)
+  );
 
-  it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
-    expect(
-      isPrivyByokEnabled({
-        PRIVY_BYOK_ENABLED: flag,
-      })
-    ).toBe(true);
-  });
-});
+  describe.each(SDP_RELEASE_CHANNEL_NAMES)("on the %s release channel", (releaseChannel) => {
+    it.each(CUSTODY_PROVIDERS)("offers Managed %s", (provider) => {
+      expect(
+        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "managed")
+      ).toBe(true);
+    });
 
-describe("isCustodyConnectionRuntimeEnabled", () => {
-  it("uses the Privy rollout flag only for Privy Connections", () => {
-    expect(isCustodyConnectionRuntimeEnabled({ PRIVY_BYOK_ENABLED: "true" }, "privy")).toBe(true);
-    expect(isCustodyConnectionRuntimeEnabled({ PRIVY_BYOK_ENABLED: "false" }, "privy")).toBe(false);
-    expect(isCustodyConnectionRuntimeEnabled({ PRIVY_BYOK_ENABLED: "true" }, "turnkey")).toBe(
-      false
-    );
-  });
-});
+    it.each(BYOK_CUSTODY_PROVIDERS)("offers BYOK %s", (provider) => {
+      expect(
+        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "byok")
+      ).toBe(true);
+    });
 
-describe("resolveNewCustodySetupMethod", () => {
-  it.each([
-    [{ PRIVY_BYOK_ENABLED: "false" }, "privy", "legacy_config"],
-    [{ PRIVY_BYOK_ENABLED: "true" }, "turnkey", "legacy_config"],
-    [{ PRIVY_BYOK_ENABLED: "true", SDP_DEPLOYMENT_MODE: "managed" }, "privy", "stored_credentials"],
-    [
-      {
-        PRIVY_BYOK_ENABLED: "true",
-        SDP_DEPLOYMENT_MODE: "self_hosted",
-        SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED: "true",
-      },
-      "privy",
-      "stored_credentials",
-    ],
-    [
-      {
-        PRIVY_BYOK_ENABLED: "true",
-        SDP_DEPLOYMENT_MODE: "self_hosted",
-        SELF_HOSTED_STORED_CONNECTION_SETUP_ENABLED: "false",
-      },
-      "privy",
-      "deployment_credentials",
-    ],
-  ] as const)("resolves %j for %s to %s", (env, provider, expected) => {
-    expect(resolveNewCustodySetupMethod(env, provider)).toBe(expected);
+    it.each(nonByokCustodyProviders)("never offers BYOK %s", (provider) => {
+      expect(
+        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "byok")
+      ).toBe(false);
+    });
   });
 });
 
@@ -291,6 +268,31 @@ describe("release channels", () => {
       stable: ["custody", "payments", "recurring_payments", "compliance"],
     });
   });
+
+  it("pins each custody (provider, mode) pair's stage", () => {
+    expect(SDP_MANAGED_CUSTODY_PROVIDER_STAGES).toEqual({
+      local: "stable",
+      fireblocks: "stable",
+      privy: "stable",
+      coinbase_cdp: "stable",
+      para: "stable",
+      turnkey: "stable",
+      dfns: "stable",
+      ibm_haven: "stable",
+      anchorage: "stable",
+      utila: "stable",
+    });
+    expect(SDP_BYOK_CUSTODY_PROVIDER_STAGES).toEqual({ privy: "stable" });
+  });
+
+  it.each(SDP_RELEASE_CHANNEL_NAMES)(
+    "runs custody on %s because a custody provider is staged there",
+    (releaseChannel) => {
+      expect(isModuleInReleaseChannel(releaseChannel, "custody", SDP_RAMP_PROVIDER_STAGES)).toBe(
+        true
+      );
+    }
+  );
 
   it("runs ramps only where at least one ramp provider is in the release channel", () => {
     const bvnkInBeta: SdpRampProviderStages = {

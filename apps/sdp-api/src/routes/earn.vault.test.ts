@@ -37,13 +37,24 @@ import { AuditService } from "@/services/audit.service";
 import { SigningService } from "@/services/domain/signing.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
-import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
+import {
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
+import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
 const depositIntoVault = vi.hoisted(() => vi.fn());
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
+  return mockCustodyReleaseChannels(
+    await importOriginal<typeof import("@sdp/types/release-channels")>()
+  );
+});
 
 vi.mock("@/services/earn/vault-deposit.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/vault-deposit.service")>()),
@@ -109,7 +120,7 @@ const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
 let originalMarketsEnabled: string | undefined;
 let originalEarnEnabled: string | undefined;
-let originalPrivyByokEnabled: string | undefined;
+let originalEncryptionKey: string | undefined;
 let originalJupiterSwapApiKey: string | undefined;
 
 async function seedWallet(params: {
@@ -138,42 +149,33 @@ async function seedWallet(params: {
 }
 
 async function seedConnectionWallet(): Promise<void> {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO provider_credentials (
-           id, organization_id, project_id, provider, label, scope, source,
-           storage_backend, status, created_by
-         ) VALUES ('pcred_earn_vault', ?, ?, 'privy', 'Vault BYOK', 'project',
-                   'runtime', 'runtime_env', 'active', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_connections (
-           id, organization_id, project_id, provider, scope,
-           provider_credential_id, provider_credential_scope_key, status,
-           provider_account_fingerprint, created_by
-         ) VALUES ('cconn_earn_vault', ?, ?, 'privy', 'project',
-                   'pcred_earn_vault', ?, 'pending', 'sha256:test', ?)`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id, TEST_PROJECT.id, TEST_USER.id),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets (
-           id, custody_connection_id, wallet_id, public_key, status
-         ) VALUES ('cwlt_earn_vault_connection', 'cconn_earn_vault',
-                   'privy_earn_vault_connection', ?, 'active')`
-      )
-      .bind(WALLET_ADDRESS),
-    getDb(env).prepare(
-      `UPDATE custody_connections
-         SET default_custody_wallet_id = 'cwlt_earn_vault_connection',
-             status = 'active', last_check_status = 'success',
-             last_check_at = sdp_iso_now(), activated_at = sdp_iso_now()
-         WHERE id = 'cconn_earn_vault'`
-    ),
-  ]);
+  env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 43).toString("base64");
+  await seedTestPrivyConnection(getDb(env), {
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    connectionId: "cconn_earn_vault",
+    credentialId: "pcred_earn_vault",
+    createdBy: TEST_USER.id,
+    stored: await writeTestPrivyCredentialSecret(env, {
+      organizationId: TEST_ORG.id,
+      credentialId: "pcred_earn_vault",
+      appId: "earn-vault-connection-app",
+      appSecret: "earn-vault-connection-secret",
+    }),
+    providerAccountFingerprint: "sha256:test",
+    lastCheckStatus: "success",
+    wallets: [
+      {
+        id: "cwlt_earn_vault_connection",
+        walletId: "privy_earn_vault_connection",
+        publicKey: WALLET_ADDRESS,
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+    defaultCustodyWalletId: "cwlt_earn_vault_connection",
+  });
 }
 
 async function requireDepositApproval() {
@@ -379,10 +381,11 @@ function postVaultDeposit(
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
   originalEarnEnabled = env.EARN_ENABLED;
-  originalPrivyByokEnabled = env.PRIVY_BYOK_ENABLED;
+  originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
   originalJupiterSwapApiKey = env.JUPITER_SWAP_API_KEY;
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
+  custodyReleaseChannel.outOfChannelMode = null;
   await seedTestDatabase(env);
   await clearKVStores(env);
   vi.clearAllMocks();
@@ -401,7 +404,7 @@ beforeEach(async () => {
 afterEach(() => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
-  env.PRIVY_BYOK_ENABLED = originalPrivyByokEnabled;
+  env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   env.JUPITER_SWAP_API_KEY = originalJupiterSwapApiKey;
   surfacing.forceOn = false;
   vaultDirectClientOverride.current = null;
@@ -411,14 +414,12 @@ afterEach(() => {
 describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
   it.each([
     { action: "approve", status: "approved", operationStatus: "completed", refusal: "unavailable" },
-    { action: "approve", status: "approved", operationStatus: "completed", refusal: "paused" },
     {
       action: "approve",
       status: "approved",
       operationStatus: "failed",
       refusal: "provider-denied",
     },
-    { action: "reject", status: "rejected", operationStatus: "canceled", refusal: "paused" },
     { action: "cancel", status: "canceled", operationStatus: "canceled", refusal: "unavailable" },
     { action: "approve", status: "approved", operationStatus: "completed", refusal: "unexpected" },
   ])(
@@ -429,7 +430,6 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
       await seedConnectionWallet();
       const strategy = await seedStrategy({});
       await requireDepositApproval();
-      env.PRIVY_BYOK_ENABLED = "true";
       const held = await postVaultDeposit(
         { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
         "approve-admission-race",
@@ -466,9 +466,7 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
         }
         const other = await app.request(`${path}/${action}`, { method: "POST", headers }, env);
         expect(other.status).toBe(200);
-        if (refusal === "paused") {
-          env.PRIVY_BYOK_ENABLED = "false";
-        } else if (refusal === "provider-denied") {
+        if (refusal === "provider-denied") {
           await getDb(env)
             .prepare(
               "UPDATE organizations SET settings = jsonb_set(settings::jsonb, '{providerOverrides,custody}', ?::jsonb)::text WHERE id = ?"
@@ -509,17 +507,13 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
     }
   );
 
-  it.each(
-    ["false", "true"].flatMap((byokEnabled) =>
-      [
-        { state: "inactive-wallet", status: 409, reason: "runtime_execution_unavailable" },
-        { state: "inactive-config", status: 409, reason: "runtime_execution_unavailable" },
-        { state: "provider-denied", status: 403, reason: "provider_not_entitled" },
-      ].map((expectation) => ({ byokEnabled, ...expectation }))
-    )
-  )(
-    "keeps a new Config approval pending with a $state wallet and BYOK $byokEnabled",
-    async ({ byokEnabled, state, status, reason }) => {
+  it.each([
+    { state: "inactive-wallet", status: 409, reason: "runtime_execution_unavailable" },
+    { state: "inactive-config", status: 409, reason: "runtime_execution_unavailable" },
+    { state: "provider-denied", status: 403, reason: "provider_not_entitled" },
+  ])(
+    "keeps a new Config approval pending with a $state wallet",
+    async ({ state, status, reason }) => {
       await seedAuth();
       const headers = await seedApprover();
       await seedWallet({
@@ -531,7 +525,6 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
       });
       const strategy = await seedStrategy({});
       await requireDepositApproval();
-      env.PRIVY_BYOK_ENABLED = byokEnabled;
       const held = await postVaultDeposit(
         { strategyId: strategy.id, custodyWalletId: "cwlt_approval_legacy", amount: "10" },
         "approve-legacy-deposit",
@@ -582,7 +575,6 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
   );
 
   it.each([
-    { state: "paused", status: 403, reason: "runtime_execution_paused" },
     { state: "retired-credential", status: 409, reason: "runtime_execution_unavailable" },
     { state: "inactive-wallet", status: 409, reason: "runtime_execution_unavailable" },
     { state: "provider-denied", status: 403, reason: "provider_not_entitled" },
@@ -594,10 +586,9 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
     await seedConnectionWallet();
     const strategy = await seedStrategy({});
     const repo = await requireDepositApproval();
-    env.PRIVY_BYOK_ENABLED = "true";
     const held = await postVaultDeposit(
       { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
-      "approve-paused-deposit",
+      "approve-pending-deposit",
       TEST_API_KEY.raw
     );
     expect(held.status).toBe(202);
@@ -621,7 +612,6 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
       )
       .bind(TEST_ORG.id, TEST_PROJECT.id)
       .run();
-    if (state === "paused") env.PRIVY_BYOK_ENABLED = "false";
     if (state === "retired-credential") {
       await getDb(env)
         .prepare("UPDATE provider_credentials SET status = 'retired' WHERE id = 'pcred_earn_vault'")
@@ -685,7 +675,7 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
       execution_lease_expires_at: null,
       execution_effect_started_at: null,
     });
-    if (state === "paused" || state === "provider-denied") {
+    if (state === "provider-denied") {
       const selfApproval = await app.request(
         `${path}/approve`,
         {
@@ -699,15 +689,12 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
         error: { message: "Approval requests must be decided by a different principal" },
       });
 
-      env.PRIVY_BYOK_ENABLED = "true";
-      if (state === "provider-denied") {
-        await getDb(env)
-          .prepare(
-            "UPDATE organizations SET settings = jsonb_set(settings::jsonb, '{providerOverrides,custody}', ?::jsonb)::text WHERE id = ?"
-          )
-          .bind(JSON.stringify({ privy: true }), TEST_ORG.id)
-          .run();
-      }
+      await getDb(env)
+        .prepare(
+          "UPDATE organizations SET settings = jsonb_set(settings::jsonb, '{providerOverrides,custody}', ?::jsonb)::text WHERE id = ?"
+        )
+        .bind(JSON.stringify({ privy: true }), TEST_ORG.id)
+        .run();
       const responses = await Promise.all([
         app.request(`${path}/approve`, { method: "POST", headers }, env),
         app.request(`${path}/approve`, { method: "POST", headers }, env),
@@ -729,169 +716,42 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
     }
   });
 
-  it.each([
-    { state: "paused", status: 403, reason: "runtime_execution_paused" },
-    { state: "unavailable", status: 409, reason: "runtime_execution_unavailable" },
-  ])(
-    "refuses a $state wallet before creating an approval or deposit",
-    async ({ state, status, reason }) => {
-      await seedAuth();
-      await seedConnectionWallet();
-      const strategy = await seedStrategy({});
-      const repo = await requireDepositApproval();
-      env.PRIVY_BYOK_ENABLED = state === "paused" ? "false" : "true";
-      if (state === "unavailable") {
-        await getDb(env)
-          .prepare(
-            "UPDATE provider_credentials SET status = 'retired' WHERE id = 'pcred_earn_vault'"
-          )
-          .run();
-      }
-      const audit = vi.spyOn(AuditService.prototype, "beginCritical");
+  it("refuses an unavailable wallet before creating an approval or deposit", async () => {
+    await seedAuth();
+    await seedConnectionWallet();
+    const strategy = await seedStrategy({});
+    const repo = await requireDepositApproval();
+    await getDb(env)
+      .prepare("UPDATE provider_credentials SET status = 'retired' WHERE id = 'pcred_earn_vault'")
+      .run();
+    const audit = vi.spyOn(AuditService.prototype, "beginCritical");
 
-      const response = await postVaultDeposit(
-        { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
-        "paused-deposit",
-        TEST_API_KEY.raw
-      );
+    const response = await postVaultDeposit(
+      { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
+      "unavailable-deposit",
+      TEST_API_KEY.raw
+    );
 
-      expect(response.status).toBe(status);
-      expect(await response.json()).toMatchObject({
-        error: { details: { reason } },
-      });
-      expect(
-        await repo.listApprovalRequestDetails({
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT.id,
-        })
-      ).toEqual([]);
-      expect(depositIntoVault).not.toHaveBeenCalled();
-      expect(audit).not.toHaveBeenCalled();
-    }
-  );
-
-  it.each(
-    ["recovery", "approve"].flatMap((execution) =>
-      ["matching", "missing", "different-payload", "different-project", "failed"].map((record) => ({
-        execution,
-        record,
-      }))
-    )
-  )(
-    "preserves approved deposit replay with a $record movement while custody execution is paused through $execution",
-    async ({ execution, record }) => {
-      await seedAuth();
-      const headers = await seedApprover();
-      await seedConnectionWallet();
-      const strategy = await seedStrategy({});
-      const repo = await requireDepositApproval();
-      env.PRIVY_BYOK_ENABLED = "true";
-      const requestId = "approved-recorded-deposit";
-      const held = await postVaultDeposit(
-        { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
-        requestId,
-        TEST_API_KEY.raw
-      );
-      expect(held.status).toBe(202);
-      const {
-        error: { details },
-      } = z
-        .object({
-          error: z.object({
-            details: z.object({ approvalRequestId: z.string(), walletOperationId: z.string() }),
-          }),
-        })
-        .parse(await held.json());
-      if (record !== "missing") {
-        const recorded = await recordConnectionDeposit(strategy, requestId);
-        if (record === "different-payload") {
-          await getDb(env)
-            .prepare("UPDATE earn_movements SET idempotency_fingerprint = ? WHERE id = ?")
-            .bind("another-deposit", recorded.movement.id)
-            .run();
-        } else if (record === "different-project") {
-          await getDb(env)
-            .prepare("UPDATE earn_movements SET project_id = ? WHERE id = ?")
-            .bind(TEST_PRODUCTION_PROJECT.id, recorded.movement.id)
-            .run();
-        } else if (record === "failed") {
-          await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
-            movementId: recorded.movement.id,
-            organizationId: TEST_ORG.id,
-            toStatus: "failed",
-            failureReason: "expired",
-          });
-        }
-      }
-      await repo.updateApprovalRequestStatus({
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { details: { reason: "runtime_execution_unavailable" } },
+    });
+    expect(
+      await repo.listApprovalRequestDetails({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
-        approvalRequestId: details.approvalRequestId,
-        status: "approved",
-        operationStatus: "executing",
-        resolvedBy: TEST_USER.id,
-      });
-      env.PRIVY_BYOK_ENABLED = "false";
+      })
+    ).toEqual([]);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
 
-      const actual = await vi.importActual<typeof import("@/services/earn/vault-deposit.service")>(
-        "@/services/earn/vault-deposit.service"
-      );
-      depositIntoVault.mockImplementation(actual.depositIntoVault);
-      const path = `/v1/wallets/approval-requests/${details.approvalRequestId}/approve`;
-      if (execution === "recovery") {
-        expect(await recoverApprovedWalletOperations(env)).toBe(1);
-      } else {
-        const response = await app.request(path, { method: "POST", headers }, env);
-        expect(response.status).toBe(200);
-      }
-      const operation = await repo.getWalletOperationById(details.walletOperationId);
-      if (record === "matching") {
-        expect(operation).toMatchObject({ status: "completed", execution_error: null });
-        expect(required(operation).execution_effect_started_at).toEqual(expect.any(String));
-        expect(depositIntoVault).toHaveBeenCalledTimes(1);
-      } else if (record === "failed") {
-        expect(operation).toMatchObject({
-          status: "failed",
-          execution_error:
-            "Approved vault deposit execution is incomplete and requires manual reconciliation",
-        });
-        expect(required(operation).execution_effect_started_at).toEqual(expect.any(String));
-      } else {
-        expect(operation).toMatchObject({
-          status: "failed",
-          execution_error:
-            record === "missing"
-              ? "Wallet execution is paused. Retry after wallet execution is available."
-              : "Idempotency key already used with different request payload",
-          execution_effect_started_at: null,
-        });
-        expect(depositIntoVault).not.toHaveBeenCalled();
-      }
-
-      for (const enabled of ["false", "true"]) {
-        env.PRIVY_BYOK_ENABLED = enabled;
-        const repeated = await app.request(path, { method: "POST", headers }, env);
-        expect(repeated.status).toBe(200);
-        expect(await repeated.json()).toMatchObject({
-          data: {
-            approvalRequest: {
-              status: "approved",
-              operation: { status: record === "matching" ? "completed" : "failed" },
-            },
-          },
-        });
-        expect(await recoverApprovedWalletOperations(env)).toBe(0);
-        expect(await repo.getWalletOperationById(details.walletOperationId)).toEqual(operation);
-      }
-    }
-  );
-
-  it("returns an ordinary recorded deposit while custody execution is paused", async () => {
+  it("returns an ordinary recorded deposit while the BYOK pair is out of channel", async () => {
     await seedAuth();
     await seedConnectionWallet();
     const strategy = await seedStrategy({});
     const recorded = await recordConnectionDeposit(strategy, "recorded-deposit");
-    env.PRIVY_BYOK_ENABLED = "false";
+    custodyReleaseChannel.outOfChannelMode = "byok";
 
     const response = await postVaultDeposit(
       { strategyId: strategy.id, custodyWalletId: "cwlt_earn_vault_connection", amount: "10" },
@@ -1187,7 +1047,6 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     await seedAuth();
     const strategy = await seedStrategy({});
     await seedConnectionWallet();
-    env.PRIVY_BYOK_ENABLED = "false";
 
     const res = await app.request(
       "/v1/earn/vault-deposits",
@@ -1220,7 +1079,6 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     await seedAuth();
     const strategy = await seedStrategy({});
     await seedConnectionWallet();
-    env.PRIVY_BYOK_ENABLED = "false";
 
     const repo = createPostgresPolicyRepository(
       getDb(env),
@@ -1515,7 +1373,6 @@ describe("POST /v1/earn/vault-deposits — request validation", () => {
     await seedAuth();
     const strategy = await seedStrategy({});
     await seedConnectionWallet();
-    env.PRIVY_BYOK_ENABLED = "true";
 
     const res = await postVaultDeposit(
       {
@@ -2095,7 +1952,6 @@ describe("vault policy retry recovery", () => {
   async function setup() {
     await seedAuth();
     await seedConnectionWallet();
-    env.PRIVY_BYOK_ENABLED = "true";
     const strategy = await seedStrategy({});
     return {
       strategy,

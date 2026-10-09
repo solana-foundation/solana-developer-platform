@@ -1,9 +1,17 @@
+import type { CustodyConnectionLifecycle, CustodyProvider } from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { insertTestCustodyScopeDefault, insertTestCustodyWalletRow } from "@/test/helpers/custody";
+import {
+  activateTestCustodyConnection,
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  type TestStoredProviderCredential,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -23,13 +31,12 @@ const USER = {
   clerkId: "clerk_connections_read",
 };
 const SECRET_PAYLOAD = "encrypted-connections-read-secret";
-const ORIGINAL_PRIVY_BYOK_ENABLED = env.PRIVY_BYOK_ENABLED;
 
 function encodeJwtPart(value: Record<string, unknown>): string {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
-function buildApp(options: { injectJwt?: boolean } = {}) {
+function buildApp(options: { injectJwt: boolean }) {
   const payload: ClerkJwtPayload = {
     sub: USER.clerkId,
     org_id: ORG.clerkId,
@@ -41,7 +48,7 @@ function buildApp(options: { injectJwt?: boolean } = {}) {
 
   app.use("*", kvStoreMiddleware());
   app.use("*", async (c, next) => {
-    if (options.injectJwt !== false) {
+    if (options.injectJwt) {
       c.set("verifiedClerkJwt", { token, payload });
     }
     c.set("requestId", "req_connections_read");
@@ -100,57 +107,48 @@ async function seedScope(): Promise<void> {
 async function seedCredentialAndConnection(input: {
   credentialId: string;
   connectionId: string;
-  label?: string;
-  status: string;
+  provider: CustodyProvider;
+  label: string;
+  status: Extract<CustodyConnectionLifecycle, "pending" | "failed">;
   createdAt: string;
-  failureCode?: string;
-  pendingWalletLabel?: string;
-  provider?: string;
+  failureCode: string | null;
+  pendingWalletLabel: string | null;
 }): Promise<void> {
-  const provider = input.provider ?? "privy";
   const db = getDb(env);
-  await db
-    .prepare(
-      `INSERT INTO provider_credentials
-         (id, organization_id, project_id, provider, label, scope, source, storage_backend,
-          encrypted_secret_payload, status)
-       VALUES (?, ?, ?, ?, ?, 'project', 'stored', 'encrypted_db', ?, 'active')`
-    )
-    .bind(
-      input.credentialId,
-      ORG.id,
-      PROJECT.id,
-      provider,
-      input.label ?? `Label ${input.credentialId}`,
-      SECRET_PAYLOAD
-    )
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO custody_connections
-         (id, organization_id, project_id, provider, scope, provider_credential_id,
-          provider_credential_scope_key, status, setup_metadata,
-          last_check_status, last_check_at, last_check_failure_code, activated_at, created_at)
-       VALUES (?, ?, ?, ?, 'project', ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      input.connectionId,
-      ORG.id,
-      PROJECT.id,
-      provider,
-      input.credentialId,
-      PROJECT.id,
-      input.status,
-      JSON.stringify(
-        input.pendingWalletLabel ? { pendingWalletLabel: input.pendingWalletLabel } : {}
-      ),
-      input.failureCode ? "failed" : null,
-      input.failureCode ? input.createdAt : null,
-      input.failureCode ?? null,
-      input.status === "active" ? input.createdAt : null,
-      input.createdAt
-    )
-    .run();
+  const credential: TestStoredProviderCredential = {
+    id: input.credentialId,
+    organizationId: ORG.id,
+    projectId: PROJECT.id,
+    provider: input.provider,
+    label: input.label,
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: SECRET_PAYLOAD },
+    displayMetadata: {},
+    status: "active",
+    credentialVersion: 1,
+    rotatedFromProviderCredentialId: null,
+    lastValidatedAt: null,
+    deactivatedAt: null,
+    createdBy: null,
+  };
+  await insertTestStoredProviderCredential(db, credential);
+  await insertTestCustodyConnection(db, {
+    id: input.connectionId,
+    organizationId: ORG.id,
+    projectId: PROJECT.id,
+    provider: input.provider,
+    credential,
+    status: input.status,
+    setupMetadata:
+      input.pendingWalletLabel === null ? {} : { pendingWalletLabel: input.pendingWalletLabel },
+    providerAccountFingerprint: null,
+    lastCheckStatus: input.failureCode === null ? null : "failed",
+    lastCheckAt: input.failureCode === null ? null : input.createdAt,
+    lastCheckFailureCode: input.failureCode,
+    activatedAt: null,
+    deactivatedAt: null,
+    createdBy: null,
+    createdAt: input.createdAt,
+  });
 }
 
 async function makeConnectionRuntimeReady(
@@ -158,44 +156,48 @@ async function makeConnectionRuntimeReady(
   custodyWalletId: string
 ): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_connection_id, wallet_id, public_key, status)
-         VALUES (?, ?, ?, ?, 'active')`
-      )
-      .bind(
-        custodyWalletId,
-        connectionId,
-        `provider-${custodyWalletId}`,
-        `address-${custodyWalletId}`
-      ),
-    db
-      .prepare(
-        `UPDATE custody_connections
-         SET status = 'active', last_check_status = 'success',
-             last_check_at = sdp_iso_now(), provider_account_fingerprint = ?,
-             default_custody_wallet_id = ?, activated_at = sdp_iso_now()
-         WHERE id = ?`
-      )
-      .bind(`fingerprint-${connectionId}`, custodyWalletId, connectionId),
-  ]);
+  await insertTestCustodyWalletRow(db, {
+    id: custodyWalletId,
+    owner: { kind: "connection", custodyConnectionId: connectionId },
+    walletId: `provider-${custodyWalletId}`,
+    publicKey: `address-${custodyWalletId}`,
+    label: null,
+    purpose: null,
+    status: "active",
+  });
+  await activateTestCustodyConnection(db, {
+    connectionId,
+    custodyWalletId,
+    providerAccountFingerprint: `fingerprint-${connectionId}`,
+  });
+}
+
+async function seedRuntimeReadyConnection(connectionId: string, createdAt: string): Promise<void> {
+  await seedCredentialAndConnection({
+    credentialId: `pcred_${connectionId}`,
+    connectionId,
+    provider: "privy",
+    label: "Shared label",
+    status: "pending",
+    createdAt,
+    failureCode: null,
+    pendingWalletLabel: null,
+  });
+  await makeConnectionRuntimeReady(connectionId, `cwlt_${connectionId}`);
 }
 
 async function selectConnection(connectionId: string): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_scope_defaults
-         (id, organization_id, project_id, default_custody_connection_id)
-       VALUES ('csd_connections_read', ?, ?, ?)`
-    )
-    .bind(ORG.id, PROJECT.id, connectionId)
-    .run();
+  await insertTestCustodyScopeDefault(getDb(env), {
+    id: "csd_connections_read",
+    organizationId: ORG.id,
+    projectId: PROJECT.id,
+    defaultCustodyConfigId: null,
+    defaultCustodyConnectionId: connectionId,
+  });
 }
 
-async function requestConnections(query = ""): Promise<Response> {
-  const { app, token } = buildApp();
+async function requestConnections(query: string): Promise<Response> {
+  const { app, token } = buildApp({ injectJwt: true });
   return app.request(
     `/internal/dashboard/custody/connections${query}`,
     { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT.id } },
@@ -203,16 +205,11 @@ async function requestConnections(query = ""): Promise<Response> {
   );
 }
 
-async function listConnections(query = ""): Promise<{
+async function listConnections(query: string): Promise<{
   connections: Array<Record<string, unknown>>;
   pagination: { limit: number; offset: number; total: number };
 }> {
-  const { app, token } = buildApp();
-  const response = await app.request(
-    `/internal/dashboard/custody/connections${query}`,
-    { headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT.id } },
-    env
-  );
+  const response = await requestConnections(query);
   expect(response.status).toBe(200);
   const body = (await response.json()) as { data: never };
   return body.data;
@@ -225,7 +222,6 @@ describe("internal custody connections", () => {
   });
 
   afterEach(async () => {
-    env.PRIVY_BYOK_ENABLED = ORIGINAL_PRIVY_BYOK_ENABLED;
     await clearKVStores(env);
   });
 
@@ -243,21 +239,25 @@ describe("internal custody connections", () => {
     await seedCredentialAndConnection({
       credentialId: "pcred_read_a",
       connectionId: "ccon_read_a",
+      provider: "privy",
       label: "Failed treasury",
       status: "failed",
       createdAt: "2026-08-01T00:00:00.000Z",
       failureCode: "invalid_credentials",
+      pendingWalletLabel: null,
     });
     await seedCredentialAndConnection({
       credentialId: "pcred_read_b",
       connectionId: "ccon_read_b",
+      provider: "privy",
       label: "Pending treasury",
       status: "pending",
       createdAt: "2026-08-02T00:00:00.000Z",
+      failureCode: null,
       pendingWalletLabel: "Treasury wallet",
     });
 
-    const data = await listConnections();
+    const data = await listConnections("");
 
     expect(data).toEqual({
       connections: [
@@ -302,12 +302,15 @@ describe("internal custody connections", () => {
     await seedCredentialAndConnection({
       credentialId: "pcred_read_secret",
       connectionId: "ccon_read_secret",
+      provider: "privy",
+      label: "Secret treasury",
       status: "failed",
       createdAt: "2026-08-01T00:00:00.000Z",
       failureCode: "raw_provider_stack",
+      pendingWalletLabel: null,
     });
 
-    const data = await listConnections();
+    const data = await listConnections("");
     expect(JSON.stringify(data)).not.toContain(SECRET_PAYLOAD);
     expect(JSON.stringify(data)).not.toContain("encrypted_secret_payload");
     expect(JSON.stringify(data)).not.toContain("raw_provider_stack");
@@ -315,26 +318,11 @@ describe("internal custody connections", () => {
   });
 
   it("separates effective default selection from runtime eligibility", async () => {
-    env.PRIVY_BYOK_ENABLED = "true";
-    await seedCredentialAndConnection({
-      credentialId: "pcred_read_selected",
-      connectionId: "ccon_read_selected",
-      label: "Shared label",
-      status: "pending",
-      createdAt: "2026-08-01T00:00:00.000Z",
-    });
-    await makeConnectionRuntimeReady("ccon_read_selected", "cwlt_read_selected");
-    await seedCredentialAndConnection({
-      credentialId: "pcred_read_unselected",
-      connectionId: "ccon_read_unselected",
-      label: "Shared label",
-      status: "pending",
-      createdAt: "2026-08-02T00:00:00.000Z",
-    });
-    await makeConnectionRuntimeReady("ccon_read_unselected", "cwlt_read_unselected");
+    await seedRuntimeReadyConnection("ccon_read_selected", "2026-08-01T00:00:00.000Z");
+    await seedRuntimeReadyConnection("ccon_read_unselected", "2026-08-02T00:00:00.000Z");
     await selectConnection("ccon_read_selected");
 
-    const data = await listConnections();
+    const data = await listConnections("");
     const selected = data.connections.find((connection) => connection.id === "ccon_read_selected");
     const unselected = data.connections.find(
       (connection) => connection.id === "ccon_read_unselected"
@@ -345,23 +333,23 @@ describe("internal custody connections", () => {
       status: "active",
       isDefault: true,
       isRuntimeExecutionAllowed: true,
-      defaultCustodyWalletId: "cwlt_read_selected",
+      defaultCustodyWalletId: "cwlt_ccon_read_selected",
     });
     expect(unselected).toMatchObject({
       label: "Shared label",
       status: "active",
       isDefault: false,
       isRuntimeExecutionAllowed: true,
-      defaultCustodyWalletId: "cwlt_read_unselected",
+      defaultCustodyWalletId: "cwlt_ccon_read_unselected",
     });
 
     await getDb(env)
       .prepare(
         `UPDATE custody_wallets SET status = 'inactive'
-         WHERE id = 'cwlt_read_selected'`
+         WHERE id = 'cwlt_ccon_read_selected'`
       )
       .run();
-    const unavailableDefault = (await listConnections()).connections.find(
+    const unavailableDefault = (await listConnections("")).connections.find(
       (connection) => connection.id === "ccon_read_selected"
     );
     expect(unavailableDefault).toMatchObject({
@@ -370,52 +358,29 @@ describe("internal custody connections", () => {
     });
   });
 
-  it("keeps Connections visible but runtime-disabled while BYOK is off", async () => {
-    env.PRIVY_BYOK_ENABLED = "false";
-    await seedCredentialAndConnection({
-      credentialId: "pcred_read_flag_off",
-      connectionId: "ccon_read_flag_off",
-      label: "Dormant treasury",
-      status: "pending",
-      createdAt: "2026-08-01T00:00:00.000Z",
-    });
-    await makeConnectionRuntimeReady("ccon_read_flag_off", "cwlt_read_flag_off");
-    await selectConnection("ccon_read_flag_off");
-
-    expect((await listConnections()).connections).toEqual([
-      expect.objectContaining({
-        id: "ccon_read_flag_off",
-        label: "Dormant treasury",
-        status: "active",
-        isDefault: false,
-        isRuntimeExecutionAllowed: false,
-        defaultCustodyWalletId: "cwlt_read_flag_off",
-      }),
-    ]);
-  });
-
-  // The page and the count have to narrow together. Filtering after a
-  // provider-blind page drops this provider's older connections as soon as the
-  // project holds more than one page of them, and still calls what is left the
-  // whole inventory.
   it("narrows the page and the total to one provider together", async () => {
     await seedCredentialAndConnection({
       credentialId: "pcred_filter_privy_old",
       connectionId: "ccon_filter_privy_old",
+      provider: "privy",
       label: "Older Privy",
       status: "pending",
       createdAt: "2026-08-01T00:00:00.000Z",
+      failureCode: null,
+      pendingWalletLabel: null,
     });
     await seedCredentialAndConnection({
       credentialId: "pcred_filter_other",
       connectionId: "ccon_filter_other",
+      provider: "turnkey",
       label: "Newer Turnkey",
       status: "pending",
       createdAt: "2026-08-05T00:00:00.000Z",
-      provider: "turnkey",
+      failureCode: null,
+      pendingWalletLabel: null,
     });
 
-    const all = await listConnections();
+    const all = await listConnections("");
     expect(all.pagination.total).toBe(2);
 
     const privy = await listConnections("?provider=privy");
@@ -427,27 +392,30 @@ describe("internal custody connections", () => {
     expect(turnkey.pagination.total).toBe(1);
   });
 
-  // The newest page being all one provider is exactly the shape that used to
-  // hide the other provider's rows from a caller that filtered afterwards.
   it("reaches a provider's connections past a page filled by another", async () => {
     for (let index = 0; index < 3; index += 1) {
       await seedCredentialAndConnection({
         credentialId: `pcred_filter_newer_${index}`,
         connectionId: `ccon_filter_newer_${index}`,
+        provider: "turnkey",
+        label: `Newer Turnkey ${index}`,
         status: "pending",
         createdAt: `2026-09-0${index + 1}T00:00:00.000Z`,
-        provider: "turnkey",
+        failureCode: null,
+        pendingWalletLabel: null,
       });
     }
     await seedCredentialAndConnection({
       credentialId: "pcred_filter_buried",
       connectionId: "ccon_filter_buried",
+      provider: "privy",
       label: "Buried Privy",
       status: "pending",
       createdAt: "2026-08-01T00:00:00.000Z",
+      failureCode: null,
+      pendingWalletLabel: null,
     });
 
-    // A provider-blind first page of that size sees only the Turnkey rows.
     const blind = await listConnections("?limit=3");
     expect(blind.connections.map((row) => row.provider)).toEqual(["turnkey", "turnkey", "turnkey"]);
 
@@ -456,14 +424,16 @@ describe("internal custody connections", () => {
     expect(privy.pagination.total).toBe(1);
   });
 
-  // Ignoring an unusable filter would widen it back to every provider, which is
-  // how a page ends up listing connections that are not its own.
   it("refuses an unknown provider rather than ignoring the filter", async () => {
     await seedCredentialAndConnection({
       credentialId: "pcred_filter_reject",
       connectionId: "ccon_filter_reject",
+      provider: "privy",
+      label: "Filtered Privy",
       status: "pending",
       createdAt: "2026-08-01T00:00:00.000Z",
+      failureCode: null,
+      pendingWalletLabel: null,
     });
 
     const response = await requestConnections("?provider=not_a_provider");
@@ -475,9 +445,12 @@ describe("internal custody connections", () => {
       await seedCredentialAndConnection({
         credentialId: `pcred_read_p${index}`,
         connectionId: `ccon_read_p${index}`,
+        provider: "privy",
+        label: `Paged treasury ${index}`,
         status: "failed",
         createdAt: `2026-08-0${index + 1}T00:00:00.000Z`,
-        failureCode: "pagination_fixture",
+        failureCode: "invalid_credentials",
+        pendingWalletLabel: null,
       });
     }
 
@@ -488,16 +461,12 @@ describe("internal custody connections", () => {
     const clamped = await listConnections("?limit=9999");
     expect(clamped.pagination.limit).toBe(50);
 
-    // Fractional values must be truncated before they reach PostgreSQL.
     const fractional = await listConnections("?limit=1.5&offset=1.9");
     expect(fractional.pagination).toEqual({ limit: 1, offset: 1, total: 3 });
 
-    // Infinity survives `|| 0` and must not reach the SQL OFFSET.
     const infinite = await listConnections("?limit=Infinity&offset=1e309");
     expect(infinite.pagination).toEqual({ limit: 50, offset: 0, total: 3 });
 
-    // A finite offset past MAX_SAFE_INTEGER would overflow the bigint the SQL
-    // OFFSET binds to; the clamp turns it into an empty page instead of a 500.
     const oversized = await listConnections("?offset=1e308");
     expect(oversized.pagination).toEqual({
       limit: 20,

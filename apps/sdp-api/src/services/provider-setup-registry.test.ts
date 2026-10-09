@@ -54,7 +54,7 @@ describe("provider setup registry", () => {
       },
     } as const;
 
-    const parsed = privy.validateSetupPayload(payload, "submit");
+    const parsed = privy.validateSetupPayload(payload);
     expect(parsed.success).toBe(true);
     if (!parsed.success) throw parsed.error;
 
@@ -69,14 +69,11 @@ describe("provider setup registry", () => {
       payload: parsed.data,
     });
 
-    const replacement = privy.validateSetupPayload(payload, "replace");
-    expect(replacement.success).toBe(true);
-    if (!replacement.success) throw replacement.error;
     await privy.storeCredentials({
       context,
       connectionId: "cconn_1",
       idempotencyKey: "replace-key",
-      payload: replacement.data,
+      payload: parsed.data,
     });
     await privy.activate({ context, connectionId: "cconn_1" });
     await privy.deactivate({ context, connectionId: "cconn_1" });
@@ -85,20 +82,20 @@ describe("provider setup registry", () => {
     expect(credentialOperations.replace).toHaveBeenCalledWith(
       context,
       "cconn_1",
-      replacement.data,
+      parsed.data,
       "replace-key"
     );
     expect(credentialOperations.complete).toHaveBeenCalledWith(context, "cconn_1");
     expect(credentialOperations.cancel).toHaveBeenCalledWith(context, "cconn_1");
   });
 
-  it("keeps Privy payload validation strict and requires fields for replacement", () => {
+  it("keeps Privy payload validation strict and requires credential fields", () => {
     const privy = getProviderSetupDefinition("custody", "privy");
 
-    expect(
-      privy.validateSetupPayload({ provider: "privy", unexpected: "value" }, "submit").success
-    ).toBe(false);
-    expect(privy.validateSetupPayload({ provider: "privy" }, "replace").success).toBe(false);
+    expect(privy.validateSetupPayload({ provider: "privy", unexpected: "value" }).success).toBe(
+      false
+    );
+    expect(privy.validateSetupPayload({ provider: "privy" }).success).toBe(false);
   });
 
   it("checks compliance configuration without screening an address", () => {

@@ -37,6 +37,7 @@ export interface ProviderCredentialRow {
 }
 
 export interface LifecycleCredentialRow extends ProviderCredentialRow {
+  provider: "privy";
   source: "stored" | "runtime";
   storage_backend: StoredCredentialSecret["storageBackend"];
   deactivated_at: string | null;
@@ -112,7 +113,6 @@ export interface InstallationConnectionState extends CustodyConnectionRow {
   credential_version: number;
   credential_scope: "organization" | "project";
   credential_project_id: string | null;
-  credential_source: "stored" | "runtime";
   credential_storage_backend: StoredCredentialSecret["storageBackend"];
   credential_secret_ref: string | null;
   credential_secret_version_ref: string | null;
@@ -754,7 +754,6 @@ export class ProviderCredentialStore {
               pc.credential_version,
               pc.scope AS credential_scope,
               pc.project_id AS credential_project_id,
-              pc.source AS credential_source,
               pc.storage_backend AS credential_storage_backend,
               pc.secret_ref AS credential_secret_ref,
               pc.secret_version_ref AS credential_secret_version_ref,
@@ -800,7 +799,6 @@ export class ProviderCredentialStore {
   async acquireInstallationLease(params: {
     connectionId: string;
     providerCredentialId: string;
-    credentialSource: "stored" | "runtime";
     expectedStatus: "pending" | "checking";
     expectedLastCheckStatus: string | null;
     expectedLastCheckAt: string | null;
@@ -836,7 +834,6 @@ export class ProviderCredentialStore {
            SELECT 1 FROM provider_credentials pc
            WHERE pc.id = c.provider_credential_id
              AND pc.status = 'pending'
-             AND pc.source = ?
              AND pc.scope = 'project'
              AND pc.project_id = c.project_id
          )
@@ -847,99 +844,9 @@ export class ProviderCredentialStore {
         params.expectedStatus,
         params.expectedLastCheckStatus,
         params.expectedLastCheckAt,
-        params.credentialSource,
       ]
     );
     return row?.last_check_at ?? null;
-  }
-
-  async acquireRuntimeFailureRetryLease(params: {
-    connectionId: string;
-    providerCredentialId: string;
-    expectedLastCheckAt: string;
-    expectedFailureCode: "invalid_credentials" | "provider_account_already_connected";
-  }): Promise<string | null> {
-    const row = await this.db.queryOne<{ last_check_at: string }>(
-      `UPDATE custody_connections c
-       SET status = 'checking',
-           last_check_status = 'running',
-           last_check_at = GREATEST(
-             sdp_iso_now(),
-             to_char(
-               timezone('UTC', c.last_check_at::timestamptz + interval '1 millisecond'),
-               'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-             )
-           ),
-           last_check_failure_code = NULL,
-           updated_at = sdp_iso_now()
-       WHERE c.id = ?
-         AND c.provider_credential_id = ?
-         AND c.status = 'failed'
-         AND c.last_check_status = 'failed'
-         AND c.last_check_at = ?
-         AND c.last_check_failure_code = ?
-         AND c.provider_account_fingerprint IS NULL
-         AND c.default_custody_wallet_id IS NULL
-         AND c.activated_at IS NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM custody_wallets owned
-           WHERE owned.custody_connection_id = c.id
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM custody_connections sibling
-           WHERE sibling.organization_id = c.organization_id
-             AND sibling.project_id = c.project_id
-             AND sibling.provider = c.provider
-             AND sibling.id <> c.id
-             AND sibling.status IN ('pending', 'checking')
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM provider_credentials creating
-           WHERE creating.organization_id = c.organization_id
-             AND creating.project_id = c.project_id
-             AND creating.provider = c.provider
-             AND ${CREATING_SUBMISSION}
-         )
-         AND EXISTS (
-           SELECT 1 FROM provider_credentials pc
-           WHERE pc.id = c.provider_credential_id
-             AND pc.status = 'failed_validation'
-             AND pc.last_failure_code = ?
-             AND pc.source = 'runtime'
-             AND pc.storage_backend = 'runtime_env'
-             AND pc.scope = 'project'
-             AND pc.project_id = c.project_id
-         )
-       RETURNING c.last_check_at`,
-      [
-        params.connectionId,
-        params.providerCredentialId,
-        params.expectedLastCheckAt,
-        params.expectedFailureCode,
-        params.expectedFailureCode,
-      ]
-    );
-    if (!row) {
-      return null;
-    }
-
-    const resetCredential = await this.db.execute(
-      `UPDATE provider_credentials
-       SET status = 'pending',
-           last_failure_code = NULL,
-           updated_at = sdp_iso_now()
-       WHERE id = ?
-         AND status = 'failed_validation'
-         AND last_failure_code = ?
-         AND source = 'runtime'
-         AND storage_backend = 'runtime_env'
-         AND scope = 'project'`,
-      [params.providerCredentialId, params.expectedFailureCode]
-    );
-    if (resetCredential !== 1) {
-      throw new Error("Runtime installation Credential changed during retry admission");
-    }
-    return row.last_check_at;
   }
 
   async reserveProviderAccountFingerprint(params: {
@@ -1108,7 +1015,6 @@ export class ProviderCredentialStore {
   async cancelInstallation(params: {
     connectionId: string;
     providerCredentialId: string;
-    credentialSource: "stored" | "runtime";
     expectedStatus: "pending" | "checking";
     expectedLastCheckStatus: string | null;
     expectedLastCheckAt: string | null;
@@ -1161,9 +1067,8 @@ export class ProviderCredentialStore {
            updated_at = sdp_iso_now()
        WHERE id = ?
          AND status = 'pending'
-         AND source = ?
          AND scope = 'project'`,
-      [params.providerCredentialId, params.credentialSource]
+      [params.providerCredentialId]
     );
     if (updatedCredential !== 1) {
       throw new Error("Installation Credential changed during cancellation");

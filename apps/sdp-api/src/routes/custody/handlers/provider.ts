@@ -4,8 +4,7 @@ import { SigningError } from "@sdp/custody/signing";
 import { redactCredentialString } from "@sdp/redaction";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
-import { AppError, badRequest, conflict, forbidden, notFound } from "@/lib/errors";
-import { isCustodyConnectionRuntimeEnabled } from "@/lib/feature-flags";
+import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -26,10 +25,10 @@ import {
 } from "@/services/domain/signing/provider-config";
 import { createSigningService, type ProviderReuseState } from "@/services/domain/signing.service";
 import {
+  assertCustodyProviderAvailable,
   assertCustodyProviderEntitled,
   assertProviderAvailable,
   getEnabledProviders,
-  getProviderAvailability,
 } from "@/services/provider-availability.service";
 import { type AppContext, getPreferredWalletForConfig, resolveActor } from "../context";
 import type {
@@ -83,7 +82,7 @@ export const initializeSigning = async (
   const signingService = createSigningService(c.env, getRequestTenantScope(c));
 
   try {
-    await assertProviderInitializationAllowed(c, actor.organizationId, projectId, body.provider);
+    await assertProviderInitializationAllowed(c, actor.organizationId, body.provider);
     const result = await initializeProviderConnection(
       c,
       signingService,
@@ -133,12 +132,7 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
 
   try {
     let connectionId = "connectionId" in body ? body.connectionId : undefined;
-    if (
-      !connectionId &&
-      projectId &&
-      requestedProvider &&
-      isCustodyConnectionRuntimeEnabled(c.env, requestedProvider)
-    ) {
+    if (!connectionId && projectId && requestedProvider) {
       const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
         kind: "provider",
         organizationId: actor.organizationId,
@@ -186,6 +180,7 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
       throw badRequest("Provider is required when connectionId is omitted");
     }
     const targetProvider = providerRequest.provider;
+    assertCustodyProviderAvailable(c.env, targetProvider, "managed");
     const existingScopeConfig = await findScopeConfigByProvider(
       c,
       actor.organizationId,
@@ -215,7 +210,7 @@ export const switchSigning = async (c: ValidatedBodyContext<typeof switchSigning
       );
       await completeDefaultProviderSelection(c, auditService, intent, result.configId, [selection]);
     } else {
-      await assertProviderInitializationAllowed(c, actor.organizationId, projectId, targetProvider);
+      await assertProviderInitializationAllowed(c, actor.organizationId, targetProvider);
       const organizationSlug = await resolveOrganizationSlug(c, actor.organizationId);
       intent = await beginConfigSelection(c, auditService, targetProvider, existingScopeConfig?.id);
       result = await initializeProviderConnection(
@@ -308,9 +303,7 @@ async function admitConnectionSelection(
   if (provider && provider !== target.provider) {
     throw badRequest("Provider does not match Custody Connection");
   }
-  if (!isCustodyConnectionRuntimeEnabled(c.env, target.provider)) {
-    throw forbidden("Custody Connection runtime is disabled");
-  }
+  assertCustodyProviderAvailable(c.env, target.provider, "byok");
   await assertCustodyProviderEntitled(c.env, getDb(c.env), organizationId, target.provider);
   if (!target.isRuntimeAvailable) throw conflict("Custody Connection is unavailable");
   return target;
@@ -397,12 +390,9 @@ export const getSwitchProviderOptions = async (c: AppContext) => {
 async function assertProviderInitializationAllowed(
   c: AppContext,
   organizationId: string,
-  projectId: string | undefined,
   provider: CustodyProvider
 ): Promise<void> {
-  if (provider === "privy") {
-    await assertFreshPrivyLegacySetupAllowed(c, organizationId, projectId);
-  }
+  assertCustodyProviderAvailable(c.env, provider, "managed");
   await assertProviderAvailable(c.env, getDb(c.env), organizationId, "custody", provider);
 }
 
@@ -495,48 +485,6 @@ async function initializeProviderConnection(
       });
     default:
       throw badRequest("Unsupported provider");
-  }
-}
-
-async function assertFreshPrivyLegacySetupAllowed(
-  c: AppContext,
-  organizationId: string,
-  projectId: string | undefined
-): Promise<void> {
-  if (!projectId) {
-    throw badRequest("Project scope is required");
-  }
-
-  if (!isCustodyConnectionRuntimeEnabled(c.env, "privy")) {
-    return;
-  }
-
-  const blockingConnection = await getDb(c.env)
-    .prepare(
-      `SELECT id
-       FROM custody_connections
-       WHERE organization_id = ?
-         AND project_id = ?
-         AND provider = 'privy'
-         AND status IN ('pending', 'checking', 'active')
-       LIMIT 1`
-    )
-    .bind(organizationId, projectId)
-    .first<{ id: string }>();
-  if (blockingConnection) {
-    throw conflict("Privy custody setup already exists for this project");
-  }
-
-  const existingConfig = await findScopeConfigByProvider(c, organizationId, projectId, "privy");
-  if (existingConfig?.status === "active") {
-    return;
-  }
-
-  const availability = await getProviderAvailability(c.env, getDb(c.env), organizationId, {
-    rampProviderStages: c.get("rampProviderStages"),
-  });
-  if (availability.providers.custody.privy.entitled) {
-    throw forbidden("New Privy setup must use stored credentials");
   }
 }
 

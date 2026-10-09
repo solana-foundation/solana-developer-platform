@@ -1,3 +1,5 @@
+import type { SdpEnvironment } from "./api-keys";
+
 export const CUSTODY_PROVIDERS = [
   "local",
   "fireblocks",
@@ -13,6 +15,53 @@ export const CUSTODY_PROVIDERS = [
 
 export type CustodyProvider = (typeof CUSTODY_PROVIDERS)[number];
 export type ManagedCustodyProvider = Exclude<CustodyProvider, "local">;
+
+/**
+ * Where a wallet's provider account comes from, fixed per wallet by its owner
+ * row: a custody config is `managed` (the deployment's own provider account),
+ * a custody connection is `byok` (a provider account the project supplied).
+ */
+export const CUSTODY_MODES = ["managed", "byok"] as const;
+export type CustodyMode = (typeof CUSTODY_MODES)[number];
+
+/** Providers with a BYOK runtime: the only ones a custody connection can name. */
+export const BYOK_CUSTODY_PROVIDERS = ["privy"] as const satisfies readonly CustodyProvider[];
+export type ByokCustodyProvider = (typeof BYOK_CUSTODY_PROVIDERS)[number];
+
+/**
+ * Whether `provider` has a BYOK runtime.
+ *
+ * @param provider - The custody provider to classify.
+ * @returns True when a custody connection may name `provider`.
+ */
+export function isByokCustodyProvider(provider: CustodyProvider): provider is ByokCustodyProvider {
+  return BYOK_CUSTODY_PROVIDERS.some((byokProvider) => byokProvider === provider);
+}
+
+/**
+ * Which custody modes a project may set up, by its environment. Production
+ * projects hold mainnet funds, so SDP's hosted deployment never holds their
+ * keys under its own provider accounts (ADR 0006).
+ */
+export const CUSTODY_MODES_BY_ENVIRONMENT = {
+  sandbox: ["managed", "byok"],
+  production: ["byok"],
+} as const satisfies Record<SdpEnvironment, readonly CustodyMode[]>;
+
+/**
+ * Whether a project in `environment` may set up `mode` custody.
+ *
+ * @param environment - The project's environment.
+ * @param mode - The custody mode being set up.
+ * @returns True when `CUSTODY_MODES_BY_ENVIRONMENT` lists `mode` for `environment`.
+ */
+export function isCustodyModeAllowedInEnvironment(
+  environment: SdpEnvironment,
+  mode: CustodyMode
+): boolean {
+  const allowedModes: readonly CustodyMode[] = CUSTODY_MODES_BY_ENVIRONMENT[environment];
+  return allowedModes.includes(mode);
+}
 
 /**
  * Every provider the catalog shows is built and runnable, so the status only

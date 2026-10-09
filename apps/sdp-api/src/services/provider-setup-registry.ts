@@ -63,50 +63,26 @@ const privyCredentialSetupBaseSchema = z.object({
   walletLabel: z.string().trim().min(1).max(100).optional(),
 });
 
-const privyCredentialSubmissionSchema = privyCredentialSetupBaseSchema
-  .extend({ fields: privyCredentialFieldsSchema.optional() })
-  .strict();
-
-const privyCredentialReplacementSchema = privyCredentialSetupBaseSchema
+const privyCredentialSetupSchema = privyCredentialSetupBaseSchema
   .extend({ fields: privyCredentialFieldsSchema })
   .strict();
 
-export type PrivyCredentialSubmissionPayload = z.infer<typeof privyCredentialSubmissionSchema>;
-export type PrivyCredentialReplacementPayload = z.infer<typeof privyCredentialReplacementSchema>;
+export type PrivyCredentialSetupPayload = z.infer<typeof privyCredentialSetupSchema>;
 
-type PrivySetupOperation = "submit" | "replace";
-
-type PrivyStoreCredentialsInput =
-  | {
-      context: AppContext;
-      idempotencyKey: string;
-      payload: PrivyCredentialSubmissionPayload;
-      connectionId?: undefined;
-    }
-  | {
-      context: AppContext;
-      idempotencyKey: string;
-      payload: PrivyCredentialReplacementPayload;
-      connectionId: string;
-    };
+interface PrivyStoreCredentialsInput {
+  context: AppContext;
+  idempotencyKey: string;
+  payload: PrivyCredentialSetupPayload;
+  connectionId?: string;
+}
 
 interface PrivyConnectionOperationInput {
   context: AppContext;
   connectionId: string;
 }
 
-function validatePrivySetupPayload(
-  payload: unknown,
-  operation: "submit"
-): ReturnType<typeof privyCredentialSubmissionSchema.safeParse>;
-function validatePrivySetupPayload(
-  payload: unknown,
-  operation: "replace"
-): ReturnType<typeof privyCredentialReplacementSchema.safeParse>;
-function validatePrivySetupPayload(payload: unknown, operation: PrivySetupOperation) {
-  return operation === "replace"
-    ? privyCredentialReplacementSchema.safeParse(payload)
-    : privyCredentialSubmissionSchema.safeParse(payload);
+function validatePrivySetupPayload(payload: unknown) {
+  return privyCredentialSetupSchema.safeParse(payload);
 }
 
 async function storePrivyCredentials(input: PrivyStoreCredentialsInput) {

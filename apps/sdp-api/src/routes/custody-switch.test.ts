@@ -7,6 +7,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -69,63 +70,56 @@ async function seedAuthAndActiveConfig(): Promise<void> {
     members: [],
     ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
   });
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO api_keys
-           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_API_KEY.id,
-        TEST_ORG.id,
-        TEST_PROJECT.id,
-        TEST_USER.id,
-        "Custody Switch Test Key",
-        TEST_API_KEY.prefix,
-        keyHash,
-        "api_admin",
-        JSON.stringify(["*"]),
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted, encryption_version, default_wallet_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        TEST_CONFIG_ID,
-        TEST_ORG.id,
-        null,
-        "privy",
-        "test-config",
-        "sdp-custody-encryption-v1",
-        "privy_wallet_test",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, purpose, status)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        `cwlt_${TEST_CONFIG_ID}`,
-        TEST_CONFIG_ID,
-        "privy_wallet_test",
-        "privy_pubkey_test",
-        "root",
-        "active"
-      ),
-    getDb(env)
-      .prepare(
-        `INSERT INTO custody_scope_defaults
-           (id, organization_id, project_id, default_custody_config_id)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, null, TEST_CONFIG_ID),
-  ]);
+  await getDb(env).execute(
+    `INSERT INTO api_keys
+       (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      TEST_API_KEY.id,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_USER.id,
+      "Custody Switch Test Key",
+      TEST_API_KEY.prefix,
+      keyHash,
+      "api_admin",
+      JSON.stringify(["*"]),
+      "active",
+    ]
+  );
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: TEST_CONFIG_ID,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        provider: "privy",
+        configEncrypted: "test-config",
+        defaultWalletId: "privy_wallet_test",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: `cwlt_${TEST_CONFIG_ID}`,
+        owner: { kind: "config", custodyConfigId: TEST_CONFIG_ID },
+        walletId: "privy_wallet_test",
+        publicKey: "privy_pubkey_test",
+        label: null,
+        purpose: "root",
+        status: "active",
+      },
+    ],
+    scopeDefaults: [
+      {
+        id: `csd_${TEST_CONFIG_ID}`,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+        defaultCustodyConfigId: TEST_CONFIG_ID,
+        defaultCustodyConnectionId: null,
+      },
+    ],
+  });
 }
 
 describe("Custody switch rollback", () => {

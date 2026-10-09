@@ -11,6 +11,14 @@
  */
 
 import { z } from "zod";
+import {
+  BYOK_CUSTODY_PROVIDERS,
+  type ByokCustodyProvider,
+  CUSTODY_PROVIDERS,
+  type CustodyMode,
+  type CustodyProvider,
+  isByokCustodyProvider,
+} from "./custody";
 import { RAMP_PROVIDERS, type RampProviderId } from "./provider-access";
 
 export const SDP_MODULES = [
@@ -40,14 +48,16 @@ export type SdpReleaseChannel = (typeof SDP_RELEASE_CHANNEL_NAMES)[number];
  * own level, so each channel contains the more mature ones by construction.
  * Promoting a module is a one-line change here.
  *
- * Two modules have no stage of their own:
+ * Three modules have no stage of their own:
+ * - Custody is in a release channel when at least one (provider, custody mode)
+ *   pair is (`SDP_MANAGED_CUSTODY_PROVIDER_STAGES`, `SDP_BYOK_CUSTODY_PROVIDER_STAGES`),
+ *   so pairs launch one at a time.
  * - Ramps is in a release channel when at least one ramp provider is
  *   (`SDP_RAMP_PROVIDER_STAGES`), so providers launch one at a time.
  * - Markets is in a release channel when Earn or DvP is, so promoting one
  *   sub-module always takes effect.
  */
 export const SDP_MODULE_STAGES = {
-  custody: "stable",
   payments: "stable",
   recurring_payments: "stable",
   compliance: "stable",
@@ -57,7 +67,28 @@ export const SDP_MODULE_STAGES = {
   dvp: "experimental",
   private_channels: "experimental",
   helius_rings: "experimental",
-} as const satisfies Record<Exclude<SdpModule, "ramps" | "markets">, SdpReleaseChannel>;
+} as const satisfies Record<Exclude<SdpModule, "custody" | "ramps" | "markets">, SdpReleaseChannel>;
+
+/**
+ * Each custody provider's maturity, per custody mode. Promoting a (provider, mode)
+ * pair is a one-line change here.
+ */
+export const SDP_MANAGED_CUSTODY_PROVIDER_STAGES = {
+  local: "stable",
+  fireblocks: "stable",
+  privy: "stable",
+  coinbase_cdp: "stable",
+  para: "stable",
+  turnkey: "stable",
+  dfns: "stable",
+  ibm_haven: "stable",
+  anchorage: "stable",
+  utila: "stable",
+} as const satisfies Record<CustodyProvider, SdpReleaseChannel>;
+
+export const SDP_BYOK_CUSTODY_PROVIDER_STAGES = {
+  privy: "stable",
+} as const satisfies Record<ByokCustodyProvider, SdpReleaseChannel>;
 
 export type SdpRampProviderStages = Record<RampProviderId, SdpReleaseChannel>;
 
@@ -114,6 +145,36 @@ export function isRampProviderInReleaseChannel(
 }
 
 /**
+ * Whether the release channel offers custody `provider` in `mode`, from
+ * `SDP_MANAGED_CUSTODY_PROVIDER_STAGES` and `SDP_BYOK_CUSTODY_PROVIDER_STAGES`.
+ * A `byok` pair whose provider has no BYOK runtime is in no channel.
+ *
+ * @param releaseChannel - The deployment's release channel.
+ * @param provider - The custody provider.
+ * @param mode - The custody mode the provider is used in.
+ * @returns True when the pair's stage is at or above the release channel.
+ */
+export function isCustodyProviderInReleaseChannel(
+  releaseChannel: SdpReleaseChannel,
+  provider: CustodyProvider,
+  mode: CustodyMode
+): boolean {
+  switch (mode) {
+    case "managed":
+      return isStageInReleaseChannel(SDP_MANAGED_CUSTODY_PROVIDER_STAGES[provider], releaseChannel);
+    case "byok":
+      return (
+        isByokCustodyProvider(provider) &&
+        isStageInReleaseChannel(SDP_BYOK_CUSTODY_PROVIDER_STAGES[provider], releaseChannel)
+      );
+    default: {
+      const exhaustive: never = mode;
+      throw new Error(`Unknown custody mode: ${String(exhaustive)}`);
+    }
+  }
+}
+
+/**
  * @param rampProviderStages - `SDP_RAMP_PROVIDER_STAGES`; tests pass their own table.
  */
 export function isModuleInReleaseChannel(
@@ -121,6 +182,16 @@ export function isModuleInReleaseChannel(
   module: SdpModule,
   rampProviderStages: SdpRampProviderStages
 ): boolean {
+  if (module === "custody") {
+    return (
+      CUSTODY_PROVIDERS.some((provider) =>
+        isCustodyProviderInReleaseChannel(releaseChannel, provider, "managed")
+      ) ||
+      BYOK_CUSTODY_PROVIDERS.some((provider) =>
+        isCustodyProviderInReleaseChannel(releaseChannel, provider, "byok")
+      )
+    );
+  }
   if (module === "ramps") {
     return RAMP_PROVIDERS.some((provider) =>
       isRampProviderInReleaseChannel(releaseChannel, provider, rampProviderStages)
@@ -141,7 +212,7 @@ function modulesInReleaseChannel(releaseChannel: SdpReleaseChannel): readonly Sd
   );
 }
 
-/** Each release channel's modules, derived from `SDP_MODULE_STAGES`. */
+/** Each release channel's modules, derived from the module and provider stages. */
 export const SDP_RELEASE_CHANNELS = {
   experimental: modulesInReleaseChannel("experimental"),
   beta: modulesInReleaseChannel("beta"),

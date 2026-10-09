@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as repositories from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
+import {
+  activateTestCustodyConnection,
+  insertTestCustodyConnection,
+  insertTestStoredProviderCredential,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import * as gatewayAuth from "./auth/gateway-auth";
@@ -61,7 +66,7 @@ const pcUser = {
 
 const originalPrivy = { appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET };
 
-let originalByok: string | undefined;
+let originalEncryptionKey: string | undefined;
 
 let client: {
   challengeWallet: ReturnType<typeof vi.fn>;
@@ -88,7 +93,7 @@ let principalRepo: {
 let signMessages: ReturnType<typeof vi.fn<PrivySigner["signMessages"]>>;
 
 beforeEach(async () => {
-  originalByok = env.PRIVY_BYOK_ENABLED;
+  originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
   await seedTestDatabase(env);
   env.PRIVY_APP_ID = "pc-verification-app";
   env.PRIVY_APP_SECRET = "pc-verification-secret";
@@ -179,7 +184,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   env.PRIVY_APP_ID = originalPrivy.appId;
   env.PRIVY_APP_SECRET = originalPrivy.appSecret;
-  env.PRIVY_BYOK_ENABLED = originalByok;
+  env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
 });
 
 describe("verifyPrivateChannelWallet", () => {
@@ -227,46 +232,64 @@ describe("verifyPrivateChannelWallet", () => {
     expect(PrivySigner.create).not.toHaveBeenCalled();
     expect(client.challengeWallet).not.toHaveBeenCalled();
   });
-  it.each([true, false])(
-    "uses the exact Connection for verification only when admitted (enabled=%s)",
-    async (enabled) => {
-      env.PRIVY_BYOK_ENABLED = String(enabled);
-      const db = getDb(env);
-      await db.batch([
-        db.prepare("UPDATE custody_configs SET default_wallet_id = NULL WHERE id = 'cfg_verify'"),
-        db.prepare(`INSERT INTO provider_credentials
-        (id, organization_id, project_id, provider, label, scope, source, storage_backend, status, created_by)
-        VALUES ('pcred_verify', 'org_test_pc_wallet', 'prj_1', 'privy', 'PC', 'project', 'runtime', 'runtime_env', 'active', 'usr_test_pc_wallet')`),
-        db.prepare(`INSERT INTO custody_connections
-        (id, organization_id, project_id, provider, scope, provider_credential_id, provider_credential_scope_key, status, created_by)
-        VALUES ('conn_verify', 'org_test_pc_wallet', 'prj_1', 'privy', 'project', 'pcred_verify', 'prj_1', 'pending', 'usr_test_pc_wallet')`),
-        db.prepare(
-          "UPDATE custody_wallets SET custody_config_id = NULL, custody_connection_id = 'conn_verify' WHERE id = 'cw_verify'"
-        ),
-        db
-          .prepare(`UPDATE custody_connections SET default_custody_wallet_id = 'cw_verify', status = 'active',
-        provider_account_fingerprint = ?, activated_at = sdp_iso_now(), last_check_status = 'success', last_check_at = sdp_iso_now()
-        WHERE id = 'conn_verify'`)
-          .bind(await getPrivyProviderAccountFingerprint("pc-verification-app")),
-      ]);
-      if (enabled) {
-        expect((await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).row.pubkey).toBe(
-          PUBKEY
-        );
-        expect(PrivySigner.create).toHaveBeenCalledWith(
-          expect.objectContaining({ walletId: WALLET_ID, appId: "pc-verification-app" })
-        );
-        expect(signMessages).toHaveBeenCalledTimes(1);
-      } else {
-        await expect(
-          verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)
-        ).rejects.toMatchObject({ code: "FORBIDDEN" });
-        expect(PrivySigner.create).not.toHaveBeenCalled();
-        expect(spcSession.getSpcSession).not.toHaveBeenCalled();
-        expect(client.challengeWallet).not.toHaveBeenCalled();
-      }
-    }
-  );
+  it("verifies through the exact Connection's stored credential", async () => {
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 29).toString("base64");
+    const db = getDb(env);
+    await db.execute("UPDATE custody_configs SET default_wallet_id = NULL WHERE id = 'cfg_verify'");
+    await insertTestStoredProviderCredential(db, {
+      id: "pcred_verify",
+      organizationId: "org_test_pc_wallet",
+      projectId: "prj_1",
+      provider: "privy",
+      label: "PC",
+      stored: await writeTestPrivyCredentialSecret(env, {
+        organizationId: "org_test_pc_wallet",
+        credentialId: "pcred_verify",
+        appId: "pc-connection-app",
+        appSecret: "pc-connection-secret",
+      }),
+      displayMetadata: {},
+      status: "active",
+      credentialVersion: 1,
+      rotatedFromProviderCredentialId: null,
+      lastValidatedAt: null,
+      deactivatedAt: null,
+      createdBy: "usr_test_pc_wallet",
+    });
+    await insertTestCustodyConnection(db, {
+      id: "conn_verify",
+      organizationId: "org_test_pc_wallet",
+      projectId: "prj_1",
+      provider: "privy",
+      credential: { id: "pcred_verify", projectId: "prj_1" },
+      status: "pending",
+      setupMetadata: {},
+      providerAccountFingerprint: null,
+      lastCheckStatus: null,
+      lastCheckAt: null,
+      lastCheckFailureCode: null,
+      activatedAt: null,
+      deactivatedAt: null,
+      createdBy: "usr_test_pc_wallet",
+      createdAt: new Date().toISOString(),
+    });
+    await db.execute(
+      "UPDATE custody_wallets SET custody_config_id = NULL, custody_connection_id = 'conn_verify' WHERE id = 'cw_verify'"
+    );
+    await activateTestCustodyConnection(db, {
+      connectionId: "conn_verify",
+      custodyWalletId: "cw_verify",
+      providerAccountFingerprint: "sha256:pc-verify",
+    });
+
+    expect((await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).row.pubkey).toBe(
+      PUBKEY
+    );
+    expect(PrivySigner.create).toHaveBeenCalledWith(
+      expect.objectContaining({ walletId: WALLET_ID, appId: "pc-connection-app" })
+    );
+    expect(signMessages).toHaveBeenCalledTimes(1);
+  });
   it("treats an SPC 409 (already verified) as success and still upserts the mirror", async () => {
     client.verifyWallet.mockRejectedValue(
       new PrivateChannelError("CONFLICT", "wallet already verified")

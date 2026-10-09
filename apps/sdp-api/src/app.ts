@@ -406,6 +406,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.use("/issuance/*", requireModule("issuance"));
   v1.route("/issuance/asset-profiles", assetProfiles);
   v1.route("/issuance", issuance);
+  v1.use("/wallets/*", requireModule("custody"));
   v1.route("/wallets", wallets);
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
@@ -433,6 +434,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Dashboard-only helpers. These routes are intentionally excluded from the
   // public OpenAPI and AI discovery surfaces.
   app.route("/internal/playground", playgroundInternal);
+  app.use("/internal/dashboard/custody/*", requireModule("custody"));
   app.route("/internal/dashboard/custody", internalCustody);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
 
