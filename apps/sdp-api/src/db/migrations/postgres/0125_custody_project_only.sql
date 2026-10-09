@@ -25,6 +25,9 @@
 
 -- The collision probe and the moves must see the same rows. Every ALTER below
 -- takes this lock until commit anyway; taking it first only covers the probe.
+-- lock_timeout bounds the wait: a long-running transaction on either table
+-- fails the migration instead of queueing all custody traffic behind it.
+SET LOCAL lock_timeout = '5s';
 LOCK TABLE custody_configs, custody_scope_defaults IN ACCESS EXCLUSIVE MODE;
 
 -- Fails the migration, rather than leaving a row unmoved, when an organization
