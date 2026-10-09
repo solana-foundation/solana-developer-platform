@@ -10,42 +10,59 @@ import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_custody_config_scope_integrity";
 const PROJECT_ID = "prj_custody_config_scope_integrity";
+const OTHER_ORGANIZATION_ID = "org_custody_config_scope_integrity_other";
 const OTHER_PROJECT_ID = "prj_custody_config_scope_integrity_other";
 const USER_ID = "usr_custody_config_scope_integrity";
 
-async function seedScope(): Promise<void> {
+interface ConfigScope {
+  organizationId: string;
+  projectId: string;
+}
+
+const SCOPE: ConfigScope = { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID };
+const OTHER_SCOPE: ConfigScope = {
+  organizationId: OTHER_ORGANIZATION_ID,
+  projectId: OTHER_PROJECT_ID,
+};
+
+async function seedOrganization(scope: ConfigScope): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, 'Custody config scope integrity', ?, 'individual', 'active')`
-      )
-      .bind(ORGANIZATION_ID, "custody-config-scope-integrity"),
-    db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, 'custody-config-scope-integrity@example.com', 1, 'active')`
-      )
-      .bind(USER_ID),
-  ]);
+  await db
+    .prepare(
+      `INSERT INTO organizations (id, name, slug, tier, status)
+       VALUES (?, ?, ?, 'individual', 'active')`
+    )
+    .bind(scope.organizationId, scope.organizationId, scope.organizationId)
+    .run();
   await seedDefaultProjects(db, {
-    organizationId: ORGANIZATION_ID,
+    organizationId: scope.organizationId,
     createdBy: USER_ID,
     members: [],
-    ids: { sandbox: PROJECT_ID, production: OTHER_PROJECT_ID },
+    ids: { sandbox: scope.projectId, production: `${scope.projectId}_production` },
   });
+}
+
+async function seedScope(): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO users (id, email, email_verified, status)
+       VALUES (?, 'custody-config-scope-integrity@example.com', 1, 'active')`
+    )
+    .bind(USER_ID)
+    .run();
+  await seedOrganization(SCOPE);
+  await seedOrganization(OTHER_SCOPE);
 }
 
 async function insertConfig(
   id: string,
-  projectId: string,
+  scope: ConfigScope,
   provider: CustodyProvider
 ): Promise<void> {
   await insertTestCustodyConfigRow(getDb(env), {
     id,
-    organizationId: ORGANIZATION_ID,
-    projectId,
+    organizationId: scope.organizationId,
+    projectId: scope.projectId,
     provider,
     configEncrypted: "test-config",
     status: "active",
@@ -64,13 +81,6 @@ async function insertWallet(id: string, configId: string, walletId: string): Pro
   });
 }
 
-async function setDefaultWallet(configId: string, walletId: string | null): Promise<void> {
-  await getDb(env)
-    .prepare("UPDATE custody_configs SET default_wallet_id = ? WHERE id = ?")
-    .bind(walletId, configId)
-    .run();
-}
-
 describe("custody Config scope integrity constraints", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -78,51 +88,50 @@ describe("custody Config scope integrity constraints", () => {
   });
 
   it("enforces one project-level config per provider", async () => {
-    await insertConfig("cust_scope_prj_a", PROJECT_ID, "privy");
+    await insertConfig("cust_scope_prj_a", SCOPE, "privy");
 
-    await expect(insertConfig("cust_scope_prj_b", PROJECT_ID, "privy")).rejects.toThrow(
+    await expect(insertConfig("cust_scope_prj_b", SCOPE, "privy")).rejects.toThrow(
       /idx_custody_configs_org_project_provider_unarchived/
     );
   });
 
   it("allows the same provider in distinct projects and distinct providers per project", async () => {
-    await insertConfig("cust_scope_mix_prj", PROJECT_ID, "privy");
-    await insertConfig("cust_scope_mix_other", OTHER_PROJECT_ID, "privy");
-    await insertConfig("cust_scope_mix_para", PROJECT_ID, "para");
+    await insertConfig("cust_scope_mix_prj", SCOPE, "privy");
+    await insertConfig("cust_scope_mix_other", OTHER_SCOPE, "privy");
+    await insertConfig("cust_scope_mix_para", SCOPE, "para");
 
     const rows = await getDb(env)
       .prepare(
-        "SELECT id, project_id, provider FROM custody_configs WHERE id IN (?, ?, ?) ORDER BY id"
+        `SELECT id, organization_id, project_id, provider FROM custody_configs
+         WHERE id IN (?, ?, ?) ORDER BY id`
       )
       .bind("cust_scope_mix_other", "cust_scope_mix_para", "cust_scope_mix_prj")
-      .all<{ id: string; project_id: string; provider: string }>();
+      .all<{ id: string; organization_id: string; project_id: string; provider: string }>();
     expect(rows.results).toEqual([
-      { id: "cust_scope_mix_other", project_id: OTHER_PROJECT_ID, provider: "privy" },
-      { id: "cust_scope_mix_para", project_id: PROJECT_ID, provider: "para" },
-      { id: "cust_scope_mix_prj", project_id: PROJECT_ID, provider: "privy" },
+      {
+        id: "cust_scope_mix_other",
+        organization_id: OTHER_ORGANIZATION_ID,
+        project_id: OTHER_PROJECT_ID,
+        provider: "privy",
+      },
+      {
+        id: "cust_scope_mix_para",
+        organization_id: ORGANIZATION_ID,
+        project_id: PROJECT_ID,
+        provider: "para",
+      },
+      {
+        id: "cust_scope_mix_prj",
+        organization_id: ORGANIZATION_ID,
+        project_id: PROJECT_ID,
+        provider: "privy",
+      },
     ]);
   });
 
-  it("requires the default wallet to belong to the same config", async () => {
-    await insertConfig("cust_scope_fk_a", OTHER_PROJECT_ID, "privy");
-    await insertConfig("cust_scope_fk_b", PROJECT_ID, "privy");
-    await insertWallet("cwlt_scope_fk_a", "cust_scope_fk_a", "wallet_fk_a");
-    await insertWallet("cwlt_scope_fk_b", "cust_scope_fk_b", "wallet_fk_b");
-
-    await setDefaultWallet("cust_scope_fk_a", "wallet_fk_a");
-
-    await expect(setDefaultWallet("cust_scope_fk_b", "wallet_missing")).rejects.toThrow(
-      /custody_configs_default_wallet_fkey/
-    );
-    await expect(setDefaultWallet("cust_scope_fk_b", "wallet_fk_a")).rejects.toThrow(
-      /custody_configs_default_wallet_fkey/
-    );
-  });
-
-  it("cascade-deletes a config together with its wallets despite the default pointer", async () => {
-    await insertConfig("cust_scope_cascade", PROJECT_ID, "privy");
+  it("cascade-deletes a config together with its wallets", async () => {
+    await insertConfig("cust_scope_cascade", SCOPE, "privy");
     await insertWallet("cwlt_scope_cascade", "cust_scope_cascade", "wallet_cascade");
-    await setDefaultWallet("cust_scope_cascade", "wallet_cascade");
 
     await getDb(env).prepare("DELETE FROM custody_configs WHERE id = 'cust_scope_cascade'").run();
 
@@ -173,7 +182,7 @@ describe("custody Config scoped upsert concurrency", () => {
     expect(rows).toEqual([{ id: configIds[0], status: "active" }]);
   });
 
-  it("persists the config payload and its wallet atomically without a default pointer", async () => {
+  it("persists the config payload and its wallet atomically", async () => {
     const store = new CustodyConfigStore(getDb(env), env);
 
     const { configId } = await store.saveProviderConfig({
@@ -190,10 +199,10 @@ describe("custody Config scoped upsert concurrency", () => {
     });
 
     const config = await getDb(env)
-      .prepare("SELECT default_wallet_id, status FROM custody_configs WHERE id = ?")
+      .prepare("SELECT status FROM custody_configs WHERE id = ?")
       .bind(configId)
-      .first<{ default_wallet_id: string | null; status: string }>();
-    expect(config).toEqual({ default_wallet_id: null, status: "active" });
+      .first<{ status: string }>();
+    expect(config).toEqual({ status: "active" });
 
     const wallet = await getDb(env)
       .prepare(
@@ -207,7 +216,7 @@ describe("custody Config scoped upsert concurrency", () => {
   it("rolls back the config upsert when the wallet insert fails", async () => {
     const store = new CustodyConfigStore(getDb(env), env);
 
-    await insertConfig("cust_scope_rollback", PROJECT_ID, "para");
+    await insertConfig("cust_scope_rollback", SCOPE, "para");
     await insertWallet("cwlt_scope_rollback", "cust_scope_rollback", "wallet_rollback");
 
     await expect(

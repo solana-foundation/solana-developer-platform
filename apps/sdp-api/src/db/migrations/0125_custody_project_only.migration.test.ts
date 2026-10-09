@@ -13,6 +13,10 @@ import {
 } from "@/test/helpers/migration-db";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { runPostgresMigrations } from "../../../scripts/lib/run-postgres-migrations.mjs";
+import {
+  CUSTODY_DEFAULTS_DROP_MIGRATION,
+  restorePreCustodyDefaultsDropSchema,
+} from "./custody-defaults-schema";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 const migrationFile = "0125_custody_project_only.sql";
@@ -242,11 +246,15 @@ afterAll(async () => {
 describe("0125 custody project-only migration", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
+    await restorePreCustodyDefaultsDropSchema(client);
     await restorePreProjectOnlySchema();
   });
 
   afterEach(async () => {
     await seedTestDatabase(env);
+    await client.query("DELETE FROM schema_migrations WHERE version = $1", [
+      CUSTODY_DEFAULTS_DROP_MIGRATION,
+    ]);
     await runPostgresMigrations({ databaseUrl, migrationsDir });
   });
 
@@ -807,15 +815,8 @@ describe("0125 custody project-only constraints", () => {
     await client.query("ROLLBACK");
   });
 
-  it("rejects an org-level custody config and an org-level custody default", async () => {
+  it("rejects an org-level custody config", async () => {
     const tenant = await seedOrgProject(client, "0125_not_null");
-    await seedConfig({
-      id: "ccfg_0125_not_null",
-      organizationId: tenant.organizationId,
-      projectId: tenant.projectId,
-      provider: "privy",
-      status: "active",
-    });
 
     await expectSqlstate(
       client,
@@ -826,17 +827,6 @@ describe("0125 custody project-only constraints", () => {
           projectId: null,
           provider: "fireblocks",
           status: "active",
-        }),
-      NOT_NULL_VIOLATION
-    );
-    await expectSqlstate(
-      client,
-      () =>
-        seedScopeDefault({
-          id: "csd_0125_not_null_org",
-          organizationId: tenant.organizationId,
-          projectId: null,
-          custodyConfigId: "ccfg_0125_not_null",
         }),
       NOT_NULL_VIOLATION
     );
