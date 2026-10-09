@@ -81,7 +81,7 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   }
 
   const { signer, custodyWalletId } = await resolveAuthoritySigner({
-    movement: "issuance.control",
+    movement: "issuance.seize",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
@@ -93,7 +93,7 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   const destination = assertValidAddress(body.seize.destination, "destination");
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.control");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.seize");
   const prepared = await mosaic.prepareForceTransfer({
     mint: mintAddress,
     source,
@@ -284,14 +284,14 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   }
 
   const signer = await createResolvedAuthoritySigner({
-    movement: "issuance.control",
+    movement: "issuance.seize",
     env: c.env,
     auth,
     custodyWalletId,
     currentAuthority: permanentDelegateRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.control");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.seize");
   const auditIntent = await auditService.beginCritical(c, {
     action: "seize",
     resourceType: "token_transaction",

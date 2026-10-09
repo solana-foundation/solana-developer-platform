@@ -44,24 +44,39 @@ export const MOVEMENTS = {
   "recurring.resume": { module: "recurring_payments", kind: "start" },
   "recurring.cancel": { module: "recurring_payments", kind: "exit" },
 
-  /** Mint, deploy, thaw, unpause, metadata and authority changes, allowlist additions. */
+  /**
+   * Mint, deploy, thaw, unpause, metadata and authority changes, control-list
+   * additions, and blocklist removals (which give an address access back).
+   */
   "issuance.authority": { module: "issuance", kind: "start" },
   /**
    * Compliance controls that only reduce exposure: burn, force-burn, freeze,
-   * pause, seize, allowlist removal. An issuer must keep them while suspended.
+   * pause, allowlist removal. An issuer must keep them while refused starts.
    */
   "issuance.control": { module: "issuance", kind: "exit" },
+  /**
+   * Permanent-delegate force transfer from any holder to a caller-chosen
+   * destination: it moves value somewhere new, so it is a start.
+   */
+  "issuance.seize": { module: "issuance", kind: "start" },
 
   "dvp.create": { module: "dvp", kind: "start" },
   "dvp.fund": { module: "dvp", kind: "start" },
-  /** Settles a trade whose legs are funded; reclaim stays open as the exit. */
+  /** Settles a trade whose legs are funded; cancel and reclaim stay open as exits. */
   "dvp.settle": { module: "dvp", kind: "start" },
+  /** Cancels a trade, refunding each party to its own token account. */
+  "dvp.cancel": { module: "dvp", kind: "exit" },
   "dvp.reclaim": { module: "dvp", kind: "exit" },
 
   "earn.deposit": { module: "earn", kind: "start" },
   "earn.withdraw": { module: "earn", kind: "exit" },
-  /** Requesting and cancelling a queued withdrawal. */
-  "earn.queued_withdraw": { module: "earn", kind: "exit" },
+  /** Requests a queued withdrawal; the proceeds go to the owner. */
+  "earn.queued_withdraw_request": { module: "earn", kind: "exit" },
+  /**
+   * Cancels a queued withdrawal, putting the shares back into the position.
+   * It undoes an exit, and refusing it traps nothing: the request still matures.
+   */
+  "earn.queued_withdraw_cancel": { module: "earn", kind: "start" },
 
   "private_channels.session": { module: "private_channels", kind: "start" },
   "private_channels.deposit": { module: "private_channels", kind: "start" },
@@ -73,15 +88,21 @@ export const MOVEMENTS = {
   /** Withdraw, merge, timelock settlement, ring exit. */
   "helius_rings.operation_exit": { module: "helius_rings", kind: "exit" },
   /**
-   * Transactions the Rings SDK signs on its own (ring bring-up, enabling
-   * merges, re-keying). Every value-moving Rings operation signs through the
-   * service's own path and is classified by its op type, so these move no
-   * value and must stay open for an organization's exits.
+   * Identity registration and custom-ring bring-up (ring config, authority and
+   * lookup table, the auditor-key attestation and authority challenge). They
+   * open new authority, so they are starts.
+   */
+  "helius_rings.bring_up": { module: "helius_rings", kind: "start" },
+  /**
+   * The other transactions the Rings SDK signs on its own: enabling merges
+   * (which merge needs) and re-keying an identity. They move no note value and
+   * must stay open for an organization's exits.
    */
   "helius_rings.gateway_transaction": { module: "helius_rings", kind: "exit" },
   /**
-   * Raw message signatures. Shielded keys are re-derived from one on every
-   * use, withdrawals included, so refusing it would trap funds.
+   * The owner's signature over Zolana's derivation message, and only that
+   * message. Shielded keys are re-derived from it on every use, withdrawals
+   * included, so refusing it would trap funds.
    */
   "helius_rings.key_derivation": { module: "helius_rings", kind: "exit" },
 } as const satisfies Record<string, MovementDefinition>;

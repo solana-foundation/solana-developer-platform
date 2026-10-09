@@ -53,7 +53,13 @@ export type VaultFeeMode =
 
 export interface ResolveVaultSponsorshipInput {
   /** The movement the sponsored transaction serves (HOO-1955). */
-  movement: Extract<MovementId, "earn.deposit" | "earn.withdraw" | "earn.queued_withdraw">;
+  movement: Extract<
+    MovementId,
+    | "earn.deposit"
+    | "earn.withdraw"
+    | "earn.queued_withdraw_request"
+    | "earn.queued_withdraw_cancel"
+  >;
   organizationId: string;
   projectId: string;
   /** Custody wallet id, used as the sponsorship quota actor. */

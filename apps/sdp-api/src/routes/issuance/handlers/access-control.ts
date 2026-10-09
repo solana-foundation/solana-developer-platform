@@ -25,6 +25,19 @@ export function getTokenAccessControlMode(token: TokenAccessControlShape): Token
   return "disabled";
 }
 
+/**
+ * The movement removing a control-list entry serves (HOO-1955). Removing an
+ * allowlist entry takes access away, a control (exit). Removing a blocklist
+ * entry gives it back, so it is a start like any other grant.
+ */
+export function controlListRemovalMovement(
+  token: TokenAccessControlShape
+): "issuance.authority" | "issuance.control" {
+  return getTokenAccessControlMode(token) === "blocklist"
+    ? "issuance.authority"
+    : "issuance.control";
+}
+
 export function getMosaicAclMode(token: TokenAccessControlShape): AclMode | undefined {
   const mode = getTokenAccessControlMode(token);
   return mode === "disabled" ? undefined : mode;
