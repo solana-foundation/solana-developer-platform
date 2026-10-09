@@ -156,6 +156,7 @@ pay.post(
       null;
     const getFeePayment = async () => {
       feePaymentInstance ??= await createProjectSponsorshipFeePayment(c.env, {
+        movement: "payments.pay_request",
         organizationId: request.organization_id,
         projectId: request.project_id as string,
         actor: { type: "wallet", id: request.wallet_id },

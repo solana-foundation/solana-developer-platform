@@ -1,8 +1,9 @@
 /**
- * Money movements (HOO-1955): every reason SDP asks a custody wallet to sign,
- * and whether it starts new exposure or takes money already committed back
- * out. The custody signer is handed the movement it serves and decides at
- * signing time, against the organization's live state, whether to sign.
+ * Money movements (HOO-1955): every reason SDP asks a custody wallet to sign
+ * or sponsors a transaction's fees, and whether it starts new exposure or
+ * takes money already committed back out. The custody signer and the fee
+ * sponsor are each handed the movement they serve and decide when asked to
+ * sign, against the organization's live state, whether to.
  *
  * - `start`: anything that opens new exposure, supply, authority or
  *   delegation, including a signature that moves nothing (a signer check).
@@ -31,6 +32,8 @@ export const MOVEMENTS = {
 
   "payments.transfer": { module: "payments", kind: "start" },
   "payments.transfer_batch": { module: "payments", kind: "start" },
+  /** `/pay`: SDP sponsors the payer's transaction for the organization's request. */
+  "payments.pay_request": { module: "payments", kind: "start" },
 
   "recurring.activate": { module: "recurring_payments", kind: "start" },
   "recurring.update": { module: "recurring_payments", kind: "start" },
@@ -42,6 +45,7 @@ export const MOVEMENTS = {
 
   "issuance.authority": { module: "issuance", kind: "start" },
 
+  "dvp.create": { module: "dvp", kind: "start" },
   "dvp.fund": { module: "dvp", kind: "start" },
   /** Settles a trade whose legs are funded; reclaim stays open as the exit. */
   "dvp.settle": { module: "dvp", kind: "start" },

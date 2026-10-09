@@ -400,6 +400,7 @@ async function prepareCustodyTransaction(
   const cluster = earnClusterFor(input.actor.environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const fee = await resolveVaultSponsorship(env, {
+    movement: "earn.queued_withdraw",
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     walletId: input.actor.custodyWalletId,
@@ -521,6 +522,7 @@ export async function createCustodyQueuedWithdrawal(
   const actionId = generateEarnVaultWithdrawalRequestActionId();
   const deadline = createVaultDeadline();
   const fee = await resolveVaultSponsorship(env, {
+    movement: "earn.queued_withdraw",
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     walletId: input.actor.custodyWalletId,

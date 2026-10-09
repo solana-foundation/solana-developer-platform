@@ -1379,6 +1379,7 @@ async function runReplacementUpdate(input: {
       { commitment: "confirmed" }
     );
     const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+      movement: "recurring.update",
       organizationId: input.organizationId,
       projectId: input.projectId,
       actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },

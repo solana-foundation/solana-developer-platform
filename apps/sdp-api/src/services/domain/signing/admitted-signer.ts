@@ -1,7 +1,6 @@
 import type { MovementId } from "@sdp/types";
 import type { TransactionSigner } from "@solana/kit";
-import { type MoneyAdmissionDecision, MoneyMovementRefusedError } from "@/lib/money-admission";
-import { logEvent } from "@/runtime/money-path-events";
+import { assertMovementAdmitted, type MoneyAdmissionDecision } from "@/lib/money-admission";
 
 /**
  * Every way a `@solana/kit` signer produces a signature. A refused signer keeps
@@ -42,18 +41,14 @@ export function admittedSigner(
   if (decision.admitted) {
     return signer;
   }
-  const { reason } = decision;
-  const refuse = () => {
-    logEvent("warn", {
-      event: "sdp_money_refused",
+  const refuse = async () => {
+    assertMovementAdmitted(decision, {
       surface: "signer",
       movement: context.movement,
-      subject_id: context.custodyWalletId,
-      organization_id: context.organizationId,
-      project_id: context.projectId,
-      reason,
+      organizationId: context.organizationId,
+      projectId: context.projectId,
+      subjectId: context.custodyWalletId,
     });
-    return Promise.reject(new MoneyMovementRefusedError(reason));
   };
   const refused: Record<string, unknown> = { address: signer.address };
   for (const method of SIGNING_METHODS) {

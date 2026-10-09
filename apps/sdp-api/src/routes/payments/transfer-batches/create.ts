@@ -263,7 +263,7 @@ export async function createTransferBatch(c: AppContext) {
   const idempotencyKey = idempotencyKeyHeader === undefined ? null : idempotencyKeyHeader;
   const idempotencyFingerprint = idempotencyKey ? resolved.idempotencyFingerprint : null;
 
-  const feePayment = getFeePayment(c);
+  const feePayment = getFeePayment(c, "payments.transfer_batch");
   const [signer, feePayer, lifetime] = await Promise.all([
     solanaServices.createOrgSignerForCustodyWallet(
       c.env,

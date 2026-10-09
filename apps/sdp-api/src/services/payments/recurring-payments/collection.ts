@@ -1717,6 +1717,7 @@ export async function collectRecurringPayment(input: {
       tokenProgram,
     });
     const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+      movement: "recurring.collect",
       organizationId: input.organizationId,
       projectId: input.projectId,
       actor: { type: "wallet", id: input.sourceWallet.walletId },

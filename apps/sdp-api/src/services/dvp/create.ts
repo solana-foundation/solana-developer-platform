@@ -474,6 +474,7 @@ export async function createDvpTrade(
   let signed = false;
   try {
     const feePayment = await createProjectSponsorshipFeePayment(env, {
+      movement: "dvp.create",
       organizationId: input.organizationId,
       projectId: input.projectId,
       actor: { type: "wallet", id: settlement.custodyWalletId },

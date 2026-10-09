@@ -178,6 +178,7 @@ export async function withdrawFromVault(
   // this exit pays for any other account is charged to the sponsor and stays
   // there.
   const fee = await resolveVaultSponsorship(env, {
+    movement: "earn.withdraw",
     organizationId: input.organizationId,
     projectId: input.projectId,
     walletId: input.wallet.id,

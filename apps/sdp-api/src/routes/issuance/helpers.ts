@@ -41,8 +41,13 @@ export const createIssuanceMosaicService = (
     c.env,
     signer,
     feePayment,
-    feePayment === "sponsored" ? resolveRequestSponsorshipScope(c) : undefined
+    feePayment === "sponsored"
+      ? { ...resolveRequestSponsorshipScope(c), movement: "issuance.authority" }
+      : undefined
   );
 
 export const createIssuanceToken2022Service = (c: AppContext, signer: TransactionSigner) =>
-  createToken2022Service(c.env, signer, resolveRequestSponsorshipScope(c));
+  createToken2022Service(c.env, signer, {
+    ...resolveRequestSponsorshipScope(c),
+    movement: "issuance.authority",
+  });

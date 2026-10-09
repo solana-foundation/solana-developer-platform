@@ -31,7 +31,7 @@ import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime
 import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
-import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
+import { resolveAuthenticatedSponsoredFeePayer } from "@/services/sponsorship.service";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 import { findAuthorizedOperationalWallet } from "./wallets";
 
@@ -102,7 +102,6 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // a signer check is diagnostics, and diagnostics must not be able to spend
     // sponsorship — the transaction below is verified locally and in RPC
     // simulation, and is never broadcast.
-    const feePayment = createAuthenticatedSponsorshipFeePayment(c);
     const [signer, feePayer] = await Promise.all([
       createOrgSignerForCustodyWallet(
         c.env,
@@ -111,7 +110,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
         wallet.id,
         "custody.signer_check"
       ),
-      feePayment.getFeePayer(),
+      resolveAuthenticatedSponsoredFeePayer(c),
     ]);
 
     const rpc = createClusterRpc(c.env, CLUSTER_BY_SDP_ENVIRONMENT[resolveSdpEnvironment(c)]);

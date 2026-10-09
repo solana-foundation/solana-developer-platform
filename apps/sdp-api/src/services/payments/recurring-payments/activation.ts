@@ -892,6 +892,7 @@ export async function activateRecurringPayment(input: {
         { commitment: "confirmed" }
       );
       const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+        movement: "recurring.activate",
         organizationId: input.organizationId,
         projectId: input.projectId,
         actor: { type: "wallet", id: input.sourceWallet.walletId },

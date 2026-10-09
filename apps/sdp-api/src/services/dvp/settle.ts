@@ -185,7 +185,7 @@ export async function closeDvpTrade(
   });
 
   // Sponsorship is resolved only after every local refusal above, as in create.
-  const feePayment = createRequestSponsorshipFeePayment(c);
+  const feePayment = createRequestSponsorshipFeePayment(c, "dvp.settle");
   const sponsor = await feePayment.getFeePayer();
 
   const instructions = [

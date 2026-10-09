@@ -114,6 +114,40 @@ export function decideMovement(
   return MOVEMENTS[movement].kind === "exit" ? { admitted: true } : decideMoneyStart(facts);
 }
 
+/** Where a movement was refused, for the `sdp_money_refused` event. */
+export interface MovementRefusalContext {
+  surface: "signer" | "sponsor";
+  movement: MovementId;
+  organizationId: string;
+  projectId: string | null;
+  /** The custody wallet or sponsored actor the refusal is about. */
+  subjectId: string;
+}
+
+/**
+ * Throws {@link MoneyMovementRefusedError} (403) for a refused decision, after
+ * emitting one `sdp_money_refused` event. The signing sinks call it at the
+ * moment they are asked to sign.
+ */
+export function assertMovementAdmitted(
+  decision: MoneyAdmissionDecision,
+  context: MovementRefusalContext
+): void {
+  if (decision.admitted) {
+    return;
+  }
+  logEvent("warn", {
+    event: "sdp_money_refused",
+    surface: context.surface,
+    movement: context.movement,
+    subject_id: context.subjectId,
+    organization_id: context.organizationId,
+    project_id: context.projectId,
+    reason: decision.reason,
+  });
+  throw new MoneyMovementRefusedError(decision.reason);
+}
+
 /** One primary-key join, scoped by both ids. */
 export async function readMoneyAdmissionFacts(
   env: Env,

@@ -134,6 +134,7 @@ export async function reclaimDvpTradeLeg(
 
   // Sponsorship only after every refusal above, as in fund and settle.
   const feePayment = await createProjectSponsorshipFeePayment(env, {
+    movement: "dvp.reclaim",
     organizationId: params.organizationId,
     projectId: params.projectId,
     actor: { type: "wallet", id: params.custodyWalletId },

@@ -248,6 +248,7 @@ export async function sendSubscriptionInstructions(input: {
   const rpc = solanaRpc.createRpc(input.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = await createProjectSponsorshipFeePayment(input.env, {
+    movement: input.movement,
     organizationId: input.organizationId,
     projectId: input.projectId,
     actor: { type: "wallet", id: input.sourceWallet.walletId },
