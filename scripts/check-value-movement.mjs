@@ -292,7 +292,12 @@ export function findValueMovementViolations({
         !node.importClause.isTypeOnly
       ) {
         reportModule(node, node.moduleSpecifier);
-      } else if (ts.isExportDeclaration(node) && !node.exportClause && node.moduleSpecifier) {
+      } else if (
+        ts.isExportDeclaration(node) &&
+        node.moduleSpecifier &&
+        !node.isTypeOnly &&
+        (!node.exportClause || ts.isNamespaceExport(node.exportClause))
+      ) {
         reportModule(node, node.moduleSpecifier);
       } else if (
         ts.isCallExpression(node) &&

@@ -104,12 +104,19 @@ test("flags destructuring, element access and whole-module escapes", () => {
     "src/element.ts": `import { Signer } from "./lib/cap";\nnew Signer()["sign"]();\n`,
     "src/dynamic.ts": `export async function load() {\n  return import("./lib/cap");\n}\n`,
     "src/star.ts": `export * from "./lib/cap";\n`,
+    "src/star-as.ts": `export * as cap from "./lib/cap";\n`,
   });
 
   const flagged = new Set(found.map((violation) => violation.split(":")[0]));
   assert.deepEqual(
     [...flagged].sort(),
-    ["src/destructure.ts", "src/dynamic.ts", "src/element.ts", "src/star.ts"].sort()
+    [
+      "src/destructure.ts",
+      "src/dynamic.ts",
+      "src/element.ts",
+      "src/star-as.ts",
+      "src/star.ts",
+    ].sort()
   );
 });
 
