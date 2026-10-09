@@ -147,8 +147,8 @@ const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
     { family: "ramps", provider: "moneygram", available: false },
     { family: "ramps", provider: "coinbase", available: false },
     { family: "ramps", provider: "mural", available: false },
-    { family: "ramps", provider: "stripe", available: false },
-    { family: "earn", provider: "veda", available: false },
+    { family: "ramps", provider: "stripe", available: true },
+    { family: "earn", provider: "veda", available: true },
     { family: "earn", provider: "upshift", available: false },
     { family: "earn", provider: "perena", available: false },
     { family: "earn", provider: "kamino", available: false },
@@ -283,7 +283,6 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     custodyReleaseChannel.stageOverride = null;
-    providerStages.rampStageOverride = null;
     providerStages.moduleStageOverride = null;
     providerStages.surfacedEarnProvider = null;
     await seedTestDatabase(env);
@@ -307,8 +306,6 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   });
 
   it("lists every provider with its availability for a Production project", async () => {
-    providerStages.rampStageOverride = { provider: "moonpay", stage: "stable" };
-
     const response = await read(
       PROJECT_IDS.production,
       apiKeyHeaders(API_KEYS.production),
@@ -396,52 +393,28 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     });
   });
 
-  it("reports providers below stable as unavailable in a Production project and available in a Sandbox one", async () => {
+  it("reports below-stable providers the release channel offers the same in a Production project as in a Sandbox one, Managed custody aside", async () => {
     custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
     providerStages.moduleStageOverride = { module: "compliance", stage: "beta" };
 
     const production = await readAvailability("production", deploymentEnv({}));
     const sandbox = await readAvailability("sandbox", deploymentEnv({}));
 
+    expect(production.providers.filter((entry) => entry.family !== "custody")).toEqual(
+      SANDBOX_AVAILABILITY.providers.filter((entry) => entry.family !== "custody")
+    );
+    expect(sandbox.providers.filter((entry) => entry.family !== "custody")).toEqual(
+      SANDBOX_AVAILABILITY.providers.filter((entry) => entry.family !== "custody")
+    );
     expect(production.providers).toContainEqual({
       family: "custody",
       provider: "privy",
-      modes: [],
-    });
-    expect(production.providers).toContainEqual({
-      family: "compliance",
-      provider: "range",
-      available: false,
-    });
-    expect(production.providers).toContainEqual({
-      family: "ramps",
-      provider: "moonpay",
-      available: false,
-    });
-    expect(production.providers).toContainEqual({
-      family: "earn",
-      provider: "veda",
-      available: false,
+      modes: ["byok"],
     });
     expect(sandbox.providers).toContainEqual({
       family: "custody",
       provider: "privy",
       modes: ["managed", "byok"],
-    });
-    expect(sandbox.providers).toContainEqual({
-      family: "compliance",
-      provider: "range",
-      available: true,
-    });
-    expect(sandbox.providers).toContainEqual({
-      family: "ramps",
-      provider: "moonpay",
-      available: true,
-    });
-    expect(sandbox.providers).toContainEqual({
-      family: "earn",
-      provider: "veda",
-      available: true,
     });
   });
 
@@ -493,7 +466,6 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   });
 
   it("reports a provider with only sandbox credentials as unavailable in a Production project", async () => {
-    providerStages.rampStageOverride = { provider: "moonpay", stage: "stable" };
     const sandboxKeysOnly = deploymentEnv({
       MOONPAY_API_KEY: undefined,
       MOONPAY_SECRET_KEY: undefined,

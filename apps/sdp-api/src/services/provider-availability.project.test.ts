@@ -99,7 +99,6 @@ describe("assertProjectProviderAdmitted", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     custodyReleaseChannel.stageOverride = null;
-    providerStages.rampStageOverride = null;
     providerStages.moduleStageOverride = null;
     providerStages.surfacedEarnProvider = null;
     await seedTestDatabase(env);
@@ -125,7 +124,7 @@ describe("assertProjectProviderAdmitted", () => {
     vi.restoreAllMocks();
   });
 
-  it("checks a ramp provider's channel, stage, entitlement and credentials in that order", async () => {
+  it("checks a below-stable ramp provider's channel, entitlement and credentials in that order in a Production project", async () => {
     await setProviderOverrides({ ramps: { moonpay: false } });
 
     await expect(
@@ -136,13 +135,6 @@ describe("assertProjectProviderAdmitted", () => {
         "provider_not_in_release_channel"
       )
     );
-    await expect(admit(projects.production, deploymentEnv({}), MOONPAY)).rejects.toMatchObject(
-      refusal(
-        "MoonPay is not stable yet, so a production project cannot use it.",
-        "provider_stage_not_allowed"
-      )
-    );
-    providerStages.rampStageOverride = { provider: "moonpay", stage: "stable" };
     await expect(admit(projects.production, deploymentEnv({}), MOONPAY)).rejects.toMatchObject(
       refusal("MoonPay requires manual activation for this organization.", "provider_not_entitled")
     );
@@ -168,7 +160,7 @@ describe("assertProjectProviderAdmitted", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("checks a compliance provider's channel, stage, entitlement and credentials in that order", async () => {
+  it("checks a below-stable compliance provider's channel, entitlement and credentials in that order in a Production project", async () => {
     providerStages.moduleStageOverride = { module: "compliance", stage: "experimental" };
 
     await expect(
@@ -176,13 +168,6 @@ describe("assertProjectProviderAdmitted", () => {
     ).rejects.toMatchObject(
       refusal("Range is not available in this release channel.", "provider_not_in_release_channel")
     );
-    await expect(admit(projects.production, deploymentEnv({}), RANGE)).rejects.toMatchObject(
-      refusal(
-        "Range is not stable yet, so a production project cannot use it.",
-        "provider_stage_not_allowed"
-      )
-    );
-    providerStages.moduleStageOverride = null;
     await expect(admit(projects.production, deploymentEnv({}), RANGE)).rejects.toMatchObject(
       refusal("Range requires manual activation for this organization.", "provider_not_entitled")
     );
@@ -199,7 +184,7 @@ describe("assertProjectProviderAdmitted", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("checks an Earn provider's channel, surfacing, stage, entitlement and credentials in that order", async () => {
+  it("checks a below-stable Earn provider's channel, surfacing, entitlement and credentials in that order in a Production project", async () => {
     await expect(admit(projects.production, deploymentEnv({}), UPSHIFT)).rejects.toMatchObject(
       refusal(
         "Upshift is not available in this release channel.",
@@ -218,15 +203,6 @@ describe("assertProjectProviderAdmitted", () => {
       admit(projects.production, deploymentEnv(EARN_ENABLED_FLAGS), UPSHIFT)
     ).rejects.toMatchObject(refusal("Upshift is not currently offered.", "provider_not_offered"));
     providerStages.surfacedEarnProvider = "upshift";
-    await expect(
-      admit(projects.production, deploymentEnv(EARN_ENABLED_FLAGS), UPSHIFT)
-    ).rejects.toMatchObject(
-      refusal(
-        "Upshift is not stable yet, so a production project cannot use it.",
-        "provider_stage_not_allowed"
-      )
-    );
-    providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
     await expect(
       admit(projects.production, deploymentEnv(EARN_ENABLED_FLAGS), UPSHIFT)
     ).rejects.toMatchObject(
@@ -261,7 +237,6 @@ describe("assertProjectProviderAdmitted", () => {
     "refuses an otherwise admissible Earn provider as outside the release channel while $flag is off",
     async ({ flags }) => {
       providerStages.surfacedEarnProvider = "upshift";
-      providerStages.moduleStageOverride = { module: "earn", stage: "stable" };
       await setProviderOverrides({ earn: { upshift: true } });
 
       await expect(
@@ -312,17 +287,10 @@ describe("assertProjectProviderAdmitted", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("checks BYOK custody's stage before entitlement and admits it without deployment credentials", async () => {
+  it("checks a below-stable BYOK custody pair's entitlement and admits it in a Production project without deployment credentials", async () => {
     custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
     await setProviderOverrides({ custody: { privy: false } });
 
-    await expect(admit(projects.production, deploymentEnv({}), BYOK_PRIVY)).rejects.toMatchObject(
-      refusal(
-        "Privy BYOK custody is not stable yet, so a production project cannot use it.",
-        "custody_mode_not_allowed"
-      )
-    );
-    custodyReleaseChannel.stageOverride = null;
     await expect(admit(projects.production, deploymentEnv({}), BYOK_PRIVY)).rejects.toMatchObject(
       refusal("Privy requires manual activation for this organization.", "provider_not_entitled")
     );

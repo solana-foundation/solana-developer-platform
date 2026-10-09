@@ -50,11 +50,9 @@ export const providerStages: ProviderStageToggle = {
  * overridden provider's stage from `providerStages.rampStageOverride`, and whose
  * module predicates read the overridden module's stage from
  * `providerStages.moduleStageOverride`, and whose `isEarnProviderSurfaced` also
- * surfaces `providerStages.surfacedEarnProvider`; everything else is the real module. The
- * environment stage predicate keeps the real rule but asks the mocked module
- * predicate, since its in-module call is out of a module mock's reach. Load it
- * with `await import()` inside the test file's `vi.mock` factory, so the factory
- * and the test share this module's toggle.
+ * surfaces `providerStages.surfacedEarnProvider`; everything else is the real module.
+ * Load it with `await import()` inside the test file's `vi.mock` factory, so the
+ * factory and the test share this module's toggle.
  * @param original - The real module, from the factory's `importOriginal`.
  * @returns The module with its ramp stage manifest, module predicates and Earn surfacing overridden.
  */
@@ -91,9 +89,5 @@ export function mockProviderStages(original: SdpTypesModule): ProviderStagesModu
     isModuleInReleaseChannel,
     isEarnProviderSurfaced: (provider) =>
       provider === providerStages.surfacedEarnProvider || original.isEarnProviderSurfaced(provider),
-    isModuleStageAllowedInEnvironment: (environment, module, stages) =>
-      environment === "production"
-        ? isModuleInReleaseChannel("stable", module, stages)
-        : original.isModuleStageAllowedInEnvironment(environment, module, stages),
   };
 }
