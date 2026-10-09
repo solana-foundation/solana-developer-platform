@@ -92,6 +92,13 @@ Please read [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md), and 
 
 This project is licensed under the [MIT License](LICENSE).
 
+The MIT License does not cover the third-party fonts in
+[`packages/sdp-design-tokens/src/assets/fonts/`](packages/sdp-design-tokens/src/assets/fonts/).
+Season Sans is a proprietary Displaay face licensed to the Solana Foundation for SDP only, and
+you may not copy or reuse it
+([notice](packages/sdp-design-tokens/src/assets/fonts/LICENSE-SeasonSans.txt)). Geist Mono
+is under the [SIL Open Font License 1.1](packages/sdp-design-tokens/src/assets/fonts/LICENSE-GeistMono.txt).
+
 ## Security
 
 Report security issues using the process in [`SECURITY.md`](SECURITY.md). Do not open public issues for vulnerabilities or suspected secrets.

@@ -20,3 +20,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+
+---
+
+Third-party fonts excluded from this license:
+
+- packages/sdp-design-tokens/src/assets/fonts/SeasonSans-*: Season Sans, (c) Displaay
+  Type Foundry s.r.o. Proprietary; licensed to the Solana Foundation for this project only.
+  Not covered by the MIT License above and may not be copied or redistributed. See
+  packages/sdp-design-tokens/src/assets/fonts/LICENSE-SeasonSans.txt.
+- packages/sdp-design-tokens/src/assets/fonts/GeistMono-*: Geist Mono, (c) 2023 Vercel.
+  SIL Open Font License 1.1. See
+  packages/sdp-design-tokens/src/assets/fonts/LICENSE-GeistMono.txt.
