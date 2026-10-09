@@ -192,7 +192,9 @@ function PaymentRequestRecord({
           <RecordColumns>
             <RecordList>
               <RecordRow label={t("DashboardPayments.requests.from")}>
-                {contactName ?? t("DashboardPayments.requests.anyoneWithLink")}
+                {contactName ??
+                  request.counterpartyId ??
+                  t("DashboardPayments.requests.anyoneWithLink")}
               </RecordRow>
               <RecordRow label={t("DashboardPayments.requests.to")}>
                 {walletName ? (

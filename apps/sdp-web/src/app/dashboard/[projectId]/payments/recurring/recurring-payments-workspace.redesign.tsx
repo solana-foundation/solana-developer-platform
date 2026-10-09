@@ -169,7 +169,8 @@ export function RecurringPaymentsWorkspace({
         recurringPayment.token,
         issuedTokensByMint,
         resolveTokenLabel(recurringPayment.token, wallets)
-      ).tokenName
+      ).tokenName,
+      locale
     );
   const getScheduleTitle = (recurringPayment: PaymentRecurringPayment) =>
     t("DashboardPayments.recurring.amountToCounterparty", {

@@ -7,6 +7,7 @@ import {
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
+import { getEnabledRampProviders } from "@/flags/ramps";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -28,17 +29,20 @@ async function PaymentsPlaygroundData({
   trace: Trace;
 }) {
   const [t, apiClient] = await Promise.all([getTranslations(), apiClientPromise]);
-  const [apiKeysResult, walletsResult, transfersResult, counterpartiesResult] = await Promise.all([
-    trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-    trace.step("fetch_payments_wallet_summaries", () =>
-      fetchPaymentsWallets(apiClient.request, { view: "summary" })
-    ),
-    trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
-    // Fills the contact endpoints' id pickers; the API's largest page.
-    trace.step("fetch_counterparties", () =>
-      fetchCounterparties(apiClient.request, { page: 1, pageSize: 100 })
-    ),
-  ]);
+  const [apiKeysResult, walletsResult, transfersResult, counterpartiesResult, rampProviders] =
+    await Promise.all([
+      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+      trace.step("fetch_payments_wallet_summaries", () =>
+        fetchPaymentsWallets(apiClient.request, { view: "summary" })
+      ),
+      trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
+      // Fills the contact endpoints' id pickers; the API's largest page.
+      trace.step("fetch_counterparties", () =>
+        fetchCounterparties(apiClient.request, { page: 1, pageSize: 100 })
+      ),
+      // The quote endpoints offer the providers the channel-capped flags leave on, never the raw list.
+      getEnabledRampProviders(),
+    ]);
   const wallets = walletsResult.data ?? [];
   const transfers = transfersResult.data ?? [];
   const walletsError = walletsResult.ok
@@ -70,6 +74,7 @@ async function PaymentsPlaygroundData({
       transfers={transfers}
       transfersError={transfersError}
       counterparties={counterpartiesResult.data.map(({ id, displayName }) => ({ id, displayName }))}
+      rampProviders={rampProviders}
     />
   );
 }

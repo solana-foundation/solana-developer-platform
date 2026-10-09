@@ -129,6 +129,8 @@ function DashboardHeaderDownloadAction({
   };
 
   return (
+    // The icon goes in the button's icon slot: as a child it would sit on its own line above the
+    // label, since the shared button wraps children in their own box.
     <Button
       type="button"
       variant={variant === "primary" ? "default" : "outline"}
@@ -136,12 +138,14 @@ function DashboardHeaderDownloadAction({
       disabled={pending}
       aria-busy={pending || undefined}
       onClick={() => void download()}
+      iconLeft={
+        pending ? (
+          <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <DownloadIcon className="size-4" aria-hidden="true" />
+        )
+      }
     >
-      {pending ? (
-        <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-      ) : (
-        <DownloadIcon className="size-4" aria-hidden="true" />
-      )}
       {label}
     </Button>
   );

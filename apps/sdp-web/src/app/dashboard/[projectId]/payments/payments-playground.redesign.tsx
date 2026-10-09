@@ -1,6 +1,10 @@
 "use client";
 
-import { CLUSTER_BY_SDP_ENVIRONMENT, type PaymentsDashboardWallet } from "@sdp/types";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type PaymentsDashboardWallet,
+  type RampProviderId,
+} from "@sdp/types";
 import { useMemo } from "react";
 import {
   type ApiPlaygroundEndpointConfig,
@@ -29,6 +33,7 @@ interface PaymentsPlaygroundProps {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
   counterparties: CounterpartyPlaygroundView[];
+  rampProviders: readonly RampProviderId[];
 }
 
 function withGroup(endpoints: ApiPlaygroundEndpointConfig[], group: string) {
@@ -49,6 +54,7 @@ export function PaymentsPlayground({
   wallets,
   walletsError,
   counterparties,
+  rampProviders,
 }: PaymentsPlaygroundProps) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
@@ -56,7 +62,7 @@ export function PaymentsPlayground({
     const tokens = deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]);
     const merged = [
       ...withGroup(
-        buildPaymentsPlaygroundEndpointConfigs({ transfers, wallets }, t),
+        buildPaymentsPlaygroundEndpointConfigs({ transfers, wallets, rampProviders }, t),
         t("DashboardPayments.playground.groupPayments")
       ),
       ...withGroup(
@@ -77,7 +83,7 @@ export function PaymentsPlayground({
       seen.add(endpoint.id);
       return true;
     });
-  }, [transfers, wallets, counterparties, sdpEnvironment, t]);
+  }, [transfers, wallets, counterparties, rampProviders, sdpEnvironment, t]);
 
   return (
     <ApiPlaygroundShell

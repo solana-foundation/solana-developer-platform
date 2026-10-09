@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types";
+import type { PaymentsDashboardWallet, PaymentTransferSummary, RampProviderId } from "@sdp/types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
@@ -30,6 +30,7 @@ interface PaymentsPlaygroundWorkspaceProps {
   transfers: PaymentTransferSummary[];
   transfersError: string | null;
   counterparties: CounterpartyPlaygroundView[];
+  rampProviders: readonly RampProviderId[];
 }
 
 export function PaymentsPlaygroundWorkspace({
@@ -40,6 +41,7 @@ export function PaymentsPlaygroundWorkspace({
   transfers,
   transfersError,
   counterparties,
+  rampProviders,
 }: PaymentsPlaygroundWorkspaceProps) {
   const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
 
@@ -61,6 +63,7 @@ export function PaymentsPlaygroundWorkspace({
       wallets={wallets}
       walletsError={walletsError}
       counterparties={counterparties}
+      rampProviders={rampProviders}
     />
   );
 }

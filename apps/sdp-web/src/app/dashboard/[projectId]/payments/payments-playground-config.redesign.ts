@@ -1,4 +1,4 @@
-import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
+import { PAYMENT_TRANSFER_STATUSES, type RampProviderId } from "@sdp/types";
 import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,
@@ -6,6 +6,7 @@ import type {
 } from "@/components/api-playground-shell";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
+import { getRampProviderLabel } from "@/lib/ramps";
 
 export interface PaymentsPlaygroundWalletView {
   id: string;
@@ -22,6 +23,8 @@ export interface PaymentsPlaygroundTransferView {
 interface BuildPaymentsPlaygroundConfigOptions {
   transfers: PaymentsPlaygroundTransferView[];
   wallets: PaymentsPlaygroundWalletView[];
+  /** The ramp providers the dashboard offers (`getEnabledRampProviders`); the quote endpoints pick from these only. */
+  rampProviders: readonly RampProviderId[];
 }
 
 const fiatCurrencyOptions: ApiPlaygroundFieldOption[] = [{ label: "USD", value: "USD" }];
@@ -72,13 +75,12 @@ function buildTransferOptions(
 }
 
 function buildRampProviderOptions(
-  t: (key: MessageKey, values?: TranslationValues) => string
+  rampProviders: readonly RampProviderId[]
 ): ApiPlaygroundFieldOption[] {
-  return [
-    { label: t("DashboardPayments.playground.moonPay"), value: "moonpay" },
-    { label: t("DashboardPayments.playground.lightspark"), value: "lightspark" },
-    { label: t("DashboardPayments.playground.bvnk"), value: "bvnk" },
-  ];
+  return rampProviders.map((provider) => ({
+    label: getRampProviderLabel(provider),
+    value: provider,
+  }));
 }
 
 function buildSelectBackedField(
@@ -109,10 +111,10 @@ function buildSelectBackedField(
 }
 
 export function buildPaymentsPlaygroundEndpointConfigs(
-  { transfers, wallets }: BuildPaymentsPlaygroundConfigOptions,
+  { transfers, wallets, rampProviders }: BuildPaymentsPlaygroundConfigOptions,
   t: (key: MessageKey, values?: TranslationValues) => string
 ): ApiPlaygroundEndpointConfig[] {
-  const rampProviderOptions = buildRampProviderOptions(t);
+  const rampProviderOptions = buildRampProviderOptions(rampProviders);
   const providerWalletOptions = buildProviderWalletOptions(wallets);
   const custodyWalletOptions = buildCustodyWalletOptions(wallets);
   const transferOptions = buildTransferOptions(transfers);
@@ -335,15 +337,12 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       path: "/v1/payments/ramps/onramp/quote",
       pathFields: [],
       bodyFields: [
-        {
-          key: "provider",
-          label: "provider",
-          placeholder: t("DashboardPayments.playground.selectProvider"),
-          kind: "select",
-          options: rampProviderOptions,
-          defaultValue: "moonpay",
-          required: true,
-        },
+        buildSelectBackedField(
+          "provider",
+          "provider",
+          t("DashboardPayments.playground.selectProvider"),
+          rampProviderOptions
+        ),
         {
           key: "counterpartyId",
           label: "counterpartyId",
@@ -393,15 +392,12 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       path: "/v1/payments/ramps/offramp/quote",
       pathFields: [],
       bodyFields: [
-        {
-          key: "provider",
-          label: "provider",
-          placeholder: t("DashboardPayments.playground.selectProvider"),
-          kind: "select",
-          options: rampProviderOptions,
-          defaultValue: "moonpay",
-          required: true,
-        },
+        buildSelectBackedField(
+          "provider",
+          "provider",
+          t("DashboardPayments.playground.selectProvider"),
+          rampProviderOptions
+        ),
         {
           key: "counterpartyId",
           label: "counterpartyId",
