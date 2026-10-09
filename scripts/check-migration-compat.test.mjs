@@ -208,18 +208,22 @@ test("the breaking directive ignores changed test files outside the migrations d
     []
   );
 
-  const mixed = check(sql, [
+  assert.deepEqual(check(sql, [SQL, "apps/sdp-api/src/test/helpers/custody.ts"]), [
+    `${SQL} is marked breaking, so the PR must change nothing outside apps/sdp-api/src/db/migrations/ except test files; found apps/sdp-api/src/test/helpers/custody.ts.`,
+  ]);
+});
+
+test("the breaking directive still flags a source file renamed to a test file", () => {
+  const sql = "-- sdp:migration-compat: breaking\nALTER TABLE a DROP COLUMN b;";
+  const renamedToTestFile = check(sql, [
     SQL,
     "apps/sdp-api/src/routes/foo.test.ts",
     "apps/sdp-api/src/routes/foo.ts",
   ]);
-  assert.equal(mixed.length, 1);
-  assert.match(mixed[0], /found apps\/sdp-api\/src\/routes\/foo\.ts\.$/);
-  assert.doesNotMatch(mixed[0], /foo\.test\.ts/);
-
-  assert.deepEqual(check(sql, [SQL, "apps/sdp-api/src/test/helpers/custody.ts"]), [
-    `${SQL} is marked breaking, so the PR must change nothing outside apps/sdp-api/src/db/migrations/; found apps/sdp-api/src/test/helpers/custody.ts.`,
+  assert.deepEqual(renamedToTestFile, [
+    `${SQL} is marked breaking, so the PR must change nothing outside apps/sdp-api/src/db/migrations/ except test files; found apps/sdp-api/src/routes/foo.ts.`,
   ]);
+  assert.doesNotMatch(renamedToTestFile[0], /foo\.test\.ts/);
 });
 
 test("files outside the postgres directory and deleted files are ignored", () => {
