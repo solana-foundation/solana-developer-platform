@@ -38,6 +38,7 @@ import {
 import type { HeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository";
 import { createPostgresHeliusRingsOperationRepository } from "@/db/repositories/helius-rings-operation.repository.postgres";
 import { AppError } from "@/lib/errors";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
@@ -1443,6 +1444,26 @@ describe("HeliusRingsService", () => {
 
       expect(operation.state).toBe("indexing");
       expect(sign).toHaveBeenCalledOnce();
+    });
+
+    it("surfaces a money-admission refusal as itself and submits nothing", async () => {
+      const submit = vi.fn(async () => OUTER_TX.signature);
+      const gateway = new InMemoryRingsGateway({
+        buildUnsignedTx: () => unsignedShieldTransaction(1_000_000n),
+      });
+
+      const refusal = await service({
+        gateway,
+        signOuterTransaction: async () => {
+          throw new MoneyMovementRefusedError("organization_inactive");
+        },
+        submitOuterTransaction: submit,
+      })
+        .prepareOperation(operationInput({ clientNonce: "nonce-admission-refused" }), actorContext)
+        .catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
+      expect(submit).not.toHaveBeenCalled();
     });
 
     it("rejects changed signer message bytes before signed-byte persistence", async () => {

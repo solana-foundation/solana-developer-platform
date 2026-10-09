@@ -58,6 +58,7 @@ import {
   mapHeliusRingsWalletRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
@@ -1538,6 +1539,17 @@ export class HeliusRingsService {
     operation: HeliusRingsOperationRow,
     error: unknown
   ): Promise<HeliusRingsOperationRow> {
+    if (error instanceof MoneyMovementRefusedError) {
+      // Money admission refused the signature (HOO-1955): a decision, not an
+      // outage. Record it as final and surface the 403 rather than a
+      // retryable gateway failure.
+      await this.fail(operation.id, operation.state, {
+        code: "signer_failed",
+        message: error.message,
+        retryable: false,
+      });
+      throw error;
+    }
     const failed = await this.fail(operation.id, operation.state, describeFailure(error));
     return failed ?? (await this.requireOperation(operation.id));
   }
