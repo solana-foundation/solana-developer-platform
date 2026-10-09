@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -51,6 +52,36 @@ const ADMIN_KEY = {
   raw: "sk_test_delete_cache_failure_admin",
 };
 
+const TARGET_KEY = {
+  id: "key_delete_cache_failure_target",
+  raw: "sk_test_delete_cache_failure_target",
+  name: "Revoked read key",
+};
+
+function cachedKey(id: string): CachedApiKey {
+  return {
+    id,
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    role: "api_admin",
+    permissions: ["*"],
+    environment: "sandbox",
+    rateLimitTier: "standard",
+    allowedIps: null,
+    signingWalletId: null,
+    signingWalletIds: [],
+    walletBindings: [],
+    status: "active",
+    expiresAt: null,
+    rotationDeadline: null,
+  };
+}
+
+async function cachedStatus(keyHash: string): Promise<string | undefined> {
+  const raw = await createKVStoreSet(env).apiKeys.get(`key:${keyHash}`);
+  return raw === null ? undefined : (JSON.parse(raw) as { status?: string }).status;
+}
+
 describe("organization deletion with failing cache invalidation", () => {
   let adminHash: string;
   beforeEach(async () => {
@@ -86,22 +117,7 @@ describe("organization deletion with failing cache invalidation", () => {
           JSON.stringify(["*"])
         ),
     ]);
-    await seedCachedApiKey(env, adminHash, {
-      id: ADMIN_KEY.id,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      role: "api_admin",
-      permissions: ["*"],
-      environment: "sandbox",
-      rateLimitTier: "standard",
-      allowedIps: null,
-      signingWalletId: null,
-      signingWalletIds: [],
-      walletBindings: [],
-      status: "active",
-      expiresAt: null,
-      rotationDeadline: null,
-    });
+    await seedCachedApiKey(env, adminHash, cachedKey(ADMIN_KEY.id));
   });
   afterEach(async () => {
     kvFailure.failApiKeyWrites = false;
@@ -127,7 +143,7 @@ describe("organization deletion with failing cache invalidation", () => {
     );
     expect(afterDeletion.status).toBe(401);
   });
-  it("repairs revoked keys left cached active by a failed deletion refresh", async () => {
+  it("refuses a deleted organization's key at once when the cache refresh failed, and the sweep still repairs the entry", async () => {
     kvFailure.failApiKeyWrites = true;
     const res = await app.request(
       `/v1/organizations/${TEST_ORG.id}`,
@@ -146,12 +162,15 @@ describe("organization deletion with failing cache invalidation", () => {
       }>();
     expect(required(row).status).toBe("revoked");
     kvFailure.failApiKeyWrites = false;
+    // The cached entry still says active (APE-387); the live organization read
+    // on the request refuses the key anyway.
+    expect(await cachedStatus(adminHash)).toBe("active");
     const duringWindow = await app.request(
       "/v1/api-keys",
       { headers: { Authorization: `Bearer ${ADMIN_KEY.raw}` } },
       env
     );
-    expect(duringWindow.status).toBe(200);
+    expect(duringWindow.status).toBe(401);
     const outcome = await reconcileRevokedApiKeyCache(env);
     expect(outcome.repaired).toBe(1);
     const afterSweep = await app.request(
@@ -161,5 +180,88 @@ describe("organization deletion with failing cache invalidation", () => {
     );
     expect(afterSweep.status).toBe(401);
     expect((await reconcileRevokedApiKeyCache(env)).repaired).toBe(0);
+  });
+
+  it("refuses a key whose organization stopped being active while its row and cache still say active", async () => {
+    await getDb(env)
+      .prepare("UPDATE organizations SET status = 'suspended' WHERE id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+
+    expect(await cachedStatus(adminHash)).toBe("active");
+    const response = await app.request(
+      "/v1/api-keys",
+      { headers: { Authorization: `Bearer ${ADMIN_KEY.raw}` } },
+      env
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("lets a cached key with no row through on its active organization's word", async () => {
+    const orphanHash = await hashString("sk_test_delete_cache_failure_orphan", env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, orphanHash, cachedKey("key_delete_cache_failure_orphan"));
+
+    const response = await app.request(
+      "/v1/api-keys",
+      { headers: { Authorization: "Bearer sk_test_delete_cache_failure_orphan" } },
+      env
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it("refuses a single revoked key at once when its cache write failed", async () => {
+    const targetHash = await hashString(TARGET_KEY.raw, env.API_KEY_PEPPER);
+    await getDb(env)
+      .prepare(`INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, 'sk_test_dcf', ?, 'api_readonly', ?, 'active')`)
+      .bind(
+        TARGET_KEY.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_USER.id,
+        TARGET_KEY.name,
+        targetHash,
+        JSON.stringify(["api-keys:read"])
+      )
+      .run();
+    await seedCachedApiKey(env, targetHash, {
+      ...cachedKey(TARGET_KEY.id),
+      role: "api_readonly",
+      permissions: ["api-keys:read"],
+    });
+    expect(
+      (
+        await app.request(
+          "/v1/api-keys",
+          { headers: { Authorization: `Bearer ${TARGET_KEY.raw}` } },
+          env
+        )
+      ).status
+    ).toBe(200);
+
+    kvFailure.failApiKeyWrites = true;
+    const revoke = await app.request(
+      `/v1/api-keys/${TARGET_KEY.id}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${ADMIN_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ confirmation: TARGET_KEY.name }),
+      },
+      env
+    );
+    expect(revoke.status).toBe(500);
+    kvFailure.failApiKeyWrites = false;
+
+    expect(await cachedStatus(targetHash)).toBe("active");
+    const afterRevoke = await app.request(
+      "/v1/api-keys",
+      { headers: { Authorization: `Bearer ${TARGET_KEY.raw}` } },
+      env
+    );
+    expect(afterRevoke.status).toBe(401);
   });
 });

@@ -13,8 +13,23 @@ export const ORGANIZATION_STATUSES = ["active", "suspended", "deleted"] as const
 export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
 
 /**
+ * Organization statuses whose credentials may authenticate (HOO-1955). A
+ * suspended or deleted organization is locked out of the API and dashboard
+ * entirely; money its jobs already committed still finishes, and production
+ * custody is BYOK, so funds stay reachable in the customer's own provider.
+ */
+export const ORGANIZATION_STATUSES_THAT_MAY_AUTHENTICATE = [
+  "active",
+] as const satisfies readonly OrganizationStatus[];
+
+/** Takes the raw column: an unknown status may not authenticate. */
+export function organizationStatusMayAuthenticate(status: string): boolean {
+  return ORGANIZATION_STATUSES_THAT_MAY_AUTHENTICATE.some((allowed) => allowed === status);
+}
+
+/**
  * Organization statuses that may start new money movement (HOO-1955). A
- * suspended or deleted organization may only take money out.
+ * suspended or deleted organization starts nothing; exits still run.
  */
 export const ORGANIZATION_STATUSES_THAT_MAY_START_MONEY = [
   "active",

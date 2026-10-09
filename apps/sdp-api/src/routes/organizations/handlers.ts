@@ -244,12 +244,22 @@ export const deleteOrganization = async (c: AppContext) => {
         `UPDATE organizations SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`
       )
       .bind(orgId),
+    // A pending invitation is a way back in: accepting one re-activates a
+    // removed membership in this organization. Invitations lock before
+    // memberships, the same order acceptInvitation takes them, so a
+    // concurrent acceptance cannot deadlock the deletion.
+    db
+      .prepare(
+        "UPDATE invitations SET status = 'revoked' WHERE organization_id = ? AND status = 'pending'"
+      )
+      .bind(orgId),
     db
       .prepare("UPDATE organization_members SET status = 'removed' WHERE organization_id = ?")
       .bind(orgId),
     db
       .prepare(
-        `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now') WHERE organization_id = ?`
+        `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now')
+         WHERE organization_id = ? AND status = 'active'`
       )
       .bind(orgId),
   ]);
@@ -261,14 +271,15 @@ export const deleteOrganization = async (c: AppContext) => {
   // credential. Failures are collected and reported once at the end.
   const failures: unknown[] = [];
 
-  // Cached entries keep authenticating for the remainder of the cache TTL
-  // until the revoked state is pushed into them. The hashes are queried
+  // Push the revoked state into the cached entries. Authentication already
+  // refuses these keys from the live organization read, so this keeps the
+  // cache accurate rather than closing access. The hashes are queried
   // AFTER the batch commits: a key created concurrently with this request
   // still gets revoked by it, and a pre-batch snapshot would miss that key.
   // Transient cache errors are retried with backoff here rather than
   // aborting, so the caller is not left with a committed deletion it cannot
   // retry; keys that never succeed become the 500 below, which the
-  // per-minute reconciliation sweep then repairs from the revoked rows.
+  // reconciliation sweep then repairs from the revoked rows.
   try {
     const orgKeyHashes = await db
       .prepare("SELECT key_hash FROM api_keys WHERE organization_id = ?")

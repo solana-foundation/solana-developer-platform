@@ -19,6 +19,12 @@
  * never replaced by an active one — only by another terminal state or TTL
  * expiry (after which fills re-read the authoritative row anyway).
  *
+ * The cache is not the revocation boundary. Request authentication re-reads
+ * the organization's status and the key's own row on every request
+ * (`lib/organization-access.ts`), so a revocation whose cache write failed is
+ * still refused on the key's next request (APE-387). These rules keep the
+ * cache accurate so its cheap rejects are right and its fills stay fresh.
+ *
  * What this module guarantees, and where that guarantee stops
  * -----------------------------------------------------------
  * Guaranteed: a revocation never reports success until the terminal state is

@@ -626,7 +626,9 @@ describe("Custody wallet scope routes", () => {
 
       const response = await requestSignerCheck({ walletId: "privy_wallet_a" }, "api_key");
 
-      expect(response.status).toBe(403);
+      // Authentication reads the key's row fresh, so a revoked or expired key is
+      // refused there (401); a narrowed binding reaches the route's check (403).
+      expect(response.status).toBe(state === "read-only" ? 403 : 401);
       expect(signerCheckMocks.createExactSigner).not.toHaveBeenCalled();
       expect(signerCheckMocks.createSponsorship).not.toHaveBeenCalled();
       expect(createClusterRpcMock).not.toHaveBeenCalled();

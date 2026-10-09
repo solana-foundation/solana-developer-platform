@@ -92,7 +92,7 @@ describe("Organizations routes", () => {
       };
       expect(body.error.code).toBe("INTERNAL_ERROR");
     });
-    it("returns internal error when organization status is invalid in storage", async () => {
+    it("refuses a key whose organization's stored status is not one it knows", async () => {
       await getDb(env)
         .prepare("UPDATE organizations SET status = ? WHERE id = ?")
         .bind("unknown", TEST_ORG.id)
@@ -106,13 +106,15 @@ describe("Organizations routes", () => {
         },
         env
       );
-      expect(res.status).toBe(500);
+      // Authentication admits only an `active` organization, so an unknown status
+      // fails closed there rather than reaching the route.
+      expect(res.status).toBe(401);
       const body = (await res.json()) as {
         error: {
           code: string;
         };
       };
-      expect(body.error.code).toBe("INTERNAL_ERROR");
+      expect(body.error.code).toBe("REVOKED_API_KEY");
     });
     it("rejects unauthenticated requests", async () => {
       const res = await app.request(`/v1/organizations/${TEST_ORG.id}`, {}, env);
@@ -136,7 +138,7 @@ describe("Organizations routes", () => {
       };
       expect(body.error.code).toBe("FORBIDDEN");
     });
-    it("returns 404 for non-existent organization", async () => {
+    it("refuses a key whose organization does not exist", async () => {
       const nonExistentOrgId = "org_nonexistent123";
       await seedCachedApiKey(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,
@@ -151,7 +153,7 @@ describe("Organizations routes", () => {
         },
         env
       );
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(401);
     });
   });
   describe("PATCH /v1/organizations/:orgId", () => {

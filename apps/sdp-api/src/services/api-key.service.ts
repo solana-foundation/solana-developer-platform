@@ -351,10 +351,20 @@ export class ApiKeyService {
     );
     assertGrantableAllowedOperations(input.actorAllowedOperations, input.allowedOperations);
 
+    // The organization must still be active, and the share lock holds that
+    // until this transaction commits: a concurrent deletion's
+    // `UPDATE organizations` waits for it, and its key revocation then sees
+    // (and revokes) the key inserted here. Without it, a create racing a
+    // deletion commits an active key under a deleted organization (APE-358).
+    // FOR KEY SHARE would not do: it does not conflict with a non-key update.
     const project = await this.db
       .prepare(
-        `SELECT environment FROM projects
-         WHERE id = ? AND organization_id = ? AND status = 'active'`
+        `SELECT p.environment
+           FROM projects p
+           JOIN organizations o ON o.id = p.organization_id
+          WHERE p.id = ? AND p.organization_id = ? AND p.status = 'active'
+            AND o.status = 'active'
+          FOR SHARE OF o`
       )
       .bind(input.projectId, input.organizationId)
       .first<{ environment: ApiKeyEnvironment }>();
@@ -598,15 +608,19 @@ export class ApiKeyService {
         // Everything the clone copies is judged and read on the rows this
         // transaction sees, not on what the caller read before the lock: a
         // permissions, IP, expiry or binding change committed in that
-        // window would otherwise be cloned unchecked.
+        // window would otherwise be cloned unchecked. The organization share
+        // lock is createApiKey's: a replacement can't commit under an
+        // organization a concurrent deletion has already revoked (APE-358).
         const target = await tx.queryOne<RotationTargetRow>(
           `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
                   p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
                   ak.signing_wallet_id, ak.created_by, ak.expires_at
            FROM api_keys ak
            JOIN projects p ON p.id = ak.project_id
+           JOIN organizations o ON o.id = ak.organization_id
            WHERE ak.id = $1 AND ak.organization_id = $2 AND ak.project_id = $3
-             AND ak.status = 'active'`,
+             AND ak.status = 'active' AND o.status = 'active'
+           FOR SHARE OF o`,
           [keyId, organizationId, projectId]
         );
         if (!target) {
