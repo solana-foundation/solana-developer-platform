@@ -88,6 +88,8 @@ export async function parseCollectionResponse(
 
 export async function createRecurringPaymentFixture(options: {
   headers: Record<string, string>;
+  /** The project the key and source wallet live in; defaults to the Sandbox test project. */
+  projectId?: string;
   sourceCustodyWalletId: string;
   destinationAddress: string;
   token: string;
@@ -95,8 +97,10 @@ export async function createRecurringPaymentFixture(options: {
   periodHours: number;
   firstCollectionAt?: string;
 }): Promise<z.infer<typeof recurringResponseSchema>["data"]["recurringPayment"]> {
+  const projectId = options.projectId ?? "prj_test_payments_policy";
   const counterpartyId = await seedCounterparty({
     externalId: `recurring_fixture_${crypto.randomUUID()}`,
+    projectId,
   });
   const counterpartyAccountId = `counterparty_account_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
@@ -110,7 +114,7 @@ export async function createRecurringPaymentFixture(options: {
     .bind(
       counterpartyAccountId,
       "org_payments_policy_test",
-      "prj_test_payments_policy",
+      projectId,
       counterpartyId,
       JSON.stringify({ network: "solana", address: options.destinationAddress }),
       now,
@@ -140,6 +144,7 @@ export async function createRecurringPaymentFixture(options: {
 
 export async function activateRecurringPaymentFixture(options: {
   headers: Record<string, string>;
+  projectId?: string;
   sourceCustodyWalletId: string;
   destinationAddress: string;
   token: string;

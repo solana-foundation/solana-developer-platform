@@ -19,7 +19,7 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
@@ -37,6 +37,10 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
+import {
+  seedTestPrivyConnection,
+  writeTestPrivyCredentialSecret,
+} from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
@@ -3368,8 +3372,54 @@ describe("Payments routes — recurring", () => {
     });
 
     it("skips a production project's due period once its organization loses production access", async () => {
+      // Production custody is BYOK only (HOO-1970), so the payment runs from a
+      // Privy wallet in the organization's production project, under a key
+      // re-homed there. The wallet carries the address the source signer signs as.
+      const productionProjectId = `${TEST_PROJECT.id}_production`;
+      const productionWalletId = "cwlt_recurring_production";
+      const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
+      env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 41).toString("base64");
+      onTestFinished(() => {
+        env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
+      });
+      await seedTestPrivyConnection(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: productionProjectId,
+        connectionId: "cconn_recurring_production",
+        credentialId: "pcred_recurring_production",
+        createdBy: TEST_USER.id,
+        stored: await writeTestPrivyCredentialSecret(env, {
+          organizationId: TEST_ORG.id,
+          credentialId: "pcred_recurring_production",
+          appId: "recurring-production-app",
+          appSecret: "recurring-production-secret",
+        }),
+        providerAccountFingerprint: "sha256:recurring-production",
+        wallets: [
+          {
+            id: productionWalletId,
+            walletId: "privy_recurring_production",
+            publicKey: recurringExecution.sourceSigner().address,
+            label: "Production Recurring Wallet",
+            purpose: "transfer",
+            status: "active",
+          },
+        ],
+        lastCheckStatus: "success",
+        defaultCustodyWalletId: productionWalletId,
+      });
+      await getDb(env)
+        .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
+        .bind(productionProjectId, TEST_API_KEY.id)
+        .run();
+      await seedCachedKey({ projectId: productionProjectId, environment: "production" });
+
       const signAndSendMock = recurringExecution.signAndSendMock();
-      const recurringPayment = await activateRecurringPaymentForTest(RECURRING_HEADERS);
+      const recurringPayment = await activateRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        projectId: productionProjectId,
+        sourceCustodyWalletId: productionWalletId,
+      });
       const signaturesBefore = signAndSendMock.mock.calls.length;
       const now = new Date();
       await setRecurringCollectionDue({
@@ -3377,16 +3427,6 @@ describe("Payments routes — recurring", () => {
         subscriptionId: recurringPayment.subscriptionId,
         dueAt: new Date(now.getTime() - 60 * 1000).toISOString(),
       });
-      // Make the payment's project the organization's production project (one
-      // active project per environment), then revoke production access.
-      await getDb(env)
-        .prepare("UPDATE projects SET status = 'archived' WHERE id = ?")
-        .bind(`${TEST_PROJECT.id}_production`)
-        .run();
-      await getDb(env)
-        .prepare("UPDATE projects SET environment = 'production' WHERE id = ?")
-        .bind(TEST_PROJECT.id)
-        .run();
       await getDb(env)
         .prepare(
           `UPDATE organizations
