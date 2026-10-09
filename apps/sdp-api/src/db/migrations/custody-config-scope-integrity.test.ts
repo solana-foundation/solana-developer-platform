@@ -82,7 +82,7 @@ describe("custody Config scope integrity constraints", () => {
     await insertConfig("cust_scope_prj_a", PROJECT_ID, "privy");
 
     await expect(insertConfig("cust_scope_prj_b", PROJECT_ID, "privy")).rejects.toThrow(
-      /custody_configs_org_project_provider_key/
+      /idx_custody_configs_org_project_provider_unarchived/
     );
   });
 
