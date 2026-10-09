@@ -79,8 +79,13 @@ step** → admission → validation → handler.
 **Lease.** 60 seconds by default, set per route, and renewed every third of the lease while the
 handler runs. A crashed request's key frees when the lease runs out.
 
+**Replay authorization.** A route whose resource access is checked after this step (an API key's
+wallet bindings, for example) passes `authorizeReplay`, which runs before any stored response is
+replayed. A credential narrowed since the original request is refused, not served.
+
 **Bypass.** Approved-operation executions skip the step: they re-send the original key to execute
-the operation, not to replay it. The bypass goes away with approvals (#2236's stack).
+the operation, not to replay it. A route that declares `honorsDryRun` (its policy gate answers a
+dry run without writing) lets dry runs skip it too, so a dry run may reuse a real request's key. The bypass goes away with approvals (#2236's stack).
 
 **Retention.** 24 hours. Expired rows are pruned hourly in-process and on every run of the managed
 reconciliation job. A claim ignores an expired row.

@@ -49,6 +49,21 @@ export interface IdempotencyOptions {
    * does not matter). Must be pure.
    */
   canonicalize?: (body: JsonValue) => JsonValue;
+  /**
+   * Re-checks, before a stored response is replayed, the resource access the
+   * route checks after this step (for example, an API key's wallet bindings).
+   * Throw to refuse. Without it, a credential narrowed since the original
+   * request would still read that request's response.
+   */
+  authorizeReplay?: (c: Context<{ Bindings: Env }>) => void | Promise<void>;
+  /**
+   * The route answers `Dry-Run: true` with a write-free verdict (its policy
+   * gate short-circuits before anything is written), so a dry run skips this
+   * step: it claims nothing and may reuse a real request's key. Leave unset on
+   * routes that ignore the header; there a dry run is fingerprinted apart from
+   * the real request.
+   */
+  honorsDryRun?: boolean;
 }
 
 export const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
@@ -252,14 +267,15 @@ function startLeaseRenewal(
  * Allowed Operations, so a replay re-checks the caller, and before admission
  * and body validation, so a replay is not admitted again as a new movement.
  * Approved-operation executions skip it: they re-send the original key to
- * execute the operation, not to replay it.
+ * execute the operation, not to replay it. So do dry runs on a route that
+ * declares `honorsDryRun`.
  */
 export async function runIdempotency(
   c: Context<{ Bindings: Env }>,
   next: Next,
   options: IdempotencyOptions
 ): Promise<Response | undefined> {
-  if (approvedWalletOperationId(c) !== undefined) {
+  if (approvedWalletOperationId(c) !== undefined || (options.honorsDryRun && isDryRunRequest(c))) {
     await next();
     return undefined;
   }
@@ -305,6 +321,7 @@ export async function runIdempotency(
 
   switch (claim.kind) {
     case "completed":
+      await options.authorizeReplay?.(c);
       logOutcome(operation, idempotencyKey, "replayed");
       return replay(c, claim.response);
     case "mismatch":

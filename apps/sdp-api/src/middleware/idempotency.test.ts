@@ -430,6 +430,36 @@ describe("idempotent()", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it("re-checks resource access before replaying", async () => {
+    let allowed = true;
+    const { app, create } = buildApp(
+      {
+        key: "required",
+        authorizeReplay: () => {
+          if (!allowed) throw forbidden("wallet no longer bound");
+        },
+      },
+      created
+    );
+    await post(app, "/v1/other", { a: 1 }, KEY);
+    allowed = false;
+    expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(403);
+    allowed = true;
+    expect(
+      (await post(app, "/v1/other", { a: 1 }, KEY)).headers.get(IDEMPOTENT_REPLAYED_HEADER)
+    ).toBe("true");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a dry run reuse a real request's key on a route that honors dry runs", async () => {
+    const { app, create } = buildApp({ key: "required", honorsDryRun: true }, created);
+    await post(app, "/v1/other", { a: 1 }, KEY);
+    const dryRun = await post(app, "/v1/other", { a: 1 }, { ...KEY, "Dry-Run": "true" });
+    expect(dryRun.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBeNull();
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(await storedRows()).toHaveLength(1);
+  });
+
   it("skips approved-operation executions", async () => {
     const { app, create } = buildApp({ key: "required" }, created);
     await post(app, "/v1/other", { a: 1 }, KEY);
