@@ -45,7 +45,6 @@ import {
   listDvpInboundTradesResponseSchema,
   listDvpTradesResponseSchema,
   listMembersResponseSchema,
-  listProjectApiKeysResponseSchema,
   listProjectMembersResponseSchema,
   listProjectsResponseSchema,
   listTemplatesResponseSchema,
@@ -166,7 +165,6 @@ export const projectResponse = successResponseSchema(projectResponseSchema);
 export const listProjectsResponse = successResponseSchema(listProjectsResponseSchema);
 export const listProjectMembersResponse = successResponseSchema(listProjectMembersResponseSchema);
 export const projectMemberResponse = successResponseSchema(projectMemberResponseSchema);
-export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKeysResponseSchema);
 export const rpcProvidersResponse = successResponseSchema(rpcProvidersResponseSchema);
 export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 

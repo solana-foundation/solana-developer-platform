@@ -13,7 +13,7 @@ import type {
 } from "@sdp/types";
 import type { Context } from "hono";
 import type { Env } from "@/types/env";
-import { AppError, badRequest } from "./errors";
+import { AppError, badRequest, forbidden } from "./errors";
 
 export type AuthType = "api_key" | "clerk" | "approved_operation";
 
@@ -144,6 +144,26 @@ export function getAuth(c: Context<{ Bindings: Env }>): ApiKeyContext {
   const auth = getOptionalAuth(c);
   if (auth) return auth;
   throw new AppError("UNAUTHORIZED", "Authentication required");
+}
+
+export type UserAuthContext = Extract<ApiKeyContext, { authType: "clerk" }>;
+
+/**
+ * Auth context for operations only a signed-in user may perform, such as
+ * minting credentials. API keys are refused with 403. Clerk is the only
+ * supported user credential; the legacy cookie session is refused too and is
+ * removed in the follow-up PR.
+ *
+ * @param c Request context.
+ * @param operation Short noun phrase for the 403 message, e.g. "API key creation".
+ * @returns The signed-in user's auth context.
+ */
+export function requireUserAuth(c: Context<{ Bindings: Env }>, operation: string): UserAuthContext {
+  const auth = getAuth(c);
+  if (auth.authType !== "clerk") {
+    throw forbidden(`${operation} requires a signed-in user`);
+  }
+  return auth;
 }
 
 /**

@@ -407,7 +407,6 @@ export const revokeApiKeyResponseSchema = z
   .openapi({ description: "API key revocation response payload." });
 
 export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
-  .omit({ connectionId: true })
   .extend({
     name: withOpenApi(apiKeyCreateSchemaBase.shape.name, {
       description: "Friendly name for the API key.",
@@ -418,7 +417,8 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       example: "Used by backend service.",
     }),
     role: withOpenApi(apiKeyCreateSchemaBase.shape.role, {
-      description: "Role assigned to this API key.",
+      description:
+        "Role preset for this API key. Required; an explicit permissions list may only narrow it.",
       example: "api_developer",
     }),
     walletScope: withOpenApi(apiKeyCreateSchemaBase.shape.walletScope, {
@@ -431,11 +431,12 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       example: ["203.0.113.0/24"],
     }),
     expiresAt: withOpenApi(apiKeyCreateSchemaBase.shape.expiresAt, {
-      description: "Optional expiration timestamp.",
-      example: "2025-12-31T00:00:00.000Z",
+      description: "Optional expiration timestamp. Must be in the future.",
+      example: "2027-12-31T00:00:00.000Z",
     }),
     permissions: withOpenApi(apiKeyCreateSchemaBase.shape.permissions, {
-      description: "Optional explicit permission set. Requires admin access.",
+      description:
+        "Optional explicit permission set. Must be a subset of the role preset and of the creator's own permissions.",
       example: ["tokens:read", "tokens:write"],
     }),
     signingWalletId: withOpenApi(apiKeyCreateSchemaBase.shape.signingWalletId, {
@@ -451,19 +452,6 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       description:
         "Optional wallet-level permission bindings. Use this to attach multiple wallets with scoped permissions.",
     }),
-    provisionWallet: withOpenApi(apiKeyCreateSchemaBase.shape.provisionWallet, {
-      description:
-        "Set true to provision for the effective custody target, or provide a connectionId object to provision for an exact Custody Connection.",
-      example: { connectionId: "cconn_123" },
-    }),
-    walletLabel: withOpenApi(apiKeyCreateSchemaBase.shape.walletLabel, {
-      description: "Optional label for a provisioned wallet.",
-      example: "Mint authority wallet",
-    }),
-    walletPurpose: withOpenApi(apiKeyCreateSchemaBase.shape.walletPurpose, {
-      description: "Optional purpose for a provisioned wallet.",
-      example: "mint_authority",
-    }),
   })
   .openapi({
     description: "Create API key request body.",
@@ -471,9 +459,7 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       name: "Primary Key",
       role: "api_developer",
       walletScope: "selected",
-      provisionWallet: { connectionId: "cconn_123" },
-      walletLabel: "Mint authority wallet",
-      walletPurpose: "mint_authority",
+      signingWalletIds: ["privy_wallet_123"],
     },
   });
 
@@ -498,7 +484,7 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
     }),
     expiresAt: withOpenApi(apiKeyUpdateSchemaBase.shape.expiresAt, {
       description: "Updated expiration. Use null to clear.",
-      example: "2026-01-01T00:00:00.000Z",
+      example: "2027-12-31T00:00:00.000Z",
     }),
     permissions: withOpenApi(apiKeyUpdateSchemaBase.shape.permissions, {
       description: "Updated explicit permission set. Use null to revert to role defaults.",

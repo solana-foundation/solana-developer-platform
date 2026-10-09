@@ -1,4 +1,3 @@
-import { apiTestSupport } from "@sdp/api/test-support";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupIntegrationSuite,
@@ -8,9 +7,8 @@ import {
   requestWithApiKey,
   resetIntegrationState,
   SOLANA_CONFIGURED,
+  signInTestUser,
 } from "../helpers/integration";
-
-const { TEST_PROJECT } = apiTestSupport;
 
 type WalletListResponse = {
   data: {
@@ -70,11 +68,9 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
       fundLamports: 5_000_000,
     });
 
-    const createKeyRes = await adminRequest(`/v1/projects/${TEST_PROJECT.id}/api-keys`, {
+    const userRequest = await signInTestUser();
+    const createKeyRes = await userRequest("/v1/api-keys", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({
         name: `Rotation key ${Date.now()}`,
         role: "api_admin",

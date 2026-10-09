@@ -3,6 +3,7 @@ import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
+import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -67,7 +68,11 @@ async function installBindingFailureConstraint(): Promise<void> {
     .run();
 }
 
-async function seedAuthAndWallets(): Promise<void> {
+type ClerkActor = Awaited<ReturnType<typeof authenticateTestClerkUser>>;
+
+let clerkActor: ClerkActor;
+
+async function seedAuthAndWallets(): Promise<ClerkActor> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
@@ -82,7 +87,7 @@ async function seedAuthAndWallets(): Promise<void> {
   await seedDefaultProjects(getDb(env), {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
-    members: [],
+    members: [TEST_USER.id],
     ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
   });
   await getDb(env).batch([
@@ -158,6 +163,19 @@ async function seedAuthAndWallets(): Promise<void> {
         "active"
       ),
   ]);
+  return authenticateTestClerkUser(env, getDb(env), {
+    userId: TEST_USER.id,
+    email: TEST_USER.email,
+    clerkUserId: "clerk_user_api_key_wallet_scope",
+    organizationId: TEST_ORG.id,
+    clerkOrgId: "clerk_org_api_key_wallet_scope",
+    orgSlug: TEST_ORG.slug,
+    role: "admin",
+  });
+}
+
+function userJsonHeaders() {
+  return clerkActor.headers(TEST_PROJECT.id);
 }
 
 function authenticatedJsonHeaders() {
@@ -177,9 +195,10 @@ async function createManagedApiKey(input: {
     "/v1/api-keys",
     {
       method: "POST",
-      headers: authenticatedJsonHeaders(),
+      headers: userJsonHeaders(),
       body: JSON.stringify({
         name: input.name,
+        role: "api_developer",
         walletScope: input.walletScope,
         ...(input.walletScope === "selected"
           ? {
@@ -269,7 +288,7 @@ async function createAndActivateApiKeyPolicy(apiKeyId: string): Promise<{
 describe("API key wallet scope routes", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await seedAuthAndWallets();
+    clerkActor = await seedAuthAndWallets();
   });
 
   afterEach(async () => {
@@ -282,13 +301,10 @@ describe("API key wallet scope routes", () => {
       "/v1/api-keys",
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
+        headers: userJsonHeaders(),
         body: JSON.stringify({
           name: "Missing wallet scope",
-          projectId: TEST_PROJECT.id,
+          role: "api_developer",
         }),
       },
       env
@@ -302,13 +318,10 @@ describe("API key wallet scope routes", () => {
       "/v1/api-keys",
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
+        headers: userJsonHeaders(),
         body: JSON.stringify({
           name: "Conflicting all-wallet key",
-          projectId: TEST_PROJECT.id,
+          role: "api_developer",
           walletScope: "all",
           signingWalletId: "wal_scope_a",
         }),
@@ -326,13 +339,10 @@ describe("API key wallet scope routes", () => {
       "/v1/api-keys",
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
+        headers: userJsonHeaders(),
         body: JSON.stringify({
           name: "Scoped key",
-          projectId: TEST_PROJECT.id,
+          role: "api_developer",
           walletScope: "selected",
           signingWalletId: "wal_scope_b",
           signingWalletIds: ["wal_scope_a", "wal_scope_b"],
@@ -381,9 +391,10 @@ describe("API key wallet scope routes", () => {
       "/v1/api-keys",
       {
         method: "POST",
-        headers: authenticatedJsonHeaders(),
+        headers: userJsonHeaders(),
         body: JSON.stringify({
           name: "Atomic create rollback",
+          role: "api_developer",
           walletScope: "selected",
           signingWalletId: "wal_scope_b",
           signingWalletIds: ["wal_scope_b"],
@@ -441,9 +452,10 @@ describe("API key wallet scope routes", () => {
       "/v1/api-keys",
       {
         method: "POST",
-        headers: authenticatedJsonHeaders(),
+        headers: userJsonHeaders(),
         body: JSON.stringify({
           name: "Ambiguous wallet key",
+          role: "api_developer",
           walletScope: "selected",
           signingWalletId: "wal_scope_a",
         }),
@@ -464,13 +476,10 @@ describe("API key wallet scope routes", () => {
       "/v1/api-keys",
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
+        headers: userJsonHeaders(),
         body: JSON.stringify({
           name: "Scoped key with policy",
-          projectId: TEST_PROJECT.id,
+          role: "api_developer",
           walletScope: "selected",
           signingWalletId: "wal_scope_b",
           signingWalletIds: ["wal_scope_a", "wal_scope_b"],

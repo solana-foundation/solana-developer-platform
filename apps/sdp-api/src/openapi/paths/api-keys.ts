@@ -47,30 +47,6 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
-    method: "post",
-    path: "/v1/api-keys",
-    tags: ["API Keys"],
-    summary: "Create API key",
-    operationId: "createApiKey",
-    description: "Creates a new API key. The full key is returned once.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      body: {
-        required: true,
-        content: jsonContent(createApiKeyRequestSchema),
-      },
-    },
-    responses: {
-      201: {
-        description: "API key created",
-        content: jsonContent(apiKeyCreateResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
-    },
-  });
-
-  registry.registerPath({
     method: "get",
     path: "/v1/api-keys/{keyId}",
     tags: ["API Keys"],
@@ -277,6 +253,39 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
         content: jsonContent(apiKeyRevokeResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+}
+
+/**
+ * Registers the dashboard-only create operation. Clerk-authenticated, so it belongs in the internal
+ * document only: the public document defines no `clerkBearerAuth` scheme.
+ *
+ * @param registry - OpenAPI registry to add the operation to.
+ */
+export function registerApiKeyCreatePath(registry: OpenAPIRegistry) {
+  registry.registerPath({
+    method: "post",
+    path: "/v1/api-keys",
+    tags: ["API Keys"],
+    summary: "Create API key",
+    operationId: "createApiKey",
+    description:
+      "Creates a new API key in the project selected by x-project-id. Signed-in users only: API keys cannot mint API keys. The full key is returned once.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createApiKeyRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "API key created",
+        content: jsonContent(apiKeyCreateResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 }

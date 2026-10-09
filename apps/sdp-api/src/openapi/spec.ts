@@ -3,7 +3,7 @@ import { DEFAULT_SDP_API_URL } from "@sdp/types";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 
 import { registerAdminPaths } from "./paths/admin";
-import { registerApiKeyPaths } from "./paths/api-keys";
+import { registerApiKeyCreatePath, registerApiKeyPaths } from "./paths/api-keys";
 import { registerAssetProfilePaths } from "./paths/asset-profiles";
 import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
@@ -182,6 +182,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerHealthPaths(registry);
   registerOrganizationPaths(registry);
   registerApiKeyPaths(registry);
+  registerApiKeyCreatePath(registry);
   registerMemberPaths(registry);
   registerCustodyPaths(registry);
   registerEarnPaths(registry);

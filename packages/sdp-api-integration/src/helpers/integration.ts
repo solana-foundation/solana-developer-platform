@@ -22,6 +22,7 @@ import { getIntegrationCustodyProvider } from "./custody-provider";
 
 const {
   app,
+  authenticateTestClerkUser,
   createKVStoreSet,
   createFeePaymentAdapter,
   createMosaicService,
@@ -45,6 +46,9 @@ const LOCAL_CUSTODY_CONFIGURED = !!env.CUSTODY_PRIVATE_KEY;
 const INTEGRATION_CUSTODY_CONFIGURED =
   INTEGRATION_CUSTODY_PROVIDER === "local" ? LOCAL_CUSTODY_CONFIGURED : PRIVY_CONFIGURED;
 const SOLANA_CONFIGURED = !!env.SOLANA_RPC_URL && INTEGRATION_CUSTODY_CONFIGURED;
+
+const TEST_CLERK_USER_ID = "clerk_user_integration";
+const TEST_CLERK_ORG_ID = "clerk_org_integration";
 
 let cachedKeyHash: string | null = null;
 export interface IntegrationCustodyWallet {
@@ -304,6 +308,51 @@ export function requestWithApiKey(apiKey: string = TEST_PROJECT_API_KEY.raw) {
   return (url: string, init: IntegrationRequestInit = {}) => {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${apiKey}`);
+    return request(url, { ...init, headers });
+  };
+}
+
+/**
+ * Signs the suite's test user in through Clerk as an organization admin enrolled in the test
+ * project, for operations only a signed-in user may perform, such as minting API keys. Call it
+ * from a test body or `beforeEach`: outside a running test the shared Clerk test issuer registers
+ * an `afterAll` that closes it, which would strand later files under `isolate: false`. Safe to call
+ * more than once per file: it replaces the user's earlier Clerk identity rows.
+ *
+ * @returns A request function authenticated as the signed-in test user in the test project.
+ */
+export async function signInTestUser() {
+  const db = getDb(env);
+  await db.batch([
+    db
+      .prepare("DELETE FROM auth_user_identities WHERE provider = 'clerk' AND provider_user_id = ?")
+      .bind(TEST_CLERK_USER_ID),
+    db
+      .prepare("DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?")
+      .bind(TEST_ORG.id, TEST_USER.id),
+    db
+      .prepare(
+        `INSERT INTO project_members (id, project_id, user_id, role)
+         VALUES (?, ?, ?, 'admin')
+         ON CONFLICT (project_id, user_id) DO NOTHING`
+      )
+      .bind(`pm_${TEST_PROJECT.id}_${TEST_USER.id}`, TEST_PROJECT.id, TEST_USER.id),
+  ]);
+  const session = await authenticateTestClerkUser(env, db, {
+    userId: TEST_USER.id,
+    email: TEST_USER.email,
+    clerkUserId: TEST_CLERK_USER_ID,
+    organizationId: TEST_ORG.id,
+    clerkOrgId: TEST_CLERK_ORG_ID,
+    orgSlug: TEST_ORG.slug,
+    role: "admin",
+  });
+
+  return (url: string, init: IntegrationRequestInit) => {
+    const headers = new Headers(init.headers);
+    for (const [name, value] of Object.entries(session.headers(TEST_PROJECT.id))) {
+      headers.set(name, value);
+    }
     return request(url, { ...init, headers });
   };
 }

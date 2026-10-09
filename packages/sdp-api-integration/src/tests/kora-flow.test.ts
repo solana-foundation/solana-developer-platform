@@ -6,6 +6,7 @@ import {
   env,
   initIntegrationApiSuite,
   requestWithApiKey,
+  signInTestUser,
 } from "../helpers/integration";
 
 const { createSigningService, getDb, SponsorshipBudgetRepository, TEST_ORG, TEST_PROJECT } =
@@ -212,13 +213,12 @@ describe("Kora Fee Payment (Live Smoke)", () => {
     const walletId = createWalletBody.data.wallet.walletId;
     const walletAddress = createWalletBody.data.wallet.publicKey;
 
-    const createKeyRes = await request("/v1/api-keys", {
+    const userRequest = await signInTestUser();
+    const createKeyRes = await userRequest("/v1/api-keys", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({
         name: "Signer check integration key",
+        role: "api_developer",
         permissions: ["wallets:write"],
         walletScope: "selected",
         signingWalletId: walletId,

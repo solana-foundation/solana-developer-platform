@@ -195,7 +195,6 @@ describe("ApiKeyService.createApiKey permission guard", () => {
         organizationId: "org_1",
         projectId: "prj_1",
         actorPermissions: ["api-keys:write"],
-        actorApiKeyRole: null,
         createdByUserId: "usr_1",
         name: "escalated",
         role: "api_admin",
@@ -214,7 +213,7 @@ describe("ApiKeyService.updateApiKey", () => {
     currentRole: "api_developer" as const,
   };
 
-  it("rejects a non-admin raising permissions to a wildcard", async () => {
+  it("rejects a non-admin granting permissions it does not hold", async () => {
     const db = new RecordingDb();
     const service = new ApiKeyService(db, TEST_SCOPE);
 
@@ -223,9 +222,25 @@ describe("ApiKeyService.updateApiKey", () => {
         ...base,
         actorPermissions: ["payments:read"],
         actorApiKeyRole: null,
-        permissions: ["*"],
+        permissions: ["payments:read", "tokens:write", "wallets:write"],
       })
     ).rejects.toMatchObject({ code: "INSUFFICIENT_PERMISSIONS" });
+
+    expect(db.runs).toHaveLength(0);
+  });
+
+  it("rejects a wildcard beyond the api_developer role preset", async () => {
+    const db = new RecordingDb();
+    const service = new ApiKeyService(db, TEST_SCOPE);
+
+    await expect(
+      service.updateApiKey({
+        ...base,
+        actorPermissions: ["org:admin"],
+        actorApiKeyRole: null,
+        permissions: ["*"],
+      })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     expect(db.runs).toHaveLength(0);
   });
