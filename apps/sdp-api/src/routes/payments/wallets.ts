@@ -1,6 +1,7 @@
 import { badRequest } from "@sdp/payments/errors";
 import { isAddress } from "@sdp/solana/address";
 import type { Permission } from "@sdp/types";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, walletNotFound } from "@/lib/errors";
@@ -167,6 +168,21 @@ export function assertPaymentWalletExactAccess(
   );
   if (allowedCustodyWalletIds && !allowedCustodyWalletIds.includes(custodyWalletId)) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  }
+}
+
+const replayedSourceWalletSchema = z.object({ sourceCustodyWalletId: z.string() });
+
+/**
+ * `authorizeReplay` for a route that moves money from `sourceCustodyWalletId`
+ * (HOO-1918): before an Idempotency-Key replay is served, the caller's API key
+ * must still be allowed to move money from that wallet. A body without the
+ * field was never stored (validation refuses it), so there is nothing to check.
+ */
+export async function authorizeSourceWalletReplay(c: AppContext): Promise<void> {
+  const parsed = replayedSourceWalletSchema.safeParse(await c.req.json());
+  if (parsed.success) {
+    assertPaymentWalletExactAccess(c, parsed.data.sourceCustodyWalletId, ["payments:write"]);
   }
 }
 

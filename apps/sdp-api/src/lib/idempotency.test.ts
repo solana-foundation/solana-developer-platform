@@ -80,7 +80,9 @@ describe("resolveIdentityBoundIdempotencyReplay", () => {
         "current",
         (existing) => existing.custody_wallet_id === "cwlt_2"
       )
-    ).rejects.toSatisfy((error: unknown) => error instanceof AppError && error.code === "CONFLICT");
+    ).rejects.toSatisfy(
+      (error: unknown) => error instanceof AppError && error.code === "IDEMPOTENCY_KEY_REUSED"
+    );
   });
 });
 

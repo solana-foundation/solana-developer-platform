@@ -659,7 +659,8 @@ describe("Payments routes — transfer policy", () => {
   });
   it.each([
     ["under the same Idempotency-Key", 1, "pay-same-intent"],
-    ["with no Idempotency-Key", 2, undefined],
+    // Omitted: postTransfer sends a fresh key per call, so two different keys.
+    ["under two different Idempotency-Keys", 2, undefined],
   ] as const)(
     "approving two requests opened %s executes the payment as %i transfer(s)",
     async (_label, expectedTransfers, idempotencyKey) => {
@@ -704,13 +705,20 @@ describe("Payments routes — transfer policy", () => {
       const retryApproval = approvalErrorDetailsSchema.parse(
         (await readErrorResponse(retry)).error.details
       ).approvalRequestId;
-      expect(retryApproval).not.toBe(firstApproval);
+      // The same key replays the held 202 rather than opening a second
+      // approval (APE-568); different keys are two payments.
+      if (idempotencyKey === undefined) {
+        expect(retryApproval).not.toBe(firstApproval);
+      } else {
+        expect(retryApproval).toBe(firstApproval);
+        expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+      }
       expect(await countTransferRows()).toBe(0);
       const adminHeaders = {
         Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), approverUserId, TEST_ORG.id)}`,
         "x-project-id": TEST_PROJECT.id,
       };
-      for (const approvalRequestId of [firstApproval, retryApproval]) {
+      for (const approvalRequestId of new Set([firstApproval, retryApproval])) {
         const approved = await app.request(
           `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
           { method: "POST", headers: adminHeaders },
