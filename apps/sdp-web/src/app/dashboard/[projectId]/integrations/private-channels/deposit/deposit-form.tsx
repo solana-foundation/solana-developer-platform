@@ -218,7 +218,11 @@ export function DepositForm({
             </SelectItem>
           ))}
         </Select>
-        {walletError ? <p className="text-destructive text-sm">{walletError}</p> : null}
+        {walletError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {walletError}
+          </p>
+        ) : null}
         <p className="text-secondary text-xs">
           {t("DashboardPrivateChannels.deposit.fromWalletHelp")}
         </p>

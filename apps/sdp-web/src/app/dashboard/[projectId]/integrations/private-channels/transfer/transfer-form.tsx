@@ -587,7 +587,11 @@ function TransferFields(props: {
             </SelectItem>
           ))}
         </Select>
-        {props.walletError ? <p className="text-destructive text-sm">{props.walletError}</p> : null}
+        {props.walletError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {props.walletError}
+          </p>
+        ) : null}
         <p className="text-secondary text-xs">
           {props.t("DashboardPrivateChannels.transfer.fromWalletHelp")}
         </p>

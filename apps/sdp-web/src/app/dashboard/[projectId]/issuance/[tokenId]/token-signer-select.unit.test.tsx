@@ -29,13 +29,12 @@ function render(
       signerWalletId={signerWalletId}
       signerUnavailableReason={signerUnavailableReason}
       onSignerWalletIdChange={() => {}}
-      optional
     />
   );
 }
 
 describe("TokenSignerSelect", () => {
-  it("shows runtime unavailability for signing, while the same wallet remains usable in a draft", () => {
+  it("shows runtime unavailability for signing on the locked row", () => {
     const wallet = { ...makeWallet(1), isRuntimeExecutionAllowed: false };
     const markup = renderToStaticMarkup(
       <TokenSignerSelect
@@ -51,9 +50,6 @@ describe("TokenSignerSelect", () => {
     expect(markup).not.toContain("DashboardIssuance.management.signingUnavailable");
     expect(markup).toContain("text-warning");
     expect(markup).not.toContain("text-destructive-strong");
-    const draftMarkup = render([wallet], null, wallet.id);
-    expect(draftMarkup).toContain("Wallet 1");
-    expect(draftMarkup).not.toContain("DashboardIssuance.management.signingUnavailable");
   });
 
   it("shows the only wallet as a compact identity row without a select", () => {
@@ -77,10 +73,10 @@ describe("TokenSignerSelect", () => {
     expect(markup).toContain("DashboardIssuance.signer.select");
   });
 
-  it("renders the optional-signer hint instead of a locked card when no wallets exist", () => {
+  it("renders the no-signer message instead of a locked card when no wallets exist", () => {
     const markup = render([]);
     expect(markup).not.toContain('data-testid="wallet-identity-card"');
-    expect(markup).toContain("DashboardIssuance.signer.defaultSignerHint");
+    expect(markup).toContain("DashboardIssuance.signer.noneAvailable");
   });
 
   it("keeps the identity row for a single signer whose runtime signing is restricted", () => {

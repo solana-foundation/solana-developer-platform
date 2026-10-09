@@ -334,8 +334,8 @@ describe("WalletSetupFlow connection picker", () => {
     renderInteractiveInstalledPrivy();
 
     await user.type(screen.getByLabelText("Wallet label"), "Treasury");
-    await user.click(screen.getByRole("combobox", { name: "Connection" }));
-    await user.click(await screen.findByRole("option", { name: "Managed" }));
+    await user.click(screen.getByRole("combobox", { name: "Account" }));
+    await user.click(await screen.findByRole("option", { name: "Managed by SDP" }));
     await user.click(screen.getByRole("button", { name: "Create wallet" }));
 
     await waitFor(() => expect(createCustodySetupWalletAction).toHaveBeenCalledTimes(1));
@@ -350,7 +350,7 @@ describe("WalletSetupFlow connection picker", () => {
     renderInteractiveInstalledPrivy();
 
     await user.type(screen.getByLabelText("Wallet label"), "Treasury");
-    await user.click(screen.getByRole("combobox", { name: "Connection" }));
+    await user.click(screen.getByRole("combobox", { name: "Account" }));
     await user.click(await screen.findByRole("option", { name: "Production signing" }));
     await user.click(screen.getByRole("button", { name: "Create wallet" }));
 

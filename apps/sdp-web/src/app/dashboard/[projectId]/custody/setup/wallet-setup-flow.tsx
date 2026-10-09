@@ -414,6 +414,7 @@ export function WalletSetupFlow({
             return;
           case "provider_already_set_up":
             setErrorMessage(t("DashboardCustody.walletSetupProviderAlreadySetUp"));
+            router.refresh();
             return;
           case "success":
             break;

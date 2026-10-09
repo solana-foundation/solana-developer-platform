@@ -12,7 +12,12 @@ import {
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
 import { extractPolicyDenialReason, withPolicyDenialReason } from "@/lib/policy-denial-reason";
-import { createSdpApiClient, requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
+import {
+  createSdpApiClient,
+  extractSdpApiError,
+  requestProjectHref,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "./provider-catalog";
 
 const DEVNET_FAUCET_SOL = sol("1");
@@ -90,17 +95,6 @@ function toApiActionErrorMessage(
     error: withPolicyDenialReason(base, extractPolicyDenialReason(body)),
     status,
   });
-}
-
-/**
- * Reads the HTTP status from an error thrown by `SdpApiClient.fetch`.
- *
- * @param error - The caught error.
- * @returns The response status, or null when the error is not an API response failure.
- */
-function parseApiErrorStatus(error: unknown): number | null {
-  const match = /^SDP API request failed \((\d+)\):/.exec(extractErrorMessage(error).trim());
-  return match ? Number(match[1]) : null;
 }
 
 /**
@@ -195,7 +189,7 @@ export async function initializeCustodySetupAction(
     await revalidateWalletPaths();
     return { status: "success" };
   } catch (error) {
-    if (parseApiErrorStatus(error) === 409) {
+    if (extractSdpApiError(error).status === 409) {
       return { status: "provider_already_set_up" };
     }
     return {
