@@ -12,6 +12,7 @@
 
 import { hashString } from "@sdp/payments/hash";
 import type {
+  AllowedOperation,
   ApiKeyEnvironment,
   ApiKeyRole,
   ApiKeyWalletAuthorizationBinding,
@@ -66,6 +67,7 @@ interface ApiKeyContext {
   signingWalletId: string | null;
   signingWalletIds: string[];
   walletBindings: Array<ApiKeyWalletAuthorizationBinding & { custodyWalletId: string }>;
+  allowedOperations?: AllowedOperation[] | null;
 }
 
 function extractBearerToken(c: Context<{ Bindings: Env }>): string | null {
@@ -357,6 +359,7 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
     role: cachedKey.role,
     permissions: cachedKey.permissions,
     environment: cachedKey.environment,
+    allowedOperations: cachedKey.allowedOperations ?? null,
     walletScope: normalizedWalletBindings.walletScope,
     signingWalletId: normalizedWalletBindings.signingWalletId,
     signingWalletIds: normalizedWalletBindings.signingWalletIds,

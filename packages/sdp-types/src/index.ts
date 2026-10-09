@@ -3,6 +3,7 @@
  */
 
 export * from "./advanced-settings";
+export * from "./allowed-operations";
 export * from "./api-keys";
 export * from "./asset-profiles";
 export * from "./audit";

@@ -2,6 +2,7 @@
  * API Key Types
  */
 
+import type { AllowedOperation } from "./allowed-operations";
 import type { ApiKeyRole, Permission } from "./permissions";
 import type { ApiKeyWalletPolicyBindingScope } from "./policy";
 
@@ -52,6 +53,7 @@ export interface ApiKey {
   environment: ApiKeyEnvironment;
   rateLimitTier: RateLimitTier;
   allowedIps: string[] | null; // IPv4/IPv6 addresses or CIDR ranges for IP restriction
+  allowedOperations: AllowedOperation[] | null; // Operation families/types the key may perform; null or [] = unrestricted
   lastUsedAt: string | null;
   expiresAt: string | null;
   revokedAt: string | null;
@@ -78,6 +80,11 @@ export interface CachedApiKey {
   environment: ApiKeyEnvironment;
   rateLimitTier: RateLimitTier;
   allowedIps: string[] | null;
+  /**
+   * Operation families and types the key may perform. Null, undefined (a
+   * legacy cache entry) or an empty list places no restriction.
+   */
+  allowedOperations?: AllowedOperation[] | null;
   signingWalletId: string | null;
   walletScope?: ApiKeyWalletScope;
   signingWalletIds?: string[];
@@ -117,6 +124,7 @@ export interface CreateApiKeyRequest {
   permissions?: Permission[];
   walletScope: ApiKeyWalletScope;
   allowedIps?: string[]; // IPv4/IPv6 addresses or CIDR ranges for IP restriction
+  allowedOperations?: AllowedOperation[]; // Omit or [] for no restriction
   expiresAt?: string; // ISO date string
   signingWalletId?: string;
   signingWalletIds?: string[];
@@ -134,6 +142,7 @@ export interface UpdateApiKeyRequest {
   description?: string;
   walletScope?: ApiKeyWalletScope;
   allowedIps?: string[] | null; // null to remove IP restrictions
+  allowedOperations?: AllowedOperation[] | null; // null or [] to remove the restriction
   expiresAt?: string | null; // null to remove expiration
   permissions?: Permission[] | null; // null to revert to role defaults
   signingWalletId?: string | null; // null to unset binding
@@ -191,6 +200,7 @@ export interface ListApiKeysResponse {
     signingWalletIds: string[];
     walletBindings: ApiKeyWalletBinding[];
     policyBindings: ApiKeyWalletPolicyBindingSummary[];
+    allowedOperations: AllowedOperation[];
     lastUsedAt: string | null;
     expiresAt: string | null;
     createdAt: string;

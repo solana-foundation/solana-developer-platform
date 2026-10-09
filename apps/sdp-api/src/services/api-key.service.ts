@@ -1,3 +1,4 @@
+import { normalizeAllowedOperations } from "@sdp/types";
 /**
  * API Key Service
  *
@@ -7,6 +8,7 @@
 // biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { hashString } from "@sdp/payments/hash";
 import type {
+  AllowedOperation,
   ApiKeyEnvironment,
   ApiKeyRole,
   ApiKeyStatus,
@@ -19,7 +21,10 @@ import type { ApiKeyWalletPolicyBindingRow } from "@/db/repositories";
 import { AppError, badRequest, internalError, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
-import { assertGrantableApiKeyPermissions } from "./api-key-scope.service";
+import {
+  assertGrantableAllowedOperations,
+  assertGrantableApiKeyPermissions,
+} from "./api-key-scope.service";
 import { parseApiKeyWalletPermissionsColumn } from "./api-key-wallets.service";
 
 export interface ApiKeyListItem {
@@ -32,6 +37,8 @@ export interface ApiKeyListItem {
   status: ApiKeyStatus;
   walletScope: ApiKeyWalletScope;
   signingWalletId: string | null;
+  /** Operation families/types the key may perform. Empty means unrestricted. */
+  allowedOperations: AllowedOperation[];
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
@@ -58,6 +65,9 @@ export interface CreateApiKeyInput {
   role: ApiKeyRole;
   permissions?: Permission[] | null;
   allowedIps?: string[] | null;
+  allowedOperations?: AllowedOperation[] | null;
+  /** The creating key's own list; null for a dashboard actor or an unrestricted key. */
+  actorAllowedOperations: AllowedOperation[] | null;
   expiresAt?: string | null;
   signingWalletId?: string | null;
   pepper?: string;
@@ -70,9 +80,11 @@ export interface UpdateApiKeyInput {
   actorPermissions: Permission[];
   actorApiKeyRole: string | null;
   currentRole: ApiKeyRole;
+  actorAllowedOperations: AllowedOperation[] | null;
   name?: string;
   description?: string | null;
   allowedIps?: string[] | null;
+  allowedOperations?: AllowedOperation[] | null;
   expiresAt?: string | null;
   permissions?: Permission[] | null;
   signingWallet?: { walletId: string | null };
@@ -147,6 +159,7 @@ interface ApiKeyListRow {
   status: ApiKeyStatus;
   wallet_scope: ApiKeyWalletScope;
   signing_wallet_id: string | null;
+  allowed_operations: string | null;
   last_used_at: string | null;
   expires_at: string | null;
   created_at: string;
@@ -159,6 +172,21 @@ interface ApiKeyDetailsRow extends ApiKeyListRow {
   signing_wallet_id: string | null;
   rotated_from: string | null;
   rotation_deadline: string | null;
+}
+
+/** Column form of an Allowed Operations list: NULL when unrestricted. */
+function serializeAllowedOperationsColumn(
+  allowedOperations: AllowedOperation[] | null | undefined
+): string | null {
+  if (!allowedOperations || allowedOperations.length === 0) {
+    return null;
+  }
+  return JSON.stringify(normalizeAllowedOperations(allowedOperations));
+}
+
+/** API form of the column: an empty list when unrestricted. */
+export function parseAllowedOperationsColumn(value: string | null): AllowedOperation[] {
+  return parseOptionalPostgresJson<AllowedOperation[]>(value) ?? [];
 }
 
 function stringifyJsonb(value: unknown, fallback: unknown): string {
@@ -179,6 +207,7 @@ type RotationTargetRow = {
   environment: ApiKeyEnvironment;
   project_id: string;
   allowed_ips: string | null;
+  allowed_operations: string | null;
   signing_wallet_id: string | null;
   created_by: string;
   expires_at: string | null;
@@ -254,7 +283,8 @@ export class ApiKeyService {
                   THEN 'selected'
                   ELSE 'all'
                 END AS wallet_scope,
-                ak.signing_wallet_id, ak.last_used_at, ak.expires_at, ak.created_at
+                ak.signing_wallet_id, ak.allowed_operations, ak.last_used_at, ak.expires_at,
+                ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.organization_id = ?
@@ -287,7 +317,8 @@ export class ApiKeyService {
                   THEN 'selected'
                   ELSE 'all'
                 END AS wallet_scope,
-                ak.last_used_at, ak.expires_at, ak.rotated_from, ak.rotation_deadline, ak.created_at
+                ak.allowed_operations, ak.last_used_at, ak.expires_at, ak.rotated_from,
+                ak.rotation_deadline, ak.created_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ?`
@@ -318,6 +349,7 @@ export class ApiKeyService {
       input.permissions,
       input.actorApiKeyRole
     );
+    assertGrantableAllowedOperations(input.actorAllowedOperations, input.allowedOperations);
 
     const project = await this.db
       .prepare(
@@ -363,8 +395,8 @@ export class ApiKeyService {
         .prepare(
           `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            role, permissions, allowed_ips, signing_wallet_id, expires_at, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+            role, permissions, allowed_ips, allowed_operations, signing_wallet_id, expires_at, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
         )
         .bind(
           keyId,
@@ -378,6 +410,7 @@ export class ApiKeyService {
           input.role,
           input.permissions ? JSON.stringify(input.permissions) : null,
           input.allowedIps ? JSON.stringify(input.allowedIps) : null,
+          serializeAllowedOperationsColumn(input.allowedOperations),
           input.signingWalletId ?? null,
           input.expiresAt ?? null
         )
@@ -432,6 +465,9 @@ export class ApiKeyService {
         input.actorApiKeyRole
       );
     }
+    if (input.allowedOperations !== undefined) {
+      assertGrantableAllowedOperations(input.actorAllowedOperations, input.allowedOperations);
+    }
 
     const updates: string[] = [];
     const values: (string | null)[] = [];
@@ -451,6 +487,10 @@ export class ApiKeyService {
     if (input.expiresAt !== undefined) {
       updates.push("expires_at = ?");
       values.push(input.expiresAt);
+    }
+    if (input.allowedOperations !== undefined) {
+      updates.push("allowed_operations = ?");
+      values.push(serializeAllowedOperationsColumn(input.allowedOperations));
     }
     if (input.permissions !== undefined) {
       updates.push("permissions = ?");
@@ -481,6 +521,7 @@ export class ApiKeyService {
     gracePeriodHours: number,
     actorPermissions: Permission[],
     actorApiKeyRole: string | null,
+    actorAllowedOperations: AllowedOperation[] | null,
     pepper?: string,
     guardTargetWalletScope?: (target: {
       signingWalletId: string | null;
@@ -491,8 +532,8 @@ export class ApiKeyService {
     const existing = await this.db
       .prepare(
         `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
-                p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id, ak.created_by,
-                ak.expires_at
+                p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
+                ak.signing_wallet_id, ak.created_by, ak.expires_at
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.id = ? AND ak.organization_id = ? AND ak.project_id = ?
@@ -510,6 +551,10 @@ export class ApiKeyService {
       existing.role,
       existing.permissions === null ? null : parsePostgresJson<Permission[]>(existing.permissions),
       actorApiKeyRole
+    );
+    assertGrantableAllowedOperations(
+      actorAllowedOperations,
+      parseAllowedOperationsColumn(existing.allowed_operations)
     );
 
     const newKeyId = `key_${crypto.randomUUID()}`;
@@ -556,8 +601,8 @@ export class ApiKeyService {
         // window would otherwise be cloned unchecked.
         const target = await tx.queryOne<RotationTargetRow>(
           `SELECT ak.id, ak.name, ak.description, ak.key_hash, ak.role, ak.permissions,
-                  p.environment, ak.project_id, ak.allowed_ips, ak.signing_wallet_id,
-                  ak.created_by, ak.expires_at
+                  p.environment, ak.project_id, ak.allowed_ips, ak.allowed_operations,
+                  ak.signing_wallet_id, ak.created_by, ak.expires_at
            FROM api_keys ak
            JOIN projects p ON p.id = ak.project_id
            WHERE ak.id = $1 AND ak.organization_id = $2 AND ak.project_id = $3
@@ -574,6 +619,10 @@ export class ApiKeyService {
           target.role,
           target.permissions === null ? null : parsePostgresJson<Permission[]>(target.permissions),
           actorApiKeyRole
+        );
+        assertGrantableAllowedOperations(
+          actorAllowedOperations,
+          parseAllowedOperationsColumn(target.allowed_operations)
         );
 
         const signingWalletId = target.signing_wallet_id;
@@ -593,8 +642,8 @@ export class ApiKeyService {
           .prepare(
             `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            role, permissions, allowed_ips, signing_wallet_id, rotated_from, status, expires_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
+            role, permissions, allowed_ips, allowed_operations, signing_wallet_id, rotated_from, status, expires_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`
           )
           .bind(
             newKeyId,
@@ -608,6 +657,7 @@ export class ApiKeyService {
             target.role,
             target.permissions,
             target.allowed_ips,
+            target.allowed_operations,
             signingWalletId,
             keyId,
             target.expires_at
@@ -771,6 +821,7 @@ export class ApiKeyService {
       status: row.status,
       walletScope: row.wallet_scope,
       signingWalletId: row.signing_wallet_id,
+      allowedOperations: parseAllowedOperationsColumn(row.allowed_operations),
       lastUsedAt: row.last_used_at,
       expiresAt: row.expires_at,
       createdAt: row.created_at,

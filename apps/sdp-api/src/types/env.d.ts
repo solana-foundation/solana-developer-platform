@@ -2,7 +2,11 @@
 
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
-import type { OrganizationEntitlements, SdpRampProviderStages } from "@sdp/types";
+import type {
+  AllowedOperation,
+  OrganizationEntitlements,
+  SdpRampProviderStages,
+} from "@sdp/types";
 import type { PolicyGateContext } from "@/middleware/policy-gate";
 import type { KVStoreSet } from "@/runtime/kv";
 import type { Observability } from "@/runtime/observability";
@@ -377,6 +381,7 @@ declare module "hono" {
       role: string;
       permissions: Permission[];
       environment: ApiKeyEnvironment;
+      allowedOperations?: AllowedOperation[] | null;
       walletScope?: "all" | "selected";
       signingWalletId: string | null;
       signingWalletIds?: string[];

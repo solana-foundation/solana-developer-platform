@@ -1,4 +1,4 @@
-import { PERMISSIONS } from "@sdp/types";
+import { ALLOWED_OPERATIONS, PERMISSIONS } from "@sdp/types";
 import {
   apiKeyControlProfileCreateSchema as apiKeyControlProfileCreateSchemaBase,
   apiKeyControlProfileRevisionCreateBaseSchema as apiKeyControlProfileRevisionCreateSchemaBase,
@@ -32,6 +32,12 @@ export const apiKeyWalletScopeSchema = z.enum(["all", "selected"]).openapi({
 export const apiKeyStatusSchema = z
   .enum(["active", "revoked", "expired", "deactivated"])
   .openapi({ description: "API key status.", example: "active" });
+
+export const allowedOperationSchema = z.enum(ALLOWED_OPERATIONS).openapi({
+  description:
+    "An operation family (transfer, payment, ramp, issuance, program) or a single operation type. A family entry covers every type in it.",
+  example: "payment",
+});
 
 export const permissionSchema = z.enum(PERMISSIONS).openapi({
   description: "Permission granted to the API key.",
@@ -248,6 +254,11 @@ export const apiKeyListItemSchema = z
     policyBindings: z.array(apiKeyWalletPolicyBindingSchema).openapi({
       description: "Policy binding summaries currently associated with this API key.",
     }),
+    allowedOperations: z.array(allowedOperationSchema).openapi({
+      description:
+        "Operation families and types this key may perform on the wallets it can access. An empty list places no restriction.",
+      example: ["payment", "ramp_offramp_quote"],
+    }),
     lastUsedAt: isoDateTimeSchema.nullable().openapi({
       description: "Timestamp of the last key usage.",
       example: "2025-01-10T12:00:00.000Z",
@@ -306,6 +317,11 @@ export const apiKeyDetailSchema = z
     }),
     policyBindings: z.array(apiKeyWalletPolicyBindingSchema).openapi({
       description: "Policy binding summaries currently associated with this API key.",
+    }),
+    allowedOperations: z.array(allowedOperationSchema).openapi({
+      description:
+        "Operation families and types this key may perform on the wallets it can access. An empty list places no restriction.",
+      example: ["payment", "ramp_offramp_quote"],
     }),
     lastUsedAt: isoDateTimeSchema.nullable().openapi({
       description: "Timestamp of the last key usage.",
@@ -430,6 +446,11 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
       description: "Optional list of IPv4/IPv6 addresses or CIDR ranges allowed to use the key.",
       example: ["203.0.113.0/24"],
     }),
+    allowedOperations: withOpenApi(apiKeyCreateSchemaBase.shape.allowedOperations, {
+      description:
+        "Optional operation families and types the key may perform. Omit or pass an empty list for no restriction. A key cannot grant operations outside its own list.",
+      example: ["payment", "ramp"],
+    }),
     expiresAt: withOpenApi(apiKeyCreateSchemaBase.shape.expiresAt, {
       description: "Optional expiration timestamp.",
       example: "2025-12-31T00:00:00.000Z",
@@ -495,6 +516,11 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
     allowedIps: withOpenApi(apiKeyUpdateSchemaBase.shape.allowedIps, {
       description: "Updated IPv4/IPv6 address or CIDR allowlist. Use null to clear.",
       example: ["203.0.113.0/24"],
+    }),
+    allowedOperations: withOpenApi(apiKeyUpdateSchemaBase.shape.allowedOperations, {
+      description:
+        "Updated operation families and types the key may perform. Use null or an empty list to remove the restriction.",
+      example: ["issuance_mint_execute"],
     }),
     expiresAt: withOpenApi(apiKeyUpdateSchemaBase.shape.expiresAt, {
       description: "Updated expiration. Use null to clear.",

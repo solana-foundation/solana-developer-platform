@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
 import { policyGate } from "@/middleware/policy-gate";
 import { validateBody } from "@/middleware/validate";
@@ -25,6 +26,7 @@ transferBatches.post(
 transferBatches.post(
   "/",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
+  requireAllowedOperation("payment_transfer_batch_execute"),
   validateBody(createTransferBatchSchema),
   policyGate({
     extract: extractTransferBatchPolicyCandidate,

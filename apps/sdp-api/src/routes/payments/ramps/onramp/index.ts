@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
@@ -25,6 +26,7 @@ onramp.post(
 onramp.post(
   "/quote",
   requirePermissions("payments:write", "wallets:read"),
+  requireAllowedOperation("ramp_onramp_quote"),
   validateBody(createOnrampQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
   policyGate({ extract: extractOnrampQuotePolicyCandidate }),

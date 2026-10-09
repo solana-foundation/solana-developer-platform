@@ -12,6 +12,7 @@ import type { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import { ApiKeyService } from "@/services/api-key.service";
 import {
   assertBindingsWithinActorWalletScope,
+  assertGrantableAllowedOperations,
   isWalletScopedActor,
   resolveCreateWalletScope,
   resolveWalletBindingsInScope,
@@ -100,6 +101,7 @@ export const listProjectApiKeys = async (c: AppContext) => {
         signingWalletIds: walletBindings.map((binding) => binding.walletId),
         walletBindings,
         policyBindings: accessSummary?.policyBindings ?? [],
+        allowedOperations: key.allowedOperations,
         lastUsedAt: key.lastUsedAt,
         expiresAt: key.expiresAt,
         createdAt: key.createdAt,
@@ -123,6 +125,7 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     permissions,
     walletScope,
     allowedIps,
+    allowedOperations,
     expiresAt,
     signingWalletId,
     signingWalletIds,
@@ -153,6 +156,11 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       walletScope
     );
   }
+
+  // Judge the requested Allowed Operations before any wallet is provisioned,
+  // so a refused request leaves nothing behind. The service judges again
+  // inside the key transaction.
+  assertGrantableAllowedOperations(actorApiKey?.allowedOperations ?? null, allowedOperations);
 
   let resolvedSigningWalletId: string | null = walletSelection.defaultSigningWalletId;
   let resolvedWalletBindings: ExactApiKeyWalletBinding[] = [];
@@ -214,11 +222,13 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
       createdByUserId: auth.userId ?? undefined,
       actorPermissions: auth.permissions,
       actorApiKeyRole: c.get("apiKey")?.role ?? null,
+      actorAllowedOperations: c.get("apiKey")?.allowedOperations ?? null,
       name,
       description,
       role,
       permissions,
       allowedIps,
+      allowedOperations,
       expiresAt,
       signingWalletId: resolvedSigningWalletId,
       pepper: c.env.API_KEY_PEPPER,

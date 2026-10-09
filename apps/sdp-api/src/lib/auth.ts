@@ -6,6 +6,7 @@
  */
 
 import type {
+  AllowedOperation,
   ApiKeyWalletAuthorizationBinding,
   ApiKeyWalletScope,
   Permission,
@@ -24,6 +25,8 @@ interface AuthContextBase {
   role: string;
   permissions: Permission[];
   environment: string;
+  /** Operation families/types the key may perform; null or [] is unrestricted. Always null for non-key actors. */
+  allowedOperations?: AllowedOperation[] | null;
   walletScope?: ApiKeyWalletScope | null;
   signingWalletId: string | null;
   signingWalletIds: string[];
@@ -80,6 +83,7 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       role: apiKey.role,
       permissions: apiKey.permissions,
       environment: apiKey.environment,
+      allowedOperations: apiKey.allowedOperations ?? null,
       walletScope:
         apiKey.walletScope ??
         ((apiKey.walletBindings?.length ?? 0) > 0 || apiKey.signingWalletId ? "selected" : "all"),
@@ -103,6 +107,7 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       role: clerk.role,
       permissions: clerk.permissions,
       environment: c.get("projectEnvironment") ?? "dashboard",
+      allowedOperations: null,
       walletScope: null,
       signingWalletId: null,
       signingWalletIds: [],
@@ -122,6 +127,7 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       role: "approved_operation",
       permissions: replayActor.permissions,
       environment: c.get("projectEnvironment") ?? "dashboard",
+      allowedOperations: null,
       walletScope: null,
       signingWalletId: null,
       signingWalletIds: [],
