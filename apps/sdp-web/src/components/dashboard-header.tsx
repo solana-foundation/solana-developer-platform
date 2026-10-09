@@ -5,12 +5,14 @@ import {
   ArrowLeftIcon,
   ChevronLeftIcon,
   DownloadIcon,
+  Loader2Icon,
   MenuIcon,
   PanelRightIcon,
   PlusIcon,
 } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
+import { toast } from "sonner";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
@@ -22,9 +24,14 @@ import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs
 import { Button } from "@/components/ui/button";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { type DesignModuleFlags, isNewDesignPage } from "@/lib/design-modules";
-import { PAYMENT_REQUESTS_HREF, PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
+import {
+  PAYMENT_REQUEST_NEW_HREF,
+  PAYMENT_REQUESTS_HREF,
+  PAYMENT_TRANSACTIONS_HREF,
+} from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 
@@ -63,9 +70,82 @@ export type DashboardHeaderActionConfig = {
   variant: "primary" | "outline";
   /** Appends the page's current query string, so an export follows the list's filters. */
   withCurrentQuery?: boolean;
-  /** A file download rather than a page: rendered as a plain anchor with `download`. */
+  /**
+   * A file download rather than a page: an anchor with `download` whose click fetches the file,
+   * so a failed export reaches the user as a message rather than a broken download.
+   */
   download?: boolean;
 };
+
+/** The saved file's name, off a Content-Disposition header. */
+function attachmentFilename(header: string | null): string | null {
+  return header?.match(/filename="([^"]+)"/)?.[1] ?? null;
+}
+
+/**
+ * A download action. The click fetches the file and saves it, the button spinning meanwhile (an
+ * export can wait out the API's rate limit), and a failure shows as a toast. It is a button, not
+ * a link: the page never navigates to the file.
+ */
+function DashboardHeaderDownloadAction({
+  href,
+  label,
+  variant,
+}: {
+  href: string;
+  label: string;
+  variant: DashboardHeaderActionConfig["variant"];
+}) {
+  const t = useTranslations();
+  const [pending, setPending] = useState(false);
+
+  const download = async () => {
+    setPending(true);
+    try {
+      const response = await dashboardRequest(href, { method: "GET" });
+      if (!response.ok) {
+        toast.error(
+          t(
+            response.status === 429
+              ? "Shared.dashboardShell.downloadRateLimited"
+              : "Shared.dashboardShell.downloadFailed"
+          )
+        );
+        return;
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = attachmentFilename(response.headers.get("Content-Disposition")) ?? "";
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch {
+      toast.error(t("Shared.dashboardShell.downloadFailed"));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant={variant === "primary" ? "default" : "outline"}
+      size="sm"
+      disabled={pending}
+      aria-busy={pending || undefined}
+      onClick={() => void download()}
+    >
+      {pending ? (
+        <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+      ) : (
+        <DownloadIcon className="size-4" aria-hidden="true" />
+      )}
+      {label}
+    </Button>
+  );
+}
 
 /**
  * The title row's page action.
@@ -83,22 +163,19 @@ export function DashboardHeaderAction({
   const projectHref = useProjectHref();
   const Icon = action.icon === undefined ? null : action.icon === "plus" ? PlusIcon : DownloadIcon;
   const target = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
-  const href = action.download ? target : projectHref(target);
-  const content = (
-    <>
-      {Icon === null ? null : <Icon className="size-4" aria-hidden="true" />}
-      {action.label}
-    </>
-  );
+  if (action.download) {
+    // The export route is an API path, not a dashboard page, so it takes no project segment.
+    return (
+      <DashboardHeaderDownloadAction href={target} label={action.label} variant={action.variant} />
+    );
+  }
+  const href = projectHref(target);
   return (
     <Button asChild variant={action.variant === "primary" ? "default" : "outline"} size="sm">
-      {action.download ? (
-        <a href={href} download>
-          {content}
-        </a>
-      ) : (
-        <Link href={href}>{content}</Link>
-      )}
+      <Link href={href}>
+        {Icon === null ? null : <Icon className="size-4" aria-hidden="true" />}
+        {action.label}
+      </Link>
     </Button>
   );
 }
@@ -934,8 +1011,8 @@ function getWalletSectionPageConfig(
 }
 
 /**
- * Header config for the Payments pages built on the refresh design so far: Contacts and the two
- * flows. Returns null for every other route.
+ * Header config for the Payments pages built on the refresh design: the overview, the three
+ * lists and the two flows. Returns null for every other route.
  */
 function getRefreshPaymentsPageConfig(
   pathname: string,
@@ -949,6 +1026,82 @@ function getRefreshPaymentsPageConfig(
       headerAction: {
         label: t("DashboardPayments.counterparty.add"),
         href: "/dashboard/payments/counterparty/create",
+        icon: "plus",
+        variant: "primary",
+      },
+    };
+  }
+  if (pathname === "/dashboard/payments") {
+    return {
+      title: t("Shared.dashboardShell.payments"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+    };
+  }
+  if (pathname === "/dashboard/payments/transactions") {
+    return {
+      title: t("Shared.dashboardShell.transactions"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardPayments.transactions.downloadCsv"),
+        href: "/api/dashboard/payments/transactions/export",
+        icon: "download",
+        variant: "outline",
+        withCurrentQuery: true,
+        download: true,
+      },
+    };
+  }
+  if (pathname === PAYMENT_REQUESTS_HREF) {
+    return {
+      title: t("Shared.dashboardShell.requests"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardPayments.requests.new"),
+        href: PAYMENT_REQUEST_NEW_HREF,
+        icon: "plus",
+        variant: "primary",
+      },
+    };
+  }
+  if (pathname === PAYMENT_REQUEST_NEW_HREF) {
+    return {
+      title: t("DashboardPayments.requests.newRequest"),
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+      backAction: { href: PAYMENT_REQUESTS_HREF, label: t("Shared.dashboardShell.requests") },
+    };
+  }
+  if (pathname.startsWith(`${PAYMENT_REQUESTS_HREF}/`)) {
+    // A request's page reads in the page column, the way back over its title.
+    return {
+      title: t("DashboardPayments.requests.paymentRequest"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      backAction: { href: PAYMENT_REQUESTS_HREF, label: t("Shared.dashboardShell.requests") },
+    };
+  }
+  if (pathname.startsWith(`${PAYMENT_TRANSACTIONS_HREF}/`)) {
+    // The page titles itself with what moved and between whom; "Transaction" holds the place
+    // until it does.
+    return {
+      title: t("Shared.dashboardShell.transaction"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      backAction: {
+        href: PAYMENT_TRANSACTIONS_HREF,
+        label: t("Shared.dashboardShell.transactions"),
+      },
+    };
+  }
+  if (pathname === "/dashboard/payments/recurring") {
+    return {
+      title: t("Shared.dashboardShell.newDesign.recurringPayments"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardPayments.recurring.new"),
+        href: "/dashboard/payments/recurring/create",
         icon: "plus",
         variant: "primary",
       },
@@ -1106,6 +1259,16 @@ function getLegacyDesignPageConfig(
   });
 }
 
+/**
+ * Requests and Schedules sit under new-design-activity, but their pages are still the previous
+ * design's, so they keep its header (the Requests playground switch included) with the flag on.
+ */
+function isHeldOnPreviousDesign(pathname: string): boolean {
+  return [PAYMENT_REQUESTS_HREF, "/dashboard/payments/recurring"].some(
+    (href) => pathname === href || pathname.startsWith(`${href}/`)
+  );
+}
+
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -1168,10 +1331,11 @@ export function getDashboardPageConfig(
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   // A Payments page no design module has redesigned keeps the previous design's header under
-  // NEW DESIGN too.
-  const legacyDesignConfig = !newDesignPage
-    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled, transactionModules)
-    : null;
+  // NEW DESIGN too, and so do Requests and Schedules until their redesign lands.
+  const legacyDesignConfig =
+    !newDesignPage || isHeldOnPreviousDesign(pathname)
+      ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled, transactionModules)
+      : null;
   if (legacyDesignConfig) {
     return legacyDesignConfig;
   }
@@ -1186,6 +1350,27 @@ export function getDashboardPageConfig(
   const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
   if (marketsRouteConfig) {
     return marketsRouteConfig;
+  }
+  if (pathname === "/dashboard/payments/recurring/create") {
+    return {
+      title: t("DashboardPayments.recurring.newSchedule"),
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: "/dashboard/payments/recurring",
+        label: t("Shared.dashboardShell.newDesign.backToRecurringPayments"),
+      },
+    };
+  }
+  if (pathname.startsWith("/dashboard/payments/recurring/")) {
+    return {
+      title: t("Shared.dashboardShell.newDesign.recurringPayment"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      backAction: {
+        href: "/dashboard/payments/recurring",
+        label: t("Shared.dashboardShell.newDesign.backToRecurringPayments"),
+      },
+    };
   }
   const privateChannelsConfig = getPrivateChannelsRoutePageConfig(pathname, t);
   if (privateChannelsConfig) {

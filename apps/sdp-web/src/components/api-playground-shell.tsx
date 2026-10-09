@@ -4,6 +4,15 @@ import { Badge } from "@solana/design-system/badge";
 import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
 import type { ComponentProps, Dispatch, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ApiPlaygroundEndpointOptions,
+  ApiPlaygroundRefreshLayout,
+} from "@/components/api-playground-refresh-layout";
+import {
+  type IdentifyPendingApiKey,
+  PendingApiKeyContext,
+} from "@/components/playground-pending-api-key";
+import { useThemeScope } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -46,12 +55,20 @@ export interface ApiPlaygroundEndpointConfig {
   pathFields: ApiPlaygroundFieldConfig[];
   bodyFields: ApiPlaygroundFieldConfig[];
   expectedResponse: unknown;
+  /** The API family this endpoint belongs to, grouping the endpoint picker when set. */
+  group?: string;
 }
 
 export interface ApiPlaygroundMessage {
   text: string;
   tone?: "critical" | "neutral";
 }
+
+/** Where the last run stands, as the refresh layout reports it beside the response. */
+export type ApiPlaygroundExecution =
+  | { state: "idle" }
+  | { state: "running" }
+  | { state: "done" | "error"; ok: boolean; label: string; durationMs?: number };
 
 interface ExecutionResult {
   ok: boolean;
@@ -60,6 +77,8 @@ interface ExecutionResult {
   durationMs: number;
   authMode: "api_key" | "session";
   body: unknown;
+  /** The response headers the proxy passes through (an allowlist, secret redacted). */
+  headers: Record<string, string>;
 }
 
 interface ApiPlaygroundShellProps {
@@ -72,6 +91,37 @@ interface ApiPlaygroundShellProps {
   requiresApiKey?: boolean;
   productName: string;
   rightMessages?: ApiPlaygroundMessage[];
+}
+
+function apiHostOf(baseUrl: string): string | null {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return null;
+  }
+}
+
+function getRefreshExecution(
+  isExecuting: boolean,
+  executionResult: ExecutionResult | null,
+  executeError: string | null,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): ApiPlaygroundExecution {
+  if (isExecuting) {
+    return { state: "running" };
+  }
+  if (executionResult) {
+    return {
+      state: "done",
+      ok: executionResult.ok,
+      label: `${executionResult.status} ${executionResult.statusText}`.trim(),
+      durationMs: executionResult.durationMs,
+    };
+  }
+  if (executeError) {
+    return { state: "error", ok: false, label: t("Shared.SharedComponents.requestFailed") };
+  }
+  return { state: "idle" };
 }
 
 function getDefaultApiBaseUrl(): string {
@@ -425,6 +475,7 @@ async function executePlaygroundRequest({
       status?: number;
       statusText?: string;
       body?: unknown;
+      headers?: Record<string, string>;
     };
 
     if (!proxyResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
@@ -439,6 +490,7 @@ async function executePlaygroundRequest({
       durationMs: Date.now() - startedAt,
       authMode: "api_key",
       body: envelope.body ?? {},
+      headers: envelope.headers ?? {},
     });
   } catch {
     onExecutionError(t("Shared.SharedComponents.requestExecutionFailed"));
@@ -507,18 +559,497 @@ const OUTPUT_PANEL_LABEL_KEYS = [
   labelKey: MessageKey;
 }[];
 
-export function ApiPlaygroundShell({
-  apiBaseUrl,
-  apiKeyId,
+/** Which half of the playground the mobile layout shows. */
+type MobileSection = "request" | "output";
+
+/** Which view the output column shows. */
+type OutputPanel = "code" | "response" | "example";
+
+/** The notes shown above a column, when there are any. */
+function PlaygroundMessages({ messages }: { messages: ApiPlaygroundMessage[] }) {
+  if (messages.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mb-4 shrink-0 space-y-4">
+      {messages.map((message) => (
+        <MessageCard key={`${message.tone ?? "neutral"}-${message.text}`} message={message} />
+      ))}
+    </div>
+  );
+}
+
+/** One request field's control: a select, a textarea or a text input, as the field asks. */
+function PlaygroundFieldControl({
+  field,
+  id,
+  value,
+  textareaRows,
+  onChange,
+}: {
+  field: ApiPlaygroundFieldConfig;
+  id: string;
+  value: string;
+  textareaRows: number;
+  onChange: (value: string) => void;
+}) {
+  const t = useTranslations();
+  if (field.kind === "select") {
+    return (
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 text-sm text-primary outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+      >
+        <option value="">{field.placeholder ?? t("Shared.SharedComponents.selectValue")}</option>
+        {(field.options ?? []).map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  if (field.kind === "textarea") {
+    return (
+      <textarea
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        placeholder={field.placeholder}
+        rows={textareaRows}
+        spellCheck={false}
+        className="w-full resize-y rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
+      />
+    );
+  }
+  return (
+    <Input
+      id={id}
+      value={value}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      placeholder={field.placeholder}
+      className="h-11 rounded-[var(--sdp-field-radius)] border-border-default bg-surface-raised px-4 shadow-none"
+    />
+  );
+}
+
+/** A titled group of request fields (path parameters or body), or a note when it has none. */
+function PlaygroundFieldSection({
+  title,
+  emptyLabel,
+  fields,
+  textareaRows,
+  fieldValues,
+  getFieldId,
+  onFieldChange,
+}: {
+  title: string;
+  emptyLabel: string;
+  fields: ApiPlaygroundFieldConfig[];
+  textareaRows: number;
+  fieldValues: Record<string, string>;
+  getFieldId: (fieldKey: string) => string;
+  onFieldChange: (fieldKey: string, value: string) => void;
+}) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-[18px] leading-6 font-medium text-primary">{title}</h2>
+      {fields.length === 0 ? (
+        <EmptyState>{emptyLabel}</EmptyState>
+      ) : (
+        <div className="space-y-4">
+          {fields.map((field) => (
+            <div key={field.key} className="space-y-2">
+              <FieldLabel htmlFor={getFieldId(field.key)}>{field.label}</FieldLabel>
+              {field.description ? (
+                <p className="text-[13px] leading-5 text-tertiary">{field.description}</p>
+              ) : null}
+              <PlaygroundFieldControl
+                field={field}
+                id={getFieldId(field.key)}
+                value={fieldValues[field.key] ?? ""}
+                textareaRows={textareaRows}
+                onChange={(value) => onFieldChange(field.key, value)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** The top row: the endpoint picker, and the caller's API key control beside it. */
+function PlaygroundEndpointBar({
+  endpoints,
+  activeEndpoint,
+  onEndpointChange,
   apiKeySelector,
+}: {
+  endpoints: ApiPlaygroundEndpointConfig[];
+  activeEndpoint: ApiPlaygroundEndpointConfig;
+  onEndpointChange: (endpointId: string) => void;
+  apiKeySelector?: ReactNode;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="grid shrink-0 border-b border-border-default lg:grid-cols-2">
+      <div className="px-6 py-5">
+        <div className="relative">
+          <div className="pointer-events-none flex h-11 w-full items-center rounded-xl border border-border-default bg-surface-raised px-3 shadow-none">
+            <span className="flex min-w-0 items-center gap-3 pr-8">
+              <Badge variant={getMethodBadgeVariant(activeEndpoint.method)}>
+                {activeEndpoint.method}
+              </Badge>
+              <span className="truncate text-[15px] font-medium text-primary">
+                {activeEndpoint.title}
+              </span>
+            </span>
+          </div>
+          <select
+            aria-label={t("Shared.SharedComponents.selectApiEndpoint")}
+            className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-xl bg-surface-raised text-primary opacity-0"
+            value={activeEndpoint.id}
+            onChange={(event) => onEndpointChange(event.currentTarget.value)}
+          >
+            <ApiPlaygroundEndpointOptions endpoints={endpoints} />
+          </select>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            className="pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2 text-muted"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="m4 6 4 4 4-4" />
+          </svg>
+        </div>
+      </div>
+
+      <div className="border-t border-border-default px-6 py-5 lg:border-t-0">
+        <div className="flex justify-stretch lg:justify-end">{apiKeySelector ?? null}</div>
+      </div>
+    </div>
+  );
+}
+
+/** The mobile switch between the request form and its output. */
+function PlaygroundSectionTabs({
+  mobileSection,
+  onChange,
+}: {
+  mobileSection: MobileSection;
+  onChange: (section: MobileSection) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="border-b border-border-default px-6 py-4 lg:hidden">
+      <div className="grid grid-cols-2 gap-1 rounded-full bg-fill-strong p-1">
+        {MOBILE_SECTION_LABEL_KEYS.map(({ value, labelKey }) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => onChange(value)}
+            className={cn(
+              "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+              mobileSection === value ? "bg-surface-raised text-primary shadow-sm" : "text-tertiary"
+            )}
+          >
+            {t(labelKey)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The left column: its notes, then the path parameter and request body fields. */
+function PlaygroundRequestColumn({
+  mobileSection,
+  messages,
+  activeEndpoint,
+  fieldValues,
+  getFieldId,
+  onFieldChange,
+}: {
+  mobileSection: MobileSection;
+  messages: ApiPlaygroundMessage[];
+  activeEndpoint: ApiPlaygroundEndpointConfig;
+  fieldValues: Record<string, string>;
+  getFieldId: (fieldKey: string) => string;
+  onFieldChange: (fieldKey: string, value: string) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className={cn("min-h-0", mobileSection === "request" ? "flex-1" : "hidden", "lg:block")}>
+      <div className="flex h-full min-h-0 flex-col px-6 py-6">
+        <PlaygroundMessages messages={messages} />
+
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto lg:pr-2">
+          <PlaygroundFieldSection
+            title={t("Shared.SharedComponents.pathParameters")}
+            emptyLabel={t("Shared.SharedComponents.noPathParameters")}
+            fields={activeEndpoint.pathFields}
+            textareaRows={8}
+            fieldValues={fieldValues}
+            getFieldId={getFieldId}
+            onFieldChange={onFieldChange}
+          />
+
+          <PlaygroundFieldSection
+            title={t("Shared.SharedComponents.requestBody")}
+            emptyLabel={t("Shared.SharedComponents.noRequestBody")}
+            fields={activeEndpoint.bodyFields}
+            textareaRows={10}
+            fieldValues={fieldValues}
+            getFieldId={getFieldId}
+            onFieldChange={onFieldChange}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The output column's switch between the code, the response and the example. */
+function PlaygroundOutputTabs({
+  activePanel,
+  onChange,
+}: {
+  activePanel: OutputPanel;
+  onChange: (panel: OutputPanel) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="mb-4 shrink-0 rounded-full bg-fill-strong p-1">
+      <div className="grid grid-cols-3 gap-1">
+        {OUTPUT_PANEL_LABEL_KEYS.map(({ value: tab, labelKey }) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => onChange(tab)}
+            className={cn(
+              "rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors",
+              activePanel === tab ? "bg-surface-raised text-primary shadow-sm" : "text-tertiary"
+            )}
+          >
+            {t(labelKey)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The code block: the chosen view's content over a status strip for the last run. */
+function PlaygroundCodePanel({
+  activePanel,
+  panelContent,
+  panelLanguage,
+  executionResult,
+  executeError,
+}: {
+  activePanel: OutputPanel;
+  panelContent: string;
+  panelLanguage: HighlightLanguage;
+  executionResult: ExecutionResult | null;
+  executeError: string | null;
+}) {
+  const t = useTranslations();
+  const { statusToneVariant, statusLabel } = getExecutionStatus(executionResult, executeError, t);
+  return (
+    <div
+      className="code-block-line-numbers group relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--button-radius-md)]"
+      style={{
+        border: "1px solid var(--code-block-border)",
+        background: "var(--code-block-bg)",
+        fontFamily: "var(--font-berkeley-mono), ui-monospace, monospace",
+      }}
+    >
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {activePanel === "response" && !executionResult && !executeError ? (
+          <ResponseEmptyState message={t("Shared.SharedComponents.runRequestToInspectOutput")} />
+        ) : (
+          <HighlightedCode content={panelContent} language={panelLanguage} />
+        )}
+      </div>
+      <div
+        className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3 text-sm"
+        style={{
+          background: "var(--code-block-header-bg)",
+          color: "var(--code-block-header-text)",
+          boxShadow: "inset 0 1px 0 var(--code-block-header-border)",
+        }}
+      >
+        <span className="leading-none text-tertiary">{t("Shared.SharedComponents.status")}</span>
+        <Badge className="h-6 whitespace-nowrap px-2.5 leading-none" variant={statusToneVariant}>
+          {statusLabel}
+        </Badge>
+        {executionResult ? (
+          <Badge className="h-6 whitespace-nowrap px-2.5 leading-none [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1.5 [&>span]:leading-none">
+            <Clock3 className="inline-block size-3 shrink-0" aria-hidden="true" />
+            <span className="tabular-nums">
+              {t("Shared.SharedComponents.durationMilliseconds", {
+                duration: executionResult.durationMs,
+              })}
+            </span>
+          </Badge>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** The right column: its notes, the view switch, and the code block. */
+function PlaygroundOutputColumn({
+  mobileSection,
+  messages,
+  activePanel,
+  onPanelChange,
+  panelContent,
+  panelLanguage,
+  executionResult,
+  executeError,
+}: {
+  mobileSection: MobileSection;
+  messages: ApiPlaygroundMessage[];
+  activePanel: OutputPanel;
+  onPanelChange: (panel: OutputPanel) => void;
+  panelContent: string;
+  panelLanguage: HighlightLanguage;
+  executionResult: ExecutionResult | null;
+  executeError: string | null;
+}) {
+  return (
+    <div
+      className={cn(
+        "min-h-0 border-t border-border-default lg:border-t-0",
+        mobileSection === "output" ? "flex-1" : "hidden",
+        "lg:flex lg:h-full lg:min-h-0 lg:flex-col"
+      )}
+    >
+      <div className="flex h-full min-h-0 flex-col px-6 py-6">
+        <PlaygroundMessages messages={messages} />
+
+        <PlaygroundOutputTabs activePanel={activePanel} onChange={onPanelChange} />
+
+        <PlaygroundCodePanel
+          activePanel={activePanel}
+          panelContent={panelContent}
+          panelLanguage={panelLanguage}
+          executionResult={executionResult}
+          executeError={executeError}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** The bottom row: run and reset under the request, the copy actions under the output. */
+function PlaygroundActionBar({
+  requiresApiKey,
+  isExecuting,
+  onRun,
+  onReset,
+  copiedAction,
+  onCopyCode,
+  onCopyAi,
+}: {
+  requiresApiKey: boolean;
+  isExecuting: boolean;
+  onRun: () => void;
+  onReset: () => void;
+  copiedAction: "code" | "ai" | null;
+  onCopyCode: () => void;
+  onCopyAi: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="grid shrink-0 lg:grid-cols-2">
+      <div className="px-6 py-5">
+        <div className="flex flex-col gap-3">
+          {requiresApiKey ? (
+            <p className="text-sm leading-6 text-secondary">
+              {t("Shared.SharedComponents.apiKeyRequired")}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              onClick={onRun}
+              disabled={isExecuting || requiresApiKey}
+              className="h-10 rounded-[var(--button-radius-lg)] bg-primary px-4 text-on-primary hover:opacity-90 max-sm:flex-1 whitespace-nowrap"
+              iconLeft={
+                isExecuting ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Play className="size-4 fill-current" />
+                )
+              }
+            >
+              {t("Shared.SharedComponents.runRequest")}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onReset}
+              className="h-10 rounded-[var(--button-radius-lg)] px-2 text-secondary hover:bg-transparent hover:text-primary"
+            >
+              {t("Shared.SharedComponents.reset")}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 border-t border-border-default px-6 py-5 lg:border-t-0">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCopyCode}
+          className="h-10 rounded-[var(--button-radius-lg)] border-border-default bg-surface-raised px-4 max-sm:flex-1 whitespace-nowrap"
+          iconLeft={<Copy className="size-4" />}
+        >
+          {copiedAction === "code"
+            ? t("Shared.SharedComponents.copied")
+            : t("Shared.SharedComponents.copyCode")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCopyAi}
+          className="h-10 rounded-[var(--button-radius-lg)] border-border-default bg-surface-raised px-4 max-sm:flex-1 whitespace-nowrap"
+          iconLeft={<Sparkles className="size-4" />}
+        >
+          {copiedAction === "ai"
+            ? t("Shared.SharedComponents.copied")
+            : t("Shared.SharedComponents.aiInstructions")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The playground's state: the URL-driven endpoint, the field values, the last run, and the
+ * request, snippet and responses derived from them. Switching endpoints resets the form.
+ */
+function useApiPlaygroundState({
+  apiBaseUrl,
   defaultEndpointId,
   endpoints,
-  leftMessages = [],
-  requiresApiKey = false,
   productName,
-  rightMessages = [],
-}: ApiPlaygroundShellProps) {
-  const t = useTranslations();
+  t,
+}: Pick<
+  ApiPlaygroundShellProps,
+  "apiBaseUrl" | "defaultEndpointId" | "endpoints" | "productName"
+> & {
+  t: (key: MessageKey, values?: TranslationValues) => string;
+}) {
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
@@ -534,8 +1065,8 @@ export function ApiPlaygroundShell({
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     initialEndpoint ? buildInitialFieldValues(initialEndpoint, preselectedFieldValues) : {}
   );
-  const [mobileSection, setMobileSection] = useState<"request" | "output">("request");
-  const [activePanel, setActivePanel] = useState<"code" | "response" | "example">("code");
+  const [mobileSection, setMobileSection] = useState<MobileSection>("request");
+  const [activePanel, setActivePanel] = useState<OutputPanel>("code");
   const [isExecuting, setIsExecuting] = useState(false);
   const [executeError, setExecuteError] = useState<string | null>(null);
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
@@ -623,9 +1154,88 @@ export function ApiPlaygroundShell({
     [activeEndpoint, fieldValues, productName, requestBody, t]
   );
 
+  return {
+    activeEndpoint,
+    preselectedFieldValues,
+    updateEndpointInUrl,
+    effectiveApiBaseUrl,
+    fieldValues,
+    setFieldValues,
+    mobileSection,
+    setMobileSection,
+    activePanel,
+    setActivePanel,
+    isExecuting,
+    setIsExecuting,
+    executeError,
+    setExecuteError,
+    executionResult,
+    setExecutionResult,
+    copiedAction,
+    setCopiedAction,
+    requestBodyResult,
+    requestBody,
+    resolvedPath,
+    codeSnippet,
+    exampleBody,
+    responseBody,
+    aiInstructions,
+  };
+}
+
+export function ApiPlaygroundShell({
+  apiBaseUrl,
+  apiKeyId,
+  apiKeySelector,
+  defaultEndpointId,
+  endpoints,
+  leftMessages = [],
+  requiresApiKey = false,
+  productName,
+  rightMessages = [],
+}: ApiPlaygroundShellProps) {
+  const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
+  const {
+    activeEndpoint,
+    preselectedFieldValues,
+    updateEndpointInUrl,
+    effectiveApiBaseUrl,
+    fieldValues,
+    setFieldValues,
+    mobileSection,
+    setMobileSection,
+    activePanel,
+    setActivePanel,
+    isExecuting,
+    setIsExecuting,
+    executeError,
+    setExecuteError,
+    executionResult,
+    setExecutionResult,
+    copiedAction,
+    setCopiedAction,
+    requestBodyResult,
+    requestBody,
+    resolvedPath,
+    codeSnippet,
+    exampleBody,
+    responseBody,
+    aiInstructions,
+  } = useApiPlaygroundState({ apiBaseUrl, defaultEndpointId, endpoints, productName, t });
+  // The key field fills this, so a run can identify a key pasted a moment before.
+  const identifyPendingApiKey = useRef<IdentifyPendingApiKey | null>(null);
+  // Set from the press until the run settles, key check included: a second Run or ⌘↵ meanwhile
+  // would wait on the same check and then send the request again.
+  const runPending = useRef(false);
+
   if (!activeEndpoint) {
     return null;
   }
+
+  const keySelector = apiKeySelector ? (
+    <PendingApiKeyContext value={identifyPendingApiKey}>{apiKeySelector}</PendingApiKeyContext>
+  ) : null;
 
   const panelContent = resolvePanelContent(activePanel, codeSnippet, responseBody, exampleBody);
   const panelLanguage: HighlightLanguage = activePanel === "code" ? "javascript" : "json";
@@ -658,12 +1268,16 @@ export function ApiPlaygroundShell({
     setExecuteError(null);
   };
 
-  const handleExecute = () => {
-    setExecuteError(null);
-    setExecutionResult(null);
-    void executePlaygroundRequest({
+  const runWithIdentifiedKey = async () => {
+    // A key pasted a moment ago, its popover maybe still open, is identified before the run so
+    // the run uses it. A refused key stops the run; the key field says why.
+    const pending = (await identifyPendingApiKey.current?.()) ?? { kind: "none" };
+    if (pending.kind === "rejected") {
+      return;
+    }
+    await executePlaygroundRequest({
       activeEndpoint,
-      apiKeyId,
+      apiKeyId: pending.kind === "identified" ? pending.apiKeyId : apiKeyId,
       fieldValues,
       requestBody,
       requestBodyResult,
@@ -687,372 +1301,90 @@ export function ApiPlaygroundShell({
     });
   };
 
-  const { statusToneVariant, statusLabel } = getExecutionStatus(executionResult, executeError, t);
+  const handleExecute = () => {
+    if (runPending.current) {
+      return;
+    }
+    runPending.current = true;
+    setExecuteError(null);
+    setExecutionResult(null);
+    void runWithIdentifiedKey().finally(() => {
+      runPending.current = false;
+    });
+  };
+
+  if (refresh) {
+    return (
+      <ApiPlaygroundRefreshLayout
+        endpoints={endpoints}
+        activeEndpoint={activeEndpoint}
+        onEndpointChange={updateEndpointInUrl}
+        apiKeySelector={keySelector}
+        apiHost={apiHostOf(effectiveApiBaseUrl)}
+        requiresApiKey={requiresApiKey}
+        messages={[...leftMessages, ...rightMessages]}
+        fieldValues={fieldValues}
+        onFieldChange={updateFieldValue}
+        getFieldId={getFieldId}
+        resolvedPath={resolvedPath}
+        requestBody={requestBody}
+        codeSnippet={codeSnippet}
+        aiInstructions={aiInstructions}
+        exampleBody={exampleBody}
+        execution={getRefreshExecution(isExecuting, executionResult, executeError, t)}
+        responseBody={responseBody}
+        responseHeaders={executionResult?.headers ?? null}
+        onRun={handleExecute}
+        onReset={handleReset}
+        onCopy={(text, action) => void copyText(text, action)}
+        copiedAction={copiedAction}
+      />
+    );
+  }
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
       <div className="pointer-events-none absolute top-0 bottom-0 left-1/2 hidden w-px -translate-x-1/2 bg-fill-strong lg:block" />
-      <div className="grid shrink-0 border-b border-border-default lg:grid-cols-2">
-        <div className="px-6 py-5">
-          <div className="relative">
-            <div className="pointer-events-none flex h-11 w-full items-center rounded-xl border border-border-default bg-surface-raised px-3 shadow-none">
-              <span className="flex min-w-0 items-center gap-3 pr-8">
-                <Badge variant={getMethodBadgeVariant(activeEndpoint.method)}>
-                  {activeEndpoint.method}
-                </Badge>
-                <span className="truncate text-[15px] font-medium text-primary">
-                  {activeEndpoint.title}
-                </span>
-              </span>
-            </div>
-            <select
-              aria-label={t("Shared.SharedComponents.selectApiEndpoint")}
-              className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-xl bg-surface-raised text-primary opacity-0"
-              value={activeEndpoint.id}
-              onChange={(event) => updateEndpointInUrl(event.currentTarget.value)}
-            >
-              {endpoints.map((endpoint) => (
-                <option
-                  key={endpoint.id}
-                  value={endpoint.id}
-                  className="bg-surface-raised text-primary"
-                >
-                  {endpoint.method} {endpoint.title}
-                </option>
-              ))}
-            </select>
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 16 16"
-              className="pointer-events-none absolute top-1/2 right-4 h-4 w-4 -translate-y-1/2 text-muted"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.75"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="m4 6 4 4 4-4" />
-            </svg>
-          </div>
-        </div>
+      <PlaygroundEndpointBar
+        endpoints={endpoints}
+        activeEndpoint={activeEndpoint}
+        onEndpointChange={updateEndpointInUrl}
+        apiKeySelector={keySelector}
+      />
 
-        <div className="border-t border-border-default px-6 py-5 lg:border-t-0">
-          <div className="flex justify-stretch lg:justify-end">{apiKeySelector ?? null}</div>
-        </div>
-      </div>
-
-      <div className="border-b border-border-default px-6 py-4 lg:hidden">
-        <div className="grid grid-cols-2 gap-1 rounded-full bg-fill-strong p-1">
-          {MOBILE_SECTION_LABEL_KEYS.map(({ value, labelKey }) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setMobileSection(value)}
-              className={cn(
-                "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                mobileSection === value
-                  ? "bg-surface-raised text-primary shadow-sm"
-                  : "text-tertiary"
-              )}
-            >
-              {t(labelKey)}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PlaygroundSectionTabs mobileSection={mobileSection} onChange={setMobileSection} />
 
       <div className="flex min-h-0 flex-1 flex-col border-b border-border-default lg:grid lg:grid-cols-2">
-        <div
-          className={cn("min-h-0", mobileSection === "request" ? "flex-1" : "hidden", "lg:block")}
-        >
-          <div className="flex h-full min-h-0 flex-col px-6 py-6">
-            {leftMessages.length > 0 ? (
-              <div className="mb-4 shrink-0 space-y-4">
-                {leftMessages.map((message) => (
-                  <MessageCard
-                    key={`${message.tone ?? "neutral"}-${message.text}`}
-                    message={message}
-                  />
-                ))}
-              </div>
-            ) : null}
+        <PlaygroundRequestColumn
+          mobileSection={mobileSection}
+          messages={leftMessages}
+          activeEndpoint={activeEndpoint}
+          fieldValues={fieldValues}
+          getFieldId={getFieldId}
+          onFieldChange={updateFieldValue}
+        />
 
-            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto lg:pr-2">
-              <section className="space-y-3">
-                <h2 className="text-[18px] leading-6 font-medium text-primary">
-                  {t("Shared.SharedComponents.pathParameters")}
-                </h2>
-                {activeEndpoint.pathFields.length === 0 ? (
-                  <EmptyState>{t("Shared.SharedComponents.noPathParameters")}</EmptyState>
-                ) : (
-                  <div className="space-y-4">
-                    {activeEndpoint.pathFields.map((field) => (
-                      <div key={field.key} className="space-y-2">
-                        <FieldLabel htmlFor={getFieldId(field.key)}>{field.label}</FieldLabel>
-                        {field.description ? (
-                          <p className="text-[13px] leading-5 text-tertiary">{field.description}</p>
-                        ) : null}
-                        {field.kind === "select" ? (
-                          <select
-                            id={getFieldId(field.key)}
-                            value={fieldValues[field.key] ?? ""}
-                            onChange={(event) =>
-                              updateFieldValue(field.key, event.currentTarget.value)
-                            }
-                            className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 text-sm text-primary outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
-                          >
-                            <option value="">
-                              {field.placeholder ?? t("Shared.SharedComponents.selectValue")}
-                            </option>
-                            {(field.options ?? []).map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : field.kind === "textarea" ? (
-                          <textarea
-                            id={getFieldId(field.key)}
-                            value={fieldValues[field.key] ?? ""}
-                            onChange={(event) =>
-                              updateFieldValue(field.key, event.currentTarget.value)
-                            }
-                            placeholder={field.placeholder}
-                            rows={8}
-                            spellCheck={false}
-                            className="w-full resize-y rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
-                          />
-                        ) : (
-                          <Input
-                            id={getFieldId(field.key)}
-                            value={fieldValues[field.key] ?? ""}
-                            onChange={(event) =>
-                              updateFieldValue(field.key, event.currentTarget.value)
-                            }
-                            placeholder={field.placeholder}
-                            className="h-11 rounded-[var(--sdp-field-radius)] border-border-default bg-surface-raised px-4 shadow-none"
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="space-y-3">
-                <h2 className="text-[18px] leading-6 font-medium text-primary">
-                  {t("Shared.SharedComponents.requestBody")}
-                </h2>
-                {activeEndpoint.bodyFields.length === 0 ? (
-                  <EmptyState>{t("Shared.SharedComponents.noRequestBody")}</EmptyState>
-                ) : (
-                  <div className="space-y-4">
-                    {activeEndpoint.bodyFields.map((field) => (
-                      <div key={field.key} className="space-y-2">
-                        <FieldLabel htmlFor={getFieldId(field.key)}>{field.label}</FieldLabel>
-                        {field.description ? (
-                          <p className="text-[13px] leading-5 text-tertiary">{field.description}</p>
-                        ) : null}
-                        {field.kind === "select" ? (
-                          <select
-                            id={getFieldId(field.key)}
-                            value={fieldValues[field.key] ?? ""}
-                            onChange={(event) =>
-                              updateFieldValue(field.key, event.currentTarget.value)
-                            }
-                            className="h-11 w-full rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 text-sm text-primary outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
-                          >
-                            <option value="">
-                              {field.placeholder ?? t("Shared.SharedComponents.selectValue")}
-                            </option>
-                            {(field.options ?? []).map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : field.kind === "textarea" ? (
-                          <textarea
-                            id={getFieldId(field.key)}
-                            value={fieldValues[field.key] ?? ""}
-                            onChange={(event) =>
-                              updateFieldValue(field.key, event.currentTarget.value)
-                            }
-                            placeholder={field.placeholder}
-                            rows={10}
-                            spellCheck={false}
-                            className="w-full resize-y rounded-[var(--sdp-field-radius)] border border-border-default bg-surface-raised px-4 py-3 font-mono text-sm text-primary shadow-none outline-none transition-[box-shadow,border-color] focus:border-border-strong focus:ring-2 focus:ring-border-default"
-                          />
-                        ) : (
-                          <Input
-                            id={getFieldId(field.key)}
-                            value={fieldValues[field.key] ?? ""}
-                            onChange={(event) =>
-                              updateFieldValue(field.key, event.currentTarget.value)
-                            }
-                            placeholder={field.placeholder}
-                            className="h-11 rounded-[var(--sdp-field-radius)] border-border-default bg-surface-raised px-4 shadow-none"
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className={cn(
-            "min-h-0 border-t border-border-default lg:border-t-0",
-            mobileSection === "output" ? "flex-1" : "hidden",
-            "lg:flex lg:h-full lg:min-h-0 lg:flex-col"
-          )}
-        >
-          <div className="flex h-full min-h-0 flex-col px-6 py-6">
-            {rightMessages.length > 0 ? (
-              <div className="mb-4 shrink-0 space-y-4">
-                {rightMessages.map((message) => (
-                  <MessageCard
-                    key={`${message.tone ?? "neutral"}-${message.text}`}
-                    message={message}
-                  />
-                ))}
-              </div>
-            ) : null}
-
-            <div className="mb-4 shrink-0 rounded-full bg-fill-strong p-1">
-              <div className="grid grid-cols-3 gap-1">
-                {OUTPUT_PANEL_LABEL_KEYS.map(({ value: tab, labelKey }) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setActivePanel(tab)}
-                    className={cn(
-                      "rounded-full px-4 py-2 text-sm font-medium capitalize transition-colors",
-                      activePanel === tab
-                        ? "bg-surface-raised text-primary shadow-sm"
-                        : "text-tertiary"
-                    )}
-                  >
-                    {t(labelKey)}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div
-              className="code-block-line-numbers group relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--button-radius-md)]"
-              style={{
-                border: "1px solid var(--code-block-border)",
-                background: "var(--code-block-bg)",
-                fontFamily: "var(--font-berkeley-mono), ui-monospace, monospace",
-              }}
-            >
-              <div className="min-h-0 flex-1 overflow-hidden">
-                {activePanel === "response" && !executionResult && !executeError ? (
-                  <ResponseEmptyState
-                    message={t("Shared.SharedComponents.runRequestToInspectOutput")}
-                  />
-                ) : (
-                  <HighlightedCode content={panelContent} language={panelLanguage} />
-                )}
-              </div>
-              <div
-                className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3 text-sm"
-                style={{
-                  background: "var(--code-block-header-bg)",
-                  color: "var(--code-block-header-text)",
-                  boxShadow: "inset 0 1px 0 var(--code-block-header-border)",
-                }}
-              >
-                <span className="leading-none text-tertiary">
-                  {t("Shared.SharedComponents.status")}
-                </span>
-                <Badge
-                  className="h-6 whitespace-nowrap px-2.5 leading-none"
-                  variant={statusToneVariant}
-                >
-                  {statusLabel}
-                </Badge>
-                {executionResult ? (
-                  <Badge className="h-6 whitespace-nowrap px-2.5 leading-none [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1.5 [&>span]:leading-none">
-                    <Clock3 className="inline-block size-3 shrink-0" aria-hidden="true" />
-                    <span className="tabular-nums">
-                      {t("Shared.SharedComponents.durationMilliseconds", {
-                        duration: executionResult.durationMs,
-                      })}
-                    </span>
-                  </Badge>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
+        <PlaygroundOutputColumn
+          mobileSection={mobileSection}
+          messages={rightMessages}
+          activePanel={activePanel}
+          onPanelChange={setActivePanel}
+          panelContent={panelContent}
+          panelLanguage={panelLanguage}
+          executionResult={executionResult}
+          executeError={executeError}
+        />
       </div>
 
-      <div className="grid shrink-0 lg:grid-cols-2">
-        <div className="px-6 py-5">
-          <div className="flex flex-col gap-3">
-            {requiresApiKey ? (
-              <p className="text-sm leading-6 text-secondary">
-                {t("Shared.SharedComponents.apiKeyRequired")}
-              </p>
-            ) : null}
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                type="button"
-                onClick={handleExecute}
-                disabled={isExecuting || requiresApiKey}
-                className="h-10 rounded-[var(--button-radius-lg)] bg-primary px-4 text-on-primary hover:opacity-90 max-sm:flex-1 whitespace-nowrap"
-                iconLeft={
-                  isExecuting ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Play className="size-4 fill-current" />
-                  )
-                }
-              >
-                {t("Shared.SharedComponents.runRequest")}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={handleReset}
-                className="h-10 rounded-[var(--button-radius-lg)] px-2 text-secondary hover:bg-transparent hover:text-primary"
-              >
-                {t("Shared.SharedComponents.reset")}
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 border-t border-border-default px-6 py-5 lg:border-t-0">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => copyText(codeSnippet, "code")}
-            className="h-10 rounded-[var(--button-radius-lg)] border-border-default bg-surface-raised px-4 max-sm:flex-1 whitespace-nowrap"
-            iconLeft={<Copy className="size-4" />}
-          >
-            {copiedAction === "code"
-              ? t("Shared.SharedComponents.copied")
-              : t("Shared.SharedComponents.copyCode")}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => copyText(aiInstructions, "ai")}
-            className="h-10 rounded-[var(--button-radius-lg)] border-border-default bg-surface-raised px-4 max-sm:flex-1 whitespace-nowrap"
-            iconLeft={<Sparkles className="size-4" />}
-          >
-            {copiedAction === "ai"
-              ? t("Shared.SharedComponents.copied")
-              : t("Shared.SharedComponents.aiInstructions")}
-          </Button>
-        </div>
-      </div>
+      <PlaygroundActionBar
+        requiresApiKey={requiresApiKey}
+        isExecuting={isExecuting}
+        onRun={handleExecute}
+        onReset={handleReset}
+        copiedAction={copiedAction}
+        onCopyCode={() => copyText(codeSnippet, "code")}
+        onCopyAi={() => copyText(aiInstructions, "ai")}
+      />
     </div>
   );
 }

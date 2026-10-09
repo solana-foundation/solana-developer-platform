@@ -1,21 +1,16 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
-import { SANDBOX_PROJECT } from "@/test/projects";
 import PublicPayLoading from "../../pay/[token]/loading";
 import DashboardLoading from "./(home)/loading";
 import CounterpartyDetailLoading from "./payments/counterparty/[counterpartyId]/loading";
 import CounterpartyCreateLoading from "./payments/counterparty/create/loading";
-import CounterpartyLoading, {
-  PreviousCounterpartyLoading as LegacyCounterpartyLoading,
-} from "./payments/counterparty/loading";
-import { CounterpartyPlaygroundLoading } from "./payments/counterparty-menu-loading.redesign";
-import DepositLoading, {
-  PreviousDepositLoading as LegacyDepositLoading,
-} from "./payments/deposit/loading";
-import PaymentsLoading from "./payments/loading";
-import PayLoading, { PreviousPayLoading as LegacyPayLoading } from "./payments/pay/loading";
+import CounterpartyLoading from "./payments/counterparty/loading";
+import DepositLoading from "./payments/deposit/loading";
+import PaymentsLoading, {
+  PreviousPaymentsLoading as LegacyPaymentsLoading,
+} from "./payments/loading";
+import PayLoading from "./payments/pay/loading";
 import {
   CounterpartyDirectorySkeleton,
   PaymentRequestsPageSkeleton,
@@ -29,8 +24,12 @@ import RecurringPaymentDetailLoading from "./payments/recurring/[recurringPaymen
 import RecurringPaymentCreateLoading from "./payments/recurring/create/loading";
 import RecurringPaymentsLoading from "./payments/recurring/loading";
 import PaymentRequestsLoading from "./payments/requests/loading";
-import TransactionsLoading from "./payments/transactions/loading";
+import PaymentRequestCreateLoading from "./payments/requests/new/loading";
+import TransactionsLoading, {
+  PreviousTransactionsLoading as LegacyTransactionsLoading,
+} from "./payments/transactions/loading";
 
+const navigationMock = vi.hoisted(() => ({ tab: null as null | "playground" }));
 const designMock = vi.hoisted(() => ({ newDesign: true }));
 
 vi.mock("@/components/new-design", () => ({
@@ -39,7 +38,15 @@ vi.mock("@/components/new-design", () => ({
     designMock.newDesign ? current : legacy,
 }));
 
-vi.mock("next/navigation", () => import("@/test/next-navigation"));
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return {
+    ...actual,
+    useRouter: () => ({ push: () => undefined }),
+    useSearchParams: () =>
+      new URLSearchParams(navigationMock.tab ? { tab: navigationMock.tab } : undefined),
+  };
+});
 
 const EXPECTED_ROUTE_LAYOUTS = [
   "home",
@@ -48,6 +55,7 @@ const EXPECTED_ROUTE_LAYOUTS = [
   "payments-pay",
   "payments-deposit",
   "payment-requests",
+  "payment-request-create",
   "counterparty-directory",
   "counterparty-create",
   "counterparty-detail",
@@ -65,6 +73,7 @@ function renderAuthenticatedLoadingStates(): string {
       <PayLoading />
       <DepositLoading />
       <PaymentRequestsLoading />
+      <PaymentRequestCreateLoading />
       <TransactionsLoading />
       <CounterpartyLoading />
       <CounterpartyCreateLoading />
@@ -82,7 +91,7 @@ function renderScopedLoadingStates(): string {
 
 describe("home and payments route loading states", () => {
   afterEach(() => {
-    resetDashboardNavigation();
+    navigationMock.tab = null;
   });
 
   it("gives every scoped route a geometry-specific loading boundary", () => {
@@ -97,114 +106,34 @@ describe("home and payments route loading states", () => {
     const markup = renderScopedLoadingStates();
 
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(5);
-    // Pay, a new contact and a new schedule; Deposit opens on its address tab, not a wizard.
-    expect(markup.match(/data-loading-wizard/g)).toHaveLength(3);
+    expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
     // A contact's page, Deposit's terms, and the two blocks of a schedule's page.
     expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(4);
     expect(markup).toContain("lg:grid-cols-2");
     expect(markup).toContain("size-[208px]");
   });
 
-  it("keeps the transaction toolbar and loading table contained beside the expanded sidebar", () => {
-    const markup = renderToStaticMarkup(<TransactionsLoading />);
-
-    expect(markup).toContain("sm:grid-cols-2");
-    expect(markup).toContain("xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto]");
-    expect(markup).not.toContain("lg:grid-cols-[minmax(280px,1fr)_190px_190px_auto]");
-    expect(markup).toContain("hidden overflow-x-auto lg:block");
-    expect(markup).toContain("[&amp;_table]:min-w-[1040px]");
-    expect(markup).toContain("[&amp;_table]:table-fixed");
-  });
-
-  it("matches each settled route's native table columns and responsive visibility", () => {
-    const tableCases = [
+  it("draws the refresh lists as a toolbar over a scrolling table in the title's column", () => {
+    const listCases = [
+      {
+        layout: "payments-transactions",
+        markup: renderToStaticMarkup(<TransactionsLoading />),
+        columns: ["status", "type", "amount", "contact", "wallet", "created"],
+      },
       {
         layout: "payment-requests",
         markup: renderToStaticMarkup(<PaymentRequestsPageSkeleton />),
-        columnClasses: ["w-[16%]", "w-[20%]", "w-[22%]", "w-[22%]", "w-[20%]"],
+        columns: ["status", "amount", "from", "to", "created", "actions"],
       },
-      {
-        layout: "recurring-payments",
-        markup: renderToStaticMarkup(<RecurringPaymentsPageSkeleton />),
-        columnClasses: [
-          "w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%] 2xl:w-[15%]",
-          "w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%] 2xl:w-[15%]",
-          "w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%] 2xl:w-[20%]",
-          "hidden lg:table-cell lg:w-[28%] xl:w-[22%] 2xl:w-[18%]",
-          "hidden xl:table-cell xl:w-[18%] 2xl:w-[16%]",
-          "hidden md:table-cell lg:hidden 2xl:table-cell md:w-[18%] 2xl:w-[16%]",
-        ],
-      },
-    ];
-
-    for (const { layout, markup, columnClasses } of tableCases) {
-      expect(markup).toContain(`data-loading-layout="${layout}"`);
-      expect(markup).toContain(`data-loading-table-variant="${layout}"`);
-      expect(markup.match(/data-loading-column=/g)).toHaveLength(columnClasses.length);
-      expect(markup.match(/data-loading-table-row=/g)).toHaveLength(5);
-      expect(markup).toContain("[&amp;_table]:table-fixed");
-      for (const className of columnClasses) {
-        expect(markup).toContain(className);
-      }
-    }
-
-    for (const { markup } of tableCases) {
-      expect(markup).toContain("data-loading-mobile-rows");
-      expect(markup).toContain("md:hidden");
-      expect(markup).toContain("hidden md:block");
-    }
-  });
-
-  it("uses the same next-payment breakpoints in the recurring header, rows, and loader", () => {
-    const markup = renderToStaticMarkup(<RecurringPaymentsPageSkeleton />);
-
-    expect(markup.match(/hidden md:table-cell lg:hidden 2xl:table-cell/g)).toHaveLength(6);
-    expect(markup).not.toContain("md:table-cell xl:hidden 2xl:table-cell");
-  });
-
-  it("keeps counterparty menu loading aligned with the selected tab", () => {
-    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/payments/requests?tab=playground`, {});
-
-    const expectedPlayground = renderToStaticMarkup(<CounterpartyPlaygroundLoading />);
-    expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
-      'data-loading-layout="counterparty-directory"'
-    );
-    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(expectedPlayground);
-    expect(expectedPlayground).toContain('data-loading-layout="counterparty-playground"');
-
-    resetDashboardNavigation();
-    expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
-      'data-loading-layout="counterparty-directory"'
-    );
-    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(
-      'data-loading-layout="payment-requests"'
-    );
-  });
-
-  it("matches the initial counterparty picker in the schedule wizard", () => {
-    const wizardCases = [
-      ["recurring-payment-create", renderToStaticMarkup(<RecurringPaymentCreateSkeleton />)],
-    ];
-
-    for (const [layout, markup] of wizardCases) {
-      expect(markup).toContain(`data-loading-layout="${layout}"`);
-      expect(markup.match(/data-loading-counterparty-picker=/g)).toHaveLength(1);
-      expect(markup.match(/data-loading-add-counterparty=/g)).toHaveLength(1);
-      expect(markup.match(/data-loading-combobox=/g)).toHaveLength(1);
-      expect(markup).toContain("border-dashed");
-      expect(markup).toContain("h-[var(--input-height-xl)]");
-      expect(markup).toContain("rounded-[var(--input-radius-xl)]");
-      expect(markup).not.toContain("data-loading-option");
-      expect(markup).not.toContain("min-h-16");
-    }
-  });
-
-  it("draws the Contacts list as a toolbar over a scrolling table in the title's column", () => {
-    const listCases = [
       {
         layout: "counterparty-directory",
         markup: renderToStaticMarkup(<CounterpartyDirectorySkeleton />),
         columns: ["name", "type", "external-id", "address", "created", "actions"],
+      },
+      {
+        layout: "recurring-payments",
+        markup: renderToStaticMarkup(<RecurringPaymentsPageSkeleton />),
+        columns: ["status", "schedule", "repeats", "next-run"],
       },
     ];
 
@@ -216,10 +145,39 @@ describe("home and payments route loading states", () => {
         columns.map((column) => `data-loading-column="${column}"`)
       );
       expect(markup.match(/data-loading-table-row=/g)).toHaveLength(5);
+      // The settled lists scroll sideways on narrow screens rather than swapping to cards.
       expect(markup).toContain("overflow-x-auto");
       expect(markup).toContain("min-w-[760px]");
       expect(markup).not.toContain("data-loading-mobile-rows");
     }
+  });
+
+  it("loads Contacts as its list and Requests by the tab the URL carries", () => {
+    // Contacts sends ?tab=playground to the Payments playground, so it loads as its list.
+    // Requests is still the previous design's page, playground tab included.
+    navigationMock.tab = "playground";
+    expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
+      'data-loading-layout="counterparty-directory"'
+    );
+    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(
+      'data-loading-layout="counterparty-playground"'
+    );
+    navigationMock.tab = null;
+    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(
+      'data-loading-layout="payment-requests"'
+    );
+  });
+
+  it("opens the schedule wizard on its payment step", () => {
+    const markup = renderToStaticMarkup(<RecurringPaymentCreateSkeleton />);
+
+    // The step's question, then contact, source wallet, and amount beside token.
+    expect(markup).toContain('data-loading-layout="recurring-payment-create"');
+    expect(markup.match(/data-loading-stepper=/g)).toHaveLength(1);
+    expect(markup.match(/data-loading-field=/g)).toHaveLength(4);
+    expect(markup).toContain("overflow-y-auto");
+    expect(markup).toContain("shrink-0 border-t");
+    expect(markup).not.toContain("data-loading-counterparty-picker");
   });
 
   it("opens Pay on its details step and Deposit on its address tab", () => {
@@ -279,6 +237,7 @@ describe("home and payments route loading states", () => {
   it("keeps the recurring list loader contained at a 390px viewport", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentsLoading />);
 
+    // Schedules is still the previous design's page, so it loads with that list's geometry.
     expect(markup).toContain("grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]");
     expect(markup).toContain("flex min-w-0 grow flex-col overflow-hidden");
     expect(markup).toContain("table-scroll-container overflow-x-auto");
@@ -309,12 +268,11 @@ describe("payments route loading with NEW DESIGN off", () => {
 
   it("draws the previous design's skeletons", () => {
     designMock.newDesign = false;
-    expect(renderToStaticMarkup(<CounterpartyLoading />)).toBe(
-      renderToStaticMarkup(<LegacyCounterpartyLoading />)
+    expect(renderToStaticMarkup(<PaymentsLoading />)).toBe(
+      renderToStaticMarkup(<LegacyPaymentsLoading />)
     );
-    expect(renderToStaticMarkup(<PayLoading />)).toBe(renderToStaticMarkup(<LegacyPayLoading />));
-    expect(renderToStaticMarkup(<DepositLoading />)).toBe(
-      renderToStaticMarkup(<LegacyDepositLoading />)
+    expect(renderToStaticMarkup(<TransactionsLoading />)).toBe(
+      renderToStaticMarkup(<LegacyTransactionsLoading />)
     );
   });
 });

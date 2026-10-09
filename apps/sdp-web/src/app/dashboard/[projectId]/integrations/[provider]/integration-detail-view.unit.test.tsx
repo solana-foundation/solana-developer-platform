@@ -1,3 +1,4 @@
+import { RAMP_PROVIDERS } from "@sdp/types";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";
@@ -25,7 +26,7 @@ const INPUTS = {
     connectedProviders: ["privy"],
     enabledProviders: ["privy", "para"],
   }),
-  ramps: resolveRampIntegrations({ moonpay: on }),
+  ramps: resolveRampIntegrations({ moonpay: on }, RAMP_PROVIDERS),
   compliance: resolveComplianceIntegrations({ range: off }),
 };
 

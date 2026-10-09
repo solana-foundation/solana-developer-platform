@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { newDesign, newDesignContacts, newDesignPayDeposit } from "@/flags";
+import { newDesign, newDesignActivity, newDesignContacts, newDesignPayDeposit } from "@/flags";
 import type { DesignModule, DesignModuleFlags } from "@/lib/design-modules";
 
 type Page<P> = (props: P) => ReactNode | Promise<ReactNode>;
@@ -9,6 +9,7 @@ type ModuleFlag = () => Promise<boolean>;
 const DESIGN_MODULE_FLAGS: Record<DesignModule, ModuleFlag> = {
   contacts: newDesignContacts,
   payDeposit: newDesignPayDeposit,
+  activity: newDesignActivity,
 };
 
 /**

@@ -176,7 +176,8 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
   const context = (environment: SdpEnvironment = "sandbox", env: Record<string, string> = {}) =>
     ({
       env,
-      get: (key: string) => (key === "apiKey" ? { environment } : undefined),
+      get: (key: string) =>
+        key === "apiKey" ? { environment } : key === "projectEnvironment" ? environment : undefined,
     }) as unknown as AppContext;
   const holding = (
     id: string,

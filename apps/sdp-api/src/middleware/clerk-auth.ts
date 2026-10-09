@@ -24,6 +24,10 @@ import {
 import { AppError, unauthorized } from "@/lib/errors";
 import { invitationWasRevoked } from "@/lib/invitations";
 import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
+import {
+  loadOrganizationEntitlements,
+  recordOrganizationEntitlements,
+} from "@/lib/production-entitlement";
 import { ensureClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import {
@@ -422,7 +426,10 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     organizationClaims.organizationId
   );
   if (knownOrganization) {
-    await enforceOrganizationIpAllowlist(c, knownOrganization.organization_id);
+    recordOrganizationEntitlements(
+      c,
+      await enforceOrganizationIpAllowlist(c, knownOrganization.organization_id)
+    );
   }
 
   const existingContext = await resolveExistingClerkContext(getDb(c.env), {
@@ -517,6 +524,10 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
   );
 
   const permissions = getPermissionsForOrgRole(role);
+  if (!knownOrganization) {
+    // First provisioned by this request: no allowlist read recorded them yet.
+    await loadOrganizationEntitlements(c, resolvedOrgIdentity.organization_id);
+  }
 
   return {
     userId: userIdentity.userId,

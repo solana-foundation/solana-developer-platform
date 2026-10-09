@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   type RampProviderFlagReads,
   resolveEnabledRampProviders,
+  resolveOfferedRampProviders,
   resolveRampsEnabled,
 } from "./ramps";
 
@@ -33,5 +34,19 @@ describe("resolveRampsEnabled", () => {
     await expect(
       resolveRampsEnabled({ payments, providers: providerFlags(enabled) })
     ).resolves.toBe(expected);
+  });
+});
+
+describe("resolveOfferedRampProviders", () => {
+  it("offers the enabled providers while Payments is on", async () => {
+    await expect(
+      resolveOfferedRampProviders({ payments: on, providers: providerFlags(["moonpay"]) })
+    ).resolves.toEqual(["moonpay"]);
+  });
+
+  it("offers none while Payments is off", async () => {
+    await expect(
+      resolveOfferedRampProviders({ payments: off, providers: providerFlags(RAMP_PROVIDERS) })
+    ).resolves.toEqual([]);
   });
 });

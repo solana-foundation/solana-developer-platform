@@ -61,8 +61,10 @@ test.describe
       const recurringHref = projectHref(bootstrapProjectId, "/dashboard/payments/recurring");
       await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments"));
 
-      await expect(page.getByRole("link", { name: "Recurring", exact: true })).toBeVisible();
-      await page.getByRole("link", { name: "Recurring", exact: true }).click();
+      // The sidebar says "Scheduled" with new-design-activity on and "Recurring" with it off.
+      const schedulesLink = page.getByRole("link", { name: /^(Scheduled|Recurring)$/ });
+      await expect(schedulesLink).toBeVisible();
+      await schedulesLink.click();
       await expect(page).toHaveURL(recurringHref);
       await expect(
         page.locator("main").getByRole("heading", { name: "Recurring payments" }).first()

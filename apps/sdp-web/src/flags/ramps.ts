@@ -45,16 +45,33 @@ export async function resolveRampsEnabled(flags: {
   payments: FlagRead;
   providers: RampProviderFlagReads;
 }): Promise<boolean> {
+  return (await resolveOfferedRampProviders(flags)).length > 0;
+}
+
+/**
+ * The ramp providers the dashboard offers: the enabled ones while Payments is on, none otherwise.
+ * Each provider flag is capped at that provider's own release stage, so this follows the channel
+ * provider by provider.
+ */
+export async function resolveOfferedRampProviders(flags: {
+  payments: FlagRead;
+  providers: RampProviderFlagReads;
+}): Promise<RampProviderId[]> {
   const [paymentsEnabled, providers] = await Promise.all([
     flags.payments(),
     resolveEnabledRampProviders(flags.providers),
   ]);
-  return paymentsEnabled && providers.length > 0;
+  return paymentsEnabled ? providers : [];
 }
 
 /** The ramp providers enabled for the current request, in canonical provider order. */
 export function getEnabledRampProviders(): Promise<RampProviderId[]> {
   return resolveEnabledRampProviders(RAMP_PROVIDER_FLAGS);
+}
+
+/** The ramp providers the integrations catalog and its detail pages offer for the current request. */
+export function getOfferedRampProviders(): Promise<RampProviderId[]> {
+  return resolveOfferedRampProviders({ payments, providers: RAMP_PROVIDER_FLAGS });
 }
 
 /** Whether the ramps surfaces (payments wizards, integrations) show for the current request. */

@@ -8,7 +8,11 @@ describe("designModuleForPath", () => {
     ["/dashboard/payments/counterparty/cp_1", "contacts"],
     ["/dashboard/payments/pay", "payDeposit"],
     ["/dashboard/payments/deposit", "payDeposit"],
-    ["/dashboard/payments/transactions", null],
+    ["/dashboard/payments", "activity"],
+    ["/dashboard/payments/transactions", "activity"],
+    ["/dashboard/payments/requests/new", "activity"],
+    ["/dashboard/payments/recurring/rp_1", "activity"],
+    ["/dashboard/payments-archive", null],
     ["/dashboard/issuance", null],
   ])("puts %s in %s", (pathname, designModule) => {
     expect(designModuleForPath(pathname)).toBe(designModule);
@@ -21,13 +25,6 @@ describe("isNewDesignPage", () => {
     (pathname) => {
       expect(isNewDesignPage(pathname, { newDesign: true })).toBe(true);
       expect(isNewDesignPage(pathname, { newDesign: false })).toBe(false);
-    }
-  );
-
-  it.each(["/dashboard/payments", "/dashboard/payments/transactions"])(
-    "keeps %s, which no design module has redesigned, on the previous design",
-    (pathname) => {
-      expect(isNewDesignPage(pathname, { newDesign: true })).toBe(false);
     }
   );
 

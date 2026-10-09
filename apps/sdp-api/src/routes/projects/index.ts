@@ -4,6 +4,7 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import type { Env } from "@/types/env";
@@ -27,6 +28,12 @@ projects.use("*", unifiedAuthMiddleware());
 // every current and future path-scoped project handler inherits the check.
 projects.use("/:projectId", apiKeyProjectAccessMiddleware());
 projects.use("/:projectId/*", apiKeyProjectAccessMiddleware());
+// A production project is refused without the organization's production
+// entitlement, like every other project-scoped route (APE-351): minting a
+// production key or wallet here must not outrun that gate.
+const pathProjectContext = projectContextMiddleware({ projectIdParam: "projectId" });
+projects.use("/:projectId", pathProjectContext);
+projects.use("/:projectId/*", pathProjectContext);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Project CRUD

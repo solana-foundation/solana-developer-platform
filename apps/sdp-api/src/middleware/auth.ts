@@ -34,6 +34,7 @@ import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
 import { enforceOrganizationIpAllowlist } from "@/lib/organization-ip-allowlist";
+import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
 import type { KVStore } from "@/runtime/kv";
 import { getLogger } from "@/runtime/logger";
 import { tryApprovedOperationReplayAuth } from "@/services/policy/approved-operation-replay";
@@ -343,7 +344,10 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   // is why it must sit behind the KV-backed limiter: ahead of it, a flooding
   // key costs one DB read per rejected request. Behind it, reads are capped
   // at the tier; the quota this spends belongs to whoever holds the key.
-  await enforceOrganizationIpAllowlist(c, cachedKey.organizationId);
+  recordOrganizationEntitlements(
+    c,
+    await enforceOrganizationIpAllowlist(c, cachedKey.organizationId)
+  );
 
   // Set auth context
   const normalizedWalletBindings = normalizeWalletBindings(cachedKey);

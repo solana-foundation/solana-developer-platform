@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { custody, policies, privateChannels } from "@/flags";
-import { isRampsEnabled } from "@/flags/ramps";
+import { getOfferedRampProviders } from "@/flags/ramps";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
@@ -72,17 +72,17 @@ export default async function IntegrationsPage() {
     redirect("/dashboard");
   }
   const organizationId = onboarding.organization.id;
-  const [t, custodyEnabled, rampsEnabled, complianceEnabled, privateChannelsEnabled] =
+  const [t, custodyEnabled, rampProviders, complianceEnabled, privateChannelsEnabled] =
     await Promise.all([
       getTranslations(),
       custody(),
-      isRampsEnabled(),
+      getOfferedRampProviders(),
       policies(),
       privateChannels(),
     ]);
   const integrationFlags = {
     custody: custodyEnabled,
-    ramps: rampsEnabled,
+    rampProviders,
     compliance: complianceEnabled,
     privateChannels: privateChannelsEnabled,
   };
@@ -119,7 +119,7 @@ export default async function IntegrationsPage() {
       }
       ramps={
         isIntegrationFamilyEnabled("ramps", integrationFlags)
-          ? resolveRampIntegrations(availability.providers.ramps)
+          ? resolveRampIntegrations(availability.providers.ramps, rampProviders)
           : []
       }
       compliance={
@@ -134,7 +134,7 @@ export default async function IntegrationsPage() {
       })}
       enabledFamilies={[
         ...(custodyEnabled ? (["custody"] as const) : []),
-        ...(rampsEnabled ? (["ramps"] as const) : []),
+        ...(rampProviders.length > 0 ? (["ramps"] as const) : []),
         ...(complianceEnabled ? (["compliance"] as const) : []),
         ...(privateChannelsEnabled ? (["privacy"] as const) : []),
       ]}
