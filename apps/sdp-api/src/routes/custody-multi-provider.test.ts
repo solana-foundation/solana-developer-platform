@@ -4,6 +4,7 @@ import {
   CUSTODY_CONFIG_STATUSES,
   type CustodyConfigStatus,
   type CustodyMode,
+  isUnarchivedCustodyConfigStatus,
 } from "@sdp/types";
 import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -448,7 +449,9 @@ describe("Custody multi-provider routes", () => {
           default_custody_config_id: body.data.configId,
           default_custody_connection_id: null,
         });
-        expect(providerFetch).toHaveBeenCalledTimes(status === "absent" ? 2 : 0);
+        expect(providerFetch).toHaveBeenCalledTimes(
+          status !== "absent" && isUnarchivedCustodyConfigStatus(status) ? 0 : 2
+        );
         const audit = await readSwitchAudit();
         expect(audit).toHaveLength(1);
         expect(audit[0]).toMatchObject({

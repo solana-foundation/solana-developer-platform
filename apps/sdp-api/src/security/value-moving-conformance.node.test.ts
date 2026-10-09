@@ -735,7 +735,7 @@ describe("value-moving authorization and replay conformance", () => {
     const localRecord = {
       id: "cfg_local",
       organizationId: "org_1",
-      projectId: null,
+      projectId: "prj_1",
       provider: "local",
       config: JSON.stringify({ provider: "local", encryptedPrivateKey: "ciphertext" }),
       encryptionVersion: "v2",
@@ -772,7 +772,7 @@ describe("value-moving authorization and replay conformance", () => {
     // SAFETY: initializeLocalSigning must refuse before its first store call;
     // the fake only records whether that call happened.
     const service = new SigningService(configStore as never, managedEnv);
-    await expect(service.initializeLocalSigning("org_1")).rejects.toThrow(/Local signing/);
+    await expect(service.initializeLocalSigning("org_1", "prj_1")).rejects.toThrow(/Local signing/);
     expect(configStore.findActiveByProvider).not.toHaveBeenCalled();
   });
 

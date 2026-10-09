@@ -1007,7 +1007,7 @@ async function tenantOwnsWallet(
          AND w.status = 'active'
          AND (
            (c.organization_id = ?
-            AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
+            AND c.project_id = ?
             AND c.status = 'active')
            OR
            (connection.organization_id = ?
@@ -1055,7 +1055,7 @@ async function tenantOwnsWalletTarget(
          AND w.status = 'active'
          AND (
            (c.organization_id = ?
-            AND (c.project_id IS NOT DISTINCT FROM ? OR c.project_id IS NULL)
+            AND c.project_id = ?
             AND c.status = 'active')
            OR
            (connection.organization_id = ?
@@ -1928,7 +1928,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
              FROM target_api_key ak
              JOIN custody_configs c
                ON c.organization_id = ak.organization_id
-              AND (c.project_id IS NOT DISTINCT FROM ak.project_id OR c.project_id IS NULL)
+              AND c.project_id = ak.project_id
               AND c.status = 'active'
              JOIN custody_wallets w ON w.custody_config_id = c.id AND w.status = 'active'
 
@@ -1938,7 +1938,7 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
              FROM target_api_key ak
              JOIN custody_connections connection
                ON connection.organization_id = ak.organization_id
-              AND connection.project_id IS NOT DISTINCT FROM ak.project_id
+              AND connection.project_id = ak.project_id
               AND connection.status = 'active'
              JOIN custody_wallets w
                ON w.custody_connection_id = connection.id

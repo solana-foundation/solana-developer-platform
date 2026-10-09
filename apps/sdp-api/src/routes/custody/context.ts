@@ -4,10 +4,10 @@ import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
 
-export function resolveActor(c: AppContext): { organizationId: string; projectId?: string } {
+export function resolveActor(c: AppContext): { organizationId: string } {
   const apiKey = c.get("apiKey");
   if (apiKey) {
-    return { organizationId: apiKey.organizationId, projectId: apiKey.projectId ?? undefined };
+    return { organizationId: apiKey.organizationId };
   }
 
   const clerk = c.get("clerk");

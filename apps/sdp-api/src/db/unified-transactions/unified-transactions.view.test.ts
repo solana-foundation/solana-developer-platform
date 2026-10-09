@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -37,20 +38,31 @@ async function seedBase(): Promise<void> {
     members: [],
     ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
   });
-  await db
-    .prepare(
-      `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-       VALUES ('cfg_unified_view', ?, 'local', 'encrypted', 'active')`
-    )
-    .bind(TEST_ORG.id)
-    .run();
-  await db
-    .prepare(
-      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-       VALUES (?, 'cfg_unified_view', 'wallet_unified_view', 'UnifiedViewWallet111', 'active')`
-    )
-    .bind(CUSTODY_WALLET)
-    .run();
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: "cfg_unified_view",
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT,
+        provider: "local",
+        configEncrypted: "encrypted",
+        defaultWalletId: null,
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: CUSTODY_WALLET,
+        owner: { kind: "config", custodyConfigId: "cfg_unified_view" },
+        walletId: "wallet_unified_view",
+        publicKey: "UnifiedViewWallet111",
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+    scopeDefaults: [],
+  });
   await db
     .prepare(
       `INSERT INTO provider_credentials

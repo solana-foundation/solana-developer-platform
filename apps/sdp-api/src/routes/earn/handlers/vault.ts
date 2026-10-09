@@ -629,9 +629,8 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
     // keyed on `(organization_id, request_id)` — migration 0059's unique index —
     // so a key first used in a SIBLING project resolves that project's movement.
     // Returning it would both answer the wrong deposit and hand over its amount
-    // and signature. Reachable because organization-level custody configs give
-    // two projects the same `custody_wallets` row, so the rest of the request can
-    // legitimately match.
+    // and signature. Reachable because the key is unique per organization, not
+    // per project, so the rest of the request can legitimately match.
     //
     // Answered as the fingerprint conflict it is: the key really has been used by
     // a different request. The caller chose the key, so learning that its own key
@@ -750,11 +749,10 @@ export async function listReadableEarnVaultWallets(
 /**
  * PROJECT boundary for a recorded movement.
  *
- * Wallet scope alone does not close this. Custody configs may be
- * ORGANIZATION-level (`config.project_id IS NULL`), and `listWallets` hands
- * those to every project in the org — so a sibling project's deposit signed by a
- * shared org wallet passes the wallet check, and without this it would hand over
- * that deposit's amount, signature and failure reason.
+ * Wallet scope alone does not close this: the wallet check says the caller may
+ * use the wallet, not that the movement belongs to the caller's project, and
+ * without this it would hand over another project's amount, signature and
+ * failure reason.
  *
  * This is deliberately STRICTER than `GET /vault-positions`, which scopes by
  * wallet alone, and the asymmetry is the point: a POSITION is a holding the
@@ -768,7 +766,7 @@ export async function listReadableEarnVaultWallets(
  * of `ON DELETE SET NULL` (migration 0059) — the insert requires a real project
  * id — so a null means the owning project was DELETED. Treating that as
  * readable-by-anyone was a hole: it handed a deleted project's deposits to every
- * sibling project that shares an org-level wallet, which is exactly the leak
+ * sibling project with access to the wallet, which is exactly the leak
  * this guard exists to close. The row survives for forensics in the database;
  * it is simply no longer addressable through a project-scoped API, and there is
  * no caller who legitimately needs a deleted project's deposit. Nothing about
@@ -807,9 +805,9 @@ function isMovementInProject(movement: { project_id: string | null }, projectId:
  *   environment  — a sandbox-scoped key must not read a production movement.
  *                  The row carries its own environment, so this is a
  *                  comparison, not a second query.
- *   project      — see `isMovementInProject`. Wallet scope does NOT imply it,
- *                  because an organization-level custody config is handed to
- *                  every project in the org. An EXACT match: a null
+ *   project      — see `isMovementInProject`. Wallet scope does NOT imply it:
+ *                  a wallet check says the caller may use the wallet, not which
+ *                  project recorded the movement. An EXACT match: a null
  *                  `project_id` means the project was deleted, not that the row
  *                  is public.
  *   direction    — a withdrawal is not a deposit. The column is the only thing
@@ -1243,9 +1241,7 @@ interface EarnVaultWithdrawalResolved {
  * every environment a position exists in. The only refusals left are the ones
  * that protect the org itself: the position must belong to the caller's org
  * and environment (404), the key binding must carry a write scope for the
- * signing wallet, and custody runtime admission precedes the org's wallet policy. A shared
- * organization-level custody wallet intentionally lets sibling projects exit
- * the same org-owned position, matching the deposit route's wallet boundary.
+ * signing wallet, and custody runtime admission precedes the org's wallet policy.
  */
 export async function extractEarnVaultWithdrawalPolicyCandidate(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalSchema>

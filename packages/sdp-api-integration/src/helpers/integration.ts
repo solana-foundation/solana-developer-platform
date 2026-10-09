@@ -233,7 +233,7 @@ async function findIntegrationCustodyWallet(address: string): Promise<Integratio
   const signingService = createSigningService(env);
   const config = await signingService.getConfigurationByProvider(
     TEST_ORG.id,
-    undefined,
+    TEST_PROJECT.id,
     INTEGRATION_CUSTODY_PROVIDER
   );
   if (!config?.defaultWalletId) {
@@ -315,17 +315,25 @@ async function ensurePrivyCustodyAddress(): Promise<string> {
 
   const db = getDb(env);
   const signingService = createSigningService(env);
-  const existing = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
+  const existing = await signingService.getConfigurationByProvider(
+    TEST_ORG.id,
+    TEST_PROJECT.id,
+    "privy"
+  );
 
   if (!existing) {
-    await signingService.initializePrivySigning(TEST_ORG.id, undefined, {
+    await signingService.initializePrivySigning(TEST_ORG.id, TEST_PROJECT.id, {
       walletLabel: "Integration Root Wallet",
     });
   } else {
-    await signingService.setDefaultProvider(TEST_ORG.id, undefined, "privy");
+    await signingService.setDefaultProvider(TEST_ORG.id, TEST_PROJECT.id, "privy");
   }
 
-  const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
+  const config = await signingService.getConfigurationByProvider(
+    TEST_ORG.id,
+    TEST_PROJECT.id,
+    "privy"
+  );
   if (!config) {
     throw new Error("Integration precondition failed: Privy signer configuration not found.");
   }
@@ -422,10 +430,14 @@ async function ensureLocalCustodyAddress(): Promise<string> {
 
   const db = getDb(env);
   const signingService = createSigningService(env);
-  const existing = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "local");
+  const existing = await signingService.getConfigurationByProvider(
+    TEST_ORG.id,
+    TEST_PROJECT.id,
+    "local"
+  );
 
   if (!existing) {
-    const initialized = await signingService.initializeLocalSigning(TEST_ORG.id, undefined, {
+    const initialized = await signingService.initializeLocalSigning(TEST_ORG.id, TEST_PROJECT.id, {
       walletLabel: "Integration Local Root Wallet",
     });
     await ensureAddressAccountExists(initialized.publicKey);
@@ -433,8 +445,12 @@ async function ensureLocalCustodyAddress(): Promise<string> {
     return initialized.publicKey;
   }
 
-  await signingService.setDefaultProvider(TEST_ORG.id, undefined, "local");
-  const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "local");
+  await signingService.setDefaultProvider(TEST_ORG.id, TEST_PROJECT.id, "local");
+  const config = await signingService.getConfigurationByProvider(
+    TEST_ORG.id,
+    TEST_PROJECT.id,
+    "local"
+  );
   if (!config) {
     throw new Error("Integration precondition failed: local signer configuration not found.");
   }
@@ -737,13 +753,17 @@ export async function createFundedPrivyWallet(input: {
   setDefault?: boolean;
 }): Promise<ApiTestCustodyWallet> {
   const signingService = createSigningService(env);
-  const wallet = await signingService.createWallet(TEST_ORG.id, undefined, {
+  const wallet = await signingService.createWallet(TEST_ORG.id, TEST_PROJECT.id, {
     provider: "privy",
     label: input.label,
   });
 
   if (input.setDefault) {
-    const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
+    const config = await signingService.getConfigurationByProvider(
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      "privy"
+    );
     if (!config) {
       throw new Error("Integration precondition failed: privy signer configuration not found.");
     }
@@ -783,7 +803,11 @@ async function createFundedLocalWallet(input: {
 }): Promise<ApiTestCustodyWallet> {
   const publicKey = await ensureLocalCustodyAddress();
   const signingService = createSigningService(env);
-  const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "local");
+  const config = await signingService.getConfigurationByProvider(
+    TEST_ORG.id,
+    TEST_PROJECT.id,
+    "local"
+  );
   if (!config) {
     throw new Error("Integration precondition failed: local signer configuration not found.");
   }

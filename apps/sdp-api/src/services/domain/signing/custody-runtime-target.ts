@@ -1,6 +1,7 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider, normalizePrivyWalletId } from "@sdp/custody";
 import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/signing";
 import type {
+  CustodyConfigStatus,
   CustodyConnectionCheckStatus,
   CustodyConnectionLifecycle,
   CustodyMode,
@@ -92,24 +93,24 @@ export type CustodyRuntimeTargetQuery =
   | {
       kind: "effective";
       organizationId: string;
-      projectId?: string;
+      projectId: string;
     }
   | {
       kind: "wallet";
       organizationId: string;
-      projectId?: string;
+      projectId: string;
       walletId: string;
     }
   | {
       kind: "wallet_record";
       organizationId: string;
-      projectId?: string;
+      projectId: string;
       custodyWalletId: string;
     }
   | {
       kind: "provider";
       organizationId: string;
-      projectId?: string;
+      projectId: string;
       provider: CustodyProvider;
     }
   | {
@@ -148,7 +149,7 @@ interface ConfigRow {
   config_encrypted: string;
   encryption_version: string;
   default_wallet_id: string | null;
-  status: "active" | "inactive";
+  status: CustodyConfigStatus;
   created_at: string;
   updated_at: string;
 }
@@ -337,7 +338,7 @@ export class CustodyRuntimeTargets {
 
   async admitRuntimeExecution(params: {
     organizationId: string;
-    projectId?: string;
+    projectId: string;
     custodyWalletId: string;
   }): Promise<void> {
     const target = await this.resolveRetainedWalletRecord(
@@ -355,16 +356,14 @@ export class CustodyRuntimeTargets {
 
   async listWallets(params: {
     organizationId: string;
-    projectId?: string;
+    projectId: string;
     provider?: CustodyProvider;
     includeAllProviders: boolean;
   }): Promise<CustodyRuntimeWalletProjection[]> {
     const effective = await this.resolveEffective(params.organizationId, params.projectId);
     const [configRows, connectionRows, availability] = await Promise.all([
       this.findOperationalConfigWallets(params.organizationId, params.projectId),
-      params.projectId
-        ? this.findOperationalConnectionWallets(params.organizationId, params.projectId)
-        : Promise.resolve([]),
+      this.findOperationalConnectionWallets(params.organizationId, params.projectId),
       // Custody entries only: ramp provider stages cannot change them.
       getProviderAvailability(this.env, this.db, params.organizationId, {
         rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
@@ -393,7 +392,7 @@ export class CustodyRuntimeTargets {
 
   async findOperationalWallet(params: {
     organizationId: string;
-    projectId?: string;
+    projectId: string;
     walletId: string;
     allowRecordIdAlias?: boolean;
   }): Promise<CustodyRuntimeWalletProjection | null> {
@@ -415,7 +414,7 @@ export class CustodyRuntimeTargets {
 
   async findOperationalWalletById(params: {
     organizationId: string;
-    projectId?: string;
+    projectId: string;
     custodyWalletId: string;
   }): Promise<CustodyRuntimeWalletProjection | null> {
     const wallets = await this.listWallets({
@@ -463,7 +462,7 @@ export class CustodyRuntimeTargets {
           AND w.status = 'active'
           AND (
             (cfg.id IS NOT NULL AND cfg.organization_id = ? AND cfg.status = 'active'
-               AND (cfg.project_id = ? OR cfg.project_id IS NULL))
+               AND cfg.project_id = ?)
             OR
             (conn.id IS NOT NULL AND conn.organization_id = ? AND conn.project_id = ?
                AND conn.status = 'active')
@@ -487,7 +486,7 @@ export class CustodyRuntimeTargets {
 
   async findOwnedWalletForMutation(params: {
     organizationId: string;
-    projectId?: string;
+    projectId: string;
     walletId: string;
     /** Include retained address aliases when checking source-selector ambiguity. */
     publicKey?: string;
@@ -507,28 +506,24 @@ export class CustodyRuntimeTargets {
          FROM custody_wallets w
          JOIN custody_configs c ON c.id = w.custody_config_id
          WHERE c.organization_id = ?
-           AND ${params.projectId ? "(c.project_id = ? OR c.project_id IS NULL)" : "c.project_id IS NULL"}
+           AND c.project_id = ?
            AND ${selector}`,
-        params.projectId
-          ? [params.organizationId, params.projectId, ...selectorValues]
-          : [params.organizationId, ...selectorValues]
+        [params.organizationId, params.projectId, ...selectorValues]
       ),
-      params.projectId
-        ? this.db.queryMany<{
-            id: string;
-            custody_connection_id: string;
-            provider: string;
-            wallet_id: string;
-          }>(
-            `SELECT w.id, w.custody_connection_id, c.provider, w.wallet_id
-             FROM custody_wallets w
-             JOIN custody_connections c ON c.id = w.custody_connection_id
-             WHERE c.organization_id = ?
-               AND c.project_id = ?
-               AND ${selector}`,
-            [params.organizationId, params.projectId, ...selectorValues]
-          )
-        : Promise.resolve([]),
+      this.db.queryMany<{
+        id: string;
+        custody_connection_id: string;
+        provider: string;
+        wallet_id: string;
+      }>(
+        `SELECT w.id, w.custody_connection_id, c.provider, w.wallet_id
+         FROM custody_wallets w
+         JOIN custody_connections c ON c.id = w.custody_connection_id
+         WHERE c.organization_id = ?
+           AND c.project_id = ?
+           AND ${selector}`,
+        [params.organizationId, params.projectId, ...selectorValues]
+      ),
     ]);
     const matches: CustodyOwnedWallet[] = [
       ...configs.map((wallet) => ({
@@ -659,7 +654,7 @@ export class CustodyRuntimeTargets {
 
   async getTransactionSigner(
     organizationId: string,
-    projectId: string | undefined,
+    projectId: string,
     walletId: string | undefined,
     getConfigAdapter: ConfigAdapterResolver
   ): Promise<TransactionSigner> {
@@ -695,13 +690,13 @@ export class CustodyRuntimeTargets {
 
   /**
    * Resolve a signer from the exact custody-wallet row authorized by the
-   * caller. Provider wallet ids are not globally unique across retained
-   * project and organization targets, so money-moving flows that already hold
-   * a row id must not collapse it back to `walletId` before signing.
+   * caller. Provider wallet ids are not unique across a project's retained
+   * Config and Connection targets, so money-moving flows that already hold a
+   * row id must not collapse it back to `walletId` before signing.
    */
   async getTransactionSignerForWalletRecord(
     organizationId: string,
-    projectId: string | undefined,
+    projectId: string,
     custodyWalletId: string,
     getConfigAdapter: ConfigAdapterResolver
   ): Promise<TransactionSigner> {
@@ -735,19 +730,17 @@ export class CustodyRuntimeTargets {
    * target whatever its release-channel state: execution paths refuse an
    * out-of-channel pair themselves, and nothing resolves a config in its place.
    *
-   * @param organizationId - The organization that owns the scope.
-   * @param projectId - The project scope, or undefined for the organization scope.
-   * @returns The selected connection, else the scope's default config, else null.
+   * @param organizationId - The organization that owns the project.
+   * @param projectId - The project whose custody target is wanted.
+   * @returns The selected connection, else the project's default config, else null.
    */
   private async resolveEffective(
     organizationId: string,
-    projectId: string | undefined
+    projectId: string
   ): Promise<CustodyRuntimeTarget | null> {
-    if (projectId) {
-      const connection = await this.findSelectedConnection(organizationId, projectId);
-      if (connection) {
-        return connection;
-      }
+    const connection = await this.findSelectedConnection(organizationId, projectId);
+    if (connection) {
+      return connection;
     }
 
     const config = await findEffectiveConfig(this.db, organizationId, projectId);
@@ -786,21 +779,16 @@ export class CustodyRuntimeTargets {
 
   private async resolveProvider(
     organizationId: string,
-    projectId: string | undefined,
+    projectId: string,
     provider: CustodyProvider
   ): Promise<CustodyRuntimeTarget | null> {
-    if (!projectId) {
-      const config = await findConfigByProvider(this.db, organizationId, projectId, provider);
-      return config ? this.mapConfigTarget(config) : null;
-    }
-
     const effective = await this.resolveEffective(organizationId, projectId);
     if (effective?.provider === provider) {
       return effective;
     }
 
     const config = await findConfigByProvider(this.db, organizationId, projectId, provider);
-    if (config?.project_id === (projectId ?? null)) {
+    if (config) {
       return this.mapConfigTarget(config);
     }
 
@@ -838,86 +826,70 @@ export class CustodyRuntimeTargets {
     if (connections.length > 0) {
       throw conflict("Custody Connection is unavailable");
     }
-    return config ? this.mapConfigTarget(config) : null;
+    return null;
   }
 
   private async resolveWallet(
     organizationId: string,
-    projectId: string | undefined,
+    projectId: string,
     walletId: string
   ): Promise<CustodyRuntimeTarget | null> {
-    if (projectId) {
-      const [connections, configs] = await Promise.all([
-        this.db.queryMany<ConnectionTargetRow>(
-          `${connectionTargetSelect()}
-           WHERE c.organization_id = ?
-             AND c.project_id = ?
-             AND w.wallet_id = ?
-           ORDER BY c.updated_at DESC, c.id DESC`,
-          [organizationId, projectId, walletId]
-        ),
-        this.db.queryMany<ConfigWalletRow>(
-          `${configWalletSelect()}
-           WHERE c.organization_id = ?
-             AND c.project_id = ?
-             AND c.status = 'active'
-             AND w.status = 'active'
-             AND w.wallet_id = ?
-           ORDER BY c.updated_at DESC, c.id DESC`,
-          [organizationId, projectId, walletId]
-        ),
-      ]);
+    const [connections, configs] = await Promise.all([
+      this.db.queryMany<ConnectionTargetRow>(
+        `${connectionTargetSelect()}
+         WHERE c.organization_id = ?
+           AND c.project_id = ?
+           AND w.wallet_id = ?
+         ORDER BY c.updated_at DESC, c.id DESC`,
+        [organizationId, projectId, walletId]
+      ),
+      this.db.queryMany<ConfigWalletRow>(
+        `${configWalletSelect()}
+         WHERE c.organization_id = ?
+           AND c.project_id = ?
+           AND c.status = 'active'
+           AND w.status = 'active'
+           AND w.wallet_id = ?
+         ORDER BY c.updated_at DESC, c.id DESC`,
+        [organizationId, projectId, walletId]
+      ),
+    ]);
 
-      if (connections.length + configs.length > 1) {
-        throw conflict("Custody wallet ownership is ambiguous");
-      }
-      if (connections[0]) {
-        return this.mapConnectionTarget(connections[0]);
-      }
-      if (configs[0]) {
-        return this.mapConfigWalletTarget(configs[0]);
-      }
+    if (connections.length + configs.length > 1) {
+      throw conflict("Custody wallet ownership is ambiguous");
     }
-
-    const organizationConfig = await this.db.queryOne<ConfigWalletRow>(
-      `${configWalletSelect()}
-       WHERE c.organization_id = ?
-         AND c.project_id IS NULL
-         AND c.status = 'active'
-         AND w.status = 'active'
-         AND w.wallet_id = ?
-       ORDER BY c.updated_at DESC, c.id DESC
-       LIMIT 1`,
-      [organizationId, walletId]
-    );
-    return organizationConfig ? this.mapConfigWalletTarget(organizationConfig) : null;
+    if (connections[0]) {
+      return this.mapConnectionTarget(connections[0]);
+    }
+    if (configs[0]) {
+      return this.mapConfigWalletTarget(configs[0]);
+    }
+    return null;
   }
 
   private async resolveWalletRecord(
     organizationId: string,
-    projectId: string | undefined,
+    projectId: string,
     custodyWalletId: string
   ): Promise<CustodyRuntimeTarget | null> {
     const [connections, configs] = await Promise.all([
-      projectId
-        ? this.db.queryMany<ConnectionTargetRow>(
-            `${connectionTargetSelect()}
-             WHERE c.organization_id = ?
-               AND c.project_id = ?
-               AND c.status = 'active'
-               AND w.status = 'active'
-               AND w.id = ?`,
-            [organizationId, projectId, custodyWalletId]
-          )
-        : Promise.resolve([]),
-      this.db.queryMany<ConfigWalletRow>(
-        `${configWalletSelect()}
+      this.db.queryMany<ConnectionTargetRow>(
+        `${connectionTargetSelect()}
          WHERE c.organization_id = ?
-           AND ${projectId ? "(c.project_id = ? OR c.project_id IS NULL)" : "c.project_id IS NULL"}
+           AND c.project_id = ?
            AND c.status = 'active'
            AND w.status = 'active'
            AND w.id = ?`,
-        projectId ? [organizationId, projectId, custodyWalletId] : [organizationId, custodyWalletId]
+        [organizationId, projectId, custodyWalletId]
+      ),
+      this.db.queryMany<ConfigWalletRow>(
+        `${configWalletSelect()}
+         WHERE c.organization_id = ?
+           AND c.project_id = ?
+           AND c.status = 'active'
+           AND w.status = 'active'
+           AND w.id = ?`,
+        [organizationId, projectId, custodyWalletId]
       ),
     ]);
 
@@ -931,25 +903,23 @@ export class CustodyRuntimeTargets {
 
   private async resolveRetainedWalletRecord(
     organizationId: string,
-    projectId: string | undefined,
+    projectId: string,
     custodyWalletId: string
   ): Promise<CustodyRuntimeTarget | null> {
     const [connections, configs] = await Promise.all([
-      projectId
-        ? this.db.queryMany<ConnectionTargetRow>(
-            `${connectionTargetSelect()}
-             WHERE c.organization_id = ?
-               AND c.project_id = ?
-               AND w.id = ?`,
-            [organizationId, projectId, custodyWalletId]
-          )
-        : Promise.resolve([]),
+      this.db.queryMany<ConnectionTargetRow>(
+        `${connectionTargetSelect()}
+         WHERE c.organization_id = ?
+           AND c.project_id = ?
+           AND w.id = ?`,
+        [organizationId, projectId, custodyWalletId]
+      ),
       this.db.queryMany<ConfigWalletRow>(
         `${configWalletSelect()}
          WHERE c.organization_id = ?
-           AND ${projectId ? "(c.project_id = ? OR c.project_id IS NULL)" : "c.project_id IS NULL"}
+           AND c.project_id = ?
            AND w.id = ?`,
-        projectId ? [organizationId, projectId, custodyWalletId] : [organizationId, custodyWalletId]
+        [organizationId, projectId, custodyWalletId]
       ),
     ]);
 
@@ -1360,7 +1330,7 @@ export class CustodyRuntimeTargets {
 
   private async findOperationalConfigWallets(
     organizationId: string,
-    projectId: string | undefined
+    projectId: string
   ): Promise<OperationalConfigWalletRow[]> {
     return this.db.queryMany<OperationalConfigWalletRow>(
       `SELECT w.id AS wallet_record_id, w.custody_config_id, c.provider,
@@ -1372,9 +1342,9 @@ export class CustodyRuntimeTargets {
        WHERE c.organization_id = ?
          AND c.status = 'active'
          AND w.status = 'active'
-         AND ${projectId ? "(c.project_id = ? OR c.project_id IS NULL)" : "c.project_id IS NULL"}
+         AND c.project_id = ?
        ORDER BY c.updated_at DESC, c.id DESC, w.created_at ASC`,
-      projectId ? [organizationId, projectId] : [organizationId]
+      [organizationId, projectId]
     );
   }
 
@@ -1485,13 +1455,13 @@ export class CustodyRuntimeTargets {
 
   private logMissingExactWallet(params: {
     organizationId: string;
-    projectId?: string;
+    projectId: string;
     custodyWalletId: string;
   }): void {
     getLogger().warn(
       {
         organizationId: params.organizationId,
-        projectId: params.projectId ?? null,
+        projectId: params.projectId,
         custodyWalletId: params.custodyWalletId,
         reason: "exact_wallet_not_found",
       },
@@ -1582,44 +1552,30 @@ export async function selectCustodyConfigTarget(
   db: DatabaseClient,
   params: {
     organizationId: string;
-    projectId: string | undefined;
+    projectId: string;
     configId: string;
   }
 ): Promise<CustodyScopeSelection> {
   return db.transaction(async (tx) => {
     const owner = await tx.queryOne<{ id: string }>(
-      params.projectId
-        ? `SELECT id FROM projects
-           WHERE id = ? AND organization_id = ? AND status = 'active'
-           FOR UPDATE`
-        : `SELECT id FROM organizations
-           WHERE id = ? AND status = 'active'
-           FOR UPDATE`,
-      params.projectId ? [params.projectId, params.organizationId] : [params.organizationId]
+      `SELECT id FROM projects
+       WHERE id = ? AND organization_id = ? AND status = 'active'
+       FOR UPDATE`,
+      [params.projectId, params.organizationId]
     );
     if (!owner) {
       throw new SigningError("Custody target scope is unavailable", "NOT_FOUND");
     }
 
     const config = await tx.queryOne<{ id: string; provider: string }>(
-      params.projectId
-        ? `SELECT id, provider
-           FROM custody_configs
-           WHERE id = ?
-             AND organization_id = ?
-             AND project_id = ?
-             AND status = 'active'
-           FOR UPDATE`
-        : `SELECT id, provider
-           FROM custody_configs
-           WHERE id = ?
-             AND organization_id = ?
-             AND project_id IS NULL
-             AND status = 'active'
-           FOR UPDATE`,
-      params.projectId
-        ? [params.configId, params.organizationId, params.projectId]
-        : [params.configId, params.organizationId]
+      `SELECT id, provider
+       FROM custody_configs
+       WHERE id = ?
+         AND organization_id = ?
+         AND project_id = ?
+         AND status = 'active'
+       FOR UPDATE`,
+      [params.configId, params.organizationId, params.projectId]
     );
     if (!config) {
       throw new SigningError(
@@ -1628,20 +1584,18 @@ export async function selectCustodyConfigTarget(
       );
     }
 
-    const scopeDefault = params.projectId
-      ? await findProjectScopeDefault(tx, params.organizationId, params.projectId, true)
-      : await findOrganizationScopeDefault(tx, params.organizationId, true);
+    const scopeDefault = await findProjectScopeDefault(
+      tx,
+      params.organizationId,
+      params.projectId,
+      true
+    );
     if (!scopeDefault) {
       await tx.execute(
         `INSERT INTO custody_scope_defaults (
            id, organization_id, project_id, default_custody_config_id
          ) VALUES (?, ?, ?, ?)`,
-        [
-          `csd_${crypto.randomUUID()}`,
-          params.organizationId,
-          params.projectId ?? null,
-          params.configId,
-        ]
+        [`csd_${crypto.randomUUID()}`, params.organizationId, params.projectId, params.configId]
       );
       return {
         previousConfigId: null,
@@ -1651,15 +1605,14 @@ export async function selectCustodyConfigTarget(
       };
     }
 
-    const selectedConnection =
-      params.projectId && scopeDefault.default_custody_connection_id
-        ? await tx.queryOne<{ provider: string }>(
-            `SELECT provider
-             FROM custody_connections
-             WHERE id = ? AND organization_id = ? AND project_id = ?`,
-            [scopeDefault.default_custody_connection_id, params.organizationId, params.projectId]
-          )
-        : null;
+    const selectedConnection = scopeDefault.default_custody_connection_id
+      ? await tx.queryOne<{ provider: string }>(
+          `SELECT provider
+           FROM custody_connections
+           WHERE id = ? AND organization_id = ? AND project_id = ?`,
+          [scopeDefault.default_custody_connection_id, params.organizationId, params.projectId]
+        )
+      : null;
     const clearConnection =
       Boolean(scopeDefault.default_custody_connection_id) &&
       selectedConnection?.provider !== config.provider;
@@ -1829,67 +1782,42 @@ function configWalletSelect(): string {
 async function findEffectiveConfig(
   db: DatabaseExecutor,
   organizationId: string,
-  projectId: string | undefined
+  projectId: string
 ): Promise<ConfigRow | null> {
   return db.queryOne<ConfigRow>(
-    projectId
-      ? `SELECT c.id, c.organization_id, c.project_id, c.provider,
-                c.config_encrypted, c.encryption_version,
-                c.default_wallet_id, c.status, c.created_at, c.updated_at
-         FROM custody_scope_defaults d
-         JOIN custody_configs c
-           ON c.id = d.default_custody_config_id
-          AND c.organization_id = d.organization_id
-          AND c.project_id IS NOT DISTINCT FROM d.project_id
-         WHERE d.organization_id = ?
-           AND (d.project_id = ? OR d.project_id IS NULL)
-           AND c.status = 'active'
-         ORDER BY CASE WHEN d.project_id = ? THEN 0 ELSE 1 END
-         LIMIT 1`
-      : `SELECT c.id, c.organization_id, c.project_id, c.provider,
-                c.config_encrypted, c.encryption_version,
-                c.default_wallet_id, c.status, c.created_at, c.updated_at
-         FROM custody_scope_defaults d
-         JOIN custody_configs c
-           ON c.id = d.default_custody_config_id
-          AND c.organization_id = d.organization_id
-          AND c.project_id IS NOT DISTINCT FROM d.project_id
-         WHERE d.organization_id = ?
-           AND d.project_id IS NULL
-           AND c.status = 'active'
-         LIMIT 1`,
-    projectId ? [organizationId, projectId, projectId] : [organizationId]
+    `SELECT c.id, c.organization_id, c.project_id, c.provider,
+            c.config_encrypted, c.encryption_version,
+            c.default_wallet_id, c.status, c.created_at, c.updated_at
+     FROM custody_scope_defaults d
+     JOIN custody_configs c
+       ON c.id = d.default_custody_config_id
+      AND c.organization_id = d.organization_id
+      AND c.project_id = d.project_id
+     WHERE d.organization_id = ?
+       AND d.project_id = ?
+       AND c.status = 'active'
+     LIMIT 1`,
+    [organizationId, projectId]
   );
 }
 
 async function findConfigByProvider(
   db: DatabaseExecutor,
   organizationId: string,
-  projectId: string | undefined,
+  projectId: string,
   provider: CustodyProvider
 ): Promise<ConfigRow | null> {
   return db.queryOne<ConfigRow>(
-    projectId
-      ? `SELECT id, organization_id, project_id, provider,
-                config_encrypted, encryption_version,
-                default_wallet_id, status, created_at, updated_at
-         FROM custody_configs
-         WHERE organization_id = ?
-           AND (project_id = ? OR project_id IS NULL)
-           AND provider = ?
-           AND status = 'active'
-         ORDER BY CASE WHEN project_id = ? THEN 0 ELSE 1 END
-         LIMIT 1`
-      : `SELECT id, organization_id, project_id, provider,
-                config_encrypted, encryption_version,
-                default_wallet_id, status, created_at, updated_at
-         FROM custody_configs
-         WHERE organization_id = ?
-           AND project_id IS NULL
-           AND provider = ?
-           AND status = 'active'
-         LIMIT 1`,
-    projectId ? [organizationId, projectId, provider, projectId] : [organizationId, provider]
+    `SELECT id, organization_id, project_id, provider,
+            config_encrypted, encryption_version,
+            default_wallet_id, status, created_at, updated_at
+     FROM custody_configs
+     WHERE organization_id = ?
+       AND project_id = ?
+       AND provider = ?
+       AND status = 'active'
+     LIMIT 1`,
+    [organizationId, projectId, provider]
   );
 }
 
@@ -1905,20 +1833,6 @@ async function findProjectScopeDefault(
      WHERE organization_id = ? AND project_id = ?
      ${lock ? "FOR UPDATE" : ""}`,
     [organizationId, projectId]
-  );
-}
-
-async function findOrganizationScopeDefault(
-  db: DatabaseExecutor,
-  organizationId: string,
-  lock: boolean
-): Promise<ScopeDefaultRow | null> {
-  return db.queryOne<ScopeDefaultRow>(
-    `SELECT id, default_custody_config_id, default_custody_connection_id
-     FROM custody_scope_defaults
-     WHERE organization_id = ? AND project_id IS NULL
-     ${lock ? "FOR UPDATE" : ""}`,
-    [organizationId]
   );
 }
 

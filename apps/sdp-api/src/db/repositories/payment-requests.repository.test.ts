@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -54,23 +55,31 @@ describe("PaymentRequestsRepository (postgres)", () => {
       members: [],
       ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs
-           (id, organization_id, project_id, provider, config_encrypted)
-         VALUES ('cfg_preq_repo_exact', ?, NULL, 'test_preq_exact', 'encrypted')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(TEST_ORG.id)
-      .run();
-    await db
-      .prepare(
-        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
-         VALUES (?, 'cfg_preq_repo_exact', 'wlt_receiving', 'OurWallet')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(TEST_CUSTODY_WALLET_ID)
-      .run();
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: "cfg_preq_repo_exact",
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          provider: "local",
+          configEncrypted: "encrypted",
+          defaultWalletId: null,
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: TEST_CUSTODY_WALLET_ID,
+          owner: { kind: "config", custodyConfigId: "cfg_preq_repo_exact" },
+          walletId: "wlt_receiving",
+          publicKey: "OurWallet",
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+      scopeDefaults: [],
+    });
 
     repo = createPostgresPaymentRequestsRepository(db);
   });

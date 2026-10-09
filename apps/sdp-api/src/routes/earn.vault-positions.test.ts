@@ -12,6 +12,7 @@ import {
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -360,29 +361,38 @@ describe("GET /v1/earn/vault-positions", () => {
   });
 
   it("exposes no rows for an ambiguous selected-wallet provider id", async () => {
-    const orgConfigId = "cfg_vault_positions_org_fallback";
-    const orgWalletId = "cwlt_vault_positions_org_fallback";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted, status)
-           VALUES (?, ?, NULL, 'privy', 'encrypted', 'active')`
-        )
-        .bind(orgConfigId, ORG),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES (?, ?, ?, ?, 'active')`
-        )
-        .bind(orgWalletId, orgConfigId, PROVIDER_WALLET_A, PUBLIC_KEY_B),
-    ]);
+    const secondConfigId = "cfg_vault_positions_second";
+    const secondWalletId = "cwlt_vault_positions_second";
+    await seedTestCustodyRows(env, {
+      configs: [
+        {
+          id: secondConfigId,
+          organizationId: ORG,
+          projectId: PROJECT_A,
+          provider: "para",
+          configEncrypted: "encrypted",
+          defaultWalletId: null,
+          status: "active",
+        },
+      ],
+      wallets: [
+        {
+          id: secondWalletId,
+          owner: { kind: "config", custodyConfigId: secondConfigId },
+          walletId: PROVIDER_WALLET_A,
+          publicKey: PUBLIC_KEY_B,
+          label: null,
+          purpose: null,
+          status: "active",
+        },
+      ],
+      scopeDefaults: [],
+    });
     await createPosition({ providerReference: "vault_project_binding" });
     await createPosition({
-      walletId: orgWalletId,
-      providerReference: "vault_org_binding",
-      signature: "sig_org_binding",
+      walletId: secondWalletId,
+      providerReference: "vault_second_binding",
+      signature: "sig_second_binding",
     });
     const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
     await seedCachedApiKey(env, keyHash, {

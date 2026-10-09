@@ -260,7 +260,7 @@ async function seedAuthAndWallet(): Promise<void> {
       .bind(
         TEST_CONFIG_ID,
         TEST_ORG.id,
-        null,
+        TEST_PROJECT.id,
         "local",
         "test-config",
         "sdp-custody-encryption-v1",
@@ -273,7 +273,7 @@ async function seedAuthAndWallet(): Promise<void> {
            (id, organization_id, project_id, default_custody_config_id)
          VALUES (?, ?, ?, ?)`
       )
-      .bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, null, TEST_CONFIG_ID),
+      .bind(`csd_${TEST_CONFIG_ID}`, TEST_ORG.id, TEST_PROJECT.id, TEST_CONFIG_ID),
     getDb(env)
       .prepare(
         `INSERT INTO custody_wallets

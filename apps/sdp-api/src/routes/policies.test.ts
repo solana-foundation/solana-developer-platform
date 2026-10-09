@@ -139,7 +139,7 @@ async function seedPolicyInventory(): Promise<string> {
       .prepare(
         `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         "cfg_policy_inventory",
@@ -147,13 +147,6 @@ async function seedPolicyInventory(): Promise<string> {
         TEST_PROJECT_ID,
         "fireblocks",
         "encrypted-main",
-        "sdp-custody-encryption-v1",
-        "active",
-        "cfg_policy_inventory_null",
-        TEST_ORG_ID,
-        null,
-        "local",
-        "encrypted-null",
         "sdp-custody-encryption-v1",
         "active",
         "cfg_policy_inventory_foreign",
@@ -169,7 +162,6 @@ async function seedPolicyInventory(): Promise<string> {
         `INSERT INTO custody_wallets
            (id, custody_config_id, wallet_id, public_key, label, purpose, status, created_at, updated_at)
          VALUES
-           (?, ?, ?, ?, ?, ?, ?, ?, ?),
            (?, ?, ?, ?, ?, ?, ?, ?, ?),
            (?, ?, ?, ?, ?, ?, ?, ?, ?),
            (?, ?, ?, ?, ?, ?, ?, ?, ?),
@@ -213,15 +205,6 @@ async function seedPolicyInventory(): Promise<string> {
         "active",
         "2026-07-07T00:00:00.000Z",
         "2026-07-07T00:00:00.000Z",
-        "cw_policy_inventory_null",
-        "cfg_policy_inventory_null",
-        "wallet_policy_inventory_null",
-        "address_policy_inventory_null",
-        "Organization Wallet",
-        "transfer",
-        "active",
-        "2026-07-08T00:00:00.000Z",
-        "2026-07-08T00:00:00.000Z",
         "cw_policy_inventory_foreign",
         "cfg_policy_inventory_foreign",
         "wallet_policy_inventory_foreign",
@@ -237,7 +220,6 @@ async function seedPolicyInventory(): Promise<string> {
         `INSERT INTO wallet_control_profiles
            (id, organization_id, project_id, custody_wallet_id, name, status, active_revision_id, created_at, updated_at, activated_at)
          VALUES
-           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -272,24 +254,13 @@ async function seedPolicyInventory(): Promise<string> {
         "wcpr_policy_inventory_disabled",
         "2026-07-13T00:00:00.000Z",
         "2026-07-13T00:00:00.000Z",
-        "2026-07-13T00:00:00.000Z",
-        "wcp_policy_inventory_null",
-        TEST_ORG_ID,
-        null,
-        "cw_policy_inventory_null",
-        "Organization controls",
-        "active",
-        "wcpr_policy_inventory_null",
-        "2026-07-14T00:00:00.000Z",
-        "2026-07-14T00:00:00.000Z",
-        "2026-07-14T00:00:00.000Z"
+        "2026-07-13T00:00:00.000Z"
       ),
     getDb(env)
       .prepare(
         `INSERT INTO wallet_control_profile_revisions
            (id, profile_id, revision_number, rules, default_action, created_at, activated_at)
          VALUES
-           (?, ?, ?, ?::jsonb, ?, ?, ?),
            (?, ?, ?, ?::jsonb, ?, ?, ?),
            (?, ?, ?, ?::jsonb, ?, ?, ?),
            (?, ?, ?, ?::jsonb, ?, ?, ?)`
@@ -315,14 +286,7 @@ async function seedPolicyInventory(): Promise<string> {
         JSON.stringify([{ kind: "approval" }]),
         "approval_required",
         "2026-07-13T00:00:00.000Z",
-        "2026-07-13T00:00:00.000Z",
-        "wcpr_policy_inventory_null",
-        "wcp_policy_inventory_null",
-        1,
-        JSON.stringify([{ kind: "always" }]),
-        "deny",
-        "2026-07-14T00:00:00.000Z",
-        "2026-07-14T00:00:00.000Z"
+        "2026-07-13T00:00:00.000Z"
       ),
     getDb(env)
       .prepare(
@@ -588,22 +552,11 @@ describe("GET /v1/policies", () => {
     expect(invalidResponse.status).toBe(400);
   });
 
-  it("keeps organization, exact-project, and null scopes isolated", async () => {
+  it("keeps another organization's wallets out of the project inventory", async () => {
     const response = await getInventory();
     const body = (await response.json()) as { data: PolicyControlInventoryResponse };
     const targetIds = body.data.controls.map((control) => control.targetId);
-    expect(targetIds).not.toContain("cw_policy_inventory_null");
     expect(targetIds).not.toContain("cw_policy_inventory_foreign");
-
-    const nullScoped = await createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG_ID, projectId: null })
-    ).listPolicyControlInventory({
-      organizationId: TEST_ORG_ID,
-      projectId: null,
-    });
-    expect(nullScoped.total).toBe(1);
-    expect(nullScoped.rows.map((row) => row.target_id)).toEqual(["cw_policy_inventory_null"]);
   });
 
   it("requires read access for every requested target family", async () => {

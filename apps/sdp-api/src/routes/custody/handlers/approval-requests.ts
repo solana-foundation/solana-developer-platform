@@ -1,7 +1,7 @@
 import type { WalletApprovalRequestSummary } from "@sdp/types";
 import { z } from "zod";
 import { type ApprovalRequestDetailRow, createPolicyRepository } from "@/db/repositories";
-import { type ApiKeyContext, getAuth } from "@/lib/auth";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
   badRequestParams,
@@ -289,7 +289,7 @@ export const approveApprovalRequest = async (c: AppContext) => {
       if (current.custody_wallet_id) {
         await createSigningService(c.env, getRequestTenantScope(c)).admitRuntimeExecution(
           current.organization_id,
-          current.project_id ?? undefined,
+          requireProjectId(c),
           current.custody_wallet_id
         );
       } else if (

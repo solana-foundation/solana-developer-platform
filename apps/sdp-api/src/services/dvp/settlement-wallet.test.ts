@@ -12,6 +12,7 @@ import { Context } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -39,13 +40,15 @@ const scope = { organizationId: TEST_ORG.id, projectId: PROJECT_ID };
  * until it failed against a real project.
  */
 async function seedCustodyWallet(id: string, publicKey: string): Promise<void> {
-  await getDb(env)
-    .prepare(
-      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
-       VALUES (?, ?, ?, ?, 'active')`
-    )
-    .bind(id, CUSTODY_CONFIG_ID, `provider_${id}`, publicKey)
-    .run();
+  await insertTestCustodyWalletRow(getDb(env), {
+    id,
+    owner: { kind: "config", custodyConfigId: CUSTODY_CONFIG_ID },
+    walletId: `provider_${id}`,
+    publicKey,
+    label: null,
+    purpose: null,
+    status: "active",
+  });
 }
 
 describe("getOrCreateDvpSettlementWallet", () => {
@@ -78,13 +81,15 @@ describe("getOrCreateDvpSettlementWallet", () => {
       members: [],
       ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
     });
-    await db
-      .prepare(
-        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
-         VALUES (?, ?, 'local', 'x', 'active')`
-      )
-      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id)
-      .run();
+    await insertTestCustodyConfigRow(db, {
+      id: CUSTODY_CONFIG_ID,
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      provider: "local",
+      configEncrypted: "x",
+      defaultWalletId: null,
+      status: "active",
+    });
   });
 
   it("provisions a wallet on first use", async () => {
@@ -95,31 +100,6 @@ describe("getOrCreateDvpSettlementWallet", () => {
 
     expect(wallet.custodyWalletId).toBe("cwlt_first");
     expect(provisionApiKeyWallet).toHaveBeenCalledTimes(1);
-  });
-
-  // `projectId` and `legacyConfigProjectId` are NOT the same argument: the first
-  // scopes the custody CONNECTION lookup, the second the custody CONFIG one.
-  // Passing only the first makes the config fallback ask for the organization
-  // -wide default (`project_id IS NULL`), which almost no organization has —
-  // the dashboard writes a project-scoped row. The result was "Custody not
-  // initialized" on an organization whose custody works, failing every first
-  // DvP trade in a project.
-  it("scopes the legacy config lookup to the project, not the organization", async () => {
-    await seedCustodyWallet("cwlt_first", "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
-    provisionApiKeyWallet.mockResolvedValue({ id: "cwlt_first", walletId: "provider_first" });
-
-    await getOrCreateDvpSettlementWallet(env, auditContext, scope);
-
-    expect(provisionApiKeyWallet).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        projectId: scope.projectId,
-        legacyConfigProjectId: scope.projectId,
-        auditContext,
-        creationReason: "dvp_settlement_authority",
-      })
-    );
   });
 
   it("returns the same wallet on every later call, without provisioning again", async () => {

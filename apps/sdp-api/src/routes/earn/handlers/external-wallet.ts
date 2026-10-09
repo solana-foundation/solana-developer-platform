@@ -963,9 +963,8 @@ function toDepositSwapWire(sourceTokenMint: string, leg: JupiterSwapLeg): EarnDe
  *
  * Authenticated scoping answers 404 across the board: organization and
  * environment in the position query, kind and owner shape, and exact project.
- * A sibling project must not learn whether the position exists. This is
- * deliberately stricter than the custody exit, where sibling projects
- * legitimately share organization-level wallets.
+ * A sibling project must not learn whether the position exists. The custody
+ * exit holds the same boundary: every custody wallet belongs to one project.
  */
 export async function createEarnExternalWalletWithdrawalTransaction(
   c: ValidatedBodyContext<typeof earnExternalWalletWithdrawalTransactionSchema>

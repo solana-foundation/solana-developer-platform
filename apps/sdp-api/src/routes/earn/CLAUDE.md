@@ -872,8 +872,8 @@ transaction signed by the organization custody wallet or external owner.
     and the server fingerprint (`buildEarnVaultDepositFingerprint`) omits the
     project, so a key first used by a SIBLING project matched on both and its
     movement was returned as a replay — the wrong deposit, plus its amount and
-    signature. Reachable because an organization-level custody config gives two
-    projects the same `custody_wallets` row. The rule is ONE exported function —
+    signature. Reachable because the key is unique per organization, not per
+    project. The rule is ONE exported function —
     `assertMovementIsOwnReplay` (`db/repositories/earn-movements.repository.ts`) —
     enforced at EVERY site that resolves a replay: the route guard
     (`findEarnVaultDepositIdempotentKeyReplay`), `depositIntoVault`'s fast
@@ -924,8 +924,8 @@ transaction signed by the organization custody wallet or external owner.
     vault-withdraw path before there is anything to leak through it), and
     PROJECT (an EXACT match — `project_id` is nullable only through
     `ON DELETE SET NULL`, so a null means the project was DELETED, and accepting
-    it would hand that project's deposits to every sibling project sharing an
-    organization-level custody wallet).
+    it would make a deleted project's deposits addressable through sibling
+    projects' reads).
   - Wallet-binding scope comes from `listReadableEarnVaultWallets`, **shared with
     `/vault-positions`**. Keep it shared: a binding that hides a position has to
     hide that position's deposits too, and two copies of that rule is how they
@@ -993,9 +993,9 @@ transaction signed by the organization custody wallet or external owner.
   attributes to the active-then-newest row and sets `ambiguousAttribution` when
   the candidates disagree on the vault identity — `share_mint` carries no
   uniqueness rule, and a re-listed vault leaves its predecessor row behind.
-  **Report-only in both directions**: it writes, adopts, and closes nothing — an org-level custody
-  config is shared by sibling projects, so adoption would guess attribution,
-  and a scan that writes money records fabricates claims the moment it has a
+  **Report-only in both directions**: it writes, adopts, and closes nothing — a
+  holding does not name the request that produced it, so adoption would guess
+  attribution, and a scan that writes money records fabricates claims the moment it has a
   bug. Claim visibility is the positions read's EXACT predicate by construction
   (`CUSTODY_VAULT_CLAIM_VISIBILITY_SQL` — a broader match would mark a holding
   recorded while `/vault-positions` still hides it), and wallet-binding scope is

@@ -13,7 +13,6 @@ export async function provisionApiKeyWallet(
     creationReason: "api_key" | "dvp_settlement_authority";
     organizationId: string;
     projectId: string;
-    legacyConfigProjectId?: string;
     connectionId?: string;
     label?: string;
     purpose?: CustodyWalletPurpose;
@@ -44,9 +43,8 @@ export async function provisionApiKeyWallet(
     });
   }
 
-  return createSigningService(env).createWallet(
-    params.organizationId,
-    params.legacyConfigProjectId,
-    { label: params.label, purpose: params.purpose }
-  );
+  return createSigningService(env).createWallet(params.organizationId, params.projectId, {
+    label: params.label,
+    purpose: params.purpose,
+  });
 }

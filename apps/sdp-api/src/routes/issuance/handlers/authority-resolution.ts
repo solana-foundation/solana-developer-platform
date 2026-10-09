@@ -7,7 +7,7 @@ import { getListConfig, inspectToken } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
 import { fetchMaybeMint } from "@solana-program/token-2022";
 import { getDb } from "@/db";
-import type { ApiKeyContext } from "@/lib/auth";
+import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
 import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -103,7 +103,7 @@ export async function admitIssuanceRuntimeExecution(params: {
 
   await createSigningService(params.env).admitRuntimeExecution(
     params.auth.organizationId,
-    params.auth.projectId ?? undefined,
+    requireAuthProjectId(params.auth),
     params.custodyWalletId
   );
 }
@@ -311,36 +311,27 @@ async function findIssuanceWallets(params: {
   const walletParams = [custodyWalletId, publicKey].filter(
     (value): value is string => value !== undefined
   );
-  const projectId = auth.projectId ?? undefined;
-  const configScope = projectId
-    ? "(c.project_id = ? OR c.project_id IS NULL)"
-    : "c.project_id IS NULL";
-  const configParams = projectId
-    ? [auth.organizationId, projectId, ...walletParams]
-    : [auth.organizationId, ...walletParams];
-  const connectionQuery = projectId
-    ? `
-       UNION ALL
-
-       SELECT w.id AS custody_wallet_id, w.wallet_id, w.public_key
-       FROM custody_wallets w
-       JOIN custody_connections c ON c.id = w.custody_connection_id
-       WHERE c.organization_id = ?
-         AND c.project_id = ?
-         ${walletFilter}`
-    : "";
-  const connectionParams = projectId ? [auth.organizationId, projectId, ...walletParams] : [];
+  const projectId = requireAuthProjectId(auth);
+  const scopeParams = [auth.organizationId, projectId, ...walletParams];
   const rows = await getDb(env).queryMany<IssuanceWalletRow>(
     `SELECT w.id AS custody_wallet_id, w.wallet_id, w.public_key
      FROM custody_wallets w
      JOIN custody_configs c ON c.id = w.custody_config_id
      WHERE c.organization_id = ?
-       AND ${configScope}
+       AND c.project_id = ?
        ${walletFilter}
-     ${connectionQuery}
+
+     UNION ALL
+
+     SELECT w.id AS custody_wallet_id, w.wallet_id, w.public_key
+     FROM custody_wallets w
+     JOIN custody_connections c ON c.id = w.custody_connection_id
+     WHERE c.organization_id = ?
+       AND c.project_id = ?
+       ${walletFilter}
      ORDER BY custody_wallet_id
      LIMIT 2`,
-    [...configParams, ...connectionParams]
+    [...scopeParams, ...scopeParams]
   );
 
   return rows.map((row) => ({
@@ -435,7 +426,7 @@ async function loadResolvedAuthoritySigner(params: {
   const signer = await solanaServices.createOrgSignerForCustodyWallet(
     params.env,
     params.auth.organizationId,
-    params.auth.projectId,
+    requireAuthProjectId(params.auth),
     params.custodyWalletId
   );
   if (signer.address !== params.currentAuthority) {
@@ -486,7 +477,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
 }): Promise<TransactionSigner> {
   const { env, auth, walletId, currentAuthority, expectedCustodyWalletId } = params;
   const custodyStore = new CustodyConfigStore(getDb(env), env);
-  const projectId = auth.projectId ?? undefined;
+  const projectId = requireAuthProjectId(auth);
   const expectedWallet = expectedCustodyWalletId
     ? await custodyStore.findActiveWalletByIdentifier(
         auth.organizationId,
@@ -524,7 +515,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
   const signer = await solanaServices.createOrgSignerForCustodyWallet(
     env,
     auth.organizationId,
-    auth.projectId,
+    projectId,
     wallet.id
   );
 

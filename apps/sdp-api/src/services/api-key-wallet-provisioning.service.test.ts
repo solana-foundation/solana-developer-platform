@@ -469,69 +469,72 @@ describe("provisionApiKeyWallet", () => {
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
   });
 
-  it("provisions from the Config when it is the effective target and connectionId is omitted", async () => {
-    const db = getDb(env);
-    await db.execute(
-      `UPDATE custody_scope_defaults
+  it.each(["/v1/api-keys", `/v1/projects/${PROJECT_ID}/api-keys`])(
+    "provisions on the key's project Config through %s when connectionId is omitted",
+    async (path) => {
+      const db = getDb(env);
+      await db.execute(
+        `UPDATE custody_scope_defaults
        SET default_custody_connection_id = NULL
        WHERE organization_id = ? AND project_id = ?`,
-      [ORGANIZATION_ID, PROJECT_ID]
-    );
-    await insertTestCustodyWalletRow(db, {
-      id: "cwlt_api_key_config_provisioned",
-      owner: { kind: "config", custodyConfigId: CONFIG_ID },
-      walletId: "para_api_key_config_provisioned",
-      publicKey: "Vote111111111111111111111111111111111111111",
-      label: null,
-      purpose: null,
-      status: "active",
-    });
-    createConfigWalletMock.mockResolvedValueOnce({
-      id: "cwlt_api_key_config_provisioned",
-      custodyConfigId: CONFIG_ID,
-      walletId: "para_api_key_config_provisioned",
-      publicKey: "Vote111111111111111111111111111111111111111",
-      label: null,
-      purpose: null,
-      status: "active",
-      createdAt: new Date().toISOString(),
-    });
+        [ORGANIZATION_ID, PROJECT_ID]
+      );
+      await insertTestCustodyWalletRow(db, {
+        id: "cwlt_api_key_config_provisioned",
+        owner: { kind: "config", custodyConfigId: CONFIG_ID },
+        walletId: "para_api_key_config_provisioned",
+        publicKey: "Vote111111111111111111111111111111111111111",
+        label: null,
+        purpose: null,
+        status: "active",
+      });
+      createConfigWalletMock.mockResolvedValueOnce({
+        id: "cwlt_api_key_config_provisioned",
+        custodyConfigId: CONFIG_ID,
+        walletId: "para_api_key_config_provisioned",
+        publicKey: "Vote111111111111111111111111111111111111111",
+        label: null,
+        purpose: null,
+        status: "active",
+        createdAt: new Date().toISOString(),
+      });
 
-    const response = await app.request(
-      `/v1/projects/${PROJECT_ID}/api-keys`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${API_KEY.raw}`,
-          "Content-Type": "application/json",
+      const response = await app.request(
+        path,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${API_KEY.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: `Config compatibility key ${path}`,
+            walletScope: "selected",
+            provisionWallet: true,
+          }),
         },
-        body: JSON.stringify({
-          name: "Config compatibility key",
-          walletScope: "selected",
-          provisionWallet: true,
-        }),
-      },
-      env
-    );
+        env
+      );
 
-    expect(response.status).toBe(201);
-    expect(createConfigWalletMock).toHaveBeenCalledWith(ORGANIZATION_ID, PROJECT_ID, {
-      label: undefined,
-      purpose: undefined,
-    });
-    const body = (await response.json()) as { data: { apiKey: { id: string } } };
-    expect(
-      await db
-        .prepare(
-          `SELECT wallet_id
+      expect(response.status).toBe(201);
+      expect(createConfigWalletMock).toHaveBeenCalledWith(ORGANIZATION_ID, PROJECT_ID, {
+        label: undefined,
+        purpose: undefined,
+      });
+      const body = (await response.json()) as { data: { apiKey: { id: string } } };
+      expect(
+        await db
+          .prepare(
+            `SELECT wallet_id
            FROM api_key_wallet_permissions
            WHERE api_key_id = ?`
-        )
-        .bind(body.data.apiKey.id)
-        .first()
-    ).toEqual({ wallet_id: "para_api_key_config_provisioned" });
-    expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
-  });
+          )
+          .bind(body.data.apiKey.id)
+          .first()
+      ).toEqual({ wallet_id: "para_api_key_config_provisioned" });
+      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    }
+  );
 });
 
 async function seedFixture(): Promise<void> {

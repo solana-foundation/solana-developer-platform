@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { TEST_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
-import { type ApiKeyContext, canManageOrganizationCredentials } from "./auth";
+import { type ApiKeyContext, canManageOrganizationCredentials, requireAuthProjectId } from "./auth";
 
 const base = {
   id: TEST_USER.id,
@@ -63,5 +63,31 @@ describe("canManageOrganizationCredentials", () => {
 
     expect(canManageOrganizationCredentials(member)).toBe(false);
     expect(canManageOrganizationCredentials(apiKey)).toBe(false);
+  });
+});
+
+describe("requireAuthProjectId", () => {
+  const member: ApiKeyContext = {
+    ...base,
+    authType: "clerk",
+    apiKeyId: null,
+    userId: TEST_USER.id,
+    role: "member",
+    permissions: ["payments:read"],
+  };
+
+  it("returns the project the auth context is scoped to", () => {
+    expect(requireAuthProjectId(member)).toBe(TEST_PROJECT.id);
+  });
+
+  it("rejects an auth context with no project scope as a bad request", () => {
+    expect(() => requireAuthProjectId({ ...member, projectId: null })).toThrow(
+      expect.objectContaining({
+        name: "AppError",
+        code: "BAD_REQUEST",
+        statusCode: 400,
+        message: "Project scope is required",
+      })
+    );
   });
 });

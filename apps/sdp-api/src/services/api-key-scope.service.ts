@@ -315,7 +315,7 @@ export async function resolveWalletBindingsInScope(
        WHERE c.organization_id = ?
          AND c.status = 'active'
          AND w.status = 'active'
-         AND (c.project_id IS NULL OR c.project_id = ?)
+         AND c.project_id = ?
          AND w.wallet_id IN (${placeholders})
 
        UNION ALL
