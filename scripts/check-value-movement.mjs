@@ -7,8 +7,9 @@
  * and the fee sponsor (`createSponsorshipFeePayment`). Wrappers above them are
  * harmless, because they still reach the waist. What would bypass admission is
  * code below them: building a signing adapter from an encrypted config or a
- * provider credential, or a fee-payment adapter, and signing with it directly.
- * This check pins those constructors to the waist files.
+ * provider credential, a provider keychain adapter, a fee-payment adapter, or
+ * a keypair from raw bytes, and signing with it directly. This check pins
+ * those constructors to the files that use them today.
  *
  * It resolves every identifier with the TypeScript checker, so a reference
  * counts however it is spelled: `@/` alias or relative import, renamed import,
@@ -27,8 +28,9 @@ import ts from "typescript";
 
 const API = "apps/sdp-api/src";
 const FEE_PAYMENT = "packages/sdp-payments/src/fee-payment";
+const KEYCHAIN = "packages/sdp-custody/src/keychain";
 
-/** @typedef {{ file: string, name: string, member?: string }} CapabilitySymbol */
+/** @typedef {{ file?: string, module?: string, name: string, member?: string }} CapabilitySymbol */
 /**
  * @typedef {{
  *   id: string,
@@ -81,20 +83,81 @@ export const CAPABILITIES = [
     allow: [`${API}/services/sponsorship.service.ts`],
     shrinkOnly: true,
   },
+  {
+    id: "keychain-signing-adapter",
+    why: "Holds a provider secret and can sign; only the adapter factory and the wallet lifecycle may build one.",
+    symbols: [
+      { file: `${KEYCHAIN}/keychain-coinbase.adapter.ts`, name: "KeychainCoinbaseAdapter" },
+      { file: `${KEYCHAIN}/keychain-dfns.adapter.ts`, name: "KeychainDfnsAdapter" },
+      { file: `${KEYCHAIN}/keychain-fireblocks.adapter.ts`, name: "KeychainFireblocksAdapter" },
+      { file: `${KEYCHAIN}/keychain-ibm-haven.adapter.ts`, name: "KeychainIbmHavenAdapter" },
+      { file: `${KEYCHAIN}/keychain-memory.adapter.ts`, name: "KeychainMemoryAdapter" },
+      { file: `${KEYCHAIN}/keychain-para.adapter.ts`, name: "KeychainParaAdapter" },
+      { file: `${KEYCHAIN}/keychain-privy.adapter.ts`, name: "KeychainPrivyAdapter" },
+      { file: `${KEYCHAIN}/keychain-turnkey.adapter.ts`, name: "KeychainTurnkeyAdapter" },
+      { file: `${KEYCHAIN}/keychain-utila.adapter.ts`, name: "KeychainUtilaAdapter" },
+    ],
+    owners: [],
+    allow: [
+      `${API}/services/adapters/index.ts`,
+      `${API}/services/adapters/signing/index.ts`,
+      `${API}/services/domain/signing.service.ts`,
+      `${API}/services/domain/signing/provider-adapter-factory.ts`,
+      `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
+    ],
+    shrinkOnly: true,
+  },
+  {
+    id: "native-fee-payer",
+    why: "Signs as fee payer with a process key and no budget; the sponsorship waist builds fee payers.",
+    symbols: [
+      { file: `${FEE_PAYMENT}/native.adapter.ts`, name: "NativeAdapter" },
+      { file: `${FEE_PAYMENT}/index.ts`, name: "createNativeAdapter" },
+      { file: `${FEE_PAYMENT}/index.ts`, name: "KoraClient" },
+    ],
+    owners: [],
+    allow: [],
+  },
+  {
+    id: "keypair-signer",
+    why: "Turns raw private-key bytes into a signer; only local key creation in the signing service may.",
+    symbols: [{ module: "@solana/signers", name: "createKeyPairSignerFromPrivateKeyBytes" }],
+    owners: [],
+    allow: [`${API}/services/domain/signing.service.ts`],
+    shrinkOnly: true,
+  },
 ];
 
+/** Test files and the API's own test-support tree; nothing else is exempt. */
 function isTestFile(relativePath) {
   return (
     /\.(test|spec)\.(ts|tsx|mts)$/.test(relativePath) ||
-    /(^|\/)(test|tests|__tests__)\//.test(relativePath)
+    relativePath.startsWith(`${API}/test/`) ||
+    relativePath.startsWith("src/test/")
   );
+}
+
+/** Resolves a package specifier (an external constructor) the way the program does. */
+function resolveModuleSource(program, specifier) {
+  const containingFile = program.getRootFileNames()[0];
+  const resolved = ts.resolveModuleName(
+    specifier,
+    containingFile,
+    program.getCompilerOptions(),
+    ts.sys
+  ).resolvedModule;
+  return resolved ? program.getSourceFile(resolved.resolvedFileName) : undefined;
 }
 
 /** Resolves a capability's declared symbol in the program. */
 function resolveSymbol(checker, program, rootDir, capabilitySymbol) {
-  const source = program.getSourceFile(path.join(rootDir, capabilitySymbol.file));
+  const source = capabilitySymbol.module
+    ? resolveModuleSource(program, capabilitySymbol.module)
+    : program.getSourceFile(path.join(rootDir, capabilitySymbol.file));
   if (!source) {
-    throw new Error(`Capability file is not in the program: ${capabilitySymbol.file}`);
+    throw new Error(
+      `Capability source is not in the program: ${capabilitySymbol.module ?? capabilitySymbol.file}`
+    );
   }
   const moduleSymbol = checker.getSymbolAtLocation(source);
   const exported = moduleSymbol
@@ -142,6 +205,14 @@ export function findValueMovementViolations({
     }
   }
 
+  /** Declaring file of each pinned symbol, mapped to one of its symbols. */
+  const pinnedModules = new Map();
+  for (const symbol of targets.keys()) {
+    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+    const fileName = declaration?.getSourceFile().fileName;
+    if (fileName && !pinnedModules.has(fileName)) pinnedModules.set(fileName, { symbol });
+  }
+
   const violations = [];
   const used = new Map(capabilities.map((capability) => [capability.id, new Set()]));
   for (const source of program.getSourceFiles()) {
@@ -151,23 +222,71 @@ export function findValueMovementViolations({
     if (!relativePath.startsWith(scanRoot)) continue;
     if (isTestFile(relativePath)) continue;
 
+    const report = (node, symbol, label) => {
+      if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
+        symbol = checker.getAliasedSymbol(symbol);
+      }
+      const capability = symbol ? targets.get(symbol) : undefined;
+      if (!capability || capability.owners.includes(relativePath)) return;
+      if (capability.allow.includes(relativePath)) {
+        used.get(capability.id).add(relativePath);
+        return;
+      }
+      const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+      violations.push(
+        `${relativePath}:${line + 1}: references ${capability.id} (${label}). ${capability.why}`
+      );
+    };
+    // A whole pinned module handed out as a value (namespace import, require,
+    // dynamic import, export *) carries every constructor in it.
+    const reportModule = (node, specifier) => {
+      const moduleSymbol = checker.getSymbolAtLocation(specifier);
+      const declaration = moduleSymbol?.valueDeclaration ?? moduleSymbol?.declarations?.[0];
+      const pinned = declaration
+        ? pinnedModules.get(declaration.getSourceFile().fileName)
+        : undefined;
+      if (pinned) report(node, pinned.symbol, `module ${specifier.text}`);
+    };
     const visit = (node) => {
       if (ts.isIdentifier(node)) {
-        let symbol = checker.getSymbolAtLocation(node);
-        if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
-          symbol = checker.getAliasedSymbol(symbol);
-        }
-        const capability = symbol ? targets.get(symbol) : undefined;
-        if (capability && !capability.owners.includes(relativePath)) {
-          if (capability.allow.includes(relativePath)) {
-            used.get(capability.id).add(relativePath);
-          } else {
-            const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
-            violations.push(
-              `${relativePath}:${line + 1}: references ${capability.id} (${node.text}). ${capability.why}`
-            );
-          }
-        }
+        report(node, checker.getSymbolAtLocation(node), node.text);
+      } else if (
+        ts.isElementAccessExpression(node) &&
+        ts.isStringLiteralLike(node.argumentExpression)
+      ) {
+        const property = checker.getPropertyOfType(
+          checker.getTypeAtLocation(node.expression),
+          node.argumentExpression.text
+        );
+        report(node, property, node.argumentExpression.text);
+      } else if (
+        ts.isBindingElement(node) &&
+        !node.propertyName &&
+        ts.isIdentifier(node.name) &&
+        ts.isObjectBindingPattern(node.parent)
+      ) {
+        const property = checker.getPropertyOfType(
+          checker.getTypeAtLocation(node.parent),
+          node.name.text
+        );
+        report(node, property, node.name.text);
+      } else if (
+        ts.isImportDeclaration(node) &&
+        node.importClause?.namedBindings &&
+        ts.isNamespaceImport(node.importClause.namedBindings) &&
+        !node.importClause.isTypeOnly
+      ) {
+        reportModule(node, node.moduleSpecifier);
+      } else if (ts.isExportDeclaration(node) && !node.exportClause && node.moduleSpecifier) {
+        reportModule(node, node.moduleSpecifier);
+      } else if (
+        ts.isCallExpression(node) &&
+        node.arguments.length > 0 &&
+        ts.isStringLiteralLike(node.arguments[0]) &&
+        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(node.expression) && node.expression.text === "require"))
+      ) {
+        reportModule(node, node.arguments[0]);
       }
       ts.forEachChild(node, visit);
     };
