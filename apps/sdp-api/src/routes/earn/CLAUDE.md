@@ -365,17 +365,19 @@ other's balance.
     allocations, and the label.
   - **Gate ORDER is load-bearing — key resolution runs LAST.** parseBody
     (schema 400s) → `requirePortfolioClient` (501) →
-    `assertEarnProviderSurfaced` (403) → `assertProviderAvailable` (403) →
+    `assertProviderAvailable` (403) →
     `assertKnownYieldSources` (400) → project scope (500) → key resolution
     (400). An unentitled caller sending no key still gets 403, and a provider
     without the portfolio capability still gets 501, rather than a generic
     "missing idempotency key" that hides why the call could never work.
-  - **Surfacing runs BEFORE entitlement, and says something different.** This is
-    the ONLY route that consults `EARN_PROVIDER_SURFACING` — the platform-level
-    "we do not offer this provider", which no `providerOverrides` can lift. Its
-    403 reads "not currently offered"; `assertProviderAvailable`'s reads
-    "requires manual activation". Order matters because pointing a caller at an
-    activation door that does not exist is worse than a plain refusal.
+  - **Surfacing runs BEFORE entitlement, and says something different.**
+    `assertProviderAvailable` checks release channel → `EARN_PROVIDER_SURFACING`
+    (the platform-level "we do not offer this provider", which no
+    `providerOverrides` can lift) → entitlement → credentials. Un-surfaced
+    answers 403 `details.reason: "provider_not_offered"` ("not currently
+    offered"); unentitled answers `provider_not_entitled` ("requires manual
+    activation"). Order matters because pointing a caller at an activation door
+    that does not exist is worse than a plain refusal.
   - **`assertKnownYieldSources` validates against the STORED active catalogue.**
     It matches every requested `yieldSourceId` against `status = 'active'` for
     the environment, so whatever a provider client admits is allocatable and
@@ -816,7 +818,8 @@ transaction signed by the organization custody wallet or external owner.
   deliberately. The optional-auth router validates a presented credential and
   its `earn:read` scope, then the handler applies the environment fail-close
   (`isVaultDirectDepositEnabled`, 403), catalogue row (404), deposit style
-  (400), `assertEarnProviderSurfaced`, authenticated provider availability,
+  (400), authenticated provider availability (surfacing alone, via
+  `assertAnonymousEarnProviderOffered`, for an anonymous caller),
   admission (`assertStrategyDepositable`), the vault exposure cap evaluated
   WITHOUT throwing (`checkVaultExposure`; an unreadable exposure still 503s),
   then capability (`supportsVaultDepositQuote`, 501 for a provider that cannot
@@ -1597,7 +1600,10 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):
   `assertProviderAvailable` (entitlement + enablement + credentials).
-- **New positions only** (`POST /programs`): `assertEarnProviderSurfaced`.
+- **New positions only** (`POST /programs`, vault deposits): surfacing, the
+  `provider_not_offered` check inside `assertProviderAvailable`
+  (`assertAnonymousEarnProviderOffered` for an anonymous vault deposit). `PUT`
+  passes `program: "existing"`, which skips it.
   Surfacing gates the way IN and nothing else — every read, every money-out
   route, and `PUT` (re-target) ignore it, so un-surfacing a provider can never
   strand a position taken while it was offered. `POST /programs` is the only

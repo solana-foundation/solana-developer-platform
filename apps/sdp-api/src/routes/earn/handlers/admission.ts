@@ -11,7 +11,7 @@ import { getOptionalAuth } from "@/lib/auth";
 import { badRequest, forbidden } from "@/lib/errors";
 import { assertVaultExposureWithinCap } from "@/services/earn/vault-exposure";
 import {
-  assertEarnProviderSurfaced,
+  assertAnonymousEarnProviderOffered,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import { type AppContext, resolveSdpEnvironment } from "../context";
@@ -90,8 +90,9 @@ export function assertVaultDepositEnvironmentOpen(
  * `POST /external-wallet/deposit-transactions` (caller-signed), and
  * `POST /vault-deposit-previews` (the quote that opens either). Runs, in
  * order: deposit-style shape, provider registration, environment capability,
- * surfacing, the project provider rule for an authenticated caller (an
- * anonymous caller has no project for it to decide from), catalogue admission,
+ * the project provider rule for an authenticated caller (an anonymous caller
+ * has no project for it to decide from, so only its surfacing check applies),
+ * catalogue admission,
  * and LAST, when the caller passes the deposit `amount`, the SDP-wide vault
  * exposure cap (ADR 0004 layer 1, `services/earn/vault-exposure.ts`). Keep it shared: a second copy
  * is a second thing that can drift toward permissive.
@@ -132,9 +133,10 @@ export async function assertVaultDepositAdmissible(
   const provider = strategy.provider;
 
   assertVaultDepositEnvironmentOpen(environment, provider);
-  assertEarnProviderSurfaced(provider);
   if (getOptionalAuth(c)) {
     await assertProviderAvailable(c, { family: "earn", provider });
+  } else {
+    assertAnonymousEarnProviderOffered(provider);
   }
   assertStrategyDepositable(strategy, environment);
 

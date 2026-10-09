@@ -48,7 +48,6 @@ import { approvedWalletOperationId } from "@/services/policy/approved-operation-
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import {
   assertEarnProviderConfigured,
-  assertEarnProviderSurfaced,
   assertProviderAvailable,
 } from "@/services/provider-availability.service";
 import { type AppContext, earnRuntime, getEarnRepository, resolveSdpEnvironment } from "../context";
@@ -471,15 +470,10 @@ export const createEarnProgram = async (
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
 
-  // Platform-level "we do not offer this provider", ahead of the org-level
-  // entitlement check below: no override lifts it, so answering "requires
-  // manual activation" would send the caller to a door that does not exist.
-  // Creation is the ONLY route that takes this gate — an organization holding a
-  // program with an un-surfaced provider keeps every read, re-target,
-  // withdrawal and ledger route (ADR 0002).
-  assertEarnProviderSurfaced(client.provider);
-
-  // Money-in gate: full entitlement + mode-specific credential check.
+  // Money-in gate: release channel, surfacing, entitlement and credentials.
+  // A new position is the only program route that checks surfacing; re-target
+  // passes `program: "existing"`, and reads, withdrawals and ledger routes take
+  // no provider gate (ADR 0002).
   await assertProviderAvailable(c, { family: "earn", provider: client.provider });
   await assertKnownYieldSources(c, client.provider, body.allocations);
 

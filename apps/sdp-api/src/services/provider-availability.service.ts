@@ -989,10 +989,33 @@ function providerNotConfiguredForProject(
 }
 
 /**
+ * The 403 for a provider SDP does not offer.
+ *
+ * @param label - The provider's display label.
+ * @returns The `provider_not_offered` error.
+ */
+function providerNotOffered(label: string): AppError {
+  return forbidden(`${label} is not currently offered.`, { reason: "provider_not_offered" });
+}
+
+/**
+ * Whether SDP offers an Earn request's provider: a new position needs it
+ * surfaced, while an existing program ignores surfacing (ADR 0002 exit safety).
+ *
+ * @param request - The Earn provider being used.
+ * @returns Whether the provider is offered for the request.
+ */
+function isEarnRequestOffered(
+  request: Extract<ProjectProviderRequest, { family: "earn" }>
+): boolean {
+  return "program" in request || isEarnProviderSurfaced(request.provider);
+}
+
+/**
  * The staged-provider rule for ramps, compliance and Earn. A provider is
  * admitted for a project when, in order: the deployment's release channel
- * includes it; SDP offers it (its surfacing, the same check the ramp and Earn
- * entry points run before entitlement); the organization is entitled to it;
+ * includes it; SDP offers it (its surfacing, checked nowhere else for an
+ * authenticated caller); the organization is entitled to it;
  * and the deployment holds its credentials for the project's environment. The
  * channel alone decides which providers are offered, the same for Sandbox and
  * Production.
@@ -1032,7 +1055,7 @@ function decideStagedProvider(
       facts,
       request,
       "provider_not_offered",
-      forbidden(`${label} is not currently offered.`, { reason: "provider_not_offered" })
+      providerNotOffered(label)
     );
   }
   if (!checks.entry.entitled) {
@@ -1122,8 +1145,7 @@ function decideProjectProvider(
     case "earn":
       return decideStagedProvider(facts, request, {
         inReleaseChannel: isEarnEnabled(env),
-        // An existing program ignores surfacing (ADR 0002 exit safety).
-        offered: "program" in request || isEarnProviderSurfaced(request.provider),
+        offered: isEarnRequestOffered(request),
         entry: facts.availability.providers.earn[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
@@ -1586,26 +1608,18 @@ export async function assertProviderAvailable(
 }
 
 /**
- * Platform-level gate: opening a NEW position with a provider SDP does not
- * currently offer (`EARN_PROVIDER_SURFACING` in @sdp/types).
+ * The provider gate for an anonymous Earn money-in caller. With no project, the
+ * project provider rule has no entitlement or credentials to decide from, so
+ * only its offered check applies, answered with the same 403 an authenticated
+ * caller gets from `assertProviderAvailable`. Exits and reads never call it
+ * (ADR 0002).
  *
- * Deliberately NOT folded into `assertProviderAvailable`, which answers an
- * ORGANIZATION-scoped question and whose refusal tells the caller to ask for
- * manual activation. No override lifts this one, so it runs FIRST and says
- * something different — pointing a caller at an activation door that does not
- * exist is worse than a plain "not offered".
- *
- * This is the ONLY place surfacing is allowed to refuse anything. Every
- * money-out route, every read, and re-targeting an existing program ignore it
- * entirely, so un-surfacing a provider can never strand a position taken while
- * it was offered (ADR 0002).
+ * @param provider - The Earn provider a new position is being opened with.
+ * @throws 403 `FORBIDDEN` with `details.reason: "provider_not_offered"` when SDP does not surface the provider.
  */
-export function assertEarnProviderSurfaced(providerId: EarnProviderId): void {
-  if (!isEarnProviderSurfaced(providerId)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `${PROVIDER_AVAILABILITY_DEFINITIONS.earn[providerId].label} is not currently offered.`
-    );
+export function assertAnonymousEarnProviderOffered(provider: EarnProviderId): void {
+  if (!isEarnRequestOffered({ family: "earn", provider })) {
+    throw providerNotOffered(getProviderLabel("earn", provider));
   }
 }
 

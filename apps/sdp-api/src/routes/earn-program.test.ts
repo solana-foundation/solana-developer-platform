@@ -1412,10 +1412,14 @@ describe("Earn program — un-surfaced provider", () => {
     );
 
     expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { message: string } };
-
-    expect(body.error.message).toContain("not currently offered");
-    expect(body.error.message).not.toContain("manual activation");
+    expect(await res.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "Upshift is not currently offered.",
+        details: { reason: "provider_not_offered" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
 
     expect(createWallet).not.toHaveBeenCalled();
   });
