@@ -96,3 +96,31 @@ test("lets tests reference capabilities", () => {
 
   assert.deepEqual(found, []);
 });
+
+test("flags destructuring, element access and whole-module escapes", () => {
+  const found = violations({
+    "src/allowed.ts": `import { mint } from "./lib/cap";\nmint();\n`,
+    "src/destructure.ts": `import * as cap from "./lib/cap";\nconst { mint } = cap;\nmint();\n`,
+    "src/element.ts": `import { Signer } from "./lib/cap";\nnew Signer()["sign"]();\n`,
+    "src/dynamic.ts": `export async function load() {\n  return import("./lib/cap");\n}\n`,
+    "src/star.ts": `export * from "./lib/cap";\n`,
+  });
+
+  const flagged = new Set(found.map((violation) => violation.split(":")[0]));
+  assert.deepEqual(
+    [...flagged].sort(),
+    ["src/destructure.ts", "src/dynamic.ts", "src/element.ts", "src/star.ts"].sort()
+  );
+});
+
+test("exempts only test files, not a production module under a test-named directory", () => {
+  const found = violations({
+    "src/allowed.ts": `import { mint } from "./lib/cap";\nmint();\n`,
+    "src/feature/test/helper.ts": `import { mint } from "../../lib/cap";\nmint();\n`,
+  });
+
+  assert.ok(found.length > 0);
+  for (const violation of found) {
+    assert.match(violation, /^src\/feature\/test\/helper\.ts:/);
+  }
+});
