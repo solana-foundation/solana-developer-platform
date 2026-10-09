@@ -610,7 +610,6 @@ export const PROJECT_PROVIDER_REFUSAL_REASONS = [
   ...CUSTODY_SETUP_REFUSAL_REASONS,
   "provider_not_in_release_channel",
   "provider_not_offered",
-  "provider_stage_not_allowed",
   "provider_not_configured",
 ] as const;
 export type ProjectProviderRefusalReason = (typeof PROJECT_PROVIDER_REFUSAL_REASONS)[number];

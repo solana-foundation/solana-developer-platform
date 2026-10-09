@@ -1561,9 +1561,8 @@ export async function loadProjectProviderVerdict(
  * The provider gate for ramps and Earn money-in: every path that starts
  * provider work for a project calls this before any provider call, claim or
  * row write. Reads the project from the request's authenticated scope and
- * applies the project provider rule (release channel, surfacing, the
- * Production `stable` bar, entitlement and the deployment's credentials for
- * the project's environment) through the same core the availability read
+ * applies the project provider rule (release channel, surfacing,
+ * entitlement and the deployment's credentials for the project's environment) through the same core the availability read
  * uses, logging a refusal. Re-targeting an existing Earn program passes
  * `program: "existing"`, which skips surfacing alone. Webhooks, reconcilers,
  * reads and Earn exits (ADR 0002) never call it.
@@ -1571,8 +1570,7 @@ export async function loadProjectProviderVerdict(
  * @param c - Request context carrying the authenticated project scope.
  * @param request - The ramps or Earn provider being used (Earn: a new position, or `program: "existing"`).
  * @throws 403 `FORBIDDEN` whose `details.reason` is `provider_not_in_release_channel`,
- *   `provider_not_offered`, `provider_stage_not_allowed` or
- *   `provider_not_entitled`; 503 `PROVIDER_NOT_CONFIGURED` when the deployment
+ *   `provider_not_offered` or `provider_not_entitled`; 503 `PROVIDER_NOT_CONFIGURED` when the deployment
  *   lacks the provider's credentials for the project's environment; 404 when
  *   the project is not an active project of the organization.
  */

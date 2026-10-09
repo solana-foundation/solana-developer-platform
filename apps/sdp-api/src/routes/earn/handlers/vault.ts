@@ -127,9 +127,9 @@ import {
  * A READ that takes the deposit's own money-in gates through
  * `assertVaultDepositAdmissible`, the function both deposit builds call: the
  * quote exists only to open a NEW position, so surfacing, admission, and
- * environment capability always apply, an authenticated caller takes the
- * project provider rule, and an anonymous caller takes the Production `stable`
- * bar for Earn. There is no wallet, policy gate, persistence, or idempotency
+ * environment capability always apply, and an authenticated caller takes the
+ * project provider rule (an anonymous caller has no project for it to decide
+ * from). There is no wallet, policy gate, persistence, or idempotency
  * key because the preview moves and holds nothing.
  */
 export async function createEarnVaultDepositPreview(

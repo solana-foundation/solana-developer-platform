@@ -82,7 +82,6 @@ export type CustodySetupRefusalReason = (typeof CUSTODY_SETUP_REFUSAL_REASONS)[n
 export const STAGED_PROVIDER_REFUSAL_REASONS = [
   "provider_not_in_release_channel",
   "provider_not_offered",
-  "provider_stage_not_allowed",
   "provider_not_entitled",
 ] as const;
 export type StagedProviderRefusalReason = (typeof STAGED_PROVIDER_REFUSAL_REASONS)[number];

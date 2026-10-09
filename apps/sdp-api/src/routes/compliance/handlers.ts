@@ -21,8 +21,7 @@ import type { screenAddressSchema } from "./schemas";
  * @param c - Request context with the validated screening body.
  * @returns One result per enabled compliance provider.
  * @throws 403 `FORBIDDEN` when no provider is enabled, or whose `details.reason`
- *   is `provider_not_in_release_channel`, `provider_stage_not_allowed` or
- *   `provider_not_entitled` when the project may not use an enabled provider;
+ *   is `provider_not_in_release_channel` or `provider_not_entitled` when the project may not use an enabled provider;
  *   503 `PROVIDER_NOT_CONFIGURED` when the deployment lacks an enabled
  *   provider's credentials for the project's environment.
  */
