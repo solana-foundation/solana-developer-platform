@@ -345,10 +345,13 @@ function availabilityBody(availability: ProjectProviderAvailability) {
 }
 
 async function setProviderOverrides(overrides: OrganizationProviderOverrides): Promise<void> {
-  await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
-    JSON.stringify({ providerOverrides: overrides }),
-    ORGANIZATION_ID,
-  ]);
+  await getDb(env).execute(
+    `UPDATE organizations
+     SET settings = (COALESCE(NULLIF(settings, ''), '{}')::jsonb
+                     || jsonb_build_object('providerOverrides', ?::jsonb))::text
+     WHERE id = ?`,
+    [JSON.stringify(overrides), ORGANIZATION_ID]
+  );
 }
 
 async function seedApiKey(
