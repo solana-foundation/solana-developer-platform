@@ -68,6 +68,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # The PR's own tip, not the merge ref: a stack's merge ref also carries main commits the stack lacks.
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
@@ -85,7 +87,8 @@ jobs:
 
       - name: Require rollback-safe migrations
         env:
-          MIGRATION_COMPAT_BASE_REF: origin/${{ github.base_ref }}
+          # The parent branch tip: on a stacked PR, github.base_ref is the stack base.
+          MIGRATION_COMPAT_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: pnpm check:migration-compat
 
   module_boundaries:
