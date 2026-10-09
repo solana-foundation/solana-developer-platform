@@ -142,8 +142,8 @@ const PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS = [
 
 /**
  * The documented project provider availability, with or without the Earn
- * family. The runtime response always carries Earn entries; the public
- * document leaves them out while `EARN_PUBLIC_SURFACE_PUBLISHED` is false.
+ * family. While `EARN_PUBLIC_SURFACE_PUBLISHED` is false the public document
+ * leaves Earn out and the runtime response omits Earn entries to match it.
  *
  * @param publishEarn - Whether the document carries the Earn family.
  * @returns The response schema, its description and example matching `publishEarn`.

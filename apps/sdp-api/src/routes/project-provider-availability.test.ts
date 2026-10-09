@@ -32,6 +32,18 @@ vi.mock("@sdp/types", async (importOriginal) => {
   return mockProviderStages(await importOriginal<typeof import("@sdp/types")>());
 });
 
+const earnPublication = vi.hoisted(() => ({ published: true }));
+
+vi.mock("@/openapi/spec", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/openapi/spec")>();
+  return {
+    ...actual,
+    get EARN_PUBLIC_SURFACE_PUBLISHED() {
+      return earnPublication.published;
+    },
+  };
+});
+
 const ORGANIZATION_ID = "org_project_provider_availability";
 const USER_ID = "usr_project_provider_availability";
 const OTHER_ORGANIZATION_ID = "org_project_provider_availability_other";
@@ -285,6 +297,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     custodyReleaseChannel.stageOverride = null;
     providerStages.moduleStageOverride = null;
     providerStages.surfacedEarnProvider = null;
+    earnPublication.published = true;
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedFixture();
@@ -294,7 +307,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     await clearKVStores(env);
   });
 
-  it("lists every provider with its availability for a Sandbox project", async () => {
+  it("lists every provider, Earn included, while the public Earn surface is published", async () => {
     const response = await read(
       PROJECT_IDS.sandbox,
       apiKeyHeaders(API_KEYS.sandbox),
@@ -314,6 +327,24 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(availabilityBody(PRODUCTION_AVAILABILITY));
+  });
+
+  it("omits Earn entries while the public Earn surface is unpublished", async () => {
+    earnPublication.published = false;
+
+    const response = await read(
+      PROJECT_IDS.sandbox,
+      apiKeyHeaders(API_KEYS.sandbox),
+      deploymentEnv({})
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(
+      availabilityBody({
+        ...SANDBOX_AVAILABILITY,
+        providers: SANDBOX_AVAILABILITY.providers.filter((entry) => entry.family !== "earn"),
+      })
+    );
   });
 
   it("reports providers the release channel leaves out as unavailable", async () => {
