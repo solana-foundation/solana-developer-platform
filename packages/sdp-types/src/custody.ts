@@ -71,7 +71,6 @@ export const CUSTODY_SETUP_REFUSAL_REASONS = [
   "custody_provider_not_in_release_channel",
   "custody_mode_not_allowed",
   "provider_not_entitled",
-  "provider_not_configured",
 ] as const;
 export type CustodySetupRefusalReason = (typeof CUSTODY_SETUP_REFUSAL_REASONS)[number];
 

@@ -46,10 +46,15 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet signing initialized",
         content: jsonContent(initializeSigningResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 500]),
       403: {
         description:
-          "Forbidden: the API key lacks permission or is wallet-scoped, or custody setup was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when a Production project names Managed custody (Production is BYOK only), custody_provider_not_in_release_channel, provider_not_entitled, or provider_not_configured.",
+          "Forbidden: the API key lacks permission or is wallet-scoped, or custody setup was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when a Production project names Managed custody (Production is BYOK only), custody_provider_not_in_release_channel, or provider_not_entitled.",
+        content: jsonContent(errorResponseSchema),
+      },
+      503: {
+        description:
+          "PROVIDER_NOT_CONFIGURED: the deployment holds no credentials for the provider in the project's environment (details.reason provider_not_configured).",
         content: jsonContent(errorResponseSchema),
       },
     },

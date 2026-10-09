@@ -7,7 +7,9 @@ import type { CustodyWalletOwnerTarget } from "./custody";
 import type { ApiKeyRole, Permission } from "./permissions";
 import type { ApiKeyWalletPolicyBindingScope } from "./policy";
 
-export type SdpEnvironment = "sandbox" | "production";
+export const SDP_ENVIRONMENTS = ["sandbox", "production"] as const;
+
+export type SdpEnvironment = (typeof SDP_ENVIRONMENTS)[number];
 
 export type ApiKeyEnvironment = SdpEnvironment;
 

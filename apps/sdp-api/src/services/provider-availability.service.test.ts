@@ -17,13 +17,14 @@ import {
   assertProviderAvailable,
   CustodySetupRefusedError,
   custodyProviderNotInReleaseChannel,
-  getCustodyModesForProject,
+  getProjectProviderAvailability,
   getProviderAvailability,
   parseClerkOrganizationTierMetadata,
   parseProviderOverridesFromClerkMetadata,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
+import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
 import {
   type SeededDefaultProjects,
@@ -94,6 +95,8 @@ const providerEnvKeys = [
   "JUPITER_SWAP_API_KEY",
   "WISDOMTREE_API_KEY",
   "WISDOMTREE_SANDBOX_API_KEY",
+  "MARKETS_ENABLED",
+  "EARN_ENABLED",
 ] as const;
 
 type ProviderEnvKey = (typeof providerEnvKeys)[number];
@@ -127,6 +130,7 @@ function setBaseProviderEnv(): void {
     TURNKEY_API_PUBLIC_KEY: "turnkey_test_public_key",
     TURNKEY_API_PRIVATE_KEY: "turnkey_test_private_key",
     TURNKEY_ORGANIZATION_ID: "turnkey_test_org",
+    ...EARN_ENABLED_FLAGS,
   });
 }
 
@@ -748,6 +752,30 @@ describe("provider-availability.service", () => {
     });
   });
 
+  it.for(EARN_FLAG_OFF_CASES)(
+    "reports an entitled, configured earn provider as not enabled while $flag is off",
+    async ({ flags }) => {
+      await getDb(env)
+        .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+        .bind(JSON.stringify({ providerOverrides: { earn: { upshift: true } } }), TEST_ORG_ID)
+        .run();
+      env.UPSHIFT_API_KEY = "upshift_test_key";
+
+      const availability = await getProviderAvailability(
+        { ...env, ...flags },
+        getDb(env),
+        TEST_ORG_ID,
+        MANIFEST_STAGES
+      );
+
+      expect(availability.providers.earn.upshift).toEqual({
+        entitled: true,
+        configured: true,
+        enabled: false,
+      });
+    }
+  );
+
   /**
    * Veda reaches its vaults on-chain through `@sdp/veda`, so it has no provider
    * API and no credential — the same shape as Kamino. Pinned here because
@@ -920,15 +948,16 @@ describe("provider-availability.service", () => {
       });
       expect(warn).toHaveBeenCalledExactlyOnceWith(
         {
-          event: "sdp_api_custody_setup_refused",
+          event: "sdp_api_project_provider_refused",
           organization_id: TEST_ORG_ID,
           project_id: projects.production.id,
           environment: "production",
+          family: "custody",
           provider: "privy",
           mode: "managed",
           reason: "custody_mode_not_allowed",
         },
-        "sdp_api_custody_setup_refused"
+        "sdp_api_project_provider_refused"
       );
     });
 
@@ -976,9 +1005,9 @@ describe("provider-availability.service", () => {
       env.PRIVY_APP_SECRET = undefined;
 
       await expect(admitCustodySetup(projects.sandbox, "privy", "managed")).rejects.toMatchObject({
-        code: "FORBIDDEN",
-        statusCode: 403,
-        message: "Privy is not configured in this environment.",
+        code: "PROVIDER_NOT_CONFIGURED",
+        statusCode: 503,
+        message: "Privy is not configured for sandbox projects in this deployment.",
         details: { reason: "provider_not_configured" },
       });
       await expect(admitCustodySetup(projects.sandbox, "privy", "byok")).resolves.toBeUndefined();
@@ -1034,9 +1063,13 @@ describe("provider-availability.service", () => {
       const warn = vi.spyOn(logger, "warn").mockImplementation(() => logger);
       const project = { organizationId: TEST_ORG_ID, projectId: projects.production.id };
 
-      await expect(getCustodyModesForProject(env, getDb(env), project, "privy")).resolves.toEqual([
-        "byok",
-      ]);
+      const availability = await getProjectProviderAvailability(env, getDb(env), project);
+      expect(availability.providers).toContainEqual({
+        family: "custody",
+        provider: "privy",
+        modes: ["byok"],
+        unavailableModes: [{ mode: "managed", reason: "custody_mode_not_allowed" }],
+      });
       expect(warn).not.toHaveBeenCalled();
     });
 
@@ -1060,9 +1093,9 @@ describe("provider-availability.service", () => {
         await expect(admitByokCustodySetup(env, getDb(env), scope, "privy")).rejects.toMatchObject(
           notFound
         );
-        await expect(
-          getCustodyModesForProject(env, getDb(env), scope, "privy")
-        ).rejects.toMatchObject(notFound);
+        await expect(getProjectProviderAvailability(env, getDb(env), scope)).rejects.toMatchObject(
+          notFound
+        );
         expect(warn).not.toHaveBeenCalled();
       }
     );

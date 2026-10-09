@@ -121,6 +121,17 @@ export async function seedDefaultProjects(
 }
 
 /**
+ * Archive a project, the soft delete every project read treats as gone.
+ *
+ * @param db - Test database client.
+ * @param projectId - Project to archive.
+ * @returns Resolves once the row is archived.
+ */
+export async function archiveProject(db: DatabaseClient, projectId: string): Promise<void> {
+  await db.prepare("UPDATE projects SET status = 'archived' WHERE id = ?").bind(projectId).run();
+}
+
+/**
  * Assert a read is scoped to its project: visible through the project that owns the row,
  * hidden through the organization's other project.
  *

@@ -77,6 +77,7 @@ import {
   prepareSeizeResponseSchema,
   prepareUpdateAuthorityResponseSchema,
   projectMemberResponseSchema,
+  projectProviderAvailabilityResponseSchema,
   projectResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
@@ -164,6 +165,15 @@ export const listProjectsResponse = successResponseSchema(listProjectsResponseSc
 export const listProjectMembersResponse = successResponseSchema(listProjectMembersResponseSchema);
 export const projectMemberResponse = successResponseSchema(projectMemberResponseSchema);
 export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKeysResponseSchema);
+/**
+ * The project provider availability envelope, with or without the Earn family.
+ *
+ * @param publishEarn - Whether the document carries the Earn family.
+ * @returns The success envelope around `projectProviderAvailabilityResponseSchema(publishEarn)`.
+ */
+export function projectProviderAvailabilityResponse(publishEarn: boolean) {
+  return successResponseSchema(projectProviderAvailabilityResponseSchema(publishEarn));
+}
 export const rpcRelayResponse = successResponseSchema(rpcRelayResponseSchema);
 
 export const tokenResponse = successResponseSchema(tokenResponseSchema);
