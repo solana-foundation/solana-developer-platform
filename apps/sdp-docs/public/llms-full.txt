@@ -798,6 +798,18 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
+Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId`:
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connectionId": "cconn_123",
+    "label": "Treasury wallet"
+  }'
+```
+
 #### 2. Create additional wallets
 
 Every wallet names the provider account it lives under: `provider` for the provider's Managed account, or `connectionId` for a connection your project added. Send exactly one of them. There is no default account to fall back to.

@@ -33,7 +33,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Initialize wallet signing",
     operationId: "initializeWalletSigning",
     description:
-      "Initializes wallet signing for the organization or project by creating an active signing configuration.",
+      "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {
@@ -46,7 +46,12 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet signing initialized",
         content: jsonContent(initializeSigningResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 409, 500]),
+      403: {
+        description:
+          "Forbidden: the API key lacks permission or is wallet-scoped, or custody setup was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when a Production project names Managed custody (Production is BYOK only), custody_provider_not_in_release_channel, provider_not_entitled, or provider_not_configured.",
+        content: jsonContent(errorResponseSchema),
+      },
     },
   });
 
