@@ -369,16 +369,20 @@ describe("fetchConnectionPickerOptions", () => {
     expect(options.map((option) => option.id)).toEqual(["conn-active"]);
   });
 
-  // The endpoint needs custody:admin, which creating a wallet does not.
-  it("returns nothing rather than throwing when the read is refused", async () => {
+  it("throws when the read is refused", async () => {
     const request = vi.fn(async () => new Response("forbidden", { status: 403 }));
 
-    await expect(fetchConnectionPickerOptions(request, "privy")).resolves.toEqual([]);
+    await expect(fetchConnectionPickerOptions(request, "privy")).rejects.toMatchObject({
+      name: "ConnectionsRequestError",
+      status: 403,
+    });
   });
 
-  it("returns nothing when the payload does not match the schema", async () => {
+  it("throws when the payload does not match the schema", async () => {
     const request = vi.fn(async () => jsonResponse({ data: { connections: "nope" } }));
 
-    await expect(fetchConnectionPickerOptions(request, "privy")).resolves.toEqual([]);
+    await expect(fetchConnectionPickerOptions(request, "privy")).rejects.toMatchObject({
+      name: "ZodError",
+    });
   });
 });

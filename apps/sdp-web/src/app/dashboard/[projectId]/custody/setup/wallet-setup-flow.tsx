@@ -9,7 +9,7 @@ import {
 } from "@sdp/types";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { type FormEvent, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import {
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
@@ -49,6 +49,10 @@ const ENVIRONMENT_LABEL_KEYS = {
   sandbox: "DashboardCustody.sandbox",
   production: "DashboardCustody.production",
 } as const satisfies Record<SdpEnvironment, MessageKey>;
+const CUSTODY_MODE_LABEL_KEYS = {
+  managed: "DashboardCustody.walletSetupModeManaged",
+  byok: "DashboardCustody.walletSetupModeByok",
+} as const satisfies Record<CustodyMode, MessageKey>;
 
 // Keep Enter available to controls that own it (newlines, option selection,
 // navigation, and action buttons). The already-selected provider card opts in
@@ -235,6 +239,7 @@ function WalletFixedField({ label, value }: { label: string; value: string }) {
  * @param props.disabled - Locks the choice while a setup request is pending or a
  *   BYOK submission awaits recovery.
  * @param props.mode - The chosen mode, or `null` before the user picks.
+ * @param props.modes - The modes the provider may be set up in, one option each.
  * @param props.onModeChange - Called with the newly chosen mode.
  * @param props.t - The translator.
  * @returns The mode select.
@@ -242,29 +247,40 @@ function WalletFixedField({ label, value }: { label: string; value: string }) {
 function CustodyModeField({
   disabled,
   mode,
+  modes,
   onModeChange,
   t,
 }: {
   disabled: boolean;
   mode: CustodyMode | null;
+  modes: AvailableCustodyModes;
   onModeChange: (mode: CustodyMode | null) => void;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const selectId = useId();
+  const hintId = useId();
   return (
     <div className="space-y-2">
-      <Label>{t("DashboardCustody.walletSetupMode")}</Label>
+      <Label htmlFor={selectId}>{t("DashboardCustody.walletSetupMode")}</Label>
       <Select
+        id={selectId}
         ariaLabel={t("DashboardCustody.walletSetupMode")}
+        ariaDescribedBy={hintId}
         placeholder={t("DashboardCustody.walletSetupModePlaceholder")}
         size="xl"
         value={mode}
         onValueChange={(value) => onModeChange(isCustodyMode(value) ? value : null)}
         disabled={disabled}
       >
-        <SelectItem value="managed">{t("DashboardCustody.walletSetupModeManaged")}</SelectItem>
-        <SelectItem value="byok">{t("DashboardCustody.walletSetupModeByok")}</SelectItem>
+        {modes.map((option) => (
+          <SelectItem key={option} value={option}>
+            {t(CUSTODY_MODE_LABEL_KEYS[option])}
+          </SelectItem>
+        ))}
       </Select>
-      <p className="text-sm leading-6 text-tertiary">{t("DashboardCustody.walletSetupModeHint")}</p>
+      <p id={hintId} className="text-sm leading-6 text-tertiary">
+        {t("DashboardCustody.walletSetupModeHint")}
+      </p>
     </div>
   );
 }
@@ -313,7 +329,8 @@ interface SetupOptions {
   hasManagedConfig: boolean;
   isConnected: boolean;
   setupMode: CustodyMode | null;
-  showModeChoice: boolean;
+  /** The modes the user picks between, or `null` when the wizard picks the mode itself. */
+  modeChoices: AvailableCustodyModes | null;
 }
 
 /**
@@ -347,7 +364,7 @@ function resolveSetupOptions(input: {
       hasManagedConfig: false,
       isConnected: false,
       setupMode: null,
-      showModeChoice: false,
+      modeChoices: null,
     };
   }
   const offersManaged = selectedAvailability.modes.includes("managed");
@@ -366,7 +383,7 @@ function resolveSetupOptions(input: {
     hasManagedConfig,
     isConnected,
     setupMode,
-    showModeChoice: !isConnected && offersManaged && offersByok,
+    modeChoices: !isConnected && offersManaged && offersByok ? selectedAvailability.modes : null,
   };
 }
 
@@ -542,12 +559,12 @@ export function WalletSetupFlow({
     hasManagedConfig,
     isConnected,
     setupMode,
-    showModeChoice,
+    modeChoices,
   } = useMemo(
     () => resolveSetupOptions({ selectedAvailability, connections, chosenMode }),
     [selectedAvailability, connections, chosenMode]
   );
-  const awaitingModeChoice = showModeChoice && setupMode === null;
+  const awaitingModeChoice = modeChoices !== null && setupMode === null;
   const canProvisionWallet =
     selectedProviderEntry !== null &&
     (isConnected ? selectedProviderEntry.supportsAdditionalWallets : setupMode === "managed");
@@ -738,17 +755,18 @@ export function WalletSetupFlow({
               </form>
             ) : (
               <>
-                {showModeChoice ? (
+                {modeChoices === null ? null : (
                   <CustodyModeField
                     disabled={byokRecoveryLocked || setupRequestInFlight}
                     mode={chosenMode}
+                    modes={modeChoices}
                     onModeChange={(mode) => {
                       setChosenMode(mode);
                       setErrorMessage(null);
                     }}
                     t={t}
                   />
-                ) : null}
+                )}
                 {byokSetupProvider === null ? null : (
                   <ByokCredentialForm
                     provider={byokSetupProvider}

@@ -43,10 +43,15 @@ import {
 
 type OpenCreateWallet = (provider: KnownCustodyProvider | null) => void;
 
+/** The project's custody availability, or `ok: false` when it could not be read. */
+export type CustodyAvailabilityResult =
+  | { ok: true; providers: ProjectCustodyAvailability[] }
+  | { ok: false };
+
 interface WalletsOverviewProps {
   canManageCustody: boolean;
   connectedProviders: KnownCustodyProvider[];
-  custodyAvailability: ProjectCustodyAvailability[];
+  custodyAvailability: CustodyAvailabilityResult;
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
@@ -189,13 +194,26 @@ function WalletCardsGrid({
   );
 }
 
+/** Inline notice that the create area is closed because availability could not be read. */
+function CreateOptionsUnavailable() {
+  const t = useTranslations();
+  return (
+    <p
+      role="alert"
+      className="rounded-2xl border border-destructive/15 bg-destructive/[0.04] px-5 py-4 text-sm leading-6 text-destructive-strongest"
+    >
+      {t("DashboardCustody.walletCreationOptionsUnavailable")}
+    </p>
+  );
+}
+
 function EmptyWallets({
   canManageCustody,
   configsError,
   onCreateWallet,
   providerAvailability,
 }: Pick<WalletsOverviewProps, "canManageCustody" | "configsError" | "onCreateWallet"> & {
-  providerAvailability: CustodyProviderAvailability[];
+  providerAvailability: CustodyProviderAvailability[] | null;
 }) {
   const t = useTranslations();
   return (
@@ -214,13 +232,17 @@ function EmptyWallets({
         {configsError ? <p className="text-sm text-destructive-strong">{configsError}</p> : null}
       </div>
 
-      <WalletProviderChoices
-        availability={providerAvailability}
-        canSelect={canManageCustody}
-        grouped={false}
-        selectedProvider={null}
-        onSelect={onCreateWallet}
-      />
+      {providerAvailability === null ? (
+        <CreateOptionsUnavailable />
+      ) : (
+        <WalletProviderChoices
+          availability={providerAvailability}
+          canSelect={canManageCustody}
+          grouped={false}
+          selectedProvider={null}
+          onSelect={onCreateWallet}
+        />
+      )}
     </div>
   );
 }
@@ -248,10 +270,16 @@ export function WalletsOverview({
   const lastUrlSearchRef = useRef(initialSearch);
   const syncingFromUrlRef = useRef<string | null>(null);
   const providerAvailability = useMemo(
-    () => resolveCustodyProviderAvailability({ connectedProviders, custodyAvailability }),
+    () =>
+      custodyAvailability.ok
+        ? resolveCustodyProviderAvailability({
+            connectedProviders,
+            custodyAvailability: custodyAvailability.providers,
+          })
+        : null,
     [connectedProviders, custodyAvailability]
   );
-  const hasAvailableProvider = providerAvailability.length > 0;
+  const hasAvailableProvider = providerAvailability !== null && providerAvailability.length > 0;
   const normalizedSearch = normalizeWalletSearchQuery(effectiveSearchValue);
   const visibleWallets = useMemo(
     () => filterWallets(wallets, normalizedSearch),
@@ -325,6 +353,7 @@ export function WalletsOverview({
 
   return (
     <div className="space-y-6">
+      {canManageCustody && providerAvailability === null ? <CreateOptionsUnavailable /> : null}
       {configsError ? (
         <div className="rounded-[18px] border border-border-default bg-fill-subtle px-4 py-3 text-sm text-secondary">
           {configsError}

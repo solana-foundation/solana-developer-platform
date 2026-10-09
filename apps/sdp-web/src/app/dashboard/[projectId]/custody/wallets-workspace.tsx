@@ -12,11 +12,10 @@ import {
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
-import type { ProjectCustodyAvailability } from "@/lib/provider-availability";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 import type { KnownCustodyProvider } from "./provider-catalog";
-import { WalletsOverview } from "./wallets-overview";
+import { type CustodyAvailabilityResult, WalletsOverview } from "./wallets-overview";
 
 const WalletsPlayground = dynamic(
   () => import("./wallets-playground").then((module) => module.WalletsPlayground),
@@ -41,7 +40,7 @@ interface WalletsWorkspaceProps {
   apiBaseUrl: string | null;
   apiKeys: WalletsApiKeyOption[];
   connectedProviders: KnownCustodyProvider[];
-  custodyAvailability: ProjectCustodyAvailability[];
+  custodyAvailability: CustodyAvailabilityResult;
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;

@@ -268,24 +268,23 @@ export function summarizeProviderConnections(
  * pending and failed ones are kept so the picker can show them disabled with a
  * reason, rather than leave the user wondering where their connection went.
  *
- * Returns `[]` instead of throwing on any failure: the endpoint requires
- * `custody:admin`, and someone allowed to create a wallet without it must still
- * reach the wizard's provider form.
+ * A failed read throws: an empty picker would make an existing connection look
+ * absent and send the user back to the credential form for a second one.
+ *
+ * @param request - The SDP API request function scoped to the project.
+ * @param provider - The custody provider whose connections to read.
+ * @returns The provider's connections in the project, deactivated ones excluded.
  */
 export async function fetchConnectionPickerOptions(
   request: SdpApiClient["request"],
   provider: CustodyProvider
 ): Promise<CustodyConnectionListItem[]> {
-  try {
-    const page = await fetchConnectionsSlice(request, {
-      provider,
-      limit: CONNECTIONS_FETCH_LIMIT,
-      offset: 0,
-    });
-    return page.connections.filter((connection) => connection.status !== "deactivated");
-  } catch {
-    return [];
-  }
+  const page = await fetchConnectionsSlice(request, {
+    provider,
+    limit: CONNECTIONS_FETCH_LIMIT,
+    offset: 0,
+  });
+  return page.connections.filter((connection) => connection.status !== "deactivated");
 }
 
 /**

@@ -94,7 +94,7 @@ function renderOverview(
       <WalletsOverview
         canManageCustody
         connectedProviders={[]}
-        custodyAvailability={CUSTODY_AVAILABILITY}
+        custodyAvailability={{ ok: true, providers: CUSTODY_AVAILABILITY }}
         configsError={null}
         wallets={wallets}
         walletsError={null}
@@ -120,13 +120,27 @@ describe("wallets overview search", () => {
   });
 
   it("explains provider setup and offers no creation when the project can use no provider", () => {
-    const emptyProject = renderOverview("", { wallets: [], custodyAvailability: [] });
+    const emptyProject = renderOverview("", {
+      wallets: [],
+      custodyAvailability: { ok: true, providers: [] },
+    });
     expect(emptyProject).toContain(
       "Wallet creation is available after a custody provider is enabled for this organization."
     );
     expect(emptyProject).not.toContain("data-provider-selection-card");
 
-    const withWallets = renderOverview("", { custodyAvailability: [] });
+    const withWallets = renderOverview("", { custodyAvailability: { ok: true, providers: [] } });
+    expect(withWallets.match(/data-wallet-card=/g)).toHaveLength(2);
+    expect(withWallets).not.toContain('data-wallet-create-tile="true"');
+  });
+
+  it("closes the create area with an inline error and keeps existing wallets when availability could not be read", () => {
+    const emptyProject = renderOverview("", { wallets: [], custodyAvailability: { ok: false } });
+    expect(emptyProject).toContain("Unable to load wallet creation options.");
+    expect(emptyProject).not.toContain("data-provider-selection-card");
+
+    const withWallets = renderOverview("", { custodyAvailability: { ok: false } });
+    expect(withWallets).toContain("Unable to load wallet creation options.");
     expect(withWallets.match(/data-wallet-card=/g)).toHaveLength(2);
     expect(withWallets).not.toContain('data-wallet-create-tile="true"');
   });

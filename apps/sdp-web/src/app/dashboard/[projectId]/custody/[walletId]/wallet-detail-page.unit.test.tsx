@@ -229,6 +229,24 @@ describe("WalletDetailPage critical path", () => {
     expect(markup).toContain("Treasury connection");
   });
 
+  it.each([403, 404])(
+    "renders the truncated connection id, unlinked, when the connection lookup returns %i",
+    async (status) => {
+      walletOverrides = { custodyConnectionId: "connection_one" };
+      mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+      mockRequest.mockImplementation(async (path: string) =>
+        path === "/internal/dashboard/custody/connections/connection_one"
+          ? new Response(null, { status })
+          : defaultApiResponse(path)
+      );
+
+      const markup = renderWalletIdentity(await renderPage());
+
+      expect(markup).toContain("connec..._one");
+      expect(markup).not.toContain("/integrations/privy/connections/");
+    }
+  );
+
   it.each([
     [
       "http",

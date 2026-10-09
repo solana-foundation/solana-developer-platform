@@ -9,7 +9,11 @@ import { ListChecks, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { type ReactNode, Suspense } from "react";
-import { fetchConnectionInstallation } from "@/app/dashboard/[projectId]/custody/connections/connection-detail.data";
+import {
+  ConnectionDetailRequestError,
+  type CustodyInstallationConnection,
+  fetchConnectionInstallation,
+} from "@/app/dashboard/[projectId]/custody/connections/connection-detail.data";
 import {
   formatCustodyProviderName,
   getCustodyProviderCategory,
@@ -100,7 +104,8 @@ async function getWalletDetail(
  * The connection row of a wallet created in a custody connection: the
  * connection's label, linked to its detail page, for a viewer who may manage
  * custody, and the truncated connection id, unlinked, for one who may not read
- * connections.
+ * connections or whose lookup is refused (403) or finds no connection (404).
+ * Any other lookup failure throws.
  *
  * @param params - The wallet's connection and the viewer's access.
  * @param params.request - The SDP API request function.
@@ -120,7 +125,18 @@ async function resolveWalletConnectionRow(params: {
   if (!canManageCustody) {
     return { label: truncateMiddle(connectionId), href: undefined };
   }
-  const connection = await fetchConnectionInstallation(request, connectionId);
+  let connection: CustodyInstallationConnection;
+  try {
+    connection = await fetchConnectionInstallation(request, connectionId);
+  } catch (error) {
+    if (
+      error instanceof ConnectionDetailRequestError &&
+      (error.status === 403 || error.status === 404)
+    ) {
+      return { label: truncateMiddle(connectionId), href: undefined };
+    }
+    throw error;
+  }
   return {
     label: connection.label,
     href: await requestProjectHref(
