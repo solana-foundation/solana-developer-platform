@@ -21,7 +21,7 @@ SDP launches on mainnet on Nov 2 with keys required on the routes that move mone
 ## Decision
 
 One route step, `idempotent({ key })` in `apps/sdp-api/src/middleware/idempotency.ts`, backed by
-one table, `idempotency_keys` (migration 0126). It follows three sources:
+one table, `idempotency_keys` (migration 0127). It follows three sources:
 
 - [draft-ietf-httpapi-idempotency-key-header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)
   for the header and the 400/422/409 codes.
