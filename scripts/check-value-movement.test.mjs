@@ -124,3 +124,32 @@ test("exempts only test files, not a production module under a test-named direct
     assert.match(violation, /^src\/feature\/test\/helper\.ts:/);
   }
 });
+
+test("flags a whole-module import of a barrel that only re-exports a capability", () => {
+  const found = violations({
+    "src/allowed.ts": `import { mint } from "./lib/cap";\nmint();\n`,
+    "src/lib/barrel.ts": `export { mint } from "./cap";\n`,
+    "src/barrel-user.ts": `export async function load() {\n  return import("./lib/barrel");\n}\n`,
+  });
+
+  assert.ok(found.some((violation) => violation.startsWith("src/barrel-user.ts:")));
+});
+
+test("checks every capability a whole module carries, not just the first", () => {
+  const second = {
+    id: "second",
+    why: "second capability",
+    symbols: [{ file: "src/lib/cap.ts", name: "Signer" }],
+    owners: ["src/lib/cap.ts"],
+    allow: [],
+  };
+  const first = { ...CAPABILITY, symbols: [{ file: "src/lib/cap.ts", name: "mint" }] };
+  const found = violations(
+    {
+      "src/allowed.ts": `import * as cap from "./lib/cap";\ncap.mint();\n`,
+    },
+    [first, second]
+  );
+
+  assert.ok(found.some((violation) => /src\/allowed\.ts:1: references second/.test(violation)));
+});

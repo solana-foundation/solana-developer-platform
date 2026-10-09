@@ -30,6 +30,27 @@ const API = "apps/sdp-api/src";
 const FEE_PAYMENT = "packages/sdp-payments/src/fee-payment";
 const KEYCHAIN = "packages/sdp-custody/src/keychain";
 
+/** Providers with a `Keychain<Provider>Adapter` in `@sdp/custody/keychain`. */
+const KEYCHAIN_PROVIDERS = [
+  "coinbase",
+  "dfns",
+  "fireblocks",
+  "ibm-haven",
+  "memory",
+  "para",
+  "privy",
+  "turnkey",
+  "utila",
+];
+
+/** `ibm-haven` → `IbmHaven`. */
+function pascalCase(slug) {
+  return slug
+    .split("-")
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join("");
+}
+
 /** @typedef {{ file?: string, module?: string, name: string, member?: string }} CapabilitySymbol */
 /**
  * @typedef {{
@@ -87,15 +108,10 @@ export const CAPABILITIES = [
     id: "keychain-signing-adapter",
     why: "Holds a provider secret and can sign; only the adapter factory and the wallet lifecycle may build one.",
     symbols: [
-      { file: `${KEYCHAIN}/keychain-coinbase.adapter.ts`, name: "KeychainCoinbaseAdapter" },
-      { file: `${KEYCHAIN}/keychain-dfns.adapter.ts`, name: "KeychainDfnsAdapter" },
-      { file: `${KEYCHAIN}/keychain-fireblocks.adapter.ts`, name: "KeychainFireblocksAdapter" },
-      { file: `${KEYCHAIN}/keychain-ibm-haven.adapter.ts`, name: "KeychainIbmHavenAdapter" },
-      { file: `${KEYCHAIN}/keychain-memory.adapter.ts`, name: "KeychainMemoryAdapter" },
-      { file: `${KEYCHAIN}/keychain-para.adapter.ts`, name: "KeychainParaAdapter" },
-      { file: `${KEYCHAIN}/keychain-privy.adapter.ts`, name: "KeychainPrivyAdapter" },
-      { file: `${KEYCHAIN}/keychain-turnkey.adapter.ts`, name: "KeychainTurnkeyAdapter" },
-      { file: `${KEYCHAIN}/keychain-utila.adapter.ts`, name: "KeychainUtilaAdapter" },
+      ...KEYCHAIN_PROVIDERS.map((provider) => ({
+        file: `${KEYCHAIN}/keychain-${provider}.adapter.ts`,
+        name: `Keychain${pascalCase(provider)}Adapter`,
+      })),
     ],
     owners: [],
     allow: [
@@ -205,14 +221,6 @@ export function findValueMovementViolations({
     }
   }
 
-  /** Declaring file of each pinned symbol, mapped to one of its symbols. */
-  const pinnedModules = new Map();
-  for (const symbol of targets.keys()) {
-    const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
-    const fileName = declaration?.getSourceFile().fileName;
-    if (fileName && !pinnedModules.has(fileName)) pinnedModules.set(fileName, { symbol });
-  }
-
   const violations = [];
   const used = new Map(capabilities.map((capability) => [capability.id, new Set()]));
   for (const source of program.getSourceFiles()) {
@@ -237,15 +245,22 @@ export function findValueMovementViolations({
         `${relativePath}:${line + 1}: references ${capability.id} (${label}). ${capability.why}`
       );
     };
-    // A whole pinned module handed out as a value (namespace import, require,
-    // dynamic import, export *) carries every constructor in it.
+    // A whole module handed out as a value (namespace import, require, dynamic
+    // import, export *) carries every pinned constructor it exports, including
+    // ones it only re-exports from elsewhere.
     const reportModule = (node, specifier) => {
       const moduleSymbol = checker.getSymbolAtLocation(specifier);
-      const declaration = moduleSymbol?.valueDeclaration ?? moduleSymbol?.declarations?.[0];
-      const pinned = declaration
-        ? pinnedModules.get(declaration.getSourceFile().fileName)
-        : undefined;
-      if (pinned) report(node, pinned.symbol, `module ${specifier.text}`);
+      if (!moduleSymbol) return;
+      const reported = new Set();
+      for (const exported of checker.getExportsOfModule(moduleSymbol)) {
+        const symbol =
+          exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported;
+        const capability = targets.get(symbol);
+        if (capability && !reported.has(capability.id)) {
+          reported.add(capability.id);
+          report(node, symbol, `module ${specifier.text}`);
+        }
+      }
     };
     const visit = (node) => {
       if (ts.isIdentifier(node)) {
