@@ -11,6 +11,7 @@ import {
   type Project,
   type ProjectProviderAvailability,
   type ProjectProviderAvailabilityEntry,
+  // biome-ignore lint/style/noRestrictedImports: the fixture mirrors the API, which lists every ramp provider the deployment knows
   RAMP_PROVIDERS,
   type RampProviderId,
 } from "@sdp/types";
