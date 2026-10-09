@@ -1,4 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
+import { derivationMessageBase64 } from "@sdp/helius-rings-sdk";
 import type { MovementId } from "@sdp/types";
 import { getBase64Codec } from "@solana/codecs";
 import {
@@ -112,6 +113,7 @@ export interface SignRingsOuterTransactionInput {
     MovementId,
     | "helius_rings.operation_start"
     | "helius_rings.operation_exit"
+    | "helius_rings.bring_up"
     | "helius_rings.gateway_transaction"
   >;
   /** Test seam; production resolves the owner's custody wallet. */
@@ -204,6 +206,22 @@ type OwnerSignerInput = Pick<
   "env" | "organizationId" | "projectId" | "owner"
 > & { movement: MovementId };
 
+/** The derivation message is an exit; every other message is bring-up. */
+function ringsMessageMovement(
+  input: Pick<SignRingsMessageInput, "owner" | "messageBase64">
+): "helius_rings.key_derivation" | "helius_rings.bring_up" {
+  let derivationMessage: string;
+  try {
+    derivationMessage = derivationMessageBase64(input.owner);
+  } catch {
+    // Not an address, so not a derivation request; resolving the signer refuses it.
+    return "helius_rings.bring_up";
+  }
+  return input.messageBase64 === derivationMessage
+    ? "helius_rings.key_derivation"
+    : "helius_rings.bring_up";
+}
+
 async function ownerSigner(
   input: OwnerSignerInput & { signer?: TransactionSigner }
 ): Promise<TransactionSigner> {
@@ -267,9 +285,10 @@ export interface SignRingsMessageInput {
 export async function signRingsMessage(input: SignRingsMessageInput): Promise<string> {
   const base64 = getBase64Codec();
 
-  // Shielded keys are re-derived from this signature on every use, withdrawals
-  // included, so it is never refused (an exit).
-  const signer = await ownerSigner({ ...input, movement: "helius_rings.key_derivation" });
+  // Shielded keys are re-derived from the derivation signature on every use,
+  // withdrawals included, so that one message is never refused (an exit). Any
+  // other message (ring bring-up's attestation and challenge) is a start.
+  const signer = await ownerSigner({ ...input, movement: ringsMessageMovement(input) });
   if (!isMessagePartialSigner(signer)) {
     throw new RingsAdapterError("signer_failed", "custody signer cannot sign raw messages", {
       retryable: false,

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { RingsGatewayPort, RuntimeHealth } from "@sdp/helius-rings";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import {
@@ -70,6 +71,9 @@ export function ringsEgressFetch(
   return env.ENVIRONMENT === "development" ? undefined : createGuardedFetch(options);
 }
 
+/** Set while the SDK signs for identity registration or ring bring-up. */
+const bringUp = new AsyncLocalStorage<true>();
+
 export function createConfiguredRingsGateway(
   env: Env,
   tenant: RingsGatewayTenant,
@@ -101,7 +105,9 @@ export function createConfiguredRingsGateway(
           projectId: tenant.projectId,
           owner,
           unsignedTxBase64,
-          movement: "helius_rings.gateway_transaction",
+          movement: bringUp.getStore()
+            ? "helius_rings.bring_up"
+            : "helius_rings.gateway_transaction",
         })
       ),
     signMessage: (messageBase64: string, owner: string) =>
@@ -119,7 +125,15 @@ export function createConfiguredRingsGateway(
         submitOuterTransaction({ env, signedTxBase64, rpcUrl: connection.solanaRpcUrl })
       ),
   };
-  const gateway = create(gatewayConfig);
+  const created = create(gatewayConfig);
+  // Identity registration and ring bring-up sign through the same callback as
+  // merge-enabling and re-keying, so the flow is carried alongside the call:
+  // bring-up opens new authority (a start), the rest serve exits (HOO-1955).
+  const gateway: RingsGatewayPort = {
+    ...created,
+    provisionIdentity: (input) => bringUp.run(true, () => created.provisionIdentity(input)),
+    provisionRing: (input) => bringUp.run(true, () => created.provisionRing(input)),
+  };
   const port = connection.ringRpcUrl
     ? gateway
     : {

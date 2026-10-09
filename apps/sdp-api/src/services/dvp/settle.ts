@@ -163,12 +163,14 @@ export async function closeDvpTrade(
     assertInsideSettlementWindow(trade, snapshot.clusterUnixTimestamp);
   }
 
+  // Cancel only refunds each party to its own token account, so it is an exit.
+  const movement = action === "settle" ? "dvp.settle" : "dvp.cancel";
   const signer = await createOrgSignerForCustodyWallet(
     env,
     trade.organizationId,
     trade.projectId,
     settlement.custodyWalletId,
-    "dvp.settle"
+    movement
   );
   if (signer.address !== trade.settlementAuthority) {
     throw badRequest("DvP settlement wallet no longer matches the trade's authority");
@@ -185,7 +187,7 @@ export async function closeDvpTrade(
   });
 
   // Sponsorship is resolved only after every local refusal above, as in create.
-  const feePayment = createRequestSponsorshipFeePayment(c, "dvp.settle");
+  const feePayment = createRequestSponsorshipFeePayment(c, movement);
   const sponsor = await feePayment.getFeePayer();
 
   const instructions = [

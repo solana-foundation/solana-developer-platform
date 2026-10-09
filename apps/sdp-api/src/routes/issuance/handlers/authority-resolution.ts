@@ -417,8 +417,11 @@ export async function resolveAuthorityWallet(params: {
   return wallet;
 }
 
-/** The two issuance movements: compliance controls are exits, everything else a start. */
-export type IssuanceMovement = Extract<MovementId, "issuance.authority" | "issuance.control">;
+/** The issuance movements: compliance controls are exits, everything else a start. */
+export type IssuanceMovement = Extract<
+  MovementId,
+  "issuance.authority" | "issuance.control" | "issuance.seize"
+>;
 
 async function loadResolvedAuthoritySigner(params: {
   env: Env;

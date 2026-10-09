@@ -98,8 +98,9 @@ describe("MOVEMENTS exits", () => {
       .filter((movement) => MOVEMENTS[movement].kind === "exit")
       .sort();
     expect(exits).toEqual([
+      "dvp.cancel",
       "dvp.reclaim",
-      "earn.queued_withdraw",
+      "earn.queued_withdraw_request",
       "earn.withdraw",
       "helius_rings.gateway_transaction",
       "helius_rings.key_derivation",

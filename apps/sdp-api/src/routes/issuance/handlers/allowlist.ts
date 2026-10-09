@@ -28,6 +28,7 @@ import {
   listAllowlistQuerySchema,
   removeAllowlistQuerySchema,
 } from "../schemas";
+import { controlListRemovalMovement } from "./access-control";
 import type { IssuanceMovement } from "./authority-resolution";
 import {
   admitIssuanceRuntimeExecution,
@@ -117,8 +118,9 @@ async function removeExistingAllowlistEntryOnChain(opts: {
   signer: TransactionSigner;
   list: ReturnType<typeof assertValidAddress>;
   wallet: ReturnType<typeof assertValidAddress>;
+  movement: IssuanceMovement;
 }): Promise<void> {
-  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored", "issuance.control");
+  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored", opts.movement);
   const removeOperation = mosaic.removeFromList({
     list: opts.list,
     wallet: opts.wallet,
@@ -397,13 +399,14 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   const list = token.ablListAddress
     ? assertValidAddress(token.ablListAddress, "ablListAddress")
     : null;
+  const removalMovement = controlListRemovalMovement(token);
   const authorityWallet = list
     ? await resolveAllowlistAuthoritySigner(
         c,
         auth,
         tokenService,
         list,
-        "issuance.control",
+        removalMovement,
         parsed.data.signingCustodyWalletId
       )
     : null;
@@ -433,6 +436,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
         signer: authorityWallet.signer,
         list,
         wallet: assertValidAddress(entry.address, "address"),
+        movement: removalMovement,
       });
       authoritativeEffectCompleted = true;
       await tokenService.revokeAllowlistEntry(entryId);
