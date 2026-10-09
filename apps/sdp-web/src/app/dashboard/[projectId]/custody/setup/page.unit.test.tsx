@@ -68,7 +68,14 @@ describe("custody setup page", () => {
     expect(page.type).toBe(WalletSetupFlow);
     expect(page.props).toEqual({
       connectedProviders: [],
-      custodyAvailability: [{ family: "custody", provider: "privy", modes: ["byok"] }],
+      custodyAvailability: [
+        {
+          family: "custody",
+          provider: "privy",
+          modes: ["byok"],
+          unavailableModes: [{ mode: "managed", reason: "custody_mode_not_allowed" }],
+        },
+      ],
       environment: "production",
       initialProvider: "privy",
       connections: [],

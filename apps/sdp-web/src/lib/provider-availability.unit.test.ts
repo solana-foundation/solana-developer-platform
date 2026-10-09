@@ -23,8 +23,18 @@ const AVAILABILITY = projectProviderAvailability({
 describe("availableCustodyProviders", () => {
   it("keeps only custody entries with modes, in tuple order", () => {
     expect(availableCustodyProviders(AVAILABILITY)).toEqual([
-      { family: "custody", provider: "fireblocks", modes: ["managed"] },
-      { family: "custody", provider: "privy", modes: ["managed", "byok"] },
+      {
+        family: "custody",
+        provider: "fireblocks",
+        modes: ["managed"],
+        unavailableModes: [{ mode: "byok", reason: "provider_not_entitled" }],
+      },
+      {
+        family: "custody",
+        provider: "privy",
+        modes: ["managed", "byok"],
+        unavailableModes: [],
+      },
     ]);
   });
 
