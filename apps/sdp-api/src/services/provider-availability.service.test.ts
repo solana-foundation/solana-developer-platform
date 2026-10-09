@@ -43,12 +43,6 @@ const MANIFEST_STAGES = { rampProviderStages: SDP_RAMP_PROVIDER_STAGES };
 
 const TEST_ORG_ID = "org_provider_availability_test";
 const TEST_USER_ID = "usr_provider_availability_test";
-const NOT_STABLE_PRODUCTION_REFUSAL = {
-  code: "FORBIDDEN",
-  statusCode: 403,
-  message: "Privy BYOK custody is not stable yet, so a production project cannot use it.",
-  details: { reason: "custody_mode_not_allowed" },
-};
 const NOT_ENTITLED_REFUSAL = {
   code: "FORBIDDEN",
   statusCode: 403,
@@ -951,12 +945,12 @@ describe("provider-availability.service", () => {
       });
     });
 
-    it("refuses a Production pair that is not stable though the channel offers it, and admits it in Sandbox", async () => {
+    it("admits a below-stable BYOK pair the channel offers in both a Production and a Sandbox project", async () => {
       custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
 
-      await expect(admitCustodySetup(projects.production, "privy", "byok")).rejects.toMatchObject(
-        NOT_STABLE_PRODUCTION_REFUSAL
-      );
+      await expect(
+        admitCustodySetup(projects.production, "privy", "byok")
+      ).resolves.toBeUndefined();
       await expect(admitCustodySetup(projects.sandbox, "privy", "byok")).resolves.toBeUndefined();
     });
 
@@ -1023,17 +1017,6 @@ describe("provider-availability.service", () => {
       });
       expect(notInChannel).toMatchObject({ error: expect.any(CustodySetupRefusedError) });
 
-      custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
-      await expect(admitByokCustodySetup(env, getDb(env), project, "privy")).resolves.toMatchObject(
-        {
-          admitted: false,
-          request: { ...project, provider: "privy", mode: "byok" },
-          environment: "production",
-          error: NOT_STABLE_PRODUCTION_REFUSAL,
-        }
-      );
-
-      custodyReleaseChannel.stageOverride = null;
       await disablePrivyEntitlement();
       await expect(admitByokCustodySetup(env, getDb(env), project, "privy")).resolves.toMatchObject(
         {

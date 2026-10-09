@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type CustodySetupRefusal,
-  CustodySetupRefusedError,
+  custodyProviderNotInReleaseChannel,
 } from "./provider-availability.service";
 import { decideInstallation, type InstallationFacts } from "./provider-credential-installation";
 
@@ -15,10 +15,7 @@ const SETUP_REFUSAL: CustodySetupRefusal = {
     mode: "byok",
   },
   environment: "production",
-  error: new CustodySetupRefusedError(
-    "Privy BYOK custody is not stable yet, so a production project cannot use it.",
-    "custody_mode_not_allowed"
-  ),
+  error: custodyProviderNotInReleaseChannel("privy", "byok"),
 };
 
 function facts(overrides: Partial<InstallationFacts>): InstallationFacts {

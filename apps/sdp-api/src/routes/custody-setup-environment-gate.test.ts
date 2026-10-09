@@ -2,6 +2,7 @@ import {
   type CachedApiKey,
   CUSTODY_PROVIDERS,
   type CustodyProvider,
+  type CustodySetupRefusalReason,
   type SdpEnvironment,
 } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -71,11 +72,12 @@ const MANAGED_LABELS = {
   anchorage: "Anchorage",
   utila: "Utila",
 } as const satisfies Record<CustodyProvider, string>;
-const NOT_STABLE_REFUSAL = {
+const OUT_OF_CHANNEL_REFUSAL = {
   error: {
     code: "FORBIDDEN",
-    message: "Privy BYOK custody is not stable yet, so a production project cannot use it.",
-    details: { reason: "custody_mode_not_allowed" },
+    message:
+      "The privy custody provider is not available in this release channel for byok custody.",
+    details: { reason: "custody_provider_not_in_release_channel" },
   },
   meta: { requestId: expect.any(String) },
 };
@@ -273,7 +275,11 @@ function refusalLogs(warn: ReturnType<typeof spyOnWarn>) {
   return warn.mock.calls.filter((call) => call[1] === REFUSAL_EVENT);
 }
 
-function refusalLog(environment: SdpEnvironment, mode: "managed" | "byok") {
+function refusalLog(
+  environment: SdpEnvironment,
+  mode: "managed" | "byok",
+  reason: CustodySetupRefusalReason
+) {
   return [
     {
       event: REFUSAL_EVENT,
@@ -282,7 +288,7 @@ function refusalLog(environment: SdpEnvironment, mode: "managed" | "byok") {
       environment,
       provider: "privy",
       mode,
-      reason: "custody_mode_not_allowed",
+      reason,
     },
     REFUSAL_EVENT,
   ];
@@ -447,64 +453,21 @@ describe("Custody setup by project environment", () => {
     ]);
   });
 
-  it("refuses a BYOK submission in a Production project when the pair is not stable, though the release channel offers it", async () => {
-    custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
+  it.each(["sandbox", "production"] as const)(
+    "admits a below-stable BYOK pair the release channel offers through submission and completion in a %s project",
+    async (environment) => {
+      custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
 
-    const response = await submit("production", "gate-prod-beta");
+      const connectionId = await submittedConnectionId(
+        await submit(environment, `gate-${environment}-beta`)
+      );
+      stubSuccessfulPrivyInstallation(connectionId);
+      const response = await complete(environment, connectionId);
 
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual(NOT_STABLE_REFUSAL);
-    expect(fetch).not.toHaveBeenCalled();
-    expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
-    expect(await auditRows()).toEqual([]);
-  });
-
-  it("refuses completing a Production installation once its pair is not stable, leaving every row unchanged", async () => {
-    const connectionId = await submittedConnectionId(
-      await submit("production", "gate-prod-then-beta")
-    );
-    custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
-    const before = { rows: await custodyRows(), audits: await auditRows() };
-
-    const response = await complete("production", connectionId);
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual(NOT_STABLE_REFUSAL);
-    expect(fetch).not.toHaveBeenCalled();
-    expect({ rows: await custodyRows(), audits: await auditRows() }).toEqual(before);
-  });
-
-  it("admits the same non-stable pair through submission and completion in a Sandbox project", async () => {
-    custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
-
-    const connectionId = await submittedConnectionId(await submit("sandbox", "gate-sandbox-beta"));
-    stubSuccessfulPrivyInstallation(connectionId);
-    const response = await complete("sandbox", connectionId);
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(completionBody("sandbox", connectionId));
-  });
-
-  it("replays a Production submission whose retry the stage gate would refuse, and refuses a new key", async () => {
-    const first = await submit("production", "gate-prod-replay");
-    expect(first.status).toBe(201);
-    const { data: firstData } = (await first.json()) as { data: Record<string, unknown> };
-    custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
-    const afterFirst = await custodyRows();
-
-    const replay = await submit("production", "gate-prod-replay");
-    const fresh = await submit("production", "gate-prod-fresh");
-
-    expect(replay.status).toBe(201);
-    expect(await replay.json()).toEqual({
-      data: firstData,
-      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
-    });
-    expect(fresh.status).toBe(403);
-    expect(await fresh.json()).toEqual(NOT_STABLE_REFUSAL);
-    expect(fetch).not.toHaveBeenCalled();
-    expect(await custodyRows()).toEqual(afterFirst);
-  });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(completionBody(environment, connectionId));
+    }
+  );
 
   describe("refusal logging and archived projects", () => {
     let warn: ReturnType<typeof spyOnWarn>;
@@ -520,14 +483,16 @@ describe("Custody setup by project environment", () => {
       const response = await initialize("production", "privy");
 
       expect(response.status).toBe(403);
-      expect(refusalLogs(warn)).toEqual([refusalLog("production", "managed")]);
+      expect(refusalLogs(warn)).toEqual([
+        refusalLog("production", "managed", "custody_mode_not_allowed"),
+      ]);
     });
 
     it("reads a Production installation the gate refuses without logging, and logs its refused completion exactly once", async () => {
       const connectionId = await submittedConnectionId(
         await submit("production", "gate-prod-read-then-complete")
       );
-      custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
+      custodyReleaseChannel.outOfChannelMode = "byok";
 
       const read = await getConnection("production", connectionId);
 
@@ -552,13 +517,15 @@ describe("Custody setup by project environment", () => {
       const completed = await complete("production", connectionId);
 
       expect(completed.status).toBe(403);
-      expect(await completed.json()).toEqual(NOT_STABLE_REFUSAL);
-      expect(refusalLogs(warn)).toEqual([refusalLog("production", "byok")]);
+      expect(await completed.json()).toEqual(OUT_OF_CHANNEL_REFUSAL);
+      expect(refusalLogs(warn)).toEqual([
+        refusalLog("production", "byok", "custody_provider_not_in_release_channel"),
+      ]);
     });
 
     it("replays a Production submission the gate refuses without logging, and logs a refused new submission exactly once", async () => {
       await submittedConnectionId(await submit("production", "gate-prod-log-replay"));
-      custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
+      custodyReleaseChannel.outOfChannelMode = "byok";
 
       const replay = await submit("production", "gate-prod-log-replay");
 
@@ -568,7 +535,10 @@ describe("Custody setup by project environment", () => {
       const fresh = await submit("production", "gate-prod-log-fresh");
 
       expect(fresh.status).toBe(403);
-      expect(refusalLogs(warn)).toEqual([refusalLog("production", "byok")]);
+      expect(await fresh.json()).toEqual(OUT_OF_CHANNEL_REFUSAL);
+      expect(refusalLogs(warn)).toEqual([
+        refusalLog("production", "byok", "custody_provider_not_in_release_channel"),
+      ]);
     });
 
     it.each(["sandbox", "production"] as const)(

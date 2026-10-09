@@ -30,12 +30,10 @@ export const custodyReleaseChannel: CustodyReleaseChannelToggle = {
  * Build the `@sdp/types/release-channels` mock whose custody predicate refuses
  * every pair in `custodyReleaseChannel.outOfChannelMode`, reads the overridden
  * pair's stage from `custodyReleaseChannel.stageOverride`, and otherwise defers
- * to the real stages. The environment stage predicate keeps the real rule but
- * asks the mocked custody predicate, since its in-module call is out of a module
- * mock's reach. Load it with `await import()` inside the test file's `vi.mock`
- * factory, so the factory and the test share this module's toggle.
+ * to the real stages. Load it with `await import()` inside the test file's
+ * `vi.mock` factory, so the factory and the test share this module's toggle.
  * @param original - The real module, from the factory's `importOriginal`.
- * @returns The module with its custody predicates overridden.
+ * @returns The module with its custody predicate overridden.
  */
 export function mockCustodyReleaseChannels(original: ReleaseChannelsModule): ReleaseChannelsModule {
   const isCustodyProviderInReleaseChannel: ReleaseChannelsModule["isCustodyProviderInReleaseChannel"] =
@@ -55,9 +53,5 @@ export function mockCustodyReleaseChannels(original: ReleaseChannelsModule): Rel
   return {
     ...original,
     isCustodyProviderInReleaseChannel,
-    isCustodyProviderStageAllowedInEnvironment: (environment, provider, mode) =>
-      environment === "production"
-        ? isCustodyProviderInReleaseChannel("stable", provider, mode)
-        : original.isCustodyProviderStageAllowedInEnvironment(environment, provider, mode),
   };
 }
