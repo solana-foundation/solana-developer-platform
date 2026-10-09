@@ -1609,18 +1609,6 @@ export function assertEarnProviderSurfaced(providerId: EarnProviderId): void {
   }
 }
 
-export function assertRampProviderSurfaced(
-  providerId: RampProviderId,
-  environment: SdpEnvironment
-): void {
-  if (!isRampProviderSurfaced(providerId, environment)) {
-    throw new AppError(
-      "FORBIDDEN",
-      `${PROVIDER_AVAILABILITY_DEFINITIONS.ramps[providerId].label} is not currently offered.`
-    );
-  }
-}
-
 /**
  * Exit-safety gate for Earn withdrawals: money OUT must keep working when a
  * provider is commercially disabled for an organization (entitlement off), so

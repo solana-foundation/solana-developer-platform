@@ -41,6 +41,7 @@ import {
   notFound,
 } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampRuntime } from "@/routes/payments/context";
 import {
@@ -52,10 +53,7 @@ import {
   refreshBvnkCustomerAccount,
 } from "@/routes/payments/ramps/providers/bvnk";
 import { resolveMuralRequirements } from "@/routes/payments/ramps/providers/mural";
-import {
-  advanceCounterpartyRequirements,
-  assertRampProviderOffered,
-} from "@/routes/payments/ramps/shared";
+import { advanceCounterpartyRequirements } from "@/routes/payments/ramps/shared";
 import {
   assertPaymentWalletExactAccess,
   resolveScope,
@@ -266,7 +264,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     });
   }
 
-  assertRampProviderOffered(c, query.data.provider);
+  assertRampProviderInChannel(c, query.data.provider);
 
   const repo = getCounterpartiesRepository(c);
   const counterparty = await repo.getCounterpartyById({
@@ -434,7 +432,7 @@ export const submitCounterpartyRequirements = async (
 
   const body = c.req.valid("json");
 
-  assertRampProviderOffered(c, body.provider);
+  assertRampProviderInChannel(c, body.provider);
   await assertProviderAvailable(c, { family: "ramps", provider: body.provider });
 
   const repo = getCounterpartiesRepository(c);

@@ -45,7 +45,6 @@ import { describeError, logEvent } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import {
   assertProviderAvailable,
-  assertRampProviderSurfaced,
   loadProjectProviderVerdict,
 } from "@/services/provider-availability.service";
 import {
@@ -88,15 +87,6 @@ function isRampProviderOffered(c: AppContext, provider: RampProviderId): boolean
     isRampProviderInChannel(c, provider) &&
     isRampProviderSurfaced(provider, resolveSdpEnvironment(c))
   );
-}
-
-/**
- * Refuses a request that names a ramp provider SDP does not offer: outside the
- * release channel, or not surfaced for the request's environment.
- */
-export function assertRampProviderOffered(c: AppContext, provider: RampProviderId): void {
-  assertRampProviderInChannel(c, provider);
-  assertRampProviderSurfaced(provider, resolveSdpEnvironment(c));
 }
 
 /**
@@ -144,6 +134,8 @@ type RampQuoteDirection = "onramp" | "offramp";
  * selects providers from) lists the provider for the requested crypto/fiat pair.
  * When fiatCurrency is omitted (off-ramp quotes may defer fiat selection to the
  * provider), the provider must support the crypto rail for at least one fiat.
+ * Surfacing is not checked here: `assertProviderAvailable` refuses an un-offered
+ * provider; only the error's `supportedProviders` hint is narrowed to offered ones.
  */
 function assertRampCorridorSupported(
   c: AppContext,
@@ -159,12 +151,12 @@ function assertRampCorridorSupported(
     const fiatSide = direction === "onramp" ? pair.source : pair.dest;
     return railSide === assetRail && (fiat === undefined || fiatSide === fiat);
   });
-  const supportedProviders = providersFromPairs(matched).filter((p) => isRampProviderOffered(c, p));
-  if (!supportedProviders.includes(input.provider)) {
+  const matchedProviders = providersFromPairs(matched);
+  if (!matchedProviders.includes(input.provider)) {
     throw unsupportedRampCorridor(input.provider, direction, {
       assetRail,
       fiatCurrency: fiat,
-      supportedProviders,
+      supportedProviders: matchedProviders.filter((p) => isRampProviderOffered(c, p)),
     });
   }
 }
@@ -216,7 +208,7 @@ export async function resolveRampQuoteRequest(
   input: CreateOnrampQuoteBody | CreateOfframpQuoteBody,
   custodyWalletId: string
 ): Promise<RampQuotePolicyResolved> {
-  assertRampProviderOffered(c, input.provider);
+  assertRampProviderInChannel(c, input.provider);
   assertRampCorridorSupported(c, direction, input);
   const scope = await resolveScope(c);
   await assertProviderAvailable(c, { family: "ramps", provider: input.provider });

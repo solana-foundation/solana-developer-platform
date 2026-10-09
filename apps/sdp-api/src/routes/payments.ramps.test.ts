@@ -929,6 +929,43 @@ describe("Payments routes — ramps", () => {
     const offrampBody = (await offrampRes.json()) as { error: { code: string } };
     expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
+
+  it("refuses a quote for a provider not surfaced in the project's environment", async () => {
+    await seedCachedKey({ projectId: TEST_PRODUCTION_PROJECT_ID, environment: "production" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const res = await app.request(
+      "/v1/payments/ramps/offramp/quote",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          provider: "moneygram",
+          counterpartyId: "cpty_unsurfaced_quote",
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          assetRail: "usdc.solana",
+          fiatCurrency: "USD",
+          cryptoAmount: "25",
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "MoneyGram is not currently offered.",
+        details: { reason: "provider_not_offered" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
   describe("BVNK off-ramp quote (funding-wallet channel)", () => {
     const BVNK_OFFRAMP_CUSTOMER = "bvnk_offramp_test_customer";
     async function seedProvisionedOfframpCounterparty(externalId: string): Promise<string> {
