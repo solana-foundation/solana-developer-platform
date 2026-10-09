@@ -12,6 +12,13 @@ import {
 } from "@/db/repositories";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, internalError } from "@/lib/errors";
+import {
+  assertMoneyStartAdmitted,
+  checkMoneyStart,
+  type MoneyAdmissionScope,
+  MoneyMovementRefusedError,
+  type MoneyStartContext,
+} from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import {
@@ -20,6 +27,7 @@ import {
   collectRecurringPayment,
   journalAutomatedCollectionFailure,
   resumeRecurringPayment,
+  skipRefusedRecurringCollectionPeriod,
 } from "@/services/payments/recurring-payments";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -32,17 +40,57 @@ import type { Env } from "@/types/env";
 // in-flight set per scope at one as in the serial job (ADR 0004).
 const COLLECTION_ROW_CONCURRENCY = 8;
 
-type CollectionRowOutcome = "ok" | "failed" | "skipped";
+type CollectionRowOutcome = "ok" | "failed" | "skipped" | "refused";
 
 export interface CollectDueRecurringPaymentsResult {
   recovered: number;
   collected: number;
   failed: number;
   skipped: number;
+  /** Rows money admission refused (HOO-1955): a period skipped or an operation reverted. */
+  refused: number;
 }
 
 function emptyResult(): CollectDueRecurringPaymentsResult {
-  return { recovered: 0, collected: 0, failed: 0, skipped: 0 };
+  return { recovered: 0, collected: 0, failed: 0, skipped: 0, refused: 0 };
+}
+
+function admissionFor(
+  row: PaymentRecurringPaymentRow,
+  operation: MoneyStartContext["operation"]
+): { scope: MoneyAdmissionScope; context: MoneyStartContext } {
+  return {
+    scope: { organizationId: row.organization_id, projectId: row.project_id },
+    context: { surface: "job", operation, subjectId: row.id },
+  };
+}
+
+/**
+ * A refused collection skips its period instead of failing, so the job never
+ * retries it and re-entitlement does not catch it up (HOO-1955).
+ */
+async function skipRefusedPeriod(
+  env: Env,
+  row: CollectibleRecurringPaymentRow | RecoverableCollectionRecurringPaymentRow,
+  refusal: MoneyMovementRefusedError
+): Promise<CollectionRowOutcome> {
+  try {
+    const skipped = await skipRefusedRecurringCollectionPeriod({
+      env,
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      recurringPayment: row,
+      refusal,
+      now: new Date(),
+    });
+    // Not skipped: the cycle moved on or a collection already holds it, and
+    // recovery finishes that one without signing.
+    return skipped ? "refused" : "skipped";
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    logCronFailure("collectDueRecurringPayments: failed to skip a refused period", row, error);
+    return "failed";
+  }
 }
 
 async function resolveSourceWallet(
@@ -110,10 +158,17 @@ function logCronFailure(message: string, row: PaymentRecurringPaymentRow, error:
 async function collectRow(
   env: Env,
   row: CollectibleRecurringPaymentRow | RecoverableCollectionRecurringPaymentRow
-): Promise<"ok" | "failed" | "skipped"> {
+): Promise<CollectionRowOutcome> {
+  const { scope, context } = admissionFor(row, "recurring_payment.collect");
   try {
     const sourceWallet = await resolveSourceWallet(env, row);
     if (!sourceWallet) {
+      // A refused organization skips the period rather than journaling a
+      // failure every retry window.
+      const decision = await checkMoneyStart(env, scope, context);
+      if (!decision.admitted) {
+        return skipRefusedPeriod(env, row, new MoneyMovementRefusedError(decision.reason));
+      }
       await journalAutomatedCollectionFailure({
         env,
         organizationId: row.organization_id,
@@ -136,10 +191,14 @@ async function collectRow(
       recurringPayment: row,
       initiatedByKeyId: null,
       collectionSource: "automated",
+      admitStart: () => assertMoneyStartAdmitted(env, scope, context),
     });
     return "ok";
   } catch (error) {
     if (!(error instanceof Error)) throw error;
+    if (error instanceof MoneyMovementRefusedError) {
+      return skipRefusedPeriod(env, row, error);
+    }
     if (shouldSkipCollectionError(error)) {
       return "skipped";
     }
@@ -151,47 +210,51 @@ async function collectRow(
 async function recoverLifecycleRow(
   env: Env,
   row: PaymentRecurringPaymentRow
-): Promise<"ok" | "failed" | "skipped"> {
+): Promise<CollectionRowOutcome> {
   try {
     const sourceWallet = await resolveSourceWallet(env, row);
     if (!sourceWallet) {
       return "failed";
     }
+    const input = {
+      env,
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      sourceWallet,
+      recurringPayment: row,
+    };
     if (isActivatingRecurringPaymentStatus(row.status)) {
+      const { scope, context } = admissionFor(row, "recurring_payment.activate");
       await activateRecurringPayment({
-        env,
-        organizationId: row.organization_id,
-        projectId: row.project_id,
-        sourceWallet,
-        recurringPayment: row,
+        ...input,
         createdBy: row.created_by,
+        admitStart: () => assertMoneyStartAdmitted(env, scope, context),
       });
       return "ok";
     }
     const operation = recurringPaymentInFlightLifecycleOperation(row.status);
     if (operation === "cancel") {
-      await cancelRecurringPayment({
-        env,
-        organizationId: row.organization_id,
-        projectId: row.project_id,
-        sourceWallet,
-        recurringPayment: row,
-      });
+      // An exit: never refused, for deleted and unentitled organizations alike.
+      await cancelRecurringPayment(input);
       return "ok";
     }
     if (operation === "resume") {
+      const { scope, context } = admissionFor(row, "recurring_payment.resume");
       await resumeRecurringPayment({
-        env,
-        organizationId: row.organization_id,
-        projectId: row.project_id,
-        sourceWallet,
-        recurringPayment: row,
+        ...input,
+        admitStart: () => assertMoneyStartAdmitted(env, scope, context),
       });
       return "ok";
     }
     throw internalError(`Unhandled lifecycle status ${row.status}`);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
+    // The operation's own failure path already failed the attempt and reset
+    // the row to a status the job does not select (activation:
+    // `pending_activation`, resume: `canceled`).
+    if (error instanceof MoneyMovementRefusedError) {
+      return "refused";
+    }
     if (shouldSkipCollectionError(error)) {
       return "skipped";
     }
@@ -206,7 +269,7 @@ async function recoverLifecycleRow(
 
 function addOutcome(
   result: CollectDueRecurringPaymentsResult,
-  outcome: "ok" | "failed" | "skipped",
+  outcome: CollectionRowOutcome,
   okKey: "recovered" | "collected"
 ): void {
   switch (outcome) {
@@ -215,6 +278,9 @@ function addOutcome(
       return;
     case "skipped":
       result.skipped += 1;
+      return;
+    case "refused":
+      result.refused += 1;
       return;
     case "failed":
       result.failed += 1;

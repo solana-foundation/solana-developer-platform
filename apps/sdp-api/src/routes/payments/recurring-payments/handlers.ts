@@ -9,6 +9,7 @@ import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recur
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
@@ -220,6 +221,12 @@ export const activateRecurringPayment = async (
     sourceWallet,
     recurringPayment,
     createdBy: await resolveCreatorUserId(c),
+    admitStart: () =>
+      assertMoneyStartAdmitted(
+        c.env,
+        { organizationId: auth.organizationId, projectId },
+        { surface: "http", operation: "recurring_payment.activate", subjectId: recurringPayment.id }
+      ),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(activated),
@@ -272,6 +279,16 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           projectId,
           sourceWallet,
           recurringPayment,
+          admitStart: () =>
+            assertMoneyStartAdmitted(
+              c.env,
+              { organizationId: auth.organizationId, projectId },
+              {
+                surface: "http",
+                operation: "recurring_payment.resume",
+                subjectId: recurringPayment.id,
+              }
+            ),
         });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
@@ -325,6 +342,12 @@ export const collectRecurringPayment = async (
     recurringPayment,
     initiatedByKeyId: auth.authType === "api_key" ? auth.id : null,
     collectionSource: "manual",
+    admitStart: () =>
+      assertMoneyStartAdmitted(
+        c.env,
+        { organizationId: auth.organizationId, projectId },
+        { surface: "http", operation: "recurring_payment.collect", subjectId: recurringPayment.id }
+      ),
   });
   const response: PaymentRecurringPaymentCollectionResponse = {
     recurringPayment: mapRecurringPayment(collected.recurringPayment),

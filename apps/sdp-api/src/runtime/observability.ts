@@ -8,6 +8,8 @@
  * SDK. Error tracking via Sentry remains a web-only concern (sdp-web).
  */
 
+import type { CronMonitor } from "@/cron/money-effects";
+
 export interface ObservabilityScope {
   setTag(key: string, value: string | undefined): void;
   setUser(user: { id: string }): void;
@@ -34,7 +36,8 @@ export type MonitorCheckIn =
 export interface Observability {
   captureException(err: unknown): void;
   withScope(cb: (scope: ObservabilityScope) => void): void;
-  withMonitor<T>(slug: string, fn: () => Promise<T>, opts: MonitorOptions): Promise<T>;
+  /** Only classified monitors (`cron/money-effects.ts`) may run. */
+  withMonitor<T>(slug: CronMonitor, fn: () => Promise<T>, opts: MonitorOptions): Promise<T>;
 }
 
 export interface CheckInObservability extends Observability {
