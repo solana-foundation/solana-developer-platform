@@ -88,6 +88,32 @@ export function defineDashboardFlags({
     });
   }
 
+  /**
+   * Creates the flag for one design module: an area NEW DESIGN redesigns (lib/design-modules.ts).
+   * The flag counts only while NEW DESIGN is on; on by default, so the area follows NEW DESIGN
+   * until someone turns it off.
+   *
+   * @param key - The module's key suffix, e.g. `contacts` for `new-design-contacts`.
+   * @param area - What the module covers, for the description.
+   * @returns The module's feature flag definition.
+   */
+  function newDesignModuleFlag(key: string, area: string) {
+    return flag<boolean, DashboardFlagEntities>({
+      key: `new-design-${key}`,
+      adapter: vercel(),
+      identify,
+      defaultValue: flagDefault(
+        `SDP_FLAG_NEW_DESIGN_${key.toUpperCase().replaceAll("-", "_")}`,
+        true
+      ),
+      description: `NEW DESIGN for ${area}. Requires the new-design flag; off serves that area's previous design.`,
+      options: [
+        { value: false, label: "Previous design" },
+        { value: true, label: "New design" },
+      ],
+    });
+  }
+
   const homepageOpenSignup = flag<boolean, DashboardFlagEntities>({
     key: "homepage-open-signup",
     adapter: vercel(),
@@ -259,6 +285,17 @@ export function defineDashboardFlags({
     ],
   });
 
+  const newDesignContacts = newDesignModuleFlag(
+    "contacts",
+    "Payments' Contacts (the list, a new contact, one contact's page)"
+  );
+
+  const newDesignPayDeposit = newDesignModuleFlag("pay-deposit", "Payments' Pay and Deposit flows");
+  const newDesignActivity = newDesignModuleFlag(
+    "activity",
+    "the rest of Payments (the overview and its API playground, Transactions, Requests, Schedules)"
+  );
+
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
   const rampProviderLightspark = rampProviderFlag("lightspark", "Lightspark");
   const rampProviderBvnk = rampProviderFlag("bvnk", "BVNK");
@@ -281,6 +318,9 @@ export function defineDashboardFlags({
     dvp,
     earn,
     newDesign,
+    newDesignContacts,
+    newDesignPayDeposit,
+    newDesignActivity,
     rampProviderMoonpay,
     rampProviderLightspark,
     rampProviderBvnk,

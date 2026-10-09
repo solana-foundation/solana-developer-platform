@@ -1,24 +1,24 @@
 "use client";
 
 import type { ComponentType } from "react";
-import DashboardLoading from "@/app/dashboard/(home)/loading";
-import AllowlistLoading from "@/app/dashboard/allowlist/loading";
-import ApiKeyEditLoading from "@/app/dashboard/api-keys/[keyId]/edit/loading";
-import { ApiKeysListSkeleton } from "@/app/dashboard/api-keys/api-key-page-skeletons";
-import ApiKeyNewLoading from "@/app/dashboard/api-keys/new/loading";
+import DashboardLoading from "@/app/dashboard/[projectId]/(home)/loading";
+import AllowlistLoading from "@/app/dashboard/[projectId]/allowlist/loading";
+import ApiKeyEditLoading from "@/app/dashboard/[projectId]/api-keys/[keyId]/edit/loading";
+import { ApiKeysListSkeleton } from "@/app/dashboard/[projectId]/api-keys/api-key-page-skeletons";
+import ApiKeyNewLoading from "@/app/dashboard/[projectId]/api-keys/new/loading";
 import {
   ApprovalDetailSkeleton,
   ApprovalInboxSkeleton,
-} from "@/app/dashboard/approvals/approval-page-skeletons";
-import { HeliusRingsSkeleton } from "@/app/dashboard/helius-rings/helius-rings-skeleton";
+} from "@/app/dashboard/[projectId]/approvals/approval-page-skeletons";
+import { HeliusRingsSkeleton } from "@/app/dashboard/[projectId]/helius-rings/helius-rings-skeleton";
 import {
   IntegrationDetailSkeleton,
   IntegrationsSkeleton,
-} from "@/app/dashboard/integrations/integrations-skeleton";
-import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/integrations/private-channels/private-channels-route-skeletons";
-import { IssuanceCreateSkeleton } from "@/app/dashboard/issuance/issuance-create-skeleton";
-import { IssuanceDetailSkeleton } from "@/app/dashboard/issuance/issuance-detail-skeleton";
-import { IssuancePageSkeleton } from "@/app/dashboard/issuance/issuance-page-skeleton";
+} from "@/app/dashboard/[projectId]/integrations/integrations-skeleton";
+import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-route-skeletons";
+import { IssuanceCreateSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-create-skeleton";
+import { IssuanceDetailSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-detail-skeleton";
+import { IssuancePageSkeleton } from "@/app/dashboard/[projectId]/issuance/issuance-page-skeleton";
 import {
   DvpCreateSkeleton,
   DvpTradeDetailSkeleton,
@@ -27,23 +27,41 @@ import {
   EmbeddedYieldPortfolioSkeleton,
   MarketsLandingSkeleton,
   TreasurySolutionsSkeleton,
-} from "@/app/dashboard/markets/markets-route-skeletons";
-import { SettingsPageSkeleton } from "@/app/dashboard/operations-card-page-skeletons";
-import CounterpartyDirectoryLoading from "@/app/dashboard/payments/counterparty/loading";
-import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
+} from "@/app/dashboard/[projectId]/markets/markets-route-skeletons";
+import { SettingsPageSkeleton } from "@/app/dashboard/[projectId]/operations-card-page-skeletons";
+import CounterpartyDirectoryLoading, {
+  PreviousCounterpartyLoading as LegacyCounterpartyDirectoryLoading,
+} from "@/app/dashboard/[projectId]/payments/counterparty/loading";
+import { PaymentsPageSkeleton as LegacyPaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton";
+import { PaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton.redesign";
+import {
+  CounterpartyCreateSkeleton as LegacyCounterpartyCreateSkeleton,
+  CounterpartyDetailSkeleton as LegacyCounterpartyDetailSkeleton,
+  PaymentsDepositPageSkeleton as LegacyPaymentsDepositPageSkeleton,
+  PaymentsPayPageSkeleton as LegacyPaymentsPayPageSkeleton,
+  PaymentsTransactionsPageSkeleton as LegacyPaymentsTransactionsPageSkeleton,
+  RecurringPaymentCreateSkeleton as LegacyRecurringPaymentCreateSkeleton,
+  RecurringPaymentDetailSkeleton as LegacyRecurringPaymentDetailSkeleton,
+  RecurringPaymentsPageSkeleton as LegacyRecurringPaymentsPageSkeleton,
+} from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import {
   CounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton,
+  PaymentRequestCreateSkeleton,
+  PaymentRequestDetailSkeleton,
   PaymentsDepositPageSkeleton,
   PaymentsPayPageSkeleton,
   PaymentsTransactionsPageSkeleton,
+  PaymentTransactionDetailSkeleton,
   RecurringPaymentCreateSkeleton,
   RecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton,
-} from "@/app/dashboard/payments/payments-route-skeletons";
-import PaymentRequestsLoading from "@/app/dashboard/payments/requests/loading";
-import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
-import TokenHoldingsLoading from "@/app/dashboard/tokens/loading";
+} from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
+import PaymentRequestsLoading, {
+  PreviousPaymentRequestsLoading as LegacyPaymentRequestsLoading,
+} from "@/app/dashboard/[projectId]/payments/requests/loading";
+import { PoliciesOverviewSkeleton } from "@/app/dashboard/[projectId]/policies/policies-overview";
+import TokenHoldingsLoading from "@/app/dashboard/[projectId]/tokens/loading";
 import {
   WalletConnectionsListSkeleton,
   WalletDetailSkeleton,
@@ -52,24 +70,54 @@ import {
   WalletPolicySkeleton,
   WalletSetupSkeleton,
   WalletsOverviewSkeleton,
-} from "@/app/dashboard/wallets/wallet-route-skeletons";
+} from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import type { DashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 
 interface PageLoadingProps {
   assetProfilesEnabled?: boolean;
 }
 
-// The previous design's skeletons for the routes NEW DESIGN redesigns. Each redesigned route
-// adds its previous skeleton here; the rest load as they always have.
+// The previous design's skeletons for the routes NEW DESIGN redesigns. Its own new routes (a
+// transaction's or a request's page, the new-request page) send the previous design to their
+// list, so they load as the list does.
 const LEGACY_DESIGN_PAGE_LOADING: Partial<
   Record<DashboardLoadingRoute, ComponentType<PageLoadingProps>>
-> = {};
+> = {
+  "payments-overview": LegacyPaymentsPageSkeleton,
+  "payments-transactions": LegacyPaymentsTransactionsPageSkeleton,
+  "payment-transaction-detail": LegacyPaymentsTransactionsPageSkeleton,
+  "payments-pay": LegacyPaymentsPayPageSkeleton,
+  "payments-deposit": LegacyPaymentsDepositPageSkeleton,
+  "payment-requests": LegacyPaymentRequestsLoading,
+  "payment-request-create": LegacyPaymentRequestsLoading,
+  "payment-request-detail": LegacyPaymentRequestsLoading,
+  "counterparty-directory": LegacyCounterpartyDirectoryLoading,
+  "counterparty-create": LegacyCounterpartyCreateSkeleton,
+  "counterparty-detail": LegacyCounterpartyDetailSkeleton,
+  "recurring-payments": LegacyRecurringPaymentsPageSkeleton,
+  "recurring-payment-create": LegacyRecurringPaymentCreateSkeleton,
+  "recurring-payment-detail": LegacyRecurringPaymentDetailSkeleton,
+};
+
+// Requests and Schedules are still the previous design's pages, so they load as them with
+// new-design-activity on too.
+const HELD_ON_PREVIOUS_DESIGN: ReadonlySet<DashboardLoadingRoute> = new Set([
+  "payment-requests",
+  "payment-request-create",
+  "payment-request-detail",
+  "recurring-payments",
+  "recurring-payment-create",
+  "recurring-payment-detail",
+]);
 
 export function resolvePageLoadingComponent(
   route: DashboardLoadingRoute,
   newDesign = true
 ): ComponentType<PageLoadingProps> {
-  const legacy = newDesign ? undefined : LEGACY_DESIGN_PAGE_LOADING[route];
+  const legacy =
+    newDesign && !HELD_ON_PREVIOUS_DESIGN.has(route)
+      ? undefined
+      : LEGACY_DESIGN_PAGE_LOADING[route];
   return legacy ?? resolveCurrentPageLoadingComponent(route);
 }
 
@@ -127,12 +175,18 @@ function resolveCurrentPageLoadingComponent(
       return DvpTradeDetailSkeleton;
     case "payments-transactions":
       return PaymentsTransactionsPageSkeleton;
+    case "payment-transaction-detail":
+      return PaymentTransactionDetailSkeleton;
     case "payments-pay":
       return PaymentsPayPageSkeleton;
     case "payments-deposit":
       return PaymentsDepositPageSkeleton;
     case "payment-requests":
       return PaymentRequestsLoading;
+    case "payment-request-create":
+      return PaymentRequestCreateSkeleton;
+    case "payment-request-detail":
+      return PaymentRequestDetailSkeleton;
     case "counterparty-directory":
       return CounterpartyDirectoryLoading;
     case "counterparty-create":

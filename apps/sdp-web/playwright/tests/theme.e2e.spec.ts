@@ -1,7 +1,9 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
+import { projectHref } from "@/lib/dashboard-project-path";
 import {
   bootstrapLocalWalletFixtures,
-  bootstrapProjectForPage,
+  provisionLinkedOrgProjects,
+  provisionWithAdminSession,
 } from "../support/local-dashboard-bootstrap";
 
 const THEME_STORAGE_KEY = "sdp-theme";
@@ -53,10 +55,9 @@ async function setThemePreference(page: Page, preference: ThemePreference) {
 
 /** Only the toast test needs a wallet to copy an address from. Bootstrapping it for the
  *  whole suite meant one custody-provider hiccup failed every theme test with it.
- *  Bootstrapping replaces the org, so the page's project cookie must be reseeded
- *  before it navigates — see seedProjectCookie. */
-async function bootstrapWalletForToasts(browser: Browser, page: Page) {
-  return bootstrapProjectForPage(browser, page, (session) =>
+ *  Bootstrapping replaces the org, so the suite navigates by its Project from then on. */
+async function bootstrapWalletForToasts(browser: Browser) {
+  return provisionWithAdminSession(browser, (session) =>
     bootstrapLocalWalletFixtures({
       identity: session.identity,
       bearerToken: session.getBearerToken,
@@ -69,6 +70,12 @@ async function bootstrapWalletForToasts(browser: Browser, page: Page) {
 }
 
 test.describe("dashboard theme e2e", () => {
+  let projectId: string;
+
+  test.beforeAll(async ({ browser }) => {
+    projectId = (await provisionLinkedOrgProjects(browser)).sandbox;
+  });
+
   test("keeps the only theme control in the account menu, off settings and the chrome", async ({
     page,
   }) => {
@@ -87,7 +94,7 @@ test.describe("dashboard theme e2e", () => {
     await closeAccountMenu(page);
 
     // The settings card it used to live on is gone.
-    await page.goto("/dashboard/settings");
+    await page.goto(projectHref(projectId, "/dashboard/settings"));
     await expect(page.getByRole("group", { name: "Color theme" })).toHaveCount(0);
   });
 
@@ -168,10 +175,10 @@ test.describe("dashboard theme e2e", () => {
   });
 
   test("themes rendered toasts in both modes", async ({ browser, page }) => {
-    await bootstrapWalletForToasts(browser, page);
+    projectId = (await bootstrapWalletForToasts(browser)).projectId;
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light" });
-    await page.goto("/dashboard/wallets");
+    await page.goto(projectHref(projectId, "/dashboard/wallets"));
 
     const copyAddress = page.getByRole("button", { name: "Copy wallet address" }).first();
     await expect(copyAddress).toBeVisible();
@@ -184,7 +191,7 @@ test.describe("dashboard theme e2e", () => {
     await setThemePreference(page, "Dark");
     await expect(page.locator("html")).toHaveClass(/dark/);
 
-    await page.goto("/dashboard/wallets");
+    await page.goto(projectHref(projectId, "/dashboard/wallets"));
     const darkCopyAddress = page.getByRole("button", { name: "Copy wallet address" }).first();
     await expect(darkCopyAddress).toBeVisible();
     await darkCopyAddress.click();
@@ -200,7 +207,13 @@ test.describe("dashboard theme e2e", () => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light" });
 
-    const codePanel = page.locator(".code-block-line-numbers");
+    // The new design's playground (new-design on) puts the request's code behind a Code tab, and
+    // that view renders before the response body, so first() is the snippet. The previous design
+    // shows the code at once, in a line-numbered block.
+    const newDesignCodePanel = page.getByTestId("api-playground-code").first();
+    const previousCodePanel = page.locator(".code-block-line-numbers").first();
+    const codeTab = page.getByRole("tab", { name: "Code", exact: true });
+    let codePanel = newDesignCodePanel;
     const readCodeTokens = () =>
       codePanel.evaluate((element) => {
         const styles = getComputedStyle(element);
@@ -211,8 +224,15 @@ test.describe("dashboard theme e2e", () => {
       });
 
     const openPlayground = async () => {
-      await page.goto("/dashboard/payments");
+      await page.goto(projectHref(projectId, "/dashboard/payments"));
       await page.getByRole("tab", { name: "API Playground" }).click();
+      await expect(codeTab.or(previousCodePanel).first()).toBeVisible();
+      if (await codeTab.isVisible()) {
+        await codeTab.click();
+        codePanel = newDesignCodePanel;
+      } else {
+        codePanel = previousCodePanel;
+      }
       await expect(codePanel).toBeVisible();
     };
 

@@ -327,14 +327,14 @@ describe("Organization access settings", () => {
       });
       expect(res.status).toBe(200);
     });
-    it("reads no restriction from settings that will not parse", async () => {
+    it("fails loudly with a 500 on settings that will not parse", async () => {
       await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
       await writeRawSettings("{not json");
       const res = await get({
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
         "x-forwarded-for": "198.51.100.42",
       });
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(500);
     });
     it("ignores an allowlist that was recorded before the setting was enforced", async () => {
       await seedOrganization(null);

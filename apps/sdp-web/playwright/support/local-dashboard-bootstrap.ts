@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Browser, Page } from "@playwright/test";
+import type { Browser, Page, Response } from "@playwright/test";
 import type {
   CounterpartyAccountResponse,
   CounterpartyResponse,
+  ListProjectsResponse,
+  OrganizationSettings,
   OrganizationTier,
   PaymentsDashboardWallet,
 } from "@sdp/types";
@@ -23,7 +25,7 @@ import {
 import { KoraClient } from "@solana/kora";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { Client } from "pg";
-import { getE2EEnv } from "../env";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { getPlaywrightAdminSession, type PlaywrightAdminSession } from "./auth-session";
 import { type ClerkTestIdentity, setClerkOrganizationTier } from "./clerk-admin";
 import {
@@ -32,13 +34,14 @@ import {
   type LocalApiClient,
 } from "./local-api-client";
 
-const PROJECT_COOKIE_NAME = "sdp_selected_project_id";
-
 const PLAYWRIGHT_LOCAL_ORG_ID_PREFIX = "org_e2e_dashboard";
 const PLAYWRIGHT_LOCAL_ORG_NAME_PREFIX = "E2E Dashboard Org";
 const PLAYWRIGHT_LOCAL_ORG_SLUG_PREFIX = "e2e-dashboard";
 const PLAYWRIGHT_LOCAL_USER_ID = "usr_e2e_dashboard_admin";
 const PLAYWRIGHT_LOCAL_MEMBER_ID = "mem_e2e_dashboard_admin";
+const PLAYWRIGHT_ORGANIZATION_BASE_SETTINGS = {
+  enableProductionProject: true,
+} satisfies OrganizationSettings;
 const PLAYWRIGHT_LOCAL_ORG_AUTH_ID = "aoi_e2e_dashboard";
 const PLAYWRIGHT_LOCAL_USER_AUTH_ID = "aui_e2e_dashboard";
 const DEFAULT_LOCAL_API_URL = "http://127.0.0.1:8788";
@@ -99,9 +102,13 @@ export interface WalletBootstrapResult {
     slug: string;
     name: string;
   };
-  /** The freshly provisioned project, for seedProjectCookie. */
   projectId: string;
   wallets: PlaywrightWalletFixture[];
+}
+
+export interface PlaywrightProjects {
+  sandbox: string;
+  production: string;
 }
 
 interface PlaywrightOrganizationFixture {
@@ -328,6 +335,7 @@ async function enableLocalCustodyForPlaywrightOrg(organizationId: string): Promi
       [
         organizationId,
         JSON.stringify({
+          ...PLAYWRIGHT_ORGANIZATION_BASE_SETTINGS,
           providerOverrides: {
             custody: {
               local: true,
@@ -370,68 +378,53 @@ export async function provisionWithAdminSession<T>(
 }
 
 /**
- * Points the test page at the project a bootstrap just provisioned.
+ * Resolves the Sandbox and Production Project ids of the bearer token's Organization.
  *
- * Every bootstrap helper here recreates the Playwright org — and with it the
- * project — out-of-band, so whatever project cookie the page's context already
- * holds now names a deleted project. Until the dashboard's cookie repair runs,
- * project-scoped requests 403 ("Requested project is not accessible") and pages
- * render their empty states. Any test that bootstraps fixtures must call this
- * before its first navigation; skipping it is what the intermittent
- * empty-page-then-timeout failures look like.
- *
- * @param page - The test page whose browser context gets the cookie.
- * @param projectId - The project the bootstrap provisioned.
- * @returns Resolves once the cookie is set.
+ * @param localApiBaseUrl - The sdp-api base URL.
+ * @param bearerToken - The admin session's bearer token provider.
+ * @returns The Sandbox and Production Project ids.
  */
-export async function seedProjectCookie(page: Page, projectId: string): Promise<void> {
-  await page.context().addCookies([
-    {
-      name: PROJECT_COOKIE_NAME,
-      value: projectId,
-      url: getE2EEnv().baseURL,
-      sameSite: "Lax",
-    },
-  ]);
+export async function resolvePlaywrightProjects(
+  localApiBaseUrl: string,
+  bearerToken: BearerTokenProvider
+): Promise<PlaywrightProjects> {
+  const projectsApi = createLocalApiClient(localApiBaseUrl, bearerToken);
+  const { projects } = await projectsApi.get<ListProjectsResponse>("/v1/projects");
+  const sandbox = projects.find((project) => project.environment === "sandbox");
+  const production = projects.find((project) => project.environment === "production");
+  if (sandbox === undefined || production === undefined) {
+    throw new Error("The Playwright Organization must list a Sandbox and a Production Project");
+  }
+  return { sandbox: sandbox.id, production: production.id };
 }
 
 /**
- * Runs `provision` inside a managed admin session, then points `page` at the
- * project it provisioned. Owns the whole bootstrap ceremony: opens the admin
- * session, closes it even when provisioning throws, and seeds the test page's
- * project cookie before the caller can navigate — see seedProjectCookie for why
- * seeding is mandatory.
+ * Opens a dashboard page inside a Project, returning once its DOM has loaded.
  *
- * @param browser - The Playwright browser to open the admin session in.
- * @param page - The test page whose context receives the project cookie.
- * @param provision - Provisions fixtures with the admin session; must return the projectId to seed.
- * @returns The provision result, after the cookie is seeded.
+ * @param page - The page to navigate.
+ * @param projectId - The Project the URL is scoped to.
+ * @param dashboardPath - The project-less dashboard path, e.g. `/dashboard/wallets`.
+ * @returns The main navigation response.
  */
-export async function bootstrapProjectForPage<T extends { projectId: string }>(
-  browser: Browser,
+export async function gotoProjectPage(
   page: Page,
-  provision: (session: PlaywrightAdminSession) => Promise<T>
-): Promise<T> {
-  return provisionWithAdminSession(browser, async (session) => {
-    const result = await provision(session);
-    await seedProjectCookie(page, result.projectId);
-    return result;
-  });
+  projectId: string,
+  dashboardPath: string
+): Promise<Response | null> {
+  return page.goto(projectHref(projectId, dashboardPath), { waitUntil: "domcontentloaded" });
 }
 
-export async function resolvePlaywrightProjectId(
-  localApiBaseUrl: string,
-  bearerToken: BearerTokenProvider
-): Promise<string> {
-  const projectsApi = createLocalApiClient(localApiBaseUrl, bearerToken);
-  const { projects } = await projectsApi.get<{ projects: Array<{ id: string; slug: string }> }>(
-    "/v1/projects"
-  );
-  const sandbox = projects.find((project) => project.slug === "default-sandbox") ?? projects[0];
-  if (!sandbox) {
-    throw new Error("No project available for Playwright bootstrap");
-  }
-  return sandbox.id;
+/**
+ * Recreates the Playwright Organization with no fixtures beyond its Projects.
+ *
+ * @param browser - The Playwright browser to open the admin session in.
+ * @returns The new Organization's Sandbox and Production Project ids.
+ */
+export async function provisionLinkedOrgProjects(browser: Browser): Promise<PlaywrightProjects> {
+  return provisionWithAdminSession(browser, async (session) => {
+    await ensureLinkedOrg(session.identity, { tier: "enterprise" });
+    return resolvePlaywrightProjects(getBootstrapApiBaseUrl(), session.getBearerToken);
+  });
 }
 
 async function requestWalletAirdropLamports(
@@ -705,17 +698,24 @@ export async function ensureLinkedOrg(
 
       await client.query(
         `INSERT INTO organizations
-           (id, name, slug, tier, status, onboarding_completed_at, onboarding_version)
-         VALUES ($1, $2, $3, $4, 'active', sdp_datetime_now(), 1)
+           (id, name, slug, tier, status, settings, onboarding_completed_at, onboarding_version)
+         VALUES ($1, $2, $3, $4, 'active', $5, sdp_datetime_now(), 1)
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name,
            slug = EXCLUDED.slug,
            tier = EXCLUDED.tier,
            status = EXCLUDED.status,
+           settings = EXCLUDED.settings,
            onboarding_completed_at = sdp_datetime_now(),
            onboarding_version = 1,
            updated_at = sdp_datetime_now()`,
-        [organization.id, organization.name, organization.slug, tier]
+        [
+          organization.id,
+          organization.name,
+          organization.slug,
+          tier,
+          JSON.stringify(PLAYWRIGHT_ORGANIZATION_BASE_SETTINGS),
+        ]
       );
 
       await client.query(
@@ -803,7 +803,8 @@ export async function bootstrapLocalWalletFixtures(input: {
     await enableLocalCustodyForPlaywrightOrg(organization.id);
   }
 
-  const projectId = await resolvePlaywrightProjectId(runtimeEnv.localApiBaseUrl, bearerToken);
+  const projects = await resolvePlaywrightProjects(runtimeEnv.localApiBaseUrl, bearerToken);
+  const projectId = projects.sandbox;
   const api = createLocalApiClient(runtimeEnv.localApiBaseUrl, bearerToken, projectId);
 
   const createdWalletIds = [

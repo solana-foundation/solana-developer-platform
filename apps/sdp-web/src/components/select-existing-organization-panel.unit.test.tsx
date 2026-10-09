@@ -10,6 +10,7 @@ import {
   getStoredApiKeySecret,
   storeApiKeySecret,
 } from "@/lib/playground-api-keys";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { SelectExistingOrganizationPanel } from "./select-existing-organization-panel";
 
 const mocks = vi.hoisted(() => ({
@@ -26,8 +27,6 @@ const mocks = vi.hoisted(() => ({
   fetchNext: vi.fn(),
   hasNextPage: false,
   isFetching: false,
-  clearSelectedProject: vi.fn(),
-  refresh: vi.fn(),
   setActive: vi.fn(),
 }));
 
@@ -44,13 +43,7 @@ vi.mock("@clerk/nextjs", () => ({
   }),
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: mocks.refresh }),
-}));
-
-vi.mock("@/lib/project-cookie-action", () => ({
-  selectProjectAction: mocks.clearSelectedProject,
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 function renderPanel() {
   return render(
@@ -63,6 +56,7 @@ function renderPanel() {
 describe("SelectExistingOrganizationPanel", () => {
   beforeEach(() => {
     cleanup();
+    resetDashboardNavigation();
     clearStoredApiKeySecrets();
     mocks.isLoaded = true;
     mocks.memberships = [
@@ -77,9 +71,6 @@ describe("SelectExistingOrganizationPanel", () => {
     mocks.fetchNext.mockReset();
     mocks.hasNextPage = false;
     mocks.isFetching = false;
-    mocks.clearSelectedProject.mockReset();
-    mocks.clearSelectedProject.mockResolvedValue(undefined);
-    mocks.refresh.mockReset();
     mocks.setActive.mockReset();
     mocks.setActive.mockResolvedValue(undefined);
   });
@@ -98,12 +89,8 @@ describe("SelectExistingOrganizationPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Existing workspace" }));
 
-    expect(mocks.clearSelectedProject).toHaveBeenCalledWith(null);
     expect(mocks.setActive).toHaveBeenCalledWith({ organization: "org_existing" });
-    expect(mocks.clearSelectedProject.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.setActive.mock.invocationCallOrder[0]
-    );
-    expect(mocks.refresh).toHaveBeenCalledOnce();
+    expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
     expect(getStoredApiKeySecret({ apiKeyId: "key_previous" })).toBeNull();
   });
 

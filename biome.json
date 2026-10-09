@@ -171,6 +171,49 @@
           }
         }
       }
+    },
+    {
+      "includes": ["**/apps/sdp-web/src/**/*.ts", "**/apps/sdp-web/src/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@sdp/types": {
+                    "importNames": [
+                      "UNIFIED_TRANSACTION_MODULES",
+                      "UNIFIED_TRANSACTION_SDP_MODULES",
+                      "SDP_MODULES",
+                      "RAMP_PROVIDERS"
+                    ],
+                    "message": "Raw module and provider lists ignore the release channel. Derive the list from the channel-capped flags: enabledTransactionModules(flags), getEnabledRampProviders(), isModuleInDeploymentReleaseChannel(). See docs/decisions/0005-release-channels.md."
+                  },
+                  "@sdp/types/provider-access": {
+                    "importNames": ["RAMP_PROVIDERS"],
+                    "message": "Raw module and provider lists ignore the release channel. Derive the list from the channel-capped flags: enabledTransactionModules(flags), getEnabledRampProviders(), isModuleInDeploymentReleaseChannel(). See docs/decisions/0005-release-channels.md."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/apps/sdp-web/src/flags/**",
+        "**/apps/sdp-web/src/**/*.test.ts",
+        "**/apps/sdp-web/src/**/*.test.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
     }
   ],
   "files": {

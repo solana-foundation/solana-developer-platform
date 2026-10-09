@@ -28,6 +28,12 @@ export interface SeedDefaultProjectsInput {
   members: readonly string[];
   /** Row ids; derived from the organization id when omitted. */
   ids?: Record<SdpEnvironment, string>;
+  /**
+   * Grant the organization `enableProductionProject`, without which the API
+   * refuses the production project (APE-351). Defaults to true: a test that
+   * seeds a production project means to reach it. Pass false to test refusal.
+   */
+  productionEntitled?: boolean;
 }
 
 export interface SeededDefaultProjects {
@@ -46,6 +52,7 @@ export interface SeededDefaultProjects {
  * @param input.createdBy - User recorded as the creator of both rows.
  * @param input.members - Users enrolled as admin members of both projects.
  * @param input.ids - Explicit row ids per environment.
+ * @param input.productionEntitled - Grant the production entitlement (default true).
  * @returns The seeded sandbox and production projects.
  */
 export async function seedDefaultProjects(
@@ -90,6 +97,18 @@ export async function seedDefaultProjects(
       )
     ),
   ]);
+
+  if (input.productionEntitled ?? true) {
+    await db
+      .prepare(
+        `UPDATE organizations
+         SET settings = (COALESCE(NULLIF(settings, ''), '{}')::jsonb
+                         || '{"enableProductionProject": true}'::jsonb)::text
+         WHERE id = ?`
+      )
+      .bind(input.organizationId)
+      .run();
+  }
 
   const seeded = (environment: SdpEnvironment): SeededProject => ({
     id: ids[environment],

@@ -4,9 +4,9 @@ import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { setDashboardUrl } from "@/test/dashboard-navigation";
+import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { DashboardShell } from "./dashboard-shell";
-
-const pathnameMock = vi.hoisted(() => ({ value: "/dashboard/issuance" }));
 
 vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isLoaded: true, isSignedIn: true, orgId: "org-sidebar-scope" }),
@@ -14,11 +14,7 @@ vi.mock("@clerk/nextjs", () => ({
   SignInButton: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => pathnameMock.value,
-  useRouter: () => ({ push: () => undefined, replace: () => undefined }),
-  useSearchParams: () => new URLSearchParams(),
-}));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
@@ -32,15 +28,13 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
       capabilities: { canReadApprovals: true, canManageOrgSettings: true },
     },
     dashboardCacheScope: { orgId: "org-sidebar-scope", userId: "user-sidebar-scope" },
-    selectedProjectId: "project-sidebar-scope",
+    selectedProjectId: "prj_test_sandbox",
     isSidebarOpen: true,
     setSidebarOpen: () => undefined,
     isProjectSwitching: false,
   }),
 }));
 
-// The sidebar's account, workspace and quick-start widgets fetch their own data; the scope under
-// test is on the containers around them.
 vi.mock("@/components/workspace-switcher", () => ({ WorkspaceSwitcher: () => null }));
 vi.mock("@/components/sidebar-user-menu", () => ({ SidebarUserMenu: () => null }));
 vi.mock("@/components/dashboard-quick-start", () => ({ DashboardQuickStart: () => null }));
@@ -73,7 +67,7 @@ function shell(newDesign: boolean) {
 }
 
 function renderShell(pathname: string, newDesign: boolean): HTMLElement {
-  pathnameMock.value = pathname;
+  setDashboardUrl(pathname, {});
   const root = document.createElement("div");
   root.innerHTML = renderToStaticMarkup(shell(newDesign));
   return root;
@@ -83,7 +77,7 @@ const openNavigationSelector = 'button[aria-label="Shared.dashboardShell.openNav
 
 describe("dashboard shell sidebar on a route no area has redesigned", () => {
   it("puts the sidebar in the refresh scope on NEW DESIGN while the page keeps the base one", () => {
-    const root = renderShell("/dashboard/issuance", true);
+    const root = renderShell(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, true);
     const main = root.querySelector("main");
     const sidebar = root.querySelector("aside");
     const page = root.querySelector("section");
@@ -97,7 +91,7 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
   });
 
   it("keeps the previous design's sidebar and page card with NEW DESIGN off", () => {
-    const root = renderShell("/dashboard/issuance", false);
+    const root = renderShell(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, false);
     const main = root.querySelector("main");
     const sidebar = root.querySelector("aside");
     const page = root.querySelector("section");
@@ -111,14 +105,13 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
 
   it("drops the phone's bottom bar on NEW DESIGN and opens the navigation from the header", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    // A phone: the tablet query never matches, so nothing closes the slide-over.
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: false,
       media: query,
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
     }));
-    pathnameMock.value = "/dashboard/issuance";
+    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, {});
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -129,7 +122,6 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
       const menuButton = container.querySelector<HTMLButtonElement>(openNavigationSelector);
       expect(menuButton).not.toBeNull();
       expect(menuButton?.className).toContain("md:hidden");
-      // The page itself stays on the base design: only its phone header gains the button.
       expect(container.querySelector("main")?.hasAttribute("data-sdp-theme")).toBe(false);
       expect(
         container.querySelector('[aria-label="Shared.dashboardShell.closeNavigationOverlay"]')
@@ -149,10 +141,13 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
     }
   });
 
-  it("keeps the phone's bottom bar and no header menu button with NEW DESIGN off", () => {
-    const root = renderShell("/dashboard/issuance", false);
+  it("keeps the phone's bottom bar, no header menu button and Project links with NEW DESIGN off", () => {
+    const root = renderShell(`/dashboard/${PRODUCTION_PROJECT.id}/issuance`, false);
     expect(root.querySelector("[data-dashboard-bottom-nav]")).not.toBeNull();
-    // The previous design's toggle carries the same label but is never displayed.
+    expect(
+      root.querySelector(`aside a[href="/dashboard/${PRODUCTION_PROJECT.id}/payments"]`)
+    ).not.toBeNull();
+    expect(root.querySelector('a[href^="/dashboard/payments"]')).toBeNull();
     const toggles = root.querySelectorAll(openNavigationSelector);
     for (const toggle of toggles) {
       expect(toggle.className.split(" ")).toContain("hidden");
@@ -163,7 +158,9 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
 
 describe("dashboard shell transactions tabs", () => {
   it("shows a tab only for transaction modules whose area is on", () => {
-    const text = renderShell("/dashboard/payments/transactions", false).textContent ?? "";
+    const text =
+      renderShell(`/dashboard/${SANDBOX_PROJECT.id}/payments/transactions`, false).textContent ??
+      "";
 
     expect(text).toContain("DashboardPayments.transactions.modules.payments");
     expect(text).toContain("DashboardPayments.transactions.modules.issuance");

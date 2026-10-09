@@ -57,9 +57,12 @@ export type DashboardLoadingRoute =
   | "dvp-trade-create"
   | "dvp-trade-detail"
   | "payments-transactions"
+  | "payment-transaction-detail"
   | "payments-pay"
   | "payments-deposit"
   | "payment-requests"
+  | "payment-request-create"
+  | "payment-request-detail"
   | "counterparty-directory"
   | "counterparty-create"
   | "counterparty-detail"
@@ -163,6 +166,11 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/payments/pay") return "payments-pay";
   if (pathname === "/dashboard/payments/deposit") return "payments-deposit";
   if (pathname === "/dashboard/payments/requests") return "payment-requests";
+  if (pathname === "/dashboard/payments/requests/new") return "payment-request-create";
+  if (/^\/dashboard\/payments\/requests\/[^/]+$/.test(pathname)) return "payment-request-detail";
+  if (/^\/dashboard\/payments\/transactions\/[^/]+$/.test(pathname)) {
+    return "payment-transaction-detail";
+  }
   if (pathname === "/dashboard/payments/counterparty") return "counterparty-directory";
   if (pathname === "/dashboard/payments/counterparty/create") return "counterparty-create";
   if (/^\/dashboard\/payments\/counterparty\/[^/]+$/.test(pathname)) {
@@ -232,4 +240,26 @@ export function isDashboardNavItemActive(pathname: string, href: string): boolea
     );
   }
   return pathnameOnly === href || pathnameOnly.startsWith(`${href}/`);
+}
+
+const PROJECT_SWITCH_DESTINATIONS = [
+  ...Object.values(DASHBOARD_MARKETS_SUBNAV_HREFS),
+  ...Object.values(DASHBOARD_PAYMENTS_SUBNAV_HREFS),
+  ...Object.values(DASHBOARD_SIDE_NAV_HREFS),
+];
+
+/**
+ * Where switching Project lands from the current page: the root of the module
+ * (or sub-module) the page belongs to, never the page itself, because ids in
+ * the path (wallets, tokens, trades) belong to the Project being left.
+ *
+ * @param dashboardPath - Project-less path of the current page, e.g. `/dashboard/custody/cwlt_1`.
+ * @returns The module root to open under the other Project, e.g. `/dashboard/wallets`.
+ */
+export function projectSwitchDestination(dashboardPath: string): string {
+  const destination = PROJECT_SWITCH_DESTINATIONS.find(
+    (href) =>
+      href !== DASHBOARD_SIDE_NAV_HREFS.home && isDashboardNavItemActive(dashboardPath, href)
+  );
+  return destination === undefined ? DASHBOARD_SIDE_NAV_HREFS.home : destination;
 }

@@ -21,6 +21,7 @@ import { validateBody } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { APPROVED_OPERATION_REPLAY_HEADER } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
+import { isEarnExitOrRead } from "./exits";
 import {
   createEarnExternalWalletDeposit,
   createEarnExternalWalletDepositTransaction,
@@ -142,9 +143,14 @@ async function optionalEarnAuth(c: Context<{ Bindings: Env }>, next: Next) {
   });
 }
 
+const earnProjectContextOptions = {
+  allowUnentitledProduction: (c: Context<{ Bindings: Env }>) =>
+    isEarnExitOrRead(c.req.method, c.req.path),
+};
+
 // Authenticated callers keep their verified project selection. Anonymous
 // callers have no organization or project to resolve and continue untouched.
-const resolveProjectContext = projectContextMiddleware();
+const resolveProjectContext = projectContextMiddleware(earnProjectContextOptions);
 function hasEarnAuth(c: Context<{ Bindings: Env }>): boolean {
   return Boolean(c.get("apiKey") || c.get("clerk"));
 }
@@ -310,7 +316,7 @@ async function requireKeyedEarnCredential(c: Context<{ Bindings: Env }>, next: N
 
 earn.use("*", requireKeyedEarnCredential);
 earn.use("*", unifiedAuthMiddleware());
-earn.use("*", projectContextMiddleware());
+earn.use("*", projectContextMiddleware(earnProjectContextOptions));
 
 // Metered quotas for the Earn reads that fan out to a PAID upstream — the
 // provider's API on a program read, Solana RPC on a live-hydrated one. A single

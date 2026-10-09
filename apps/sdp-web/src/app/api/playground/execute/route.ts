@@ -29,6 +29,35 @@ function redactSecret(value: unknown, secret: string): unknown {
   return value;
 }
 
+/**
+ * Response headers the playground shows under Headers. An allowlist, not a denylist: anything
+ * the API adds later (cookies, internal routing) stays out until someone decides it belongs.
+ */
+const FORWARDED_RESPONSE_HEADERS = new Set([
+  "cache-control",
+  "content-length",
+  "content-type",
+  "date",
+  "etag",
+  "location",
+  "retry-after",
+  "x-ratelimit-limit",
+  "x-ratelimit-remaining",
+  "x-ratelimit-reset",
+  "x-request-id",
+  "x-sdp-trace-id",
+]);
+
+function forwardedResponseHeaders(headers: Headers, secret: string): Record<string, string> {
+  const forwarded: Record<string, string> = {};
+  for (const [name, value] of headers) {
+    if (FORWARDED_RESPONSE_HEADERS.has(name)) {
+      forwarded[name] = redactSecretFromString(value, secret);
+    }
+  }
+  return forwarded;
+}
+
 function normalizePublicApiPath(path: string, requestUrl: string): string | null {
   if (!path.startsWith("/")) return null;
 
@@ -154,6 +183,7 @@ export async function POST(request: Request) {
         status: response.status,
         statusText: redactSecretFromString(response.statusText, apiKey),
         body,
+        headers: forwardedResponseHeaders(response.headers, apiKey),
       },
       {
         headers: {

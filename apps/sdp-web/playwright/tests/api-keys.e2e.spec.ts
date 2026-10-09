@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { projectHref } from "@/lib/dashboard-project-path";
 import {
   bootstrapLocalWalletFixtures,
   provisionWithAdminSession,
-  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
 test.describe
@@ -20,16 +20,12 @@ test.describe
       projectId = fixtures.projectId;
     });
 
-    test.beforeEach(async ({ page }) => {
-      await seedProjectCookie(page, projectId);
-    });
-
     test("user can create a selected-wallet API key and the secret is only shown once", async ({
       page,
     }) => {
       const keyName = `Playwright Selected Wallet Key ${Date.now()}`;
 
-      await page.goto("/dashboard/api-keys");
+      await page.goto(projectHref(projectId, "/dashboard/api-keys"));
       await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
 
       await page.getByLabel("Name").fill(keyName);
@@ -89,7 +85,7 @@ test.describe
     }) => {
       const keyName = `Playwright Restricted Key ${Date.now()}`;
 
-      await page.goto("/dashboard/api-keys");
+      await page.goto(projectHref(projectId, "/dashboard/api-keys"));
       await page.getByRole("link", { name: /^(Create new API key|New API key)$/ }).click();
       await page.getByLabel("Name").fill(keyName);
       await page.getByRole("button", { name: "Continue" }).click();

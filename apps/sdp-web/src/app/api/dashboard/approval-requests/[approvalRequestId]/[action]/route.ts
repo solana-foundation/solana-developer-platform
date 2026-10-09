@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isApprovalAction } from "@/app/dashboard/approvals/approval-actions";
+import { isApprovalAction } from "@/app/dashboard/[projectId]/approvals/approval-actions";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 type RouteContext = {

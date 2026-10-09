@@ -10,6 +10,7 @@ import {
   type WalletOperationRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
+import { loadOrganizationEntitlements } from "@/lib/production-entitlement";
 import { createTenantScope, getRequestTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { loadApiKeyWalletAuthorization } from "@/services/api-key-wallets.service";
@@ -44,6 +45,38 @@ const replayResponsePayloadSchema = z.looseObject({
 type ReplayResponsePayload = z.infer<typeof replayResponsePayloadSchema>;
 
 export type WalletOperationExecutionRequest = z.infer<typeof walletOperationExecutionRequestSchema>;
+
+/**
+ * The request an approval would execute once approved: method plus path
+ * without its query string. Null when the approval is not this organization's
+ * or its operation stored no execution request.
+ */
+export async function readApprovalExecutionTarget(
+  env: Env,
+  organizationId: string,
+  approvalRequestId: string
+): Promise<{ method: string; path: string } | null> {
+  const row = await getDb(env)
+    .prepare(
+      `SELECT wo.raw_payload
+       FROM approval_requests ar
+       JOIN wallet_operations wo ON wo.id = ar.wallet_operation_id
+       WHERE ar.id = ? AND ar.organization_id = ?`
+    )
+    .bind(approvalRequestId, organizationId)
+    .first<{ raw_payload: unknown }>();
+  if (!row) {
+    return null;
+  }
+  const parsed = z
+    .looseObject({ executionRequest: walletOperationExecutionRequestSchema.optional() })
+    .safeParse(parsePostgresJson(row.raw_payload));
+  const request = parsed.success ? parsed.data.executionRequest : undefined;
+  if (!request) {
+    return null;
+  }
+  return { method: request.method, path: request.path.split("?")[0] as string };
+}
 
 export function walletOperationExecutionRequest(
   c: Context<{ Bindings: Env }>,
@@ -210,6 +243,8 @@ export async function tryApprovedOperationReplayAuth(
   }
 
   const organizationId = operation.organization_id as string;
+  // Replays skip authMiddleware, so they load the entitlements themselves.
+  await loadOrganizationEntitlements(c, organizationId);
   const projectId = (operation.project_id as string | null | undefined) ?? null;
   const apiKeyId = (operation.api_key_id as string | null | undefined) ?? null;
   const rawPayload = walletOperationRawPayloadSchema.parse(

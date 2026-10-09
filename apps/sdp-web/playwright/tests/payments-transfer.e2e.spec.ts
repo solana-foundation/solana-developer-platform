@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { createLocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
@@ -8,7 +9,6 @@ import {
   getPlaywrightCustodyProvider,
   provisionWithAdminSession,
   seedCounterpartyWithSolanaAccount,
-  seedProjectCookie,
 } from "../support/local-dashboard-bootstrap";
 
 test.describe
@@ -87,48 +87,43 @@ test.describe
       });
     });
 
-    test.beforeEach(async ({ page }) => {
-      await seedProjectCookie(page, bootstrapProjectId);
-    });
-
-    test("user can submit a wallet transfer and see it in recent transactions", async ({
-      page,
-    }) => {
+    /**
+     * Pay's single details step: contact, then one of its accounts, then the source wallet,
+     * token and amount, then on to review.
+     */
+    async function fillPayDetails(page: Page, contactName: string, destinationLabel: string) {
       const app = page.locator("main");
-      const next = app.getByRole("button", { name: "Next", exact: true });
+      const continueToReview = app.getByRole("button", { name: "Continue to review", exact: true });
 
-      await page.goto("/dashboard/payments/pay");
+      await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments/pay"));
 
-      await app.getByRole("button", { name: "Counterparty", exact: true }).click();
-      await page.getByPlaceholder("Search counterparties").fill(counterpartyName);
-      await page.getByRole("button", { name: counterpartyName }).click();
-      await expect(next).toBeEnabled({ timeout: 120_000 });
-      await next.click();
+      await app.getByRole("button", { name: "Contact", exact: true }).click();
+      await page.getByPlaceholder("Search contacts").fill(contactName);
+      await page.getByRole("button", { name: contactName }).click();
 
-      const onchainMethod = app.getByRole("button", { name: "Onchain transfer" });
-      const destinationSelect = app.getByRole("button", { name: "Destination account" });
-      await expect(onchainMethod.or(destinationSelect)).toBeVisible({ timeout: 120_000 });
-      if (await onchainMethod.isVisible()) {
-        await onchainMethod.click();
-        await expect(next).toBeEnabled();
-        await next.click();
-      }
-
+      const destinationSelect = app.getByRole("button", { name: "Destination", exact: true });
+      await expect(destinationSelect).toBeEnabled({ timeout: 120_000 });
       await destinationSelect.click();
-      await page.getByRole("button", { name: accountLabel }).click();
-      await expect(next).toBeEnabled({ timeout: 120_000 });
-      await next.click();
+      await page.getByRole("button", { name: destinationLabel }).click();
 
       await app.getByRole("button", { name: "Source wallet" }).click();
       await page.getByPlaceholder("Search wallets").fill(sourceWalletLabel);
       await page.getByRole("button", { name: sourceWalletLabel }).click();
 
-      await app.getByRole("button", { name: "Asset" }).click();
+      await app.getByRole("button", { name: "Token", exact: true }).click();
       await page.getByRole("button", { name: transferTokenSymbol, exact: true }).click();
 
       await app.getByLabel("Amount", { exact: true }).fill("0.01");
-      await expect(next).toBeEnabled({ timeout: 120_000 });
-      await next.click();
+      await expect(continueToReview).toBeEnabled({ timeout: 120_000 });
+      await continueToReview.click();
+    }
+
+    test("user can submit a wallet transfer and see it in recent transactions", async ({
+      page,
+    }) => {
+      const app = page.locator("main");
+
+      await fillPayDetails(page, counterpartyName, accountLabel);
 
       await expect(app.getByText("Review transfer")).toBeVisible();
       const sendButton = app.getByRole("button", { name: "Send transfer", exact: true });
@@ -139,7 +134,9 @@ test.describe
       const doneButton = app.getByRole("button", { name: "Done", exact: true });
       await doneButton.focus();
       await doneButton.press("Enter");
-      await expect(page).toHaveURL(/\/dashboard\/payments(?:\?.*)?$/);
+      await expect(page).toHaveURL(
+        new RegExp(`${projectHref(bootstrapProjectId, "/dashboard/payments")}(?:\\?.*)?$`)
+      );
 
       const shortenedDestination = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
       const transferRow = app.getByRole("link").filter({ hasText: shortenedDestination }).first();
@@ -149,40 +146,8 @@ test.describe
 
     test("wallet policy denies a transfer to a non-allowlisted destination", async ({ page }) => {
       const app = page.locator("main");
-      const next = app.getByRole("button", { name: "Next", exact: true });
 
-      await page.goto("/dashboard/payments/pay");
-
-      await app.getByRole("button", { name: "Counterparty", exact: true }).click();
-      await page.getByPlaceholder("Search counterparties").fill(deniedCounterpartyName);
-      await page.getByRole("button", { name: deniedCounterpartyName }).click();
-      await expect(next).toBeEnabled({ timeout: 120_000 });
-      await next.click();
-
-      const onchainMethod = app.getByRole("button", { name: "Onchain transfer" });
-      const destinationSelect = app.getByRole("button", { name: "Destination account" });
-      await expect(onchainMethod.or(destinationSelect)).toBeVisible({ timeout: 120_000 });
-      if (await onchainMethod.isVisible()) {
-        await onchainMethod.click();
-        await expect(next).toBeEnabled();
-        await next.click();
-      }
-
-      await destinationSelect.click();
-      await page.getByRole("button", { name: deniedAccountLabel }).click();
-      await expect(next).toBeEnabled({ timeout: 120_000 });
-      await next.click();
-
-      await app.getByRole("button", { name: "Source wallet" }).click();
-      await page.getByPlaceholder("Search wallets").fill(sourceWalletLabel);
-      await page.getByRole("button", { name: sourceWalletLabel }).click();
-
-      await app.getByRole("button", { name: "Asset" }).click();
-      await page.getByRole("button", { name: transferTokenSymbol, exact: true }).click();
-
-      await app.getByLabel("Amount", { exact: true }).fill("0.01");
-      await expect(next).toBeEnabled({ timeout: 120_000 });
-      await next.click();
+      await fillPayDetails(page, deniedCounterpartyName, deniedAccountLabel);
 
       await expect(app.getByText("Review transfer")).toBeVisible();
       const sendButton = app.getByRole("button", { name: "Send transfer", exact: true });
@@ -210,7 +175,7 @@ test.describe
       await expect(page.getByText(/Wallet operation denied by policy/)).toBeVisible();
       await expect(app.getByText("Transfer submitted")).not.toBeVisible();
 
-      await page.goto("/dashboard/payments");
+      await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments"));
       const allowedShortened = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
       await expect(app.getByRole("link").filter({ hasText: allowedShortened }).first()).toBeVisible(
         { timeout: 120_000 }
