@@ -148,6 +148,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
         environment: TEST_PROJECT.environment,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
+        movement: "issuance.authority",
         actor: { type: "project", id: TEST_PROJECT.id },
       });
 
