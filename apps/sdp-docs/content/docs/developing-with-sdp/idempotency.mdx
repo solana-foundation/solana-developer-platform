@@ -1,43 +1,57 @@
 ---
 title: Idempotency
-description: Replay-safe mutations through the Idempotency-Key header, claimed by the record itself.
+description: Retry mutations safely with the Idempotency-Key header. Required on the routes that move money, accepted on every other stable mutation.
 ---
 
-Retries are a fact of distributed systems: clients time out, connections drop, workers die mid-run. SDP lets you replay a mutation safely by sending an `Idempotency-Key` header — a unique value (a UUID works well) that you mint once per logical operation and reuse on every retry of that operation.
+Clients time out, connections drop and workers die mid-run. Send an `Idempotency-Key` header so a retry returns the first attempt's result instead of doing the work twice.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
-  -H "Idempotency-Key: 8a2f6c1e-9d4b-4f3a-b7e5-2c8d9f0a1b3c" \
+  -H "Idempotency-Key: 0192f8a4-6c1e-7d4b-8f3a-b7e52c8d9f0a" \
   -H "Content-Type: application/json" \
   -d '{ ... }'
 ```
 
-## How replay resolution works
+## Choosing a key
 
-SDP's model differs from response-cache designs: the idempotency key is claimed by the **business record itself**, not by a snapshot of the original response.
+- A key is 1–255 printable ASCII characters. Anything else returns `400`.
+- Generate one key per logical operation (a UUIDv4 or UUIDv7 works well), store it with the operation, and send the same key on every retry of that operation.
+- A new operation needs a new key, even when its request is identical to an earlier one.
+- Keys are scoped to your organization, project, HTTP method and route. The same key value on two different routes is two separate keys.
 
-1. The first request creates the record — a transfer, a batch, an issuance transaction — carrying your key and a fingerprint of the normalized request payload.
-2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in the normal success envelope. Because it is the live record and not a cached response, a replay reflects current state — a transfer that has since finalized comes back `finalized`, not the `processing` you would have seen on the first attempt.
-3. A request with the same key but a **different payload** is rejected with **409 `CONFLICT`** ("Idempotency key already used with different request payload"). The fingerprint comparison is field-normalized, so formatting differences don't cause false conflicts.
+## Where keys apply
 
-Keys are retained for the lifetime of the record they claimed — there is no TTL, and a replay works for as long as the record exists.
+| Endpoints | Key |
+| --- | --- |
+| `POST /v1/payments/transfers`<br />`POST /v1/payments/transfer-batches`<br />`POST /v1/payments/recurring-payments`<br />`POST /v1/payments/recurring-payments/{id}/activate`, `/cancel`, `/resume`, `/collect`<br />`POST /v1/wallets/approval-requests/{approvalRequestId}/approve` | **Required.** A request without one returns `400 IDEMPOTENCY_KEY_REQUIRED`. |
+| Wallets: `POST /v1/wallets`, `/initialize`, `/signer-check`; `PATCH /v1/wallets/{walletId}`<br />Approval requests: `POST .../reject`, `.../cancel`<br />Payments: `PATCH /v1/payments/recurring-payments/{id}`, subscription plans (`POST`, `PATCH`, `prepare-create`), subscriptions (`POST`, `prepare-*`)<br />Counterparties and counterparty accounts: `POST`, `PATCH`<br />Compliance: `POST /v1/compliance/address-screenings` | **Accepted.** Optional, and honored when sent. |
 
-The header itself is validated on every `/v1` route (1–255 printable ASCII characters), but only the endpoints below consume it. Elsewhere it is accepted and ignored.
+Issuance operations keep their own key handling for now: a key is scoped to your organization across every issuance operation and token, and reusing it for a different request returns `409`.
 
-## Where it applies
+## What a retry returns
 
-Each domain claims keys in its own namespace, and the namespaces are scoped differently:
+| Situation | Response |
+| --- | --- |
+| Same key, same request, original finished | The stored status and body, with the response header `Idempotent-Replayed: true` |
+| Same key, original still running | `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. Wait and retry with the same key. |
+| Same key, different request or different credential | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
+| Original returned `400`, `401`, `403`, `409` or `429` | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
+| Original returned a `5xx` | Stored and replayed; use a new key to try again. Transfers, transfer batches and recurring-payment creation are the exception: a same-key retry runs again and recovers the original record instead of creating a second one. |
 
-| Domain | Operations | Key namespace |
-| --- | --- | --- |
-| Payments — transfers | `POST /v1/payments/transfers` | Per project |
-| Payments — batches | `POST /v1/payments/transfer-batches` | Per project |
-| Issuance | Execute-mode deploy, mint, burn, force-burn, freeze, thaw, pause, unpause, seize, and authority transfer | Per organization, shared across **all** issuance operations and tokens |
-| Custody | Provider credential submission (dashboard flow) | Required on every submission |
+"Same request" means the same path, query parameters, body and credential. A request made after rotating an API key is a new request, so it gets `422` if it reuses the old key.
 
-Namespaces are independent across domains — the same key value used on a transfer and on a mint are two separate claims that never collide. Within issuance, however, the namespace is organization-wide: reusing a key for a different issuance operation, even on a different token, returns 409.
+A replay returns the response as it was first sent. To see current state (for example, whether a `processing` transfer has finalized), read the resource with `GET`.
 
-## This model is open to change
+A `Dry-Run: true` request on transfers and transfer batches needs no key, and may reuse the key of a real request without consuming it.
 
-The per-domain differences above reflect the order in which these surfaces shipped, not a finished design, and we expect them to converge. Treat the core contract as stable — one key per logical operation, replay returns the record, payload mismatch returns 409 — and treat the scoping details (per-project vs per-organization namespaces, which endpoints consume the header) as subject to change. We are considering extending consumption to more mutation endpoints and unifying namespace scoping across domains.
+## Retention
+
+Keys are kept for 24 hours after the original request. After that, the same key starts a new request, except on transfers, transfer batches and recurring-payment creation: those records keep their key permanently, so a late retry still returns the original record, or `422` if the request differs.
+
+## Recommendations
+
+- Send a key on every mutation, not only where it is required.
+- Retry timeouts, connection errors and `409 IDEMPOTENCY_KEY_IN_FLIGHT` with backoff, reusing the key. A replayed `5xx` means the original failed: on transfers, transfer batches and recurring-payment creation, retry with the same key; elsewhere, use a new key.
+- Treat `422 IDEMPOTENCY_KEY_REUSED` as a bug in your client: the key was attached to two different operations.
+- Persist the returned resource ID before moving to the next operation, so a restarted worker can resume without guessing.

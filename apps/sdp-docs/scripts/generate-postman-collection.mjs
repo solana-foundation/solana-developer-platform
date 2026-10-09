@@ -180,6 +180,23 @@ function getRequestHeaders(operation) {
     });
   }
 
+  // A route that requires Idempotency-Key 400s without one. Postman's {{$guid}}
+  // mints a fresh key per send, so each send is a new logical operation.
+  const requiresIdempotencyKey = (operation.parameters ?? []).some(
+    (parameter) =>
+      parameter?.in === "header" &&
+      parameter.required === true &&
+      typeof parameter.name === "string" &&
+      parameter.name.toLowerCase() === "idempotency-key"
+  );
+  if (requiresIdempotencyKey) {
+    headers.push({
+      key: "Idempotency-Key",
+      value: "{{$guid}}",
+      type: "text",
+    });
+  }
+
   return headers;
 }
 
