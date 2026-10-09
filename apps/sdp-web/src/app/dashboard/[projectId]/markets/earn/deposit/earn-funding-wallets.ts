@@ -167,16 +167,37 @@ export async function refreshFundingWalletBalances(
   );
 }
 
+/** Identical sweeps in flight together share one collection read and one set of live reads. */
 export function useEarnFundingWallets() {
   const minimumSlot = useRef<number | undefined>(undefined);
   const walletMinimumSlots = useRef(new Map<string, number>());
-  const read = async () => {
-    const wallets = await fetchFundingWallets();
-    return minimumSlot.current === undefined && walletMinimumSlots.current.size === 0
-      ? wallets
-      : refreshFundingWalletBalances(wallets, minimumSlot.current ?? walletMinimumSlots.current);
-  };
-  const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.fundingWallets(), read);
+  const inFlight = useRef(new Map<string, Promise<EarnFundingWallet[]>>());
+  const sweep = useCallback((readLive: boolean) => {
+    const hasFloor = () => minimumSlot.current !== undefined || walletMinimumSlots.current.size > 0;
+    const live = readLive || hasFloor();
+    const key = JSON.stringify([
+      live,
+      minimumSlot.current ?? null,
+      [...walletMinimumSlots.current],
+    ]);
+    const running = inFlight.current.get(key);
+    if (running) return running;
+    const started = (async () => {
+      const wallets = await fetchFundingWallets();
+      return live || hasFloor()
+        ? refreshFundingWalletBalances(wallets, minimumSlot.current ?? walletMinimumSlots.current)
+        : wallets;
+    })();
+    const settle = () => {
+      if (inFlight.current.get(key) === started) inFlight.current.delete(key);
+    };
+    inFlight.current.set(key, started);
+    started.then(settle, settle);
+    return started;
+  }, []);
+  const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.fundingWallets(), () =>
+    sweep(false)
+  );
   const refreshBalances = useCallback(
     (slot?: number, custodyWalletIds?: readonly string[]) => {
       if (slot !== undefined) {
@@ -193,19 +214,9 @@ export function useEarnFundingWallets() {
             ...walletMinimumSlots.current.values()
           );
       }
-      return mutate(
-        async () =>
-          refreshFundingWalletBalances(
-            await fetchFundingWallets(),
-            minimumSlot.current ?? walletMinimumSlots.current
-          ),
-        {
-          revalidate: false,
-          throwOnError: true,
-        }
-      );
+      return mutate(sweep(true), { revalidate: false, throwOnError: true });
     },
-    [mutate]
+    [mutate, sweep]
   );
   return { wallets: data, error, isLoading, refresh: () => void mutate(), refreshBalances };
 }

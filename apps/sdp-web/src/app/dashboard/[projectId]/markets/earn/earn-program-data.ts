@@ -557,15 +557,39 @@ export function appendVaultPositionsRead(
   return [...retained, read];
 }
 
-/** Live position values refresh while the surface is mounted; `reads` keeps the recent history, newest last. */
+function vaultPositionsReadKey(
+  afterMovementIds: readonly string[],
+  positionIds: ReadonlyMap<string, string> | undefined
+): string {
+  return JSON.stringify(afterMovementIds.map((id) => [id, positionIds?.get(id) ?? null]));
+}
+
+/**
+ * Live position values refresh while the surface is mounted; `reads` keeps the recent history,
+ * newest last. The poll and explicit refreshes share one in-flight read when their requests are
+ * identical.
+ */
 export function useEarnVaultPositions() {
   const afterMovementIds = useRef<readonly string[]>([]);
   const movementPositionIds = useRef<ReadonlyMap<string, string> | undefined>(undefined);
-  const { data, error, isLoading, mutate } = useSWR(
-    earnQueryKeys.vaultPositions(),
-    () => readEarnVaultPositions(afterMovementIds.current, movementPositionIds.current),
-    { refreshInterval: LIVE_FEED_REFRESH_MS }
-  );
+  const inFlight = useRef(new Map<string, Promise<EarnVaultPositionsRead>>());
+  const read = useCallback(() => {
+    const ids = afterMovementIds.current;
+    const positionIds = movementPositionIds.current;
+    const key = vaultPositionsReadKey(ids, positionIds);
+    const running = inFlight.current.get(key);
+    if (running) return running;
+    const started = readEarnVaultPositions(ids, positionIds);
+    const settle = () => {
+      if (inFlight.current.get(key) === started) inFlight.current.delete(key);
+    };
+    inFlight.current.set(key, started);
+    started.then(settle, settle);
+    return started;
+  }, []);
+  const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.vaultPositions(), read, {
+    refreshInterval: LIVE_FEED_REFRESH_MS,
+  });
   const [history, setHistory] = useState<readonly EarnVaultPositionsRead[]>([]);
   useEffect(() => {
     if (data) setHistory((current) => appendVaultPositionsRead(current, data));
@@ -583,12 +607,9 @@ export function useEarnVaultPositions() {
       }
       // Explicit mutation propagates failures; a bare SWR revalidation can
       // resolve with cached data after its fetcher failed.
-      return mutate(readEarnVaultPositions(afterMovementIds.current, movementPositionIds.current), {
-        revalidate: false,
-        throwOnError: true,
-      });
+      return mutate(read(), { revalidate: false, throwOnError: true });
     },
-    [mutate]
+    [mutate, read]
   );
   return { positions: data?.positions, reads, error, isLoading, refresh };
 }
