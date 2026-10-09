@@ -48,8 +48,10 @@ Remove the policy engine and keep one small per-key control.
   declaration on each value-moving route. They apply to API keys only. A
   dashboard session is not an API key. Background runs started by an earlier
   request, such as a recurring collection, do not re-check them.
-- The operation vocabulary keeps the existing family and type names. Actions
-  that were deliberately never gated, such as DvP cancel and reclaim, stay
+- The operation vocabulary keeps the existing type names and all family names
+  but one: the Helius Rings family is `privacy`, not the policy engine's
+  `transfer`, because ordinary transfers belong to `payment` and a key listing
+  `transfer` would expect them. Actions that were deliberately never gated, such as DvP cancel and reclaim, stay
   ungated: a control must never strand funds.
 - Allowed Operations ship in every release channel. Existing control profiles
   are not converted; every key starts unrestricted.

@@ -10,7 +10,7 @@
  * entry covers every type in that family.
  */
 
-export const OPERATION_FAMILIES = ["transfer", "payment", "ramp", "issuance", "program"] as const;
+export const OPERATION_FAMILIES = ["privacy", "payment", "ramp", "issuance", "program"] as const;
 
 export type OperationFamily = (typeof OPERATION_FAMILIES)[number];
 
@@ -44,7 +44,7 @@ export const OPERATION_TYPES = [
   "earn_vault_deposit",
   "earn_vault_withdrawal",
   "earn_program_withdrawal",
-  // transfer (Helius Rings shielded operations)
+  // privacy (private operations through Helius Rings)
   "rings_shield",
   "rings_transfer_registered",
   "rings_transfer_anonymous",
@@ -85,16 +85,16 @@ export const OPERATION_FAMILY_BY_TYPE = {
   earn_vault_deposit: "program",
   earn_vault_withdrawal: "program",
   earn_program_withdrawal: "program",
-  rings_shield: "transfer",
-  rings_transfer_registered: "transfer",
-  rings_transfer_anonymous: "transfer",
-  rings_withdraw: "transfer",
-  rings_merge: "transfer",
-  rings_timelock_create: "transfer",
-  rings_timelock_settle: "transfer",
-  rings_zone_create: "transfer",
-  rings_ring_exit: "transfer",
-  rings_ring_entry: "transfer",
+  rings_shield: "privacy",
+  rings_transfer_registered: "privacy",
+  rings_transfer_anonymous: "privacy",
+  rings_withdraw: "privacy",
+  rings_merge: "privacy",
+  rings_timelock_create: "privacy",
+  rings_timelock_settle: "privacy",
+  rings_zone_create: "privacy",
+  rings_ring_exit: "privacy",
+  rings_ring_entry: "privacy",
 } as const satisfies Record<OperationType, OperationFamily>;
 
 /** Every value an `allowedOperations` list may hold: a family or a type. */

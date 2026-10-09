@@ -35,7 +35,7 @@ export const apiKeyStatusSchema = z
 
 export const allowedOperationSchema = z.enum(ALLOWED_OPERATIONS).openapi({
   description:
-    "An operation family (transfer, payment, ramp, issuance, program) or a single operation type. A family entry covers every type in it.",
+    "An operation family (privacy, payment, ramp, issuance, program) or a single operation type. A family entry covers every type in it.",
   example: "payment",
 });
 

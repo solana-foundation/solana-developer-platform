@@ -22,7 +22,12 @@ import {
 describe("allowed operations vocabulary", () => {
   it("mirrors the wallet operation vocabulary the routes already declare", () => {
     expect([...OPERATION_TYPES].sort()).toEqual([...WALLET_OPERATION_TYPES].sort());
-    expect([...OPERATION_FAMILIES].sort()).toEqual([...WALLET_OPERATION_FAMILIES].sort());
+    // One deliberate difference: the policy engine's Rings family `transfer`
+    // is `privacy` here, so it cannot be mistaken for `payment` transfers.
+    const renamed = WALLET_OPERATION_FAMILIES.map((family) =>
+      family === "transfer" ? "privacy" : family
+    );
+    expect([...OPERATION_FAMILIES].sort()).toEqual(renamed.sort());
   });
 
   it("files every type under a known family and lists each value once", () => {
