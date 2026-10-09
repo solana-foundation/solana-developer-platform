@@ -9,13 +9,13 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
   seedCachedKey,
   TEST_API_KEY,
-  TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
   TEST_PROJECT,
   TEST_USER,
@@ -30,6 +30,8 @@ import { readErrorResponse } from "@/test/helpers/payments-transfers";
  */
 
 const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
+const PRODUCTION_CUSTODY_CONFIG_ID = "cust_cfg_payments_test_production";
+const PRODUCTION_CUSTODY_WALLET_ID = "cwlt_payments_test_production";
 const PRODUCTION_NOT_ENABLED = "Production is not enabled for this organization";
 
 const approvalDetailsSchema = z.object({
@@ -70,13 +72,41 @@ async function setProductionEntitled(entitled: boolean): Promise<void> {
     .run();
 }
 
+/**
+ * The production project's own custody wallet: custody is project-only, so the
+ * sandbox wallet cannot pay out of the production project. It carries the
+ * address the payments signer mock signs as.
+ */
+async function seedProductionCustodyWallet(): Promise<void> {
+  await getDb(env).transaction(async (tx) => {
+    await insertTestCustodyConfigRow(tx, {
+      id: PRODUCTION_CUSTODY_CONFIG_ID,
+      organizationId: TEST_ORG.id,
+      projectId: PRODUCTION_PROJECT_ID,
+      provider: "local",
+      configEncrypted: "test-config",
+      defaultWalletId: null,
+      status: "active",
+    });
+    await insertTestCustodyWalletRow(tx, {
+      id: PRODUCTION_CUSTODY_WALLET_ID,
+      owner: { kind: "config", custodyConfigId: PRODUCTION_CUSTODY_CONFIG_ID },
+      walletId: "wal_payments_test_production",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+      label: "Production Payments Wallet",
+      purpose: "transfer",
+      status: "active",
+    });
+  });
+}
+
 /** Every payment out of the seeded wallet in the production project needs approval. */
 async function seedProductionApprovalPolicy(): Promise<void> {
   const repo = policyRepository();
   const profile = await repo.createWalletControlProfile({
     organizationId: TEST_ORG.id,
     projectId: PRODUCTION_PROJECT_ID,
-    custodyWalletId: TEST_CUSTODY_WALLET_ID,
+    custodyWalletId: PRODUCTION_CUSTODY_WALLET_ID,
     name: "Production payment controls",
     createdBy: TEST_USER.id,
   });
@@ -135,7 +165,7 @@ async function openHeldProductionTransfer(actor: Actor) {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceCustodyWalletId: PRODUCTION_CUSTODY_WALLET_ID,
         destination: TEST_SOLANA_ADDRESSES.wallet2,
         token: "SOL",
         amount: "0.1",
@@ -177,6 +207,7 @@ describe("approved-operation replay into production (APE-351)", () => {
   installPaymentsRouteTestHooks();
 
   async function setUp(actor: Actor) {
+    await seedProductionCustodyWallet();
     await seedProductionApprovalPolicy();
     if (actor === "api_key") {
       await rehomeApiKeyToProduction();
