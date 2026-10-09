@@ -335,7 +335,7 @@ Migration-free merges deploy production without a stop. Because a rollback only 
 schema, CI (`pnpm check:migration-compat`) rejects migrations the previous
 image cannot run against. A migration that must break compatibility declares
 `-- sdp:migration-compat: breaking` and ships in a PR that touches nothing
-outside the migrations directory.
+outside the migrations directory except test files.
 
 Do not run a deployed migration directly from a laptop with Doppler credentials.
 For an exceptional manual operation, use the named Cloud Run migration job and

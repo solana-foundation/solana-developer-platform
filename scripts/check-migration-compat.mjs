@@ -7,6 +7,8 @@ export const MIGRATIONS_DIR = "apps/sdp-api/src/db/migrations/";
 const SQL_DIR = `${MIGRATIONS_DIR}postgres/`;
 const REPEATABLE_DIR = `${SQL_DIR}repeatable/`;
 const BREAKING_DIRECTIVE = /^--\s*sdp:migration-compat:\s*breaking\s*$/m;
+// Test files never run in the deployed image, so they cannot break a traffic rollback.
+const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const NAME = String.raw`(?:"[^"]+"|[^\s".(),;]+)(?:\.(?:"[^"]+"|[^\s".(),;]+))*`;
 const IF_EXISTS = String.raw`(?:IF\s+(?:NOT\s+)?EXISTS\s+)?`;
 const ALTER_TABLE = new RegExp(
@@ -439,7 +441,9 @@ export function findRemovedViewColumns(baseSql, headSql) {
 }
 
 export function checkMigrationChange(changedFiles, readFile, readBase = () => null) {
-  const outside = changedFiles.filter((file) => !file.startsWith(MIGRATIONS_DIR));
+  const outside = changedFiles.filter(
+    (file) => !file.startsWith(MIGRATIONS_DIR) && !TEST_FILE.test(file)
+  );
   const violations = [];
 
   for (const file of changedFiles) {
@@ -456,11 +460,11 @@ export function checkMigrationChange(changedFiles, readFile, readBase = () => nu
       violations.push(
         `${file}: the previous image cannot run against this schema, so a traffic rollback would break:\n  ${findings.join("\n  ")}\n` +
           "Expand first: add before use, stop using before drop, backfill only columns this file adds. " +
-          "If this contraction is intended, add `-- sdp:migration-compat: breaking` and ship it in a PR that touches only the migrations directory."
+          "If this contraction is intended, add `-- sdp:migration-compat: breaking` and ship it in a PR that touches only the migrations directory and test files."
       );
     } else if (outside.length > 0) {
       violations.push(
-        `${file} is marked breaking, so the PR must change nothing outside ${MIGRATIONS_DIR}; found ${outside.join(", ")}.`
+        `${file} is marked breaking, so the PR must change nothing outside ${MIGRATIONS_DIR} except test files; found ${outside.join(", ")}.`
       );
     }
   }
@@ -472,7 +476,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const base = process.env.MIGRATION_COMPAT_BASE_REF || "origin/main";
   const git = (args) =>
     execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  const changedFiles = git(["diff", "--name-only", `${base}...HEAD`])
+  const changedFiles = git(["diff", "--name-only", "--no-renames", `${base}...HEAD`])
     .split("\n")
     .filter(Boolean);
   const mergeBase = git(["merge-base", base, "HEAD"]).trim();
