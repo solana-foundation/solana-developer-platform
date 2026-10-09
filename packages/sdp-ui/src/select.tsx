@@ -22,7 +22,11 @@ function triggerSizeClassName(size: SelectSize): string {
 }
 
 interface UiSelectProps {
+  /** The trigger's id, so a `<label htmlFor>` can name it. */
+  id?: string;
   ariaLabel?: string;
+  /** Id of the element that describes the trigger, such as a hint below it. */
+  ariaDescribedBy?: string;
   /** Form field name; renders a hidden input so the value submits with a native form. */
   name?: string;
   /** Initial value for uncontrolled (form) usage. */
@@ -73,7 +77,9 @@ function collectItemLabels(children: ReactNode): Record<string, ReactNode> {
 }
 
 function Select({
+  id,
   ariaLabel,
+  ariaDescribedBy,
   name,
   defaultValue,
   value,
@@ -100,7 +106,9 @@ function Select({
       disabled={disabled}
     >
       <BaseSelect.Trigger
+        id={id}
         aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         className={cn(
           "group/select relative flex w-full cursor-pointer items-center gap-2 text-left",
           disabled && "pointer-events-none opacity-40",

@@ -13,7 +13,8 @@ import {
 import { WalletsOverviewSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { fetchProviderAvailability } from "@/lib/provider-availability";
+import { availableCustodyProviders } from "@/lib/provider-availability";
+import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import { createTimedTrace } from "@/lib/request-tracing";
 import {
   createRequestScopedSdpApiClients,
@@ -22,6 +23,7 @@ import {
 } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 import type { OnboardingStatusResponse } from "../onboarding-status";
+import type { CustodyAvailabilityResult } from "./wallets-create-area";
 import { WalletsWorkspace } from "./wallets-workspace";
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
@@ -97,19 +99,15 @@ export default async function CustodyPage() {
       );
     }
 
-    const [configsResult, walletsResult, apiKeysResult, providerAccessResult] = await Promise.all([
-      trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
-      trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(projectClient.request)),
-      trace.step("fetch_provider_access", () =>
-        onboarding.organization
-          ? settle(fetchProviderAvailability(projectClient.request, onboarding.organization.id))
-          : Promise.resolve({
-              ok: false as const,
-              error: new Error("Organization is not linked"),
-            })
-      ),
-    ]);
+    const [configsResult, walletsResult, apiKeysResult, providerAvailabilityResult] =
+      await Promise.all([
+        trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
+        trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
+        trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(projectClient.request)),
+        trace.step("fetch_provider_availability", () =>
+          settle(fetchProjectProviderAvailability(projectClient))
+        ),
+      ]);
 
     const connectedProviders: KnownCustodyProvider[] = configsResult.ok
       ? configsResult.value.configs
@@ -129,15 +127,20 @@ export default async function CustodyPage() {
         ? walletsResult.error.message
         : t("DashboardCustody.unableToLoadWallets");
     const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
-    const enabledProviders = providerAccessResult.ok
-      ? providerAccessResult.value.enabledCustodyProviders
-      : connectedProviders;
+    // Availability only drives the create area, so a failed read closes that
+    // area instead of taking down the existing wallets.
+    const custodyAvailability: CustodyAvailabilityResult = providerAvailabilityResult.ok
+      ? { ok: true, providers: availableCustodyProviders(providerAvailabilityResult.value) }
+      : { ok: false };
 
     trace.log({
       ok: true,
       linked: true,
       connectedProviderCount: connectedProviders.length,
-      enabledProviderCount: enabledProviders.length,
+      availableProviderCount: custodyAvailability.ok ? custodyAvailability.providers.length : null,
+      providerAvailabilityError: providerAvailabilityResult.ok
+        ? null
+        : String(providerAvailabilityResult.error),
       walletCount: walletsResult.ok ? walletsResult.value.length : 0,
       apiKeyCount: apiKeys.length,
     });
@@ -148,7 +151,7 @@ export default async function CustodyPage() {
           apiBaseUrl={resolvePlaygroundApiBaseUrl()}
           apiKeys={apiKeys}
           connectedProviders={connectedProviders}
-          enabledProviders={enabledProviders}
+          custodyAvailability={custodyAvailability}
           configsError={configsError}
           wallets={walletsResult.ok ? walletsResult.value : []}
           walletsError={walletsError}

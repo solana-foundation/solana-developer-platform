@@ -99,20 +99,11 @@ export function isStagedProviderRefusalReason(
 }
 
 /**
- * Every provider the catalog shows is built and runnable, so the status only
- * ever answers "what is my next step" — never "does this exist". The two
- * non-actionable states are deliberately distinct (HOO-772/775 and the
- * remove-signup-waitlist decision map): `request_access` is organization
- * access the SDP team grants, `not_configured` is environment availability —
- * the deployment does not hold that provider's credentials. Presenting one as
- * the other is how both prior vocabularies went wrong.
+ * A custody provider's status on a dashboard that lists only the providers the
+ * project can use: `active` once it is set up, `available` until then. A
+ * provider the project cannot use is hidden, never shown with a status.
  */
-export const CUSTODY_PROVIDER_DISPLAY_STATUSES = [
-  "available",
-  "active",
-  "request_access",
-  "not_configured",
-] as const;
+export const CUSTODY_PROVIDER_DISPLAY_STATUSES = ["available", "active"] as const;
 export type CustodyProviderDisplayStatus = (typeof CUSTODY_PROVIDER_DISPLAY_STATUSES)[number];
 
 /**
@@ -250,12 +241,11 @@ export type CustodyProviderSetupField = CustodyProviderSetupFieldBase &
   CustodyProviderSetupFieldValueHandling;
 
 /**
- * How this provider's credentials come to exist: a self-service form, an
- * external request route, or none — the deployment supplies them via env.
+ * How this provider's credentials come to exist: a self-service form, or
+ * none — the deployment supplies them via env.
  */
 export type CustodyProviderStoredCredentialSetup =
   | { mode: "self_service"; fields: readonly CustodyProviderSetupField[] }
-  | { mode: "request_access"; requestAccessUrl: string }
   | { mode: "none" };
 
 interface CustodyProviderCatalogEntryShape {
@@ -371,14 +361,7 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.fireblocks,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    // The one provider with an established external request route. The other
-    // manual providers get a CTA when the request-access endpoint with
-    // organization/provider attribution exists (decision-map.md #4) — not a
-    // recycled link whose audience we have not confirmed.
-    storedCredentialSetup: {
-      mode: "request_access",
-      requestAccessUrl: "https://solanafoundation.typeform.com/to/wShiq9SN",
-    },
+    storedCredentialSetup: { mode: "none" },
   },
   coinbase_cdp: {
     id: "coinbase_cdp",

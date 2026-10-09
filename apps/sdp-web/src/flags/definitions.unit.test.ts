@@ -26,7 +26,6 @@ const FLAG_CAPS = {
   newDesignPayDeposit: "uncapped",
   newDesignActivity: "uncapped",
   custody: { module: "custody" },
-  privyByok: { module: "custody" },
   issuance: { module: "issuance" },
   assetProfiles: { module: "issuance" },
   policies: { module: "policies" },
@@ -124,7 +123,6 @@ describe("defineDashboardFlags", () => {
         "newDesignPayDeposit",
         "newDesignActivity",
         "payments",
-        "privyByok",
       ].sort()
     );
     for (const name of delegated) {

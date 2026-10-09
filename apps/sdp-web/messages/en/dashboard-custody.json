@@ -182,6 +182,7 @@
     "newWallet": "New wallet",
     "providerAdditionalWalletUnavailable": "{provider} is already connected, but additional wallets are not available yet.",
     "walletCreationAvailable": "Wallet creation is available after a custody provider is enabled for this organization.",
+    "walletCreationOptionsUnavailable": "Unable to load wallet creation options. Reload the page to try again.",
     "stale": "(stale)",
     "organizationSettings": "Organization settings",
     "organizationSettingsDescription": "Configure the RPC provider used across this organization.",
@@ -735,7 +736,6 @@
     "byokCheckAgain": "Check again",
     "byokMissingFields": "Fill in every required credential field.",
     "byokSubmitFailed": "Storing the credential failed. Try again.",
-    "providerRequestAccess": "Request access",
     "byokRetrySubmit": "Retry submission",
     "connectionColumn": "Connection",
     "connectionsDescription": "Custody connections your project set up from stored provider credentials.",
@@ -904,6 +904,11 @@
     "walletSetupConnectionRequired": "Choose the account the wallet is created in.",
     "walletSetupProviderAlreadySetUp": "This provider is already set up. Add a wallet instead.",
     "walletSetupConnectionUnavailablePending": "Setup unfinished",
-    "walletSetupConnectionUnavailableFailed": "Needs attention"
+    "walletSetupConnectionUnavailableFailed": "Needs attention",
+    "walletSetupMode": "Custody mode",
+    "walletSetupModePlaceholder": "Choose a custody mode",
+    "walletSetupModeManaged": "Managed",
+    "walletSetupModeByok": "Bring your own credentials",
+    "walletSetupModeHint": "Managed wallets use SDP's provider account. Bring your own credentials connects your own provider app."
   }
 }

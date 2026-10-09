@@ -15,6 +15,7 @@ import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { cn } from "@/lib/utils";
 import type { KnownCustodyProvider } from "./provider-catalog";
+import type { CustodyAvailabilityResult } from "./wallets-create-area";
 import { WalletsOverview } from "./wallets-overview";
 
 const WalletsPlayground = dynamic(
@@ -40,7 +41,7 @@ interface WalletsWorkspaceProps {
   apiBaseUrl: string | null;
   apiKeys: WalletsApiKeyOption[];
   connectedProviders: KnownCustodyProvider[];
-  enabledProviders: KnownCustodyProvider[];
+  custodyAvailability: CustodyAvailabilityResult;
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
@@ -50,7 +51,7 @@ export function WalletsWorkspace({
   apiBaseUrl,
   apiKeys,
   connectedProviders,
-  enabledProviders,
+  custodyAvailability,
   configsError,
   wallets,
   walletsError,
@@ -109,7 +110,7 @@ export function WalletsWorkspace({
               <div className="contents" data-wallet-panel="overview">
                 <WalletsOverview
                   connectedProviders={connectedProviders}
-                  enabledProviders={enabledProviders}
+                  custodyAvailability={custodyAvailability}
                   configsError={configsError}
                   wallets={wallets}
                   walletsError={walletsError}

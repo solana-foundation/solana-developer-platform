@@ -1,6 +1,5 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { ProviderSelectionCard } from "@/components/ui/provider-selection-card";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -25,12 +24,12 @@ export function WalletProviderChoices({
   selectedProvider: KnownCustodyProvider | null;
 }) {
   const t = useTranslations();
-  const hasSelectableProvider = availability.some((provider) => provider.isSelectable);
+  const hasAvailableProvider = availability.length > 0;
   const categories = grouped ? WALLET_PROVIDER_CATEGORIES : [null];
 
   return (
     <div className="grid gap-8">
-      {!canSelect || hasSelectableProvider ? null : (
+      {!canSelect || hasAvailableProvider ? null : (
         <p
           role="status"
           className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-4 text-sm leading-6 text-secondary"
@@ -65,7 +64,7 @@ export function WalletProviderChoices({
                   key={provider.entry.id}
                   onSelect={() => onSelect(provider.entry.id)}
                   isSelected={isSelected}
-                  isSelectable={canSelect && provider.isSelectable}
+                  isSelectable={canSelect}
                   advanceOnEnter={isSelected}
                   icon={<WalletProviderMark provider={provider.entry.id} size="sm" />}
                   title={provider.entry.label}
@@ -75,29 +74,6 @@ export function WalletProviderChoices({
                       <span className="rounded-full bg-surface-raised px-3 py-1 text-xs font-medium text-secondary ring-1 ring-border-subtle">
                         {t("DashboardCustody.active")}
                       </span>
-                    ) : provider.status === "request_access" ? (
-                      // Visible but not self-serve installable (HOO-772): the
-                      // pill says why the card cannot be selected.
-                      <span className="rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-secondary">
-                        {t("Shared.integrations.statusRequestAccess")}
-                      </span>
-                    ) : provider.status === "not_configured" ? (
-                      <span className="rounded-full bg-fill-subtle px-3 py-1 text-xs font-medium text-tertiary">
-                        {t("Shared.integrations.statusNotConfigured")}
-                      </span>
-                    ) : undefined
-                  }
-                  action={
-                    canSelect && provider.requestAccessUrl ? (
-                      <Button asChild variant="secondary">
-                        <a
-                          href={provider.requestAccessUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                        >
-                          {t("DashboardCustody.providerRequestAccess")}
-                        </a>
-                      </Button>
                     ) : undefined
                   }
                 />

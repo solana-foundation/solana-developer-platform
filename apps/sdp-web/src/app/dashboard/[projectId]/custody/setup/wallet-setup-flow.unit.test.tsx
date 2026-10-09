@@ -8,9 +8,16 @@ import {
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
 } from "@/app/dashboard/[projectId]/custody/actions";
+import {
+  recheckPrivyCredentialAction,
+  submitPrivyCredentialAction,
+} from "@/app/dashboard/[projectId]/custody/byok-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { availableCustodyProviders } from "@/lib/provider-availability";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
+import { projectProviderAvailability } from "@/test/provider-availability";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -27,17 +34,74 @@ vi.mock("@/app/dashboard/[projectId]/custody/actions", () => ({
   initializeCustodySetupAction: vi.fn(),
 }));
 
+vi.mock("@/app/dashboard/[projectId]/custody/byok-actions", () => ({
+  submitPrivyCredentialAction: vi.fn(),
+  recheckPrivyCredentialAction: vi.fn(),
+}));
+
 type FlowProps = Parameters<typeof WalletSetupFlow>[0];
+type ConnectionItem = FlowProps["connections"][number];
 
 beforeEach(() => {
   vi.mocked(createCustodySetupWalletAction).mockReset();
   vi.mocked(initializeCustodySetupAction).mockReset();
+  vi.mocked(submitPrivyCredentialAction).mockReset();
+  vi.mocked(recheckPrivyCredentialAction).mockReset();
 });
 
 afterEach(() => {
   cleanup();
   resetDashboardNavigation();
 });
+
+const SANDBOX_AVAILABILITY = availableCustodyProviders(
+  projectProviderAvailability({
+    project: SANDBOX_PROJECT,
+    custody: [
+      { provider: "privy", modes: ["managed", "byok"] },
+      { provider: "fireblocks", modes: ["managed"] },
+    ],
+    compliance: [],
+    ramps: [],
+    earn: [],
+  })
+);
+
+const SANDBOX_MANAGED_PRIVY_AVAILABILITY = availableCustodyProviders(
+  projectProviderAvailability({
+    project: SANDBOX_PROJECT,
+    custody: [{ provider: "privy", modes: ["managed"] }],
+    compliance: [],
+    ramps: [],
+    earn: [],
+  })
+);
+
+const PRODUCTION_AVAILABILITY = availableCustodyProviders(
+  projectProviderAvailability({
+    project: PRODUCTION_PROJECT,
+    custody: [{ provider: "privy", modes: ["byok"] }],
+    compliance: [],
+    ramps: [],
+    earn: [],
+  })
+);
+
+const SANDBOX_FLOW: FlowProps = {
+  connectedProviders: ["privy"],
+  custodyAvailability: SANDBOX_AVAILABILITY,
+  environment: "sandbox",
+  initialProvider: null,
+  connections: [],
+};
+
+const PRODUCTION_FLOW: FlowProps = {
+  connectedProviders: [],
+  custodyAvailability: PRODUCTION_AVAILABILITY,
+  environment: "production",
+  initialProvider: null,
+  connections: [],
+};
 
 function renderInteractiveFlow(props: FlowProps) {
   return render(
@@ -55,67 +119,48 @@ function submittedWalletForm(): FormData {
   return call[0];
 }
 
-function renderFlowWith(props: Partial<FlowProps> = {}): string {
+function renderFlow(props: FlowProps): string {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <WalletSetupFlow
-        connectedProviders={props.connectedProviders ?? ["privy"]}
-        enabledProviders={props.enabledProviders ?? ["privy", "fireblocks"]}
-        initialProvider={props.initialProvider ?? null}
-      />
+      <WalletSetupFlow {...props} />
     </I18nProvider>
   );
 }
 
-function renderFlow(initialProvider: "privy" | null = null): string {
-  return renderFlowWith({ initialProvider });
+function detailsSubmitButton(markup: string): string {
+  const match = markup.match(/<button[^>]*form="wallet-details-form"[^>]*>/);
+  if (match === null) {
+    throw new Error("expected a wallet details submit button");
+  }
+  return match[0];
+}
+
+function connection(overrides: Partial<ConnectionItem>): ConnectionItem {
+  return {
+    id: "conn-active",
+    provider: "privy",
+    label: "Production signing",
+    status: "active",
+    isRuntimeExecutionAllowed: true,
+    createdAt: "2026-08-10T09:00:00.000Z",
+    activatedAt: "2026-08-10T09:05:00.000Z",
+    lastCheck: null,
+    pendingWalletLabel: null,
+    ...overrides,
+  };
 }
 
 describe("WalletSetupFlow", () => {
-  it("keeps the legacy wallet details for privy while the BYOK flag is off", () => {
-    const markup = renderFlow("privy");
+  it("keeps an installed provider on the additional-wallet path without a mode choice", () => {
+    const markup = renderFlow({ ...SANDBOX_FLOW, initialProvider: "privy" });
 
     expect(markup).toContain("Wallet details");
     expect(markup).not.toContain("data-privy-byok-form");
-  });
-
-  it("sends an uninstalled privy to provider details when BYOK is on", () => {
-    const markup = renderToStaticMarkup(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <WalletSetupFlow
-          connectedProviders={[]}
-          enabledProviders={["privy"]}
-          initialProvider="privy"
-          privyByokEnabled
-        />
-      </I18nProvider>
-    );
-
-    expect(markup).toContain("Provider details");
-    expect(markup).toContain("data-privy-byok-form");
-    expect(markup).toMatch(/type="password"/);
-    // The credential form owns its submit; the footer offers no second one.
-    expect(markup).not.toContain("Create wallet");
-  });
-
-  it("keeps an installed privy on the additional-wallet path even with BYOK on", () => {
-    const markup = renderToStaticMarkup(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <WalletSetupFlow
-          connectedProviders={["privy"]}
-          enabledProviders={["privy"]}
-          initialProvider="privy"
-          privyByokEnabled
-        />
-      </I18nProvider>
-    );
-
-    expect(markup).toContain("Wallet details");
-    expect(markup).not.toContain("data-privy-byok-form");
+    expect(markup).not.toContain('aria-label="Custody mode"');
   });
 
   it("uses the shared top progress and bottom action layout for provider selection", () => {
-    const markup = renderFlow();
+    const markup = renderFlow(SANDBOX_FLOW);
 
     expect(markup.match(/data-wallet-setup-stepper="true"/g)).toHaveLength(1);
     expect(markup).toContain("Step 1 of 2");
@@ -137,7 +182,7 @@ describe("WalletSetupFlow", () => {
   });
 
   it("keeps wallet details in the same shell with back and create actions", () => {
-    const markup = renderFlow("privy");
+    const markup = renderFlow({ ...SANDBOX_FLOW, initialProvider: "privy" });
 
     expect(markup).toContain("Step 2 of 2");
     expect(markup).toContain('id="wallet-details-form"');
@@ -148,26 +193,20 @@ describe("WalletSetupFlow", () => {
     expect(markup.match(/data-wallet-setup-actions="true"/g)).toHaveLength(1);
   });
 
-  it("shows providers the organization cannot use yet instead of hiding them", () => {
-    const markup = renderFlowWith({ connectedProviders: [], enabledProviders: [] });
+  it("shows only the providers the project can use", () => {
+    const markup = renderFlow({ ...SANDBOX_FLOW, connectedProviders: [] });
 
-    for (const label of [
-      "Privy",
-      "Fireblocks",
-      "Turnkey",
-      "Anchorage",
-      "IBM Digital Asset Haven",
-    ]) {
-      expect(markup).toContain(label);
+    expect(markup.match(/data-provider-selection-card="true"/g)).toHaveLength(2);
+    expect(markup).toContain("Privy");
+    expect(markup).toContain("Fireblocks");
+    for (const label of ["Turnkey", "Anchorage", "IBM Digital Asset Haven", "Local Signer"]) {
+      expect(markup).not.toContain(label);
     }
-    // Each of these ships a working adapter, so none of them may be presented
-    // as something that has not arrived yet.
-    expect(markup).not.toContain("Coming later");
+    expect(markup).not.toContain('data-provider-selectable="false"');
   });
 
-  it("groups the catalog by what the provider is for", () => {
-    // Privy is entitled (API) and Fireblocks offers request access (Institutional).
-    const markup = renderFlowWith({ connectedProviders: [], enabledProviders: ["privy"] });
+  it("groups the available providers by what they are for", () => {
+    const markup = renderFlow({ ...SANDBOX_FLOW, connectedProviders: [] });
 
     expect(markup).toMatch(/<h3[^>]*>API<\/h3>/);
     expect(markup).toMatch(/<h3[^>]*>Institutional<\/h3>/);
@@ -176,64 +215,15 @@ describe("WalletSetupFlow", () => {
     );
   });
 
-  it("keeps both categories on the page even when none is granted yet", () => {
-    const markup = renderFlowWith({ connectedProviders: [], enabledProviders: [] });
-
-    expect(markup).toMatch(/<h3[^>]*>API<\/h3>/);
-    expect(markup).toMatch(/<h3[^>]*>Institutional<\/h3>/);
-  });
-
-  it("routes a gated provider to request access rather than a dead card", () => {
-    const markup = renderFlowWith({ connectedProviders: [], enabledProviders: [] });
-
-    expect(markup).toContain("https://solanafoundation.typeform.com/to/wShiq9SN");
-    expect(markup).toContain("Request access");
-    expect(markup).toMatch(/rel="noreferrer noopener"/);
-  });
-
-  it("does not offer request access once the gated provider is connected", () => {
-    const intakeLinks = (markup: string) =>
-      (markup.match(/https:\/\/solanafoundation\.typeform\.com\/to\/wShiq9SN/g) ?? []).length;
-
-    const gated = renderFlowWith({ connectedProviders: [], enabledProviders: [] });
-    const connected = renderFlowWith({
-      connectedProviders: ["fireblocks"],
-      enabledProviders: [],
-    });
-
-    // Connecting Fireblocks retires its own intake route and nobody else's:
-    // every provider still to be granted keeps the way to ask for it.
-    expect(intakeLinks(connected)).toBe(intakeLinks(gated) - 1);
-    expect(connected).toContain("Active");
-  });
-
-  it("keeps unusable providers out of the selectable set", () => {
-    const markup = renderFlowWith({ connectedProviders: [], enabledProviders: ["privy"] });
-
-    // Privy is the only entitled provider, so it is the only pressable card.
-    expect(markup.match(/aria-pressed=/g)).toHaveLength(1);
-    expect(markup).toContain('data-provider-selectable="false"');
-  });
-
-  it("gives every provider a card now that none of them is a dead end", () => {
-    const markup = renderFlowWith({ connectedProviders: [], enabledProviders: ["privy"] });
-
-    // Nine cards: Privy is ready to connect and the other eight can be asked
-    // for. The local signer is a deployment mode, so it is not one of them.
-    expect(markup.match(/data-provider-selection-card="true"/g)).toHaveLength(9);
-    expect(markup).not.toContain("Local Signer");
-    expect(markup).not.toContain("data-provider-coming-later");
-    expect(markup).toContain("Turnkey");
-  });
-
   it("tells the user to add a wallet when the provider is already set up", async () => {
     vi.mocked(initializeCustodySetupAction).mockResolvedValue({
       status: "provider_already_set_up",
     });
     const user = userEvent.setup();
     renderInteractiveFlow({
+      ...SANDBOX_FLOW,
       connectedProviders: [],
-      enabledProviders: ["privy"],
+      custodyAvailability: SANDBOX_MANAGED_PRIVY_AVAILABILITY,
       initialProvider: "privy",
     });
 
@@ -247,61 +237,146 @@ describe("WalletSetupFlow", () => {
     expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
-  it("explains why nothing can be selected instead of emptying the page", () => {
-    const markup = renderFlowWith({ connectedProviders: [], enabledProviders: [] });
+  it("explains why nothing can be selected when the project can use no provider", () => {
+    const markup = renderFlow({ ...SANDBOX_FLOW, connectedProviders: [], custodyAvailability: [] });
 
     expect(markup).toContain(
       "Wallet creation is available after a custody provider is enabled for this organization."
     );
+    expect(markup).not.toContain("data-provider-selection-card");
+    expect(markup).not.toContain("<h3");
+  });
+});
+
+describe("WalletSetupFlow custody mode", () => {
+  it("offers only Privy in Production", () => {
+    const markup = renderFlow(PRODUCTION_FLOW);
+
+    expect(markup.match(/data-provider-selection-card="true"/g)).toHaveLength(1);
     expect(markup).toContain("Privy");
-    expect(markup).not.toContain("No wallet providers enabled");
+    expect(markup).not.toContain("Fireblocks");
+  });
+
+  it("sends Privy straight to provider details in Production, with no Managed option", () => {
+    const markup = renderFlow({ ...PRODUCTION_FLOW, initialProvider: "privy" });
+
+    expect(markup).toContain("Provider details");
+    expect(markup).toContain("data-privy-byok-form");
+    expect(markup).toMatch(/type="password"/);
+    expect(markup).not.toContain('aria-label="Custody mode"');
+    expect(markup).not.toContain(">Managed<");
+    expect(markup).not.toContain('id="wallet-label"');
+    expect(markup).not.toContain("Wallet label");
+    expect(markup).not.toContain("Create wallet");
+  });
+
+  it("labels a Production wallet's environment as Production", () => {
+    const markup = renderFlow({
+      ...PRODUCTION_FLOW,
+      initialProvider: "privy",
+      connections: [connection({})],
+    });
+
+    expect(markup).toContain("Wallet details");
+    expect(markup).toContain(">Production<");
+    expect(markup).not.toContain(">Sandbox<");
+  });
+
+  it("asks a Sandbox project to choose a mode for a provider offering both, with nothing preselected", () => {
+    const markup = renderFlow({
+      ...SANDBOX_FLOW,
+      connectedProviders: [],
+      initialProvider: "privy",
+    });
+
+    expect(markup).toContain('aria-label="Custody mode"');
+    expect(markup).toContain("Choose a custody mode");
+    expect(markup).not.toContain("data-privy-byok-form");
+    expect(markup).not.toContain('id="wallet-label"');
+  });
+
+  it("blocks submitting until a mode is chosen", () => {
+    const markup = renderFlow({
+      ...SANDBOX_FLOW,
+      connectedProviders: [],
+      initialProvider: "privy",
+    });
+
+    expect(markup).not.toContain('id="wallet-details-form"');
+    expect(detailsSubmitButton(markup)).toContain('disabled=""');
+  });
+
+  it("skips the mode choice for a provider offering one mode", () => {
+    const markup = renderFlow({
+      ...SANDBOX_FLOW,
+      connectedProviders: [],
+      initialProvider: "fireblocks",
+    });
+
+    expect(markup).not.toContain('aria-label="Custody mode"');
+    expect(markup).not.toContain("data-privy-byok-form");
+    expect(markup).toContain('id="wallet-details-form"');
+    expect(markup).toContain(">Sandbox<");
+    expect(detailsSubmitButton(markup)).not.toContain('disabled=""');
+  });
+
+  it("holds the mode choice and Back while a BYOK re-check is in flight", async () => {
+    const refusal = {
+      status: "refused",
+      message: "Install checks are not enabled for this organization",
+      connectionId: "conn_refused",
+    } as const;
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue(refusal);
+    const recheck = Promise.withResolvers<typeof refusal>();
+    vi.mocked(recheckPrivyCredentialAction).mockReturnValue(recheck.promise);
+    const user = userEvent.setup();
+    renderInteractiveFlow({ ...SANDBOX_FLOW, connectedProviders: [], initialProvider: "privy" });
+
+    await user.click(screen.getByRole("combobox", { name: "Custody mode" }));
+    await user.click(await screen.findByRole("option", { name: "Bring your own credentials" }));
+    await user.type(screen.getByLabelText("Privy app ID"), "app_test");
+    await user.type(screen.getByLabelText("Privy app secret"), "secret_test");
+    await user.click(screen.getByRole("button", { name: "Connect and verify" }));
+    await user.click(await screen.findByRole("button", { name: "Check again" }));
+
+    expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_refused");
+    expect(screen.getByRole("combobox", { name: "Custody mode" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", true);
+
+    recheck.resolve(refusal);
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Custody mode" })).toHaveProperty(
+        "disabled",
+        false
+      )
+    );
+    expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", false);
   });
 });
 
 describe("WalletSetupFlow connection picker", () => {
-  function connection(
-    overrides: Partial<FlowProps["connections"] extends (infer T)[] | undefined ? T : never> = {}
-  ) {
-    return {
-      id: "conn-active",
-      provider: "privy" as const,
-      label: "Production signing",
-      status: "active" as const,
-      isRuntimeExecutionAllowed: true,
-      createdAt: "2026-08-10T09:00:00.000Z",
-      activatedAt: "2026-08-10T09:05:00.000Z",
-      lastCheck: null,
-      pendingWalletLabel: null,
-      ...overrides,
-    };
-  }
-
   function renderInstalledPrivy(
-    connections: FlowProps["connections"],
-    connectedProviders: FlowProps["connectedProviders"] = ["privy"]
+    props: Pick<FlowProps, "connections" | "connectedProviders">
   ): string {
-    return renderToStaticMarkup(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <WalletSetupFlow
-          connectedProviders={connectedProviders}
-          enabledProviders={["privy"]}
-          initialProvider="privy"
-          privyByokEnabled
-          connections={connections}
-        />
-      </I18nProvider>
-    );
+    return renderFlow({ ...SANDBOX_FLOW, ...props, initialProvider: "privy" });
   }
 
   it("offers the account picker once the project has a usable connection", () => {
-    const markup = renderInstalledPrivy([connection()]);
+    const markup = renderInstalledPrivy({
+      connections: [connection({})],
+      connectedProviders: ["privy"],
+    });
 
     expect(markup).toContain("The wallet is created in this account");
     expect(markup).toContain('name="walletTarget"');
   });
 
   it("preselects no account, even when only one is selectable", () => {
-    const markup = renderInstalledPrivy([connection({ id: "conn-only" })], []);
+    const markup = renderInstalledPrivy({
+      connections: [connection({ id: "conn-only" })],
+      connectedProviders: [],
+    });
 
     expect(markup).toContain('name="walletTarget"');
     expect(markup).not.toContain("conn-only");
@@ -309,11 +384,9 @@ describe("WalletSetupFlow connection picker", () => {
 
   function renderInteractiveInstalledPrivy() {
     return renderInteractiveFlow({
-      connectedProviders: ["privy"],
-      enabledProviders: ["privy"],
+      ...SANDBOX_FLOW,
       initialProvider: "privy",
-      privyByokEnabled: true,
-      connections: [connection()],
+      connections: [connection({})],
     });
   }
 
@@ -358,52 +431,67 @@ describe("WalletSetupFlow connection picker", () => {
     expect(submittedWalletForm().get("connectionId")).toBe("conn-active");
   });
 
-  // A project with only unfinished connections has nothing to choose between,
-  // so the wizard keeps the shape it had before the picker existed.
   it("stays out of the way when nothing is selectable", () => {
-    const markup = renderInstalledPrivy([connection({ status: "pending" })]);
+    const markup = renderInstalledPrivy({
+      connections: [connection({ status: "pending" })],
+      connectedProviders: ["privy"],
+    });
 
     expect(markup).not.toContain("The wallet is created in this account");
     expect(markup).toContain("Wallet details");
   });
 
   it("stays out of the way when the project has no connections at all", () => {
-    const markup = renderInstalledPrivy([]);
+    const markup = renderInstalledPrivy({ connections: [], connectedProviders: ["privy"] });
 
     expect(markup).not.toContain("The wallet is created in this account");
   });
 
-  // A BYOK-only project has no legacy config, so `/v1/wallets/configs` reports
-  // nothing connected; the active connection alone must mark privy installed.
-  it("offers an active connection when there is no legacy config", () => {
-    const markup = renderInstalledPrivy([connection()], []);
+  it("offers an active connection when there is no managed config", () => {
+    const markup = renderInstalledPrivy({
+      connections: [connection({})],
+      connectedProviders: [],
+    });
 
     expect(markup).toContain("Wallet details");
     expect(markup).toContain('name="walletTarget"');
     expect(markup).toContain('name="label"');
+    expect(markup).not.toContain('aria-label="Custody mode"');
     expect(markup).not.toContain("data-privy-byok-form");
     expect(markup).not.toMatch(/type="password"/);
   });
 
   it("keeps the credential form while the only connection is not active yet", () => {
-    const markup = renderInstalledPrivy([connection({ status: "pending" })], []);
+    const markup = renderFlow({
+      ...PRODUCTION_FLOW,
+      initialProvider: "privy",
+      connections: [connection({ status: "pending" })],
+    });
 
     expect(markup).toContain("data-privy-byok-form");
     expect(markup).not.toContain('name="walletTarget"');
   });
 
-  // Connections belong to one provider; switching on step 1 must not carry them over.
+  it("offers no connections for a provider whose modes leave out byok", () => {
+    const markup = renderFlow({
+      ...SANDBOX_FLOW,
+      custodyAvailability: SANDBOX_MANAGED_PRIVY_AVAILABILITY,
+      initialProvider: "privy",
+      connections: [connection({})],
+    });
+
+    expect(markup).toContain("Wallet details");
+    expect(markup).not.toContain("The wallet is created in this account");
+    expect(markup).not.toContain('name="walletTarget"');
+  });
+
   it("ignores connections belonging to another provider", () => {
-    const markup = renderToStaticMarkup(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <WalletSetupFlow
-          connectedProviders={["fireblocks"]}
-          enabledProviders={["fireblocks"]}
-          initialProvider="fireblocks"
-          connections={[connection()]}
-        />
-      </I18nProvider>
-    );
+    const markup = renderFlow({
+      ...SANDBOX_FLOW,
+      connectedProviders: ["fireblocks"],
+      initialProvider: "fireblocks",
+      connections: [connection({})],
+    });
 
     expect(markup).not.toContain("The wallet is created in this account");
   });
