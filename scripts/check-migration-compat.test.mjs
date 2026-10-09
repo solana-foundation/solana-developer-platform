@@ -197,6 +197,31 @@ test("the breaking directive allows a migrations-only PR", () => {
   assert.equal(check(sql, [SQL, "apps/sdp-api/src/routes/a.ts"]).length, 1);
 });
 
+test("the breaking directive ignores changed test files outside the migrations directory", () => {
+  const sql = "-- sdp:migration-compat: breaking\nALTER TABLE a DROP COLUMN b;";
+  assert.deepEqual(
+    check(sql, [
+      SQL,
+      "apps/sdp-api/src/routes/foo.test.ts",
+      "apps/sdp-web/playwright/tests/bar.e2e.spec.ts",
+    ]),
+    []
+  );
+
+  const mixed = check(sql, [
+    SQL,
+    "apps/sdp-api/src/routes/foo.test.ts",
+    "apps/sdp-api/src/routes/foo.ts",
+  ]);
+  assert.equal(mixed.length, 1);
+  assert.match(mixed[0], /found apps\/sdp-api\/src\/routes\/foo\.ts\.$/);
+  assert.doesNotMatch(mixed[0], /foo\.test\.ts/);
+
+  assert.deepEqual(check(sql, [SQL, "apps/sdp-api/src/test/helpers/custody.ts"]), [
+    `${SQL} is marked breaking, so the PR must change nothing outside apps/sdp-api/src/db/migrations/; found apps/sdp-api/src/test/helpers/custody.ts.`,
+  ]);
+});
+
 test("files outside the postgres directory and deleted files are ignored", () => {
   assert.deepEqual(
     checkMigrationChange([SQL, "apps/sdp-api/src/routes/a.ts"], () => null),
