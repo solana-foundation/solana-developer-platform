@@ -175,6 +175,7 @@ function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
     CUSTODY_KMS_KEY_NAME: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
     SDP_MANAGED_RECONCILIATION_CRON: "*/3 * * * *",
     SDP_MANAGED_RECONCILIATION_TIMEOUT_SECONDS: "120",
+    SDP_RELEASE_CHANNEL: "experimental",
     ...overrides,
   } as Env;
 }
@@ -283,6 +284,12 @@ describe("runCronJob", () => {
   it("refuses to run when a managed deployment would sign with a platform-held key", async () => {
     vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ SIGNING_PROVIDER: "local" }));
     await expect(runCronJob()).rejects.toThrow(/Local signing/);
+  });
+
+  // makeEnv sets no ENVIRONMENT: the check must not depend on it.
+  it("runs the release channel boot check without ENVIRONMENT", async () => {
+    vi.mocked(getProcessEnv).mockReturnValue(makeEnv({ SDP_RELEASE_CHANNEL: undefined }));
+    await expect(runCronJob()).rejects.toThrow(/SDP_RELEASE_CHANNEL is required/);
   });
 
   it("runs a self-hosted deployment without a custody KMS key", async () => {

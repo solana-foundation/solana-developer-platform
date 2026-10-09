@@ -1,6 +1,6 @@
 "use client";
 
-import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
+import type { UnifiedTransactionModule } from "@sdp/types";
 import {
   ArrowLeftIcon,
   ChevronLeftIcon,
@@ -878,7 +878,8 @@ function getWalletSectionPageConfig(
 function getLegacyDesignPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
-  privateChannelsEnabled: boolean
+  privateChannelsEnabled: boolean,
+  transactionModules: readonly UnifiedTransactionModule[]
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/integrations/private-channels/setup") {
     return actionPageConfig({
@@ -943,7 +944,7 @@ function getLegacyDesignPageConfig(
       headerTabs: {
         tabs: [
           { id: "all", label: t("DashboardPayments.transactions.all") },
-          ...UNIFIED_TRANSACTION_MODULES.map((module) => ({
+          ...transactionModules.map((module) => ({
             id: module,
             label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
           })),
@@ -1005,6 +1006,8 @@ export function getDashboardPageConfig(
   t: ReturnType<typeof useTranslations>,
   assetProfilesEnabled: boolean,
   privateChannelsEnabled: boolean,
+  // Transactions tabs, from `enabledTransactionModules`.
+  transactionModules: readonly UnifiedTransactionModule[],
   custodyEnabled = true,
   _paymentsEnabled = true,
   _policiesEnabled = true,
@@ -1062,7 +1065,7 @@ export function getDashboardPageConfig(
   // A Payments page no design module has redesigned keeps the previous design's header under
   // NEW DESIGN too.
   const legacyDesignConfig = !newDesignPage
-    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled)
+    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled, transactionModules)
     : null;
   if (legacyDesignConfig) {
     return legacyDesignConfig;
@@ -1086,7 +1089,7 @@ export function getDashboardPageConfig(
   if (pathname.startsWith("/dashboard/settings") || pathname === "/dashboard/members") {
     // Settings was the only route left on the `max-w-5xl` default, which stranded a
     // wide empty gutter beside its cards. Widened rather than set to `max-w-none`:
-    // the members table and the RPC form are label/value rows, and letting them span
+    // the members table rows are label/value pairs, and letting them span
     // an ultrawide display pushes each value far from its label.
     return {
       title: t("Shared.dashboardShell.settings"),

@@ -147,8 +147,8 @@ describe("Clerk webhooks", () => {
           sdp: {
             tier: "pro",
             providerOverrides: {
-              rpc: {
-                helius: true,
+              compliance: {
+                elliptic: true,
               },
             },
           },
@@ -180,8 +180,8 @@ describe("Clerk webhooks", () => {
       required(createdOrg).settings ? JSON.parse(required(required(createdOrg).settings)) : null
     ).toMatchObject({
       providerOverrides: {
-        rpc: {
-          helius: true,
+        compliance: {
+          elliptic: true,
         },
       },
     });

@@ -1,4 +1,4 @@
-import { COMPLIANCE_PROVIDERS, ORGANIZATION_RPC_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
+import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/custody/provider-catalog";
 import { INTEGRATION_FAMILIES, type IntegrationFamily } from "./integrations-filter";
 
@@ -6,13 +6,9 @@ import { INTEGRATION_FAMILIES, type IntegrationFamily } from "./integrations-fil
  * How many cards each family settles at, read from the same catalogues the page
  * maps over. A flat four per section left the placeholder 22% shorter than the
  * page it stood in for, because custody alone renders ten.
- *
- * `default` is only listed while the organization runs on it, so RPC is counted
- * one short of the union rather than assuming it shows.
  */
 const FAMILY_CARD_COUNTS: Record<IntegrationFamily, number> = {
   custody: CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length,
-  rpc: ORGANIZATION_RPC_PROVIDERS.length - 1,
   ramps: RAMP_PROVIDERS.length,
   compliance: COMPLIANCE_PROVIDERS.length,
   privacy: 1,
@@ -97,9 +93,9 @@ export function IntegrationDetailSkeleton() {
         <div className="h-9 w-32 shrink-0 rounded-[10px] bg-fill-subtle" />
       </div>
       {/* One shape stands in for every family, and they differ: ramps and
-          compliance settle at 4 blocks, custody at 5, RPC at 6 once Connection
-          and "Your own credentials" are counted. Five is the median, so no
-          family jumps more than one block. Measured by the test beside this. */}
+          compliance settle at 4 blocks, custody at 5. Five matches custody, so
+          no family jumps more than one block. Measured by the test beside
+          this. */}
       <SkeletonSection headingWidth="w-32" />
       <SkeletonSection headingWidth="w-48" />
       <SkeletonSection headingWidth="w-24" />

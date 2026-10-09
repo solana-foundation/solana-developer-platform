@@ -5,6 +5,7 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { enabledTransactionModules } from "@/app/dashboard/payments/transactions/transaction-modules";
 import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import {
   DashboardHeaderAction,
@@ -408,6 +409,7 @@ export function DashboardShell({
 }) {
   const {
     assetProfiles: assetProfilesEnabled,
+    compliance: complianceEnabled,
     custody: custodyEnabled,
     dvp: dvpEnabled,
     earn: earnEnabled,
@@ -418,6 +420,7 @@ export function DashboardShell({
     payments: paymentsEnabled,
     policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
+    ramps: rampsEnabled,
   } = flags;
   const t = useTranslations();
   const { isLoaded, isSignedIn, orgId } = useAuth();
@@ -461,6 +464,7 @@ export function DashboardShell({
     t,
     assetProfilesEnabled,
     privateChannelsEnabled,
+    enabledTransactionModules(flags),
     custodyEnabled,
     paymentsEnabled,
     policiesEnabled,
@@ -469,6 +473,7 @@ export function DashboardShell({
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
+    complianceEnabled,
     custodyEnabled,
     dvpEnabled,
     earnEnabled,
@@ -479,6 +484,7 @@ export function DashboardShell({
     pendingApprovalCount,
     policiesEnabled,
     privateChannelsEnabled,
+    rampsEnabled,
   });
   const pageTitle =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname

@@ -1,3 +1,4 @@
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import type { MonitorOptions, Observability } from "@/runtime/observability";
@@ -49,7 +50,7 @@ describe("OpenAPI response delivery", () => {
   });
 
   it("lets the real app pretty-print /openapi.json without a stale body length", async () => {
-    const app = createApp({ observability });
+    const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES, observability });
     const response = await app.request("http://local.test/openapi.json?pretty", {}, appEnv);
 
     expect(response.status).toBe(200);

@@ -29,7 +29,7 @@ export function registerOnboardingPaths(registry: OpenAPIRegistry) {
     summary: "Complete organization onboarding",
     operationId: "completeOrganizationOnboarding",
     description:
-      "Marks organization onboarding complete after verifying an RPC selection and the selected default custody wallet for the default sandbox project.",
+      "Marks organization onboarding complete after verifying the selected default custody wallet for the default sandbox project.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {

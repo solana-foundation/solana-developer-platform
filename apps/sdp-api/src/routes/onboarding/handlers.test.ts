@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { validateBody } from "@/middleware/validate";
+import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -16,7 +17,7 @@ const CLERK_ORGANIZATION_ID = "org_clerk_onboarding_test";
 const USER_ID = "user_onboarding_test";
 const PROJECT_ID = "project_onboarding_test";
 
-function completeRequest(custodyProvider = "privy") {
+function completeRequest(custodyProvider: string) {
   return {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -77,76 +78,84 @@ async function seedOrganization() {
   });
 }
 
+async function seedDefaultSandboxCustodyWallet() {
+  await seedTestCustodySetup(
+    env,
+    {
+      id: "cfg_onboarding_test",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      provider: "privy",
+      config: "encrypted",
+      encryptionVersion: "sdp-custody-encryption-v1",
+      defaultWalletId: "wallet_onboarding_test",
+      status: "active",
+      createdAt: "2026-07-21T00:00:00.000Z",
+      updatedAt: "2026-07-21T00:00:00.000Z",
+    },
+    {
+      id: "cw_onboarding_test",
+      custodyConfigId: "cfg_onboarding_test",
+      walletId: "wallet_onboarding_test",
+      publicKey: "11111111111111111111111111111111",
+      label: "Default wallet",
+      purpose: null,
+      status: "active",
+      createdAt: "2026-07-21T00:00:00.000Z",
+    }
+  );
+}
+
+async function getSetup() {
+  const response = await createApp().request("/status", {}, env);
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    data: {
+      setup: {
+        status: string;
+        currentStep: string;
+        custodyProvider: string | null;
+        canManage: boolean;
+      };
+    };
+  };
+  return body.data.setup;
+}
+
 describe("organization onboarding handlers", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await seedOrganization();
   });
 
-  it("returns resumable setup state for a newly created organization", async () => {
-    const response = await createApp().request("/status", {}, env);
-    const body = (await response.json()) as {
-      data: { setup: { status: string; currentStep: string; canManage: boolean } };
-    };
-
-    expect(response.status).toBe(200);
-    expect(body.data.setup).toMatchObject({
+  it("starts a newly created organization at custody", async () => {
+    expect(await getSetup()).toMatchObject({
       status: "not_started",
-      currentStep: "rpc",
+      currentStep: "custody",
+      custodyProvider: null,
       canManage: true,
     });
   });
 
-  it("only completes after an RPC choice and active custody wallet exist", async () => {
+  it("moves to in progress once the default sandbox custody wallet exists", async () => {
+    await seedDefaultSandboxCustodyWallet();
+
+    expect(await getSetup()).toMatchObject({
+      status: "in_progress",
+      currentStep: "custody",
+      custodyProvider: "privy",
+    });
+  });
+
+  it("completes once the active custody wallet exists", async () => {
     const app = createApp();
-    expect((await app.request("/complete", completeRequest(), env)).status).toBe(400);
+    expect((await app.request("/complete", completeRequest("privy"), env)).status).toBe(400);
 
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "default" }), ORGANIZATION_ID)
-      .run();
-    expect((await app.request("/complete", completeRequest(), env)).status).toBe(400);
-
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              default_wallet_id, status)
-           VALUES
-             ('cfg_onboarding_test', ?, ?, 'privy', 'encrypted',
-              'wallet_onboarding_test', 'active')`
-        )
-        .bind(ORGANIZATION_ID, PROJECT_ID),
-      getDb(env).prepare(
-        `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, label, status)
-         VALUES
-           ('cw_onboarding_test', 'cfg_onboarding_test', 'wallet_onboarding_test',
-            '11111111111111111111111111111111', 'Default wallet', 'active')`
-      ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_scope_defaults
-             (id, organization_id, project_id, default_custody_config_id)
-           VALUES ('csd_onboarding_test', ?, ?, 'cfg_onboarding_test')`
-        )
-        .bind(ORGANIZATION_ID, PROJECT_ID),
-    ]);
+    await seedDefaultSandboxCustodyWallet();
 
     expect((await app.request("/complete", completeRequest("turnkey"), env)).status).toBe(400);
 
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "helius" }), ORGANIZATION_ID)
-      .run();
-    expect((await app.request("/complete", completeRequest(), env)).status).toBe(403);
-
-    await getDb(env)
-      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
-      .bind(JSON.stringify({ rpcProvider: "default" }), ORGANIZATION_ID)
-      .run();
-    const response = await app.request("/complete", completeRequest(), env);
+    const response = await app.request("/complete", completeRequest("privy"), env);
     const body = (await response.json()) as {
       data: { setup: { status: string; currentStep: string; custodyProvider: string } };
     };

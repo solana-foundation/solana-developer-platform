@@ -21,6 +21,7 @@ import type {
 import { bvnkPayoutObservationFromSource } from "@sdp/payments/ramps/providers/bvnk/settlement";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { toNumberAmount } from "@sdp/solana/amount";
+import type { SdpRampProviderStages } from "@sdp/types";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { getDb } from "@/db";
 import type {
@@ -32,6 +33,7 @@ import { createPostgresBvnkOnrampTransfersRepository } from "@/db/repositories/b
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { internalError } from "@/lib/errors";
+import { isRampProviderAvailable } from "@/lib/feature-flags";
 import { buildBvnkOnrampPayout } from "@/routes/payments/ramps/providers/bvnk";
 import {
   applyTerminalBvnkPayoutObservation,
@@ -59,9 +61,17 @@ const BVNK_PAYOUT_ASSET_CURRENCIES = new Set<string>(BVNK_CRYPTO_CURRENCIES);
  * is awaited (P2-1).
  *
  * @param env - Process environment used for database and provider access.
+ * @param rampProviderStages - `SDP_RAMP_PROVIDER_STAGES`; tests may pass their own.
  * @returns The number of candidate rows touched by at least one database write or a successful provider-side create/record.
  */
-export async function reconcileBvnkOnrampPayouts(env: Env): Promise<number> {
+export async function reconcileBvnkOnrampPayouts(
+  env: Env,
+  rampProviderStages: SdpRampProviderStages
+): Promise<number> {
+  // BVNK outside the release channel is off completely, its in-flight payouts included.
+  if (!isRampProviderAvailable(env, "bvnk", rampProviderStages)) {
+    return 0;
+  }
   const repo = createPostgresBvnkOnrampTransfersRepository(getDb(env));
   const now = Date.now();
   const unclaimed = await repo.listUnclaimedPayoutCandidates({

@@ -287,7 +287,11 @@ own reserve read failed goes without a value.
 in-flight requests, so owners hydrated together read the slot, a vault and
 (farm-less) its reserves once. Only `getSlot`, `getAccountInfo`,
 `getMultipleAccounts` and `getTokenAccountsByOwner` are shared; every other
-method (sends, simulations, blockhashes) passes straight through. It sits BELOW
+method (sends, simulations, blockhashes) passes straight through. A caller joins
+only a request sent after its read floor (`packages/sdp-rpc/CLAUDE.md`, "Read
+floors") and under 2 s ago (`KAMINO_SHARED_READ_JOIN_WINDOW_MS`), so a stalled
+request never captures later callers: they send their own, and the old one
+aborts once its last joiner's 30 s deadline has passed. It sits BELOW
 `withRpcReadContext`: a minimum-slot read never joins an unscoped one, and every
 consumer validates the context itself. The socket retry sits below the sharing,
 so a re-send serves every joiner with the scoped payload. Builds and quotes stay

@@ -1,6 +1,10 @@
 "use client";
 
-import { UNIFIED_TRANSACTION_MODULE_CONTRACTS, UNIFIED_TRANSACTION_STATUSES } from "@sdp/types";
+import {
+  UNIFIED_TRANSACTION_MODULE_CONTRACTS,
+  UNIFIED_TRANSACTION_STATUSES,
+  type UnifiedTransactionModule,
+} from "@sdp/types";
 import { ReceiptTextIcon, SearchIcon, XIcon } from "lucide-react";
 import {
   createContext,
@@ -95,15 +99,18 @@ export function TransactionsWorkspace({
   initialFilters,
   initialResult,
   issuedTokensByMint,
+  modules,
 }: {
   initialFilters: TransactionFilters;
   initialResult: TransactionsPageResult;
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
+  /** The modules the header shows tabs for (`enabledTransactionModules`). */
+  modules: readonly UnifiedTransactionModule[];
 }) {
   const t = useTranslations();
   const [filters, setFilters] = useState(initialFilters);
   const [initialQuery] = useState(() => transactionsApiQuery(initialFilters));
-  const activeModule = parseTransactionModule(useDashboardTab());
+  const activeModule = parseTransactionModule(useDashboardTab(), modules);
 
   const navigate = useCallback((next: TransactionFilters) => {
     setFilters(next);
@@ -120,11 +127,11 @@ export function TransactionsWorkspace({
   // the tab store still holds its null server snapshot while the URL already
   // carries the real tab, so the effect defers to the URL until the two agree.
   useEffect(() => {
-    if (parseTransactionModule(readDashboardTabFromUrl()) !== activeModule) return;
+    if (parseTransactionModule(readDashboardTabFromUrl(), modules) !== activeModule) return;
     if (activeModule !== filters.module) {
       update({ module: activeModule, kind: undefined });
     }
-  }, [activeModule, filters.module, update]);
+  }, [activeModule, filters.module, modules, update]);
 
   const apiQuery = transactionsApiQuery(filters);
   const { data, error, isValidating } = useSWR<TransactionsPageResult, Error>(

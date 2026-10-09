@@ -42,6 +42,8 @@ interface CounterpartyDetailWorkspaceProps {
   counterparty: Counterparty;
   initialAccounts: CounterpartyAccount[];
   initialTransfers: PaymentTransferSummary[];
+  /** Provider accounts are ramp onboarding state, so they show only when ramps are on. */
+  rampsEnabled: boolean;
 }
 
 const DETAIL_TABS = ["details", "transactions"] as const;
@@ -118,11 +120,14 @@ export function CounterpartyDetailWorkspace({
   counterparty,
   initialAccounts,
   initialTransfers,
+  rampsEnabled,
 }: CounterpartyDetailWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
   const router = useRouter();
-  const providerAccounts = useCounterpartyProviderAccounts(counterparty.id);
+  const providerAccounts = useCounterpartyProviderAccounts(counterparty.id, {
+    enabled: rampsEnabled,
+  });
   const [accounts, setAccounts] = useState(initialAccounts);
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -236,15 +241,17 @@ export function CounterpartyDetailWorkspace({
               </div>
             </section>
 
-            <section className="space-y-3">
-              <h3 className="text-2xl font-medium text-primary">
-                {t("DashboardPayments.counterparty.providerAccounts")}
-              </h3>
-              <CounterpartyProviderAccounts
-                accounts={providerAccounts.data}
-                error={providerAccounts.error}
-              />
-            </section>
+            {rampsEnabled ? (
+              <section className="space-y-3">
+                <h3 className="text-2xl font-medium text-primary">
+                  {t("DashboardPayments.counterparty.providerAccounts")}
+                </h3>
+                <CounterpartyProviderAccounts
+                  accounts={providerAccounts.data}
+                  error={providerAccounts.error}
+                />
+              </section>
+            ) : null}
 
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">

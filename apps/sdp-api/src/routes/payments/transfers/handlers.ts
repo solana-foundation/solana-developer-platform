@@ -57,6 +57,7 @@ import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { isRampQuoteBindingExpired } from "@/routes/payments/ramps/quote-binding";
 import { getLogger } from "@/runtime/logger";
@@ -331,6 +332,8 @@ async function updateOnchainTransferForRamp(
   };
   const existing = await getPaymentsRepository(c).getTransferById(tenant);
   if (!existing) throw notFound("Ramp transfer");
+  // A provider the release channel leaves out is off completely: never fund its deposits.
+  assertTransferRampProviderInChannel(c, existing);
 
   const deposit = getRampCryptoDeposit(existing);
   if (
@@ -399,6 +402,18 @@ export async function extractTransferPolicyCandidate(
       : undefined
   );
   assertPaymentProjectScope(body.projectId, scope.auth.projectId);
+  if (body.transferId) {
+    // Before policy runs, so an excluded provider's deposit never opens an
+    // approval request or dry-runs as allowed.
+    const existing = await getPaymentsRepository(c).getTransferById({
+      transferId: body.transferId,
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+    });
+    if (existing) {
+      assertTransferRampProviderInChannel(c, existing);
+    }
+  }
   const operation = resolveOutboundPaymentOperation({
     auth: scope.auth,
     wallets: scope.wallets,

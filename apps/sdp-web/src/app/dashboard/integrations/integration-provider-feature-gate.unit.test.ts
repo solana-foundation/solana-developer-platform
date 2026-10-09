@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   custody: vi.fn(),
+  ramps: vi.fn(),
   payments: vi.fn(),
   policies: vi.fn(),
   notFound: vi.fn(() => {
@@ -20,6 +21,7 @@ vi.mock("@/flags", () => ({
   payments: mocks.payments,
   policies: mocks.policies,
 }));
+vi.mock("@/flags/ramps", () => ({ isRampsEnabled: mocks.ramps }));
 vi.mock("next/navigation", () => ({ notFound: mocks.notFound, redirect: mocks.redirect }));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 
@@ -30,6 +32,7 @@ describe("integration provider route feature gates", () => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue({ userId: null, orgId: null, orgRole: null });
     mocks.custody.mockResolvedValue(false);
+    mocks.ramps.mockResolvedValue(false);
     mocks.payments.mockResolvedValue(false);
     mocks.policies.mockResolvedValue(false);
   });
@@ -39,12 +42,5 @@ describe("integration provider route feature gates", () => {
       "NEXT_NOT_FOUND"
     );
     expect(mocks.auth).not.toHaveBeenCalled();
-  });
-
-  it("keeps RPC provider routes independent of product module flags", async () => {
-    await expect(
-      IntegrationDetailPage({ params: Promise.resolve({ provider: "helius" }) })
-    ).rejects.toThrow("NEXT_REDIRECT");
-    expect(mocks.auth).toHaveBeenCalledOnce();
   });
 });

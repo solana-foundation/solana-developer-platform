@@ -8,6 +8,7 @@ import type {
   OrganizationProviderAvailabilityResponse,
   ProviderCredentialStatus,
 } from "@sdp/types";
+import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient, DatabaseExecutor } from "@/db";
@@ -358,7 +359,10 @@ export class CustodyRuntimeTargets {
       params.projectId
         ? this.findOperationalConnectionWallets(params.organizationId, params.projectId)
         : Promise.resolve([]),
-      getProviderAvailability(this.env, this.db, params.organizationId),
+      // Custody entries only: ramp provider stages cannot change them.
+      getProviderAvailability(this.env, this.db, params.organizationId, {
+        rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      }),
     ]);
     const wallets = [
       ...configRows.map((row) => this.mapOperationalConfigWallet(row, effective, availability)),

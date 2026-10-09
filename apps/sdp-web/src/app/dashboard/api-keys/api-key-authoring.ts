@@ -62,7 +62,7 @@ export interface PolicyBindingTarget {
 
 export type PolicyBindingIntent =
   | { mode: "none" }
-  | { mode: "blocked"; reason: "replace_restrictions_required" }
+  | { mode: "blocked"; reason: "replace_restrictions_required" | "policies_unavailable" }
   | {
       mode: "replace";
       profile: "new" | "existing";
@@ -243,11 +243,43 @@ function bindingTargets(bindings: ApiKeyWalletPolicyBindingSummary[]): string[] 
   );
 }
 
-export function getPolicyBindingIntent(
+/**
+ * Outside the release channel the API refuses every policy-binding change, so an edit
+ * that would need one is blocked up front instead of failing halfway through the save.
+ */
+function getPolicyBindingIntentWithoutPolicies(
   mode: ApiKeyAuthoringMode,
   initial: InitialApiKeyAuthoringState | null,
   draft: ApiKeyAuthoringDraft
 ): PolicyBindingIntent {
+  const blocked: PolicyBindingIntent = { mode: "blocked", reason: "policies_unavailable" };
+  if (mode === "create" || !initial) {
+    return draft.restrictionsEnabled ? blocked : { mode: "none" };
+  }
+  const hadApiRestrictions = initial.policyBindings.some(
+    (binding) => binding.apiKeyControlProfileId
+  );
+  const restrictionsChanged =
+    draft.restrictionsEdited || draft.restrictionsEnabled !== hadApiRestrictions;
+  const bindingsWouldMove =
+    initial.policyBindings.length > 0 && endpointScopeChanged(initial, draft);
+  return restrictionsChanged || bindingsWouldMove ? blocked : { mode: "none" };
+}
+
+/**
+ * Decides what a save does to the key's policy bindings.
+ *
+ * @param options.policiesInReleaseChannel - Whether the deployment runs the Policies module.
+ */
+export function getPolicyBindingIntent(
+  mode: ApiKeyAuthoringMode,
+  initial: InitialApiKeyAuthoringState | null,
+  draft: ApiKeyAuthoringDraft,
+  { policiesInReleaseChannel }: { policiesInReleaseChannel: boolean }
+): PolicyBindingIntent {
+  if (!policiesInReleaseChannel) {
+    return getPolicyBindingIntentWithoutPolicies(mode, initial, draft);
+  }
   if (mode === "create" || !initial) {
     return draft.restrictionsEnabled
       ? {

@@ -42,6 +42,9 @@ import { RINGS_INDEXING_CRON, runRingsIndexingPoll } from "./rings-indexing";
 import { startCron, startEarnCatalogueBootSync } from "./runner";
 import { runSecretRetirements, SECRET_RETIREMENTS_CRON } from "./secret-retirements";
 
+// Release channel required by the module checks the scheduler makes.
+const CHANNEL = { SDP_RELEASE_CHANNEL: "experimental" } as const;
+
 const scheduleMock = vi.fn();
 const stopMock = vi.fn();
 const fakeTask = {
@@ -187,23 +190,23 @@ describe("startCron", () => {
   // Feature-gated ticks whose flag is off are still scheduled as sdp_cron_run
   // proof-of-life no-ops, so every configuration schedules all 15 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
-  const SELF_HOSTED_NO_PROFILES = { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
+  const SELF_HOSTED_NO_PROFILES = { ...CHANNEL, SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
   const ALL_TASKS = 14;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
-    const result = startCron({ env: { DISABLE_CRON: "true" } as Env, bg: makeBg() });
+    const result = startCron({ env: { ...CHANNEL, DISABLE_CRON: "true" } as Env, bg: makeBg() });
     expect(result).toBeNull();
     expect(scheduleMock).not.toHaveBeenCalled();
   });
 
   it("returns null and does not schedule when DISABLE_CRON=1", () => {
-    const result = startCron({ env: { DISABLE_CRON: "1" } as Env, bg: makeBg() });
+    const result = startCron({ env: { ...CHANNEL, DISABLE_CRON: "1" } as Env, bg: makeBg() });
     expect(result).toBeNull();
     expect(scheduleMock).not.toHaveBeenCalled();
   });
 
   it("schedules a task with PENDING_TRANSFERS_CRON when DISABLE_CRON is unset", () => {
-    startCron({ env: {} as Env, bg: makeBg() });
+    startCron({ env: { ...CHANNEL } as Env, bg: makeBg() });
     expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
     expect(scheduleMock.mock.calls[0][0]).toBe(APPROVED_WALLET_OPERATIONS_CRON);
     expect(scheduleMock.mock.calls[1][0]).toBe(PENDING_TRANSFERS_CRON);
@@ -226,7 +229,7 @@ describe("startCron", () => {
     // cache write fails, so every deployment running the in-process
     // scheduler must get it — no feature flag, same as the standalone job.
     const bg = makeBg();
-    const env = {} as Env;
+    const env = { ...CHANNEL } as Env;
     startCron({ env, bg });
 
     expect(scheduleMock.mock.calls.map((call) => call[0])).toContain(REVOKED_API_KEY_CACHE_CRON);
@@ -243,7 +246,7 @@ describe("startCron", () => {
 
   it("gives every tick monitor a check-in margin surviving instance restarts", async () => {
     const bg = makeBg();
-    const env = {} as Env;
+    const env = { ...CHANNEL } as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
 
@@ -269,7 +272,7 @@ describe("startCron", () => {
     const bg = makeBg();
     const observability = makeObservability();
     vi.mocked(observability.withMonitor).mockImplementation((_slug, fn) => fn());
-    startCron({ env: {} as Env, bg, observability });
+    startCron({ env: { ...CHANNEL } as Env, bg, observability });
 
     (scheduleMock.mock.calls[9][1] as () => void)();
     const passed = vi.mocked(runSecretRetirements).mock.calls[0][0].observability;
@@ -326,14 +329,14 @@ describe("startCron", () => {
   });
 
   it("does not schedule by default in a Cloud Run service", () => {
-    const result = startCron({ env: { K_SERVICE: "sdp-api" } as Env, bg: makeBg() });
+    const result = startCron({ env: { ...CHANNEL, K_SERVICE: "sdp-api" } as Env, bg: makeBg() });
     expect(result).toBeNull();
     expect(scheduleMock).not.toHaveBeenCalled();
   });
 
   it("allows a Cloud Run service to opt in explicitly", () => {
     startCron({
-      env: { K_SERVICE: "sdp-api", DISABLE_CRON: "false" } as Env,
+      env: { ...CHANNEL, K_SERVICE: "sdp-api", DISABLE_CRON: "false" } as Env,
       bg: makeBg(),
     });
     expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
@@ -344,7 +347,7 @@ describe("startCron", () => {
   // Recurring payments are an always-on product surface: collection schedules
   // behind no flag, like the transfers reconciliation it complements.
   it("schedules recurring collection unconditionally", () => {
-    startCron({ env: {} as Env, bg: makeBg() });
+    startCron({ env: { ...CHANNEL } as Env, bg: makeBg() });
 
     expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
     expect(scheduleMock.mock.calls[3][0]).toBe(RECURRING_PAYMENTS_COLLECTION_CRON);
@@ -352,7 +355,7 @@ describe("startCron", () => {
 
   it("schedules deposit + withdrawal reconcilers when private channels are enabled", () => {
     const bg = makeBg();
-    const env = { PRIVATE_CHANNELS_ENABLED: "true" } as Env;
+    const env = { ...CHANNEL, PRIVATE_CHANNELS_ENABLED: "true" } as Env;
     startCron({ env, bg });
 
     expect(scheduleMock).toHaveBeenCalledTimes(ALL_TASKS);
@@ -378,7 +381,7 @@ describe("startCron", () => {
   // the managed job does) — silence is reserved for a dead scheduler.
   it("emits proof-of-life without running the reconciler when private channels is off", async () => {
     const bg = makeBg();
-    startCron({ env: {} as Env, bg });
+    startCron({ env: { ...CHANNEL } as Env, bg });
 
     (scheduleMock.mock.calls[4][1] as () => void)();
     expect(runPendingDepositsReconciliation).not.toHaveBeenCalled();
@@ -397,7 +400,7 @@ describe("startCron", () => {
 
   it("emits proof-of-life without refreshing metrics when earn is off", async () => {
     const bg = makeBg();
-    startCron({ env: {} as Env, bg });
+    startCron({ env: { ...CHANNEL } as Env, bg });
 
     (scheduleMock.mock.calls[8][1] as () => void)();
     expect(bg.run).toHaveBeenCalledTimes(1);
@@ -415,43 +418,46 @@ describe("startCron", () => {
 
   it("does not run the catalogue sync from startCron itself", () => {
     const bg = makeBg();
-    startCron({ env: { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env, bg });
+    startCron({ env: { ...CHANNEL, MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env, bg });
     expect(bg.run).not.toHaveBeenCalled();
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
   });
 
   it("schedules when DISABLE_CRON is set to a recognised falsy value ('false' / '0')", () => {
-    startCron({ env: { DISABLE_CRON: "false" } as Env, bg: makeBg() });
-    startCron({ env: { DISABLE_CRON: "0" } as Env, bg: makeBg() });
+    startCron({ env: { ...CHANNEL, DISABLE_CRON: "false" } as Env, bg: makeBg() });
+    startCron({ env: { ...CHANNEL, DISABLE_CRON: "0" } as Env, bg: makeBg() });
     expect(scheduleMock).toHaveBeenCalledTimes(2 * ALL_TASKS);
   });
 
   it("throws on an unrecognised DISABLE_CRON value to surface env typos", () => {
-    expect(() => startCron({ env: { DISABLE_CRON: "treu" } as Env, bg: makeBg() })).toThrow(
-      /Invalid DISABLE_CRON/
-    );
-    expect(() => startCron({ env: { DISABLE_CRON: "yes" } as Env, bg: makeBg() })).toThrow(
-      /Invalid DISABLE_CRON/
-    );
+    expect(() =>
+      startCron({ env: { ...CHANNEL, DISABLE_CRON: "treu" } as Env, bg: makeBg() })
+    ).toThrow(/Invalid DISABLE_CRON/);
+    expect(() =>
+      startCron({ env: { ...CHANNEL, DISABLE_CRON: "yes" } as Env, bg: makeBg() })
+    ).toThrow(/Invalid DISABLE_CRON/);
     expect(scheduleMock).not.toHaveBeenCalled();
   });
 
   it("normalises DISABLE_CRON case and surrounding whitespace", () => {
-    const result = startCron({ env: { DISABLE_CRON: "  TRUE  " } as Env, bg: makeBg() });
+    const result = startCron({
+      env: { ...CHANNEL, DISABLE_CRON: "  TRUE  " } as Env,
+      bg: makeBg(),
+    });
     expect(result).toBeNull();
     expect(scheduleMock).not.toHaveBeenCalled();
   });
 
   it("throws on a blank DISABLE_CRON value rather than defaulting silently", () => {
-    expect(() => startCron({ env: { DISABLE_CRON: "   " } as Env, bg: makeBg() })).toThrow(
-      /Invalid DISABLE_CRON/
-    );
+    expect(() =>
+      startCron({ env: { ...CHANNEL, DISABLE_CRON: "   " } as Env, bg: makeBg() })
+    ).toThrow(/Invalid DISABLE_CRON/);
     expect(scheduleMock).not.toHaveBeenCalled();
   });
 
   it("tick invokes runPendingTransfersReconciliation with the supplied deps", () => {
     const bg = makeBg();
-    const env = {} as Env;
+    const env = { ...CHANNEL } as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
     const tick = scheduleMock.mock.calls[1][1] as () => void;
@@ -465,7 +471,7 @@ describe("startCron", () => {
 
   it("tick invokes approved wallet-operation recovery with the supplied deps", () => {
     const bg = makeBg();
-    const env = {} as Env;
+    const env = { ...CHANNEL } as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
     const tick = scheduleMock.mock.calls[0][1] as () => void;
@@ -513,7 +519,7 @@ describe("startCron", () => {
 
   it("recurring tick invokes runRecurringPaymentsCollection with the supplied deps", () => {
     const bg = makeBg();
-    const env = {} as Env;
+    const env = { ...CHANNEL } as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
     // recovery, transfers, revoked-key cache, recurring — recurring is fourth.
@@ -528,7 +534,7 @@ describe("startCron", () => {
 
   it("tick receives a proof-of-life observability even when caller did not supply one", () => {
     const bg = makeBg();
-    const env = {} as Env;
+    const env = { ...CHANNEL } as Env;
     startCron({ env, bg });
     const tick = scheduleMock.mock.calls[1][1] as () => void;
     tick();
@@ -540,7 +546,7 @@ describe("startCron", () => {
   });
 
   it("tick is a no-op after stop() has been called, even if the scheduler fires once more", async () => {
-    const handle = startCron({ env: {} as Env, bg: makeBg() });
+    const handle = startCron({ env: { ...CHANNEL } as Env, bg: makeBg() });
     await handle?.stop();
     const tick = scheduleMock.mock.calls[0][1] as () => void;
     tick();
@@ -548,7 +554,7 @@ describe("startCron", () => {
   });
 
   it("returned handle.stop() delegates to the underlying scheduled task", async () => {
-    const handle = startCron({ env: {} as Env, bg: makeBg() });
+    const handle = startCron({ env: { ...CHANNEL } as Env, bg: makeBg() });
     expect(handle).not.toBeNull();
     await handle?.stop();
     expect(stopMock).toHaveBeenCalledTimes(ALL_TASKS);
@@ -556,7 +562,7 @@ describe("startCron", () => {
 
   it("returned handle.stop() stops every scheduled task", async () => {
     const handle = startCron({
-      env: { PRIVATE_CHANNELS_ENABLED: "true" } as Env,
+      env: { ...CHANNEL, PRIVATE_CHANNELS_ENABLED: "true" } as Env,
       bg: makeBg(),
     });
     expect(handle).not.toBeNull();
@@ -566,7 +572,7 @@ describe("startCron", () => {
 
   it("tick invokes the rings indexing poll with the supplied deps", () => {
     const bg = makeBg();
-    const env = {} as Env;
+    const env = { ...CHANNEL } as Env;
     const observability = makeObservability();
     startCron({ env, bg, observability });
     const tick = scheduleMock.mock.calls[6][1] as () => void;
@@ -587,7 +593,7 @@ describe("startEarnCatalogueBootSync", () => {
   it("runs one slotted sync at boot when earn is enabled", async () => {
     const bg = makeBg();
     startEarnCatalogueBootSync({
-      env: { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env,
+      env: { ...CHANNEL, MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env,
       bg,
     });
     // Handed to the background runner, never awaited by the caller.
@@ -598,8 +604,8 @@ describe("startEarnCatalogueBootSync", () => {
 
   it("runs even where in-process cron is disabled (managed Cloud Run, DISABLE_CRON)", async () => {
     for (const env of [
-      { MARKETS_ENABLED: "true", EARN_ENABLED: "true", K_SERVICE: "sdp-api" },
-      { MARKETS_ENABLED: "true", EARN_ENABLED: "true", DISABLE_CRON: "true" },
+      { ...CHANNEL, MARKETS_ENABLED: "true", EARN_ENABLED: "true", K_SERVICE: "sdp-api" },
+      { ...CHANNEL, MARKETS_ENABLED: "true", EARN_ENABLED: "true", DISABLE_CRON: "true" },
     ]) {
       const bg = makeBg();
       expect(startCron({ env: env as Env, bg })).toBeNull();
@@ -614,7 +620,7 @@ describe("startEarnCatalogueBootSync", () => {
     vi.mocked(runEarnCatalogueSyncIfDue).mockRejectedValueOnce(new Error("redis unavailable"));
     const bg = makeBg();
     startEarnCatalogueBootSync({
-      env: { MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env,
+      env: { ...CHANNEL, MARKETS_ENABLED: "true", EARN_ENABLED: "true" } as Env,
       bg,
     });
     // The tracked promise settles cleanly: the failure is reported, not rethrown.
@@ -630,7 +636,7 @@ describe("startEarnCatalogueBootSync", () => {
 
   it("does nothing when earn is off", () => {
     const bg = makeBg();
-    startEarnCatalogueBootSync({ env: {} as Env, bg });
+    startEarnCatalogueBootSync({ env: { ...CHANNEL } as Env, bg });
     expect(bg.run).not.toHaveBeenCalled();
     expect(runEarnCatalogueSyncIfDue).not.toHaveBeenCalled();
   });

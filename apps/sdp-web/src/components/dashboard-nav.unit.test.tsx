@@ -29,6 +29,7 @@ const t = ((key: string) => key) as Translate;
 function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]> = {}) {
   return {
     canReadApprovals: false,
+    complianceEnabled: true,
     custodyEnabled: true,
     dvpEnabled: false,
     earnEnabled: false,
@@ -39,6 +40,7 @@ function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]> = {
     pendingApprovalCount: null,
     policiesEnabled: true,
     privateChannelsEnabled: false,
+    rampsEnabled: true,
     ...overrides,
   };
 }
@@ -245,17 +247,18 @@ describe("Integrations dashboard navigation", () => {
   it("groups every enabled family under the Integrations submenu", () => {
     const item = findIntegrationsItem(
       navOptions({
+        complianceEnabled: true,
         custodyEnabled: true,
         paymentsEnabled: true,
         policiesEnabled: true,
         privateChannelsEnabled: true,
+        rampsEnabled: true,
       })
     );
 
     expect(item?.subnavKey).toBe("integrations");
     expect(item?.children?.map((child) => child.href)).toEqual([
       "/dashboard/integrations?tab=custody",
-      "/dashboard/integrations?tab=rpc",
       "/dashboard/integrations?tab=ramps",
       "/dashboard/integrations?tab=compliance",
       "/dashboard/integrations?tab=privacy",
@@ -263,17 +266,28 @@ describe("Integrations dashboard navigation", () => {
     expect(item?.children?.every((child) => child.icon)).toBe(true);
   });
 
-  it("keeps only RPC when every owning module is disabled", () => {
+  it("lists no family when every owning module is disabled", () => {
     const item = findIntegrationsItem(
       navOptions({
+        complianceEnabled: false,
         custodyEnabled: false,
         paymentsEnabled: false,
         policiesEnabled: false,
         privateChannelsEnabled: false,
+        rampsEnabled: false,
       })
     );
 
-    expect(item?.children?.map((child) => child.href)).toEqual(["/dashboard/integrations?tab=rpc"]);
+    expect(item?.children).toEqual([]);
+  });
+
+  // The release channel caps every ramp provider flag, so ramps can be off while Payments is on.
+  it("drops Ramps when no ramp provider is enabled, even with Payments on", () => {
+    const item = findIntegrationsItem(navOptions({ paymentsEnabled: true, rampsEnabled: false }));
+
+    expect(item?.children?.map((child) => child.href)).not.toContain(
+      "/dashboard/integrations?tab=ramps"
+    );
   });
 });
 

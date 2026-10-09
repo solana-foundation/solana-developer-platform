@@ -1,9 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { getDashboardFlags } from "@/flags/dashboard";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchIssuedTokensByMint } from "../payments-page.data";
+import { enabledTransactionModules } from "./transaction-modules";
 import { fetchTransactionsPage } from "./transactions-page.data";
 import { parseTransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
@@ -17,7 +19,8 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
-  const filters = parseTransactionFilters(await searchParams);
+  const modules = enabledTransactionModules(await getDashboardFlags());
+  const filters = parseTransactionFilters(await searchParams, modules);
   const trace = createTimedTrace("dashboard.payments.transactions.page");
   const apiClient = await trace.step("create_sdp_api_client", () =>
     createSdpApiClient(trace.childContext("dashboard.payments.transactions.api"))
@@ -33,6 +36,7 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
       initialFilters={filters}
       initialResult={result}
       issuedTokensByMint={issuedTokensByMint}
+      modules={modules}
     />
   );
 }

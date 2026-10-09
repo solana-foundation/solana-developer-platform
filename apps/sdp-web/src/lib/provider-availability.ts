@@ -1,7 +1,6 @@
 import type {
   ComplianceProviderId,
   OrganizationProviderAvailabilityResponse,
-  OrganizationRpcProvider,
   ProviderAvailabilityEntry,
   RampProviderId,
 } from "@sdp/types";
@@ -13,7 +12,6 @@ import type { SdpApiClient } from "@/lib/sdp-api";
 
 export interface DashboardProviderAvailability extends OrganizationProviderAvailabilityResponse {
   enabledCustodyProviders: KnownCustodyProvider[];
-  enabledRpcProviders: OrganizationRpcProvider[];
   enabledComplianceProviders: ComplianceProviderId[];
   rampProviderAccess: RampProviderAccess;
 }
@@ -70,9 +68,6 @@ export async function fetchProviderAvailability(
       .filter(([, entry]) => entry.enabled)
       .map(([provider]) => provider)
       .filter(isKnownCustodyProvider),
-    enabledRpcProviders: Object.entries(data.providers.rpc)
-      .filter(([, entry]) => entry.enabled)
-      .map(([provider]) => provider as OrganizationRpcProvider),
     enabledComplianceProviders: Object.entries(data.providers.compliance)
       .filter(([, entry]) => entry.enabled)
       .map(([provider]) => provider as ComplianceProviderId),

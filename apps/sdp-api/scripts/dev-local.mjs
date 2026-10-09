@@ -219,6 +219,10 @@ try {
       API_VERSION: localEnv.API_VERSION ?? process.env.API_VERSION ?? "local",
       SDP_DEPLOYMENT_MODE:
         localEnv.SDP_DEPLOYMENT_MODE ?? process.env.SDP_DEPLOYMENT_MODE ?? "self_hosted",
+      // Local tooling runs every module unless told otherwise, like the compose files;
+      // deployed services must set SDP_RELEASE_CHANNEL (the boot check refuses one without it).
+      SDP_RELEASE_CHANNEL:
+        localEnv.SDP_RELEASE_CHANNEL ?? process.env.SDP_RELEASE_CHANNEL ?? "experimental",
       DATABASE_URL: databaseUrl,
       REDIS_URL: redisUrl,
       PORT: port,

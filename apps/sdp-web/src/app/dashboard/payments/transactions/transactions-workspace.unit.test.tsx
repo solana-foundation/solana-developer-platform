@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,6 +34,7 @@ function renderWorkspace(filters: TransactionFilters) {
           initialFilters={filters}
           initialResult={{ transactions: [], nextCursor: null }}
           issuedTokensByMint={{}}
+          modules={UNIFIED_TRANSACTION_MODULES}
         />
       </I18nProvider>
     </SWRConfig>

@@ -25,7 +25,7 @@ import type {
   EarnVaultWithdrawQuoteInput,
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
-import { readFloor, readStamp } from "@sdp/rpc/read-context";
+import { readStamp } from "@sdp/rpc/read-context";
 import type { SolanaCluster } from "@sdp/types";
 import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import {
@@ -40,7 +40,7 @@ import BN from "bn.js";
 import { fromAtoms, toAtoms } from "./amounts";
 import { SdpJupiterLendError } from "./errors";
 import { assertJupiterLendPlanPrograms, permittedJupiterLendPrograms } from "./guards";
-import { jupiterLendConnection } from "./rpc";
+import { canJoinJupiterLendRead, jupiterLendConnection } from "./rpc";
 
 // biome-ignore lint/security/noSecrets: public Solana program address
 const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
@@ -59,7 +59,9 @@ const PINNED_MINT: AccountInfo<Buffer> = {
   data: Buffer.alloc(0),
 };
 
-let withdrawableAssetsInFlight: { stamp: number; read: Promise<string> } | undefined;
+let withdrawableAssetsInFlight:
+  | { stamp: number; sentAt: number; read: Promise<string> }
+  | undefined;
 
 export type JupiterLendVaultOperationRunner = <T>(
   label: string,
@@ -243,14 +245,18 @@ export class JupiterLendVaultDirectClient
   }
 
   /**
-   * Concurrent reads share one in-flight catalogue request, but never one sent
-   * before the caller's read floor (see `@sdp/rpc` "Read floors").
+   * Concurrent reads share one in-flight catalogue request, but only one
+   * `canJoinJupiterLendRead` admits: never sent before the caller's read floor,
+   * never sent a join window or more ago.
    */
   protected override readUsdtWithdrawableAssets(): Promise<string> {
-    const floor = readFloor();
     const inFlight = withdrawableAssetsInFlight;
-    if (inFlight && (floor === undefined || inFlight.stamp > floor)) return inFlight.read;
-    const entry = { stamp: readStamp(), read: super.readUsdtWithdrawableAssets() };
+    if (inFlight && canJoinJupiterLendRead(inFlight)) return inFlight.read;
+    const entry = {
+      stamp: readStamp(),
+      sentAt: Date.now(),
+      read: super.readUsdtWithdrawableAssets(),
+    };
     const forget = () => {
       if (withdrawableAssetsInFlight === entry) withdrawableAssetsInFlight = undefined;
     };

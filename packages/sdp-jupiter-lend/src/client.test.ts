@@ -23,6 +23,7 @@ const sdk = vi.hoisted(() => ({
 vi.mock("@jup-ag/lend/earn", () => sdk);
 
 const { JupiterLendVaultDirectClient } = await import("./client");
+const { JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS } = await import("./rpc");
 
 const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -388,6 +389,41 @@ describe("JupiterLendVaultDirectClient", () => {
 
     releaseStale(liquidityResponse("1000000"));
     await expect(stale).resolves.toMatchObject({
+      blockingIssues: [expect.objectContaining({ code: "INSUFFICIENT_WITHDRAWAL_LIQUIDITY" })],
+    });
+  });
+
+  it("never lets a quote join a liquidity read sent a join window or more ago", async () => {
+    let releaseStalled: (response: Response) => void = () => undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((resolve) => {
+              releaseStalled = resolve;
+            })
+        )
+        .mockImplementation(async () => liquidityResponse("100000000"))
+    );
+    const quote = () =>
+      client().quoteVaultWithdrawal(runtime, {
+        providerReference: JUPITER_LEND_USDT.assetMint,
+        shares: "4.5",
+      });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(10_000);
+    onTestFinished(() => clock.mockRestore());
+    const stalled = quote();
+    onTestFinished(() => releaseStalled(liquidityResponse("1000000")));
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+
+    clock.mockReturnValue(10_000 + JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS);
+    await expect(quote()).resolves.toMatchObject({ blockingIssues: [] });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+
+    releaseStalled(liquidityResponse("1000000"));
+    await expect(stalled).resolves.toMatchObject({
       blockingIssues: [expect.objectContaining({ code: "INSUFFICIENT_WITHDRAWAL_LIQUIDITY" })],
     });
   });

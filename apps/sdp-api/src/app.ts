@@ -1,3 +1,4 @@
+import type { SdpRampProviderStages } from "@sdp/types";
 /**
  * SDP API — Hono application factory.
  *
@@ -33,6 +34,7 @@ import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
 import { requestTracingMiddleware } from "@/middleware/request-tracing";
+import { requireModule } from "@/middleware/require-module";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import assetProfiles from "@/routes/asset-profiles";
@@ -46,7 +48,6 @@ import health from "@/routes/health";
 import heliusRings from "@/routes/helius-rings";
 import internalCustody from "@/routes/internal-custody";
 import internalHeliusRings from "@/routes/internal-helius-rings";
-import internalRpc from "@/routes/internal-rpc";
 import issuance from "@/routes/issuance";
 import llms from "@/routes/llms";
 import members from "@/routes/members";
@@ -77,6 +78,12 @@ export interface SdpPlugin {
 export interface AppDeps {
   observability: Observability;
   plugins?: SdpPlugin[];
+  /**
+   * Ramp provider stages to run the release channel against. Production passes
+   * `SDP_RAMP_PROVIDER_STAGES`; tests may put one provider in a release channel and
+   * leave another out, which today's all-`experimental` stages cannot show.
+   */
+  rampProviderStages: SdpRampProviderStages;
 }
 
 // Routes that need no KV bindings. Shared by kvStoreMiddleware (skip the
@@ -307,6 +314,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   app.use("*", async (c, next) => {
     c.set("observability", deps.observability);
+    c.set("rampProviderStages", deps.rampProviderStages);
     await next();
   });
 
@@ -395,6 +403,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // Asset profiles live under the issuance namespace, as a sibling of
   // /issuance/tokens. The router is self-contained (own auth + feature-flag + project
   // middleware).
+  v1.use("/issuance/*", requireModule("issuance"));
   v1.route("/issuance/asset-profiles", assetProfiles);
   v1.route("/issuance", issuance);
   v1.route("/wallets", wallets);
@@ -404,6 +413,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/earn", earn);
   v1.route("/dvp", dvp);
   v1.route("/places", places);
+  v1.use("/policies/*", requireModule("policies"));
   v1.route("/policies", policies);
   v1.route("/private-channels", privateChannels);
   v1.route("/helius-rings", heliusRings);
@@ -424,7 +434,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // public OpenAPI and AI discovery surfaces.
   app.route("/internal/playground", playgroundInternal);
   app.route("/internal/dashboard/custody", internalCustody);
-  app.route("/internal/dashboard/rpc", internalRpc);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
 
   // Admin routes (internal)

@@ -90,7 +90,7 @@ describe("dashboard workspace tab URL state", () => {
     }
   );
 
-  it.each(["custody", "rpc", "ramps", "compliance", "privacy"])(
+  it.each(["custody", "ramps", "compliance", "privacy"])(
     "keeps the %s tab an Integrations submenu link opens from another page",
     (tab) => {
       expect(

@@ -26,6 +26,23 @@ const SHARED_READ_METHODS = new Set([
   "getTokenSupply",
 ]);
 
+/**
+ * How long after its send a shared read may still be joined. Identical reads in
+ * one burst arrive within milliseconds; an older request may have stalled, so a
+ * later caller sends its own.
+ */
+export const JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS = 2_000;
+
+/**
+ * Whether the current caller may join an in-flight shared read: never one sent
+ * before the caller's read floor, never one sent a join window or more ago.
+ */
+export function canJoinJupiterLendRead(sent: { stamp: number; sentAt: number }): boolean {
+  const floor = readFloor();
+  if (floor !== undefined && sent.stamp <= floor) return false;
+  return Date.now() - sent.sentAt < JUPITER_LEND_SHARED_READ_JOIN_WINDOW_MS;
+}
+
 interface SharedResponse {
   status: number;
   statusText: string;
@@ -68,27 +85,30 @@ function sharedReadKey(
  * caller's minimum slot, so a scoped read never shares with an unscoped one or
  * with another floor, and every consumer still validates the returned context
  * itself. Nothing is kept once a request settles, and requests carrying a
- * signal are never shared. A caller under a read floor (`withReadFloor`) joins
- * only a request sent after the floor was stamped; an older entry is replaced,
- * and its joiners keep their response.
+ * signal are never shared. A caller joins only a request `canJoinJupiterLendRead`
+ * admits, so a stalled request never captures later callers; an older entry is
+ * replaced, and its joiners keep their response.
  */
 export function withJupiterLendReadSharing(send: typeof fetch): typeof fetch {
-  const inFlight = new Map<string, { stamp: number; response: Promise<SharedResponse> }>();
+  const inFlight = new Map<
+    string,
+    { stamp: number; sentAt: number; response: Promise<SharedResponse> }
+  >();
   return async (input, init) => {
     const key = sharedReadKey(input, init);
     if (key === undefined) return send(input, init);
-    const floor = readFloor();
     let shared = inFlight.get(key);
-    if (shared && floor !== undefined && shared.stamp <= floor) shared = undefined;
+    if (shared && !canJoinJupiterLendRead(shared)) shared = undefined;
     if (!shared) {
       const stamp = readStamp();
+      const sentAt = Date.now();
       const response = send(input, init).then(async (answer) => ({
         status: answer.status,
         statusText: answer.statusText,
         headers: answer.headers,
         body: await answer.text(),
       }));
-      const entry = { stamp, response };
+      const entry = { stamp, sentAt, response };
       const forget = () => {
         if (inFlight.get(key) === entry) inFlight.delete(key);
       };

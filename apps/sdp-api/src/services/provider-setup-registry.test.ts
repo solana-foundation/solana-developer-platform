@@ -1,10 +1,4 @@
-import type { ResolvedRpcTarget } from "@sdp/rpc/relay";
-import {
-  COMPLIANCE_PROVIDERS,
-  CUSTODY_PROVIDERS,
-  ORGANIZATION_RPC_PROVIDERS,
-  RAMP_PROVIDERS,
-} from "@sdp/types";
+import { COMPLIANCE_PROVIDERS, CUSTODY_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types";
 import type { Context } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
@@ -40,9 +34,6 @@ describe("provider setup registry", () => {
   it("covers every supported provider in each setup family", () => {
     expect(Object.keys(PROVIDER_SETUP_REGISTRY.custody).sort()).toEqual(
       [...CUSTODY_PROVIDERS].sort()
-    );
-    expect(Object.keys(PROVIDER_SETUP_REGISTRY.rpc).sort()).toEqual(
-      [...ORGANIZATION_RPC_PROVIDERS].sort()
     );
     expect(Object.keys(PROVIDER_SETUP_REGISTRY.compliance).sort()).toEqual(
       [...COMPLIANCE_PROVIDERS].sort()
@@ -108,44 +99,6 @@ describe("provider setup registry", () => {
       privy.validateSetupPayload({ provider: "privy", unexpected: "value" }, "submit").success
     ).toBe(false);
     expect(privy.validateSetupPayload({ provider: "privy" }, "replace").success).toBe(false);
-  });
-
-  it("represents managed RPC testing with the existing getVersion probe", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ jsonrpc: "2.0", id: "rpc-connectivity-test", result: {} }), {
-        status: 200,
-        statusText: "OK",
-      })
-    );
-    const target: ResolvedRpcTarget = {
-      providerId: "helius",
-      projectId: "prj_1",
-      endpoint: "https://rpc.example.test/secret-path",
-      endpointLabel: "https://rpc.example.test/***",
-      headers: { Authorization: "Bearer secret" },
-      selectionMode: "project_provider",
-    };
-
-    const result = await getProviderSetupDefinition("rpc", "helius").checkConnection({ target });
-
-    expect(result.upstream.status).toBe(200);
-    expect(result.upstreamBody).toMatchObject({ id: "rpc-connectivity-test", result: {} });
-    expect(fetchSpy).toHaveBeenCalledWith(
-      target.endpoint,
-      expect.objectContaining({
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer secret",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: "rpc-connectivity-test",
-          method: "getVersion",
-          params: [],
-        }),
-      })
-    );
   });
 
   it("checks compliance configuration without screening an address", () => {

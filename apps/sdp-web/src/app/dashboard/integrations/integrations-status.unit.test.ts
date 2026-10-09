@@ -4,7 +4,6 @@ import {
   resolveCustodyIntegrations,
   resolvePrivacyIntegrations,
   resolveRampIntegrations,
-  resolveRpcIntegrations,
 } from "./integrations-status";
 
 const entry = (entitled: boolean, configured: boolean, enabled: boolean) => ({
@@ -40,89 +39,6 @@ describe("integrations status", () => {
       enabledProviders: [],
     });
     expect(selfHosted.find((p) => p.entry.id === "local")?.status).toBe("active");
-  });
-
-  it("marks the organization's selected RPC provider active and the rest switchable", () => {
-    const rpc = resolveRpcIntegrations({
-      selectedProvider: "helius",
-      entries: {
-        helius: entry(true, true, true),
-        alchemy: entry(true, true, true),
-        triton: entry(true, true, false),
-      },
-    });
-
-    expect(rpc.find((p) => p.provider === "helius")?.status).toBe("active");
-    expect(rpc.find((p) => p.provider === "alchemy")?.status).toBe("available");
-    // An unconfigured RPC provider lacks a URL in this deployment — that is
-    // environment availability, never organization access (decision-map.md #4).
-    expect(rpc.find((p) => p.provider === "triton")?.status).toBe("not_configured");
-  });
-
-  it("calls the provider that serves the project connected, not the one merely selected", () => {
-    // The relay reaches the organization's selection only after tenant
-    // resolution returns nothing, so a BYOK connection outranks it. Reading
-    // `active` off the selection alone inverted both answers: the selected
-    // provider read Connected while the one actually carrying the requests
-    // read "Ready to connect".
-    const rpc = resolveRpcIntegrations({
-      selectedProvider: "helius",
-      servingProvider: "quicknode",
-      entries: {
-        helius: entry(true, true, true),
-        quicknode: entry(true, true, true),
-      },
-    });
-
-    expect(rpc.find((p) => p.provider === "quicknode")?.status).toBe("active");
-    expect(rpc.find((p) => p.provider === "helius")?.status).toBe("available");
-    expect(rpc.filter((p) => p.status === "active")).toHaveLength(1);
-  });
-
-  it("calls a serving provider connected even where this deployment holds no URL", () => {
-    // BYOK runs on the tenant's own endpoint, so whether SDP credentialed the
-    // provider decides nothing about whether the tenant's key is live.
-    const rpc = resolveRpcIntegrations({
-      selectedProvider: "helius",
-      servingProvider: "nodit",
-      entries: { helius: entry(true, true, true), nodit: entry(true, false, false) },
-    });
-
-    expect(rpc.find((p) => p.provider === "nodit")?.status).toBe("active");
-  });
-
-  it("never calls a provider the tenant configured themselves Not configured", () => {
-    // BYOK runs on the tenant's own endpoint, so this deployment carrying no
-    // URL for the provider decides nothing. Nodit held a live key, could be
-    // switched to, and its header still read "Not configured" directly above
-    // its own Use this provider button.
-    const rpc = resolveRpcIntegrations({
-      selectedProvider: "helius",
-      servingProvider: "quicknode",
-      providersWithOwnKey: ["quicknode", "nodit"],
-      entries: { helius: entry(true, true, true), nodit: entry(true, false, false) },
-    });
-
-    expect(rpc.find((p) => p.provider === "nodit")?.status).toBe("available");
-    // Still gone for a provider with neither a deployment URL nor a key.
-    expect(rpc.find((p) => p.provider === "validationcloud")?.status).toBe("not_configured");
-  });
-
-  it("falls back to the selection when the serving connection cannot be read", () => {
-    // A member may not read connections at all. Unknown must degrade to the
-    // pre-BYOK answer rather than to a claim we cannot support.
-    const rpc = resolveRpcIntegrations({
-      selectedProvider: "helius",
-      servingProvider: null,
-      entries: { helius: entry(true, true, true) },
-    });
-
-    expect(rpc.find((p) => p.provider === "helius")?.status).toBe("active");
-  });
-
-  it("never presents SDP's round-robin routing mode as a provider", () => {
-    const rpc = resolveRpcIntegrations({ selectedProvider: "default", entries: {} });
-    expect(rpc.some((provider) => provider.provider === "default")).toBe(false);
   });
 
   it("never calls a payment rail connected, because no organization ever connected one", () => {
@@ -163,7 +79,6 @@ describe("integrations status", () => {
       ...resolveCustodyIntegrations({ connectedProviders: [], enabledProviders: [] }).map(
         (p) => p.status
       ),
-      ...resolveRpcIntegrations({ selectedProvider: "helius", entries: {} }).map((p) => p.status),
       ...resolveRampIntegrations({}).map((p) => p.status),
       ...resolveComplianceIntegrations({}).map((p) => p.status),
     ];
