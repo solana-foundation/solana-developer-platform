@@ -129,6 +129,8 @@ function DashboardHeaderDownloadAction({
   };
 
   return (
+    // The icon goes in the button's icon slot: as a child it would sit on its own line above the
+    // label, since the shared button wraps children in their own box.
     <Button
       type="button"
       variant={variant === "primary" ? "default" : "outline"}
@@ -136,12 +138,14 @@ function DashboardHeaderDownloadAction({
       disabled={pending}
       aria-busy={pending || undefined}
       onClick={() => void download()}
+      iconLeft={
+        pending ? (
+          <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <DownloadIcon className="size-4" aria-hidden="true" />
+        )
+      }
     >
-      {pending ? (
-        <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-      ) : (
-        <DownloadIcon className="size-4" aria-hidden="true" />
-      )}
       {label}
     </Button>
   );
@@ -1249,16 +1253,6 @@ function getLegacyDesignPageConfig(
   });
 }
 
-/**
- * Requests and Schedules sit under new-design-activity, but their pages are still the previous
- * design's, so they keep its header (the Requests playground switch included) with the flag on.
- */
-function isHeldOnPreviousDesign(pathname: string): boolean {
-  return [PAYMENT_REQUESTS_HREF, "/dashboard/payments/recurring"].some(
-    (href) => pathname === href || pathname.startsWith(`${href}/`)
-  );
-}
-
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -1321,11 +1315,10 @@ export function getDashboardPageConfig(
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   // A Payments page no design module has redesigned keeps the previous design's header under
-  // NEW DESIGN too, and so do Requests and Schedules until their redesign lands.
-  const legacyDesignConfig =
-    !newDesignPage || isHeldOnPreviousDesign(pathname)
-      ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled, transactionModules)
-      : null;
+  // NEW DESIGN too.
+  const legacyDesignConfig = !newDesignPage
+    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled, transactionModules)
+    : null;
   if (legacyDesignConfig) {
     return legacyDesignConfig;
   }

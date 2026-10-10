@@ -74,39 +74,3 @@ describe("dashboard headers with NEW DESIGN off", () => {
     );
   });
 });
-
-describe("dashboard headers for Requests and Schedules with new-design-activity on", () => {
-  const activityConfig = (pathname: string) =>
-    getDashboardPageConfig(
-      pathname,
-      t,
-      false,
-      false,
-      UNIFIED_TRANSACTION_MODULES,
-      true,
-      true,
-      true,
-      true,
-      { activity: true }
-    );
-
-  it("keep the previous design's header, Requests' playground switch included", () => {
-    for (const pathname of [
-      "/dashboard/payments/requests",
-      "/dashboard/payments/recurring",
-      "/dashboard/payments/recurring/create",
-      "/dashboard/payments/recurring/rp_1",
-    ]) {
-      expect(activityConfig(pathname)).toEqual(legacyConfig(pathname));
-    }
-    const requests = activityConfig("/dashboard/payments/requests");
-    expect(requests.headerTabs?.tabs.map((tab) => tab.id)).toContain("playground");
-    expect(requests.headerAction).toBeUndefined();
-  });
-
-  it("still gives Transactions the new design's header", () => {
-    expect(activityConfig("/dashboard/payments/transactions").headerAction?.href).toBe(
-      "/api/dashboard/payments/transactions/export"
-    );
-  });
-});

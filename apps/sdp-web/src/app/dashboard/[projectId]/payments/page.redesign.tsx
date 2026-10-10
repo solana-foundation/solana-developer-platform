@@ -7,16 +7,16 @@ import {
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
-import { withLegacyDesign } from "@/flags/new-design";
+import { getEnabledRampProviders } from "@/flags/ramps";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
-import RedesignPaymentsPage from "./page.redesign";
-import { PaymentsCommandCenter } from "./payments-command-center";
+import { fetchCounterparties } from "./counterparty/counterparty-page.data";
+import { PaymentsCommandCenter } from "./payments-command-center.redesign";
 import { fetchPaymentsWallets, fetchPaymentTransfers } from "./payments-page.data";
-import { PaymentsPlaygroundWorkspace } from "./payments-workspace";
+import { PaymentsPlaygroundWorkspace } from "./payments-workspace.redesign";
 
 type ApiClientPromise = ReturnType<typeof createSdpApiClient>;
 type Trace = ReturnType<typeof createTimedTrace>;
@@ -29,13 +29,20 @@ async function PaymentsPlaygroundData({
   trace: Trace;
 }) {
   const [t, apiClient] = await Promise.all([getTranslations(), apiClientPromise]);
-  const [apiKeysResult, walletsResult, transfersResult] = await Promise.all([
-    trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
-    trace.step("fetch_payments_wallet_summaries", () =>
-      fetchPaymentsWallets(apiClient.request, { view: "summary" })
-    ),
-    trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
-  ]);
+  const [apiKeysResult, walletsResult, transfersResult, counterpartiesResult, rampProviders] =
+    await Promise.all([
+      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+      trace.step("fetch_payments_wallet_summaries", () =>
+        fetchPaymentsWallets(apiClient.request, { view: "summary" })
+      ),
+      trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
+      // Fills the contact endpoints' id pickers; the API's largest page.
+      trace.step("fetch_counterparties", () =>
+        fetchCounterparties(apiClient.request, { page: 1, pageSize: 100 })
+      ),
+      // The quote endpoints offer the providers the channel-capped flags leave on, never the raw list.
+      getEnabledRampProviders(),
+    ]);
   const wallets = walletsResult.data ?? [];
   const transfers = transfersResult.data ?? [];
   const walletsError = walletsResult.ok
@@ -66,6 +73,8 @@ async function PaymentsPlaygroundData({
       walletsError={walletsError}
       transfers={transfers}
       transfersError={transfersError}
+      counterparties={counterpartiesResult.data.map(({ id, displayName }) => ({ id, displayName }))}
+      rampProviders={rampProviders}
     />
   );
 }
@@ -108,4 +117,4 @@ async function PaymentsPage() {
   );
 }
 
-export default withLegacyDesign(RedesignPaymentsPage, PaymentsPage, "activity");
+export default PaymentsPage;
