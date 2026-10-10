@@ -153,7 +153,30 @@
     "apiKeySecretPlaceholder": "Dán khóa đầy đủ cho phiên này",
     "apiKeySecretRequired": "Dán giá trị khóa API đầy đủ cho khóa đã chọn trước khi chạy request.",
     "rowsCount": "{count} hàng",
-    "openCalendarFor": "Mở lịch cho {field}"
+    "openCalendarFor": "Mở lịch cho {field}",
+    "filter": "Bộ lọc",
+    "filterBy": "Lọc theo…",
+    "any": "Bất kỳ",
+    "copyLink": "Sao chép liên kết",
+    "notSet": "Chưa đặt",
+    "clearFilter": "Xóa bộ lọc {filter}",
+    "playgroundForm": "Biểu mẫu",
+    "playgroundRaw": "Thô",
+    "clearField": "Xóa {field}",
+    "apiKeyLabel": "Khóa ký",
+    "apiKeyProduction": "production",
+    "apiKeySandbox": "sandbox",
+    "pasteApiKey": "Dán khóa",
+    "noParameters": "Endpoint này không nhận tham số nào.",
+    "playgroundParameters": "Tham số",
+    "playgroundBody": "Body",
+    "playgroundHeaders": "Headers",
+    "headersAfterRun": "Chạy request để xem các header mà nó trả về.",
+    "noResponseHeaders": "Phản hồi trả về không có header nào để hiển thị.",
+    "playgroundKeyPlaceholder": "<your API key>",
+    "exampleResponse": "Ví dụ phản hồi",
+    "notRunYet": "Chưa chạy",
+    "running": "Đang chạy…"
   },
   "dashboardShell": {
     "workspace": "Không gian làm việc",
@@ -239,7 +262,20 @@
     "manageAccount": "Quản lý tài khoản",
     "signOut": "Đăng xuất",
     "accountMenu": "Menu tài khoản",
-    "privacy": "Quyền riêng tư"
+    "privacy": "Quyền riêng tư",
+    "contactList": "Danh sách liên hệ",
+    "contacts": "Liên hệ",
+    "contact": "Liên hệ",
+    "transaction": "Giao dịch",
+    "downloadFailed": "Tải xuống chưa hoàn tất. Thử lại.",
+    "downloadRateLimited": "Quá nhiều yêu cầu nên tải xuống chưa hoàn tất. Đợi một phút rồi thử lại.",
+    "newDesign": {
+      "recurring": "Đã lên lịch",
+      "newCounterparty": "Counterparty mới",
+      "recurringPayments": "Lịch định kỳ",
+      "recurringPayment": "Lịch định kỳ",
+      "backToRecurringPayments": "Quay lại Lịch định kỳ"
+    }
   },
   "validation": {
     "allowlistValueRequired": "Giá trị Allowlist là bắt buộc",

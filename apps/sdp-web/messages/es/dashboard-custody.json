@@ -1024,6 +1024,19 @@
     "walletSetupConnectionHint": "La Wallet se crea en esta conexión y firma con sus credenciales.",
     "walletSetupConnectionDefault": "Predeterminado del proyecto",
     "walletSetupConnectionUnavailablePending": "Configuración sin terminar",
-    "walletSetupConnectionUnavailableFailed": "Requiere atención"
+    "walletSetupConnectionUnavailableFailed": "Requiere atención",
+    "walletCreationOptionsUnavailable": "No se pudieron cargar las opciones de creación de Wallets. Recarga la página para intentarlo de nuevo.",
+    "apiKeyScopeLockedWithoutPolicies": "Esta clave tiene restricciones, por lo que su acceso a Wallets no se puede cambiar mientras Policies no esté disponible. Crea una clave nueva en su lugar.",
+    "apiKeyRestrictionsInactiveWithoutPolicies": "Las restricciones de esta clave se conservan, pero no se aplican mientras Policies no esté disponible.",
+    "apiKeyRestrictionsNeedPolicies": "Las restricciones de claves de API requieren Policies, que este despliegue no ejecuta.",
+    "walletSetupConnectionPlaceholder": "Elige una conexión",
+    "walletSetupConnectionManaged": "Administrada por SDP",
+    "walletSetupConnectionRequired": "Elige la conexión en la que se crea la Wallet.",
+    "walletSetupProviderAlreadySetUp": "Este proveedor ya está configurado. Agrega una Wallet en su lugar.",
+    "walletSetupMode": "Modo de custodia",
+    "walletSetupModePlaceholder": "Elige un modo de custodia",
+    "walletSetupModeManaged": "Administrada",
+    "walletSetupModeByok": "Usa tus propias credenciales",
+    "walletSetupModeHint": "Las Wallets administradas usan la conexión del proveedor de SDP. Usar tus propias credenciales conecta tu propia app de proveedor."
   }
 }

@@ -284,7 +284,8 @@
       "statusConfirmed": "Confirmé",
       "statusFailed": "Échec",
       "newTransfer": "Nouveau transfert",
-      "tryAgain": "Réessayer"
+      "tryAgain": "Réessayer",
+      "selectWallet": "Sélectionnez un Wallet à partir duquel transférer."
     },
     "events": {
       "title": "Événements",

@@ -283,7 +283,8 @@
       "statusConfirmed": "Confirmado",
       "statusFailed": "Fallido",
       "newTransfer": "Nueva transferencia",
-      "tryAgain": "Reintentar"
+      "tryAgain": "Reintentar",
+      "selectWallet": "Selecciona una Wallet desde la que transferir."
     },
     "events": {
       "title": "Eventos",

@@ -117,7 +117,9 @@
       "mainnetStrategiesLoading": "Chargement des stratégies Mainnet. Les stratégies Devnet restent disponibles.",
       "mainnetStrategiesUnavailable": "Les stratégies Mainnet n'ont pas pu être chargées. Les stratégies Devnet restent disponibles.",
       "sandboxUnavailable": "Production uniquement",
-      "redeemIntermediate": "Racheter des wYLDS"
+      "redeemIntermediate": "Racheter des wYLDS",
+      "positionBalanceSyncing": "Mise à jour du solde…",
+      "positionBalanceLastVerified": "Dernier solde vérifié"
     },
     "earnProgram": {
       "eyebrow": "Yield intégré",
@@ -1117,6 +1119,7 @@
       "activeLoading": "Chargement des demandes de retrait…",
       "activeError": "Le statut du retrait est temporairement indisponible. Votre demande est inchangée.",
       "activeSummary": "{amount} attendu · paiement possible à partir de {maturity} · parts récupérables après {deadline}"
-    }
+    },
+    "intentStorageUnavailable": "Votre navigateur n'a pas pu enregistrer cette demande pour permettre de nouvelles tentatives en toute sécurité. Activez le stockage du navigateur et réessayez."
   }
 }

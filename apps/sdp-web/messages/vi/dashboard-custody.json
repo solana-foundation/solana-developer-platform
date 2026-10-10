@@ -1009,6 +1009,19 @@
     "walletSetupConnectionHint": "Wallet được tạo trong kết nối này và ký bằng thông tin xác thực của kết nối.",
     "walletSetupConnectionDefault": "Mặc định của project",
     "walletSetupConnectionUnavailablePending": "Thiết lập chưa hoàn tất",
-    "walletSetupConnectionUnavailableFailed": "Cần xử lý"
+    "walletSetupConnectionUnavailableFailed": "Cần xử lý",
+    "walletCreationOptionsUnavailable": "Không tải được tùy chọn tạo Wallet. Tải lại trang để thử lại.",
+    "apiKeyScopeLockedWithoutPolicies": "Khóa này có hạn chế nên không thể đổi quyền truy cập Wallet khi Policies không khả dụng. Hãy tạo khóa mới thay thế.",
+    "apiKeyRestrictionsInactiveWithoutPolicies": "Hạn chế của khóa này vẫn được giữ nhưng không áp dụng khi Policies không khả dụng.",
+    "apiKeyRestrictionsNeedPolicies": "Hạn chế API-key cần Policies, nhưng bản triển khai này không chạy Policies.",
+    "walletSetupConnectionPlaceholder": "Chọn kết nối",
+    "walletSetupConnectionManaged": "Do SDP quản lý",
+    "walletSetupConnectionRequired": "Chọn kết nối mà Wallet sẽ được tạo.",
+    "walletSetupProviderAlreadySetUp": "Provider này đã được thiết lập. Hãy thêm Wallet thay thế.",
+    "walletSetupMode": "Chế độ Custody",
+    "walletSetupModePlaceholder": "Chọn chế độ Custody",
+    "walletSetupModeManaged": "Được quản lý",
+    "walletSetupModeByok": "Tự cung cấp thông tin xác thực",
+    "walletSetupModeHint": "Wallet Managed dùng tài khoản provider của SDP. Tự cung cấp thông tin xác thực sẽ kết nối ứng dụng provider của riêng bạn."
   }
 }
