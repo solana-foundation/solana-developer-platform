@@ -22,7 +22,7 @@ vi.mock("@clerk/nextjs/server", async (importOriginal) => {
 });
 
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
-import { isPublicRoute, proxy, rejectCrossSiteWrite } from "./proxy";
+import { demoSessionCookiesToDrop, isPublicRoute, proxy, rejectCrossSiteWrite } from "./proxy";
 
 describe("public web routes", () => {
   it("keeps the workspace loading transition available during bootstrap", () => {
@@ -261,6 +261,26 @@ describe("proxy request project", () => {
       );
 
       expect(lastUsedCookies(response)).toEqual([]);
+    }
+  });
+});
+
+describe("demoSessionCookiesToDrop", () => {
+  const cookie = "__session=jwt; sdp-demo-session.0=abc; sdp-demo-session.1=def; other=1";
+
+  it("forgets the demo session on a full page load", () => {
+    const request = new NextRequest("https://dashboard.example.com/dashboard/payments", {
+      headers: { cookie, "sec-fetch-dest": "document" },
+    });
+    expect(demoSessionCookiesToDrop(request)).toEqual(["sdp-demo-session.0", "sdp-demo-session.1"]);
+  });
+
+  it("keeps it across the app's own navigations and fetches", () => {
+    for (const dest of ["empty", null]) {
+      const request = new NextRequest("https://dashboard.example.com/dashboard/payments", {
+        headers: dest === null ? { cookie } : { cookie, "sec-fetch-dest": dest },
+      });
+      expect(demoSessionCookiesToDrop(request)).toEqual([]);
     }
   });
 });

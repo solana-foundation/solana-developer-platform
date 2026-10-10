@@ -1,5 +1,28 @@
 {
   "DashboardPayments": {
+    "demo": {
+      "label": "Demo",
+      "turnOn": "Try Payments with sample data. Payments, contacts and provider steps are simulated: nothing is saved to your project or sent to a payment provider. Address searches still use the real address lookup. Your demo changes reset when you reload the page.",
+      "turnOff": "Turn off demo mode",
+      "sandboxOnly": "Demo mode runs on sandbox projects. Switch to your sandbox project to try it.",
+      "noPayLink": "Demo requests have no pay link to share. Turn off demo mode to create a real one.",
+      "notice": {
+        "state": "Demo mode",
+        "body": "Sample data for presentation. Every action is simulated."
+      },
+      "checkout": {
+        "title": "{provider} checkout",
+        "onrampBody": "In demo mode, {provider}'s checkout doesn't open. Use Simulate deposit below to see the deposit arrive.",
+        "offrampBody": "In demo mode, {provider}'s page doesn't open. Send the funds with the button below to finish the payout.",
+        "settling": "Payment received. {provider} is delivering the funds to the wallet."
+      },
+      "verification": {
+        "simulate": "Simulate verification",
+        "simulating": "Simulating verification",
+        "body": "In demo mode, {provider}'s verification page doesn't open. Use Simulate verification below to approve the contact.",
+        "failed": "Couldn't simulate the verification. Try again."
+      }
+    },
     "signingUnavailable": "Signing is disabled for this wallet.",
     "restricted": "Restricted",
     "page": {
@@ -179,6 +202,9 @@
       "transferStatus": "Status: {status}",
       "submittingOnchainTransfer": "Submitting on-chain transfer.",
       "simulatingQuoteFunding": "Simulating quote funding.",
+      "simulateDeposit": "Simulate deposit",
+      "simulatingDeposit": "Simulating deposit",
+      "depositSimulated": "Deposit simulated",
       "quoteFundingSimulated": "Quote funding simulated.",
       "quoteSimulationFailed": "Quote simulation failed.",
       "sandboxSimulationFailed": "Sandbox simulation failed.",
