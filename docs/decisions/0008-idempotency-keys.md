@@ -41,8 +41,9 @@ route pattern, read with `routePath(c)`, so it needs no shared vocabulary that c
 credential is recorded on the row and compared in plain text rather than hashed:
 
 - the operation, path parameters, query parameters (repeated values in order) and body;
-- the credential (API key id or user id), so another credential reusing the key gets 422 and
-  never reads a response produced for different wallet access. A retry made after rotating the
+- the credential and its access (API key id or user id, role, permissions, wallet scope and
+  bindings, Allowed Operations), so another credential, or the same one after its access changed,
+  gets 422 and never reads a response produced for different wallet access. A retry made after rotating the
   API key is therefore a new request; the resource row's own unique key still stops it moving
   money twice;
 - the Dry-Run flag, so a dry run never replays as the real request.
