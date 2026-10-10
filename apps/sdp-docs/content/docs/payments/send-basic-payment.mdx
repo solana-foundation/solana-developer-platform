@@ -196,7 +196,7 @@ curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
 
 ## Deduplication
 
-`Idempotency-Key` is required. Send one stable key per logical payment and reuse it for network retries. An identical request for the same exact `sourceCustodyWalletId` returns the original transfer with `Idempotent-Replayed: true`; reusing the key with a different payload or wallet returns `422 IDEMPOTENCY_KEY_REUSED`, and a request without a key returns `400 IDEMPOTENCY_KEY_REQUIRED`. See [Idempotency](/docs/developing-with-sdp/idempotency).
+`Idempotency-Key` is required. Send one stable key per logical payment and reuse it for network retries. An identical request for the same exact `sourceCustodyWalletId` returns the original transfer with `Idempotent-Replayed: true` (after a `5xx`, the same-key retry recovers the original transfer without that header); reusing the key with a different payload or wallet returns `422 IDEMPOTENCY_KEY_REUSED`, and a request without a key returns `400 IDEMPOTENCY_KEY_REQUIRED`. See [Idempotency](/docs/developing-with-sdp/idempotency).
 
 Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 

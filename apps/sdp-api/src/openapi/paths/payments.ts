@@ -507,7 +507,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Collect recurring payment",
     operationId: "collectPaymentRecurringPayment",
-    description: `Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as \`processing\` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation. $REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION`,
+    description: `Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as \`processing\` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION}`,
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
@@ -528,7 +528,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Resume recurring payment",
     operationId: "resumePaymentRecurringPayment",
-    description: `Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status. $REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION`,
+    description: `Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION}`,
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,

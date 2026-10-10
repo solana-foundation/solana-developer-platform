@@ -37,7 +37,7 @@ Issuance operations keep their own key handling for now: a key is scoped to your
 | Same key, original still running | `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. Wait and retry with the same key. |
 | Same key, different request or different credential | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
 | Original returned `400`, `401`, `403`, `409` or `429` | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
-| Original returned a `5xx` | Stored and replayed; use a new key to try again. Transfers, transfer batches and recurring-payment creation are the exception: a same-key retry runs again and recovers the original record instead of creating a second one. |
+| Original returned a `5xx` | Stored and replayed; use a new key to try again. Transfers, transfer batches and recurring-payment creation are the exception: a same-key retry runs again and recovers the original record instead of creating a second one. That recovered response is a fresh answer, so it carries no `Idempotent-Replayed` header. |
 
 "Same request" means the same path, query parameters, body and credential. A request made after rotating an API key is a new request, so it gets `422` if it reuses the old key.
 

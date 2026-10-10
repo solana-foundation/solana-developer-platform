@@ -329,12 +329,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
           description: "Wallet approval request",
           content: jsonContent(walletApprovalRequestResponse),
         },
-        ...errorResponses(
-          errorResponseSchema,
-          action === "approve"
-            ? [400, 401, 403, 404, 409, 422, 500]
-            : [400, 401, 403, 404, 409, 500]
-        ),
+        // Any action that receives a key can answer 422 for a reused one.
+        ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
       },
     });
   }
