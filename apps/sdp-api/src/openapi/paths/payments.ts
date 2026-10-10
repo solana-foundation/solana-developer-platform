@@ -393,7 +393,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Create recurring payment",
     operationId: "createPaymentRecurringPayment",
-    description: `Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION}`,
+    description: `Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION} A same-key retry after a 5xx, or after the 24-hour record expires, runs again and returns the recurring payment the key already created instead of creating a second one; that response carries no \`Idempotent-Replayed\` header.`,
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
