@@ -294,8 +294,9 @@ async function updateOnchainTransferForRamp(
     throw conflict("Ramp quote has expired; create a new quote before sending funds.");
   }
 
+  const db = getDb(c.env);
   const updated = await createPostgresPaymentsRepository(
-    getDb(c.env),
+    db,
     getRequestTenantScope(c)
   ).updateOnchainTransferForRamp({
     ...tenant,

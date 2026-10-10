@@ -186,7 +186,7 @@ export interface ListApiKeysResponse {
     signingWalletId: string | null;
     signingWalletIds: string[];
     walletBindings: ApiKeyWalletBinding[];
-      allowedOperations: AllowedOperation[];
+    allowedOperations: AllowedOperation[];
     lastUsedAt: string | null;
     expiresAt: string | null;
     createdAt: string;

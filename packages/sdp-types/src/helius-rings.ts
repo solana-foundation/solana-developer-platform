@@ -1,6 +1,9 @@
 export const HELIUS_RINGS_OPERATION_STATUSES = [
   "draft",
   "preparing",
+  // Retired: nothing enters this state any more (ADR 0006). It stays in the list because the
+  // database CHECK constraints still allow it; dropping it needs a migration (see the table-drop change).
+  "approval_required",
   "proving",
   "ready_to_sign",
   "submitted",
