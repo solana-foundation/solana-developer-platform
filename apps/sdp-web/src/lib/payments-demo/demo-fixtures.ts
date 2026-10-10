@@ -124,6 +124,8 @@ function matchesToken(mint: string | null | undefined, filter: string): boolean 
 // ─── Stable base58 addresses and signatures ──────────────────────────────────
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+/** Replay seeds the cache with every id a visitor's session creates, so it is capped. */
+const MAX_CACHED_SEEDS = 2_000;
 const encodedSeeds = new Map<string, string>();
 
 /** Deterministic bytes for a seed: an FNV-1a hash of the seed drives a mulberry32 stream. */
@@ -162,6 +164,7 @@ function seededBase58(kind: "address" | "signature", seed: string): string {
   const cached = encodedSeeds.get(key);
   if (cached !== undefined) return cached;
   const encoded = base58(seededBytes(key, kind === "address" ? 32 : 64));
+  if (encodedSeeds.size >= MAX_CACHED_SEEDS) encodedSeeds.clear();
   encodedSeeds.set(key, encoded);
   return encoded;
 }
@@ -1198,8 +1201,9 @@ export function buildWorld(now: Date, rampProviders: readonly RampProviderId[]):
   };
   const scheduleOutputs = SCHEDULE_SPECS.map((spec) => buildSchedule(spec, base, clock));
   // A sample ramp transfer of a provider the channel hides is left out, as the API leaves it out.
+  const offeredRampProviders = new Set(rampProviders);
   const transfers = [
-    ...TRANSFER_SPECS.filter((spec) => !spec.ramp || rampProviders.includes(spec.ramp.provider)),
+    ...TRANSFER_SPECS.filter((spec) => !spec.ramp || offeredRampProviders.has(spec.ramp.provider)),
     ...batchTransferSpecs(),
     ...scheduleOutputs.flatMap((output) => output.transfers),
   ].map((spec) => buildTransfer(spec, base, clock));

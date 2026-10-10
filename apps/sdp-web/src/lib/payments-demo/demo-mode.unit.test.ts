@@ -26,6 +26,8 @@ const browser = vi.hoisted(() => {
     // The proxy stamps the page path with its project segment, and the project header apart.
     pathname: "/dashboard/prj_sandbox/payments",
     projectHeader: null as string | null,
+    // Whether the calling tab says it shows the demo (x-sdp-tab-demo).
+    tabDemo: false,
     // The ramp providers the channel-capped flags leave on.
     rampProviders: [] as RampProviderId[],
     newDesign: true,
@@ -52,6 +54,7 @@ vi.mock("next/headers", () => ({
     new Headers({
       "x-sdp-pathname": browser.pathname,
       ...(browser.projectHeader === null ? {} : { "x-project-id": browser.projectHeader }),
+      ...(browser.tabDemo ? { "x-sdp-tab-demo": "1" } : {}),
     }),
 }));
 
@@ -88,6 +91,7 @@ beforeEach(() => {
   browser.jar.set("sdp-payments-demo", PROJECT);
   browser.pathname = "/dashboard/prj_sandbox/payments";
   browser.projectHeader = null;
+  browser.tabDemo = false;
   browser.rampProviders = [...RAMP_PROVIDERS];
   browser.newDesign = true;
   browser.demoMode = true;
@@ -122,6 +126,29 @@ describe("scope", () => {
   it("stays out of the way with the demo flag off, cookie or not", async () => {
     browser.demoMode = false;
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
+  });
+
+  it("refuses a write from a tab still showing the demo after the demo was turned off", async () => {
+    browser.pathname = "/api/dashboard/payments/counterparties";
+    browser.jar.delete("sdp-payments-demo");
+    browser.tabDemo = true;
+    const refused = await call("POST", "/v1/counterparties", {
+      entityType: "business",
+      displayName: "Stale Tab Ltd",
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe("payments_demo_off");
+    // Reads still go through, and a tab that never showed the demo is not held back.
+    expect((await call("GET", "/v1/counterparties")).status).toBeNull();
+    browser.tabDemo = false;
+    expect((await call("POST", "/v1/counterparties", { displayName: "Real" })).status).toBeNull();
+  });
+
+  it("never holds back the API playground's writes", async () => {
+    browser.pathname = "/api/playground/execute";
+    browser.jar.delete("sdp-payments-demo");
+    browser.tabDemo = true;
+    expect((await call("POST", "/v1/counterparties", { displayName: "Real" })).status).toBeNull();
   });
 
   it("refuses a demo-only write outside the demo instead of sending it to the API", async () => {

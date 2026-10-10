@@ -13,7 +13,7 @@ import { cache } from "react";
 import { parseDashboardPathname } from "../dashboard-project-path";
 import { designModuleForPath } from "../design-modules";
 import { PROJECT_HEADER_NAME } from "../project-cookie";
-import { isPaymentsPath, PAYMENTS_DEMO_COOKIE_NAME } from "./demo-cookie";
+import { isPaymentsPath, PAYMENTS_DEMO_COOKIE_NAME, TAB_DEMO_HEADER_NAME } from "./demo-cookie";
 import { buildWorld, demoPathParts, demoWorldBody } from "./demo-fixtures";
 import { type DemoAnswer, demoFlowRead, demoWrite } from "./demo-handlers";
 import { applyDemoOps } from "./demo-replay";
@@ -86,6 +86,34 @@ const demoRequested = cache(async (projectId: string | null): Promise<boolean> =
 
 function respond({ status, body }: DemoAnswer): Response {
   return status === 204 ? new Response(null, { status }) : Response.json(body, { status });
+}
+
+/**
+ * Whether the calling tab says it is showing demo mode. Only the dashboard's own routes count:
+ * the API playground keeps real data in the demo, so its writes are never held back.
+ */
+async function tabShowsDemo(): Promise<boolean> {
+  try {
+    const headerStore = await headers();
+    return (
+      headerStore.get(TAB_DEMO_HEADER_NAME) === "1" &&
+      headerStore.get("x-sdp-pathname")?.startsWith("/api/dashboard/") === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+function demoWasTurnedOff(): Response {
+  return Response.json(
+    {
+      error: {
+        code: "payments_demo_off",
+        message: "Demo mode was turned off in another tab. Reload this page to carry on.",
+      },
+    },
+    { status: 409 }
+  );
 }
 
 function notInDemo(): Response {
@@ -190,20 +218,27 @@ export async function paymentsDemoResponse(
   body: RequestInit["body"],
   upstream: () => Promise<Response>
 ): Promise<Response | null> {
-  if (!(await demoRequested(projectId))) {
-    return isDemoOnlyPath(path) ? onlyInDemo() : null;
-  }
   const parts = demoPathParts(path);
   const verb = method.toUpperCase();
+  if (!(await demoRequested(projectId))) {
+    if (isDemoOnlyPath(path)) return onlyInDemo();
+    // A tab still showing the demo after another turned it off must not write for real.
+    const resource = parts?.segments[0] ?? "";
+    if (verb !== "GET" && DEMO_RESOURCES.has(resource) && (await tabShowsDemo())) {
+      return demoWasTurnedOff();
+    }
+    return null;
+  }
   if (parts === undefined) {
     return verb === "GET" ? null : notInDemo();
   }
   const [resource = ""] = parts.segments;
   const now = new Date();
-  const ops = await readDemoOps();
-  // Imported here, not at the top, for the same reason as the flags in demoRequested.
-  const { getEnabledRampProviders } = await import("@/flags/ramps");
-  const rampProviders = await getEnabledRampProviders();
+  // The flags are imported here, not at the top, for the same reason as in demoRequested.
+  const [ops, rampProviders] = await Promise.all([
+    readDemoOps(),
+    import("@/flags/ramps").then(({ getEnabledRampProviders }) => getEnabledRampProviders()),
+  ]);
   const world = applyDemoOps(buildWorld(now, rampProviders), ops, now);
 
   if (verb === "GET") {

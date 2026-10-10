@@ -12,6 +12,13 @@ export const PAYMENTS_DEMO_COOKIE_NAME = "sdp-payments-demo";
  */
 export const DEMO_SESSION_COOKIE_PREFIX = "sdp-demo-session";
 
+/**
+ * Sent by a browser call from a tab that shows demo mode. The cookie is shared by every tab of
+ * the browser, so a tab that was left on the demo after another turned it off would otherwise
+ * send its next write to the real API; the server refuses that write instead.
+ */
+export const TAB_DEMO_HEADER_NAME = "x-sdp-tab-demo";
+
 export const PAYMENTS_PATH_PREFIX = "/dashboard/payments";
 
 /** Whether a dashboard path is a Payments screen. */

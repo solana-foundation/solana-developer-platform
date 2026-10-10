@@ -46,7 +46,7 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
+import { dashboardRequest, setTabShowsDemo } from "@/lib/dashboard-fetch";
 import {
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
@@ -451,6 +451,10 @@ export function DashboardShell({
     flags.paymentsDemoMode !== false &&
     isPaymentsDemoOn(paymentsDemo, selectedProjectId);
   const paymentsDemoOn = demoAvailable && demoMode;
+  useEffect(() => {
+    setTabShowsDemo(paymentsDemoOn);
+    return () => setTabShowsDemo(false);
+  }, [paymentsDemoOn]);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
