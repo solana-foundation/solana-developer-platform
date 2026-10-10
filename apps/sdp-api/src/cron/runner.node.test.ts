@@ -16,6 +16,7 @@ import {
   EARN_VAULT_MOVEMENTS_CRON,
   runEarnVaultMovementsReconciliation,
 } from "./earn-vault-movements";
+import { IDEMPOTENCY_KEY_PRUNE_CRON } from "./idempotency-keys";
 import {
   PENDING_DEPOSITS_CRON,
   PENDING_DEPOSITS_MONITOR,
@@ -148,6 +149,11 @@ vi.mock("./secret-retirements", () => ({
   runSecretRetirements: vi.fn(),
 }));
 
+vi.mock("./idempotency-keys", () => ({
+  IDEMPOTENCY_KEY_PRUNE_CRON: "17 * * * *",
+  runIdempotencyKeyPrune: vi.fn(),
+}));
+
 vi.mock("./provider-credential-secret-cleanup", () => ({
   PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON: "*/5 * * * *",
   runProviderCredentialSecretCleanup: vi.fn(),
@@ -191,7 +197,7 @@ describe("startCron", () => {
   // proof-of-life no-ops, so every configuration schedules all 15 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { ...CHANNEL, SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 14;
+  const ALL_TASKS = 15;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { ...CHANNEL, DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -222,6 +228,7 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[11][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
     expect(scheduleMock.mock.calls[12][0]).toBe(DVP_TRADES_CRON);
     expect(scheduleMock.mock.calls[13][0]).toBe(EARN_SPLIT_SWAPS_CRON);
+    expect(scheduleMock.mock.calls[14][0]).toBe(IDEMPOTENCY_KEY_PRUNE_CRON);
   });
 
   it("always schedules revoked API key cache reconciliation", () => {

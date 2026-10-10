@@ -15,6 +15,7 @@ export * from "./earn";
 export * from "./generated/ramp.generated";
 export * from "./hastra-programs";
 export * from "./helius-rings";
+export * from "./idempotency";
 export * from "./jupiter-lend-programs";
 export * from "./kamino-programs";
 export * from "./kyc";

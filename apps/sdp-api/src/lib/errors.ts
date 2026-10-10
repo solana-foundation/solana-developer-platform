@@ -56,7 +56,11 @@ export type ErrorCode =
   | "ESTIMATE_NOT_AVAILABLE"
   | "UNSUPPORTED_CORRIDOR"
   // Earn volume caps (ADR 0004)
-  | "VAULT_EXPOSURE_CAP";
+  | "VAULT_EXPOSURE_CAP"
+  // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
+  | "IDEMPOTENCY_KEY_REQUIRED"
+  | "IDEMPOTENCY_KEY_REUSED"
+  | "IDEMPOTENCY_KEY_IN_FLIGHT";
 
 export interface ApiError {
   code: ErrorCode;
@@ -120,6 +124,10 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   UNSUPPORTED_CORRIDOR: 400,
   // Earn volume caps (ADR 0004)
   VAULT_EXPOSURE_CAP: 409,
+  // Idempotency-Key (HOO-1918)
+  IDEMPOTENCY_KEY_REQUIRED: 400,
+  IDEMPOTENCY_KEY_REUSED: 422,
+  IDEMPOTENCY_KEY_IN_FLIGHT: 409,
 };
 
 export const PUBLIC_INTERNAL_ERROR_MESSAGE = "An internal error occurred";
@@ -177,6 +185,11 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   // Earn volume caps (ADR 0004)
   VAULT_EXPOSURE_CAP:
     "This deposit would take SDP's total holdings in the vault past its exposure cap",
+  // Idempotency-Key (HOO-1918)
+  IDEMPOTENCY_KEY_REQUIRED: "This operation requires an Idempotency-Key header",
+  IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used for a different request",
+  IDEMPOTENCY_KEY_IN_FLIGHT:
+    "A request with this Idempotency-Key is still in progress; retry after the Retry-After delay",
 };
 
 export class AppError extends Error {

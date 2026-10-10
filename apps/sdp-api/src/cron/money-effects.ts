@@ -52,6 +52,8 @@ export const CRON_MONITOR_MONEY_EFFECTS = {
   "sdp-api-reconcile-revoked-api-key-cache": { effect: "observes" },
   "sdp-api-retire-secrets": { effect: "observes" },
   "sdp-api-cleanup-provider-credential-secrets": { effect: "observes" },
+  // Deletes expired Idempotency-Key records (HOO-1918); touches no money row.
+  "sdp-api-prune-idempotency-keys": { effect: "observes" },
 } as const satisfies Record<string, CronMoneyEffect>;
 
 export type CronMonitor = keyof typeof CRON_MONITOR_MONEY_EFFECTS;

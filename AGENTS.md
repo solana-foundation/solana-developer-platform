@@ -58,6 +58,10 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Consume Solana Earn packages only through exact registry-backed versions or the exact-version pnpm
   catalog. Do not commit cross-repository workspace, link, file, Git, or URL dependencies; see
   `docs/architecture/solana-earn-consumption.md`.
+- **Idempotency-Key goes through one step (hard rule).** Mutating routes of `stable` modules use
+  `idempotent()`; money routes use `key: "required"` at any stage. No
+  per-module key handling, and never on a route whose response carries a secret. See
+  `docs/decisions/0008-idempotency-keys.md`.
 - **RPC is a budget (hard rule).** Every provider read, quote and build makes the fewest RPC calls
   that still read every value-bearing input live: no per-call client construction or re-validation,
   no account fetched twice in one operation, static facts cached with a TTL that never stores a
