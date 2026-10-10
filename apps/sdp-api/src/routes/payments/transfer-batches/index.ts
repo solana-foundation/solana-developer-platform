@@ -1,14 +1,14 @@
 import { Hono } from "hono";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
-import { policyGate } from "@/middleware/policy-gate";
+import { requestGate } from "@/middleware/request-gate";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
-  admitTransferBatchRuntimeExecution,
+  admitTransferBatchExecution,
   createTransferBatch,
   estimateTransferBatch,
-  extractTransferBatchPolicyCandidate,
+  extractTransferBatchRequest,
   findTransferBatchIdempotentKeyReplay,
   getTransferBatch,
   listTransferBatches,
@@ -28,10 +28,10 @@ transferBatches.post(
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
   requireAllowedOperation("payment_transfer_batch_execute"),
   validateBody(createTransferBatchSchema),
-  policyGate({
-    extract: extractTransferBatchPolicyCandidate,
+  requestGate({
+    extract: extractTransferBatchRequest,
     findIdempotentKeyReplay: findTransferBatchIdempotentKeyReplay,
-    beforeEnforce: admitTransferBatchRuntimeExecution,
+    admit: admitTransferBatchExecution,
   }),
   createTransferBatch
 );

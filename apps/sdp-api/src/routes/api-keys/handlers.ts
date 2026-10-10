@@ -4,22 +4,17 @@ import type {
   CreateApiKeyResponse,
   ListApiKeysResponse,
   Permission,
-  PolicyRule,
   RotateApiKeyResponse,
 } from "@sdp/types";
 import type { Context } from "hono";
 import { asTransactionalClient, getDb } from "@/db";
-import {
-  createPolicyRepository,
-  type UpsertApiKeyWalletPolicyBindingInput,
-} from "@/db/repositories";
 import {
   dropApiKeyCacheEntry,
   isApiKeyCacheWritable,
   refreshApiKeyCache,
 } from "@/lib/api-key-cache";
 import { requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -41,15 +36,10 @@ import {
   replaceApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import { ApiKeyPolicyStore } from "@/services/policy/api-key-policy.store";
 import type { Env } from "@/types/env";
 import { buildApiKeyAccessSummaries } from "./access-response";
 import type {
-  apiKeyControlProfileCreateSchema,
-  apiKeyControlProfileRevisionCreateSchema,
   apiKeyCreateSchema,
-  apiKeyPolicyBindingsWriteSchema,
   apiKeyRevokeSchema,
   apiKeyRotateSchema,
   apiKeyUpdateSchema,
@@ -191,16 +181,6 @@ function resolveActor(c: AppContext): {
     };
   }
 
-  const replayActor = c.get("approvedOperationActor");
-  if (replayActor) {
-    return {
-      organizationId: replayActor.organizationId,
-      permissions: replayActor.permissions,
-      apiKeyId: null,
-      userId: replayActor.userId,
-    };
-  }
-
   throw new AppError("UNAUTHORIZED", "Authentication required");
 }
 
@@ -212,9 +192,7 @@ export const listApiKeys = async (c: AppContext) => {
   const apiKeyService = new ApiKeyService(db, getRequestTenantScope(c));
   const apiKeys = await apiKeyService.listForProject(projectId);
   const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
-    c.env,
     db,
-    getRequestTenantScope(c),
     apiKeys.map((key) => key.id)
   );
 
@@ -234,7 +212,6 @@ export const listApiKeys = async (c: AppContext) => {
         signingWalletId: key.signingWalletId,
         signingWalletIds: walletBindings.map((binding) => binding.walletId),
         walletBindings,
-        policyBindings: accessSummary?.policyBindings ?? [],
         allowedOperations: key.allowedOperations,
         lastUsedAt: key.lastUsedAt,
         expiresAt: key.expiresAt,
@@ -454,12 +431,7 @@ export const getApiKey = async (c: AppContext) => {
     throw notFound("API key");
   }
 
-  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
-    c.env,
-    getDb(c.env),
-    getRequestTenantScope(c),
-    [key.id]
-  );
+  const accessSummaryByKeyId = await buildApiKeyAccessSummaries(getDb(c.env), [key.id]);
   const accessSummary = accessSummaryByKeyId.get(key.id);
   const walletBindings = accessSummary?.walletBindings ?? [];
 
@@ -478,7 +450,6 @@ export const getApiKey = async (c: AppContext) => {
     signingWalletId: key.signingWalletId,
     signingWalletIds: walletBindings.map((binding) => binding.walletId),
     walletBindings,
-    policyBindings: accessSummary?.policyBindings ?? [],
     allowedOperations: key.allowedOperations,
     lastUsedAt: key.lastUsedAt,
     expiresAt: key.expiresAt,
@@ -586,175 +557,6 @@ export const updateApiKey = async (c: ValidatedBodyContext<typeof apiKeyUpdateSc
   });
 
   return success(c, { success: true });
-};
-
-export const createApiKeyControlProfile = async (
-  c: ValidatedBodyContext<typeof apiKeyControlProfileCreateSchema>
-) => {
-  const { keyId } = c.req.param();
-  const actor = resolveActor(c);
-  const projectId = requireProjectId(c);
-
-  if (actor.apiKeyId && keyId === actor.apiKeyId) {
-    throw badRequest("Cannot manage control profiles of the API key being used for this request");
-  }
-
-  const body = c.req.valid("json");
-
-  const profile = await new ApiKeyPolicyStore(
-    createPolicyRepository(c.env, getRequestTenantScope(c))
-  ).createApiKeyControlProfile({
-    organizationId: actor.organizationId,
-    projectId,
-    apiKeyId: keyId,
-    name: body.name,
-    createdBy: actor.userId ?? actor.apiKeyId,
-  });
-
-  await new AuditService(getDb(c.env)).log(c, {
-    action: "create",
-    resourceType: "api_key",
-    resourceId: keyId,
-    metadata: { action: "create_control_profile", profileId: profile.id, name: profile.name },
-  });
-
-  return created(c, { profile });
-};
-
-export const createApiKeyControlProfileRevision = async (
-  c: ValidatedBodyContext<typeof apiKeyControlProfileRevisionCreateSchema>
-) => {
-  const { keyId, profileId } = c.req.param();
-  const actor = resolveActor(c);
-  const projectId = requireProjectId(c);
-
-  if (actor.apiKeyId && keyId === actor.apiKeyId) {
-    throw badRequest("Cannot manage control profiles of the API key being used for this request");
-  }
-
-  const body = c.req.valid("json");
-
-  const revision = await new ApiKeyPolicyStore(
-    createPolicyRepository(c.env, getRequestTenantScope(c))
-  ).createApiKeyControlProfileRevision({
-    organizationId: actor.organizationId,
-    projectId,
-    apiKeyId: keyId,
-    profileId,
-    rules: body.rules as PolicyRule[],
-    defaultAction: body.defaultAction,
-    createdBy: actor.userId ?? actor.apiKeyId,
-  });
-
-  await new AuditService(getDb(c.env)).log(c, {
-    action: "create",
-    resourceType: "api_key",
-    resourceId: keyId,
-    metadata: {
-      action: "create_control_profile_revision",
-      profileId,
-      revisionId: revision.id,
-      revisionNumber: revision.revisionNumber,
-    },
-  });
-
-  return created(c, { revision });
-};
-
-export const activateApiKeyControlProfileRevision = async (c: AppContext) => {
-  const { keyId, profileId, revisionId } = c.req.param();
-  const actor = resolveActor(c);
-  const projectId = requireProjectId(c);
-
-  if (actor.apiKeyId && keyId === actor.apiKeyId) {
-    throw badRequest("Cannot manage control profiles of the API key being used for this request");
-  }
-
-  const active = await new ApiKeyPolicyStore(
-    createPolicyRepository(c.env, getRequestTenantScope(c))
-  ).activateApiKeyControlProfileRevision({
-    organizationId: actor.organizationId,
-    projectId,
-    apiKeyId: keyId,
-    profileId,
-    revisionId,
-  });
-
-  await new AuditService(getDb(c.env)).log(c, {
-    action: "update",
-    resourceType: "api_key",
-    resourceId: keyId,
-    metadata: { action: "activate_control_profile_revision", profileId, revisionId },
-  });
-
-  return success(c, active);
-};
-
-export const writeApiKeyPolicyBindings = async (
-  c: ValidatedBodyContext<typeof apiKeyPolicyBindingsWriteSchema>
-) => {
-  const { keyId } = c.req.param();
-  const actor = resolveActor(c);
-  const projectId = requireProjectId(c);
-
-  if (actor.apiKeyId && keyId === actor.apiKeyId) {
-    throw badRequest("Cannot replace policy bindings of the API key being used for this request");
-  }
-
-  const body = c.req.valid("json");
-
-  const custodyTargets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
-  const bindings: UpsertApiKeyWalletPolicyBindingInput[] =
-    body.mode === "replace"
-      ? await Promise.all(
-          body.bindings.map(async (binding) => {
-            if (binding.bindingScope === "all") {
-              return { apiKeyId: keyId, ...binding };
-            }
-
-            const wallet = await custodyTargets.findOperationalWallet({
-              organizationId: actor.organizationId,
-              projectId,
-              walletId: binding.walletId,
-            });
-            if (!wallet) {
-              throw forbidden("API key is not authorized for the requested wallet");
-            }
-            return {
-              apiKeyId: keyId,
-              ...binding,
-              walletId: wallet.walletId,
-              custodyWalletId: wallet.id,
-            };
-          })
-        )
-      : [];
-
-  await new ApiKeyPolicyStore(
-    createPolicyRepository(c.env, getRequestTenantScope(c))
-  ).replaceApiKeyWalletPolicyBindings({
-    organizationId: actor.organizationId,
-    projectId,
-    apiKeyId: keyId,
-    bindings,
-  });
-
-  const accessSummary = (
-    await buildApiKeyAccessSummaries(c.env, getDb(c.env), getRequestTenantScope(c), [keyId])
-  ).get(keyId);
-  const policyBindings = accessSummary?.policyBindings ?? [];
-
-  await new AuditService(getDb(c.env)).log(c, {
-    action: "update",
-    resourceType: "api_key",
-    resourceId: keyId,
-    metadata: {
-      action: `${body.mode}_policy_bindings`,
-      bindingCount: policyBindings.length,
-    },
-  });
-
-  return success(c, { policyBindings });
 };
 
 export const rotateApiKey = async (c: ValidatedBodyContext<typeof apiKeyRotateSchema>) => {

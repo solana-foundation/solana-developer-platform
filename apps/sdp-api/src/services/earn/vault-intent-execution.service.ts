@@ -81,7 +81,6 @@ export interface ExecuteSignedVaultIntentInput<TResult extends SignedVaultIntent
    * The same value reaches simulation and signing so they cannot disagree.
    */
   fee: VaultFeeMode;
-  runIntentTransaction?: <T>(mutation: (db: AppDb) => Promise<T>) => Promise<T>;
   persist: (db: AppDb, signed: SignedVaultTransaction) => Promise<TResult>;
 }
 
@@ -196,10 +195,7 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
     throw error;
   }
 
-  const runIntentTransaction =
-    input.runIntentTransaction ??
-    (<T>(mutation: (db: AppDb) => Promise<T>) => mutation(getDb(env)));
-  const result = await runIntentTransaction((db) => input.persist(db, signed));
+  const result = await input.persist(getDb(env), signed);
   if (result.replayed) return result;
 
   const movement = await broadcastRecordedVaultMovement(env, {

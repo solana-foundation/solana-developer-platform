@@ -1,12 +1,9 @@
 import type { CustodyProvider } from "@sdp/custody";
 import { hashString } from "@sdp/payments/hash";
-import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
-import { requireAdminApiKeyRole, unifiedAuthMiddleware } from "@/middleware/auth";
-import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import {
   TEST_API_KEY,
@@ -16,17 +13,12 @@ import {
 } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
-import {
-  authenticateTestClerkUser,
-  clerkHeadersWithoutProject,
-  ensureTestClerkIssuer,
-} from "@/test/helpers/clerk";
+import { ensureTestClerkIssuer } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
 
 describe("Auth Middleware", () => {
   const issuerReady = ensureTestClerkIssuer(env);
@@ -547,55 +539,6 @@ describe("Auth Middleware", () => {
       );
       expect(unresolved.status).toBe(200);
       expect(await createKVStoreSet(env).apiKeys.get(`key:${validKeyHash}`, "json")).toBeNull();
-    });
-  });
-
-  describe("requireAdminApiKeyRole", () => {
-    function gatedApp() {
-      const gated = new Hono<{ Bindings: Env }>();
-      gated.use("*", kvStoreMiddleware());
-      gated.use("*", unifiedAuthMiddleware());
-      gated.onError((error, c) => c.json({ error: error.message }, 403));
-      gated.put("/gated", requireAdminApiKeyRole(), (c) => c.json({ ok: true }));
-      return gated;
-    }
-
-    it.each([
-      ["api_developer", 403],
-      ["api_admin", 200],
-    ] as const)("gates the %s API key role", async (role, status) => {
-      await seedCachedApiKey(env, validKeyHash, { ...TEST_CACHED_API_KEY, role });
-      const res = await gatedApp().request(
-        "/gated",
-        { method: "PUT", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-        env
-      );
-      expect(res.status).toBe(status);
-    });
-
-    it.each([
-      ["member", 403],
-      ["admin", 200],
-    ] as const)("gates a Clerk organization %s", async (role, status) => {
-      await getDb(env)
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(TEST_USER.id, TEST_USER.email)
-        .run();
-      const { token } = await authenticateTestClerkUser(env, getDb(env), {
-        userId: TEST_USER.id,
-        email: TEST_USER.email,
-        clerkUserId: "clerk_user_auth_gate",
-        organizationId: TEST_ORG.id,
-        clerkOrgId: "org_test_clerk_auth_gate",
-        orgSlug: TEST_ORG.slug,
-        role,
-      });
-      const res = await gatedApp().request(
-        "/gated",
-        { method: "PUT", headers: clerkHeadersWithoutProject(token) },
-        env
-      );
-      expect(res.status).toBe(status);
     });
   });
 

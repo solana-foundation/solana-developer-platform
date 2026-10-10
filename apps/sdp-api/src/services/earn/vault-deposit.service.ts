@@ -4,7 +4,7 @@ import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { address } from "@solana/kit";
-import { type AppDb, getDb } from "@/db";
+import { getDb } from "@/db";
 import {
   assertMovementIsOwnReplay,
   createPostgresEarnMovementsRepository,
@@ -87,15 +87,6 @@ export interface VaultDepositResult {
   replayed: boolean;
 }
 
-export interface VaultDepositExecutionOptions {
-  /**
-   * Handler-owned boundary that couples an approved-operation effect fence to
-   * the repository's first durable mutation. The repository still opens a real
-   * transaction for ordinary calls.
-   */
-  runIntentTransaction?: <T>(mutation: (db: AppDb) => Promise<T>) => Promise<T>;
-}
-
 async function replayResult(
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   input: VaultDepositInput,
@@ -134,7 +125,7 @@ export function requireAcceptedPlan(
     throw internalError("Vault builder did not report the canonical amount encoded on chain");
   }
   if (compareDecimalAmounts(amount, input.amount) !== 0) {
-    throw internalError("Vault builder amount does not match the policy-approved request amount");
+    throw internalError("Vault builder amount does not match the requested request amount");
   }
   const minSharesOut = plan.accepted?.minSharesOut ?? null;
   if (input.minSharesOut !== undefined && minSharesOut === null) {
@@ -146,17 +137,14 @@ export function requireAcceptedPlan(
       minSharesOut !== null &&
       compareDecimalAmounts(minSharesOut, input.minSharesOut) !== 0)
   ) {
-    throw internalError(
-      "Vault builder minSharesOut does not match the policy-approved slippage floor"
-    );
+    throw internalError("Vault builder minSharesOut does not match the requested slippage floor");
   }
   return { minSharesOut };
 }
 
 export async function depositIntoVault(
   env: Env,
-  input: VaultDepositInput,
-  options: VaultDepositExecutionOptions = {}
+  input: VaultDepositInput
 ): Promise<VaultDepositResult> {
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const fingerprint = buildEarnVaultDepositFingerprint({
@@ -189,9 +177,8 @@ export async function depositIntoVault(
   if (prior) {
     // Ownership, not just fingerprint. The lookup is org-scoped and the
     // fingerprint omits the project, so a key first used by a SIBLING project
-    // matches both — and this path is reachable with the route-level guard
-    // skipped (an approved-operation execution). Without this line, project B's
-    // approved deposit was answered with project A's movement as replayed:true:
+    // matches both. Without this line, project B's
+    // deposit could be answered with project A's movement as replayed:true:
     // B's deposit silently never ran, and A's amount and signature leaked. Same
     // shared rule as the repository preflight; do not re-implement it here.
     assertMovementIsOwnReplay(prior, {
@@ -349,7 +336,6 @@ export async function depositIntoVault(
       plan,
       rpcUrl,
       fee,
-      runIntentTransaction: options.runIntentTransaction,
       persist: (db, signed) =>
         createPostgresEarnMovementsRepository(db).createSignedVaultDepositIntent({
           organizationId: input.organizationId,

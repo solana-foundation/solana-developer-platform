@@ -143,12 +143,12 @@ describe("OperationDetailDrawer", () => {
   it("renders repeated events at the same instant", async () => {
     renderDrawer({
       events: [
-        { kind: "policy.evaluated", createdAt: "2026-08-26T12:00:00.000Z" },
-        { kind: "policy.evaluated", createdAt: "2026-08-26T12:00:00.000Z" },
+        { kind: "proof.received", createdAt: "2026-08-26T12:00:00.000Z" },
+        { kind: "proof.received", createdAt: "2026-08-26T12:00:00.000Z" },
       ],
     });
 
-    expect(await screen.findAllByText("Policy checked")).toHaveLength(2);
+    expect(await screen.findAllByText("Proved")).toHaveLength(2);
   });
 
   it("surfaces a read failure instead of an empty drawer", async () => {

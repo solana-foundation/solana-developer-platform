@@ -204,6 +204,42 @@ describe("withdrawFromVault", () => {
     expect(resolveVaultSponsorship).not.toHaveBeenCalled();
   });
 
+  it("broadcasts exactly once when identical requests race with different signatures", async () => {
+    let releaseBuilds: (() => void) | undefined;
+    const bothBuilding = new Promise<void>((resolve) => {
+      releaseBuilds = resolve;
+    });
+    let buildCount = 0;
+    buildVaultWithdrawal.mockImplementation(async () => {
+      buildCount += 1;
+      if (buildCount === 2) releaseBuilds?.();
+      await bothBuilding;
+      return plan();
+    });
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_identical_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const results = await Promise.all([
+      withdrawFromVault(env, input()),
+      withdrawFromVault(env, input()),
+    ]);
+
+    expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+    expect(new Set(results.map((result) => result.movement.id))).toHaveProperty("size", 1);
+    const rows = await getDb(env)
+      .prepare("SELECT COUNT(*) AS count FROM earn_movements WHERE direction = 'withdrawal'")
+      .first<{ count: number | string }>();
+    expect(Number(rows?.count)).toBe(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects the same requestId with a different payload", async () => {
     await withdrawFromVault(env, input());
     await expect(withdrawFromVault(env, input({ shares: "5" }))).rejects.toMatchObject({
@@ -333,7 +369,7 @@ describe("withdrawFromVault — the exit slippage floor", () => {
       plan({ accepted: { shares: "10", minAmountOut: "9.9" } })
     );
     await expect(withdrawFromVault(env, input({ requestId: crypto.randomUUID() }))).rejects.toThrow(
-      "does not match the policy-approved slippage floor"
+      "does not match the requested slippage floor"
     );
 
     // Matching floor signs and records it.

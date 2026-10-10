@@ -16,11 +16,10 @@ import {
   authenticatedMeteredQuota,
   meteredQuota,
 } from "@/middleware/metered-quota";
-import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requestGate } from "@/middleware/request-gate";
 import { validateBody } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
-import { APPROVED_OPERATION_REPLAY_HEADER } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
 import { isEarnExitOrRead } from "./exits";
 import {
@@ -37,10 +36,9 @@ import {
 } from "./handlers/external-wallet";
 import { listEarnMovements } from "./handlers/movements";
 import {
-  answerEarnProgramWithdrawalConflict,
   createEarnProgram,
   createEarnProgramWithdrawal,
-  extractEarnProgramWithdrawalPolicyCandidate,
+  extractEarnProgramWithdrawal,
   getEarnProgram,
   getEarnProgramWithdrawal,
   listEarnProgramDeposits,
@@ -58,7 +56,7 @@ import {
   createEarnExternalWalletWithdrawalRequestTransaction,
   createEarnVaultQueuedWithdrawalPreview,
   createEarnVaultWithdrawalRequest,
-  extractEarnVaultWithdrawalRequestPolicyCandidate,
+  extractEarnVaultWithdrawalRequest,
   findEarnVaultWithdrawalRequestIdempotentKeyReplay,
   getEarnExternalWalletWithdrawalOptions,
   getEarnExternalWalletWithdrawalRequest,
@@ -75,8 +73,8 @@ import {
   createEarnVaultDepositPreview,
   createEarnVaultWithdrawal,
   createEarnVaultWithdrawalPreview,
-  extractEarnVaultDepositPolicyCandidate,
-  extractEarnVaultWithdrawalPolicyCandidate,
+  extractEarnVaultDeposit,
+  extractEarnVaultWithdrawal,
   findEarnVaultDepositIdempotentKeyReplay,
   findEarnVaultWithdrawalIdempotentKeyReplay,
   getEarnVaultDeposit,
@@ -309,7 +307,7 @@ optionalAuthEarn.post(
 // existing permission matrix. Give anonymous callers the API-facing contract
 // before projectContextMiddleware can turn a missing project into a 400.
 async function requireKeyedEarnCredential(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!c.req.header("Authorization") && !c.req.header(APPROVED_OPERATION_REPLAY_HEADER)) {
+  if (!c.req.header("Authorization")) {
     throw new AppError("UNAUTHORIZED", "API key required for this Earn route");
   }
   await next();
@@ -409,26 +407,25 @@ earn.get(
 // the handler is a documented NO-OP, so the router permission is the only gate
 // such a key ever meets when it names a wallet.
 //
-// `policyGate` is what makes this route governed at all. It reaches
-// `createOrgSignerForCustodyWallet` and broadcasts a value-moving transaction, so without the
-// gate an org's wallet deny rules, approval requirements, amount/asset limits
-// and destination controls were all bypassed — the handler simply never asked.
-// The gate must sit AFTER `requirePermissions` and `validateBody`, and
-// immediately before the handler, so a denial is decided before any KMS or
-// relay access.
+// `requestGate` resolves the strategy, wallet and binding and answers an
+// Idempotency-Key replay before the handler runs. The route reaches
+// `createOrgSignerForCustodyWallet` and broadcasts a value-moving transaction,
+// so the gate must sit AFTER `requirePermissions`, `requireAllowedOperation`
+// and `validateBody`, and immediately before the handler, so a refusal is
+// decided before any KMS or relay access.
 earn.post(
   "/vault-deposits",
   requirePermissions("earn:write", "wallets:read"),
   requireAllowedOperation("earn_vault_deposit"),
   validateBody(earnVaultDepositSchema),
-  policyGate({
-    extract: extractEarnVaultDepositPolicyCandidate,
+  requestGate({
+    extract: extractEarnVaultDeposit,
     findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
-    beforeEnforce: admitEarnVaultRuntimeExecution,
+    admit: admitEarnVaultRuntimeExecution,
   }),
   createEarnVaultDeposit
 );
-// The deposit READS take no policy gate and no provider gate — they move no
+// The deposit READS take no request gate and no provider gate — they move no
 // money and report on money that already left the wallet. They are what makes a
 // signed-but-unconfirmed deposit answerable: `POST` records before broadcast,
 // so a caller can hold a movement id for a transaction whose outcome it never
@@ -436,9 +433,8 @@ earn.post(
 //
 // The collection is declared BEFORE the `:movementId` route, the same ordering
 // rule `/programs` follows, so a literal segment can never be captured as an id.
-// `?requestId=` on the collection is how an APPROVAL-GATED deposit is found: the
-// hold returns no movement id, but the approval executor replays the caller's
-// original Idempotency-Key, so the movement it later creates carries it.
+// `?requestId=` on the collection finds a deposit by the caller's
+// Idempotency-Key when the original response was lost.
 earn.get("/vault-deposits", requirePermissions("earn:read", "wallets:read"), listEarnVaultDeposits);
 earn.get(
   "/vault-deposits/:movementId",
@@ -446,10 +442,9 @@ earn.get(
   getEarnVaultDeposit
 );
 // The EXIT half (PRO-1702): redeem a position's shares back to the custody
-// wallet that holds them. Policy-gated for the same reason the deposit is —
-// it reaches `createOrgSignerForCustodyWallet` and broadcasts value-moving transactions, and
-// wallet policy is the ORG'S control over its own custody, not a provider
-// gate. Beyond it this route takes only the capability answer (501 when the
+// wallet that holds them. Request-gated for the same reason the deposit is —
+// it reaches `createOrgSignerForCustodyWallet` and broadcasts value-moving
+// transactions. Beyond it this route takes only the capability answer (501 when the
 // provider cannot build an exit): ADR 0002 exit safety forbids money-out
 // inheriting surfacing, entitlement, availability, environment capability, or
 // any catalogue dependency — the position row names the instrument, so a
@@ -459,12 +454,12 @@ earn.post(
   requirePermissions("earn:write", "wallets:read"),
   requireAllowedOperation("earn_vault_withdrawal"),
   validateBody(earnVaultWithdrawalSchema),
-  policyGate({
-    extract: extractEarnVaultWithdrawalPolicyCandidate,
+  requestGate({
+    extract: extractEarnVaultWithdrawal,
     findIdempotentKeyReplay: findEarnVaultWithdrawalIdempotentKeyReplay,
-    // Floor policy runs AFTER the completed-replay exit so a recorded
+    // The floor check runs AFTER the completed-replay exit so a recorded
     // floor-less withdrawal stays replayable if the provider's policy flips.
-    beforeEnforce: async (c, extraction) => {
+    admit: async (c, extraction) => {
       await assertEarnVaultWithdrawalFloor(c, extraction);
       await admitEarnVaultRuntimeExecution(c, extraction);
     },
@@ -486,9 +481,9 @@ earn.post(
   validateBody(earnVaultWithdrawalPreviewSchema),
   createEarnVaultWithdrawalPreview
 );
-// Withdrawal READS mirror the deposit reads: no policy gate, no provider gate,
+// Withdrawal READS mirror the deposit reads: no request gate, no provider gate,
 // collection before the `:movementId` route, `?requestId=` finds the whole leg
-// group (including one an approval executor created later).
+// group.
 earn.get(
   "/vault-withdrawals",
   requirePermissions("earn:read", "wallets:read"),
@@ -516,8 +511,8 @@ earn.post(
   requirePermissions("earn:write", "wallets:read"),
   requireAllowedOperation("earn_vault_withdrawal"),
   validateBody(earnVaultWithdrawalRequestSchema),
-  policyGate({
-    extract: extractEarnVaultWithdrawalRequestPolicyCandidate,
+  requestGate({
+    extract: extractEarnVaultWithdrawalRequest,
     findIdempotentKeyReplay: findEarnVaultWithdrawalRequestIdempotentKeyReplay,
   }),
   createEarnVaultWithdrawalRequest
@@ -532,7 +527,7 @@ earn.get(
   requirePermissions("earn:read", "wallets:read"),
   getEarnVaultWithdrawalRequest
 );
-// Recovery is intentionally not policy-gated: it only releases the caller's
+// Recovery is intentionally not request-gated: it only releases the caller's
 // provider request. Solver queues return escrowed shares after their deadline;
 // operator redemptions revoke the claim and leave the redeemed intermediate
 // asset in the same owner wallet.
@@ -565,10 +560,10 @@ earn.get(
 // and all previews live on the optional-auth router above. Queued request and
 // cancellation builds stay keyed with the durable lifecycle they create.
 //
-// Deliberately NO `policyGate` and NO `wallets:read`, and that is not the
-// deposit route's cautionary tale repeating: wallet policy governs the org's
-// own custody and stands between a request and `createOrgSignerForCustodyWallet`. These routes
-// never resolve a signer and never touch custody — the owner's own
+// Deliberately NO `requestGate` and NO `wallets:read`, and that is not the
+// deposit route's cautionary tale repeating: the custody wallet binding governs
+// the org's own custody and stands between a request and
+// `createOrgSignerForCustodyWallet`. These routes never resolve a signer and never touch custody — the owner's own
 // signature is the authorization, and there is no signing sink here for the
 // value-moving conformance inventory to find. `earn:write` gates both submits
 // because they create and broadcast recorded movements.
@@ -652,21 +647,17 @@ earn.post(
   validateBody(earnProgramWithdrawalPreviewSchema),
   previewEarnProgramWithdrawal
 );
-// The custodial payout. `earn:write` alone used to be the whole gate: the
-// route pays a caller-supplied `destinationAddress` out of the organization's
-// provider account, so without a policy gate an org's deny rules, amount and
-// asset limits, destination controls and approval requirements never ran
-// (HOO-1559). A program has no custody wallet, so the governing profile is the
-// API key's own; the extractor also refuses a wallet-scoped key, which has no
-// wallet here to be bound against.
+// The custodial payout. The route pays a caller-supplied `destinationAddress`
+// out of the organization's provider account. A program has no custody wallet,
+// so the extractor refuses a wallet-scoped key, which has no wallet here to be
+// bound against. Retries are resolved by the handler over the movement ledger.
 earn.post(
   "/programs/:programId/withdrawals",
   requirePermissions("earn:write"),
   requireAllowedOperation("earn_program_withdrawal"),
   validateBody(earnProgramWithdrawalCreateSchema),
-  policyGate({
-    extract: extractEarnProgramWithdrawalPolicyCandidate,
-    onIdempotencyConflict: answerEarnProgramWithdrawalConflict,
+  requestGate({
+    extract: extractEarnProgramWithdrawal,
   }),
   createEarnProgramWithdrawal
 );

@@ -38,8 +38,6 @@ import type { PaymentTransferBatchesRepository } from "./payment-transfer-batche
 import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
 import type { PaymentsRepository } from "./payments.repository";
 import { createPostgresPaymentsRepository } from "./payments.repository.postgres";
-import type { PolicyRepository } from "./policy.repository";
-import { createPostgresPolicyRepository } from "./policy.repository.postgres";
 import type { PrivateChannelRepository } from "./private-channel.repository";
 import { createPostgresPrivateChannelRepository } from "./private-channel.repository.postgres";
 import type { PrivateChannelDepositRepository } from "./private-channel-deposit.repository";
@@ -189,10 +187,6 @@ export function createCounterpartyAccountsRepository(
 
 export function createTokenRepository(env: Env, scope: TenantScope): TokenRepository {
   return createPostgresTokenRepository(getDb(env), scope);
-}
-
-export function createPolicyRepository(env: Env, scope: TenantScope): PolicyRepository {
-  return createPostgresPolicyRepository(getDb(env), scope);
 }
 
 export function createAssetProfilesRepository(

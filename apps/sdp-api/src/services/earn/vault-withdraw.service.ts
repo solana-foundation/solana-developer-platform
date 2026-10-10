@@ -2,7 +2,7 @@ import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types";
-import { type AppDb, getDb } from "@/db";
+import { getDb } from "@/db";
 import {
   assertMovementIsOwnReplay,
   createPostgresEarnMovementsRepository,
@@ -57,11 +57,6 @@ export interface VaultWithdrawalResult {
   replayed: boolean;
 }
 
-export interface VaultWithdrawalExecutionOptions {
-  /** Couple an approved-operation effect fence to the first durable mutation. */
-  runIntentTransaction?: <T>(mutation: (db: AppDb) => Promise<T>) => Promise<T>;
-}
-
 /**
  * Shared with the external-wallet withdrawal build, whose plan must pass the
  * same bar.
@@ -103,9 +98,7 @@ export function requireAcceptedWithdrawalPlan(
       minAmountOut !== null &&
       compareDecimalAmounts(minAmountOut, input.minAmountOut) !== 0)
   ) {
-    throw internalError(
-      "Vault builder minAmountOut does not match the policy-approved slippage floor"
-    );
+    throw internalError("Vault builder minAmountOut does not match the requested slippage floor");
   }
 }
 
@@ -130,8 +123,7 @@ async function replayResult(
 
 export async function withdrawFromVault(
   env: Env,
-  input: VaultWithdrawalInput,
-  options: VaultWithdrawalExecutionOptions = {}
+  input: VaultWithdrawalInput
 ): Promise<VaultWithdrawalResult> {
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const fingerprint = buildEarnVaultWithdrawalFingerprint({
@@ -248,7 +240,6 @@ export async function withdrawFromVault(
     plan,
     rpcUrl,
     fee,
-    runIntentTransaction: options.runIntentTransaction,
     persist: (db, signed) =>
       createPostgresEarnMovementsRepository(db).createSignedVaultWithdrawalIntent({
         organizationId: input.organizationId,

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { APPROVED_WALLET_OPERATIONS_MONITOR } from "./approved-wallet-operations";
 import { DVP_TRADES_MONITOR } from "./dvp-trades";
 import { EARN_CATALOGUE_SYNC_MONITOR } from "./earn-catalogue-sync";
 import { EARN_METRICS_REFRESH_MONITOR } from "./earn-metrics-refresh";
@@ -19,7 +18,6 @@ describe("cron money effects (HOO-1955)", () => {
   it("classifies exactly the monitors the cron modules declare", () => {
     expect(Object.keys(CRON_MONITOR_MONEY_EFFECTS).sort()).toEqual(
       [
-        APPROVED_WALLET_OPERATIONS_MONITOR,
         DVP_TRADES_MONITOR,
         EARN_CATALOGUE_SYNC_MONITOR,
         EARN_METRICS_REFRESH_MONITOR,

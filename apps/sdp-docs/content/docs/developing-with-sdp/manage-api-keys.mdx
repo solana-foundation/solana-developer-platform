@@ -144,7 +144,7 @@ Use `null` or an empty list on update to remove the restriction. Actions that ge
 
 ## Rotate a key
 
-Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's role, permissions, IP allowlist, wallet bindings, and policy profiles, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
+Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's role, permissions, IP allowlist, wallet bindings, and allowed operations, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">

@@ -309,7 +309,6 @@ const run = async () => {
       "payments/ramps-providers",
       "---Wallet Operations---",
       "wallet-operations/index",
-      "wallet-operations/policies",
       "wallet-operations/balances",
       "---Tutorials---",
       "tutorials/end-to-end-payment-flow",

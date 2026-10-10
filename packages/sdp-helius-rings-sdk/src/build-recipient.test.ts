@@ -52,8 +52,6 @@ function transferInput(expectedShieldedAddress: string): BuildOperationInput {
       walletId: "hrw_1",
       opType: "transfer_registered",
       state: "proving",
-      approvalRequestId: null,
-      policyEvaluationId: null,
       proof: null,
       outerTxSignature: null,
       photonIndexedAt: null,

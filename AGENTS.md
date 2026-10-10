@@ -31,7 +31,7 @@ Do not hand-edit generated artifacts. Regenerate them with the owning script.
 
 Public docs and AI artifacts should mirror the supported public surface only.
 
-- Public API families: `health`, `api-keys`, `wallets`, `projects`, `issuance`, `payments`, `policies`, `compliance`
+- Public API families: `health`, `api-keys`, `wallets`, `projects`, `issuance`, `payments`, `compliance`
 - `earn` is held out of every public surface until launch (PRO-2038): `EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` drops the family from the public OpenAPI document, and the API reference, Postman collection, playground catalog and AI files regenerate from it. Flipping it back is a PRO-1872 security sign-off PR. The internal document and the runtime are unchanged, except `GET /v1/projects/{projectId}/provider-availability`, which omits Earn entries while the flag is false so the response matches the public document.
 - Hidden/internal families stay out of public AI resources unless product policy changes: `rpc`, `admin`, `onboarding`, `auth`, `organizations`, `members`
 - Earn has two access tiers. Only strategy catalogue reads, deposit and withdrawal previews, withdrawal-route discovery, and unsigned instant deposit/direct-withdrawal builds may be keyless. Queued request and cancellation builds, submits, tenant reads, programs, custody routes, and the aggregate movement feed always require authentication. Keep this matrix aligned across the router, the internal OpenAPI document and the Embedded Yield guide, which is unpublished until PRO-2038 and lives at `apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, outside the built `content/docs` tree.

@@ -1,7 +1,7 @@
 export {
-  admitTransferBatchRuntimeExecution,
+  admitTransferBatchExecution,
   createTransferBatch,
-  extractTransferBatchPolicyCandidate,
+  extractTransferBatchRequest,
   findTransferBatchIdempotentKeyReplay,
 } from "./create";
 export { estimateTransferBatch } from "./estimate";

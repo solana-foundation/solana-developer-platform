@@ -104,8 +104,7 @@ async function seedAuth(): Promise<void> {
       ),
   ]);
 
-  // Policy enforcement requires the operation's wallet to be an active
-  // custody wallet owned by the tenant.
+  // The Rings wallet links to an active custody wallet owned by the tenant.
   await db.batch([
     db
       .prepare(
@@ -368,7 +367,7 @@ describe("Helius Rings routes", () => {
       gatewayOverride.current = gateway;
     });
 
-    it("prepares an operation through real policy and fails honestly at the port", async () => {
+    it("prepares an operation and fails honestly at the port", async () => {
       const res = await post("/v1/helius-rings/operations", {
         walletId: ringsWalletId,
         opType: "shield",
@@ -386,8 +385,7 @@ describe("Helius Rings routes", () => {
         };
       };
 
-      // Default policy is implicit allow, so the operation advances to the
-      // configured gateway and records its domain failure.
+      // The operation advances to the configured gateway and records its domain failure.
       expect(body.data.operation.state).toBe("failed");
       expect(body.data.operation.failure, body.data.operation.failure?.message).toMatchObject({
         code: "config_error",
@@ -723,8 +721,7 @@ describe("Helius Rings routes", () => {
         };
         expect(body.data.operation.opType).toBe("ring_exit");
         expect(body.data.operation.ringProgramId).toBe(RING_PROGRAM);
-        // Default policy is implicit allow, so the operation advances to the
-        // port call, where the describe's gateway records its config_error.
+        // The operation advances to the port call, where the describe's gateway records its config_error.
         expect(body.data.operation.state).toBe("failed");
         expect(body.data.operation.failure).toMatchObject({ code: "config_error" });
       });

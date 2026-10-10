@@ -291,18 +291,7 @@ async function recurringExecutionSnapshot(recurringPaymentId: string) {
                 WHERE a.subscription_id = rp.subscription_id) AS collection_attempts,
               (SELECT COUNT(*)::int
                  FROM payment_transfers t
-                WHERE t.provider_data->>'recurringPaymentId' = rp.id) AS collection_transfers,
-              (SELECT COUNT(*)::int
-                 FROM policy_evaluations) AS policy_evaluations,
-              (SELECT COUNT(*)::int
-                 FROM approval_requests) AS approval_requests,
-              (SELECT COUNT(*)::int
-                 FROM wallet_operations) AS all_wallet_operations,
-              (SELECT COUNT(*)::int
-                 FROM wallet_operations wo
-                WHERE wo.organization_id = rp.organization_id
-                  AND wo.project_id = rp.project_id
-                  AND wo.raw_payload->>'recurringPaymentId' = rp.id) AS wallet_operations
+                WHERE t.provider_data->>'recurringPaymentId' = rp.id) AS collection_transfers
          FROM payment_recurring_payments rp
         WHERE rp.id = ?`
     )
@@ -1092,93 +1081,12 @@ describe("Payments routes — recurring", () => {
       .bind(firstCollectionAt, activated.id)
       .run();
 
-    const approvalOperationId = "wop_recurring_source_change_fence";
-    const approvalRequestId = "appr_recurring_source_change_fence";
-    const policyEvaluationId = "peval_recurring_source_change_fence";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO wallet_operations
-             (id, organization_id, project_id, custody_wallet_id, wallet_id, source,
-              operation_family, operation_type, raw_payload, status)
-           VALUES (?, ?, ?, ?, ?, 'api', 'payment', 'recurring_payment_collection',
-                   ?::jsonb, 'pending_approval')`
-        )
-        .bind(
-          approvalOperationId,
-          TEST_ORG.id,
-          TEST_PROJECT.id,
-          TEST_CUSTODY_WALLET_ID,
-          TEST_WALLET_ID,
-          JSON.stringify({
-            recurringPaymentId: activated.id,
-            collectionDueAt: activated.nextCollectionDueAt,
-          })
-        ),
-      getDb(env)
-        .prepare(
-          `INSERT INTO approval_requests
-             (id, organization_id, project_id, wallet_operation_id, status)
-           VALUES (?, ?, ?, ?, 'pending')`
-        )
-        .bind(approvalRequestId, TEST_ORG.id, TEST_PROJECT.id, approvalOperationId),
-      getDb(env)
-        .prepare(
-          `INSERT INTO policy_evaluations
-             (id, wallet_operation_id, decision, reason_code, requires_approval,
-              approval_request_id)
-           VALUES (?, ?, 'approval_required', 'test_source_change_fence', true, ?)`
-        )
-        .bind(policyEvaluationId, approvalOperationId, approvalRequestId),
-    ]);
-
     const replacementRequest = {
       sourceCustodyWalletId: replacementCustodyWalletId,
       amount: "35.00",
       periodHours: 48,
       nextCollectionDueAt: null,
     };
-    const signerCallsBeforeFence = createOrgSignerForCustodyWalletMock.mock.calls.length;
-    const providerCallsBeforeFence = signAndSendMock.mock.calls.length;
-    const blockedUpdateRes = await app.request(
-      `/v1/payments/recurring-payments/${activated.id}`,
-      {
-        method: "PATCH",
-        headers: RECURRING_HEADERS,
-        body: JSON.stringify(replacementRequest),
-      },
-      env
-    );
-    expect(blockedUpdateRes.status).toBe(409);
-    const blockedUpdateBody = errorResponseSchema.parse(await blockedUpdateRes.json());
-    expect(blockedUpdateBody.error.details).toEqual({
-      walletOperationId: approvalOperationId,
-      policyEvaluationId,
-      approvalRequestId,
-    });
-    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCallsBeforeFence);
-    expect(signAndSendMock).toHaveBeenCalledTimes(providerCallsBeforeFence);
-    expect(
-      await getDb(env)
-        .prepare(
-          `SELECT COUNT(*)::int AS count
-             FROM wallet_operations
-            WHERE operation_type = 'recurring_payment_update'`
-        )
-        .first<{ count: number }>()
-    ).toEqual({ count: 0 });
-    expect(
-      await getDb(env)
-        .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?")
-        .bind(activated.id)
-        .first<{ source_custody_wallet_id: string | null }>()
-    ).toEqual({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID });
-
-    await getDb(env)
-      .prepare("UPDATE approval_requests SET status = 'rejected' WHERE id = ?")
-      .bind(approvalRequestId)
-      .run();
-
     const updateRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}`,
       {
@@ -3840,13 +3748,6 @@ describe("Payments routes — recurring", () => {
     expect(attempts.results[0]?.error).toContain("Custody wallet is unavailable");
     expect(attempts.results[0]?.metadata.retryAfterAt).toBeTruthy();
 
-    const collectionOperations = await getDb(env)
-      .prepare(
-        `SELECT COUNT(*)::int AS count
-           FROM wallet_operations
-          WHERE operation_type = 'recurring_payment_collection'`
-      )
-      .first<{ count: number }>();
     const collectionTransfers = await getDb(env)
       .prepare(
         `SELECT COUNT(*)::int AS count
@@ -3855,7 +3756,6 @@ describe("Payments routes — recurring", () => {
       )
       .bind(recurringPayment.id)
       .first<{ count: number }>();
-    expect(collectionOperations).toEqual({ count: 0 });
     expect(collectionTransfers).toEqual({ count: 0 });
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });

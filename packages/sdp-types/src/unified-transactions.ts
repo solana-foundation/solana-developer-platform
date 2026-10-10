@@ -137,7 +137,6 @@ export const UNIFIED_TRANSACTION_MODULE_CONTRACTS = {
     status: {
       draft: "pending",
       preparing: "pending",
-      approval_required: "pending",
       proving: "pending",
       ready_to_sign: "pending",
       submitted: "pending",

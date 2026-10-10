@@ -22,9 +22,8 @@ export function ringNameByProgramId(rings: readonly ProjectRing[]): Map<string, 
  * States something is actively working through, so the row will change on its
  * own and is worth both a spinner and another poll.
  *
- * `approval_required` is deliberately absent: it is waiting on a person, not on
- * the pipeline, and a spinner there would turn indefinitely. Terminal states
- * are absent for the obvious reason.
+ * Terminal states are absent for the obvious reason, and so is any state this
+ * build does not know: a spinner on a row nothing advances would turn forever.
  */
 const SETTLING: ReadonlySet<RingsOperationState> = new Set<RingsOperationState>([
   "preparing",
@@ -33,6 +32,28 @@ const SETTLING: ReadonlySet<RingsOperationState> = new Set<RingsOperationState>(
   "submitted",
   "indexing",
 ]);
+
+/** Every state this build can label; anything else read from the API is shown verbatim. */
+const KNOWN_STATES: ReadonlySet<string> = new Set<RingsOperationState>([
+  "draft",
+  "preparing",
+  "proving",
+  "ready_to_sign",
+  "submitted",
+  "indexing",
+  "completed",
+  "failed",
+  "voided",
+]);
+
+/**
+ * Narrows a stored state to one with a label. A row can carry a state this
+ * build no longer names (for example one a retired flow wrote), and it must
+ * render rather than crash the list.
+ */
+export function isKnownOperationState(state: string): state is RingsOperationState {
+  return KNOWN_STATES.has(state);
+}
 
 export function isSettling(state: RingsOperationState): boolean {
   return SETTLING.has(state);

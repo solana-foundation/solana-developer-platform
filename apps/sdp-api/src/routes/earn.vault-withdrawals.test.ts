@@ -3,7 +3,6 @@ import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import {
@@ -11,14 +10,11 @@ import {
   type EarnMovementRow,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
-import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
 import app from "@/index";
 import { buildEarnVaultWithdrawalFingerprint } from "@/lib/idempotency";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
-import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import {
@@ -31,7 +27,6 @@ import {
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -415,7 +410,7 @@ afterEach(() => {
 });
 
 describe("POST /v1/earn/vault-withdrawals — custody release channel", () => {
-  it("refuses an out-of-channel wallet before creating a withdrawal operation", async () => {
+  it("refuses an out-of-channel wallet before signing a withdrawal", async () => {
     await seedAuth();
     await useConnectionWallet();
     const positionId = await seedPosition();
@@ -432,35 +427,6 @@ describe("POST /v1/earn/vault-withdrawals — custody release channel", () => {
       },
       meta: { requestId: expect.any(String) },
     });
-    const operations = await getDb(env)
-      .prepare("SELECT id FROM wallet_operations WHERE organization_id = ?")
-      .bind(TEST_ORG.id)
-      .all();
-    expect(operations.results).toEqual([]);
-    expect(withdrawFromVault).not.toHaveBeenCalled();
-  });
-
-  it("allows an advisory dry-run while the BYOK pair is out of channel", async () => {
-    await seedAuth();
-    await useConnectionWallet();
-    const positionId = await seedPosition();
-    custodyReleaseChannel.outOfChannelMode = "byok";
-
-    const response = await app.request(
-      "/v1/earn/vault-withdrawals",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Content-Type": "application/json",
-          "Dry-Run": "true",
-        },
-        body: JSON.stringify({ positionId, shares: "10" }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(200);
     expect(withdrawFromVault).not.toHaveBeenCalled();
   });
 
@@ -488,89 +454,6 @@ describe("POST /v1/earn/vault-withdrawals — custody release channel", () => {
     });
     expect(withdrawFromVault).not.toHaveBeenCalled();
   });
-
-  it.each([true, false])(
-    "requires custody admission for an approved withdrawal only without a recorded result (%s)",
-    async (recorded) => {
-      await seedAuth();
-      await useConnectionWallet();
-      const positionId = await seedPosition();
-      const repo = createPostgresPolicyRepository(
-        getDb(env),
-        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-      );
-      const profile = required(
-        await repo.createApiKeyControlProfile({
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT.id,
-          apiKeyId: TEST_API_KEY.id,
-          name: "Approve vault withdrawals",
-        })
-      );
-      const revision = required(
-        await repo.createApiKeyControlProfileRevision({
-          profileId: profile.id,
-          rules: [
-            {
-              id: "approve-withdrawal",
-              kind: "approval",
-              operationTypes: ["earn_vault_withdrawal"],
-            },
-          ],
-          defaultAction: "allow",
-          createdBy: TEST_USER.id,
-        })
-      );
-      await repo.activateApiKeyControlProfileRevision({
-        profileId: profile.id,
-        revisionId: revision.id,
-      });
-      const requestId = "approved-recorded-withdrawal";
-      const held = await postVaultWithdrawal(
-        { positionId, shares: "10" },
-        { idempotencyKey: requestId }
-      );
-      expect(held.status).toBe(202);
-      const {
-        error: { details },
-      } = z
-        .object({
-          error: z.object({
-            details: z.object({ approvalRequestId: z.string(), walletOperationId: z.string() }),
-          }),
-        })
-        .parse(await held.json());
-      if (recorded) await recordConnectionWithdrawal(positionId, requestId);
-      await repo.updateApprovalRequestStatus({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        approvalRequestId: details.approvalRequestId,
-        status: "approved",
-        operationStatus: "executing",
-        resolvedBy: TEST_USER.id,
-      });
-      custodyReleaseChannel.outOfChannelMode = "byok";
-      const actual = await vi.importActual<typeof import("@/services/earn/vault-withdraw.service")>(
-        "@/services/earn/vault-withdraw.service"
-      );
-      withdrawFromVault.mockImplementation(actual.withdrawFromVault);
-
-      expect(await recoverApprovedWalletOperations(env)).toBe(1);
-      const operation = required(await repo.getWalletOperationById(details.walletOperationId));
-      if (recorded) {
-        expect(operation).toMatchObject({ status: "completed", execution_error: null });
-        expect(operation.execution_effect_started_at).toEqual(expect.any(String));
-        expect(withdrawFromVault).toHaveBeenCalledTimes(1);
-      } else {
-        expect(operation).toMatchObject({
-          status: "failed",
-          execution_error: custodyProviderNotInReleaseChannel("privy", "byok").message,
-          execution_effect_started_at: null,
-        });
-        expect(withdrawFromVault).not.toHaveBeenCalled();
-      }
-    }
-  );
 });
 
 describe("POST /v1/earn/vault-withdrawals — request validation", () => {
@@ -1401,94 +1284,30 @@ describe("POST /v1/earn/vault-withdrawals: audit ledger parity (PRO-1866)", () =
   });
 });
 
-describe("POST /v1/earn/vault-withdrawal-requests: a par request over held intermediate", () => {
-  const WYLDS_MINT = "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih";
+describe("POST /v1/earn/vault-withdrawal-requests: a par request", () => {
+  it("refuses a request naming both shares and a held intermediate amount", async () => {
+    await seedAuth();
+    const positionId = await seedPosition({ provider: "hastra" });
 
-  function dryRunParRequest(body: Record<string, unknown>) {
-    return app.request(
+    const response = await app.request(
       "/v1/earn/vault-withdrawal-requests",
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
           "Content-Type": "application/json",
-          "Dry-Run": "true",
+          "Idempotency-Key": "par-both-sources",
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          positionId,
+          mechanism: "operatorRedemption",
+          shares: "10",
+          intermediateAmount: "2000",
+        }),
       },
       env
     );
-  }
 
-  it("puts the delegated intermediate, not the share mint, in front of policy", async () => {
-    await seedAuth();
-    const positionId = await seedPosition({ provider: "hastra" });
-    const readOptions = vi.fn(async () => ({
-      intermediateMint: WYLDS_MINT,
-      assetMint: USDC_MINT,
-      minimumShares: null,
-      minimumIntermediateAmount: "0.000001",
-      shareDecimals: 6,
-      assetDecimals: 6,
-      cancelable: true,
-      operatorSettled: true,
-    }));
-    parRedemptionClientOverride.current = { getParRedemptionOptions: readOptions };
-    const repo = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-    );
-    const profile = await repo.createApiKeyControlProfile({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      apiKeyId: TEST_API_KEY.id,
-      name: "Hold wYLDS",
-    });
-    if (!profile) throw new Error("Failed to create policy profile");
-    const revision = await repo.createApiKeyControlProfileRevision({
-      profileId: profile.id,
-      rules: [{ id: "deny-wylds", kind: "asset", asset: WYLDS_MINT, action: "deny" }],
-      defaultAction: "allow",
-      createdBy: TEST_USER.id,
-    });
-    if (!revision) throw new Error("Failed to create policy revision");
-    await repo.activateApiKeyControlProfileRevision({
-      profileId: profile.id,
-      revisionId: revision.id,
-    });
-
-    try {
-      const held = await dryRunParRequest({
-        positionId,
-        mechanism: "operatorRedemption",
-        intermediateAmount: "2000",
-      });
-      expect(held.status).toBe(200);
-      expect(await held.json()).toMatchObject({ data: { decision: "deny" } });
-
-      const shares = await dryRunParRequest({
-        positionId,
-        mechanism: "operatorRedemption",
-        shares: "10",
-      });
-      expect(shares.status).toBe(200);
-      expect(await shares.json()).toMatchObject({ data: { decision: "allow" } });
-
-      const both = await dryRunParRequest({
-        positionId,
-        mechanism: "operatorRedemption",
-        shares: "10",
-        intermediateAmount: "2000",
-      });
-      expect(both.status).toBe(400);
-
-      // Only the held-intermediate request asks the provider, through its live options read.
-      expect(readOptions).toHaveBeenCalledTimes(1);
-      expect(readOptions).toHaveBeenCalledWith(expect.objectContaining({ env }), {
-        providerReference: VAULT,
-      });
-    } finally {
-      parRedemptionClientOverride.current = null;
-    }
+    expect(response.status).toBe(400);
   });
 });

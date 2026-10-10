@@ -55,7 +55,6 @@ vi.mock("@sdp/earn", async (importOriginal) => {
 import { getDb } from "@/db";
 import {
   createPostgresEarnRepository,
-  createPostgresPolicyRepository,
   type EarnProviderWalletRow,
   type InsertEarnProviderWalletInput,
   type UpsertEarnStrategyInput,
@@ -63,9 +62,7 @@ import {
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import app from "@/index";
 import { deriveProviderRequestId } from "@/lib/idempotency";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
-import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
@@ -2221,61 +2218,6 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     );
   }
 
-  async function seedApiKeyControlProfile(params: {
-    rules: Record<string, unknown>[];
-    defaultAction: string;
-  }): Promise<void> {
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO api_key_control_profiles
-             (id, organization_id, project_id, api_key_id, name, status)
-           VALUES (?, ?, ?, ?, ?, 'active')`
-        )
-        .bind("akcp_earn_program", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, "Earn controls"),
-      getDb(env)
-        .prepare(
-          `INSERT INTO api_key_control_profile_revisions
-             (id, profile_id, revision_number, rules, default_action, created_by, activated_at)
-           VALUES (?, ?, 1, ?::jsonb, ?, ?, ?)`
-        )
-        .bind(
-          "akcpr_earn_program_1",
-          "akcp_earn_program",
-          JSON.stringify(params.rules),
-          params.defaultAction,
-          TEST_USER.id,
-          "2026-09-07T00:00:00.000Z"
-        ),
-      getDb(env)
-        .prepare(
-          "UPDATE api_key_control_profiles SET active_revision_id = ?, activated_at = ? WHERE id = ?"
-        )
-        .bind("akcpr_earn_program_1", "2026-09-07T00:00:00.000Z", "akcp_earn_program"),
-    ]);
-  }
-
-  async function readWalletOperations() {
-    const rows = await getDb(env)
-      .prepare(
-        `SELECT id, status, operation_family, operation_type, custody_wallet_id, wallet_id,
-                asset, amount, destination
-           FROM wallet_operations ORDER BY created_at ASC, id ASC`
-      )
-      .all<{
-        id: string;
-        status: string;
-        operation_family: string;
-        operation_type: string;
-        custody_wallet_id: string | null;
-        wallet_id: string;
-        asset: string | null;
-        amount: string | null;
-        destination: string | null;
-      }>();
-    return rows.results;
-  }
-
   async function countMovements(): Promise<number> {
     const row = await getDb(env)
       .prepare("SELECT COUNT(*)::int AS total FROM earn_movements")
@@ -2319,7 +2261,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     expect(preview).not.toHaveBeenCalled();
   });
 
-  it("still serves an unbound key, and records the payout as a governed operation", async () => {
+  it("still serves an unbound key, and records the payout as a movement", async () => {
     await seedAuth({ entitleGround: true });
     const program = await seedProgramWallet({});
     vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
@@ -2333,235 +2275,48 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
 
     expect(res.status).toBe(201);
 
-    expect(await readWalletOperations()).toMatchObject([
-      {
-        status: "evaluated",
-        operation_family: "program",
-        operation_type: "earn_program_withdrawal",
-        custody_wallet_id: null,
-        wallet_id: WALLET_REF,
-        asset: "usdc",
-        amount: "25.50",
-        destination: SOLANA_DESTINATION,
-      },
-    ]);
+    await expect(countMovements()).resolves.toBe(1);
   });
 
-  it("denies a destination the key's policy forbids, before the provider is driven", async () => {
+  it("answers a retry of the same payout from the recorded movement, never a second payout", async () => {
     await seedAuth({ entitleGround: true });
     const program = await seedProgramWallet({});
-    await seedApiKeyControlProfile({
-      defaultAction: "allow",
-      rules: [
-        {
-          id: "destination-allowlist",
-          kind: "destination",
-          allowlist: ["11111111111111111111111111111111"],
-          action: "allow",
-        },
-      ],
-    });
     const createWithdrawal = vi
       .spyOn(portfolioClient, "createPortfolioWithdrawal")
       .mockResolvedValue(WITHDRAWAL);
-
-    const res = await requestEarn(
-      "POST",
-      programPath(program.id, "/withdrawals"),
-      withdrawBody({ requestId: "6c2d1b84-3f57-4a0d-9d2b-7e41f5a9c308" }),
-      {}
-    );
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: { code: string; details: { decision: string } } };
-    expect(body.error.code).toBe("FORBIDDEN");
-    expect(body.error.details.decision).toBe("deny");
-
-    expect(createWithdrawal).not.toHaveBeenCalled();
-    await expect(countMovements()).resolves.toBe(0);
-  });
-
-  it("holds a payout the policy requires approval for, and a retry re-answers the same hold", async () => {
-    await seedAuth({ entitleGround: true });
-    const program = await seedProgramWallet({});
-    await seedApiKeyControlProfile({
-      defaultAction: "allow",
-      rules: [{ id: "approve-everything", kind: "always", action: "approval_required" }],
-    });
-    const createWithdrawal = vi
-      .spyOn(portfolioClient, "createPortfolioWithdrawal")
-      .mockResolvedValue(WITHDRAWAL);
+    vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
     const body = withdrawBody({ requestId: "b5a0c9e2-8d14-4b73-9c5f-0e6a2d8f4713" });
 
-    const held = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
-    expect(held.status).toBe(202);
+    const first = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
+    expect(first.status).toBe(201);
 
     const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
-    expect(retried.status).toBe(202);
+    expect(retried.status).toBe(200);
 
-    expect(createWithdrawal).not.toHaveBeenCalled();
-    await expect(countMovements()).resolves.toBe(0);
-    const operations = await readWalletOperations();
-    expect(operations).toHaveLength(1);
-    expect(operations[0]).toMatchObject({ status: "pending_approval" });
+    expect(createWithdrawal).toHaveBeenCalledTimes(1);
+    await expect(countMovements()).resolves.toBe(1);
   });
-});
-
-describe("Earn program — governed payout, execution and blast radius (HOO-1559)", () => {
-  it("admits the program as an operation target for its OWN type only", async () => {
+  it("records one movement and one provider key when the same payout arrives concurrently", async () => {
     await seedAuth({ entitleGround: true });
     const program = await seedProgramWallet({});
-    const repo = createPostgresPolicyRepository(
-      getDb(env),
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-    );
-    const candidate = {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      custodyWalletId: null,
-      walletId: program.provider_wallet_ref,
-      apiKeyId: TEST_API_KEY.id,
-      actor: null,
-      source: "test",
-      asset: "usdc",
-      amount: "1.00",
-      destination: SOLANA_DESTINATION,
-      context: {},
-      providerExtensions: {},
-      rawPayload: {},
-      idempotencyKey: null,
-    } as const;
+    const createWithdrawal = vi
+      .spyOn(portfolioClient, "createPortfolioWithdrawal")
+      .mockResolvedValue(WITHDRAWAL);
+    vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
+    const body = withdrawBody({ requestId: "c9d3e5a1-7b24-4f68-a0c2-3e5b7d9f1a46" });
 
-    await expect(
-      repo.createWalletOperation({
-        ...candidate,
-        operationFamily: "program",
-        operationType: "earn_program_withdrawal",
-      })
-    ).resolves.not.toBeNull();
+    const responses = await Promise.all([
+      requestEarn("POST", programPath(program.id, "/withdrawals"), body, {}),
+      requestEarn("POST", programPath(program.id, "/withdrawals"), body, {}),
+    ]);
 
-    await expect(
-      repo.createWalletOperation({
-        ...candidate,
-        idempotencyKey: null,
-        operationFamily: "issuance",
-        operationType: "issuance_mint_execute",
-      })
-    ).resolves.toBeNull();
+    expect(responses.map((response) => response.status).sort()).not.toContain(409);
+    await expect(countMovements()).resolves.toBe(1);
+    // A loser may re-drive the provider, but only under the SAME derived id,
+    // which the provider replays rather than paying twice.
+    const keys = new Set(createWithdrawal.mock.calls.map(([, input]) => input.requestId));
+    expect(keys.size).toBe(1);
   });
-
-  it.each(["recovery", "http"])(
-    "pays out a body-keyed withdrawal through %s approval execution",
-    async (execution) => {
-      await seedAuth({ entitleGround: true });
-      const program = await seedProgramWallet({});
-      await getDb(env)
-        .prepare(
-          `INSERT INTO api_key_control_profiles
-           (id, organization_id, project_id, api_key_id, name, status)
-         VALUES (?, ?, ?, ?, ?, 'active')`
-        )
-        .bind("akcp_exec", TEST_ORG.id, TEST_PROJECT.id, TEST_API_KEY.id, "Approve payouts")
-        .run();
-      await getDb(env)
-        .prepare(
-          `INSERT INTO api_key_control_profile_revisions
-           (id, profile_id, revision_number, rules, default_action, created_by, activated_at)
-         VALUES (?, ?, 1, ?::jsonb, 'allow', ?, ?)`
-        )
-        .bind(
-          "akcpr_exec_1",
-          "akcp_exec",
-          JSON.stringify([
-            {
-              id: "approve-program-withdrawals",
-              kind: "approval",
-              operationTypes: ["earn_program_withdrawal"],
-            },
-          ]),
-          TEST_USER.id,
-          "2026-09-07T00:00:00.000Z"
-        )
-        .run();
-      await getDb(env)
-        .prepare(
-          "UPDATE api_key_control_profiles SET active_revision_id = ?, activated_at = ? WHERE id = ?"
-        )
-        .bind("akcpr_exec_1", "2026-09-07T00:00:00.000Z", "akcp_exec")
-        .run();
-
-      const createWithdrawal = vi
-        .spyOn(portfolioClient, "createPortfolioWithdrawal")
-        .mockResolvedValue(WITHDRAWAL);
-
-      const held = await requestEarn(
-        "POST",
-        programPath(program.id, "/withdrawals"),
-        {
-          requestId: "7f3c8e51-2a94-4d6b-b0e7-1c5a9f28d403",
-          amountUsd: "25.50",
-          token: "usdc",
-          destinationAddress: SOLANA_DESTINATION,
-        },
-        {}
-      );
-      expect(held.status).toBe(202);
-      expect(createWithdrawal).not.toHaveBeenCalled();
-      const heldBody = (await held.json()) as {
-        error: { details: { approvalRequestId: string; walletOperationId: string } };
-      };
-
-      const policyRepository = createPostgresPolicyRepository(
-        getDb(env),
-        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-      );
-      if (execution === "recovery") {
-        await policyRepository.updateApprovalRequestStatus({
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT.id,
-          approvalRequestId: heldBody.error.details.approvalRequestId,
-          status: "approved",
-          operationStatus: "executing",
-          resolvedBy: TEST_API_KEY.id,
-        });
-        expect(await recoverApprovedWalletOperations(env)).toBe(1);
-      } else {
-        const approverKey = "sk_test_program_approver";
-        const approverHash = await hashString(approverKey, env.API_KEY_PEPPER);
-        await getDb(env).batch([
-          getDb(env).prepare(
-            `INSERT INTO users (id, email, email_verified, status)
-           VALUES ('usr_test_program_approver', 'program-approver@example.com', 1, 'active')`
-          ),
-          getDb(env)
-            .prepare(
-              `INSERT INTO api_keys (id, organization_id, project_id, created_by, name,
-             key_prefix, key_hash, role, permissions, status)
-           VALUES ('key_program_approver', ?, ?, 'usr_test_program_approver', 'Approver',
-             'sk_test_prog', ?, 'api_admin', '["*"]', 'active')`
-            )
-            .bind(TEST_ORG.id, TEST_PROJECT.id, approverHash),
-        ]);
-        await seedCachedApiKey(env, approverHash, {
-          ...TEST_CACHED_API_KEY,
-          id: "key_program_approver",
-        });
-        const path = `/v1/wallets/approval-requests/${heldBody.error.details.approvalRequestId}/approve`;
-        const headers = { Authorization: `Bearer ${approverKey}` };
-        const response = await app.request(path, { method: "POST", headers }, env);
-        expect(response.status).toBe(200);
-        expect(await response.json()).toMatchObject({
-          data: { approvalRequest: { status: "approved", operation: { status: "completed" } } },
-        });
-      }
-
-      expect(createWithdrawal).toHaveBeenCalledTimes(1);
-      const executed = await policyRepository.getWalletOperationById(
-        heldBody.error.details.walletOperationId
-      );
-      expect(executed).toMatchObject({ status: "completed", execution_error: null });
-    }
-  );
 });
 
 describe("Earn program — metered quotas", () => {

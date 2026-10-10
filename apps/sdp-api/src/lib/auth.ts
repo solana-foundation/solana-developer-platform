@@ -10,13 +10,12 @@ import type {
   ApiKeyWalletAuthorizationBinding,
   ApiKeyWalletScope,
   Permission,
-  WalletOperationHumanActorType,
 } from "@sdp/types";
 import type { Context } from "hono";
 import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";
 
-export type AuthType = "api_key" | "clerk" | "approved_operation";
+export type AuthType = "api_key" | "clerk";
 
 interface AuthContextBase {
   id: string;
@@ -35,19 +34,12 @@ interface AuthContextBase {
 
 /**
  * Normalized auth context returned by getAuth(), discriminated on authType:
- * API key requests always carry apiKeyId; Clerk requests and approved-operation
- * replays always carry userId.
+ * API key requests always carry apiKeyId; Clerk requests always carry userId.
  */
 export type ApiKeyContext = AuthContextBase &
   (
     | { authType: "api_key"; apiKeyId: string; userId: null }
     | { authType: "clerk"; apiKeyId: null; userId: string }
-    | {
-        authType: "approved_operation";
-        apiKeyId: null;
-        userId: string;
-        storedActorType: WalletOperationHumanActorType;
-      }
   );
 
 export interface ClerkAuthContext {
@@ -118,27 +110,6 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
     };
   }
 
-  const replayActor = c.get("approvedOperationActor");
-  if (replayActor) {
-    return {
-      id: replayActor.userId,
-      organizationId: replayActor.organizationId,
-      projectId,
-      role: "approved_operation",
-      permissions: replayActor.permissions,
-      environment: c.get("projectEnvironment") ?? "dashboard",
-      allowedOperations: null,
-      walletScope: null,
-      signingWalletId: null,
-      signingWalletIds: [],
-      walletBindings: [],
-      authType: "approved_operation",
-      userId: replayActor.userId,
-      storedActorType: replayActor.storedActorType,
-      apiKeyId: null,
-    };
-  }
-
   return null;
 }
 
@@ -189,8 +160,8 @@ export function requireAuthProjectId(auth: ApiKeyContext): string {
  *
  * Clerk contexts carry both the normalized organization role and its derived
  * permissions; accepting either admin representation keeps capability hints
- * aligned with the authenticated membership. API keys and approved-operation
- * replays are deliberately excluded from credential-administration surfaces.
+ * aligned with the authenticated membership. API keys are deliberately excluded
+ * from credential-administration surfaces.
  */
 export function canManageOrganizationCredentials(auth: ApiKeyContext): boolean {
   if (auth.authType !== "clerk") return false;

@@ -166,7 +166,7 @@ export type CreateOnrampQuoteBody = z.output<typeof createOnrampQuoteSchema>;
 
 export type CreateOfframpQuoteBody = z.output<typeof createOfframpQuoteSchema>;
 
-export interface RampQuotePolicyResolved {
+export interface RampQuoteResolved {
   scope: ResolvedScope;
   projectId: string;
   counterparty: CounterpartyRow;
@@ -207,7 +207,7 @@ export async function resolveRampQuoteRequest(
   direction: RampQuoteDirection,
   input: CreateOnrampQuoteBody | CreateOfframpQuoteBody,
   custodyWalletId: string
-): Promise<RampQuotePolicyResolved> {
+): Promise<RampQuoteResolved> {
   assertRampCorridorSupported(c, direction, input);
   const scope = await resolveScope(c);
   await assertProviderAvailable(c, { family: "ramps", provider: input.provider });

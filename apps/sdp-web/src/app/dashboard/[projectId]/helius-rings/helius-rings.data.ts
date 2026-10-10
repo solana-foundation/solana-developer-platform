@@ -78,7 +78,6 @@ export interface RingsWallet {
 export type RingsOperationState =
   | "draft"
   | "preparing"
-  | "approval_required"
   | "proving"
   | "ready_to_sign"
   | "submitted"
@@ -376,7 +375,7 @@ export function prepareRingsOperation(input: PrepareRingsOperationInput): Promis
   });
 }
 
-/** The approval verdict is read server-side, so this carries no body. */
+/** Advances an operation server-side, so this carries no body. */
 export function executeRingsOperation(operationId: string): Promise<OperationResult> {
   return postOperation(
     `/api/dashboard/helius-rings/operations/${encodeURIComponent(operationId)}/execute`

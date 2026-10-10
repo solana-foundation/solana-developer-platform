@@ -71,14 +71,12 @@ already names the Private Channels module.
   reconcilers are not gated (ADR 0002).
 - When Issuance is excluded, token metadata (`metadata.json`) is not served,
   including for tokens issued earlier.
-- When Policies is excluded, policy configuration is refused and policy
-  evaluation is skipped, so per-key spend caps, wallet rules and approvals do
-  not apply. API-key wallet bindings are still enforced. Existing rules are kept
-  and apply again when Policies returns. Each skipped evaluation is recorded
-  with its own reason code, and refused operations stay in the operation ledger.
-- Compliance integrations in the dashboard still follow the `policies` flag, so
-  they are hidden under `stable` until Compliance gets its own visibility rule.
-  The screening API is available in every channel.
+- The Policies module existed when this decision was written and was removed by
+  ADR 0006: a key's Allowed Operations ship in every channel and are not a
+  module.
+- Compliance integrations in the dashboard show whenever the channel runs the
+  Compliance module (ADR 0006). The screening API is available in every
+  channel.
 - The Transactions tabs follow each module's dashboard flag, but `GET
   /v1/transactions` filters only by permission and release channel. So a module
   inside the channel with its flag off has no tab, yet its rows still appear

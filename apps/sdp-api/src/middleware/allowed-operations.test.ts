@@ -7,8 +7,6 @@ import {
   OPERATION_FAMILY_BY_TYPE,
   OPERATION_TYPES,
   upgradeStoredAllowedOperations,
-  WALLET_OPERATION_FAMILIES,
-  WALLET_OPERATION_TYPES,
 } from "@sdp/types";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
@@ -21,14 +19,49 @@ import {
 } from "./allowed-operations";
 
 describe("allowed operations vocabulary", () => {
-  it("mirrors the wallet operation vocabulary the routes already declare", () => {
-    expect([...OPERATION_TYPES].sort()).toEqual([...WALLET_OPERATION_TYPES].sort());
-    // One deliberate difference: the policy engine's Rings family `transfer`
-    // is `privacy` here, so it cannot be mistaken for `payment` transfers.
-    const renamed = WALLET_OPERATION_FAMILIES.map((family) =>
-      family === "transfer" ? "privacy" : family
+  it("pins the vocabulary, so a new operation is added deliberately", () => {
+    expect([...OPERATION_FAMILIES].sort()).toEqual(
+      ["issuance", "payment", "privacy", "program", "ramp"].sort()
     );
-    expect([...OPERATION_FAMILIES].sort()).toEqual(renamed.sort());
+    expect([...OPERATION_TYPES].sort()).toEqual(
+      [
+        "dvp_fund",
+        "dvp_settle",
+        "earn_program_withdrawal",
+        "earn_vault_deposit",
+        "earn_vault_withdrawal",
+        "issuance_allowlist_add_execute",
+        "issuance_allowlist_remove_execute",
+        "issuance_burn_execute",
+        "issuance_deploy_execute",
+        "issuance_force_burn_execute",
+        "issuance_freeze_execute",
+        "issuance_metadata_update_execute",
+        "issuance_mint_execute",
+        "issuance_pause_execute",
+        "issuance_seize_execute",
+        "issuance_unfreeze_execute",
+        "issuance_unpause_execute",
+        "issuance_update_authority_execute",
+        "payment_transfer_batch_execute",
+        "payment_transfer_execute",
+        "ramp_offramp_quote",
+        "ramp_onramp_quote",
+        "recurring_payment_collection",
+        "recurring_payment_create",
+        "recurring_payment_update",
+        "rings_merge",
+        "rings_ring_entry",
+        "rings_ring_exit",
+        "rings_shield",
+        "rings_timelock_create",
+        "rings_timelock_settle",
+        "rings_transfer_anonymous",
+        "rings_transfer_registered",
+        "rings_withdraw",
+        "rings_zone_create",
+      ].sort()
+    );
   });
 
   it("files every type under a known family and lists each value once", () => {

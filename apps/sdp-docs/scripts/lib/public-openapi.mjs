@@ -5,7 +5,6 @@ export const PUBLIC_TAG_SLUGS = new Set([
   "projects",
   "issuance",
   "payments",
-  "policies",
   "compliance",
   "asset-profiles",
   // "earn" returns with EARN_PUBLIC_SURFACE_PUBLISHED (apps/sdp-api/src/openapi/spec.ts), PRO-2038.

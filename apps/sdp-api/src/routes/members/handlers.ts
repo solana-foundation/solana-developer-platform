@@ -40,15 +40,6 @@ function resolveActor(c: AppContext): {
     };
   }
 
-  const replayActor = c.get("approvedOperationActor");
-  if (replayActor) {
-    return {
-      organizationId: replayActor.organizationId,
-      userId: replayActor.userId,
-      apiKeyId: null,
-    };
-  }
-
   throw new AppError("UNAUTHORIZED", "Authentication required");
 }
 
@@ -61,11 +52,7 @@ function resolveActor(c: AppContext): {
  * in-handler gate from drifting away from the route-level one.
  */
 function callerHasPermission(c: AppContext, permission: Permission): boolean {
-  const permissions =
-    c.get("apiKey")?.permissions ??
-    c.get("clerk")?.permissions ??
-    c.get("approvedOperationActor")?.permissions ??
-    null;
+  const permissions = c.get("apiKey")?.permissions ?? c.get("clerk")?.permissions ?? null;
 
   if (!permissions) {
     return false;

@@ -1,7 +1,6 @@
 export const HELIUS_RINGS_OPERATION_STATUSES = [
   "draft",
   "preparing",
-  "approval_required",
   "proving",
   "ready_to_sign",
   "submitted",

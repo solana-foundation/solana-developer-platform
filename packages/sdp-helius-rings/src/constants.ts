@@ -10,8 +10,6 @@ export {
 } from "@sdp/types";
 
 export const FAILURE_CODES = [
-  "policy_denied",
-  "approval_rejected",
   "proof_failed",
   "signer_failed",
   // Distinct from signer_failed: the signer did not fail, it was never asked.
