@@ -176,14 +176,20 @@ const replayedSourceWalletSchema = z.object({ sourceCustodyWalletId: z.string() 
 /**
  * `authorizeReplay` for a route that moves money from `sourceCustodyWalletId`
  * (HOO-1918): before an Idempotency-Key replay is served, the caller's API key
- * must still be allowed to move money from that wallet. A body without the
- * field was never stored (validation refuses it), so there is nothing to check.
+ * must still be allowed to move money from that wallet, read fresh as the
+ * handler would. A body without the field was never stored (validation refuses
+ * it), so it is refused here too rather than served unchecked.
  */
 export async function authorizeSourceWalletReplay(c: AppContext): Promise<void> {
   const parsed = replayedSourceWalletSchema.safeParse(await c.req.json());
-  if (parsed.success) {
-    assertPaymentWalletExactAccess(c, parsed.data.sourceCustodyWalletId, ["payments:write"]);
+  if (!parsed.success) {
+    throw badRequest("sourceCustodyWalletId is required");
   }
+  const custodyWalletId = parsed.data.sourceCustodyWalletId;
+  assertPaymentWalletExactAccess(c, custodyWalletId, ["payments:write"]);
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), getAuth(c), custodyWalletId, [
+    "payments:write",
+  ]);
 }
 
 export async function admitExactPaymentWallet(
