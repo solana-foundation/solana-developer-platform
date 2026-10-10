@@ -41,9 +41,8 @@ route pattern, read with `routePath(c)`, so it needs no shared vocabulary that c
 credential is recorded on the row and compared in plain text rather than hashed:
 
 - the operation, path parameters, query parameters (repeated values in order) and body;
-- the credential and its access (API key id or user id, role, permissions, wallet scope and
-  bindings, Allowed Operations), so another credential, or the same one after its access changed,
-  gets 422 and never reads a response produced for different wallet access. A retry made after rotating the
+- the credential (API key id or user id), so another credential reusing the key gets 422 and
+  never reads a response produced for different wallet access. A retry made after rotating the
   API key is therefore a new request; the resource row's own unique key still stops it moving
   money twice;
 - the Dry-Run flag, so a dry run never replays as the real request.
@@ -86,7 +85,12 @@ handler runs. A crashed request's key frees when the lease runs out.
 
 **Replay authorization.** A route whose resource access is checked after this step (an API key's
 wallet bindings, for example) passes `authorizeReplay`, which runs before any stored response is
-replayed. A credential narrowed since the original request is refused, not served.
+replayed. It reads that access fresh from the database, as the handler does, not from the cached
+auth snapshot. A credential narrowed since the original request is refused (403), not served; one
+narrowed in a way that still covers the resource gets the replay.
+
+- The stored principal is the credential's id, not a snapshot of its access, so an unrelated
+  change to a key (another wallet bound, a permission added) never turns a retry into a 422.
 
 **Bypass.** Approved-operation executions skip the step: they re-send the original key to execute
 the operation, not to replay it. A route that declares `honorsDryRun` (its policy gate answers a

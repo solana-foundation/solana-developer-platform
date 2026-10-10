@@ -19,7 +19,7 @@ export interface IdempotencyKeyClaimInput {
   projectId: string | null;
   operation: string;
   idempotencyKey: string;
-  /** The credential making the request and its access, as canonical JSON. */
+  /** The credential (API key id or user id) making the request. */
   principal: string;
   fingerprint: string;
   leaseSeconds: number;
