@@ -44,6 +44,7 @@ const LOCAL_CUSTODY_PRIVATE_KEY = "local-custody-test-private-key";
 
 let originalDeploymentMode: "managed" | "self_hosted" | undefined;
 let originalCustodyPrivateKey: string | undefined;
+let originalCustodyEncryptionKey: string | undefined;
 let originalManagedProviderEnv: Record<string, string | undefined>;
 
 const managedCustodyProviderEnvKeys = [
@@ -83,14 +84,26 @@ function clearManagedProviderEnv(): void {
   writeManagedProviderEnv({});
 }
 
-async function seedAuth(tier: "individual" | "enterprise" = "individual"): Promise<void> {
+async function seedAuth(
+  tier: "individual" | "enterprise" = "individual",
+  { entitleLocal = false }: { entitleLocal?: boolean } = {}
+): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, tier, "active"),
+      .prepare(
+        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_ORG.name,
+        TEST_ORG.slug,
+        tier,
+        "active",
+        entitleLocal ? JSON.stringify({ providerOverrides: { custody: { local: true } } }) : null
+      ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -127,9 +140,11 @@ describe("Custody routes — self-hosted deployment mode", () => {
   beforeEach(async () => {
     originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
     originalCustodyPrivateKey = env.CUSTODY_PRIVATE_KEY;
+    originalCustodyEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
     originalManagedProviderEnv = readManagedProviderEnv();
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
     env.CUSTODY_PRIVATE_KEY = LOCAL_CUSTODY_PRIVATE_KEY;
+    env.CUSTODY_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
     clearManagedProviderEnv();
     await seedTestDatabase(env);
   });
@@ -137,8 +152,30 @@ describe("Custody routes — self-hosted deployment mode", () => {
   afterEach(async () => {
     env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     env.CUSTODY_PRIVATE_KEY = originalCustodyPrivateKey;
+    env.CUSTODY_ENCRYPTION_KEY = originalCustodyEncryptionKey;
     writeManagedProviderEnv(originalManagedProviderEnv);
     await clearKVStores(env);
+  });
+
+  it("POST /v1/wallets/initialize creates a local wallet", async () => {
+    await seedAuth("individual", { entitleLocal: true });
+
+    const res = await app.request(
+      "/v1/wallets/initialize",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({ provider: "local" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { publicKey: string } };
+    expect(body.data.publicKey).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
   });
 
   it("POST /v1/wallets/initialize with a non-configured provider returns 403", async () => {
