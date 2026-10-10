@@ -1,9 +1,10 @@
 import type { ListPaymentRequestsResponse, PaymentRequest } from "@sdp/types";
+import { z } from "zod";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { badRequestQuery } from "@/lib/errors";
+import { badRequest, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -71,16 +72,38 @@ export async function listPaymentRequests(c: AppContext) {
   return success(c, response);
 }
 
+/** Resolves the receiving wallet and checks the caller's access to it, read fresh. */
+async function resolveWritableWallet(c: AppContext, walletId: string) {
+  const scope = await resolveScope(c);
+  const wallet = resolveWallet(scope.wallets, walletId);
+  assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
+  await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
+  return { scope, wallet };
+}
+
+const replayedWalletSchema = z.object({ walletId: z.string().min(1) });
+
+/**
+ * `authorizeReplay` for payment-request creation (HOO-1918): the caller must
+ * still reach the receiving wallet, read fresh, before a stored response (which
+ * carries the request's public token) is replayed. A body without `walletId`
+ * was never stored, so it is refused rather than served unchecked.
+ */
+export async function authorizePaymentRequestReplay(c: AppContext): Promise<void> {
+  const parsed = replayedWalletSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw badRequest("walletId is required");
+  }
+  await resolveWritableWallet(c, parsed.data.walletId);
+}
+
 export async function createPaymentRequest(
   c: ValidatedBodyContext<typeof createPaymentRequestSchema>
 ) {
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
-  const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, body.walletId);
-  assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
+  const { scope, wallet } = await resolveWritableWallet(c, body.walletId);
 
   const row = await createPaymentRequestsRepository(
     c.env,
