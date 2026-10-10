@@ -1,7 +1,7 @@
 import type { Token, TokenTemplate } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
-  controlListRemovalMovement,
+  controlListMovement,
   getOnChainAllowlistMutationForMint,
   shouldEnableOnChainAcl,
 } from "./access-control";
@@ -63,13 +63,16 @@ describe("getOnChainAllowlistMutationForMint", () => {
   });
 });
 
-describe("controlListRemovalMovement", () => {
-  it("treats an allowlist removal as a control, since it takes access away", () => {
-    expect(controlListRemovalMovement(allowlist("stablecoin"))).toBe("issuance.control");
+describe("controlListMovement", () => {
+  it("treats a change that takes access away as a control", () => {
+    expect(controlListMovement(allowlist("stablecoin"), "remove")).toBe("issuance.control");
+    expect(controlListMovement(denylist("stablecoin"), "add")).toBe("issuance.control");
   });
 
-  it("treats a blocklist removal as a start, since it gives access back", () => {
-    expect(controlListRemovalMovement(denylist("stablecoin"))).toBe("issuance.authority");
-    expect(controlListRemovalMovement(denylist("tokenized-security"))).toBe("issuance.authority");
+  it("treats a change that grants access as a start", () => {
+    expect(controlListMovement(allowlist("stablecoin"), "add")).toBe("issuance.authority");
+    expect(controlListMovement(denylist("tokenized-security"), "remove")).toBe(
+      "issuance.authority"
+    );
   });
 });

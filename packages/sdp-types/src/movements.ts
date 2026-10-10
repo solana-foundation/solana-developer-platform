@@ -45,13 +45,16 @@ export const MOVEMENTS = {
   "recurring.cancel": { module: "recurring_payments", kind: "exit" },
 
   /**
-   * Mint, deploy, thaw, unpause, metadata and authority changes, control-list
-   * additions, and blocklist removals (which give an address access back).
+   * Mint, deploy, thaw, unpause, metadata and authority changes, and
+   * control-list changes that grant access (allowlist additions, blocklist
+   * removals).
    */
   "issuance.authority": { module: "issuance", kind: "start" },
   /**
    * Compliance controls that only reduce exposure: burn, force-burn, freeze,
-   * pause, allowlist removal. An issuer must keep them while refused starts.
+   * pause, and control-list changes that take access away (allowlist
+   * removals, blocklist additions). An issuer must keep them while refused
+   * starts.
    */
   "issuance.control": { module: "issuance", kind: "exit" },
   /**
@@ -81,11 +84,19 @@ export const MOVEMENTS = {
   "private_channels.session": { module: "private_channels", kind: "start" },
   "private_channels.deposit": { module: "private_channels", kind: "start" },
   "private_channels.transfer": { module: "private_channels", kind: "start" },
+  /**
+   * The destination is the caller's choice, by decision: an organization
+   * refused starts still owns what it deposited and may send it anywhere, and
+   * a compromised organization is suspended, which refuses every request.
+   */
   "private_channels.withdraw": { module: "private_channels", kind: "exit" },
 
   /** Shield, transfer, timelock and zone creation, ring entry. */
   "helius_rings.operation_start": { module: "helius_rings", kind: "start" },
-  /** Withdraw, merge, timelock settlement, ring exit. */
+  /**
+   * Withdraw, merge, timelock settlement, ring exit. A withdrawal may pay any
+   * address, for the same reason as `private_channels.withdraw`.
+   */
   "helius_rings.operation_exit": { module: "helius_rings", kind: "exit" },
   /**
    * Identity registration and custom-ring bring-up (ring config, authority and

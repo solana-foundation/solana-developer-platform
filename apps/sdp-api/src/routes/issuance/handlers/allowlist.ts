@@ -28,7 +28,7 @@ import {
   listAllowlistQuerySchema,
   removeAllowlistQuerySchema,
 } from "../schemas";
-import { controlListRemovalMovement } from "./access-control";
+import { controlListMovement } from "./access-control";
 import type { IssuanceMovement } from "./authority-resolution";
 import {
   admitIssuanceRuntimeExecution,
@@ -94,13 +94,9 @@ async function syncNewAllowlistEntryOnChain(opts: {
   entryId: string;
   list: ReturnType<typeof assertValidAddress>;
   wallet: ReturnType<typeof assertValidAddress>;
+  movement: IssuanceMovement;
 }): Promise<TokenAllowlistEntry> {
-  const mosaic = createIssuanceMosaicService(
-    opts.c,
-    opts.signer,
-    "sponsored",
-    "issuance.authority"
-  );
+  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored", opts.movement);
 
   try {
     await mosaic.addToList({ list: opts.list, wallet: opts.wallet });
@@ -284,13 +280,14 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
     const list = token.ablListAddress
       ? assertValidAddress(token.ablListAddress, "ablListAddress")
       : null;
+    const additionMovement = controlListMovement(token, "add");
     const authorityWallet = list
       ? await resolveAllowlistAuthoritySigner(
           c,
           auth,
           tokenService,
           list,
-          "issuance.authority",
+          additionMovement,
           body.signingCustodyWalletId
         )
       : null;
@@ -331,6 +328,7 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
           entryId: entry.id,
           list,
           wallet: assertValidAddress(body.address, "address"),
+          movement: additionMovement,
         });
         await auditService.completeCritical(c, auditIntent, {
           metadata: { syncStatus: "active" },
@@ -399,7 +397,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   const list = token.ablListAddress
     ? assertValidAddress(token.ablListAddress, "ablListAddress")
     : null;
-  const removalMovement = controlListRemovalMovement(token);
+  const removalMovement = controlListMovement(token, "remove");
   const authorityWallet = list
     ? await resolveAllowlistAuthoritySigner(
         c,

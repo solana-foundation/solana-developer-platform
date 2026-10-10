@@ -26,16 +26,16 @@ export function getTokenAccessControlMode(token: TokenAccessControlShape): Token
 }
 
 /**
- * The movement removing a control-list entry serves (HOO-1955). Removing an
- * allowlist entry takes access away, a control (exit). Removing a blocklist
- * entry gives it back, so it is a start like any other grant.
+ * The movement a control-list change serves (HOO-1955): a control (exit) when
+ * it takes access away (allowlist removal, blocklist addition), otherwise a
+ * start like any other grant.
  */
-export function controlListRemovalMovement(
-  token: TokenAccessControlShape
+export function controlListMovement(
+  token: TokenAccessControlShape,
+  change: "add" | "remove"
 ): "issuance.authority" | "issuance.control" {
-  return getTokenAccessControlMode(token) === "blocklist"
-    ? "issuance.authority"
-    : "issuance.control";
+  const blocklist = getTokenAccessControlMode(token) === "blocklist";
+  return blocklist === (change === "add") ? "issuance.control" : "issuance.authority";
 }
 
 export function getMosaicAclMode(token: TokenAccessControlShape): AclMode | undefined {
