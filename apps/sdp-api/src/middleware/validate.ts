@@ -70,18 +70,27 @@ export function validateBody<S extends z.ZodType<object>>(
     badRequest(`Invalid request body:\n${prettified}`)
   );
   return async (c, next) => {
-    const raw = await c.req.text();
-    let value: unknown = {};
-    if (raw.trim().length > 0) {
-      try {
-        value = JSON.parse(raw);
-      } catch {
-        throw badRequest("Malformed JSON in request body");
-      }
-    }
-    c.req.addValidatedData("json", await parse(value));
+    c.req.addValidatedData("json", await parse(await readJsonBody(c)));
     await next();
   };
+}
+
+/**
+ * Reads a JSON body with {@link validateBody}'s rule: an empty or
+ * whitespace-only body is an empty object, and malformed JSON is a 400. For
+ * code that runs before `validateBody`, such as an Idempotency-Key
+ * `authorizeReplay` check, so both see the same body.
+ */
+export async function readJsonBody(c: Context): Promise<unknown> {
+  const raw = await c.req.text();
+  if (raw.trim().length === 0) {
+    return {};
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw badRequest("Malformed JSON in request body");
+  }
 }
 
 /**

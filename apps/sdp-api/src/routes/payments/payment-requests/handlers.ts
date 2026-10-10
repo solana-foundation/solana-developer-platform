@@ -1,5 +1,6 @@
 import type { ListPaymentRequestsResponse, PaymentRequest } from "@sdp/types";
 import { z } from "zod";
+import { getDb } from "@/db";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -7,8 +8,11 @@ import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
+import { readJsonBody, type ValidatedBodyContext } from "@/middleware/validate";
+import {
+  assertApiKeyWalletAccess,
+  assertFreshApiKeyWalletReplayAccess,
+} from "@/services/api-key-scope.service";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
@@ -85,16 +89,23 @@ const replayedWalletSchema = z.object({ walletId: z.string().min(1) });
 
 /**
  * `authorizeReplay` for payment-request creation (HOO-1918): the caller must
- * still reach the receiving wallet, read fresh, before a stored response (which
- * carries the request's public token) is replayed. A body without `walletId`
+ * still be bound to the receiving wallet, read fresh, before a stored response
+ * (which carries the request's public token) is replayed. A wallet deactivated
+ * since still replays. A body without `walletId`
  * was never stored, so it is refused rather than served unchecked.
  */
 export async function authorizePaymentRequestReplay(c: AppContext): Promise<void> {
-  const parsed = replayedWalletSchema.safeParse(await c.req.json());
+  const parsed = replayedWalletSchema.safeParse(await readJsonBody(c));
   if (!parsed.success) {
     throw badRequest("walletId is required");
   }
-  await resolveWritableWallet(c, parsed.data.walletId);
+  await assertFreshApiKeyWalletReplayAccess(
+    getDb(c.env),
+    getAuth(c),
+    requireProjectId(c),
+    parsed.data.walletId,
+    ["payments:write"]
+  );
 }
 
 export async function createPaymentRequest(
