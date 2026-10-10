@@ -1020,10 +1020,23 @@
     "outcomeCheckCurrentState": "Verificar o estado atual",
     "outcomeContactSupport": "Falar com o suporte",
     "connection": "Conexão",
-    "walletSetupConnection": "Conexão",
-    "walletSetupConnectionHint": "A Wallet é criada nesta conexão e assina com as credenciais dela.",
+    "walletSetupConnection": "Conta",
+    "walletSetupConnectionHint": "A Wallet é criada nesta conta e assina com as credenciais dela.",
     "walletSetupConnectionDefault": "Padrão do projeto",
     "walletSetupConnectionUnavailablePending": "Configuração incompleta",
-    "walletSetupConnectionUnavailableFailed": "Requer atenção"
+    "walletSetupConnectionUnavailableFailed": "Requer atenção",
+    "walletCreationOptionsUnavailable": "Não foi possível carregar as opções de criação de Wallet. Recarregue a página para tentar novamente.",
+    "apiKeyScopeLockedWithoutPolicies": "Esta chave tem restrições, por isso o acesso dela às Wallets não pode mudar enquanto o Policies estiver indisponível. Crie uma nova chave.",
+    "apiKeyRestrictionsInactiveWithoutPolicies": "As restrições desta chave são mantidas, mas não se aplicam enquanto o Policies estiver indisponível.",
+    "apiKeyRestrictionsNeedPolicies": "As restrições de chave de API precisam do Policies, que esta implantação não executa.",
+    "walletSetupConnectionPlaceholder": "Escolha uma conta",
+    "walletSetupConnectionManaged": "Gerenciada pela SDP",
+    "walletSetupConnectionRequired": "Escolha a conta em que a Wallet será criada.",
+    "walletSetupProviderAlreadySetUp": "Este provedor já está configurado. Adicione uma Wallet em vez disso.",
+    "walletSetupMode": "Modo de custódia",
+    "walletSetupModePlaceholder": "Escolha um modo de custódia",
+    "walletSetupModeManaged": "Gerenciado",
+    "walletSetupModeByok": "Traga suas próprias credenciais",
+    "walletSetupModeHint": "Wallets gerenciadas usam a conta de provedor da SDP. No modo Traga suas próprias credenciais, você conecta seu próprio app de provedor."
   }
 }

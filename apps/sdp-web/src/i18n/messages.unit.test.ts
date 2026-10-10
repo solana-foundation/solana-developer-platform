@@ -58,6 +58,21 @@ describe("i18n messages", () => {
     }
   });
 
+  it("loads the translated Earn and French private-channel catalogs", async () => {
+    for (const locale of ["es", "fr", "pt"] as const) {
+      const source = await import(`../../messages/${locale}/dashboard-earn.json`);
+      const messages = await loadMessages(locale);
+      expect(messages.DashboardEarn.intentStorageUnavailable).toBe(
+        source.default.DashboardEarn.intentStorageUnavailable
+      );
+    }
+    const source = await import("../../messages/fr/dashboard-private-channels.json");
+    const messages = await loadMessages("fr");
+    expect(messages.DashboardPrivateChannels.transfer.selectWallet).toBe(
+      source.default.DashboardPrivateChannels.transfer.selectWallet
+    );
+  });
+
   it("defines the product name in the raw English source catalog", () => {
     expect(englishSourceMessages.Shared.dashboardShell.earnProgram).toBe("Embedded Yield");
     expect(englishSourceMessages.DashboardEarn.playground.productName).toBe("Embedded Yield");

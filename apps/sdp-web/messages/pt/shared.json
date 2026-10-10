@@ -153,7 +153,30 @@
     "apiKeySecretPlaceholder": "Cole a chave completa para esta sessão",
     "apiKeySecretRequired": "Cole o valor completo da chave de API selecionada antes de executar uma requisição.",
     "rowsCount": "{count} linhas",
-    "openCalendarFor": "Abrir o calendário para {field}"
+    "openCalendarFor": "Abrir o calendário para {field}",
+    "filter": "Filtrar",
+    "filterBy": "Filtrar por…",
+    "any": "Qualquer",
+    "copyLink": "Copiar link",
+    "notSet": "Não definido",
+    "clearFilter": "Limpar filtro de {filter}",
+    "playgroundForm": "Formulário",
+    "playgroundRaw": "Bruto",
+    "clearField": "Limpar {field}",
+    "apiKeyLabel": "Chave de assinatura",
+    "apiKeyProduction": "produção",
+    "apiKeySandbox": "sandbox",
+    "pasteApiKey": "Cole uma chave",
+    "noParameters": "Este endpoint não aceita parâmetros.",
+    "playgroundParameters": "Parâmetros",
+    "playgroundBody": "Corpo",
+    "playgroundHeaders": "Headers",
+    "headersAfterRun": "Execute a requisição para ver os headers que ela retorna.",
+    "noResponseHeaders": "A resposta veio sem headers para mostrar.",
+    "playgroundKeyPlaceholder": "<your API key>",
+    "exampleResponse": "Exemplo de resposta",
+    "notRunYet": "Ainda não executado",
+    "running": "Executando…"
   },
   "dashboardShell": {
     "workspace": "Espaço de trabalho",
@@ -238,7 +261,20 @@
     "manageAccount": "Gerenciar conta",
     "signOut": "Sair",
     "accountMenu": "Menu da conta",
-    "privacy": "Privacidade"
+    "privacy": "Privacidade",
+    "contactList": "Lista de contatos",
+    "contacts": "Contatos",
+    "contact": "Contato",
+    "transaction": "Transação",
+    "downloadFailed": "O download não foi concluído. Tente novamente.",
+    "downloadRateLimited": "O download não pôde ser concluído por excesso de requisições. Aguarde um minuto e tente novamente.",
+    "newDesign": {
+      "recurring": "Agendado",
+      "newCounterparty": "Nova contraparte",
+      "recurringPayments": "Agendamentos",
+      "recurringPayment": "Agendamento",
+      "backToRecurringPayments": "Agendamentos"
+    }
   },
   "validation": {
     "allowlistValueRequired": "O valor da allowlist é obrigatório",

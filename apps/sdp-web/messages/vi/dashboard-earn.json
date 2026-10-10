@@ -540,7 +540,8 @@
       "activeLoading": "Đang tải yêu cầu rút…",
       "activeError": "Trạng thái rút tạm thời không khả dụng. Yêu cầu của bạn không thay đổi.",
       "activeSummary": "{amount} dự kiến · thanh toán có thể bắt đầu sau {maturity} · lấy lại shares sau {deadline}"
-    }
+    },
+    "intentStorageUnavailable": "Trình duyệt không lưu được yêu cầu này để thử lại an toàn. Hãy bật lưu trữ trình duyệt và thử lại."
   },
   "DashboardMarkets": {
     "landing": {
@@ -670,7 +671,9 @@
       "mainnetStrategiesLoading": "Đang tải chiến lược Mainnet. Chiến lược Devnet vẫn khả dụng.",
       "mainnetStrategiesUnavailable": "Không tải được chiến lược Mainnet. Chiến lược Devnet vẫn khả dụng.",
       "sandboxUnavailable": "Chỉ Production",
-      "redeemIntermediate": "Quy đổi wYLDS"
+      "redeemIntermediate": "Quy đổi wYLDS",
+      "positionBalanceSyncing": "Đang cập nhật số dư…",
+      "positionBalanceLastVerified": "Số dư xác minh gần nhất"
     },
     "earnProgram": {
       "eyebrow": "Yield nhúng",

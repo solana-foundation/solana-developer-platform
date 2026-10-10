@@ -318,10 +318,10 @@ describe("EventsList", () => {
     );
 
     const summary = [...screen.getByRole("table").querySelectorAll("span")].find((element) =>
-      element.textContent?.includes("USDC from")
+      element.textContent?.includes("USDC de")
     );
     expect(summary?.textContent).toBe(
-      `12 345 678 901 234 567 890,50 USDC from ${shortenAddress(SENDER)} to ${shortenAddress(RECIPIENT)}`
+      `12 345 678 901 234 567 890,50 USDC de ${shortenAddress(SENDER)} à ${shortenAddress(RECIPIENT)}`
     );
   });
 

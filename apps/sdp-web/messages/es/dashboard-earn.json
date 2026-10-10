@@ -127,7 +127,9 @@
       "mainnetStrategiesLoading": "Cargando estrategias de Mainnet. Las estrategias de Devnet siguen disponibles.",
       "mainnetStrategiesUnavailable": "No se pudieron cargar las estrategias de Mainnet. Las estrategias de Devnet siguen disponibles.",
       "sandboxUnavailable": "Solo producción",
-      "redeemIntermediate": "Canjear wYLDS"
+      "redeemIntermediate": "Canjear wYLDS",
+      "positionBalanceSyncing": "Actualizando saldo…",
+      "positionBalanceLastVerified": "Último saldo verificado"
     },
     "earnProgram": {
       "eyebrow": "Yield integrado",
@@ -1117,6 +1119,7 @@
       "activeLoading": "Cargando solicitudes de retiro…",
       "activeError": "El estado del retiro no está disponible temporalmente. Tu solicitud no cambió.",
       "activeSummary": "{amount} esperado · el pago puede comenzar después de {maturity} · recupera tus participaciones después de {deadline}"
-    }
+    },
+    "intentStorageUnavailable": "Tu navegador no pudo guardar esta solicitud para reintentos seguros. Habilita el almacenamiento del navegador e inténtalo de nuevo."
   }
 }

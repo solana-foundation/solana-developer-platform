@@ -295,7 +295,8 @@
       "statusConfirmed": "Đã xác nhận",
       "statusFailed": "Thất bại",
       "newTransfer": "Chuyển mới",
-      "tryAgain": "Thử lại"
+      "tryAgain": "Thử lại",
+      "selectWallet": "Chọn wallet nguồn để chuyển."
     },
     "events": {
       "title": "Sự kiện",
