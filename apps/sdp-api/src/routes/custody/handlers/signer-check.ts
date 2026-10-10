@@ -23,9 +23,10 @@ import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import type { ValidatedBodyContext } from "@/middleware/validate";
+import { readJsonBody, type ValidatedBodyContext } from "@/middleware/validate";
 import {
   assertFreshApiKeyCustodyWalletAccess,
+  assertFreshApiKeyWalletReplayAccess,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -62,10 +63,10 @@ async function isValidWalletSignature(
 /**
  * `authorizeReplay` for the signer check (HOO-1918): before a stored response
  * is replayed, the caller must still reach the wallet it names (or its API
- * key's signing wallet), read fresh, exactly as the handler requires.
+ * key's signing wallet), read fresh; a wallet deactivated since still replays.
  */
 export async function authorizeSignerCheckReplay(c: AppContext): Promise<void> {
-  const parsed = replayedSignerCheckSchema.safeParse(await c.req.json());
+  const parsed = replayedSignerCheckSchema.safeParse(await readJsonBody(c));
   if (!parsed.success) {
     throw badRequest("walletId must be a non-empty string");
   }
@@ -76,11 +77,13 @@ export async function authorizeSignerCheckReplay(c: AppContext): Promise<void> {
   if (resolvedWalletId === null) {
     throw badRequest("walletId is required");
   }
-  const wallet = await findAuthorizedOperationalWallet(c, resolvedWalletId, ["wallets:write"]);
-  if (!wallet) {
-    throw new AppError("NOT_FOUND", "Custody wallet not found");
-  }
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, wallet.id, ["wallets:write"]);
+  await assertFreshApiKeyWalletReplayAccess(
+    getDb(c.env),
+    auth,
+    requireProjectId(c),
+    resolvedWalletId,
+    ["wallets:write"]
+  );
 }
 
 const replayedSignerCheckSchema = z.object({ walletId: z.string().min(1).optional() });

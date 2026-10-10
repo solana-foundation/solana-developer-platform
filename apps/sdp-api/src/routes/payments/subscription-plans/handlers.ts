@@ -10,13 +10,17 @@ import type { Address } from "@solana/kit";
 import { createNoopSigner } from "@solana/kit";
 import { getCreatePlanOverlayInstructionAsync } from "@solana/subscriptions";
 import { z } from "zod";
+import { getDb } from "@/db";
 import type { PaymentSubscriptionPlanRow } from "@/db/repositories/payment-subscriptions.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
-import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
+import { readJsonBody, type ValidatedBodyContext } from "@/middleware/validate";
+import {
+  assertApiKeyWalletAccess,
+  assertFreshApiKeyWalletReplayAccess,
+} from "@/services/api-key-scope.service";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
   buildPreparedSubscriptionTransaction,
@@ -28,7 +32,7 @@ import {
   getPaymentSubscriptionsRepository,
   getSponsoredFeePayer,
 } from "../context";
-import { assertFreshPaymentWalletAccess, resolveScope, resolveWallet } from "../wallets";
+import { resolveScope, resolveWallet } from "../wallets";
 import {
   type createSubscriptionPlanSchema,
   listSubscriptionPlansQuerySchema,
@@ -100,12 +104,15 @@ async function resolvePullerWalletAddress(
   return { pullerWalletId: wallet.walletId, pullerAddress: wallet.publicKey };
 }
 
-/** The caller's access to a plan wallet, read fresh: the replay check for plan writes. */
+/** The caller's binding to a plan wallet, read fresh: the replay check for plan writes. */
 async function assertWritablePlanWallet(c: AppContext, walletId: string): Promise<void> {
-  const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, walletId);
-  assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
-  await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
+  await assertFreshApiKeyWalletReplayAccess(
+    getDb(c.env),
+    getAuth(c),
+    requireProjectId(c),
+    walletId,
+    ["payments:write"]
+  );
 }
 
 const replayedPlanWalletsSchema = z.object({
@@ -117,10 +124,11 @@ const replayedPlanWalletsSchema = z.object({
  * `authorizeReplay` for plan create and update (HOO-1918): before a stored
  * response is replayed, the caller must still reach the plan's owner wallet
  * (from the body on create, from the plan on update) and any puller wallet the
- * body names, read fresh. A body that fails these shapes was never stored.
+ * body names, read fresh; a wallet deactivated since still replays. A body that
+ * fails these shapes was never stored.
  */
 export async function authorizeSubscriptionPlanReplay(c: AppContext): Promise<void> {
-  const body = replayedPlanWalletsSchema.safeParse(await c.req.json());
+  const body = replayedPlanWalletsSchema.safeParse(await readJsonBody(c));
   if (!body.success) {
     throw badRequest("ownerWalletId and pullerWalletId must be wallet IDs");
   }
