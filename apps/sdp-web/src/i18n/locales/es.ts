@@ -1,5 +1,6 @@
 import dashboardApprovals from "../../../messages/es/dashboard-approvals.json";
 import dashboardCustody from "../../../messages/es/dashboard-custody.json";
+import dashboardEarn from "../../../messages/es/dashboard-earn.json";
 import dashboardIssuance from "../../../messages/es/dashboard-issuance.json";
 import dashboardPayments from "../../../messages/es/dashboard-payments.json";
 import dashboardPolicies from "../../../messages/es/dashboard-policies.json";
@@ -13,6 +14,7 @@ export const catalog = {
   ...es,
   ...dashboardApprovals,
   ...dashboardCustody,
+  ...dashboardEarn,
   ...dashboardIssuance,
   ...dashboardPayments,
   ...dashboardPolicies,

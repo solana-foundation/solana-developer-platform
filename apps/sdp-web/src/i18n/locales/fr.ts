@@ -1,8 +1,10 @@
 import dashboardApprovals from "../../../messages/fr/dashboard-approvals.json";
 import dashboardCustody from "../../../messages/fr/dashboard-custody.json";
+import dashboardEarn from "../../../messages/fr/dashboard-earn.json";
 import dashboardIssuance from "../../../messages/fr/dashboard-issuance.json";
 import dashboardPayments from "../../../messages/fr/dashboard-payments.json";
 import dashboardPolicies from "../../../messages/fr/dashboard-policies.json";
+import dashboardPrivateChannels from "../../../messages/fr/dashboard-private-channels.json";
 import frShared from "../../../messages/fr/shared.json";
 import fr from "../../../messages/fr.json";
 import type { Messages } from "../messages";
@@ -12,8 +14,10 @@ export const catalog = {
   ...fr,
   ...dashboardApprovals,
   ...dashboardCustody,
+  ...dashboardEarn,
   ...dashboardIssuance,
   ...dashboardPayments,
   ...dashboardPolicies,
+  ...dashboardPrivateChannels,
   Shared: frShared,
 } satisfies LocalizedMessages<Messages>;

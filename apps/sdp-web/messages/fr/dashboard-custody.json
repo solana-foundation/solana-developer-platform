@@ -1035,8 +1035,8 @@
     "outcomeCheckCurrentState": "Vérifier l'état actuel",
     "outcomeContactSupport": "Contacter le support",
     "connection": "Connexion",
-    "walletSetupConnection": "Connexion",
-    "walletSetupConnectionHint": "Le Wallet est créé dans cette connexion et signe avec ses identifiants.",
+    "walletSetupConnection": "Compte",
+    "walletSetupConnectionHint": "Le Wallet est créé dans ce compte et signe avec ses identifiants.",
     "walletSetupConnectionDefault": "Par défaut du projet",
     "walletSetupConnectionUnavailablePending": "Configuration inachevée",
     "walletSetupConnectionUnavailableFailed": "Nécessite votre attention",
@@ -1052,6 +1052,6 @@
     "walletSetupModePlaceholder": "Choisissez un mode de custody",
     "walletSetupModeManaged": "Géré",
     "walletSetupModeByok": "Apportez vos propres identifiants",
-    "walletSetupModeHint": "Les Wallets gérés utilisent le compte fournisseur de SDP. Bring your own credentials connecte votre propre application de fournisseur."
+    "walletSetupModeHint": "Les Wallets gérés utilisent le compte fournisseur de SDP. Le mode Apportez vos propres identifiants connecte votre propre application de fournisseur."
   }
 }
