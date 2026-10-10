@@ -186,6 +186,7 @@ export interface ListTransfersByStatusInput {
   /** Only transfers whose project is in this environment, so one job run reads one cluster. */
   environment: SdpEnvironment;
   statuses: PaymentTransferStatus[];
+  fireblocks?: boolean;
   types?: readonly PaymentTransferType[];
   hasSignature?: boolean;
   createdBefore?: string;
@@ -218,6 +219,14 @@ export interface PaymentsRepositoryContext {
 }
 
 export interface PaymentsRepository {
+  /** Throttle and serialize provider reads across dashboard requests and cron workers. */
+  claimFireblocksTransferPoll(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    polledBefore: string;
+    now: string;
+  }): Promise<PaymentTransferRow | null>;
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   /**
    * Claims an awaiting off-ramp row for its crypto deposit transaction through

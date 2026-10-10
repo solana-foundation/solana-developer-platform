@@ -7,11 +7,11 @@ import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 
 interface SafeProviderCredential {
   id: string;
-  provider: "privy";
+  provider: "privy" | "fireblocks";
   label: string;
   scope: "organization" | "project";
   status: string;
-  displayMetadata: { appIdSuffix?: string };
+  displayMetadata: { appIdSuffix?: string; apiKeySuffix?: string };
 }
 
 interface ProviderCredentialSubmissionResult {
@@ -127,7 +127,9 @@ async function runCompletion(connectionId: string): Promise<PrivyByokSubmitResul
     revalidatePath(await requestProjectHref("/dashboard/wallets"));
     // The provider page now owns the connections list, so it has to see the
     // new row too.
-    revalidatePath(await requestProjectHref("/dashboard/integrations/privy"));
+    revalidatePath(
+      await requestProjectHref(`/dashboard/integrations/${result.providerCredential.provider}`)
+    );
     return { status: "success", connectionId };
   }
   if (result.completion.status === "failed") {
@@ -151,6 +153,23 @@ async function runCompletion(connectionId: string): Promise<PrivyByokSubmitResul
   return { status: "retry_unknown", connectionId };
 }
 
+function readVaultSelection(
+  formData: FormData,
+  provider: string,
+  fields: Record<string, string | undefined>
+) {
+  const ids =
+    provider === "fireblocks" ? formData.getAll("fireblocksVaultAccountIds").map(String) : [];
+  return {
+    valid:
+      ids.length <= 20 &&
+      ids.every((id) => /^\d{1,100}$/.test(id)) &&
+      new Set(ids).size === ids.length &&
+      (ids.length === 0 || ids.includes(fields.vaultAccountId ?? "")),
+    payload: ids.length ? { fireblocksVaultAccountIds: ids } : {},
+  };
+}
+
 /**
  * Stores the credential, then runs the connection completion in the same
  * action, per the install design: submit is call-and-wait, not submit-and-poll.
@@ -170,14 +189,29 @@ export async function submitPrivyCredentialAction(
 
   const idempotencyKey = String(formData.get("idempotencyKey") ?? "").trim();
   const credentialLabel = String(formData.get("credentialLabel") ?? "").trim();
-  const appId = String(formData.get("appId") ?? "").trim();
-  const appSecret = String(formData.get("appSecret") ?? "");
+  const provider = String(formData.get("provider") ?? "privy");
+  if (provider !== "privy" && provider !== "fireblocks")
+    return { status: "invalid", message: t("DashboardCustody.byokMissingFields") };
+  const fields =
+    provider === "fireblocks"
+      ? {
+          apiKey: String(formData.get("apiKey") ?? "").trim(),
+          signingKeyId: String(formData.get("signingKeyId") ?? "").trim(),
+          vaultAccountId: String(formData.get("vaultAccountId") ?? "").trim(),
+        }
+      : {
+          appId: String(formData.get("appId") ?? "").trim(),
+          appSecret: String(formData.get("appSecret") ?? ""),
+        };
+  const selection = readVaultSelection(formData, provider, fields);
+  if (!selection.valid)
+    return { status: "invalid", message: t("DashboardCustody.byokMissingFields") };
   const walletLabel = String(formData.get("walletLabel") ?? "").trim();
   const replaceConnectionId = String(formData.get("connectionId") ?? "").trim();
 
   // Trimmed-empty fields pass the browser's `required` check but are known
   // rejects before any request leaves — `invalid`, never the replay path.
-  if (!idempotencyKey || !credentialLabel || !appId || !appSecret) {
+  if (!idempotencyKey || !credentialLabel || Object.values(fields).some((value) => !value.trim())) {
     return { status: "invalid", message: t("DashboardCustody.byokMissingFields") };
   }
 
@@ -193,11 +227,12 @@ export async function submitPrivyCredentialAction(
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: JSON.stringify({
-        provider: "privy",
+        provider,
         ...(walletLabel ? { walletLabel } : {}),
+        ...selection.payload,
         // Credentials always bind to the calling project; the API no longer
         // accepts an organization scope for stored custody credentials.
-        fields: { credentialLabel, scope: "project", appId, appSecret },
+        fields: { credentialLabel, scope: "project", ...fields },
       }),
     });
   } catch (error) {

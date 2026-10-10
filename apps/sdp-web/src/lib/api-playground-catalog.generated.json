@@ -575,6 +575,11 @@
         "expectedResponse": {
           "data": {
             "transfer": {
+              "fireblocks": {
+                "transactionId": "transaction_example",
+                "status": "example",
+                "subStatus": "example"
+              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
@@ -858,6 +863,11 @@
         "expectedResponse": {
           "data": [
             {
+              "fireblocks": {
+                "transactionId": "transaction_example",
+                "status": "example",
+                "subStatus": "example"
+              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
@@ -956,6 +966,11 @@
         "expectedResponse": {
           "data": {
             "transfer": {
+              "fireblocks": {
+                "transactionId": "transaction_example",
+                "status": "example",
+                "subStatus": "example"
+              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
@@ -1125,6 +1140,11 @@
             ],
             "transfers": [
               {
+                "fireblocks": {
+                  "transactionId": "transaction_example",
+                  "status": "example",
+                  "subStatus": "example"
+                },
                 "id": "xfr_example",
                 "organizationId": "org_example",
                 "custodyWalletId": "cwlt_example",
@@ -1364,6 +1384,11 @@
             ],
             "transfers": [
               {
+                "fireblocks": {
+                  "transactionId": "transaction_example",
+                  "status": "example",
+                  "subStatus": "example"
+                },
                 "id": "xfr_example",
                 "organizationId": "org_example",
                 "custodyWalletId": "cwlt_example",
@@ -1930,6 +1955,11 @@
               "updatedAt": "2025-01-01T00:00:00.000Z"
             },
             "transfer": {
+              "fireblocks": {
+                "transactionId": "transaction_example",
+                "status": "example",
+                "subStatus": "example"
+              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",

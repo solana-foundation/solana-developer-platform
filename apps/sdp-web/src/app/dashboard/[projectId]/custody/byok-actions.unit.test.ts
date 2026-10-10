@@ -171,6 +171,48 @@ describe("submitPrivyCredentialAction outcome classification", () => {
     mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
+  it("submits Fireblocks credentials and refreshes the Fireblocks integration", async () => {
+    const fireblocksCredential = { ...credential, provider: "fireblocks" };
+    client.fetch
+      .mockResolvedValueOnce({
+        providerCredential: fireblocksCredential,
+        connectionId: "conn_test",
+      })
+      .mockResolvedValueOnce({
+        ...completionResult("success"),
+        providerCredential: fireblocksCredential,
+      });
+    const data = new FormData();
+    for (const [name, value] of Object.entries({
+      provider: "fireblocks",
+      credentialLabel: "Treasury",
+      idempotencyKey: "fireblocks-key",
+      apiKey: "api-user",
+      signingKeyId: "fbcsr_11111111-1111-4111-8111-111111111111",
+      vaultAccountId: "0",
+    }))
+      data.set(name, value);
+    data.append("fireblocksVaultAccountIds", "0");
+    data.append("fireblocksVaultAccountIds", "7");
+    expect(await submitPrivyCredentialAction(data)).toEqual({
+      status: "success",
+      connectionId: "conn_test",
+    });
+    expect(JSON.parse(client.fetch.mock.calls[0]?.[1]?.body)).toEqual({
+      provider: "fireblocks",
+      fireblocksVaultAccountIds: ["0", "7"],
+      fields: {
+        credentialLabel: "Treasury",
+        scope: "project",
+        apiKey: "api-user",
+        signingKeyId: "fbcsr_11111111-1111-4111-8111-111111111111",
+        vaultAccountId: "0",
+      },
+    });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(
+      `/dashboard/${PRODUCTION_PROJECT.id}/integrations/fireblocks`
+    );
+  });
   it("runs the connection completion after storing the credential", async () => {
     client.fetch
       .mockResolvedValueOnce({ providerCredential: credential, connectionId: "conn_test" })

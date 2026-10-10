@@ -17,6 +17,26 @@ import { dashboardRouter, setDashboardUrl } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { PrivyCredentialForm } from "./privy-credential-form";
 
+vi.mock("@/app/dashboard/[projectId]/custody/setup/fireblocks-csr-actions", () => ({
+  loadFireblocksCsrAction: vi.fn(async () => ({
+    status: "success",
+    csr: {
+      id: "fbcsr_11111111-1111-4111-8111-111111111111",
+      csrPem: "public-csr",
+      expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+    },
+  })),
+  generateFireblocksCsrAction: vi.fn(),
+  loadFireblocksVaultsAction: vi.fn(async () => ({
+    status: "success",
+    vaults: [
+      { id: "0", name: "Treasury", hasSolanaWallet: true },
+      { id: "7", name: "Operations", hasSolanaWallet: true },
+    ],
+    nextCursor: null,
+  })),
+}));
+
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 vi.mock("@/app/dashboard/[projectId]/custody/byok-actions", () => ({
@@ -26,10 +46,10 @@ vi.mock("@/app/dashboard/[projectId]/custody/byok-actions", () => ({
 
 const WALLETS_HREF = `/dashboard/${PRODUCTION_PROJECT.id}/wallets`;
 
-function renderForm() {
+function renderForm(provider: "privy" | "fireblocks" = "privy") {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <PrivyCredentialForm formId="byok-test-form" />
+      <PrivyCredentialForm formId="byok-test-form" provider={provider} />
     </I18nProvider>
   );
 }
@@ -52,6 +72,32 @@ describe("PrivyCredentialForm", () => {
     dashboardRouter.push.mockClear();
     vi.mocked(submitPrivyCredentialAction).mockReset();
     vi.mocked(recheckPrivyCredentialAction).mockReset();
+  });
+
+  it("submits the generated Fireblocks key reference and never requests a private key", async () => {
+    vi.mocked(submitPrivyCredentialAction).mockResolvedValue({
+      status: "failed",
+      message: "Rejected",
+    });
+    const user = userEvent.setup();
+    renderForm("fireblocks");
+    expect(screen.queryByLabelText("Privy app ID")).toBeNull();
+    await screen.findByRole("button", { name: "Download CSR" });
+    await user.type(screen.getByLabelText("API user ID"), "fireblocks-key");
+    expect(screen.queryByLabelText("Vault account ID")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Load vaults" }));
+    await user.click(await screen.findByRole("checkbox", { name: /Treasury/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Operations/ }));
+    await user.click(screen.getByRole("button", { name: "Connect and verify" }));
+    await screen.findByText("Rejected");
+    const submitted = vi.mocked(submitPrivyCredentialAction).mock.calls[0]?.[0];
+    expect(submitted?.get("provider")).toBe("fireblocks");
+    expect(submitted?.get("vaultAccountId")).toBe("0");
+    expect(submitted?.getAll("fireblocksVaultAccountIds")).toEqual(["0", "7"]);
+    expect(submitted?.has("walletLabel")).toBe(false);
+    expect(submitted?.get("signingKeyId")).toBe("fbcsr_11111111-1111-4111-8111-111111111111");
+    expect(submitted?.has("apiSecretPem")).toBe(false);
+    expect(screen.queryByLabelText("RSA private key (PEM)")).toBeNull();
   });
 
   it("renders the shared field definitions with a write-only secret", () => {

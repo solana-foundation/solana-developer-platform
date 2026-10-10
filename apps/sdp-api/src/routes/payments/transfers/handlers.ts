@@ -109,6 +109,13 @@ import {
   type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
+import {
+  isFireblocksTransfer,
+  prepareFireblocksTransfer,
+  refreshFireblocksTransfer,
+  submitFireblocksTransfer,
+} from "@/services/payments/fireblocks-transfer";
+import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -726,6 +733,7 @@ async function executeSponsoredTransfer(
   );
   const feePayer = await feePayment.getFeePayer();
   const instructions = await params.buildInstructions({ signer, feePayer, rpc });
+  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -735,7 +743,11 @@ async function executeSponsoredTransfer(
     (m) => addSignersToTransactionMessage([signer], m)
   );
 
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+  const partiallySigned = await signWithFreshBlockhash({
+    rpc,
+    blockhash,
+    sign: () => partiallySignTransactionMessageWithSigners(message),
+  });
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
   const signature = await submitSponsoredTransaction({
@@ -924,6 +936,8 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   const fingerprint = getIdempotencyFingerprint(c);
   const idempotency =
     recordKey !== undefined && fingerprint !== undefined ? { key: recordKey, fingerprint } : null;
+  const fireblocks = await prepareFireblocksTransfer(c.env, scope.auth.organizationId, requireProjectId(c), operation);
+  if (fireblocks && body.transferId) throw badRequest("Fireblocks native transfers currently support direct wallet payments only");
 
   const rampClaim = rampTransfer
     ? await updateOnchainTransferForRamp(c, {
@@ -949,6 +963,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         status: "processing",
         initiatedByKeyId: scope.auth.id,
         idempotency,
+        providerData: fireblocks ? { fireblocksTransfer: fireblocks.intent } : undefined,
       });
 
   if (replayed) {
@@ -993,6 +1008,19 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
       failureCode: error instanceof AppError ? error.code : "INTERNAL_ERROR",
     });
     throw error;
+  }
+  if (fireblocks) {
+    // Once claimed, an ambiguous provider response must never enter the local
+    // transaction failure/rebroadcast path. The durable provider intent owns recovery.
+    await beginApprovedWalletOperationEffect(c);
+    const updated = await submitFireblocksTransfer(getPaymentsRepository(c), transfer, fireblocks);
+    if (updated.provider_reference || updated.status === "failed") {
+      await auditService.completeCritical(c, auditIntent, {
+        status: updated.status === "failed" ? "failure" : "success",
+        metadata: { fireblocksTransactionId: updated.provider_reference, status: updated.status },
+      });
+    }
+    return success(c, { transfer: mapTransferRow(updated) });
   }
   try {
     if (isNativePaymentToken(operation.token)) {
@@ -1426,6 +1454,20 @@ export async function listTransfers(c: AppContext) {
     transferRows = result.rows;
   }
 
+  // Reconcile only a bounded slice; independent reads share a 15s durable poll claim.
+  const pending = transferRows
+    .filter((row) => isFireblocksTransfer(row) && row.status === "processing")
+    .slice(0, 4);
+  for (const row of pending) assertTransferReadAccess(c, row);
+  const refreshed = await mapSettledWithConcurrency(pending, 4, (row) =>
+    refreshFireblocksTransfer(c.env, repo, row)
+  );
+  const byId = new Map(
+    refreshed.flatMap((result) =>
+      result.status === "fulfilled" ? [[result.value.id, result.value] as const] : []
+    )
+  );
+  transferRows = transferRows.map((row) => byId.get(row.id) ?? row);
   const transfers = transferRows.map(mapTransferRow);
   return paginated(c, transfers, { total, page, pageSize });
 }
@@ -1452,5 +1494,6 @@ export async function getTransfer(c: AppContext) {
     throw notFound("Transfer");
   }
 
-  return success(c, { transfer: mapTransferRow(row) });
+  const refreshed = await refreshFireblocksTransfer(c.env, repo, row);
+  return success(c, { transfer: mapTransferRow(refreshed) });
 }

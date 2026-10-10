@@ -2,6 +2,7 @@ import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/signing";
 import {
   CUSTODY_PROVIDERS,
+  isByokCustodyProvider,
   type CustodyConfigStatus,
   type CustodyConnectionCheckStatus,
   type CustodyConnectionLifecycle,
@@ -34,10 +35,17 @@ import {
   createCredentialSecretStore,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
-import { provisionPrivyWallet } from "@/services/custody/provisioning";
+import {
+  type ByokCredentialAuthentication,
+  parseByokCredential,
+} from "@/services/custody/byok-credential";
+import {
+  provisionFireblocksVaultAccount,
+  provisionPrivyWallet,
+} from "@/services/custody/provisioning";
 import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provider-lifecycle.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
-import { createPrivyAdapterFromCredential } from "@/services/domain/signing/provider-adapter-factory";
+import { createPrivyAdapterFromCredential, createFireblocksAdapterFromCredential } from "@/services/domain/signing/provider-adapter-factory";
 import {
   assertCustodyProviderEntitled,
   assertManagedCustodyUseAllowed,
@@ -553,11 +561,11 @@ export class CustodyRuntimeTargets {
     if (!credential || !isUsableCredentialOwner(credential)) {
       throw conflict("Custody Connection is unavailable");
     }
-    if (target.provider !== "privy") {
+    if (!isByokCustodyProvider(target.provider)) {
       throw internalError("Custody Connection provider is unsupported");
     }
 
-    const authentication = await this.readPrivyCredential(target, credential);
+    const authentication = await this.readByokCredential(target, credential);
     const custodyWalletId = `cwlt_${crypto.randomUUID()}`;
     const audit = new AuditService(this.db);
     const intent = await audit.beginCritical(params.auditContext, {
@@ -575,6 +583,19 @@ export class CustodyRuntimeTargets {
     });
     let provisioned: { walletId: string; address: string };
     try {
+      if (authentication.provider === "fireblocks") {
+        provisioned = await provisionFireblocksVaultAccount(this.env, {
+              orgId: target.organizationId,
+              orgSlug: target.projectId,
+              apiKey: authentication.apiKey,
+              apiSecretPem: authentication.apiSecretPem,
+              assetId: authentication.assetId,
+            }).then((wallet) => ({
+              walletId: `fb_${wallet.vaultAccountId}`,
+              address: wallet.publicKey,
+            }));
+
+      } else {
       const requestId = params.idempotency?.requestId;
       provisioned = await provisionPrivyWallet(
         this.env,
@@ -587,6 +608,7 @@ export class CustodyRuntimeTargets {
           : { credentialRequest: true },
         authentication
       );
+      }
     } catch (error) {
       if (!(error instanceof SigningError) || error.code === "NETWORK_ERROR") {
         // Keep the intent unresolved: the Provider may have created the wallet.
@@ -600,7 +622,10 @@ export class CustodyRuntimeTargets {
       throw providerUnavailable("Custody provider is temporarily unavailable");
     }
 
-    const providerWalletId = normalizePrivyWalletId(provisioned.walletId);
+    const providerWalletId =
+      target.provider === "privy"
+        ? normalizePrivyWalletId(provisioned.walletId)
+        : provisioned.walletId;
     let persisted: CreatedCustodyConnectionWallet;
     try {
       persisted = await this.persistConnectionWallet(target, credential, {
@@ -718,6 +743,46 @@ export class CustodyRuntimeTargets {
         custodyWalletId,
       }
     );
+  }
+
+  /** Exact BYOK owner resolution for native Fireblocks payments; never deployment credentials. */
+  async getFireblocksTransferAccess(params: {
+    organizationId: string;
+    projectId: string;
+    custodyWalletId: string;
+    forSubmission: boolean;
+  }) {
+    const target = await this.resolveRetainedWalletRecord(
+      params.organizationId,
+      params.projectId,
+      params.custodyWalletId
+    );
+    if (!target) throw notFound("Custody wallet");
+    if (target.provider !== "fireblocks") return null;
+    if (target.kind !== "connection" || !target.wallet)
+      throw conflict("Native Fireblocks payments require a BYOK connection");
+    if (params.forSubmission) {
+      this.assertRuntimeExecutionAllowed(target, params.custodyWalletId);
+      await assertCustodyProviderEntitled(
+        this.env,
+        this.db,
+        params.organizationId,
+        target.provider
+      );
+    }
+    const row = await this.loadConnectionCredential(target);
+    if (!row || !isUsableCredentialOwner(row)) throw conflict("Custody Connection is unavailable");
+    const secret = await this.readByokCredential(target, row);
+    if (secret.provider !== "fireblocks" || !/^fb_\d+$/.test(target.wallet.walletId))
+      throw conflict("Invalid Fireblocks wallet");
+    return {
+      ...secret,
+      vaultAccountId: target.wallet.walletId.slice(3),
+      publicKey: target.wallet.publicKey,
+      connectionId: target.connectionId,
+      accountFingerprint: row.provider_account_fingerprint,
+      apiBaseUrl: this.env.FIREBLOCKS_API_BASE_URL,
+    };
   }
 
   private async resolveConnection(
@@ -856,7 +921,7 @@ export class CustodyRuntimeTargets {
       });
     }
 
-    if (row.provider !== "privy") {
+    if (!isByokCustodyProvider(row.provider as CustodyProvider)) {
       getLogger().error(
         {
           organizationId: target.organizationId,
@@ -884,12 +949,19 @@ export class CustodyRuntimeTargets {
       return cached;
     }
 
-    const secret = await this.readPrivyCredential(target, row);
-    const adapter = createPrivyAdapterFromCredential(this.env, {
-      ...secret,
-      walletId: wallet.walletId,
-      requestDelayMs: row.request_delay_ms ?? undefined,
-    });
+    const secret = await this.readByokCredential(target, row);
+    const adapter =
+      secret.provider === "fireblocks"
+        ? createFireblocksAdapterFromCredential(this.env, {
+            ...secret,
+            walletId: wallet.walletId,
+            requestDelayMs: row.request_delay_ms ?? undefined,
+          })
+        : createPrivyAdapterFromCredential(this.env, {
+            ...secret,
+            walletId: wallet.walletId,
+            requestDelayMs: row.request_delay_ms ?? undefined,
+          });
     this.adapterCache.set(cacheKey, adapter);
     return adapter;
   }
@@ -953,7 +1025,7 @@ export class CustodyRuntimeTargets {
         throw conflict("Custody Connection changed during wallet creation");
       }
 
-      // A Privy wallet belongs to the Provider account, not one Credential
+      // A custody wallet belongs to the Provider account, not one Credential
       // version. Rotation and rollback may change the pointer while the
       // Provider request is in flight, so re-lock the current scoped
       // Credential and rely on the unchanged account fingerprint above.
@@ -1039,10 +1111,10 @@ export class CustodyRuntimeTargets {
     );
   }
 
-  private async readPrivyCredential(
+  private async readByokCredential(
     target: ConnectionRuntimeTarget,
     row: ConnectionCredentialRow
-  ): Promise<{ appId: string; appSecret: string }> {
+  ): Promise<ByokCredentialAuthentication> {
     const stored: StoredCredentialSecret = {
       storageBackend: row.storage_backend,
       secretRef: row.secret_ref ?? undefined,
@@ -1055,12 +1127,7 @@ export class CustodyRuntimeTargets {
         orgId: target.organizationId,
         stored,
       });
-      const appId = typeof payload.appId === "string" ? payload.appId.trim() : "";
-      const appSecret = typeof payload.appSecret === "string" ? payload.appSecret : "";
-      if (!appId || !appSecret) {
-        throw new Error("incomplete credential payload");
-      }
-      return { appId, appSecret };
+      return parseByokCredential(row.provider, payload);
     } catch {
       this.logUnavailable(target, "credential_secret_unavailable");
       throw providerUnavailable("Custody credential is temporarily unavailable");

@@ -9,6 +9,7 @@ import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "@/i18n/provider";
+import { FireblocksCredentialFields } from "../setup/fireblocks-credential-fields";
 import { rotateCredentialsAction } from "./connection-actions";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";
 import { CredentialImpactList } from "./credential-impact-list";
@@ -41,6 +42,8 @@ export function RotateCredentialsModal({
   const t = useTranslations();
   const { pending, run } = useCustodyAction();
   // Keep the attempt outside Modal's children, which unmount while it is hidden.
+  const [fireblocksReady, setFireblocksReady] = useState(false);
+  const [csrAttempt, setCsrAttempt] = useState(0);
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
@@ -52,10 +55,11 @@ export function RotateCredentialsModal({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pending || (!attempt && !canRotate)) return;
+    if (pending || (!attempt && (!canRotate || (provider === "fireblocks" && !fireblocksReady))))
+      return;
     // Keep fields, key and target together: a refresh may replace the current
     // credential while the original request's response is still unknown.
-    const formData = attempt ?? new FormData();
+    const formData = attempt ?? new FormData(event.currentTarget);
     if (!attempt) {
       formData.set("credentialId", lifecycle.providerCredential.id);
       formData.set("connectionId", connectionId);
@@ -82,6 +86,7 @@ export function RotateCredentialsModal({
     // Only a conclusive refusal permits a corrected intent under a fresh key.
     if (result.status === "failed") {
       setIdempotencyKey(crypto.randomUUID());
+      setCsrAttempt((value) => value + 1);
     }
 
     if (result.status === "success") {
@@ -106,26 +111,39 @@ export function RotateCredentialsModal({
           <Callout variant="warning">{t("DashboardCustody.rotateRetryHint")}</Callout>
         ) : null}
 
-        <div className="space-y-2">
-          <Label htmlFor="custody-rotate-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
-          <Input
-            id="custody-rotate-app-id"
-            name="appId"
-            required
+        {provider === "fireblocks" ? (
+          <FireblocksCredentialFields
+            multiple={false}
+            key={csrAttempt}
+            onReadyChange={setFireblocksReady}
             disabled={fieldsDisabled}
-            value={appId}
-            onChange={(event) => setAppId(event.target.value)}
           />
-        </div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="custody-rotate-app-id">
+                {t("DashboardCustody.providerPrivyAppId")}
+              </Label>
+              <Input
+                id="custody-rotate-app-id"
+                name="appId"
+                required
+                disabled={fieldsDisabled}
+                value={appId}
+                onChange={(event) => setAppId(event.target.value)}
+              />
+            </div>
 
-        <SecretField
-          name="appSecret"
-          label={t("DashboardCustody.rotateNewSecretLabel")}
-          hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
-          value={appSecret}
-          onChange={setAppSecret}
-          disabled={fieldsDisabled}
-        />
+            <SecretField
+              name="appSecret"
+              label={t("DashboardCustody.rotateNewSecretLabel")}
+              hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
+              value={appSecret}
+              onChange={setAppSecret}
+              disabled={fieldsDisabled}
+            />
+          </>
+        )}
 
         <div className="flex items-center justify-end gap-2">
           <Button type="button" variant="secondary" onClick={handleClose} disabled={pending}>
@@ -133,7 +151,10 @@ export function RotateCredentialsModal({
           </Button>
           <Button
             type="submit"
-            disabled={pending || (!attempt && !canRotate)}
+            disabled={
+              pending ||
+              (!attempt && (!canRotate || (provider === "fireblocks" && !fireblocksReady)))
+            }
             iconLeft={
               pending ? (
                 <Loader2Icon aria-hidden className="size-4 animate-spin" />

@@ -161,7 +161,10 @@ const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
       family: "custody",
       provider: "fireblocks",
       modes: [],
-      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+      unavailableModes: [
+        { mode: "managed", reason: "provider_not_entitled" },
+        { mode: "byok", reason: "provider_not_entitled" },
+      ],
     },
     { family: "custody", provider: "privy", modes: ["managed", "byok"], unavailableModes: [] },
     {
@@ -226,7 +229,10 @@ const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
       family: "custody",
       provider: "fireblocks",
       modes: [],
-      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+      unavailableModes: [
+        { mode: "managed", reason: "custody_mode_not_allowed" },
+        { mode: "byok", reason: "provider_not_entitled" },
+      ],
     },
     {
       family: "custody",

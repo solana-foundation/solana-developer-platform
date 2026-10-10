@@ -8,6 +8,18 @@ import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { setPageRequest } from "@/test/request-project";
 
+vi.mock("@/app/dashboard/[projectId]/custody/setup/fireblocks-csr-actions", () => ({
+  loadFireblocksCsrAction: vi.fn(async () => ({
+    status: "success",
+    csr: {
+      id: "fbcsr_11111111-1111-4111-8111-111111111111",
+      csrPem: "public-csr",
+      expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+    },
+  })),
+  generateFireblocksCsrAction: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -58,7 +70,7 @@ function modal(
         isOpen
         onClose={onClose}
         lifecycle={currentLifecycle}
-        provider="privy"
+        provider={currentLifecycle.providerCredential.provider as "privy" | "fireblocks"}
         connectionId="cconn_1"
         canRotate={canRotate}
       />
@@ -462,5 +474,29 @@ describe("rotation recovery", () => {
     expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("value", "");
     expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", false);
     expect(rotation).not.toHaveBeenCalled();
+  });
+});
+
+it("rotates Fireblocks credentials using a generated key reference and the pinned vault", async () => {
+  const rotation = mockApi();
+  rotation.mockResolvedValue(Response.json({ data: { rotation: { status: "success" } } }));
+  const onClose = vi.fn();
+  render(
+    modal(onClose, {
+      ...lifecycle,
+      providerCredential: { ...lifecycle.providerCredential, provider: "fireblocks" },
+    })
+  );
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText("API user ID"), "next-api-user");
+  await user.type(screen.getByLabelText("Vault account ID"), "0");
+  await user.click(screen.getByRole("button", { name: "Rotate for 1 connections" }));
+  await waitFor(() => expect(onClose).toHaveBeenCalledWith(false));
+  expect(JSON.parse(String(rotation.mock.calls[0]?.[1]?.body))).toEqual({
+    fields: {
+      apiKey: "next-api-user",
+      signingKeyId: "fbcsr_11111111-1111-4111-8111-111111111111",
+      vaultAccountId: "0",
+    },
   });
 });

@@ -27,6 +27,7 @@ export function SecretField({
   onChange,
   disabled,
   required = true,
+  multiline = false,
 }: {
   name: string;
   label: string;
@@ -35,6 +36,7 @@ export function SecretField({
   onChange: (value: string) => void;
   disabled?: boolean;
   required?: boolean;
+  multiline?: boolean;
 }) {
   const t = useTranslations();
   const fieldId = useId();
@@ -45,18 +47,35 @@ export function SecretField({
     <div className="space-y-2">
       <Label htmlFor={fieldId}>{label}</Label>
       <div className="flex items-center gap-2">
-        <Input
-          id={fieldId}
-          name={name}
-          className="flex-1"
-          type={shown ? "text" : "password"}
-          autoComplete="off"
-          required={required}
-          disabled={disabled}
-          aria-describedby={hint ? hintId : undefined}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
+        {multiline ? (
+          <textarea
+            id={fieldId}
+            name={name}
+            className="min-h-32 min-w-0 flex-1 rounded-lg border border-border-default bg-fill-subtle px-3 py-2 text-sm text-primary outline-none focus:border-[var(--input-border-focus)]"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            required={required}
+            disabled={disabled}
+            aria-describedby={hint ? hintId : undefined}
+            value={value}
+            style={shown ? undefined : ({ WebkitTextSecurity: "disc" } as React.CSSProperties)}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        ) : (
+          <Input
+            id={fieldId}
+            name={name}
+            className="flex-1"
+            type={shown ? "text" : "password"}
+            autoComplete="off"
+            required={required}
+            disabled={disabled}
+            aria-describedby={hint ? hintId : undefined}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        )}
         <Button
           type="button"
           variant="secondary"

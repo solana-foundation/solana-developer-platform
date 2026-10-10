@@ -1,3 +1,5 @@
+import { getDb } from "@/db/client";
+import { eraseExpiredFireblocksCsrs } from "@/services/custody/fireblocks-registration.service";
 import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { alwaysEnabled, defineCron } from "./define-cron";
 
@@ -14,6 +16,7 @@ export const secretRetirementsCron = defineCron({
   effect: "observes",
   enabled: alwaysEnabled,
   run: async (env) => {
+    await eraseExpiredFireblocksCsrs(getDb(env));
     await retireOrphanedSecrets(env);
   },
 });

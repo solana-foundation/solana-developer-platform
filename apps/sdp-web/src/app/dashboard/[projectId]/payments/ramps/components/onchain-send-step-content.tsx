@@ -23,6 +23,7 @@ import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AmountBalanceReadout } from "./amount-balance-readout";
 import { CounterpartyAccountSelector } from "./counterparty-account-selector";
+import { FireblocksTransferPolicy } from "./fireblocks-transfer-policy";
 
 interface StepProps {
   wizard: OnchainSendWizard;
@@ -210,6 +211,19 @@ function DetailsStep({ wizard }: StepProps) {
           size="xl"
         />
       </div>
+      <FireblocksTransferPolicy
+        enabled={
+          wizard.selectedWallet?.provider === "fireblocks" && !wizard.submitting && !wizard.finished
+        }
+        selection={{
+          walletId: wizard.fields.walletId,
+          counterpartyId: wizard.counterpartyId,
+          accountId: wizard.selectedAccount?.id ?? "",
+          token: wizard.selectedAssetBalance?.mint ?? "",
+          address: wizard.destinationAddress ?? "",
+          amount: wizard.fields.amount || "0",
+        }}
+      />
     </div>
   );
 }
@@ -262,6 +276,11 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
           />
         )}
       </div>
+      {selectedWallet?.provider === "fireblocks" ? (
+        <p className="text-sm text-secondary">
+          {t("DashboardPayments.onchainSend.fireblocksReview")}
+        </p>
+      ) : null}
     </>
   );
 }
@@ -284,11 +303,28 @@ function ReviewStep({ wizard, counterpartyName }: StepProps) {
   return (
     <div className="flex flex-col gap-6">
       <p className="text-sm text-tertiary">
-        {signature === null
-          ? t("DashboardPayments.onchainSend.transferStatus", { status: transferResult.status })
-          : t("DashboardPayments.onchainSend.transferSuccess")}
+        {transferResult.status === "failed"
+          ? transferResult.error
+          : transferResult.fireblocks && signature === null
+            ? t(
+                transferResult.fireblocks.transactionId
+                  ? "DashboardPayments.onchainSend.fireblocksPending"
+                  : "DashboardPayments.onchainSend.fireblocksUnknown"
+              )
+            : signature === null
+              ? t("DashboardPayments.onchainSend.transferStatus", { status: transferResult.status })
+              : t("DashboardPayments.onchainSend.transferSuccess")}
       </p>
       {summary}
+      {transferResult.fireblocks ? (
+        <Button asChild variant="secondary">
+          <Link
+            href={href(`/dashboard/payments/transactions/${encodeURIComponent(transferResult.id)}`)}
+          >
+            {t("DashboardPayments.onchainSend.viewTransaction")}
+          </Link>
+        </Button>
+      ) : null}
       {signature === null ? null : (
         <Button
           type="button"

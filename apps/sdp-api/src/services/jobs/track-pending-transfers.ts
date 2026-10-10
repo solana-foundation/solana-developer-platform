@@ -37,9 +37,11 @@ import {
   createSystemPaymentsRepository,
   createSystemPaymentTransferBatchesRepository,
 } from "@/db/repositories/repository-factory";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
+import { refreshFireblocksTransfer } from "@/services/payments/fireblocks-transfer";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
@@ -214,6 +216,17 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
   const repo = createSystemPaymentsRepository(env);
   const now = new Date();
   const nowIso = now.toISOString();
+
+  // Human approvals have no five-minute signing timeout. This path only reads
+  // the provider; a missing/ambiguous create response can never trigger a POST.
+  const fireblocks = await repo.listTransfersByStatus({
+    statuses: ["processing"],
+    fireblocks: true,
+    limit: 50,
+  });
+  await mapSettledWithConcurrency(fireblocks, 5, (transfer) =>
+    refreshFireblocksTransfer(env, repo, transfer)
+  );
 
   await recoverStuckProcessingTransfers(env, repo, now, nowIso);
   await syncProcessingTransfersOnChain(env, repo, nowIso);
@@ -427,6 +440,7 @@ async function recoverStuckProcessingTransfers(
     statuses: ["processing"],
     types: WALLET_TRANSFER_TYPES,
     hasSignature: false,
+    fireblocks: false,
     updatedBefore: cutoff,
     limit: MAX_SIGNATURES_PER_BATCH,
   });
@@ -467,6 +481,7 @@ async function syncProcessingTransfersOnChain(
       statuses: ["processing"],
       types: WALLET_TRANSFER_TYPES,
       hasSignature: true,
+      fireblocks: false,
       limit: MAX_SIGNATURES_PER_BATCH,
     })
   );

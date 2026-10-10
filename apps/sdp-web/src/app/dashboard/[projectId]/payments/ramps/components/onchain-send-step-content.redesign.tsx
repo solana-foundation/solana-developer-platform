@@ -32,6 +32,7 @@ import { explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
+import { FireblocksTransferPolicy } from "./fireblocks-transfer-policy";
 import { AmountFields, SourceWalletField } from "./payment-form-fields";
 
 /** Whether this project can send privately, for the "Send privately" row; null hides it. */
@@ -355,6 +356,19 @@ function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
       <PayAmountFields wizard={wizard} />
       <MemoField wizard={wizard} />
       <PrivateSendOption status={privateSend ?? null} />
+      <FireblocksTransferPolicy
+        enabled={
+          wizard.selectedWallet?.provider === "fireblocks" && !wizard.submitting && !wizard.finished
+        }
+        selection={{
+          walletId: wizard.fields.walletId,
+          counterpartyId: wizard.counterpartyId,
+          accountId: wizard.selectedAccount?.id ?? "",
+          token: wizard.selectedAssetBalance?.mint ?? "",
+          address: wizard.destinationAddress ?? "",
+          amount: wizard.fields.amount || "0",
+        }}
+      />
     </div>
   );
 }
@@ -407,12 +421,18 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
           </DetailRow>
         )}
       </DetailList>
+      {selectedWallet?.provider === "fireblocks" ? (
+        <p className="text-sm text-secondary">
+          {t("DashboardPayments.onchainSend.fireblocksReview")}
+        </p>
+      ) : null}
     </>
   );
 }
 
 function ReviewStep({ wizard, counterpartyName }: StepProps) {
   const t = useTranslations();
+  const href = useProjectHref();
   const cluster = useSolanaCluster();
   const { transferResult } = wizard;
   const summary = (
@@ -429,11 +449,28 @@ function ReviewStep({ wizard, counterpartyName }: StepProps) {
   return (
     <div className="flex flex-col gap-6">
       <p className="text-sm text-tertiary">
-        {signature === null
-          ? t("DashboardPayments.onchainSend.transferStatus", { status: transferResult.status })
-          : t("DashboardPayments.onchainSend.transferSuccess")}
+        {transferResult.status === "failed"
+          ? transferResult.error
+          : transferResult.fireblocks && signature === null
+            ? t(
+                transferResult.fireblocks.transactionId
+                  ? "DashboardPayments.onchainSend.fireblocksPending"
+                  : "DashboardPayments.onchainSend.fireblocksUnknown"
+              )
+            : signature === null
+              ? t("DashboardPayments.onchainSend.transferStatus", { status: transferResult.status })
+              : t("DashboardPayments.onchainSend.transferSuccess")}
       </p>
       {summary}
+      {transferResult.fireblocks ? (
+        <Button asChild variant="secondary">
+          <Link
+            href={href(`/dashboard/payments/transactions/${encodeURIComponent(transferResult.id)}`)}
+          >
+            {t("DashboardPayments.onchainSend.viewTransaction")}
+          </Link>
+        </Button>
+      ) : null}
       {signature === null ? null : (
         <Button
           type="button"

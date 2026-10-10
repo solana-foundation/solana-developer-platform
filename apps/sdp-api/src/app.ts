@@ -61,6 +61,7 @@ import { privateChannels } from "@/routes/private-channels";
 import { projects } from "@/routes/projects";
 import { transactions } from "@/routes/transactions";
 import { webhooks } from "@/routes/webhooks";
+import { internalFireblocks } from "@/routes/internal-fireblocks";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
@@ -392,6 +393,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/internal/dashboard/custody", internalCustody);
   app.use("/internal/dashboard/wallets/*", requireModule("custody"));
   app.route("/internal/dashboard/wallets", internalWallets);
+  app.use("/internal/dashboard/fireblocks/*", requireModule("custody"));
+  app.route("/internal/dashboard/fireblocks", internalFireblocks);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
   app.route("/internal/dashboard/network", internalNetwork);
 

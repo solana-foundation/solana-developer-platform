@@ -158,6 +158,8 @@ export interface Env extends ManagedRpcEnv {
   FIREBLOCKS_VAULT_ID?: string;
   FIREBLOCKS_ASSET_ID?: string;
   FIREBLOCKS_API_BASE_URL?: string;
+  /** Inbound address-book imports are enabled by default; set false to disable. */
+  FIREBLOCKS_CONTACT_SYNC_ENABLED?: string;
 
   // Privy configuration (@solana/keychain-privy)
   PRIVY_APP_ID?: string;

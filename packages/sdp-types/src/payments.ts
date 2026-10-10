@@ -557,6 +557,11 @@ export interface PaymentTransferSummary {
   counterpartyId?: string;
   counterpartyDisplayName?: string;
   providerReference?: string;
+  fireblocks?: {
+    transactionId: string | null;
+    status: string;
+    subStatus: string | null;
+  };
   deliveryMode?: PaymentRampQuoteDeliveryMode;
   fiatCurrency?: string;
   fiatAmount?: string;

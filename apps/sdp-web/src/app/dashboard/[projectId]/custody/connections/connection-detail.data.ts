@@ -51,7 +51,10 @@ const safeCredentialSchema = z.object({
   projectId: z.string().nullable(),
   status: z.enum(PROVIDER_CREDENTIAL_STATUSES),
   createdAt: z.string(),
-  displayMetadata: z.object({ appIdSuffix: z.string().optional() }),
+  displayMetadata: z.object({
+    appIdSuffix: z.string().optional(),
+    apiKeySuffix: z.string().optional(),
+  }),
   source: z.enum(["stored", "runtime"]),
 });
 

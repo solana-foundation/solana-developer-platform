@@ -7,7 +7,7 @@ import { Button } from "@sdp/ui/button";
 import { ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import {
   resolveTokenByMint,
   shortenAddress,
@@ -89,6 +89,12 @@ function paymentWhy(
 ): string {
   switch (status) {
     case "processing":
+      if (transfer?.fireblocks)
+        return t(
+          transfer.fireblocks.transactionId
+            ? "DashboardPayments.onchainSend.fireblocksPending"
+            : "DashboardPayments.onchainSend.fireblocksUnknown"
+        );
       return t("DashboardPayments.transactionDetail.why.processing");
     case "settling":
       return t("DashboardPayments.transactionDetail.why.settling");
@@ -495,6 +501,15 @@ function TransactionRecord({
           signature: liveTransfer.signature,
         }
       : initialTransaction;
+  const router = useRouter();
+  const waitingForFireblocks = Boolean(transfer?.fireblocks && transfer.status === "processing");
+  useEffect(() => {
+    if (!waitingForFireblocks) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") router.refresh();
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [waitingForFireblocks, router]);
   const summary = useTransactionSummary(
     transaction,
     transfer,
@@ -541,6 +556,24 @@ function TransactionRecord({
           direction={summary.direction}
           contact={summary.contact}
         />
+        {transfer?.fireblocks ? (
+          <RecordSection title={t("DashboardPayments.onchainSend.fireblocks")}>
+            <RecordList>
+              {transfer.fireblocks.transactionId ? (
+                <RecordRow
+                  label={t("DashboardPayments.onchainSend.fireblocksTransactionId")}
+                  copy={transfer.fireblocks.transactionId}
+                >
+                  {transfer.fireblocks.transactionId}
+                </RecordRow>
+              ) : null}
+              <RecordRow label={t("DashboardPayments.onchainSend.fireblocksStatus")}>
+                {transfer.fireblocks.status}
+                {transfer.fireblocks.subStatus ? ` · ${transfer.fireblocks.subStatus}` : ""}
+              </RecordRow>
+            </RecordList>
+          </RecordSection>
+        ) : null}
         {transfer?.provider ? (
           <ProviderSection provider={transfer.provider} reference={transfer.providerReference} />
         ) : null}

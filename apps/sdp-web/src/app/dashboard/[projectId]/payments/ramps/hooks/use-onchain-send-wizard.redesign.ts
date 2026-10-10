@@ -35,6 +35,7 @@ import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
+import { useFireblocksDestination } from "./use-fireblocks-destination";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard.redesign";
 
@@ -188,6 +189,24 @@ function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
     try {
       const { transfer } = await sendTransferUnderKey(submission, t);
       setTransferResult(transfer);
+      if (transfer.status === "failed") {
+        toast.error(t("DashboardPayments.onchainSend.transferFailed"), {
+          id: toastId,
+          description: transfer.error ?? undefined,
+        });
+        return;
+      }
+      if (transfer.fireblocks && !transfer.signature) {
+        toast.info(t("DashboardPayments.onchainSend.transferSubmitted"), {
+          id: toastId,
+          description: t(
+            transfer.fireblocks.transactionId
+              ? "DashboardPayments.onchainSend.fireblocksPending"
+              : "DashboardPayments.onchainSend.fireblocksUnknown"
+          ),
+        });
+        return;
+      }
       toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
         id: toastId,
         description: submittedTransferDescription(transfer, t),
@@ -317,6 +336,15 @@ export function useOnchainSendWizard({
   );
   const { assetOptions, selectedAsset, selectedAssetBalance, availableAmount, exceedsBalance } =
     useOnchainAssetSelection(selectedWallet, fields, issuedTokenSymbolsByMint, t);
+  useFireblocksDestination({
+    enabled:
+      selectedWallet?.provider === "fireblocks" && !signingUnavailable && !submitting && !finished,
+    walletId: fields.walletId,
+    counterpartyId,
+    accountId: selectedAccount?.id ?? "",
+    token: selectedAssetBalance?.mint ?? null,
+    address: destinationAddress,
+  });
 
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);

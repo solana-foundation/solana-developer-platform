@@ -306,6 +306,17 @@ const rampTransferSettlementSchema = moonpayRampSettlementSchema;
 
 export const transferSchema = z
   .object({
+    fireblocks: z
+      .object({
+        transactionId: z.string().nullable(),
+        status: z.string(),
+        subStatus: z.string().nullable(),
+      })
+      .optional()
+      .openapi({
+        description:
+          "Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.",
+      }),
     id: transferIdParamSchema,
     organizationId: orgIdParamSchema,
     custodyWalletId: z.string().nullable().openapi({
