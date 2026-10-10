@@ -1,6 +1,6 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-import { walletBalancesQuerySchema } from "../../routes/payments/wallet-policies/schemas";
+import { walletBalancesQuerySchema } from "../../routes/payments/wallet-balances/schemas";
 
 import {
   createOnrampQuoteRequestSchema,
@@ -25,8 +25,6 @@ import {
   paymentTransferBatchIdParamsSchema,
   paymentTransferIdParamsSchema,
   paymentWalletIdParamsSchema,
-  paymentWalletPolicyEvaluationListQuerySchema,
-  paymentWalletPolicyEvaluationParamsSchema,
   prepareSubscriptionAuthorizationRequestSchema,
   prepareSubscriptionCollectionRequestSchema,
   prepareSubscriptionLifecycleRequestSchema,
@@ -34,7 +32,6 @@ import {
   simulateSandboxTransferRequestSchema,
   updateRecurringPaymentRequestSchema,
   updateSubscriptionPlanRequestSchema,
-  updateWalletPolicyRequestSchema,
 } from "../schemas";
 import {
   errorResponses,
@@ -64,10 +61,6 @@ import {
   transferListResponse,
   transferResponse,
   walletBalancesResponse,
-  walletControlProfileRevisionHistoryResponse,
-  walletPolicyEvaluationListResponse,
-  walletPolicyEvaluationResponse,
-  walletPolicyResponse,
 } from "./responses";
 
 export function registerPaymentsPaths(registry: OpenAPIRegistry) {
@@ -105,121 +98,6 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         ),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/payments/wallets/{walletId}/policies",
-    tags: ["Payments"],
-    summary: "Get wallet policy",
-    operationId: "getPaymentWalletPolicy",
-    description:
-      "Retrieves payment policy rules for a custody wallet. Policies are payment controls layered on top of custody-managed wallets.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: paymentWalletIdParamsSchema,
-    },
-    responses: {
-      200: {
-        description: "Wallet policy",
-        content: jsonContent(walletPolicyResponse),
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/payments/wallets/{walletId}/policies/revisions",
-    tags: ["Payments"],
-    summary: "List wallet policy revisions",
-    operationId: "listPaymentWalletPolicyRevisions",
-    description:
-      "Returns immutable revisions for the wallet control profile in newest-first order, including the currently active revision reference.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: paymentWalletIdParamsSchema,
-    },
-    responses: {
-      200: {
-        description: "Wallet policy revision history",
-        content: jsonContent(walletControlProfileRevisionHistoryResponse),
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/payments/wallets/{walletId}/policies/evaluations",
-    tags: ["Payments"],
-    summary: "List wallet policy evaluations",
-    operationId: "listPaymentWalletPolicyEvaluations",
-    description:
-      "Returns paginated, filterable policy audit history for one wallet. Evaluation context is redacted and excludes raw provider payloads.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: paymentWalletIdParamsSchema,
-      query: paymentWalletPolicyEvaluationListQuerySchema,
-    },
-    responses: {
-      200: {
-        description: "Wallet policy evaluation history",
-        content: jsonContent(walletPolicyEvaluationListResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "get",
-    path: "/v1/payments/wallets/{walletId}/policies/evaluations/{policyEvaluationId}",
-    tags: ["Payments"],
-    summary: "Get wallet policy evaluation",
-    operationId: "getPaymentWalletPolicyEvaluation",
-    description:
-      "Returns one policy evaluation with matched rules, redacted evaluation context, revision references, decision, status, reason, and approval linkage.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: paymentWalletPolicyEvaluationParamsSchema,
-    },
-    responses: {
-      200: {
-        description: "Wallet policy evaluation detail",
-        content: jsonContent(walletPolicyEvaluationResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "put",
-    path: "/v1/payments/wallets/{walletId}/policies",
-    tags: ["Payments"],
-    summary: "Update wallet policy",
-    operationId: "updatePaymentWalletPolicy",
-    description:
-      "Updates payment policy rules for a custody wallet, activating a new control-profile revision. API keys must hold the api_admin role; a key with a lesser role receives 403 even when it has the write permissions. Supply expectedRevisionId to reject the update with 409 when another update has activated a revision since the policy was read. Wallet provisioning and default selection remain in /v1/wallets.",
-    security: [{ apiKeyAuth: [] }],
-    request: {
-      headers: projectScopeHeaders,
-      params: paymentWalletIdParamsSchema,
-      body: {
-        required: true,
-        content: jsonContent(updateWalletPolicyRequestSchema),
-      },
-    },
-    responses: {
-      200: {
-        description: "Wallet policy updated",
-        content: jsonContent(walletPolicyResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

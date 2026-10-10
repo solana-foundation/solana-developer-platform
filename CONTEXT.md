@@ -52,45 +52,13 @@ _Avoid_: Custody wallet, token account, provider account data
 A payments product flow that repeatedly sends a fixed SPL token amount from an SDP custody source wallet to a **Counterparty Account** on a configured period. Initial records are created as pending activation; execution endpoints add the on-chain lifecycle.
 _Avoid_: Low-level subscription record, billing plan template, native SOL transfer
 
-**Wallet Operation**:
-A requested action against an SDP custody source wallet, such as a transfer, payment, ramp, issuance administration, raw signing, program invocation, or provider administration.
-_Avoid_: Provider request, transaction, payment transfer
-
-**Wallet Operation Envelope**:
-The normalized description of a **Wallet Operation** used as policy input before provider execution.
-_Avoid_: Provider payload, transaction request, payment request
-
-**Wallet Policy**:
-A source-wallet control that determines whether **Wallet Operations** are allowed, denied, or require approval regardless of the initiating actor.
-_Avoid_: API key policy, provider policy, payment policy
-
-**API Key Policy**:
-A caller-specific control that narrows or routes what an API key may do with the custody wallets it can access.
-_Avoid_: Wallet policy, endpoint permission, API key role
-
-**Policy-Scoped Wallet Binding**:
-An assignment of an API key to a custody wallet with an explicit policy scope for that wallet.
-_Avoid_: Selected wallet, wallet permission, signing wallet
-
-**Policy Evaluation**:
-An immutable decision record for a **Wallet Operation** evaluated against the active wallet and API key policies.
-_Avoid_: Audit log, provider result, transaction status
-
-**Approval Request**:
-An SDP record that pauses a **Wallet Operation** until a configured approver or provider-native approval flow resolves it.
-_Avoid_: Provider approval, manual review, multisig
-
-**Provider Control Mapping**:
-The translation between SDP policy concepts and provider-native controls when a provider can express them.
-_Avoid_: Provider availability, provider policy, custody configuration
-
 **Allowed Operations**:
 The list of operation families and types an API key may perform on the custody wallets it can access. An empty list places no restriction. An operation not in a non-empty list is refused before anything executes.
 _Avoid_: API key policy, wallet policy, rule, approval, permission scope
 
 **Payment Request**:
 A payments v2 product flow that asks a payer to complete a payment through a Solana Pay payload or a hosted payment link.
-_Avoid_: Wallet Operation Envelope, Payment Transfer, generic email
+_Avoid_: Payment Transfer, generic email
 
 **Managed Reconciliation Cadence**:
 The deployment-owned frequency for one pass over SDP's managed background reconcilers. It is distinct from each reconciler's self-hosted cadence and from monitoring tolerance windows.
@@ -114,14 +82,8 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 - SPC cannot delete principals. Legacy per-user SPC identities may remain orphaned upstream; SDP stops using them and does not create new per-user credentials.
 - A **Counterparty** may have one or more **Counterparty Accounts**.
 - A **Recurring Payment** pays a **Counterparty Account** from an SDP custody source wallet.
-- A **Wallet Operation Envelope** describes exactly one **Wallet Operation**.
-- A **Wallet Policy** is evaluated before an **API Key Policy**.
-- An **API Key Policy** can narrow or require approval, but must not silently expand past the **Wallet Policy**.
-- A **Policy-Scoped Wallet Binding** connects one API key to one custody wallet.
-- A **Policy Evaluation** may create an **Approval Request**.
-- A **Provider Control Mapping** can make provider-native controls match an SDP policy revision, partially match it, or remain inapplicable.
 - **Allowed Operations** belong to one API key and apply to every custody wallet that key can access.
-- **Allowed Operations** are checked once, when a request arrives; they never pause a **Wallet Operation**.
+- **Allowed Operations** are checked once, when a request arrives; they refuse an operation or let it run, and never pause it.
 - **Allowed Operations** narrow what a permission scope grants and never widen it.
 - A **Payment Request** may be delivered by email, but the email is not the **Payment Request**.
 - Every managed reconciler in one managed run follows the **Managed Reconciliation Cadence**, while its self-hosted equivalent may run at a different cadence.
@@ -134,9 +96,6 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 > **Dev:** "Should we make this organization enterprise so it can use Fireblocks?"
 > **Domain expert:** "No. Activate Fireblocks for that organization; provider access is independent of customer tiers."
 
-> **Dev:** "Can this API key policy let the key transfer from a wallet whose wallet policy denies transfers?"
-> **Domain expert:** "No. The wallet policy is the baseline; the API key policy can only narrow access or route the operation into approval."
-
 > **Dev:** "This key has `payments:write`. Can it request an off-ramp quote?"
 > **Domain expert:** "Only if its Allowed Operations are empty, or include the ramp family or the off-ramp quote type. The scope opens the door; the list says which actions may walk through it."
 
@@ -147,9 +106,6 @@ _Avoid_: Hard-coded job interval, Sentry schedule, self-hosted cron cadence
 
 - "Available" can mean access policy, environment configuration, runtime health, or project setup; resolved: **Provider Availability** means deployment configuration plus general availability or a **Manual Provider Activation**.
 - "Team", "organization", and "enterprise" were previously mixed with provider access; resolved: every user operates through an **Organization**, and manually onboarded providers are activated independently of organization type.
-- "Policy" can mean **Wallet Policy**, **API Key Policy**, provider-native policy, or payment policy; resolved: use the specific term instead of the generic word when discussing custody controls.
-- "Wallet" in policy discussions means an SDP custody source wallet, not a **Counterparty Account** or token account.
-- "Approval" can mean an SDP **Approval Request** or a provider-native approval flow; resolved: SDP creates the **Approval Request**, while provider-native approval is reached through **Provider Control Mapping**.
 - "Payment request" can mean a low-level request payload or a payer-facing payments product; resolved: use **Payment Request** only for the payments v2 payer-facing flow.
 - "Reconciliation cadence" previously meant either the deployment's execution schedule or Sentry's expected schedule; resolved: the **Managed Reconciliation Cadence** is deployment-owned, and managed monitoring derives from it.
-- "Policy" for API keys previously meant control profiles with rules and approvals; resolved: **Allowed Operations** is the only per-key operation control. **Wallet Policy**, **API Key Policy**, **Policy-Scoped Wallet Binding**, **Policy Evaluation**, **Approval Request**, **Provider Control Mapping**, **Wallet Operation Envelope** and the **Wallet Operation** ledger are retired by ADR 0006 and stay listed only until the removal lands.
+- "Policy" for custody controls used to mean wallet policies, API key policies, evaluations and approvals; resolved: those concepts no longer exist (ADR 0006). The only per-key operation control is **Allowed Operations**. Provider-native policy and approval flows are configured in the custody provider, not in SDP.

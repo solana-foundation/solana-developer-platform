@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { ActivityCard } from "./activity-card";
-import type { RingsOperationSummary } from "./helius-rings.data";
+import type { RingsOperationState, RingsOperationSummary } from "./helius-rings.data";
 
 const mocks = vi.hoisted(() => ({
   executeRingsOperation: vi.fn(),
@@ -96,14 +96,15 @@ describe("ActivityCard", () => {
   });
 
   /**
-   * Approval waits on a person, so a spinner there would turn forever. The row
-   * offers the decision instead.
+   * A row can carry a state this build no longer names. It renders verbatim,
+   * unmarked and without actions, instead of throwing on a missing label.
    */
-  it("offers approval inline without implying work is underway", () => {
-    renderCard([operation({ state: "approval_required" })]);
+  it("renders a state it does not know without crashing the list", () => {
+    renderCard([operation({ state: "approval_required" as RingsOperationState })]);
 
+    expect(screen.getByText("approval_required")).toBeTruthy();
     expect(spinners()).toHaveLength(0);
-    expect(screen.getByRole("button", { name: "Execute" })).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("retries a retryable failure from its own row", async () => {

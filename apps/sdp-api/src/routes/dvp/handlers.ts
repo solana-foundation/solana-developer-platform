@@ -48,10 +48,6 @@ import {
 } from "@/services/dvp/observe-now";
 import { reclaimDvpTradeLeg } from "@/services/dvp/reclaim";
 import { closeDvpTrade, type DvpCloseAction } from "@/services/dvp/settle";
-import {
-  assertApprovedWalletOperationCustodyWallet,
-  beginApprovedWalletOperationEffect,
-} from "@/services/policy/approved-operation-replay";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { resolveCloseAction, resolveLegAction } from "./action-context";
@@ -61,7 +57,6 @@ import {
   toDvpInboundResponse,
   toDvpLegTransfersResponse,
 } from "./inbound-response";
-import { assertJudgedDvpCustodyWallet } from "./policy";
 import {
   type createDvpTradeSchema,
   type fundDvpTradeSchema,
@@ -577,14 +572,6 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
 const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
   const { trade, actor, settlement, projectId } = await resolveCloseAction(c, action);
 
-  // Settle is policy-gated, cancel is not (routes/dvp/policy.ts explains why
-  // the recovery paths stay ungoverned). So only settle has a judgement to
-  // check, and only settle can be executing an approved operation. PRO-1975.
-  if (action === "settle") {
-    assertJudgedDvpCustodyWallet(c, settlement.custodyWalletId);
-    await assertApprovedWalletOperationCustodyWallet(c, settlement.custodyWalletId);
-  }
-
   const { result, replayed } = await runDvpCloseOnce(
     c.env,
     c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
@@ -595,17 +582,7 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
       projectId,
       custodyWalletId: settlement.custodyWalletId,
     },
-    (recordAttempt) =>
-      closeDvpTrade(c, trade, action, settlement, async (attempt) => {
-        // Record first, fence second. Both happen before the submission, and
-        // in this order a failed record aborts while the approval's lease is
-        // still unspent, so the operation can be executed again. Fencing first
-        // would strand an approved settle that never reached the network.
-        await recordAttempt(attempt);
-        if (action === "settle") {
-          await beginApprovedWalletOperationEffect(c);
-        }
-      })
+    (recordAttempt) => closeDvpTrade(c, trade, action, settlement, recordAttempt)
   );
 
   // An exit, so the record is written after the effect and cannot refuse it.
@@ -655,12 +632,6 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
 export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
   const { trade, actor, params } = await resolveLegAction(c, c.req.valid("json"));
 
-  // The gate judged a wallet; refuse if the second resolution landed on another
-  // one, and refuse an approved operation recorded against a different wallet.
-  // PRO-1975.
-  assertJudgedDvpCustodyWallet(c, params.custodyWalletId);
-  await assertApprovedWalletOperationCustodyWallet(c, params.custodyWalletId);
-
   // Money IN to the escrow, so the intent is fail-closed and admitted after
   // the refusals resolveLegAction makes (which move nothing and are not worth
   // an event) and before anything is signed. PRO-1992.
@@ -678,17 +649,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
       c.env,
       c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
       { action: "fund", tradeId: trade.id, ...params },
-      (recordAttempt) =>
-        fundDvpTradeLeg(c, trade, {
-          ...params,
-          recordAttempt: async (attempt) => {
-            // Record first, fence second: see the close above. The fence is a
-            // no-op on an ordinary request and is the last thing before the
-            // transfer goes out.
-            await recordAttempt(attempt);
-            await beginApprovedWalletOperationEffect(c);
-          },
-        })
+      (recordAttempt) => fundDvpTradeLeg(c, trade, { ...params, recordAttempt })
     ));
   } catch (error) {
     await concludeDvpFundAuditOnError(c, intent, error);

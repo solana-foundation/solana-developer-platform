@@ -1,4 +1,4 @@
 {
   "title": "Wallet operations",
-  "pages": ["index", "policies", "balances"]
+  "pages": ["index", "balances"]
 }

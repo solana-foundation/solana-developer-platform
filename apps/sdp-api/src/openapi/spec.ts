@@ -16,7 +16,6 @@ import { registerMemberPaths } from "./paths/members";
 import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
-import { registerPolicyPaths } from "./paths/policies";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectPaths } from "./paths/projects";
 import { registerRpcPaths } from "./paths/rpc";
@@ -42,11 +41,7 @@ const OPENAPI_TAG = {
   },
   PAYMENTS: {
     name: "Payments",
-    description: "Wallet balances, transfer execution, policies, and ramps.",
-  },
-  POLICIES: {
-    name: "Policies",
-    description: "Wallet and API-key policy-control inventory.",
+    description: "Wallet balances, transfer execution, and ramps.",
   },
   PRIVATE_CHANNELS: {
     name: "Private Channels",
@@ -105,7 +100,6 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.PROJECTS,
   OPENAPI_TAG.ISSUANCE,
   OPENAPI_TAG.PAYMENTS,
-  OPENAPI_TAG.POLICIES,
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
@@ -125,7 +119,6 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.RPC,
   OPENAPI_TAG.ISSUANCE,
   OPENAPI_TAG.PAYMENTS,
-  OPENAPI_TAG.POLICIES,
   OPENAPI_TAG.PRIVATE_CHANNELS,
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
@@ -173,7 +166,6 @@ function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerTransactionsPaths(registry);
-  registerPolicyPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
   registerAssetProfilePaths(registry);
@@ -192,7 +184,6 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerTransactionsPaths(registry);
-  registerPolicyPaths(registry);
   registerPrivateChannelsPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);

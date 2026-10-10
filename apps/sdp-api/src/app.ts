@@ -28,7 +28,6 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError, badRequest, payloadTooLarge } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
-import { dryRunMiddleware } from "@/middleware/dry-run";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -58,7 +57,6 @@ import pay from "@/routes/pay";
 import payments from "@/routes/payments";
 import places from "@/routes/places";
 import playgroundInternal from "@/routes/playground-internal";
-import policies from "@/routes/policies";
 import privateChannels from "@/routes/private-channels";
 import projects from "@/routes/projects";
 import rpc from "@/routes/rpc";
@@ -275,7 +273,6 @@ function captureUnexpectedError(
     scope.setTag("http_path", path);
 
     const apiKey = c.get("apiKey");
-    const replayActor = c.get("approvedOperationActor");
     const clerk = c.get("clerk");
 
     if (apiKey) {
@@ -285,10 +282,6 @@ function captureUnexpectedError(
         scope.setTag("project_id", apiKey.projectId);
       }
       scope.setUser({ id: `api_key:${apiKey.id}` });
-    } else if (replayActor) {
-      scope.setTag("auth_type", "approved_operation");
-      scope.setTag("organization_id", replayActor.organizationId);
-      scope.setUser({ id: replayActor.userId });
     } else if (clerk) {
       scope.setTag("auth_type", "clerk");
       scope.setTag("organization_id", clerk.organizationId);
@@ -328,7 +321,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Idempotency-Key validation + response echo (public API only)
   app.use("/v1/*", idempotencyKeyMiddleware());
-  app.use("/v1/*", dryRunMiddleware());
 
   // Backstop body bound for the whole public API: request handlers buffer the
   // body whole before zod validation runs, so without a ceiling a single
@@ -414,8 +406,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/earn", earn);
   v1.route("/dvp", dvp);
   v1.route("/places", places);
-  v1.use("/policies/*", requireModule("policies"));
-  v1.route("/policies", policies);
   v1.route("/private-channels", privateChannels);
   v1.route("/helius-rings", heliusRings);
   v1.route("/compliance", compliance);

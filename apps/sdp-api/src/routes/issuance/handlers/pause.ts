@@ -1,17 +1,10 @@
 import { assertValidAddress } from "@sdp/solana/address";
 import { MINT_ALREADY_PAUSED_ERROR, MINT_NOT_PAUSED_ERROR } from "@solana/mosaic-sdk";
 import { getDb } from "@/db";
-import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { isDryRunRequest } from "@/middleware/dry-run";
-import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
-import {
-  approvedWalletOperationId,
-  assertApprovedWalletOperationCustodyWallet,
-  beginApprovedWalletOperationEffect,
-} from "@/services/policy/approved-operation-replay";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
@@ -26,10 +19,8 @@ import {
   resolvePauseAuthority,
 } from "./authority-resolution";
 import { buildIdempotencyMetadata } from "./idempotency";
-import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicTokenTransaction } from "./public-response";
 import {
-  isSettledIssuanceTransaction,
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
@@ -77,12 +68,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
       transaction: earlyReplay,
       action: "pause",
     });
-    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict(
-        "Approved pause-state execution is incomplete and requires manual reconciliation"
-      );
-    }
     if (transaction.status === "confirmed") {
       await tokenService.applySettledTokenStatus(transaction.id, tokenId, "paused");
     }
@@ -106,8 +91,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
     requestedCustodyWalletId: body.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:admin"],
   });
-  assertJudgedCustodyWallet(c, custodyWalletId);
-  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
 
@@ -141,12 +124,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
       transaction: tx,
       action: "pause",
     });
-    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict(
-        "Approved pause-state execution is incomplete and requires manual reconciliation"
-      );
-    }
     if (transaction.status === "confirmed") {
       await tokenService.applySettledTokenStatus(tx.id, tokenId, "paused");
     }
@@ -180,7 +157,6 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
 
     const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
-    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.pauseToken({
       mint: mintAddress,
       pauseAuthority: signer,
@@ -271,12 +247,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
       transaction: earlyReplay,
       action: "unpause",
     });
-    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict(
-        "Approved pause-state execution is incomplete and requires manual reconciliation"
-      );
-    }
     if (transaction.status === "confirmed") {
       await tokenService.applySettledTokenStatus(transaction.id, tokenId, "active");
     }
@@ -300,8 +270,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     requestedCustodyWalletId: body.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:admin"],
   });
-  assertJudgedCustodyWallet(c, custodyWalletId);
-  await assertApprovedWalletOperationCustodyWallet(c, custodyWalletId);
 
   const idempotencyMetadata = idempotencyForWallet(custodyWalletId);
 
@@ -335,12 +303,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
       transaction: tx,
       action: "unpause",
     });
-    if (approvedWalletOperationId(c) && !isSettledIssuanceTransaction(transaction)) {
-      await beginApprovedWalletOperationEffect(c);
-      throw conflict(
-        "Approved pause-state execution is incomplete and requires manual reconciliation"
-      );
-    }
     if (transaction.status === "confirmed") {
       await tokenService.applySettledTokenStatus(tx.id, tokenId, "active");
     }
@@ -374,7 +336,6 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
 
     const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
 
-    await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.unpauseToken({
       mint: mintAddress,
       pauseAuthority: signer,
@@ -421,115 +382,3 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
     throw error;
   }
 };
-
-async function extractPauseStatePolicyCandidate(options: {
-  c: ValidatedBodyContext<typeof pauseTokenSchema>;
-  operation: "pause" | "unpause";
-  operationType: "issuance_pause_execute" | "issuance_unpause_execute";
-}): Promise<PolicyGateExtraction> {
-  const { c, operation, operationType } = options;
-  const { tokenId } = c.req.param();
-  const { auth, projectId, orgId } = requireProjectScope(c);
-  const body = c.req.valid("json");
-  const tokenService = getTenantTokenService(c);
-  const token = await tokenService.getToken({ tokenId, organizationId: orgId, projectId });
-  if (!token) {
-    throw notFound("Token");
-  }
-
-  const emptyExtraction = {
-    legs: [],
-    body,
-    resolved: {},
-    rawPayload: {
-      tokenId: token.id,
-      mintAddress: token.mintAddress,
-      action: operation,
-    },
-    idempotencyKey: null,
-  };
-
-  const idempotencyKey = c.req.header("Idempotency-Key");
-  const replay =
-    idempotencyKey && !isDryRunRequest(c)
-      ? await resolveDirectIssuanceReplay({
-          env: c.env,
-          auth,
-          tokenService,
-          tokenId,
-          type: operation,
-          idempotencyKey,
-          requestedCustodyWalletId: body.signingCustodyWalletId,
-          requiredWalletPermissions: ["tokens:admin"],
-          fingerprintForCustodyWalletId: (custodyWalletId) =>
-            buildIdempotencyMetadata(idempotencyKey, {
-              tokenId,
-              operation,
-              mode: "execute",
-              params: { ...body, signingCustodyWalletId: custodyWalletId },
-            }).idempotencyFingerprint,
-        })
-      : null;
-  if (replay) {
-    return { ...emptyExtraction, candidate: null };
-  }
-
-  if (!token.mintAddress) {
-    throw new AppError("TOKEN_NOT_DEPLOYED", "Token has not been deployed to Solana");
-  }
-
-  const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const pauseAuthorityRaw = await resolvePauseAuthority(c.env, mintAddress);
-  if (!pauseAuthorityRaw) {
-    throw badRequest("Pause authority is not configured for this token");
-  }
-
-  const wallet = await resolveAuthorityWallet({
-    env: c.env,
-    auth,
-    currentAuthority: pauseAuthorityRaw,
-    requestedCustodyWalletId: body.signingCustodyWalletId,
-    requiredWalletPermissions: ["tokens:admin"],
-  });
-
-  await admitIssuanceRuntimeExecution({
-    env: c.env,
-    auth,
-    custodyWalletId: wallet.custodyWalletId,
-    tokenService,
-  });
-
-  return {
-    ...emptyExtraction,
-    resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
-    candidate: buildIssuancePolicyCandidate({
-      auth,
-      token,
-      custodyWalletId: wallet.custodyWalletId,
-      walletId: wallet.providerWalletId,
-      operationType,
-      amount: null,
-      destination: null,
-    }),
-  };
-}
-
-export async function extractPausePolicyCandidate(
-  c: ValidatedBodyContext<typeof pauseTokenSchema>
-): Promise<PolicyGateExtraction> {
-  return extractPauseStatePolicyCandidate({
-    c,
-    operation: "pause",
-    operationType: "issuance_pause_execute",
-  });
-}
-
-export async function extractUnpausePolicyCandidate(
-  c: ValidatedBodyContext<typeof pauseTokenSchema>
-): Promise<PolicyGateExtraction> {
-  return extractPauseStatePolicyCandidate({
-    c,
-    operation: "unpause",
-    operationType: "issuance_unpause_execute",
-  });
-}

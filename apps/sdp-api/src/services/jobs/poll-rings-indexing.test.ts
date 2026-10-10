@@ -1,4 +1,3 @@
-import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import {
   createKeyPairFromPrivateKeyBytes,
   getAddressFromPublicKey,
@@ -38,18 +37,6 @@ const TEST_PROJECT_ID = "prj_hr_job_test";
 const TEST_CONNECTION_ID = "hrconn_hr_job_test";
 const TEST_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
-
-const allowPolicy = async () =>
-  ({
-    operation: { id: "wop_1" },
-    evaluation: {
-      id: "pev_1",
-      decision: "allow",
-      reason: null,
-      requiresApproval: false,
-      approvalRequestId: null,
-    },
-  }) as unknown as WalletOperationPolicyEnforcement;
 
 const OWNER_KEYPAIR = await createKeyPairFromPrivateKeyBytes(new Uint8Array(32).fill(61));
 const OWNER = await getAddressFromPublicKey(OWNER_KEYPAIR.publicKey);
@@ -99,7 +86,6 @@ let jobEnv: typeof env;
 function serviceWith(gateway: InMemoryRingsGateway) {
   return createHeliusRingsService(env, tenant, {
     gateway,
-    enforcePolicy: allowPolicy,
     validateOuterTransaction: async () => {},
     signOuterTransaction: async ({ unsignedTxBase64 }) =>
       (await signOuterTransaction(unsignedTxBase64)).signedTxBase64,
@@ -203,15 +189,12 @@ describe("pollRingsIndexing", () => {
 
   it("stays dormant unless the feature flag is set", async () => {
     const gateway = ringsGateway({ indexingDelayMs: 0 });
-    const operation = await serviceWith(gateway).prepareOperation(
-      {
-        walletId,
-        opType: "shield",
-        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
-        clientNonce: "job-dormant",
-      },
-      { apiKeyId: null, actor: null, custodyWalletId: null }
-    );
+    const operation = await serviceWith(gateway).prepareOperation({
+      walletId,
+      opType: "shield",
+      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      clientNonce: "job-dormant",
+    });
     expect(operation.state).toBe("indexing");
     gateway.recordSubmission(OUTER_TX.signature);
 
@@ -229,15 +212,12 @@ describe("pollRingsIndexing", () => {
 
   it("completes an indexing operation once Photon reports it", async () => {
     const gateway = ringsGateway({ indexingDelayMs: 0 });
-    const operation = await serviceWith(gateway).prepareOperation(
-      {
-        walletId,
-        opType: "shield",
-        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
-        clientNonce: "job-complete",
-      },
-      { apiKeyId: null, actor: null, custodyWalletId: null }
-    );
+    const operation = await serviceWith(gateway).prepareOperation({
+      walletId,
+      opType: "shield",
+      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      clientNonce: "job-complete",
+    });
     expect(operation.state).toBe("indexing");
     gateway.recordSubmission(OUTER_TX.signature);
 
@@ -255,15 +235,12 @@ describe("pollRingsIndexing", () => {
 
   it("times out an operation stuck in indexing past the budget", async () => {
     const gateway = ringsGateway({ indexingDelayMs: 60 * 60 * 1000 });
-    const operation = await serviceWith(gateway).prepareOperation(
-      {
-        walletId,
-        opType: "shield",
-        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
-        clientNonce: "job-timeout",
-      },
-      { apiKeyId: null, actor: null, custodyWalletId: null }
-    );
+    const operation = await serviceWith(gateway).prepareOperation({
+      walletId,
+      opType: "shield",
+      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      clientNonce: "job-timeout",
+    });
     expect(operation.state).toBe("indexing");
 
     // Sweep from a clock beyond the budget, with the chain height unavailable
@@ -289,15 +266,12 @@ describe("pollRingsIndexing", () => {
 
   it("keeps an operation past the budget while the chain vouches for it", async () => {
     const gateway = ringsGateway({ indexingDelayMs: 60 * 60 * 1000 });
-    const operation = await serviceWith(gateway).prepareOperation(
-      {
-        walletId,
-        opType: "shield",
-        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
-        clientNonce: "job-timeout-landed",
-      },
-      { apiKeyId: null, actor: null, custodyWalletId: null }
-    );
+    const operation = await serviceWith(gateway).prepareOperation({
+      walletId,
+      opType: "shield",
+      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      clientNonce: "job-timeout-landed",
+    });
     expect(operation.state).toBe("indexing");
 
     await pollRingsIndexing(jobEnv, {
@@ -319,15 +293,12 @@ describe("pollRingsIndexing", () => {
 
   it("sweeps a broadcast stranded in submitted into reconciliation", async () => {
     const gateway = ringsGateway({ indexingDelayMs: 0 });
-    const operation = await serviceWith(gateway).prepareOperation(
-      {
-        walletId,
-        opType: "shield",
-        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
-        clientNonce: "job-stranded",
-      },
-      { apiKeyId: null, actor: null, custodyWalletId: null }
-    );
+    const operation = await serviceWith(gateway).prepareOperation({
+      walletId,
+      opType: "shield",
+      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      clientNonce: "job-stranded",
+    });
     expect(operation.state).toBe("indexing");
     gateway.recordSubmission(OUTER_TX.signature);
 
@@ -362,16 +333,13 @@ describe("pollRingsIndexing", () => {
 
     async function strand(opType: "shield" | "withdraw", nonce: string): Promise<string> {
       const gateway = stalled();
-      const operation = await serviceWith(gateway).prepareOperation(
-        {
-          walletId,
-          opType,
-          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
-          ...(opType === "withdraw" ? { to: OWNER } : {}),
-          clientNonce: nonce,
-        },
-        { apiKeyId: null, actor: null, custodyWalletId: null }
-      );
+      const operation = await serviceWith(gateway).prepareOperation({
+        walletId,
+        opType,
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+        ...(opType === "withdraw" ? { to: OWNER } : {}),
+        clientNonce: nonce,
+      });
 
       // The pipeline persists the expiry from the build; force it low so the
       // sweep sees bytes that can no longer land.
@@ -589,15 +557,12 @@ describe("pollRingsIndexing", () => {
         keepBytes: boolean
       ) {
         const gateway = ringsGateway({ indexingDelayMs: 0 });
-        const operation = await serviceWith(gateway).prepareOperation(
-          {
-            walletId,
-            opType: "shield",
-            asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
-            clientNonce: nonce,
-          },
-          { apiKeyId: null, actor: null, custodyWalletId: null }
-        );
+        const operation = await serviceWith(gateway).prepareOperation({
+          walletId,
+          opType: "shield",
+          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+          clientNonce: nonce,
+        });
 
         await getDb(env)
           .prepare(

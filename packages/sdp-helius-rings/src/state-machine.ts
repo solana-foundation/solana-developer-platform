@@ -3,16 +3,10 @@ import type { FailureCode, OperationState } from "./types";
 /**
  * Named guards for advancing an operation. Each guard corresponds to an
  * external condition that must be satisfied before the transition applies:
- * a policy pass, an approval, a proof, a signer response, a submission
- * receipt, or a Photon-indexed confirmation.
+ * a prepared intent, a proof, a signer response, a submission receipt, or a
+ * Photon-indexed confirmation.
  */
-export type TransitionGuard =
-  | "policy_ok"
-  | "approved"
-  | "proof_received"
-  | "signed"
-  | "submitted"
-  | "indexed";
+export type TransitionGuard = "prepared" | "proof_received" | "signed" | "submitted" | "indexed";
 
 export interface FailEdge {
   code: FailureCode;
@@ -34,18 +28,7 @@ export interface Transition {
  */
 export const TRANSITIONS: readonly Transition[] = [
   { from: "draft", to: "preparing" },
-  {
-    from: "preparing",
-    to: "approval_required",
-    guard: "policy_ok",
-    onFail: { code: "policy_denied", retryable: false },
-  },
-  {
-    from: "approval_required",
-    to: "proving",
-    guard: "approved",
-    onFail: { code: "approval_rejected", retryable: false },
-  },
+  { from: "preparing", to: "proving", guard: "prepared" },
   {
     from: "proving",
     to: "ready_to_sign",

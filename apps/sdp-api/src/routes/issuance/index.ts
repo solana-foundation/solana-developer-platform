@@ -5,14 +5,12 @@ import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
-import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requestGate } from "@/middleware/request-gate";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   addAllowlistEntry,
-  extractAllowlistAddPolicyCandidate,
-  extractAllowlistRemovePolicyCandidate,
   listAllowlist,
   listAllowlistLabels,
   removeAllowlistEntry,
@@ -21,56 +19,34 @@ import { getAssetAuditHistory } from "./handlers/audit";
 import {
   admitUpdateAuthorityRuntimeExecution,
   executeUpdateAuthority,
-  extractUpdateAuthorityPolicyCandidate,
+  extractUpdateAuthorityRequest,
   findUpdateAuthorityIdempotentKeyReplay,
   prepareUpdateAuthority,
 } from "./handlers/authority";
-import { executeBurn, extractBurnPolicyCandidate, prepareBurn } from "./handlers/burn";
+import { executeBurn, prepareBurn } from "./handlers/burn";
 import {
   confirmDeploy,
   deployToken,
-  extractDeployPolicyCandidate,
   prepareDeploy,
   prepareDeployMetadata,
 } from "./handlers/deploy";
-import {
-  executeForceBurn,
-  extractForceBurnPolicyCandidate,
-  prepareForceBurn,
-} from "./handlers/force-burn";
-import {
-  extractFreezePolicyCandidate,
-  extractUnfreezePolicyCandidate,
-  freezeAccount,
-  listFrozenAccounts,
-  unfreezeAccount,
-} from "./handlers/freeze";
+import { executeForceBurn, prepareForceBurn } from "./handlers/force-burn";
+import { freezeAccount, listFrozenAccounts, unfreezeAccount } from "./handlers/freeze";
 import { enrollHolder, enrollHolderSchema, listHolders } from "./handlers/holders";
 import { serveTokenMetadata } from "./handlers/metadata";
 import {
   admitMintRuntimeExecution,
   executeMint,
-  extractMintPolicyCandidate,
+  extractMintRequest,
   findMintIdempotentKeyReplay,
   prepareMint,
 } from "./handlers/mint";
-import {
-  extractPausePolicyCandidate,
-  extractUnpausePolicyCandidate,
-  pauseToken,
-  unpauseToken,
-} from "./handlers/pause";
-import { executeSeize, extractSeizePolicyCandidate, prepareSeize } from "./handlers/seize";
+import { pauseToken, unpauseToken } from "./handlers/pause";
+import { extractIssuanceBody, extractIssuanceNoBody } from "./handlers/request-gate";
+import { executeSeize, prepareSeize } from "./handlers/seize";
 import { refreshTokenSupply } from "./handlers/supply";
 import { getTokenTemplate, listTokenTemplates } from "./handlers/templates";
-import {
-  createToken,
-  extractTokenUpdatePolicyCandidate,
-  getToken,
-  listTokenFacets,
-  listTokens,
-  updateToken,
-} from "./handlers/tokens";
+import { createToken, getToken, listTokenFacets, listTokens, updateToken } from "./handlers/tokens";
 import { listTokenTransactions, listTransactions } from "./handlers/transactions";
 import type { AppContext } from "./helpers";
 import {
@@ -142,7 +118,7 @@ issuance.patch(
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_metadata_update_execute"),
   validateBody(updateTokenSchema),
-  policyGate({ extract: extractTokenUpdatePolicyCandidate }),
+  requestGate({ extract: extractIssuanceBody }),
   updateToken
 );
 
@@ -152,7 +128,7 @@ issuance.post(
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_deploy_execute"),
   validateBody(deployTokenSchema),
-  policyGate({ extract: extractDeployPolicyCandidate }),
+  requestGate({ extract: extractIssuanceBody }),
   deployToken
 );
 issuance.post(
@@ -195,10 +171,10 @@ issuance.post(
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_mint_execute"),
   validateBody(mintSchema),
-  policyGate({
-    extract: extractMintPolicyCandidate,
+  requestGate({
+    extract: extractMintRequest,
     findIdempotentKeyReplay: findMintIdempotentKeyReplay,
-    beforeEnforce: admitMintRuntimeExecution,
+    admit: admitMintRuntimeExecution,
   }),
   executeMint
 );
@@ -216,7 +192,7 @@ issuance.post(
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_burn_execute"),
   validateBody(burnSchema),
-  policyGate({ extract: extractBurnPolicyCandidate }),
+  requestGate({ extract: extractIssuanceBody }),
   executeBurn
 );
 
@@ -233,7 +209,7 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_seize_execute"),
   validateBody(seizeSchema),
-  policyGate({ extract: extractSeizePolicyCandidate }),
+  requestGate({ extract: extractIssuanceBody }),
   executeSeize
 );
 
@@ -250,7 +226,7 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_force_burn_execute"),
   validateBody(forceBurnSchema),
-  policyGate({ extract: extractForceBurnPolicyCandidate }),
+  requestGate({ extract: extractIssuanceBody }),
   executeForceBurn
 );
 
@@ -267,10 +243,10 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_update_authority_execute"),
   validateBody(updateAuthoritySchema),
-  policyGate({
-    extract: extractUpdateAuthorityPolicyCandidate,
+  requestGate({
+    extract: extractUpdateAuthorityRequest,
     findIdempotentKeyReplay: findUpdateAuthorityIdempotentKeyReplay,
-    beforeEnforce: admitUpdateAuthorityRuntimeExecution,
+    admit: admitUpdateAuthorityRuntimeExecution,
   }),
   executeUpdateAuthority
 );
@@ -281,7 +257,7 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_pause_execute"),
   validateBody(pauseTokenSchema),
-  policyGate({ extract: extractPausePolicyCandidate }),
+  requestGate({ extract: extractIssuanceBody }),
   pauseToken
 );
 issuance.post(
@@ -289,7 +265,7 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_unpause_execute"),
   validateBody(pauseTokenSchema),
-  policyGate({ extract: extractUnpausePolicyCandidate }),
+  requestGate({ extract: extractIssuanceBody }),
   unpauseToken
 );
 
@@ -299,7 +275,7 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_freeze_execute"),
   validateBody(freezeSchema),
-  policyGate({ extract: extractFreezePolicyCandidate }),
+  requestGate({ extract: extractIssuanceBody }),
   freezeAccount
 );
 issuance.post(
@@ -307,7 +283,7 @@ issuance.post(
   requirePermissions("tokens:admin"),
   requireAllowedOperation("issuance_unfreeze_execute"),
   validateBody(unfreezeSchema),
-  policyGate({ extract: extractUnfreezePolicyCandidate }),
+  requestGate({ extract: extractIssuanceBody }),
   unfreezeAccount
 );
 issuance.get("/tokens/:tokenId/frozen", requirePermissions("tokens:read"), listFrozenAccounts);
@@ -326,14 +302,14 @@ issuance.post(
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_allowlist_add_execute"),
   validateBody(addAllowlistSchema),
-  policyGate({ extract: extractAllowlistAddPolicyCandidate }),
+  requestGate({ extract: extractIssuanceBody }),
   addAllowlistEntry
 );
 issuance.delete(
   "/tokens/:tokenId/allowlist/:entryId",
   requirePermissions("tokens:write"),
   requireAllowedOperation("issuance_allowlist_remove_execute"),
-  policyGate({ extract: extractAllowlistRemovePolicyCandidate }),
+  requestGate({ extract: extractIssuanceNoBody }),
   removeAllowlistEntry
 );
 

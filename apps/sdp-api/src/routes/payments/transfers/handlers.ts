@@ -2,11 +2,7 @@ import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import {
-  isSuccessfulPaymentTransferStatus,
-  type PolicyCandidate,
-  TRANSFER_CHAIN_VERDICT_STATUSES,
-} from "@sdp/types";
+import { isSuccessfulPaymentTransferStatus, TRANSFER_CHAIN_VERDICT_STATUSES } from "@sdp/types";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
   address,
@@ -54,9 +50,8 @@ import {
 } from "@/lib/idempotency";
 import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { isDryRunRequest } from "@/middleware/dry-run";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
-import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { isRampQuoteBindingExpired } from "@/routes/payments/ramps/quote-binding";
@@ -72,13 +67,6 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import {
-  approvedWalletOperationId,
-  assertApprovedWalletOperationCustodyWallet,
-  beginApprovedWalletOperationEffect,
-  runApprovedWalletOperationEffectTransaction,
-} from "@/services/policy/approved-operation-replay";
-import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import * as solanaServices from "@/services/solana";
 import {
   isDefiniteSubmissionError,
@@ -159,58 +147,57 @@ async function createTransferRecord(
     : null;
 
   try {
-    return await runApprovedWalletOperationEffectTransaction(c, async (db) => {
-      const repository = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
+    const db = getDb(c.env);
+    const repository = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
 
-      if (idempotencyKey && idempotencyFingerprint) {
-        const existing = await resolveTransferIdempotencyReplay(
-          repository,
-          input.organizationId,
-          input.projectId,
-          idempotencyKey,
-          idempotencyFingerprint,
-          input.custodyWalletId
-        );
-        if (existing) {
-          return { row: existing, replayed: true };
-        }
-      }
-
-      const createdRow = await repository.createTransfer({
-        id: generatePaymentTransferId(),
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        custodyWalletId: input.custodyWalletId,
-        walletId: input.walletId,
-        counterpartyId: null,
-        sourceAddress: input.sourceAddress,
-        destinationAddress: input.destinationAddress,
-        token: input.token,
-        amount: input.amount,
-        memo: input.memo ?? null,
-        type: input.type ?? "transfer",
-        direction: input.direction ?? "outbound",
-        status: input.status ?? "pending",
-        provider: null,
-        providerReference: null,
-        deliveryMode: null,
-        fiatCurrency: null,
-        fiatAmount: null,
-        providerData: input.providerData ?? {},
-        serializedTx: input.serializedTx ?? null,
-        signature: null,
-        slot: null,
-        initiatedByKeyId: input.initiatedByKeyId ?? null,
+    if (idempotencyKey && idempotencyFingerprint) {
+      const existing = await resolveTransferIdempotencyReplay(
+        repository,
+        input.organizationId,
+        input.projectId,
         idempotencyKey,
         idempotencyFingerprint,
-      });
-
-      if (!createdRow) {
-        throw internalError("Failed to create payment transfer record");
+        input.custodyWalletId
+      );
+      if (existing) {
+        return { row: existing, replayed: true };
       }
+    }
 
-      return { row: createdRow, replayed: false };
+    const createdRow = await repository.createTransfer({
+      id: generatePaymentTransferId(),
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      custodyWalletId: input.custodyWalletId,
+      walletId: input.walletId,
+      counterpartyId: null,
+      sourceAddress: input.sourceAddress,
+      destinationAddress: input.destinationAddress,
+      token: input.token,
+      amount: input.amount,
+      memo: input.memo ?? null,
+      type: input.type ?? "transfer",
+      direction: input.direction ?? "outbound",
+      status: input.status ?? "pending",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: input.providerData ?? {},
+      serializedTx: input.serializedTx ?? null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: input.initiatedByKeyId ?? null,
+      idempotencyKey,
+      idempotencyFingerprint,
     });
+
+    if (!createdRow) {
+      throw internalError("Failed to create payment transfer record");
+    }
+
+    return { row: createdRow, replayed: false };
   } catch (error) {
     if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
       const existing = await resolveTransferIdempotencyReplay(
@@ -229,64 +216,9 @@ async function createTransferRecord(
   }
 }
 
-async function assertApprovedTransferReplayCompleted(c: AppContext, transfer: TransferRow) {
-  if (!approvedWalletOperationId(c)) {
-    return;
-  }
-
-  const completed =
-    transfer.signature !== null && isSuccessfulPaymentTransferStatus(transfer.status);
-  if (completed) {
-    await assertApprovedWalletOperationCustodyWallet(c, transfer.custody_wallet_id);
-    return;
-  }
-
-  // This can only be legacy state created by the pre-atomic implementation or
-  // external database damage. Fence it before failing so recovery never turns
-  // the incomplete idempotency replay into a successful approved operation.
-  await beginApprovedWalletOperationEffect(c);
-  throw conflict("Approved transfer execution is incomplete and requires manual reconciliation");
-}
-
-/**
- * Build the policy candidate for a transfer operation from its resolved scope
- * and outbound operation — the single source for both the gated primary leg
- * and the in-flow signer legs.
- *
- * @param scope - The resolved request scope.
- * @param operation - The resolved outbound payment operation.
- * @param input - The transfer memo.
- * @returns The policy candidate for the operation.
- */
-function buildTransferPolicyCandidate(
-  scope: ResolvedScope,
-  operation: OutboundPaymentOperation,
-  input: { memo: string | null }
-): PolicyCandidate {
-  return {
-    organizationId: scope.auth.organizationId,
-    projectId: scope.auth.projectId,
-    custodyWalletId: operation.sourceWallet.id,
-    walletId: operation.sourceWallet.walletId,
-    apiKeyId: scope.auth.apiKeyId,
-    actor: walletOperationActorFromAuth(scope.auth),
-    source: "api",
-    operationFamily: "payment",
-    operationType: "payment_transfer_execute",
-    asset: operation.token,
-    amount: operation.amount,
-    destination: operation.destinationAddress,
-    context: {
-      sourceAddress: operation.sourceAddress,
-      memo: input.memo,
-    },
-    providerExtensions: {},
-  };
-}
-
 type CreateTransferBody = z.output<typeof createTransferSchema>;
 
-interface TransferPolicyResolved {
+interface TransferResolved {
   scope: ResolvedScope;
   operation: OutboundPaymentOperation;
 }
@@ -362,19 +294,21 @@ async function updateOnchainTransferForRamp(
     throw conflict("Ramp quote has expired; create a new quote before sending funds.");
   }
 
-  const updated = await runApprovedWalletOperationEffectTransaction(c, async (db) =>
-    createPostgresPaymentsRepository(db, getRequestTenantScope(c)).updateOnchainTransferForRamp({
-      ...tenant,
-      custodyWalletId: operation.sourceWallet.id,
-      walletId: operation.sourceWallet.walletId,
-      sourceAddress: operation.sourceWallet.publicKey,
-      destinationAddress,
-      token: operation.token,
-      amount: operation.amount,
-      initiatedByKeyId: scope.auth.id,
-      updatedAt: new Date().toISOString(),
-    })
-  );
+  const db = getDb(c.env);
+  const updated = await createPostgresPaymentsRepository(
+    db,
+    getRequestTenantScope(c)
+  ).updateOnchainTransferForRamp({
+    ...tenant,
+    custodyWalletId: operation.sourceWallet.id,
+    walletId: operation.sourceWallet.walletId,
+    sourceAddress: operation.sourceWallet.publicKey,
+    destinationAddress,
+    token: operation.token,
+    amount: operation.amount,
+    initiatedByKeyId: scope.auth.id,
+    updatedAt: new Date().toISOString(),
+  });
   if (!updated) {
     throw conflict("Ramp transfer already has an on-chain transaction");
   }
@@ -382,29 +316,25 @@ async function updateOnchainTransferForRamp(
 }
 
 /**
- * Parse and resolve a create-transfer request into its policy candidate for
- * the policy gate: validated body, resolved scope and outbound operation, and
- * the enforcement raw payload.
+ * Parse and resolve a create-transfer request for the request gate: the
+ * validated body and the resolved scope and outbound operation.
  *
  * @param c - Request context.
- * @returns The candidate, validated body, resolved resources, and raw payload.
+ * @returns The validated body and resolved resources.
  */
-export async function extractTransferPolicyCandidate(
+export async function extractTransferRequest(
   c: ValidatedBodyContext<typeof createTransferSchema>
-): Promise<PolicyGateExtraction> {
+): Promise<RequestGateExtraction> {
   const body = c.req.valid("json");
   assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
 
   const scope = await resolveScope(
     c,
-    c.req.header("Idempotency-Key") !== undefined && !isDryRunRequest(c)
-      ? body.sourceCustodyWalletId
-      : undefined
+    c.req.header("Idempotency-Key") !== undefined ? body.sourceCustodyWalletId : undefined
   );
   assertPaymentProjectScope(body.projectId, scope.auth.projectId);
   if (body.transferId) {
-    // Before policy runs, so an excluded provider's deposit never opens an
-    // approval request or dry-runs as allowed.
+    // An excluded provider's deposit is refused before anything else runs.
     const existing = await getPaymentsRepository(c).getTransferById({
       transferId: body.transferId,
       organizationId: scope.auth.organizationId,
@@ -424,54 +354,37 @@ export async function extractTransferPolicyCandidate(
     env: c.env,
     requiredWalletPermissions: ["payments:write"],
   });
-  const { sourceCustodyWalletId: _sourceCustodyWalletId, ...legacyBody } = body;
 
-  return {
-    candidate: buildTransferPolicyCandidate(scope, operation, {
-      memo: body.memo === undefined ? null : body.memo,
-    }),
-    legs: [],
-    body,
-    resolved: { scope, operation },
-    // HOO-1023: remove this legacy envelope when K2 rollback support ends.
-    executionRequestBody: { ...legacyBody, source: operation.sourceWallet.walletId },
-    rawPayload: {
-      source: operation.sourceWallet.walletId,
-      destination: body.destination,
-      token: body.token,
-      amount: body.amount,
-    },
-    idempotencyKey: null,
-  };
+  return { body, resolved: { scope, operation } };
 }
 
-export async function admitTransferRuntimeExecution(
+export async function admitTransferExecution(
   c: AppContext,
-  extraction: PolicyGateExtraction
+  extraction: RequestGateExtraction
 ): Promise<void> {
-  // SAFETY: this callback is wired only beside extractTransferPolicyCandidate in payments/index.ts.
-  const { operation } = extraction.resolved as TransferPolicyResolved;
+  // SAFETY: this callback is wired only beside extractTransferRequest in payments/index.ts.
+  const { operation } = extraction.resolved as TransferResolved;
   await admitExactPaymentWallet(c, operation.sourceWallet, ["payments:write"]);
 }
 
 /**
  * Resolve an Idempotency-Key replay for a create-transfer request: a key that
  * matches a recorded transfer with the same fingerprint returns the recorded
- * outcome, so the gate never re-enforces a replayed intent.
+ * outcome, so a replayed intent never runs twice.
  *
  * @param c - Request context.
- * @param extraction - The extraction produced by extractTransferPolicyCandidate.
+ * @param extraction - The extraction produced by extractTransferRequest.
  * @param idempotencyKey - The Idempotency-Key header value the gate read.
  * @returns The recorded response, or null when the request is a new intent.
  */
 export async function findTransferIdempotentKeyReplay(
   c: AppContext,
-  extraction: PolicyGateExtraction,
+  extraction: RequestGateExtraction,
   idempotencyKey: string
 ): Promise<Response | null> {
   const body = extraction.body as CreateTransferBody;
   if (body.transferId) return null;
-  const { scope, operation } = extraction.resolved as TransferPolicyResolved;
+  const { scope, operation } = extraction.resolved as TransferResolved;
 
   const fingerprintInput = {
     custodyWalletId: operation.sourceWallet.id,
@@ -494,7 +407,6 @@ export async function findTransferIdempotentKeyReplay(
     return null;
   }
 
-  await assertApprovedTransferReplayCompleted(c, replay);
   return success(c, buildTransferReplayPayload(replay));
 }
 
@@ -673,7 +585,6 @@ async function executeSponsoredTransfer(
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
-  await beginApprovedWalletOperationEffect(c);
   const signature = await submitSponsoredTransaction({
     feePayment,
     rpc,
@@ -804,7 +715,7 @@ export async function createTransfer(c: AppContext) {
   const {
     body,
     resolved: { scope, operation },
-  } = getPolicyGateContext<CreateTransferBody, TransferPolicyResolved>(c);
+  } = getRequestGateContext<CreateTransferBody, TransferResolved>(c);
   const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
 
   const reusedRampTransfer = body.transferId !== undefined;
@@ -834,7 +745,6 @@ export async function createTransfer(c: AppContext) {
       });
 
   if (replayed) {
-    await assertApprovedTransferReplayCompleted(c, transfer);
     return success(c, buildTransferReplayPayload(transfer));
   }
 

@@ -182,8 +182,6 @@ export interface PrivateOperation {
   walletId: string;
   opType: OpType;
   state: OperationState;
-  approvalRequestId: string | null;
-  policyEvaluationId: string | null;
   proof: ProofArtifact | null;
   outerTxSignature: string | null;
   photonIndexedAt: string | null;

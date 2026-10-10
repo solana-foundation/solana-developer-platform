@@ -26,8 +26,6 @@ import {
   type RingsGatewayPort,
   RUNTIME_HEALTH_COMPONENTS,
 } from "@sdp/helius-rings";
-import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
-import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
 import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db";
 import {
   createHeliusRingsAssetRepository,
@@ -36,7 +34,6 @@ import {
   createHeliusRingsOperationRepository,
   createHeliusRingsProjectRingRepository,
   createHeliusRingsWalletRepository,
-  createPolicyRepository,
   createPostgresHeliusRingsOperationRepository,
   createPostgresHeliusRingsWalletRepository,
   type HeliusRingsAssetRepository,
@@ -54,9 +51,7 @@ import {
   mapHeliusRingsWalletRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
-import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
 import type { Env } from "@/types/env";
 import { RingsAdapterError, redactAdapterMessage } from "./adapter-error";
 import { resolveDefaultRingsConnectionId, resolveRingsConnection } from "./connection-resolver";
@@ -66,12 +61,11 @@ import {
   UnconfiguredRingsGateway,
   validateRingsOuterTransaction,
 } from "./gateway";
-import { buildRingsWalletOperationInput } from "./policy-envelope";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { assertRingsSignedTransactionMatches, signRingsOuterTransaction } from "./signer-adapter";
 
 /**
- * Orchestrates every Rings action: provisioning, prepare-through-policy,
+ * Orchestrates every Rings action: provisioning, prepare,
  * execution, retry lineage. State transitions run through the persisted state
  * machine with compare-and-swap guards, and every hop is recorded on the
  * operation's event feed.
@@ -86,9 +80,10 @@ export interface HeliusRingsTenant {
   projectId: string;
 }
 
+/** Who is acting, recorded on the audit trail of identity-changing actions. */
 export interface HeliusRingsActor {
   apiKeyId: string | null;
-  actor: WalletOperationActor | null;
+  actor: { type: string; id: string | null } | null;
 }
 
 export interface HeliusRingsServiceDependencies {
@@ -102,13 +97,10 @@ export interface HeliusRingsServiceDependencies {
   health?: HeliusRingsHealthRepository;
   assets?: HeliusRingsAssetRepository;
   projectRings?: HeliusRingsProjectRingRepository;
-  enforcePolicy?: typeof enforceWalletOperationPolicy;
   /** Test seam; production always uses the SDK-backed local wrapper. */
   validateOuterTransaction?: typeof validateRingsOuterTransaction;
   signOuterTransaction?: typeof signRingsOuterTransaction;
   submitOuterTransaction?: typeof submitRingsOuterTransaction;
-  /** Reads the approval verdict; defaults to the policy repository. */
-  getApprovalStatus?: (approvalRequestId: string) => Promise<ApprovalRequestStatus | null>;
   now?: () => string;
 }
 
@@ -170,11 +162,6 @@ export interface ProvisionPrivateWalletInput {
   custodyWalletId?: string | null;
 }
 
-export interface PrepareOperationContext extends HeliusRingsActor {
-  /** The SDP custody wallet id backing the rings wallet, for the policy envelope. */
-  custodyWalletId: string | null;
-}
-
 /** States `executeOperation` acts on; the rest return unchanged. */
 /**
  * States `executeOperation` can move forward from.
@@ -185,7 +172,6 @@ export interface PrepareOperationContext extends HeliusRingsActor {
  * them for not being `failed`.
  */
 const EXECUTABLE_STATES: ReadonlySet<OperationState> = new Set([
-  "approval_required",
   "proving",
   "ready_to_sign",
   "submitted",
@@ -210,13 +196,9 @@ export class HeliusRingsService {
   private readonly health: HeliusRingsHealthRepository;
   private readonly assets: HeliusRingsAssetRepository;
   private readonly projectRings: HeliusRingsProjectRingRepository;
-  private readonly enforcePolicy: typeof enforceWalletOperationPolicy;
   private readonly validateOuterTransaction: typeof validateRingsOuterTransaction;
   private readonly signOuterTransaction: typeof signRingsOuterTransaction;
   private readonly submitOuterTransaction: typeof submitRingsOuterTransaction;
-  private readonly getApprovalStatus: (
-    approvalRequestId: string
-  ) => Promise<ApprovalRequestStatus | null>;
   private readonly now: () => string;
 
   constructor(
@@ -279,26 +261,11 @@ export class HeliusRingsService {
     this.events = dependencies.events ?? createHeliusRingsEventRepository(env);
     this.health = dependencies.health ?? createHeliusRingsHealthRepository(env);
     this.assets = dependencies.assets ?? createHeliusRingsAssetRepository(env);
-    this.enforcePolicy = dependencies.enforcePolicy ?? enforceWalletOperationPolicy;
     this.validateOuterTransaction =
       dependencies.validateOuterTransaction ?? validateRingsOuterTransaction;
     this.signOuterTransaction = dependencies.signOuterTransaction ?? signRingsOuterTransaction;
     this.submitOuterTransaction =
       dependencies.submitOuterTransaction ?? submitRingsOuterTransaction;
-    this.getApprovalStatus =
-      dependencies.getApprovalStatus ??
-      (async (approvalRequestId) => {
-        const scope = createTenantScope({
-          organizationId: tenant.organizationId,
-          projectId: tenant.projectId,
-        });
-        const detail = await createPolicyRepository(env, scope).getApprovalRequestDetail({
-          organizationId: tenant.organizationId,
-          projectId: tenant.projectId,
-          approvalRequestId,
-        });
-        return detail?.approval_status ?? null;
-      });
     this.now = dependencies.now ?? (() => new Date().toISOString());
   }
 
@@ -791,13 +758,12 @@ export class HeliusRingsService {
   }
 
   /**
-   * Reserves the intent, then advances draft → preparing → policy. Idempotent:
-   * a replayed request returns the operation already reserved, at whatever
-   * state it has reached, without re-running policy.
+   * Reserves the intent, then advances draft → preparing → proving and runs the
+   * pipeline. Idempotent: a replayed request returns the operation already
+   * reserved, at whatever state it has reached.
    */
   async prepareOperation(
     input: PrivateOperationInput,
-    context: PrepareOperationContext,
     retry: { ofOperationId: string; ringProgramId: string | null } | null = null,
     ringsConnectionId?: string
   ): Promise<PrivateOperation> {
@@ -812,8 +778,8 @@ export class HeliusRingsService {
     }
     await this.assertAssetAllowed(input);
     await this.assertNoUnresolvedOperation(input);
-    // A retry re-runs the pinned ring, never the selector: the approver and
-    // the failed attempt both saw a resolved id, and that is what re-runs.
+    // A retry re-runs the pinned ring, never the selector: the failed
+    // attempt saw a resolved id, and that is what re-runs.
     const ringProgramId = retry ? retry.ringProgramId : await this.resolveRing(input.ring);
     // Defense in depth behind the route schema's required custom ring: a ring
     // move pinned to the default pool has no boundary to cross.
@@ -854,79 +820,14 @@ export class HeliusRingsService {
     const preparing = await this.transition(operation.id, "draft", undefined);
     if (!preparing) return this.toPrivateOperation(await this.requireOperation(operation.id));
 
-    let enforcement: WalletOperationPolicyEnforcement;
-    try {
-      enforcement = await this.enforcePolicy(
-        this.env,
-        createTenantScope({
-          organizationId: this.tenant.organizationId,
-          projectId: this.tenant.projectId,
-        }),
-        buildRingsWalletOperationInput({
-          organizationId: this.tenant.organizationId,
-          projectId: this.tenant.projectId,
-          custodyWalletId: context.custodyWalletId,
-          sdpWalletId: wallet.sdp_wallet_id,
-          apiKeyId: context.apiKeyId,
-          actor: context.actor,
-          operation: input,
-          operationId: operation.id,
-          intentKey,
-          ringProgramId,
-        })
-      );
-    } catch (error) {
-      const failed = await this.fail(operation.id, "preparing", {
-        code: "invalid_input",
-        message: error instanceof Error ? error.message : "policy evaluation failed",
-        retryable: true,
-      });
-      return this.toPrivateOperation(failed ?? (await this.requireOperation(operation.id)));
-    }
-
-    const { evaluation } = enforcement;
-    await this.events.append({
-      operationId: operation.id,
-      kind: "policy.evaluated",
-      payload: { decision: evaluation.decision, policyEvaluationId: evaluation.id },
-    });
-
-    if (evaluation.decision === "deny") {
-      const failed = await this.fail(operation.id, "preparing", {
-        code: "policy_denied",
-        message: evaluation.reason ?? "denied by wallet policy",
-        retryable: false,
-      });
-      return this.toPrivateOperation(failed ?? (await this.requireOperation(operation.id)));
-    }
-
-    // The machine has no preparing → proving shortcut: an allowed operation
-    // passes through approval_required with the `approved` guard immediately
-    // satisfied, so the row's history reads the same either way.
-    const paused = await this.transition(operation.id, "preparing", "policy_ok", {
-      policyEvaluationId: evaluation.id,
-      approvalRequestId: evaluation.approvalRequestId,
-    });
-    if (!paused) return this.toPrivateOperation(await this.requireOperation(operation.id));
-
-    if (evaluation.requiresApproval) {
-      await this.events.append({
-        operationId: operation.id,
-        kind: "approval.requested",
-        payload: { approvalRequestId: evaluation.approvalRequestId },
-      });
-      return this.toPrivateOperation(paused);
-    }
-
-    const proving = await this.transition(operation.id, "approval_required", "approved");
+    const proving = await this.transition(operation.id, "preparing", "prepared");
     if (!proving) return this.toPrivateOperation(await this.requireOperation(operation.id));
     return this.toPrivateOperation(await this.runPipeline(proving));
   }
 
   /**
    * Advances an operation that is waiting on an external condition. Idempotent
-   * per state: an approval still pending or a signature not yet indexed leaves
-   * the row untouched. `submitted` is executable too, so a broadcast whose
+   * per state: a signature not yet indexed leaves the row untouched. `submitted` is executable too, so a broadcast whose
    * indexing transition never committed is resumed rather than stranded.
    */
   async executeOperation(operationId: string): Promise<PrivateOperation> {
@@ -935,36 +836,6 @@ export class HeliusRingsService {
       return this.toPrivateOperation(operation);
     }
     assertOperationEnabled(operation.op_type);
-
-    if (operation.state === "approval_required") {
-      // The approval verdict is read from the approval request itself — never
-      // from the caller. Trusting the request body here would let anyone with
-      // write access skip a reviewer.
-      if (!operation.approval_request_id) {
-        const failed = await this.fail(operation.id, "approval_required", {
-          code: "invalid_input",
-          message: "approval_required without an approval request",
-          retryable: false,
-        });
-        return this.toPrivateOperation(failed ?? (await this.requireOperation(operation.id)));
-      }
-      const status = await this.getApprovalStatus(operation.approval_request_id);
-      if (status === "rejected" || status === "canceled" || status === "expired") {
-        const failed = await this.fail(operation.id, "approval_required", {
-          code: "approval_rejected",
-          message: `approval request was ${status}`,
-          retryable: false,
-        });
-        return this.toPrivateOperation(failed ?? (await this.requireOperation(operation.id)));
-      }
-      if (status !== "approved") {
-        return this.toPrivateOperation(operation);
-      }
-      await this.events.append({ operationId: operation.id, kind: "approval.granted" });
-      const proving = await this.transition(operation.id, "approval_required", "approved");
-      if (!proving) return this.toPrivateOperation(await this.requireOperation(operation.id));
-      return this.toPrivateOperation(await this.runPipeline(proving));
-    }
 
     // proving: died mid-build. Nothing was signed, so rebuilding is safe;
     // `runPipeline` pins any notes a prior attempt recorded.
@@ -1222,15 +1093,10 @@ export class HeliusRingsService {
 
   /**
    * Files a fresh operation linked to a failed, retryable one and runs it
-   * through the same prepare-through-policy path — a retry re-earns its policy
-   * verdict, never inherits one. The original row stays exactly as it failed;
+   * through the same prepare path. The original row stays exactly as it failed;
    * the lineage is audit evidence, capped at RINGS_MAX_RETRY_DEPTH.
    */
-  async retryOperation(
-    operationId: string,
-    clientNonce: string,
-    context: PrepareOperationContext
-  ): Promise<PrivateOperation> {
+  async retryOperation(operationId: string, clientNonce: string): Promise<PrivateOperation> {
     const failed = await this.requireOperation(operationId);
     if (failed.state !== "failed") {
       throw new AppError("CONFLICT", "only a failed operation can be retried");
@@ -1276,7 +1142,6 @@ export class HeliusRingsService {
 
     return this.prepareOperation(
       input,
-      context,
       {
         ofOperationId: failed.id,
         ringProgramId: failed.ring_program_id ?? null,
@@ -1767,8 +1632,6 @@ export class HeliusRingsService {
       walletId: row.wallet_id,
       opType: row.op_type,
       state: row.state,
-      approvalRequestId: row.approval_request_id,
-      policyEvaluationId: row.policy_evaluation_id,
       proof: null,
       outerTxSignature: row.outer_tx_signature,
       photonIndexedAt: row.photon_indexed_at,

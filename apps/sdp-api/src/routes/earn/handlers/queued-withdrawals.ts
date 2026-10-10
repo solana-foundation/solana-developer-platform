@@ -23,9 +23,8 @@ import {
 } from "@/lib/idempotency";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
-import { isDryRunRequest } from "@/middleware/dry-run";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
-import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
+import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
@@ -54,12 +53,6 @@ import {
   submitExternalQueuedWithdrawalAction,
 } from "@/services/earn/vault-queued-withdraw.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
-import {
-  approvedWalletOperationId,
-  beginApprovedWalletOperationEffect,
-  runApprovedWalletOperationEffectTransaction,
-} from "@/services/policy/approved-operation-replay";
-import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import type { AppContext } from "../context";
 import { resolveSdpEnvironment } from "../context";
 import {
@@ -77,10 +70,6 @@ import {
   earnVaultWithdrawalRequestsQuerySchema,
 } from "../schemas";
 import { resolveExternalWalletExit } from "./external-wallet";
-import {
-  recoverFailedVaultPolicyExecution,
-  throwOnPriorEarnPolicyOperation,
-} from "./policy-replay";
 import { parseParams, parseQuery } from "./shared";
 import {
   assertBoundWalletIdentifierIsUnique,
@@ -104,11 +93,10 @@ interface ResolvedCustodyQueueTarget {
   environment: SdpEnvironment;
   actor: CustodyQueuedWithdrawalActor;
   position: QueuedWithdrawalPosition;
-  policyWalletId: string;
 }
 
 interface ResolvedCustodyQueueRequest extends ResolvedCustodyQueueTarget {
-  requestId: string | null;
+  requestId: string;
   idempotencyFingerprint: string;
 }
 
@@ -344,7 +332,6 @@ async function resolveCustodyQueueTarget(
       ownerAddress: wallet.publicKey,
       custodyWalletId: wallet.id,
     },
-    policyWalletId: wallet.walletId,
   };
 }
 
@@ -434,24 +421,6 @@ async function readPreview(
   }
 }
 
-async function readParIntermediateMint(
-  c: AppContext,
-  environment: SdpEnvironment,
-  position: QueuedWithdrawalPosition
-): Promise<string> {
-  const client = resolveVaultParRedemptionClient(c.env, position.provider, createVaultDeadline());
-  if (!client) throw notImplemented(position.provider, "par redemptions");
-  try {
-    const options = await client.getParRedemptionOptions(
-      { env: c.env, environment },
-      { providerReference: position.vaultAddress }
-    );
-    return options.intermediateMint;
-  } catch (error) {
-    rethrowVaultProviderFailure(error);
-  }
-}
-
 export async function getEarnVaultWithdrawalOptions(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalOptionsSchema>
 ) {
@@ -470,13 +439,12 @@ export async function createEarnVaultQueuedWithdrawalPreview(
   return success(c, { positionId: target.position.id, ...quote });
 }
 
-export async function extractEarnVaultWithdrawalRequestPolicyCandidate(
+export async function extractEarnVaultWithdrawalRequest(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalRequestSchema>
-): Promise<PolicyGateExtraction> {
-  const rawBody: Record<string, unknown> = await c.req.json();
+): Promise<RequestGateExtraction> {
   const body = c.req.valid("json");
-  const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null;
-  if (requestId === null && !isDryRunRequest(c)) {
+  const requestId = c.req.header(IDEMPOTENCY_KEY_HEADER);
+  if (requestId === undefined) {
     throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for asynchronous vault withdrawals`);
   }
   const target = await resolveCustodyQueueTarget(c, body.positionId, "write");
@@ -504,57 +472,14 @@ export async function extractEarnVaultWithdrawalRequestPolicyCandidate(
     requestId,
     idempotencyFingerprint,
   };
-  // Policy judges the token that actually leaves: position shares, or the
-  // held intermediate a par request delegates to the provider's operator.
-  const leaving =
-    terms.mechanism === "operator_redemption" && terms.intermediateAmount !== undefined
-      ? {
-          asset: await readParIntermediateMint(c, target.environment, target.position),
-          amount: terms.intermediateAmount,
-        }
-      : { asset: target.position.shareMint, amount: terms.shares };
-  return {
-    candidate: {
-      organizationId: target.auth.organizationId,
-      projectId: target.projectId,
-      custodyWalletId: target.actor.custodyWalletId,
-      walletId: target.policyWalletId,
-      apiKeyId: target.auth.apiKeyId ?? null,
-      actor: walletOperationActorFromAuth(target.auth),
-      source: "earn_vault_withdrawal",
-      operationFamily: "program",
-      operationType: "earn_vault_withdrawal",
-      asset: leaving.asset,
-      amount: leaving.amount,
-      destination: target.position.vaultAddress,
-      context: {
-        provider: target.position.provider,
-        positionId: target.position.id,
-        tokenMint: target.position.tokenMint,
-        environment: target.environment,
-        depositStyle: "vault_direct",
-        withdrawalRoute:
-          terms.mechanism === "operator_redemption" ? "operator_redemption" : "queued",
-        ...(terms.mechanism === "operator_redemption"
-          ? { parSource: terms.intermediateAmount === undefined ? "shares" : "intermediate" }
-          : { discountBps: terms.discountBps, deadlineSeconds: terms.deadlineSeconds }),
-      },
-      providerExtensions: {},
-    },
-    legs: [],
-    body,
-    resolved,
-    rawPayload: { ...rawBody, idempotencyFingerprint },
-    idempotencyKey: requestId,
-  };
+  return { body, resolved };
 }
 
 export async function findEarnVaultWithdrawalRequestIdempotentKeyReplay(
   c: AppContext,
-  extraction: PolicyGateExtraction,
+  extraction: RequestGateExtraction,
   idempotencyKey: string
 ): Promise<Response | null> {
-  if (approvedWalletOperationId(c)) return null;
   const resolved = extraction.resolved as ResolvedCustodyQueueRequest;
   const prior = await createPostgresEarnVaultWithdrawalRequestsRepository(
     getDb(c.env)
@@ -583,54 +508,24 @@ export async function findEarnVaultWithdrawalRequestIdempotentKeyReplay(
     await recordQueuedWithdrawalActionAudit(c, { request: prior, action, replayed: true });
     return success(c, { withdrawalRequest: withdrawalRequestWire(prior, true) });
   }
-  await throwOnPriorEarnPolicyOperation(c, {
-    organizationId: resolved.auth.organizationId,
-    scope: { kind: "project", projectId: resolved.projectId },
-    idempotencyKey,
-    idempotencyFingerprint: resolved.idempotencyFingerprint,
-    operationNoun: "vault withdrawal",
-  });
   return null;
 }
 
 export async function createEarnVaultWithdrawalRequest(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalRequestSchema>
 ) {
-  return recoverFailedVaultPolicyExecution(c, async () => {
-    const { body, resolved } = getPolicyGateContext<
-      CustodyRequestBody,
-      ResolvedCustodyQueueRequest
-    >(c);
-    if (!resolved.requestId) {
-      throw internalError(
-        "Asynchronous withdrawal execution reached the handler without an idempotency key"
-      );
-    }
-    const result = await createCustodyQueuedWithdrawal(
-      c.env,
-      {
-        actor: resolved.actor,
-        position: resolved.position,
-        terms: queuedTerms(body),
-        clientRequestId: resolved.requestId,
-      },
-      {
-        runIntentTransaction: (mutation) =>
-          runApprovedWalletOperationEffectTransaction(c, mutation),
-      }
-    );
-    if (result.replayed && approvedWalletOperationId(c)) {
-      await beginApprovedWalletOperationEffect(c);
-      if (result.request.status === "failed" || result.action.status === "failed") {
-        throw conflict(
-          "Approved asynchronous vault withdrawal execution is incomplete and requires manual reconciliation"
-        );
-      }
-    }
-    await recordQueuedWithdrawalActionAudit(c, result);
-    return success(c, {
-      withdrawalRequest: withdrawalRequestWire(result.request, result.replayed),
-    });
+  const { body, resolved } = getRequestGateContext<CustodyRequestBody, ResolvedCustodyQueueRequest>(
+    c
+  );
+  const result = await createCustodyQueuedWithdrawal(c.env, {
+    actor: resolved.actor,
+    position: resolved.position,
+    terms: queuedTerms(body),
+    clientRequestId: resolved.requestId,
+  });
+  await recordQueuedWithdrawalActionAudit(c, result);
+  return success(c, {
+    withdrawalRequest: withdrawalRequestWire(result.request, result.replayed),
   });
 }
 
@@ -841,7 +736,6 @@ export async function createEarnExternalWalletWithdrawalRequestCancelTransaction
 }
 
 function requireIdempotencyKey(c: AppContext, noun: string): string {
-  if (isDryRunRequest(c)) throw badRequest(`Dry-Run is not supported for ${noun}`);
   const key = c.req.header(IDEMPOTENCY_KEY_HEADER);
   if (!key) throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for ${noun}`);
   return key;

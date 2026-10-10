@@ -12,7 +12,7 @@ import {
   type RingsOperationDetail,
   type RingsOperationState,
 } from "./helius-rings.data";
-import { formatAssetAmount, formatWhen } from "./helius-rings.utils";
+import { formatAssetAmount, formatWhen, isKnownOperationState } from "./helius-rings.utils";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -20,7 +20,6 @@ type Translate = ReturnType<typeof useTranslations>;
 const STATE_BADGE: Record<RingsOperationState, "default" | "success" | "warning" | "danger"> = {
   draft: "default",
   preparing: "default",
-  approval_required: "warning",
   proving: "default",
   ready_to_sign: "default",
   submitted: "default",
@@ -93,8 +92,10 @@ export function OperationDetailDrawer({
                   {t("DashboardHeliusRings.activity.state")}
                 </dt>
                 <dd>
-                  <Badge variant={STATE_BADGE[detail.state]}>
-                    {t(`DashboardHeliusRings.activity.state_${detail.state}`)}
+                  <Badge variant={STATE_BADGE[detail.state] ?? "default"}>
+                    {isKnownOperationState(detail.state)
+                      ? t(`DashboardHeliusRings.activity.state_${detail.state}`)
+                      : detail.state}
                   </Badge>
                 </dd>
               </div>
@@ -183,25 +184,9 @@ export function OperationDetailDrawer({
 
 // Short human-facing label per event kind and per target state; falls back to
 // the raw kind so a new upstream event is visible rather than silently missing.
-const TIMELINE_STATES = new Set<RingsOperationState>([
-  "draft",
-  "preparing",
-  "approval_required",
-  "proving",
-  "ready_to_sign",
-  "submitted",
-  "indexing",
-  "completed",
-  "failed",
-  "voided",
-]);
-
 const EVENT_KEY: Record<string, MessageKey> = {
   "operation.created": "DashboardHeliusRings.detail.event_created",
   "operation.retried": "DashboardHeliusRings.detail.event_retried",
-  "policy.evaluated": "DashboardHeliusRings.detail.event_policyEvaluated",
-  "approval.requested": "DashboardHeliusRings.detail.event_approvalRequested",
-  "approval.granted": "DashboardHeliusRings.detail.event_approvalGranted",
   "proof.received": "DashboardHeliusRings.detail.event_proofReceived",
   "transaction.submitted": "DashboardHeliusRings.detail.event_transactionSubmitted",
   "operation.completed": "DashboardHeliusRings.detail.event_completed",
@@ -213,8 +198,8 @@ const EVENT_KEY: Record<string, MessageKey> = {
 function formatEventKind(event: RingsOperationDetail["events"][number], t: Translate): string {
   if (event.kind === "state.transitioned") {
     const to = event.payload && typeof event.payload === "object" ? event.payload.to : undefined;
-    if (typeof to === "string" && TIMELINE_STATES.has(to as RingsOperationState)) {
-      return t(`DashboardHeliusRings.detail.timelineState_${to as RingsOperationState}`);
+    if (typeof to === "string" && isKnownOperationState(to)) {
+      return t(`DashboardHeliusRings.detail.timelineState_${to}`);
     }
     if (typeof to === "string") return to;
   }

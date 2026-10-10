@@ -74,12 +74,7 @@ export const listProjectApiKeys = async (c: AppContext) => {
   );
   const apiKeys = await apiKeyService.listForProject(projectId);
   const accessSummaryByKeyId = await buildApiKeyAccessSummaries(
-    c.env,
     db,
-    createTenantScope({
-      organizationId: auth.organizationId,
-      projectId,
-    }),
     apiKeys.map((key) => key.id)
   );
 
@@ -100,7 +95,6 @@ export const listProjectApiKeys = async (c: AppContext) => {
         signingWalletId: key.signingWalletId,
         signingWalletIds: walletBindings.map((binding) => binding.walletId),
         walletBindings,
-        policyBindings: accessSummary?.policyBindings ?? [],
         allowedOperations: key.allowedOperations,
         lastUsedAt: key.lastUsedAt,
         expiresAt: key.expiresAt,

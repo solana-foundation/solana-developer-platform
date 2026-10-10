@@ -9,8 +9,6 @@ describe("PrivateOperation serialization", () => {
       walletId: "hw_1",
       opType: "shield",
       state: "proving",
-      approvalRequestId: null,
-      policyEvaluationId: null,
       proof: {
         source: "simulated",
         ref: new SecretRef("proof-internal-secret"),

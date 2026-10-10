@@ -144,87 +144,6 @@
           }
         },
         {
-          "name": "Create API-key policy profile",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles",
-            "description": "Creates a draft operation-level control profile for one API key.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Treasury service controls\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Create API-key policy revision",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles/{{profileId}}/revisions",
-            "description": "Appends an immutable rule snapshot to an API-key control profile without activating it.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"rules\": [\n    {\n      \"id\": \"deny-issuance\",\n      \"kind\": \"operation_family\",\n      \"family\": \"issuance\",\n      \"action\": \"deny\"\n    }\n  ],\n  \"defaultAction\": \"deny\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Activate API-key policy revision",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-profiles/{{profileId}}/revisions/{{revisionId}}/activate",
-            "description": "Makes one immutable revision the active policy for its API-key control profile."
-          }
-        },
-        {
-          "name": "Replace or clear API-key policy bindings",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/api-keys/{{keyId}}/policy-bindings",
-            "description": "Explicitly replaces the complete all-wallet/selected-wallet policy binding set, or clears it. Existing bindings are otherwise preserved by API-key updates and rotation.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"mode\": \"replace\",\n  \"bindings\": [\n    {\n      \"bindingScope\": \"all\",\n      \"apiKeyControlProfileId\": \"\"\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
           "name": "Rotate API key",
           "request": {
             "method": "POST",
@@ -383,51 +302,6 @@
                 }
               }
             }
-          }
-        },
-        {
-          "name": "List wallet approval requests",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/approval-requests",
-            "description": "Lists wallet operation approval requests for the authenticated organization or project scope."
-          }
-        },
-        {
-          "name": "Get wallet approval request",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}",
-            "description": "Returns one wallet operation approval request with operation and policy context."
-          }
-        },
-        {
-          "name": "Approve wallet approval request",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/approve",
-            "description": "Approves a pending wallet operation approval request. The resolver must differ from the requester, including across a user's Clerk identity and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned."
-          }
-        },
-        {
-          "name": "Reject wallet approval request",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/reject",
-            "description": "Rejects a pending wallet operation approval request. The resolver must differ from the requester, including across a user's Clerk identity and API keys created by that user, and be an active member of the assigned approval group, or an organization/API admin when no group is assigned."
-          }
-        },
-        {
-          "name": "Cancel wallet approval request",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{baseUrl}}/v1/wallets/approval-requests/{{approvalRequestId}}/cancel",
-            "description": "Cancels a pending wallet operation approval request. The requester may cancel its own request; otherwise the resolver must be an active member of the assigned approval group, or an organization/API admin when no group is assigned. A user and the API keys they created are treated as the same requester."
           }
         },
         {
@@ -1271,66 +1145,6 @@
           }
         },
         {
-          "name": "Get wallet policy",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies",
-            "description": "Retrieves payment policy rules for a custody wallet. Policies are payment controls layered on top of custody-managed wallets."
-          }
-        },
-        {
-          "name": "Update wallet policy",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies",
-            "description": "Updates payment policy rules for a custody wallet, activating a new control-profile revision. API keys must hold the api_admin role; a key with a lesser role receives 403 even when it has the write permissions. Supply expectedRevisionId to reject the update with 409 when another update has activated a revision since the policy was read. Wallet provisioning and default selection remain in /v1/wallets.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"commitMessage\": \"Require approval for transfers above 10,000 USDC.\",\n  \"defaultAction\": \"allow\",\n  \"rules\": [\n    {\n      \"id\": \"approve-batch-transfers\",\n      \"kind\": \"operation_type\",\n      \"operationTypes\": [\n        \"payment_transfer_batch_execute\"\n      ],\n      \"action\": \"approval_required\"\n    }\n  ],\n  \"expectedRevisionId\": \"wcpr_example\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "List wallet policy revisions",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/revisions",
-            "description": "Returns immutable revisions for the wallet control profile in newest-first order, including the currently active revision reference."
-          }
-        },
-        {
-          "name": "List wallet policy evaluations",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/evaluations",
-            "description": "Returns paginated, filterable policy audit history for one wallet. Evaluation context is redacted and excludes raw provider payloads."
-          }
-        },
-        {
-          "name": "Get wallet policy evaluation",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/policies/evaluations/{{policyEvaluationId}}",
-            "description": "Returns one policy evaluation with matched rules, redacted evaluation context, revision references, decision, status, reason, and approval linkage."
-          }
-        },
-        {
           "name": "List transfers",
           "request": {
             "method": "GET",
@@ -1850,20 +1664,6 @@
             "header": [],
             "url": "{{baseUrl}}/v1/transactions",
             "description": "Lists the project's transactions across SDP modules with stable cursor pagination. Results are limited to modules allowed by the caller's read permissions: payments:read for payments, private channels, and rings; wallets:read for DvP; and tokens:read for issuance. Requesting a module without its permission returns INSUFFICIENT_PERMISSIONS. `search` matches transaction id, module id, or signature as a prefix, not a substring. The endpoint is metered (60/min per credential, 240/min per organization); exceeding the quota returns 429, and 503 indicates the quota backend was unavailable."
-          }
-        }
-      ]
-    },
-    {
-      "name": "Policies",
-      "item": [
-        {
-          "name": "List policy controls",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/policies",
-            "description": "Lists wallet and API-key control targets in one paginated inventory. Every target, profile, binding, and evaluation is scoped to the authenticated organization and exact project."
           }
         }
       ]

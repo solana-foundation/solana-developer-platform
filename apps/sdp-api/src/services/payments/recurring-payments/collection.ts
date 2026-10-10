@@ -18,7 +18,6 @@ import {
   type PaymentSubscriptionCollectionAttemptInitialStatus,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
-  recurringPaymentPolicyPayloadSchema,
 } from "@sdp/types";
 import {
   AccountRole,
@@ -81,7 +80,6 @@ import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.servi
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { enforceRecurringPaymentPolicy } from "./policy";
 import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
@@ -1574,31 +1572,6 @@ export async function collectRecurringPayment(input: {
       }
       throw conflict("Recurring payment collection is already processing");
     }
-
-    await enforceRecurringPaymentPolicy({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      sourceWallet: input.sourceWallet,
-      token: input.recurringPayment.token,
-      amount: input.recurringPayment.amount,
-      destination: input.recurringPayment.destination_address,
-      apiKeyId: input.initiatedByKeyId,
-      actor:
-        input.initiatedByKeyId === null
-          ? null
-          : {
-              type: "api_key",
-              id: input.initiatedByKeyId,
-              apiKeyId: input.initiatedByKeyId,
-            },
-      rawPayload: recurringPaymentPolicyPayloadSchema.parse({
-        operationType: "recurring_payment_collection",
-        recurringPaymentId: input.recurringPayment.id,
-        subscriptionId: subscription.id,
-        collectionDueAt: dueAt,
-      }),
-    });
 
     const claimedAttempt = attempt;
     const linkedCollection = await getDb(input.env).transaction(async (tx) => {
