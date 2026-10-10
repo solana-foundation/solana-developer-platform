@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ListPaymentRecurringPaymentsResponse,
   PaymentRecurringPayment,
@@ -5,14 +6,20 @@ import type {
   PaymentRecurringPaymentResponse,
 } from "@sdp/types";
 import { z } from "zod";
+import { getDb } from "@/db";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { AppError, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { AppError, badRequestParams, badRequestQuery, internalError } from "@/lib/errors";
+import { canonicalJson, type JsonValue } from "@/lib/idempotency";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
+import { parseIdempotencyKey } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
+import {
+  assertFreshApiKeyCustodyWalletAccess,
+  getAllowedApiKeyWalletAuthorizationForPermissions,
+} from "@/services/api-key-scope.service";
 import {
   activateRecurringPayment as activateRecurringPaymentRecord,
   cancelRecurringPayment as cancelRecurringPaymentRecord,
@@ -89,6 +96,27 @@ function assertPinnedRecurringPayment(
   }
 }
 
+/**
+ * The Idempotency-Key and the fingerprint of the schedule it creates, for the
+ * row backstop (HOO-1918). The route requires the key, so it is always present
+ * on a real request; the exact source wallet is part of what is created.
+ */
+function recurringPaymentIdempotency(
+  c: ValidatedBodyContext<typeof createRecurringPaymentSchema>,
+  body: z.output<typeof createRecurringPaymentSchema>,
+  sourceCustodyWalletId: string
+): { key: string; fingerprint: string } {
+  const key = parseIdempotencyKey(c);
+  if (key === undefined) {
+    // The route's idempotent() step refuses a request without a key first.
+    throw internalError("Recurring payment create reached the handler without an Idempotency-Key");
+  }
+  const fingerprint = createHash("sha256")
+    .update(canonicalJson({ ...body, sourceCustodyWalletId } as JsonValue))
+    .digest("hex");
+  return { key, fingerprint };
+}
+
 export const createRecurringPayment = async (
   c: ValidatedBodyContext<typeof createRecurringPaymentSchema>
 ) => {
@@ -115,6 +143,10 @@ export const createRecurringPayment = async (
     createdBy: await resolveCreatorUserId(c),
     apiKeyId: scope.auth.apiKeyId,
     actor: walletOperationActorFromAuth(scope.auth),
+    idempotency: recurringPaymentIdempotency(c, body, sourceWallet.id),
+    walletAuthorization: getAllowedApiKeyWalletAuthorizationForPermissions(scope.auth, [
+      "payments:write",
+    ]),
   });
 
   const response: PaymentRecurringPaymentResponse = {
@@ -182,6 +214,42 @@ export const updateRecurringPayment = async (
 
   return success(c, response);
 };
+
+/**
+ * `authorizeReplay` for routes that act on an existing recurring payment
+ * (HOO-1918): the caller must still reach that schedule's source wallet before
+ * an Idempotency-Key replay is served, exactly as the handler would require.
+ */
+export async function authorizeRecurringPaymentReplay(c: AppContext): Promise<void> {
+  const auth = getAuth(c);
+  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
+  if (!params.success) {
+    throw badRequestParams();
+  }
+  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
+    recurringPaymentId: params.data.id,
+    organizationId: auth.organizationId,
+    projectId: requireProjectId(c),
+    walletAuthorization: getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
+      "payments:write",
+    ]),
+  });
+  if (!recurringPayment) {
+    throw new AppError("NOT_FOUND", "Recurring payment not found");
+  }
+  assertPinnedRecurringPayment(recurringPayment);
+  const custodyWalletId = recurringPayment.source_custody_wallet_id;
+  assertPaymentWalletExactAccess(c, custodyWalletId, ["payments:write"]);
+  // Read fresh, as the handlers do: a binding removed while the auth cache
+  // still holds it must not read the stored response.
+  await assertFreshApiKeyCustodyWalletAccess(
+    getDb(c.env),
+    auth,
+    custodyWalletId,
+    ["payments:write"],
+    "any"
+  );
+}
 
 export const activateRecurringPayment = async (
   c: ValidatedBodyContext<typeof activateRecurringPaymentSchema>

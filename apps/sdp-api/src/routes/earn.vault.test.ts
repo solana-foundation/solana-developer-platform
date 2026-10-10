@@ -30,7 +30,7 @@ import {
 } from "@/db/repositories";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
-import app from "@/index";
+import baseApp from "@/index";
 import { badRequest, serviceUnavailable } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -45,9 +45,13 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { APPROVAL_DECISION_PATH, withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+// Approving an approval request requires an Idempotency-Key (HOO-1918).
+const app = withIdempotencyKeys(baseApp, { only: APPROVAL_DECISION_PATH });
 
 const depositIntoVault = vi.hoisted(() => vi.fn());
 

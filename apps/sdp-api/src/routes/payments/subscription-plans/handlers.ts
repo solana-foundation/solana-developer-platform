@@ -10,13 +10,17 @@ import type { Address } from "@solana/kit";
 import { createNoopSigner } from "@solana/kit";
 import { getCreatePlanOverlayInstructionAsync } from "@solana/subscriptions";
 import { z } from "zod";
+import { getDb } from "@/db";
 import type { PaymentSubscriptionPlanRow } from "@/db/repositories/payment-subscriptions.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
-import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
+import { readJsonBody, type ValidatedBodyContext } from "@/middleware/validate";
+import {
+  assertApiKeyWalletAccess,
+  assertFreshApiKeyWalletReplayAccess,
+} from "@/services/api-key-scope.service";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
   buildPreparedSubscriptionTransaction,
@@ -98,6 +102,57 @@ async function resolvePullerWalletAddress(
   const wallet = resolveWallet(scope.wallets, pullerWalletId);
   assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
   return { pullerWalletId: wallet.walletId, pullerAddress: wallet.publicKey };
+}
+
+/** The caller's binding to a plan wallet, read fresh: the replay check for plan writes. */
+async function assertWritablePlanWallet(c: AppContext, walletId: string): Promise<void> {
+  await assertFreshApiKeyWalletReplayAccess(
+    getDb(c.env),
+    getAuth(c),
+    requireProjectId(c),
+    walletId,
+    ["payments:write"]
+  );
+}
+
+const replayedPlanWalletsSchema = z.object({
+  ownerWalletId: z.string().min(1).optional(),
+  pullerWalletId: z.string().min(1).nullable().optional(),
+});
+
+/**
+ * `authorizeReplay` for plan create and update (HOO-1918): before a stored
+ * response is replayed, the caller must still reach the plan's owner wallet
+ * (from the body on create, from the plan on update) and any puller wallet the
+ * body names, read fresh; a wallet deactivated since still replays. A body that
+ * fails these shapes was never stored.
+ */
+export async function authorizeSubscriptionPlanReplay(c: AppContext): Promise<void> {
+  const body = replayedPlanWalletsSchema.safeParse(await readJsonBody(c));
+  if (!body.success) {
+    throw badRequest("ownerWalletId and pullerWalletId must be wallet IDs");
+  }
+  let ownerWalletId = body.data.ownerWalletId;
+  const planId = c.req.param("planId");
+  if (planId !== undefined) {
+    const auth = getAuth(c);
+    const plan = await getPaymentSubscriptionsRepository(c).getPlanById({
+      planId,
+      organizationId: auth.organizationId,
+      projectId: requireProjectId(c),
+    });
+    if (!plan) {
+      throw new AppError("NOT_FOUND", "Subscription plan not found");
+    }
+    ownerWalletId = plan.owner_wallet_id;
+  }
+  if (ownerWalletId === undefined) {
+    throw badRequest("ownerWalletId is required");
+  }
+  await assertWritablePlanWallet(c, ownerWalletId);
+  if (typeof body.data.pullerWalletId === "string") {
+    await assertWritablePlanWallet(c, body.data.pullerWalletId);
+  }
 }
 
 export const createSubscriptionPlan = async (

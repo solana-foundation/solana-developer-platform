@@ -4,15 +4,19 @@ import type { CachedApiKey, PolicyRule } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPolicyRepository } from "@/db/repositories";
-import app from "@/index";
+import baseApp from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { APPROVAL_DECISION_PATH, withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+// Approving an approval request requires an Idempotency-Key (HOO-1918).
+const app = withIdempotencyKeys(baseApp, { only: APPROVAL_DECISION_PATH });
 
 const fundDvpTradeLeg = vi.hoisted(() => vi.fn());
 const reclaimDvpTradeLeg = vi.hoisted(() => vi.fn());

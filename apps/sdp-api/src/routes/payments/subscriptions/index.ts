@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requirePermissions } from "@/middleware/auth";
+import { idempotent } from "@/middleware/idempotency";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -24,6 +25,7 @@ const subscriptions = new Hono<{ Bindings: Env }>();
 subscriptions.post(
   "/",
   requirePermissions("payments:write", "counterparties:read"),
+  idempotent({ key: "accepted" }),
   validateBody(createSubscriptionSchema),
   createSubscription
 );

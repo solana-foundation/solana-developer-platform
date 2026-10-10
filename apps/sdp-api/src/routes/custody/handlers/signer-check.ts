@@ -16,15 +16,17 @@ import {
   verifySignature,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import type { ValidatedBodyContext } from "@/middleware/validate";
+import { readJsonBody, type ValidatedBodyContext } from "@/middleware/validate";
 import {
   assertFreshApiKeyCustodyWalletAccess,
+  assertFreshApiKeyWalletReplayAccess,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -32,6 +34,7 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
 import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
+import type { AppContext } from "../context";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 import { findAuthorizedOperationalWallet } from "./wallets";
 
@@ -56,6 +59,34 @@ async function isValidWalletSignature(
   );
   return verifySignature(publicKey, signature, messageBytes);
 }
+
+/**
+ * `authorizeReplay` for the signer check (HOO-1918): before a stored response
+ * is replayed, the caller must still reach the wallet it names (or its API
+ * key's signing wallet), read fresh; a wallet deactivated since still replays.
+ */
+export async function authorizeSignerCheckReplay(c: AppContext): Promise<void> {
+  const parsed = replayedSignerCheckSchema.safeParse(await readJsonBody(c));
+  if (!parsed.success) {
+    throw badRequest("walletId must be a non-empty string");
+  }
+  const auth = getAuth(c);
+  const resolvedWalletId = resolveApiKeySigningWalletId(auth, parsed.data.walletId, [
+    "wallets:write",
+  ]);
+  if (resolvedWalletId === null) {
+    throw badRequest("walletId is required");
+  }
+  await assertFreshApiKeyWalletReplayAccess(
+    getDb(c.env),
+    auth,
+    requireProjectId(c),
+    resolvedWalletId,
+    ["wallets:write"]
+  );
+}
+
+const replayedSignerCheckSchema = z.object({ walletId: z.string().min(1).optional() });
 
 export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSchema>) => {
   const body = c.req.valid("json");

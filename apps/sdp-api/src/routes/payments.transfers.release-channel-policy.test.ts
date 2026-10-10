@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresPolicyRepository } from "@/db/repositories";
-import app from "@/index";
+import baseApp from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
   walletApprovalRequestResponseSchema,
@@ -15,6 +15,7 @@ import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.serv
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { APPROVAL_DECISION_PATH, withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import {
   installPaymentsRouteTestHooks,
   TEST_API_KEY,
@@ -29,6 +30,9 @@ import {
   seedCustodyWalletFixture,
   seedWalletControlProfile,
 } from "@/test/helpers/payments-transfers";
+
+// Approving an approval request requires an Idempotency-Key (HOO-1918).
+const app = withIdempotencyKeys(baseApp, { only: APPROVAL_DECISION_PATH });
 
 // Release channels that exclude Policies skip evaluation (ADR 0005); `experimental`
 // runs it. Each case seeds a rule that would stop the transfer and checks the

@@ -7,6 +7,7 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { idempotent } from "@/middleware/idempotency";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
@@ -30,6 +31,7 @@ import {
   signerCheck,
   updateWallet,
 } from "./handlers";
+import { authorizeSignerCheckReplay } from "./handlers/signer-check";
 import {
   createWalletSchema,
   deleteWalletSchema,
@@ -85,12 +87,14 @@ wallets.use(
 wallets.post(
   "/initialize",
   requirePermissions("custody:admin"),
+  idempotent({ key: "accepted" }),
   validateBody(initializeSigningSchema),
   initializeSigning
 );
 wallets.post(
   "/",
   requirePermissions("custody:admin"),
+  idempotent({ key: "accepted" }),
   validateBody(createWalletSchema),
   createWallet
 );
@@ -103,12 +107,14 @@ wallets.delete(
 wallets.patch(
   "/:walletId",
   requirePermissions("custody:admin"),
+  idempotent({ key: "accepted" }),
   validateBody(updateWalletSchema),
   updateWallet
 );
 wallets.post(
   "/signer-check",
   requirePermissions("wallets:write"),
+  idempotent({ key: "accepted", authorizeReplay: authorizeSignerCheckReplay }),
   validateBody(signerCheckSchema),
   meteredQuota({ name: "signer-check", actorMax: 2, orgMax: 10 }),
   signerCheck
@@ -128,16 +134,19 @@ wallets.get(
 wallets.post(
   "/approval-requests/:approvalRequestId/approve",
   requirePermissions("wallets:write"),
+  idempotent({ key: "required" }),
   approveApprovalRequest
 );
 wallets.post(
   "/approval-requests/:approvalRequestId/reject",
   requirePermissions("wallets:write"),
+  idempotent({ key: "accepted" }),
   rejectApprovalRequest
 );
 wallets.post(
   "/approval-requests/:approvalRequestId/cancel",
   requirePermissions("wallets:write"),
+  idempotent({ key: "accepted" }),
   cancelApprovalRequest
 );
 wallets.get("/:walletId", requirePermissions("wallets:read"), getWalletById);

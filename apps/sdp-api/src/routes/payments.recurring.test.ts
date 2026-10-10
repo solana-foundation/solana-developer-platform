@@ -26,7 +26,7 @@ import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories"
 import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
-import app from "@/index";
+import baseApp from "@/index";
 import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
@@ -42,6 +42,7 @@ import {
   writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import {
   confirmTransactionMock,
   createFeePaymentAdapterMock,
@@ -80,6 +81,9 @@ import {
   setRecurringCollectionDue,
   testSignature,
 } from "@/test/helpers/recurring-payments";
+
+// Recurring create and its lifecycle actions require an Idempotency-Key (HOO-1918).
+const app = withIdempotencyKeys(baseApp);
 
 const recurringPaymentLogEventSchema = z.object({ event: z.string() });
 
@@ -533,6 +537,60 @@ describe("Payments routes — recurring", () => {
         .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments")
         .first<{ source_custody_wallet_id: string }>()
     ).toEqual({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID });
+  });
+
+  // HOO-1918: the schedule row keeps its key, so a retry the 24-hour shared
+  // record no longer covers still finds the first schedule.
+  it("returns the first schedule for a same-key retry after the shared key record expired", async () => {
+    const key = "recurring-backstop-key";
+    const created = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: { ...RECURRING_HEADERS, "Idempotency-Key": key },
+    });
+    await getDb(env).execute("DELETE FROM idempotency_keys");
+    const body = {
+      sourceCustodyWalletId: DEFAULT_RECURRING_FIXTURE.sourceCustodyWalletId,
+      counterpartyId: created.counterpartyId,
+      counterpartyAccountId: created.counterpartyAccountId,
+      token: DEFAULT_RECURRING_FIXTURE.token,
+      amount: DEFAULT_RECURRING_FIXTURE.amount,
+      periodHours: DEFAULT_RECURRING_FIXTURE.periodHours,
+    };
+    const post = (payload: Record<string, unknown>) =>
+      baseApp.request(
+        "/v1/payments/recurring-payments",
+        {
+          method: "POST",
+          headers: { ...RECURRING_HEADERS, "Idempotency-Key": key },
+          body: JSON.stringify(payload),
+        },
+        env
+      );
+
+    const retried = await post(body);
+    expect(retried.status).toBe(201);
+    expect((await parseRecurringResponse(retried)).data.recurringPayment.id).toBe(created.id);
+
+    await getDb(env).execute("DELETE FROM idempotency_keys");
+    const changed = await post({ ...body, amount: "26.00" });
+    expect(changed.status).toBe(422);
+    const rows = await getDb(env).queryMany(
+      "SELECT id FROM payment_recurring_payments WHERE idempotency_key = ?",
+      [key]
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("refuses a recurring payment without an Idempotency-Key", async () => {
+    const response = await baseApp.request(
+      "/v1/payments/recurring-payments",
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "IDEMPOTENCY_KEY_REQUIRED"
+    );
   });
 
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {

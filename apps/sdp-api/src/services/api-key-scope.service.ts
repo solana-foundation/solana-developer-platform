@@ -789,6 +789,46 @@ export async function assertFreshApiKeyActive(
   }
 }
 
+/**
+ * The Idempotency-Key replay check for a route that acts on a wallet by its
+ * provider wallet ID (HOO-1918, ADR 0008): the snapshot's access first, then
+ * the key's binding re-read fresh. The wallet is resolved whatever its status,
+ * because a replay moves nothing, but it must still belong to the project.
+ */
+export async function assertFreshApiKeyWalletReplayAccess(
+  db: DatabaseClient,
+  auth: ApiKeyContext,
+  projectId: string,
+  walletId: string,
+  requiredPermissions: Permission[]
+): Promise<void> {
+  assertApiKeyWalletAccess(auth, walletId, requiredPermissions);
+  const rows = await db.queryMany<{ id: string }>(
+    `SELECT w.id
+       FROM custody_wallets w
+       LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+       LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+      WHERE w.wallet_id = ?
+        AND ((cfg.organization_id = ? AND cfg.project_id = ?)
+          OR (conn.organization_id = ? AND conn.project_id = ?))`,
+    [walletId, auth.organizationId, projectId, auth.organizationId, projectId]
+  );
+  if (rows.length > 1) {
+    throw conflict("Custody wallet ownership is ambiguous");
+  }
+  const custodyWallet = rows[0];
+  if (!custodyWallet) {
+    throw new AppError("NOT_FOUND", "Custody wallet not found");
+  }
+  await assertFreshApiKeyCustodyWalletAccess(
+    db,
+    auth,
+    custodyWallet.id,
+    requiredPermissions,
+    "any"
+  );
+}
+
 export async function assertFreshApiKeyCustodyWalletAccess(
   db: DatabaseClient,
   auth: ApiKeyContext,
