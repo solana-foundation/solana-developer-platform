@@ -14,6 +14,7 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { useOnrampWizard } from "./use-onramp-wizard.redesign";
 import type { UseRampWizardProps } from "./use-ramp-wizard.redesign";
 
@@ -65,6 +66,12 @@ const BVNK_QUOTE = {
   paymentInstructions: [],
 };
 
+/** The same quote once BVNK's funding account is ready, which its sandbox needs to pay in. */
+const BVNK_QUOTE_FUNDING_READY = {
+  ...BVNK_QUOTE,
+  paymentInstructions: [{ kind: "fiat_funding", onboardingStatus: "ready" }],
+};
+
 const BVNK_PROCESSING_SETTLEMENT: BvnkRampSettlement = {
   provider: "bvnk",
   status: "PROCESSING",
@@ -111,6 +118,8 @@ const PROPS: UseRampWizardProps = {
 };
 
 let currentTransfer: PaymentTransferSummary = transferFixture("awaiting_payment");
+let currentQuote: object = BVNK_QUOTE;
+let demoMode = false;
 const fetchMock = vi.fn<typeof fetch>();
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -137,7 +146,11 @@ function wrapper({ children }: { children: ReactNode }) {
         serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
         projects={[]}
       >
-        <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
+        <PaymentsDemoProvider value={demoMode}>
+          <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+            {children}
+          </SWRConfig>
+        </PaymentsDemoProvider>
       </DashboardWorkspaceProvider>
     </I18nProvider>
   );
@@ -151,6 +164,8 @@ function transferStatusCalls(): number {
 
 beforeEach(() => {
   currentTransfer = transferFixture("awaiting_payment");
+  currentQuote = BVNK_QUOTE;
+  demoMode = false;
   fetchMock.mockReset().mockImplementation((input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -165,7 +180,7 @@ beforeEach(() => {
     }
     if (url === "/api/dashboard/payments/ramps/onramp/quote" && method === "POST") {
       return Promise.resolve(
-        Response.json({ data: { quote: BVNK_QUOTE, transferId: TRANSFER_ID } })
+        Response.json({ data: { quote: currentQuote, transferId: TRANSFER_ID } })
       );
     }
     if (url.startsWith(`/api/dashboard/payments/transfers/${TRANSFER_ID}`)) {
@@ -317,7 +332,14 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
 });
 
 describe("useOnrampWizard — sandbox funding simulation", () => {
-  it("simulates the quoted transfer by its transferId alone", async () => {
+  // Demo mode simulates any provider's pay-in, BVNK's before its funding account is ready too;
+  // its stand-in backend reads the provider and amount from the transfer, as the API does.
+  it.each([
+    ["the sandbox", BVNK_QUOTE_FUNDING_READY, false],
+    ["demo mode", BVNK_QUOTE, true],
+  ])("simulates the quoted transfer by its transferId alone in %s", async (_mode, quote, demo) => {
+    currentQuote = quote;
+    demoMode = demo;
     const rendered = renderHook(() => useOnrampWizard(PROPS), { wrapper });
     await driveToTransferStatus(rendered);
 
@@ -333,6 +355,48 @@ describe("useOnrampWizard — sandbox funding simulation", () => {
     expect(JSON.parse(String(simulateCalls[0]?.[1]?.body))).toEqual({ transferId: TRANSFER_ID });
     expect(rendered.result.current.quoteSimulationSucceeded).toBe(true);
     expect(mocks.toastSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useOnrampWizard — demo mode's Simulate verification", () => {
+  function verificationCalls() {
+    return fetchMock.mock.calls.filter(
+      ([input]) => String(input) === "/api/dashboard/payments/demo/verifications"
+    );
+  }
+
+  it("approves the contact through the demo-only path, never the sandbox simulation", async () => {
+    demoMode = true;
+    const { result } = renderHook(() => useOnrampWizard(PROPS), { wrapper });
+    await act(async () => {});
+    act(() => result.current.selectProvider("bvnk"));
+    expect(result.current.verificationSimulationAvailable).toBe(true);
+
+    await act(async () => {
+      await result.current.simulateVerification();
+    });
+
+    expect(verificationCalls()).toHaveLength(1);
+    expect(JSON.parse(String(verificationCalls()[0]?.[1]?.body))).toEqual({
+      provider: "bvnk",
+      counterpartyId: "counterparty-test",
+    });
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes("/ramps/sandbox/simulate"))
+    ).toBe(false);
+  });
+
+  it("sends nothing outside demo mode", async () => {
+    const { result } = renderHook(() => useOnrampWizard(PROPS), { wrapper });
+    await act(async () => {});
+    act(() => result.current.selectProvider("bvnk"));
+    expect(result.current.verificationSimulationAvailable).toBe(false);
+
+    await act(async () => {
+      await result.current.simulateVerification();
+    });
+
+    expect(verificationCalls()).toHaveLength(0);
   });
 });
 

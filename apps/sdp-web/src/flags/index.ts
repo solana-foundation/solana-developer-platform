@@ -55,6 +55,7 @@ export const {
   dvp,
   earn,
   newDesign,
+  paymentsDemoMode,
   newDesignContacts,
   newDesignPayDeposit,
   newDesignActivity,
