@@ -29,7 +29,6 @@ subscriptionPlans.get("/", requirePermissions("payments:read"), listSubscription
 subscriptionPlans.post(
   "/:planId/prepare-create",
   requirePermissions("payments:write", "wallets:read"),
-  idempotent({ key: "accepted" }),
   validateBody(prepareSubscriptionPlanCreateSchema),
   prepareCreateSubscriptionPlan
 );

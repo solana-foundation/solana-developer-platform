@@ -33,28 +33,24 @@ subscriptions.get("/", requirePermissions("payments:read"), listSubscriptions);
 subscriptions.post(
   "/:subscriptionId/prepare-authorization",
   requirePermissions("payments:write", "counterparties:read"),
-  idempotent({ key: "accepted" }),
   validateBody(prepareSubscriptionAuthorizationSchema),
   prepareSubscriptionAuthorization
 );
 subscriptions.post(
   "/:subscriptionId/prepare-cancel",
   requirePermissions("payments:write"),
-  idempotent({ key: "accepted" }),
   validateBody(prepareSubscriptionLifecycleSchema),
   prepareCancelSubscription
 );
 subscriptions.post(
   "/:subscriptionId/prepare-resume",
   requirePermissions("payments:write"),
-  idempotent({ key: "accepted" }),
   validateBody(prepareSubscriptionLifecycleSchema),
   prepareResumeSubscription
 );
 subscriptions.post(
   "/:subscriptionId/prepare-collection",
   requirePermissions("payments:write", "wallets:read"),
-  idempotent({ key: "accepted" }),
   validateBody(prepareSubscriptionCollectionSchema),
   prepareSubscriptionCollection
 );
