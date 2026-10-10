@@ -413,7 +413,7 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
 function ReviewStep({ wizard, counterpartyName }: StepProps) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
-  const { transferResult, heldApprovalRequestId } = wizard;
+  const { transferResult } = wizard;
   const summary = (
     <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5 refresh:rounded-none refresh:bg-transparent refresh:p-0">
       <ReviewSummary wizard={wizard} counterpartyName={counterpartyName} />
@@ -421,21 +421,6 @@ function ReviewStep({ wizard, counterpartyName }: StepProps) {
   );
   // A finished transfer's outcome is the frame heading (the rail's
   // completionTitle); the step body adds only what that heading does not say.
-  if (heldApprovalRequestId !== null) {
-    return (
-      <div className="flex flex-col gap-6">
-        <p className="text-sm text-tertiary">
-          {t("DashboardPayments.onchainSend.approvalPendingDescription")}
-        </p>
-        {summary}
-        <Button asChild type="button" variant="secondary" className="w-full">
-          <Link href={`/dashboard/approvals/${encodeURIComponent(heldApprovalRequestId)}`}>
-            {t("DashboardPayments.onchainSend.viewApprovalRequest")}
-          </Link>
-        </Button>
-      </div>
-    );
-  }
   if (transferResult === null) {
     return summary;
   }

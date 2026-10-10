@@ -11,7 +11,6 @@ import {
 } from "@solana/kit";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
-import { extractPolicyDenialReason, withPolicyDenialReason } from "@/lib/policy-denial-reason";
 import {
   createSdpApiClient,
   extractSdpApiError,
@@ -91,10 +90,7 @@ function toApiActionErrorMessage(
   const status = match[1];
   const body = match[2] ?? "";
   const base = getApiErrorMessageFromText(body) || t("DashboardCustody.requestFailed");
-  return t("DashboardCustody.httpRequestFailed", {
-    error: withPolicyDenialReason(base, extractPolicyDenialReason(body)),
-    status,
-  });
+  return t("DashboardCustody.httpRequestFailed", { error: base, status });
 }
 
 /**

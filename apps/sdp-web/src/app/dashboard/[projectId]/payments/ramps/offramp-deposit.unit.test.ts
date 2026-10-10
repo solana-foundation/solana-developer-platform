@@ -25,17 +25,9 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.unstubAllGlobals());
 
 describe("off-ramp deposit feedback", () => {
-  it("reports approval hold without reporting a completed or failed deposit", async () => {
+  it("posts the deposit under the quote's transfer id", async () => {
     const request = vi.fn<typeof fetch>(async () =>
-      Response.json(
-        {
-          error: {
-            code: "SIGNING_PENDING",
-            details: { approvalRequestId: "apr_1" },
-          },
-        },
-        { status: 202 }
-      )
+      Response.json({ data: { transfer: { id: submission.transferId, status: "processing" } } })
     );
     vi.stubGlobal("fetch", request);
     await submitOfframpDeposit(submission, send, t);
@@ -43,11 +35,6 @@ describe("off-ramp deposit feedback", () => {
     expect(JSON.parse(String(request.mock.calls[0][1]?.body))).toMatchObject({
       transferId: "xfr_quote",
     });
-    expect(feedback.info).toHaveBeenCalledWith(
-      "DashboardPayments.onchainSend.approvalPendingTitle",
-      expect.objectContaining({ id: "toast_deposit" })
-    );
-    expect(feedback.success).not.toHaveBeenCalled();
     expect(feedback.error).not.toHaveBeenCalled();
   });
 

@@ -55,7 +55,6 @@ const reviewWizard = {
   submitting: false,
   sourceWalletHint: null,
   transferResult: null,
-  heldApprovalRequestId: null,
   finished: false,
   handlePrimary: vi.fn(async () => undefined),
   handleSecondary: vi.fn(),
@@ -92,7 +91,6 @@ function wrapper({ children }: { children: ReactNode }) {
           issuance: false,
           markets: false,
           payments: true,
-          policies: false,
           privateChannels: false,
           ramps: true,
         }}
@@ -120,14 +118,6 @@ describe("OnchainSendRail heading", () => {
     renderRail(reviewWizard);
 
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Review transfer");
-  });
-
-  it("gives a held transfer one heading that says it waits for approval", () => {
-    renderRail({ ...reviewWizard, heldApprovalRequestId: "apr_test", finished: true });
-
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Waiting for approval");
-    expect(screen.getAllByText("Waiting for approval")).toHaveLength(1);
-    expect(screen.queryByText("Review transfer")).toBeNull();
   });
 
   it("gives a sent transfer one heading that says it was submitted", () => {

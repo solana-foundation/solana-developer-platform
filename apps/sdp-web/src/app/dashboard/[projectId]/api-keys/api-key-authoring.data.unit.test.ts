@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SdpApiClient } from "@/lib/sdp-api";
-import { fetchApiKeyAuthoringWallets } from "./api-key-authoring.data";
+import { fetchApiKeyAuthoringWallets, fetchApiKeyForAuthoring } from "./api-key-authoring.data";
 
 const WALLET = {
   id: "wallet_a",
@@ -11,42 +11,50 @@ const WALLET = {
   isRuntimeExecutionAllowed: true,
 };
 
-/** An API client that serves one wallet and records every path it is asked for. */
-function recordingClient() {
+/** An API client that answers every request with one response and records the paths. */
+function clientAnswering(respond: (path: string) => Response) {
   const paths: string[] = [];
   const client: SdpApiClient = {
     request: async (path) => {
       paths.push(path);
-      return Response.json({ data: { wallets: [WALLET] } });
+      return respond(path);
     },
-    fetch: async <T>(path: string) => {
-      paths.push(path);
-      // SAFETY: the only `fetch` read here is the wallet policy, whose body this is.
-      return { policy: { controlProfile: { status: "active", revisionNumber: 3 } } } as T;
+    fetch: async () => {
+      throw new Error("The authoring loaders read through `request`.");
     },
   };
   return { client, paths };
 }
 
 describe("fetchApiKeyAuthoringWallets", () => {
-  it("reads each wallet's controls when the deployment runs Policies", async () => {
-    const { client, paths } = recordingClient();
+  it("returns the wallets and reads nothing about wallet controls", async () => {
+    const { client, paths } = clientAnswering(() => Response.json({ data: { wallets: [WALLET] } }));
 
-    await expect(
-      fetchApiKeyAuthoringWallets(client, { policiesInReleaseChannel: true })
-    ).resolves.toEqual({
-      policiesInReleaseChannel: true,
-      wallets: [{ ...WALLET, controlStatus: "active", activeRevisionNumber: 3 }],
-    });
-    expect(paths).toContain("/v1/payments/wallets/wallet_a/policies");
+    await expect(fetchApiKeyAuthoringWallets(client)).resolves.toEqual([WALLET]);
+    expect(paths.filter((path) => path.includes("/policies"))).toEqual([]);
+  });
+});
+
+describe("fetchApiKeyForAuthoring", () => {
+  it("returns the key with its allowed operations", async () => {
+    const key = { id: "key_1", name: "Payouts", allowedOperations: ["payment", "ramp"] };
+    const { client, paths } = clientAnswering(() => Response.json({ data: key }));
+
+    await expect(fetchApiKeyForAuthoring(client, "key_1")).resolves.toEqual(key);
+    expect(paths).toEqual(["/v1/api-keys/key_1"]);
   });
 
-  it("makes no policy read and invents no control status without Policies", async () => {
-    const { client, paths } = recordingClient();
+  it("returns null for a key that does not exist", async () => {
+    const { client } = clientAnswering(() => new Response(null, { status: 404 }));
 
-    await expect(
-      fetchApiKeyAuthoringWallets(client, { policiesInReleaseChannel: false })
-    ).resolves.toEqual({ policiesInReleaseChannel: false, wallets: [WALLET] });
-    expect(paths.filter((path) => path.includes("/policies"))).toEqual([]);
+    await expect(fetchApiKeyForAuthoring(client, "missing")).resolves.toBeNull();
+  });
+
+  it("fails loudly on any other error", async () => {
+    const { client } = clientAnswering(() => new Response(null, { status: 500 }));
+
+    await expect(fetchApiKeyForAuthoring(client, "key_1")).rejects.toThrow(
+      "Unable to load API key (500)"
+    );
   });
 });

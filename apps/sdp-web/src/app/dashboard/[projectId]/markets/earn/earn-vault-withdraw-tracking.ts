@@ -6,8 +6,7 @@ import { createFloorMemo, createIdempotencyKeyStore } from "@/lib/idempotency-ke
  * The vault WITHDRAWAL idempotency key store — the deposit store's mirror
  * (PRO-1702), sharing every durability rule through
  * `@/lib/idempotency-key-store.ts`. A retry inside the record-before-broadcast
- * window must carry the same key or the chain accepts the same exit twice; an
- * approval hold pins the key for as long as a human may take.
+ * window must carry the same key or the chain accepts the same exit twice.
  */
 export const vaultWithdrawalIdempotencyKeyStore = createIdempotencyKeyStore(
   "sdp:earn:vault-withdrawal:idempotency:v1"

@@ -59,7 +59,6 @@ const MODULE_METADATA = [
     allowedDependencies: [
       "@sdp/design-tokens",
       "@sdp/issuance",
-      "@sdp/policy",
       "@sdp/private-channels",
       "@sdp/redaction",
       "@sdp/solana",

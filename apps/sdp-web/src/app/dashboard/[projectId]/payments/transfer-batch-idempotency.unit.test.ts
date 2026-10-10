@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   canonicalTransferBatchRequest,
   claimTransferBatchIdempotencyKey,
-  holdTransferBatchIdempotencyKey,
   isTransferBatchKeyConflict,
   releaseTransferBatchIdempotencyKey,
   resetTransferBatchIdempotencyStateForTests,
@@ -128,35 +127,6 @@ describe("claim / release", () => {
 
     vi.setSystemTime(new Date("2026-08-20T12:16:00Z"));
     expect(claimTransferBatchIdempotencyKey(fingerprint)).not.toBe(key);
-  });
-});
-
-describe("hold", () => {
-  it("suspends expiry while an approval is pending", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-20T12:00:00Z"));
-    const fingerprint = "fingerprint-held";
-    const key = claimTransferBatchIdempotencyKey(fingerprint);
-    holdTransferBatchIdempotencyKey(fingerprint);
-
-    // Hours later — far past the 15-minute TTL — the held key still answers.
-    vi.setSystemTime(new Date("2026-08-20T18:00:00Z"));
-    expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(key);
-
-    releaseTransferBatchIdempotencyKey(fingerprint);
-    expect(claimTransferBatchIdempotencyKey(fingerprint)).not.toBe(key);
-  });
-
-  it("never evicts a held entry under expiring-entry churn", () => {
-    const heldFingerprint = "fingerprint-held-under-churn";
-    const heldKey = claimTransferBatchIdempotencyKey(heldFingerprint);
-    holdTransferBatchIdempotencyKey(heldFingerprint);
-
-    for (let index = 0; index < 40; index += 1) {
-      claimTransferBatchIdempotencyKey(`fingerprint-churn-${index}`);
-    }
-
-    expect(claimTransferBatchIdempotencyKey(heldFingerprint)).toBe(heldKey);
   });
 });
 

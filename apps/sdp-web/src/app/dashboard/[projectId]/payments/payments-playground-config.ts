@@ -26,20 +26,6 @@ interface BuildPaymentsPlaygroundConfigOptions {
 const fiatCurrencyOptions: ApiPlaygroundFieldOption[] = [{ label: "USD", value: "USD" }];
 const exampleWalletAddressFallback = "1".repeat(32);
 const exampleMintAddress = ["USDCMint", "1".repeat(30)].join("");
-const policyDefaultActionOptions: ApiPlaygroundFieldOption[] = [
-  { label: "allow", value: "allow" },
-  { label: "deny", value: "deny" },
-  { label: "approval_required", value: "approval_required" },
-  { label: "review", value: "review" },
-];
-const examplePolicyRules = [
-  {
-    id: "deny-issuance",
-    kind: "operation_family",
-    family: "issuance",
-    action: "deny",
-  },
-];
 
 function buildProviderWalletOptions(
   wallets: PaymentsPlaygroundWalletView[]
@@ -164,68 +150,6 @@ export function buildPaymentsPlaygroundEndpointConfigs(
               decimals: 6,
             },
           ],
-        },
-      },
-    },
-    {
-      id: "get-wallet-policy",
-      title: t("DashboardPayments.playground.getWalletPolicy"),
-      method: "GET",
-      path: "/v1/payments/wallets/{walletId}/policies",
-      pathFields: [walletIdField],
-      bodyFields: [],
-      expectedResponse: {
-        data: {
-          policy: {
-            walletId: exampleWalletId,
-            defaultAction: "allow",
-            rules: [
-              {
-                id: "allowlist-destinations",
-                kind: "destination",
-                allowlist: [exampleWalletAddress],
-                action: "allow",
-              },
-            ],
-            controlProfile: null,
-          },
-        },
-      },
-    },
-    {
-      id: "update-wallet-policy",
-      title: t("DashboardPayments.playground.updateWalletPolicy"),
-      method: "PUT",
-      path: "/v1/payments/wallets/{walletId}/policies",
-      pathFields: [walletIdField],
-      bodyFields: [
-        {
-          key: "defaultAction",
-          label: "defaultAction",
-          placeholder: "allow",
-          kind: "select",
-          options: policyDefaultActionOptions,
-          defaultValue: "allow",
-          required: true,
-        },
-        {
-          key: "rules",
-          label: "rules",
-          placeholder: t("DashboardPayments.playground.policyRulesPlaceholder"),
-          kind: "textarea",
-          valueType: "json",
-          defaultValue: JSON.stringify(examplePolicyRules, null, 2),
-          required: true,
-        },
-      ],
-      expectedResponse: {
-        data: {
-          policy: {
-            walletId: exampleWalletId,
-            defaultAction: "allow",
-            rules: examplePolicyRules,
-            controlProfile: null,
-          },
         },
       },
     },

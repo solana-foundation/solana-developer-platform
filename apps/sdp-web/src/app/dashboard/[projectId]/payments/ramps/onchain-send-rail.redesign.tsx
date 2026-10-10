@@ -42,9 +42,6 @@ function sendCompletionTitle(
   wizard: OnchainSendWizard,
   t: ReturnType<typeof useTranslations>
 ): string | undefined {
-  if (wizard.heldApprovalRequestId !== null) {
-    return t("DashboardPayments.onchainSend.approvalPendingTitle");
-  }
   if (wizard.transferResult !== null) {
     return t("DashboardPayments.onchainSend.transferSubmitted");
   }

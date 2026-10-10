@@ -65,7 +65,7 @@ beforeEach(() => {
   vi.mocked(fetchTransferById).mockResolvedValue(RAMP);
   vi.mocked(postMoneygramRampEvent).mockResolvedValue(undefined);
   vi.mocked(sendTransferUnderKey).mockResolvedValue({
-    outcome: { kind: "submitted", transfer: CRYPTO_LEG },
+    transfer: CRYPTO_LEG,
     fingerprint: "mg_fingerprint_1",
   });
 });
@@ -95,7 +95,7 @@ describe("fundMoneygramDeposit", () => {
         ctx.t
       );
       return {
-        outcome: { kind: "submitted", transfer: CRYPTO_LEG },
+        transfer: CRYPTO_LEG,
         fingerprint: "mg_fingerprint_1",
       };
     });
@@ -157,26 +157,9 @@ describe("fundMoneygramDeposit", () => {
     expect(postMoneygramRampEvent).toHaveBeenCalledTimes(1);
   });
 
-  it("says a payment held for approval sent nothing", async () => {
-    vi.mocked(sendTransferUnderKey).mockResolvedValue({
-      outcome: { kind: "approval_pending", approvalRequestId: "apr_mg_1" },
-      fingerprint: "mg_fingerprint_1",
-    });
-    const ctx = context({});
-
-    await expect(fundMoneygramDeposit(DEPOSIT, ctx)).rejects.toThrow(
-      "DashboardPayments.ramps.transferHeldForApproval"
-    );
-    expect(ctx.onSigned).not.toHaveBeenCalled();
-    expect(postMoneygramRampEvent).toHaveBeenCalledTimes(1);
-  });
-
   it("refuses a recorded transfer that carries no signature", async () => {
     vi.mocked(sendTransferUnderKey).mockResolvedValue({
-      outcome: {
-        kind: "submitted",
-        transfer: { ...CRYPTO_LEG, status: "processing", signature: null },
-      },
+      transfer: { ...CRYPTO_LEG, status: "processing", signature: null },
       fingerprint: "mg_fingerprint_1",
     });
     const ctx = context({});

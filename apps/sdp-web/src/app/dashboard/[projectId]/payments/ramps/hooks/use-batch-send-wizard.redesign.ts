@@ -30,7 +30,6 @@ import {
 import {
   canonicalTransferBatchRequest,
   claimTransferBatchIdempotencyKey,
-  holdTransferBatchIdempotencyKey,
   isTransferBatchKeyConflict,
   releaseTransferBatchIdempotencyKey,
   transferBatchRequestFingerprint,
@@ -451,23 +450,10 @@ export function useBatchSendWizard({
     const fingerprint = transferBatchRequestFingerprint(request);
     const idempotencyKey = claimTransferBatchIdempotencyKey(fingerprint);
     try {
-      const outcome = await createTransferBatch(request, t, idempotencyKey);
-      if (outcome.kind === "approval_pending") {
-        // The approval executor replays this request under the same key, so
-        // the key must outlive the human deciding: pin it for the tab's life.
-        // A resubmit after the approval executes replays the recorded batch.
-        holdTransferBatchIdempotencyKey(fingerprint);
-        toast.info(t("DashboardPayments.batchSend.resultApprovalPending"), {
-          id: toastId,
-          description: t("DashboardPayments.batchSend.approvalPendingDescription"),
-          position: "bottom-right",
-        });
-        return;
-      }
+      const result = await createTransferBatch(request, t, idempotencyKey);
       // The batch row exists — the key is spent, and the next identical batch
       // is a new intent rather than a retry of this one.
       releaseTransferBatchIdempotencyKey(fingerprint);
-      const result = outcome.result;
       setBatchResult(result);
       const status = result.batch.status;
       if (status === "confirmed") {

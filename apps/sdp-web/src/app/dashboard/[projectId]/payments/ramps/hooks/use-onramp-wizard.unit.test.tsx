@@ -128,7 +128,6 @@ function wrapper({ children }: { children: ReactNode }) {
           issuance: false,
           markets: false,
           payments: true,
-          policies: false,
           privateChannels: false,
           ramps: true,
         }}

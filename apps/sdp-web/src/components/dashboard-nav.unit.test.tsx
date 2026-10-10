@@ -38,7 +38,6 @@ beforeEach(() => {
 
 function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]>) {
   return {
-    canReadApprovals: false,
     complianceEnabled: true,
     custodyEnabled: true,
     dvpEnabled: false,
@@ -47,8 +46,6 @@ function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]>) {
     issuanceEnabled: true,
     marketsEnabled: false,
     paymentsEnabled: true,
-    pendingApprovalCount: null,
-    policiesEnabled: true,
     privateChannelsEnabled: false,
     rampsEnabled: true,
     ...overrides,
@@ -65,13 +62,11 @@ function moreSheetMarkup(overrides: Partial<ComponentProps<typeof DashboardMoreS
   return renderToStaticMarkup(
     <DashboardMoreSheet
       pathname="/dashboard"
-      canReadApprovals={false}
       canManageOrgSettings={false}
       dvpEnabled={false}
       earnEnabled={false}
       heliusRingsEnabled={false}
       marketsEnabled={false}
-      policiesEnabled
       onClose={() => {}}
       {...overrides}
     />
@@ -224,7 +219,6 @@ describe("Integrations dashboard navigation", () => {
         complianceEnabled: true,
         custodyEnabled: true,
         paymentsEnabled: true,
-        policiesEnabled: true,
         privateChannelsEnabled: true,
         rampsEnabled: true,
       })
@@ -246,7 +240,6 @@ describe("Integrations dashboard navigation", () => {
         complianceEnabled: false,
         custodyEnabled: false,
         paymentsEnabled: false,
-        policiesEnabled: false,
         privateChannelsEnabled: false,
         rampsEnabled: false,
       })
@@ -304,21 +297,17 @@ describe("mobile bottom bar", () => {
   });
 });
 
-describe("Policies dashboard navigation", () => {
-  it("hides Policies and Approvals while retaining API Keys when the module is disabled", () => {
-    const options = navOptions({ canReadApprovals: true, policiesEnabled: false });
-    const navigation = JSON.stringify(getNavSections(t, options));
+describe("Removed Policies and Approvals navigation", () => {
+  it("lists neither Policies nor Approvals, and keeps API Keys", () => {
+    const navigation = JSON.stringify(getNavSections(t, navOptions({})));
 
     expect(navigation).not.toContain("Shared.dashboardShell.policies");
     expect(navigation).not.toContain("Shared.dashboardShell.approvals");
     expect(navigation).toContain("Shared.dashboardShell.apiKeys");
   });
 
-  it("keeps Policies and Approvals out of the mobile More sheet without hiding API Keys", () => {
-    const markup = moreSheetMarkup({
-      canReadApprovals: true,
-      policiesEnabled: false,
-    });
+  it("keeps Policies and Approvals out of the mobile More sheet, and keeps API Keys", () => {
+    const markup = moreSheetMarkup({});
 
     expect(markup).not.toContain("/policies");
     expect(markup).not.toContain("/approvals");

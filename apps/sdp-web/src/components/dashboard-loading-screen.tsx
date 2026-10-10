@@ -37,7 +37,6 @@ export function DashboardLoadingScreen({
     flags === undefined ? [] : enabledTransactionModules(flags),
     flags?.custody,
     flags?.payments,
-    flags?.policies,
     flags?.newDesign ?? false,
     flags?.newDesignModules
   );

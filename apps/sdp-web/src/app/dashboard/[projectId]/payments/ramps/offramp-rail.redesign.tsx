@@ -61,19 +61,12 @@ function offrampCompletionTitle(wizard: OfframpWizard, t: Translate): string | u
   if (wizard.transferStatus?.status === "completed") {
     return t("DashboardPayments.ramps.payoutComplete");
   }
-  if (wizard.heldApprovalRequestId !== null) {
-    return t("DashboardPayments.ramps.transferApprovalPending");
-  }
   return undefined;
 }
 
-/**
- * Whether the title row carries the polled transfer status. A held send hides
- * it: the heading already says the send waits for approval, and the row still
- * reads `awaiting_payment`, which would ask for a send that is already queued.
- */
+/** Whether the title row carries the polled transfer status. */
 function showOfframpInlineStatus(wizard: OfframpWizard, hosted: boolean): boolean {
-  if (!wizard.onTransactionStage || wizard.heldApprovalRequestId !== null) {
+  if (!wizard.onTransactionStage) {
     return false;
   }
   return hosted || wizard.depositTarget !== null;
@@ -81,7 +74,6 @@ function showOfframpInlineStatus(wizard: OfframpWizard, hosted: boolean): boolea
 
 type OfframpFooterAction =
   | { kind: "transaction" }
-  | { kind: "approval"; approvalRequestId: string }
   | { kind: "send"; depositTarget: NonNullable<OfframpWizard["depositTarget"]> };
 
 /** The one action the final step offers, in precedence order. */
@@ -89,9 +81,6 @@ function offrampFooterAction(wizard: OfframpWizard): OfframpFooterAction | null 
   const transfer = wizard.transferStatus;
   if (transfer !== undefined && getRampTransferState(transfer.status).terminal) {
     return { kind: "transaction" };
-  }
-  if (wizard.heldApprovalRequestId !== null) {
-    return { kind: "approval", approvalRequestId: wizard.heldApprovalRequestId };
   }
   return wizard.depositTarget === null
     ? null
@@ -112,14 +101,6 @@ function OfframpFooterActionButton({
         <Button asChild type="button">
           <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
             {t("DashboardPayments.goToTransaction")}
-          </Link>
-        </Button>
-      );
-    case "approval":
-      return (
-        <Button asChild type="button">
-          <Link href={`/dashboard/approvals/${encodeURIComponent(action.approvalRequestId)}`}>
-            {t("DashboardPayments.onchainSend.viewApprovalRequest")}
           </Link>
         </Button>
       );

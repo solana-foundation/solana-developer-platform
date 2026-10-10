@@ -28,7 +28,6 @@ const FLAG_CAPS = {
   custody: { module: "custody" },
   issuance: { module: "issuance" },
   assetProfiles: { module: "issuance" },
-  policies: { module: "policies" },
   privateChannels: { module: "private_channels" },
   heliusRings: { module: "helius_rings" },
   payments: { module: "payments" },

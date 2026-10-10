@@ -691,68 +691,6 @@ describe("createEarnVaultDeposit", () => {
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ error: "Invalid vault deposit response", status: 201 });
   });
-
-  it("refuses an approval hold that did not arrive as a 202", async () => {
-    // Created AND held is a contradiction; it must not resolve in the
-    // customer's favour.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              error: { code: "SIGNING_PENDING", message: "Requires policy approval" },
-            }),
-            { status: 201, headers: { "Content-Type": "application/json" } }
-          )
-      )
-    );
-
-    const result = await createEarnVaultDeposit(
-      { strategyId: "strategy_1", custodyWalletId: "cwlt_1", amount: "10" },
-      "deposit-key"
-    );
-
-    expect(result.ok).toBe(false);
-  });
-
-  it("normalizes a policy-held 202 into an approval-pending outcome", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              error: {
-                code: "SIGNING_PENDING",
-                message: "Wallet operation requires policy approval",
-                details: {
-                  approvalRequestId: "approval_1",
-                  walletOperationId: "operation_1",
-                },
-              },
-            }),
-            { status: 202, headers: { "Content-Type": "application/json" } }
-          )
-      )
-    );
-
-    const result = await createEarnVaultDeposit(
-      { strategyId: "strategy_1", custodyWalletId: "cwlt_1", amount: "10" },
-      "deposit-key"
-    );
-
-    expect(result).toEqual({
-      ok: true,
-      status: 202,
-      data: {
-        kind: "approval_pending",
-        message: "Wallet operation requires policy approval",
-        approvalRequestId: "approval_1",
-        walletOperationId: "operation_1",
-      },
-    });
-  });
 });
 
 /**
@@ -1117,44 +1055,6 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("normalizes a policy-held request into an approval-pending outcome", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              error: {
-                code: "SIGNING_PENDING",
-                message: "Wallet operation requires policy approval",
-                details: {
-                  approvalRequestId: "approval_1",
-                  walletOperationId: "operation_1",
-                },
-              },
-            }),
-            { status: 202, headers: { "Content-Type": "application/json" } }
-          )
-      )
-    );
-
-    const result = await createEarnVaultWithdrawalRequest(
-      { positionId: "position_1", shares: "5", discountBps: 25, deadlineSeconds: 360 },
-      "queued-request-key"
-    );
-
-    expect(result).toEqual({
-      ok: true,
-      status: 202,
-      data: {
-        kind: "approval_pending",
-        message: "Wallet operation requires policy approval",
-        approvalRequestId: "approval_1",
-        walletOperationId: "operation_1",
-      },
-    });
-  });
-
   it("preserves the operator-redemption discriminant in preview and request bodies", async () => {
     const bodies: unknown[] = [];
     const fetchMock = vi.fn(async (_input: string, init?: RequestInit) => {
@@ -1210,32 +1110,6 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
     });
     expect(created.ok).toBe(true);
     expect(bodies).toEqual([input, input]);
-  });
-
-  it("refuses an approval hold returned with a success status other than 202", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              error: { code: "SIGNING_PENDING", message: "Requires policy approval" },
-            }),
-            { status: 201, headers: { "Content-Type": "application/json" } }
-          )
-      )
-    );
-
-    const result = await createEarnVaultWithdrawalRequest(
-      { positionId: "position_1", shares: "5", discountBps: 25, deadlineSeconds: 360 },
-      "queued-request-key"
-    );
-
-    expect(result).toMatchObject({
-      ok: false,
-      status: 201,
-      error: "Invalid queued withdrawal response",
-    });
   });
 });
 
