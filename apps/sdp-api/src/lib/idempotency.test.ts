@@ -188,7 +188,8 @@ describe("buildTransferBatchFingerprint", () => {
     );
   });
 
-  it("preserves recipient order", () => {
+  // Recipient order does not change what moves (APE-667, HOO-1918).
+  it("ignores recipient order", () => {
     expect(
       buildTransferBatchFingerprint({
         sourceCustodyWalletId: "cwlt_source_1",
@@ -197,7 +198,7 @@ describe("buildTransferBatchFingerprint", () => {
         recipients: [firstRecipient, secondRecipient],
         options: undefined,
       })
-    ).not.toBe(
+    ).toBe(
       buildTransferBatchFingerprint({
         sourceCustodyWalletId: "cwlt_source_1",
         sourceAddress: "Source111",
