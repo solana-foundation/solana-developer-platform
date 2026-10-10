@@ -620,7 +620,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA but does not submit the transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeWithAcceptedIdempotencyHeaders,
+      headers: projectScopeHeaders,
       params: paymentSubscriptionPlanIdParamsSchema,
       body: {
         required: false,
@@ -632,7 +632,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription plan creation prepared",
         content: jsonContent(preparePaymentSubscriptionPlanResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
@@ -738,7 +738,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeWithAcceptedIdempotencyHeaders,
+      headers: projectScopeHeaders,
       params: paymentSubscriptionIdParamsSchema,
       body: {
         required: true,
@@ -750,7 +750,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription authorization prepared",
         content: jsonContent(preparePaymentSubscriptionAuthorizationResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
@@ -764,7 +764,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Prepares the subscriber-signed Solana transaction that cancels a subscription. The transaction must still be signed and submitted by the client.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeWithAcceptedIdempotencyHeaders,
+      headers: projectScopeHeaders,
       params: paymentSubscriptionIdParamsSchema,
       body: {
         required: false,
@@ -776,7 +776,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription cancellation prepared",
         content: jsonContent(preparePaymentSubscriptionLifecycleResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
@@ -790,7 +790,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeWithAcceptedIdempotencyHeaders,
+      headers: projectScopeHeaders,
       params: paymentSubscriptionIdParamsSchema,
       body: {
         required: false,
@@ -802,7 +802,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription resume prepared",
         content: jsonContent(preparePaymentSubscriptionLifecycleResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
@@ -816,7 +816,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeWithAcceptedIdempotencyHeaders,
+      headers: projectScopeHeaders,
       params: paymentSubscriptionIdParamsSchema,
       body: {
         required: true,
@@ -828,7 +828,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription collection prepared",
         content: jsonContent(preparePaymentSubscriptionCollectionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 
