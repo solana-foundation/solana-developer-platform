@@ -84,14 +84,26 @@ function clearManagedProviderEnv(): void {
   writeManagedProviderEnv({});
 }
 
-async function seedAuth(tier: "individual" | "enterprise" = "individual"): Promise<void> {
+async function seedAuth(
+  tier: "individual" | "enterprise" = "individual",
+  { entitleLocal = false }: { entitleLocal?: boolean } = {}
+): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, tier, "active"),
+      .prepare(
+        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_ORG.name,
+        TEST_ORG.slug,
+        tier,
+        "active",
+        entitleLocal ? JSON.stringify({ providerOverrides: { custody: { local: true } } }) : null
+      ),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -146,7 +158,7 @@ describe("Custody routes — self-hosted deployment mode", () => {
   });
 
   it("POST /v1/wallets/initialize creates a local wallet", async () => {
-    await seedAuth("individual");
+    await seedAuth("individual", { entitleLocal: true });
 
     const res = await app.request(
       "/v1/wallets/initialize",
