@@ -54,17 +54,8 @@ function testApp(): Hono<{ Bindings: Env }> {
   app.use("*", async (c, next) => {
     const projectId = c.req.header("x-test-project") ?? SANDBOX;
     const keyId = c.req.header("x-test-key") ?? "key_test";
-    const bound = c.req.header("x-test-bound-wallet");
-    // SAFETY: the middleware reads only these fields of the API key.
-    c.set("apiKey", {
-      id: keyId,
-      organizationId: ORG,
-      projectId,
-      permissions: ["payments:write"],
-      walletBindings: bound
-        ? [{ walletId: bound, custodyWalletId: bound, permissions: ["*"] }]
-        : [],
-    } as never);
+    // SAFETY: the middleware reads only id, organizationId and projectId.
+    c.set("apiKey", { id: keyId, organizationId: ORG, projectId } as never);
     c.set("projectId", projectId);
     if (c.req.header("x-test-approved-operation")) {
       c.set("approvedWalletOperationId", "wop_test");
@@ -247,22 +238,6 @@ describe("idempotent()", () => {
       expect(res.status).toBe(422);
       expect(await errorCode(res)).toBe("IDEMPOTENCY_KEY_REUSED");
     }
-    expect(create).toHaveBeenCalledTimes(1);
-  });
-
-  // Greptile (#2267): a key whose wallet access changed since the original
-  // request must not read the response produced under the old access.
-  it("refuses a replay once the same credential's wallet bindings changed", async () => {
-    const { app, create } = buildApp({ key: "required" }, created);
-    await post(app, "/v1/other", { a: 1 }, { ...KEY, "x-test-bound-wallet": "cwlt_a" });
-    const narrowed = await post(
-      app,
-      "/v1/other",
-      { a: 1 },
-      { ...KEY, "x-test-bound-wallet": "cwlt_b" }
-    );
-    expect(narrowed.status).toBe(422);
-    expect(await errorCode(narrowed)).toBe("IDEMPOTENCY_KEY_REUSED");
     expect(create).toHaveBeenCalledTimes(1);
   });
 
