@@ -25,7 +25,9 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 | Endpoints | Key |
 | --- | --- |
 | `POST /v1/payments/transfers`<br />`POST /v1/payments/transfer-batches`<br />`POST /v1/payments/recurring-payments`<br />`POST /v1/payments/recurring-payments/{id}/activate`, `/cancel`, `/resume`, `/collect`<br />`POST /v1/wallets/approval-requests/{approvalRequestId}/approve` | **Required.** A request without one returns `400 IDEMPOTENCY_KEY_REQUIRED`. |
-| Wallets: `POST /v1/wallets`, `/initialize`, `/signer-check`; `PATCH /v1/wallets/{walletId}`<br />Approval requests: `POST .../reject`, `.../cancel`<br />Payments: `PATCH /v1/payments/recurring-payments/{id}`, subscription plans (`POST`, `PATCH`, `prepare-create`), subscriptions (`POST`, `prepare-*`)<br />Counterparties and counterparty accounts: `POST`, `PATCH`<br />Compliance: `POST /v1/compliance/address-screenings` | **Accepted.** Optional, and honored when sent. |
+| Wallets: `POST /v1/wallets`, `/initialize`, `/signer-check`; `PATCH /v1/wallets/{walletId}`<br />Approval requests: `POST .../reject`, `.../cancel`<br />Payments: `PATCH /v1/payments/recurring-payments/{id}`, subscription plans (`POST`, `PATCH`), subscriptions (`POST`)<br />Counterparties and counterparty accounts: `POST`, `PATCH`<br />Compliance: `POST /v1/compliance/address-screenings` | **Accepted.** Optional, and honored when sent. |
+
+The subscription `prepare-*` routes and subscription-plan `prepare-create` ignore the key: each call builds a new unsigned transaction with a fresh blockhash, and they move nothing.
 
 Issuance operations keep their own key handling for now: a key is scoped to your organization across every issuance operation and token, and reusing it for a different request returns `409`.
 
@@ -35,7 +37,7 @@ Issuance operations keep their own key handling for now: a key is scoped to your
 | --- | --- |
 | Same key, same request, original finished | The stored status and body, with the response header `Idempotent-Replayed: true` |
 | Same key, original still running | `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. Wait and retry with the same key. |
-| Same key, different request or different credential | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
+| Same key, different request, different credential, or a credential whose access changed | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
 | Original returned `400`, `401`, `403`, `409` or `429` | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
 | Original returned a `5xx` | Stored and replayed; use a new key to try again. Transfers, transfer batches and recurring-payment creation are the exception: a same-key retry runs again and recovers the original record instead of creating a second one. That recovered response is a fresh answer, so it carries no `Idempotent-Replayed` header; the same holds for a same-key retry of these routes after the 24-hour record expires. |
 

@@ -20,8 +20,11 @@
       "script": {
         "type": "text/javascript",
         "exec": [
-          "if (pm.request.headers.has(\"Idempotency-Key\") && !pm.collectionVariables.get(\"idempotencyKey\")) {",
-          "  pm.collectionVariables.set(\"idempotencyKey\", pm.variables.replaceIn(\"{{$guid}}\"));",
+          "const header = pm.request.headers.find((h) => h.key.toLowerCase() === \"idempotency-key\");",
+          "const saved = header && /^\\{\\{(idempotencyKey\\.[^}]+)\\}\\}$/.exec(header.value);",
+          "const variable = saved && saved[1];",
+          "if (variable && !pm.collectionVariables.get(variable)) {",
+          "  pm.collectionVariables.set(variable, pm.variables.replaceIn(\"{{$guid}}\"));",
           "}"
         ]
       }
@@ -31,11 +34,14 @@
       "script": {
         "type": "text/javascript",
         "exec": [
-          "if (pm.request.headers.has(\"Idempotency-Key\")) {",
+          "const header = pm.request.headers.find((h) => h.key.toLowerCase() === \"idempotency-key\");",
+          "const saved = header && /^\\{\\{(idempotencyKey\\.[^}]+)\\}\\}$/.exec(header.value);",
+          "const variable = saved && saved[1];",
+          "if (variable) {",
           "  const status = pm.response.code;",
           "  const replayed = pm.response.headers.get(\"Idempotent-Replayed\") === \"true\";",
           "  if (replayed || (status < 500 && status !== 409 && status !== 429)) {",
-          "    pm.collectionVariables.unset(\"idempotencyKey\");",
+          "    pm.collectionVariables.unset(variable);",
           "  }",
           "}"
         ]
@@ -43,12 +49,6 @@
     }
   ],
   "variable": [
-    {
-      "key": "idempotencyKey",
-      "value": "",
-      "type": "string",
-      "description": "Idempotency-Key for the operation in progress. Minted on first send and kept across retries until the operation has a final answer; clear it to start a new operation."
-    },
     {
       "key": "baseUrl",
       "value": "https://api.solana.com",
@@ -444,7 +444,7 @@
             "header": [
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey}}",
+                "value": "{{idempotencyKey.approveWalletApprovalRequest}}",
                 "type": "text"
               }
             ],
@@ -1391,7 +1391,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey}}",
+                "value": "{{idempotencyKey.createPaymentTransfer}}",
                 "type": "text"
               }
             ],
@@ -1462,7 +1462,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey}}",
+                "value": "{{idempotencyKey.createPaymentTransferBatch}}",
                 "type": "text"
               }
             ],
@@ -1509,7 +1509,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey}}",
+                "value": "{{idempotencyKey.createPaymentRecurringPayment}}",
                 "type": "text"
               }
             ],
@@ -1566,7 +1566,7 @@
             "header": [
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey}}",
+                "value": "{{idempotencyKey.activatePaymentRecurringPayment}}",
                 "type": "text"
               }
             ],
@@ -1581,7 +1581,7 @@
             "header": [
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey}}",
+                "value": "{{idempotencyKey.cancelPaymentRecurringPayment}}",
                 "type": "text"
               }
             ],
@@ -1596,7 +1596,7 @@
             "header": [
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey}}",
+                "value": "{{idempotencyKey.collectPaymentRecurringPayment}}",
                 "type": "text"
               }
             ],
@@ -1611,7 +1611,7 @@
             "header": [
               {
                 "key": "Idempotency-Key",
-                "value": "{{idempotencyKey}}",
+                "value": "{{idempotencyKey.resumePaymentRecurringPayment}}",
                 "type": "text"
               }
             ],

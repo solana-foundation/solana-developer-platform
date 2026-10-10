@@ -169,7 +169,7 @@ function getNamedExampleValue(examples, preferredName) {
   return undefined;
 }
 
-function getRequestHeaders(operation) {
+function getRequestHeaders(operation, routePath, method) {
   const headers = [];
 
   if (operation.requestBody?.content?.["application/json"]) {
@@ -181,8 +181,9 @@ function getRequestHeaders(operation) {
   }
 
   // A route that requires Idempotency-Key 400s without one. The key is a saved
-  // collection variable, not {{$guid}}: a retry after a timeout must resend the
-  // same key or it pays twice. IDEMPOTENCY_KEY_EVENTS mints and retires it.
+  // collection variable per operation, not {{$guid}}: a retry after a timeout
+  // must resend the same key or it pays twice, and one operation's response
+  // must never retire another's key. IDEMPOTENCY_KEY_EVENTS mints and retires it.
   const requiresIdempotencyKey = (operation.parameters ?? []).some(
     (parameter) =>
       parameter?.in === "header" &&
@@ -193,7 +194,7 @@ function getRequestHeaders(operation) {
   if (requiresIdempotencyKey) {
     headers.push({
       key: "Idempotency-Key",
-      value: "{{idempotencyKey}}",
+      value: `{{${idempotencyKeyVariable(operation, routePath, method)}}}`,
       type: "text",
     });
   }
@@ -201,22 +202,34 @@ function getRequestHeaders(operation) {
   return headers;
 }
 
+/** The collection variable holding one operation's saved Idempotency-Key. */
+function idempotencyKeyVariable(operation, routePath, method) {
+  const name = operation.operationId ?? `${method}_${routePath}`.replace(/[^A-Za-z0-9]+/g, "_");
+  return `idempotencyKey.${name}`;
+}
+
 /**
- * Collection-level scripts for the saved Idempotency-Key. A request that sends
- * the header gets a new key only when none is saved. The key is retired once
+ * Collection-level scripts for the saved Idempotency-Key. Each operation keeps
+ * its own `idempotencyKey.<operationId>` variable, minted only when none is saved. The key is retired once
  * the operation has a final answer: a replay, or any status below 500 other
  * than 409 and 429 (the rule the dashboard uses). A timeout runs no test
  * script and a 5xx keeps the key, so pressing Send again retries the same
  * operation instead of starting a second one.
  */
+const SAVED_KEY_VARIABLE = [
+  'const header = pm.request.headers.find((h) => h.key.toLowerCase() === "idempotency-key");',
+  "const saved = header && /^\\{\\{(idempotencyKey\\.[^}]+)\\}\\}$/.exec(header.value);",
+  "const variable = saved && saved[1];",
+];
 const IDEMPOTENCY_KEY_EVENTS = [
   {
     listen: "prerequest",
     script: {
       type: "text/javascript",
       exec: [
-        'if (pm.request.headers.has("Idempotency-Key") && !pm.collectionVariables.get("idempotencyKey")) {',
-        '  pm.collectionVariables.set("idempotencyKey", pm.variables.replaceIn("{{$guid}}"));',
+        ...SAVED_KEY_VARIABLE,
+        "if (variable && !pm.collectionVariables.get(variable)) {",
+        '  pm.collectionVariables.set(variable, pm.variables.replaceIn("{{$guid}}"));',
         "}",
       ],
     },
@@ -226,11 +239,12 @@ const IDEMPOTENCY_KEY_EVENTS = [
     script: {
       type: "text/javascript",
       exec: [
-        'if (pm.request.headers.has("Idempotency-Key")) {',
+        ...SAVED_KEY_VARIABLE,
+        "if (variable) {",
         "  const status = pm.response.code;",
         '  const replayed = pm.response.headers.get("Idempotent-Replayed") === "true";',
         "  if (replayed || (status < 500 && status !== 409 && status !== 429)) {",
-        '    pm.collectionVariables.unset("idempotencyKey");',
+        "    pm.collectionVariables.unset(variable);",
         "  }",
         "}",
       ],
@@ -281,7 +295,7 @@ function createRequestItem(spec, baseUrl, routePath, method, operation) {
   const allowsAnonymous = allowsAnonymousAccess(operation.security);
   const request = {
     method: method.toUpperCase(),
-    header: getRequestHeaders(operation),
+    header: getRequestHeaders(operation, routePath, method),
     url: buildRequestUrl(baseUrl, routePath),
     description: operation.description || operation.summary || "",
   };
@@ -362,13 +376,6 @@ function toPostmanCollection(spec) {
     },
     event: IDEMPOTENCY_KEY_EVENTS,
     variable: [
-      {
-        key: "idempotencyKey",
-        value: "",
-        type: "string",
-        description:
-          "Idempotency-Key for the operation in progress. Minted on first send and kept across retries until the operation has a final answer; clear it to start a new operation.",
-      },
       {
         key: "baseUrl",
         value: productionServer,
