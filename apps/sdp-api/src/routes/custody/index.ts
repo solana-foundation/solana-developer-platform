@@ -31,6 +31,7 @@ import {
   signerCheck,
   updateWallet,
 } from "./handlers";
+import { authorizeSignerCheckReplay } from "./handlers/signer-check";
 import {
   createWalletSchema,
   deleteWalletSchema,
@@ -113,7 +114,7 @@ wallets.patch(
 wallets.post(
   "/signer-check",
   requirePermissions("wallets:write"),
-  idempotent({ key: "accepted" }),
+  idempotent({ key: "accepted", authorizeReplay: authorizeSignerCheckReplay }),
   validateBody(signerCheckSchema),
   meteredQuota({ name: "signer-check", actorMax: 2, orgMax: 10 }),
   signerCheck

@@ -16,6 +16,7 @@ import {
   verifySignature,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict } from "@/lib/errors";
@@ -32,6 +33,7 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { FeePaymentError } from "@/services/ports";
 import { createOrgSignerForCustodyWallet } from "@/services/solana";
 import { createAuthenticatedSponsorshipFeePayment } from "@/services/sponsorship.service";
+import type { AppContext } from "../context";
 import type { SignerCheckResponse, signerCheckSchema } from "../schemas";
 import { findAuthorizedOperationalWallet } from "./wallets";
 
@@ -56,6 +58,32 @@ async function isValidWalletSignature(
   );
   return verifySignature(publicKey, signature, messageBytes);
 }
+
+/**
+ * `authorizeReplay` for the signer check (HOO-1918): before a stored response
+ * is replayed, the caller must still reach the wallet it names (or its API
+ * key's signing wallet), read fresh, exactly as the handler requires.
+ */
+export async function authorizeSignerCheckReplay(c: AppContext): Promise<void> {
+  const parsed = replayedSignerCheckSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw badRequest("walletId must be a non-empty string");
+  }
+  const auth = getAuth(c);
+  const resolvedWalletId = resolveApiKeySigningWalletId(auth, parsed.data.walletId, [
+    "wallets:write",
+  ]);
+  if (resolvedWalletId === null) {
+    throw badRequest("walletId is required");
+  }
+  const wallet = await findAuthorizedOperationalWallet(c, resolvedWalletId, ["wallets:write"]);
+  if (!wallet) {
+    throw new AppError("NOT_FOUND", "Custody wallet not found");
+  }
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, wallet.id, ["wallets:write"]);
+}
+
+const replayedSignerCheckSchema = z.object({ walletId: z.string().min(1).optional() });
 
 export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSchema>) => {
   const body = c.req.valid("json");

@@ -3,7 +3,11 @@ import { requirePermissions } from "@/middleware/auth";
 import { idempotent } from "@/middleware/idempotency";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
-import { createPaymentRequest, listPaymentRequests } from "./handlers";
+import {
+  authorizePaymentRequestReplay,
+  createPaymentRequest,
+  listPaymentRequests,
+} from "./handlers";
 import { createPaymentRequestSchema } from "./schemas";
 
 const paymentRequests = new Hono<{ Bindings: Env }>();
@@ -12,7 +16,7 @@ paymentRequests.get("/", requirePermissions("payments:read"), listPaymentRequest
 paymentRequests.post(
   "/",
   requirePermissions("payments:write", "wallets:read"),
-  idempotent({ key: "accepted" }),
+  idempotent({ key: "accepted", authorizeReplay: authorizePaymentRequestReplay }),
   validateBody(createPaymentRequestSchema),
   createPaymentRequest
 );

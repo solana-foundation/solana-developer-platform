@@ -242,9 +242,13 @@ export async function authorizeRecurringPaymentReplay(c: AppContext): Promise<vo
   assertPaymentWalletExactAccess(c, custodyWalletId, ["payments:write"]);
   // Read fresh, as the handlers do: a binding removed while the auth cache
   // still holds it must not read the stored response.
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, custodyWalletId, [
-    "payments:write",
-  ]);
+  await assertFreshApiKeyCustodyWalletAccess(
+    getDb(c.env),
+    auth,
+    custodyWalletId,
+    ["payments:write"],
+    "any"
+  );
 }
 
 export const activateRecurringPayment = async (
