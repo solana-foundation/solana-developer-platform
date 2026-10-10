@@ -211,7 +211,13 @@ function transferBatchFingerprint(
       sourceCustodyWalletId,
       sourceAddress: input.sourceAddress,
       token: input.token,
-      recipients: input.recipients,
+      // Order-insensitive, like the shared step's canonicalize (APE-667), so a
+      // reordered retry that reaches this row backstop replays (HOO-1918).
+      recipients: [...input.recipients].sort((a, b) => {
+        const left = JSON.stringify(normalizeForFingerprint(a));
+        const right = JSON.stringify(normalizeForFingerprint(b));
+        return left < right ? -1 : left > right ? 1 : 0;
+      }),
       options: input.options ?? null,
     })
   );

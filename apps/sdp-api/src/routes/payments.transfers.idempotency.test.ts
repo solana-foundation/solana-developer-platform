@@ -565,7 +565,7 @@ describe("Payments routes — transfer idempotency", () => {
     );
   });
 
-  it("does not dedup when no Idempotency-Key is supplied", async () => {
+  it("does not dedup two requests under different Idempotency-Keys", async () => {
     const signAndSendMock = vi
       .fn()
       .mockResolvedValueOnce(
