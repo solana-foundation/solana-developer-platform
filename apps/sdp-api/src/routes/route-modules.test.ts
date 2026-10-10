@@ -3,7 +3,6 @@ import {
   SDP_RAMP_PROVIDER_STAGES,
   SDP_RELEASE_CHANNEL_NAMES,
   SDP_RELEASE_CHANNELS,
-  type SdpModule,
 } from "@sdp/types";
 import { inspectRoutes } from "hono/dev";
 import { describe, expect, it } from "vitest";
