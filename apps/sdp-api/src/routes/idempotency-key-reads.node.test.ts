@@ -31,6 +31,8 @@ const PINNED_READS: Record<string, number> = {
   // The row backstops for transfers and batches read the same key.
   "routes/payments/transfer-batches/create.ts": 2,
   "routes/payments/transfers/handlers.ts": 2,
+  // The recurring-create row backstop (migration 0128).
+  "routes/payments/recurring-payments/handlers.ts": 1,
   "routes/private-channels/helpers.ts": 1,
   // Forwards the original key to the in-process approved execution.
   "services/policy/approved-operation-replay.ts": 1,
@@ -38,7 +40,7 @@ const PINNED_READS: Record<string, number> = {
 
 const SHARED_STEP = new Set(["middleware/idempotency.ts", "middleware/idempotency-key.ts"]);
 const HEADER_READ =
-  /header\??\.?\(\s*(?:"Idempotency-Key"|"idempotency-key"|IDEMPOTENCY_KEY_HEADER)\s*\)/g;
+  /header\??\.?\(\s*(?:"Idempotency-Key"|"idempotency-key"|IDEMPOTENCY_KEY_HEADER)\s*\)|\.get\(\s*(?:"Idempotency-Key"|"idempotency-key"|IDEMPOTENCY_KEY_HEADER)\s*\)|\bparseIdempotencyKey\(/g;
 
 function sourceFiles(dir: string, root: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
