@@ -206,6 +206,9 @@ export const errorCodeSchema = z
     "PROVIDER_UNAVAILABLE",
     "UNSUPPORTED_CORRIDOR",
     "VAULT_EXPOSURE_CAP",
+    "IDEMPOTENCY_KEY_REQUIRED",
+    "IDEMPOTENCY_KEY_REUSED",
+    "IDEMPOTENCY_KEY_IN_FLIGHT",
   ])
   .openapi({ description: "Machine-readable error code." });
 

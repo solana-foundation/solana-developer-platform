@@ -169,7 +169,7 @@ function getNamedExampleValue(examples, preferredName) {
   return undefined;
 }
 
-function getRequestHeaders(operation) {
+function getRequestHeaders(operation, routePath, method) {
   const headers = [];
 
   if (operation.requestBody?.content?.["application/json"]) {
@@ -180,7 +180,95 @@ function getRequestHeaders(operation) {
     });
   }
 
+  // A route that requires Idempotency-Key 400s without one. The key is a saved
+  // collection variable per operation, not {{$guid}}: a retry after a timeout
+  // must resend the same key or it pays twice, and one operation's response
+  // must never retire another's key. idempotencyKeyEvents mints and retires it.
+  const requiresIdempotencyKey = (operation.parameters ?? []).some(
+    (parameter) =>
+      parameter?.in === "header" &&
+      parameter.required === true &&
+      typeof parameter.name === "string" &&
+      parameter.name.toLowerCase() === "idempotency-key"
+  );
+  if (requiresIdempotencyKey) {
+    headers.push({
+      key: "Idempotency-Key",
+      value: `{{${idempotencyKeyVariable(operation, routePath, method)}}}`,
+      type: "text",
+    });
+  }
+
   return headers;
+}
+
+/** The collection variable holding one operation's saved Idempotency-Key. */
+function idempotencyKeyVariable(operation, routePath, method) {
+  const name = operation.operationId ?? `${method}_${routePath}`.replace(/[^A-Za-z0-9]+/g, "_");
+  return `idempotencyKey.${name}`;
+}
+
+/**
+ * Collection-level scripts for the saved Idempotency-Key. Each operation keeps
+ * its own `idempotencyKey.<operationId>` variable, minted only when none is saved. The key is retired once
+ * the operation has a final answer: a replay, or any status below 500 other
+ * than 409 and 429 (the rule the dashboard uses). A dry run on a route that
+ * honors Dry-Run never retires it.
+ * A timeout runs no test script and a 5xx keeps the key, so pressing Send again retries the same
+ * operation instead of starting a second one.
+ */
+const SAVED_KEY_VARIABLE = [
+  'const header = pm.request.headers.find((h) => h.key.toLowerCase() === "idempotency-key");',
+  "const saved = header && /^\\{\\{(idempotencyKey\\.[^}]+)\\}\\}$/.exec(header.value);",
+  "const variable = saved && saved[1];",
+];
+/**
+ * Routes whose `idempotent()` step declares `honorsDryRun` (ADR 0008): a dry
+ * run there answers without running the operation, so it must not retire the
+ * operation's key. Every other route runs a request sent with `Dry-Run`.
+ */
+const DRY_RUN_ROUTES = ["/v1/payments/transfers", "/v1/payments/transfer-batches"];
+
+function idempotencyKeyEvents(spec) {
+  const dryRunVariables = DRY_RUN_ROUTES.flatMap((routePath) => {
+    const operation = spec.paths?.[routePath]?.post;
+    return operation ? [idempotencyKeyVariable(operation, routePath, "post")] : [];
+  });
+  return [
+    {
+      listen: "prerequest",
+      script: {
+        type: "text/javascript",
+        exec: [
+          ...SAVED_KEY_VARIABLE,
+          "if (variable && !pm.collectionVariables.get(variable)) {",
+          '  pm.collectionVariables.set(variable, pm.variables.replaceIn("{{$guid}}"));',
+          "}",
+        ],
+      },
+    },
+    {
+      listen: "test",
+      script: {
+        type: "text/javascript",
+        exec: [
+          ...SAVED_KEY_VARIABLE,
+          `const dryRunOperations = ${JSON.stringify(dryRunVariables)};`,
+          'const dryRun = pm.request.headers.find((h) => h.key.toLowerCase() === "dry-run" && !h.disabled);',
+          "// On a route that honors Dry-Run, a dry run does not run the operation, so it keeps the key.",
+          "const dryRunOnly = dryRunOperations.includes(variable) && dryRun &&",
+          '  String(pm.variables.replaceIn(dryRun.value)).toLowerCase() === "true";',
+          "if (variable && !dryRunOnly) {",
+          "  const status = pm.response.code;",
+          '  const replayed = pm.response.headers.get("Idempotent-Replayed") === "true";',
+          "  if (replayed || (status < 500 && status !== 409 && status !== 429)) {",
+          "    pm.collectionVariables.unset(variable);",
+          "  }",
+          "}",
+        ],
+      },
+    },
+  ];
 }
 
 function getRequestBody(spec, operation, preferredExampleName) {
@@ -226,7 +314,7 @@ function createRequestItem(spec, baseUrl, routePath, method, operation) {
   const allowsAnonymous = allowsAnonymousAccess(operation.security);
   const request = {
     method: method.toUpperCase(),
-    header: getRequestHeaders(operation),
+    header: getRequestHeaders(operation, routePath, method),
     url: buildRequestUrl(baseUrl, routePath),
     description: operation.description || operation.summary || "",
   };
@@ -305,6 +393,7 @@ function toPostmanCollection(spec) {
         },
       ],
     },
+    event: idempotencyKeyEvents(spec),
     variable: [
       {
         key: "baseUrl",

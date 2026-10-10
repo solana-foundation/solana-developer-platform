@@ -14,7 +14,12 @@ import {
   updateCounterpartyAccountRequestSchema,
   updateCounterpartyRequestSchema,
 } from "../schemas";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import {
+  errorResponses,
+  jsonContent,
+  projectScopeHeaders,
+  projectScopeWithAcceptedIdempotencyHeaders,
+} from "./helpers";
 import {
   counterpartyAccountResponse,
   counterpartyFieldOptionsResponse,
@@ -78,7 +83,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
       "Creates a counterparty. If externalId is provided, it must be unique within the organization.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createCounterpartyRequestSchema),
@@ -89,7 +94,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
         description: "Counterparty created",
         content: jsonContent(counterpartyResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 422, 500]),
     },
   });
 
@@ -126,7 +131,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
       "Updates counterparty attributes. At least one field must be provided. Use null on externalId to clear it.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       params: z.object({
         counterpartyId: counterpartyIdParamSchema,
       }),
@@ -140,7 +145,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
         description: "Counterparty updated",
         content: jsonContent(counterpartyResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -251,7 +256,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
       'Creates a payment account for a counterparty. For accountKind "crypto_wallet", details.network must be "solana" and details.address must be a Solana wallet address.',
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       params: z.object({
         counterpartyId: counterpartyIdParamSchema,
       }),
@@ -265,7 +270,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
         description: "Counterparty account created",
         content: jsonContent(counterpartyAccountResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -299,7 +304,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     description: "Updates a counterparty payment account. At least one field must be provided.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       params: counterpartyAccountPathParamsSchema,
       body: {
         required: true,
@@ -311,7 +316,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
         description: "Counterparty account updated",
         content: jsonContent(counterpartyAccountResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 

@@ -40,7 +40,9 @@ import {
   errorResponses,
   jsonContent,
   projectScopeHeaders,
-  projectScopeWithIdempotencyHeaders,
+  projectScopeWithAcceptedIdempotencyHeaders,
+  projectScopeWithRequiredIdempotencyHeaders,
+  REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION,
 } from "./helpers";
 import {
   offrampCurrenciesResponse,
@@ -233,11 +235,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
-    description:
-      "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original transfer, while reusing the key for a different request returns 409. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
+    description: `Executes an on-chain transfer using the exact SDP Wallet ID (\`id\` from \`/v1/wallets\`) and server-side custody signing. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION} A same-key retry after a 5xx runs again and recovers the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.`,
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeWithIdempotencyHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createTransferRequestSchema),
@@ -326,11 +327,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
-    description:
-      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Supply an Idempotency-Key to retry safely: an identical exact-wallet request returns the original batch without another on-chain submission, while reusing the key for a different request returns 409.",
+    description: `Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION} Recipient order does not change the request. A same-key retry after a 5xx runs again and recovers the original batch without another on-chain submission.`,
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeWithIdempotencyHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createTransferBatchRequestSchema),
@@ -393,11 +393,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Create recurring payment",
     operationId: "createPaymentRecurringPayment",
-    description:
-      "Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints.",
+    description: `Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account. This stores backend state only; activation and collection are added by follow-up endpoints. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION} A same-key retry after a 5xx, or after the 24-hour record expires, runs again and returns the recurring payment the key already created instead of creating a second one; that response carries no \`Idempotent-Replayed\` header.`,
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createRecurringPaymentRequestSchema),
@@ -408,7 +407,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment created",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -444,7 +443,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Updates an SDP-custody recurring payment. Pending records are updated directly. Active metadata and due-date edits are applied in place, while active term, source, destination, or token edits create a replacement Solana subscription, authorize it, cancel the old subscription, and then swap the recurring payment to the replacement records.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       params: paymentRecurringPaymentIdParamsSchema,
       body: {
         required: true,
@@ -456,7 +455,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Recurring payment updated",
         content: jsonContent(paymentRecurringPaymentResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -466,11 +465,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Activate recurring payment",
     operationId: "activatePaymentRecurringPayment",
-    description:
-      "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.",
+    description: `Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION}`,
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       params: paymentRecurringPaymentIdParamsSchema,
     },
     responses: {
@@ -488,11 +486,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Cancel recurring payment",
     operationId: "cancelPaymentRecurringPayment",
-    description:
-      "Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A collection already in processing may still settle independently.",
+    description: `Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A collection already in processing may still settle independently. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION}`,
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       params: paymentRecurringPaymentIdParamsSchema,
     },
     responses: {
@@ -510,11 +507,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Collect recurring payment",
     operationId: "collectPaymentRecurringPayment",
-    description:
-      "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.",
+    description: `Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as \`processing\` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION}`,
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       params: paymentRecurringPaymentIdParamsSchema,
     },
     responses: {
@@ -532,11 +528,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Resume recurring payment",
     operationId: "resumePaymentRecurringPayment",
-    description:
-      "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status.",
+    description: `Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status. ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION}`,
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithRequiredIdempotencyHeaders,
       params: paymentRecurringPaymentIdParamsSchema,
     },
     responses: {
@@ -579,7 +574,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createSubscriptionPlanRequestSchema),
@@ -590,7 +585,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription plan created",
         content: jsonContent(paymentSubscriptionPlanResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -671,7 +666,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description: "Updates mutable subscription plan fields and on-chain identifiers.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       params: paymentSubscriptionPlanIdParamsSchema,
       body: {
         required: true,
@@ -683,7 +678,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription plan updated",
         content: jsonContent(paymentSubscriptionPlanResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 
@@ -697,7 +692,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Creates a recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createSubscriptionRequestSchema),
@@ -708,7 +703,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription created",
         content: jsonContent(paymentSubscriptionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 

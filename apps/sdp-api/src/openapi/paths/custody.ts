@@ -12,7 +12,14 @@ import {
   signerCheckRequestSchema,
   updateCustodyWalletRequestSchema,
 } from "../schemas/custody";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import {
+  errorResponses,
+  jsonContent,
+  projectScopeHeaders,
+  projectScopeWithAcceptedIdempotencyHeaders,
+  projectScopeWithRequiredIdempotencyHeaders,
+  REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION,
+} from "./helpers";
 import {
   custodyConfigsResponse,
   custodyDeleteWalletResponse,
@@ -36,6 +43,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(initializeSigningRequestSchema),
@@ -46,7 +54,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet signing initialized",
         content: jsonContent(initializeSigningResponseSchema),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 422, 500]),
       403: {
         description:
           "Forbidden: the API key lacks permission or is wallet-scoped, or custody setup was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when a Production project names Managed custody (Production is BYOK only), custody_provider_not_in_release_channel, or provider_not_entitled.",
@@ -70,6 +78,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Provisions a new wallet under exactly one provider account: the project's Managed config for provider, or the Custody Connection named by connectionId. A body naming both, or neither, is rejected with 400.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createCustodyWalletRequestSchema),
@@ -80,7 +89,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet created",
         content: jsonContent(custodyWalletResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 422, 500, 503]),
       403: {
         description:
           "Forbidden: the API key lacks permission or is wallet-scoped, or the provider account was refused. A refusal's details.reason names the failed check: custody_mode_not_allowed when provider names a Managed config in a Production project (Production is BYOK only: create the wallet in a Custody Connection with connectionId), custody_provider_not_in_release_channel, or provider_not_entitled.",
@@ -218,7 +227,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       "Signs a server-authored memo message with the wallet selected by an authenticated API key or Clerk JWT, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(signerCheckRequestSchema),
@@ -229,7 +238,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Signer check verified in simulation",
         content: jsonContent(custodySignerCheckResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 502]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 502]),
     },
   });
 
@@ -301,10 +310,13 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       tags: ["Wallets"],
       summary: `${action[0].toUpperCase()}${action.slice(1)} wallet approval request`,
       operationId: `${action}WalletApprovalRequest`,
-      description: `${action[0].toUpperCase()}${action.slice(1)}s a pending wallet operation approval request. ${authorization}`,
+      description: `${action[0].toUpperCase()}${action.slice(1)}s a pending wallet operation approval request. ${authorization}${action === "approve" ? ` ${REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION}` : ""}`,
       security: [{ apiKeyAuth: [] }],
       request: {
-        headers: projectScopeHeaders,
+        headers:
+          action === "approve"
+            ? projectScopeWithRequiredIdempotencyHeaders
+            : projectScopeWithAcceptedIdempotencyHeaders,
         params: z.object({
           approvalRequestId: z.string().openapi({
             description: "Approval request ID.",
@@ -317,7 +329,8 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
           description: "Wallet approval request",
           content: jsonContent(walletApprovalRequestResponse),
         },
-        ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+        // Any action that receives a key can answer 422 for a reused one.
+        ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
       },
     });
   }
@@ -366,7 +379,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
       params: z.object({
         walletId: walletIdParamSchema,
       }),
-      headers: projectScopeHeaders,
+      headers: projectScopeWithAcceptedIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(updateCustodyWalletRequestSchema),
@@ -377,7 +390,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Wallet updated",
         content: jsonContent(custodyWalletResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
     },
   });
 }

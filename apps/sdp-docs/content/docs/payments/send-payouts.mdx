@@ -49,7 +49,7 @@ Send transfers sequentially or in modest concurrency (4–8 in flight); high con
 
 Two layers protect you against double-spends if a worker dies mid-run:
 
-1. **Idempotency keys** — generate one stable `Idempotency-Key` per recipient row and reuse it for retries. An identical request for the same exact source wallet returns the original transfer; reusing the key for a different request returns `409`.
+1. **Idempotency keys** — generate one stable `Idempotency-Key` per recipient row and reuse it for retries. The header is required. An identical request for the same exact source wallet returns the original transfer; reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`. See [Idempotency](/docs/developing-with-sdp/idempotency).
 2. **Application mapping** — persist the SDP transfer ID for each recipient row before moving to the next row. On restart, replay with the same idempotency key or skip rows that already have an associated `Transfer.id`.
 
 The on-chain `signature` is unique across SDP transfers once populated. Use it as a cross-indexer integrity check, not as the retry mechanism.

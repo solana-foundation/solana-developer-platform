@@ -18,14 +18,34 @@ export const projectScopeWithIdempotencyHeaders = projectScopeHeaders.extend({
 });
 
 /**
- * For routes where the header is the ONLY accepted idempotency source and the
- * runtime refuses a request without it (the vault and external-wallet money
- * movers). Marking it optional here would let a generated client omit a header
- * the API 400s on.
+ * For routes whose runtime refuses a request without the header: chains that
+ * declare `idempotent({ key: "required" })` (ADR 0008), and the vault and
+ * external-wallet money movers that keep their own handling. Marking it
+ * optional here would let a generated client omit a header the API 400s on.
  */
 export const projectScopeWithRequiredIdempotencyHeaders = projectScopeHeaders.extend({
   "Idempotency-Key": idempotencyKeyHeaderSchema,
 });
+
+/**
+ * Request headers for routes whose chain declares `idempotent({ key: "accepted" })`
+ * (ADR 0008): the key is optional and honored when sent. Routes outside `stable`
+ * that keep their own key handling use `projectScopeWithIdempotencyHeaders`.
+ */
+export const projectScopeWithAcceptedIdempotencyHeaders = projectScopeHeaders.extend({
+  "Idempotency-Key": idempotencyKeyHeaderSchema.optional().openapi({
+    description:
+      "Optional. 1-255 printable ASCII characters; send a UUID per logical operation and reuse it on every retry. Within 24 hours, a retry with the same key and request replays the stored status and body with `Idempotent-Replayed: true`; the same key with a different request or credential returns 422 `IDEMPOTENCY_KEY_REUSED`, and a key whose original request is still running returns 409 `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. A credential that has lost access to the resource since the original request gets 403 instead of the stored response.",
+  }),
+});
+
+/**
+ * Operation-description suffix for routes whose chain declares
+ * `idempotent({ key: "required" })` (ADR 0008). The API has no response-header
+ * pattern, so `Idempotent-Replayed` is documented here.
+ */
+export const REQUIRED_IDEMPOTENCY_KEY_DESCRIPTION =
+  "The `Idempotency-Key` header is required: a request without one returns 400 `IDEMPOTENCY_KEY_REQUIRED`. Send a UUID per logical operation and reuse it on every retry. Within 24 hours, a retry with the same key and request replays the stored status and body with the response header `Idempotent-Replayed: true`; the same key with a different request or credential returns 422 `IDEMPOTENCY_KEY_REUSED`, and a key whose original request is still running returns 409 `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. A credential that has lost access to the resource since the original request gets 403 instead of the stored response.";
 
 export const errorResponses = (schema: z.ZodTypeAny, codes: number[]) =>
   Object.fromEntries(
