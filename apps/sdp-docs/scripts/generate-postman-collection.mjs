@@ -212,8 +212,8 @@ function idempotencyKeyVariable(operation, routePath, method) {
  * Collection-level scripts for the saved Idempotency-Key. Each operation keeps
  * its own `idempotencyKey.<operationId>` variable, minted only when none is saved. The key is retired once
  * the operation has a final answer: a replay, or any status below 500 other
- * than 409 and 429 (the rule the dashboard uses). A timeout runs no test
- * script and a 5xx keeps the key, so pressing Send again retries the same
+ * than 409 and 429 (the rule the dashboard uses). A dry run never retires it.
+ * A timeout runs no test script and a 5xx keeps the key, so pressing Send again retries the same
  * operation instead of starting a second one.
  */
 const SAVED_KEY_VARIABLE = [
@@ -240,7 +240,9 @@ const IDEMPOTENCY_KEY_EVENTS = [
       type: "text/javascript",
       exec: [
         ...SAVED_KEY_VARIABLE,
-        "if (variable) {",
+        'const dryRun = pm.request.headers.find((h) => h.key.toLowerCase() === "dry-run" && !h.disabled);',
+        '// A dry run answers without running the operation, so it never retires its key.',
+        'if (variable && !(dryRun && String(pm.variables.replaceIn(dryRun.value)).toLowerCase() === "true")) {',
         "  const status = pm.response.code;",
         '  const replayed = pm.response.headers.get("Idempotent-Replayed") === "true";',
         "  if (replayed || (status < 500 && status !== 409 && status !== 429)) {",
