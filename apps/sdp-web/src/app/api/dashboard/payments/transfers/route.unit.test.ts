@@ -61,8 +61,7 @@ describe("POST /api/dashboard/payments/transfers", () => {
     mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 202 }));
   });
 
-  // Without the key a retried send is a new payment, and a retry of one a
-  // policy is holding opens a second approval.
+  // Without the key a retried send is a new payment.
   it("forwards the Idempotency-Key and nothing else from the caller", async () => {
     const request = new Request("https://dashboard.example/api/dashboard/payments/transfers", {
       method: "POST",

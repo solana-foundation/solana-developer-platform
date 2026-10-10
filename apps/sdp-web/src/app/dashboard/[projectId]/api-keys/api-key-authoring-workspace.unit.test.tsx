@@ -6,8 +6,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { saveApiKeyAuthoringAction } from "./actions";
 import type { ApiKeyAuthoringExistingKey } from "./api-key-authoring";
-import type { ApiKeyAuthoringWallets } from "./api-key-authoring.data";
 import { ApiKeyAuthoringWorkspace } from "./api-key-authoring-workspace";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -41,16 +41,35 @@ function permissionChips(): string[] {
     .map((item) => item.textContent ?? "");
 }
 
-const WITH_POLICIES: ApiKeyAuthoringWallets = { policiesInReleaseChannel: true, wallets: [] };
+const WALLET_A: PaymentsDashboardWallet = {
+  id: "wallet_a",
+  walletId: "wallet_a",
+  publicKey: "So11111111111111111111111111111111111111112",
+  label: "Treasury",
+  isRuntimeExecutionAllowed: true,
+};
+const WALLET_B: PaymentsDashboardWallet = {
+  ...WALLET_A,
+  id: "wallet_b",
+  walletId: "wallet_b",
+  label: "Ops",
+};
+const WALLETS = [WALLET_A, WALLET_B];
 
-async function openPermissionsStep(authoringWallets: ApiKeyAuthoringWallets = WITH_POLICIES) {
+async function openPermissionsStep(wallets: PaymentsDashboardWallet[] = WALLETS) {
   const user = userEvent.setup();
   render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <ApiKeyAuthoringWorkspace mode="create" authoringWallets={authoringWallets} />
+      <ApiKeyAuthoringWorkspace mode="create" wallets={wallets} />
     </I18nProvider>
   );
   await user.type(screen.getByLabelText("Name"), "Partner backend");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  return user;
+}
+
+async function openAccessStep() {
+  const user = await openPermissionsStep();
   await user.click(screen.getByRole("button", { name: "Continue" }));
   return user;
 }
@@ -111,21 +130,7 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
   });
 });
 
-const WALLET_A: PaymentsDashboardWallet = {
-  id: "wallet_a",
-  walletId: "wallet_a",
-  publicKey: "So11111111111111111111111111111111111111112",
-  label: "Treasury",
-  isRuntimeExecutionAllowed: true,
-};
-const WALLET_B: PaymentsDashboardWallet = {
-  ...WALLET_A,
-  id: "wallet_b",
-  walletId: "wallet_b",
-  label: "Ops",
-};
-
-const RESTRICTED_KEY: ApiKeyAuthoringExistingKey = {
+const EXISTING_KEY: ApiKeyAuthoringExistingKey = {
   id: "key_1",
   name: "Partner backend",
   role: "api_developer",
@@ -135,96 +140,161 @@ const RESTRICTED_KEY: ApiKeyAuthoringExistingKey = {
   walletScope: "selected",
   signingWalletId: "wallet_a",
   signingWalletIds: ["wallet_a"],
-  policyBindings: [
-    {
-      id: "binding_1",
-      bindingScope: "selected",
-      walletId: "wallet_a",
-      custodyWalletId: null,
-      walletControlProfileId: null,
-      walletControlProfileRevisionId: null,
-      apiKeyControlProfileId: "profile_1",
-      apiKeyControlProfileRevisionId: "revision_1",
-      createdAt: "2026-07-15T00:00:00.000Z",
-      updatedAt: "2026-07-15T00:00:00.000Z",
-    },
-  ],
+  allowedOperations: [],
 };
 
-function policiesOn(): ApiKeyAuthoringWallets {
-  return {
-    policiesInReleaseChannel: true,
-    wallets: [WALLET_A, WALLET_B].map((wallet) => ({
-      ...wallet,
-      controlStatus: "default_allow",
-      activeRevisionNumber: null,
-    })),
-  };
+function familyBox(name: string): HTMLInputElement {
+  return screen.getByRole<HTMLInputElement>("checkbox", { name });
 }
 
-function policiesOut(): ApiKeyAuthoringWallets {
-  return { policiesInReleaseChannel: false, wallets: [WALLET_A, WALLET_B] };
-}
+describe("ApiKeyAuthoringWorkspace allowed operations", () => {
+  it("starts unrestricted, with no operation list to fill in", async () => {
+    await openAccessStep();
 
-async function openRestrictedKeyWalletsStep(authoringWallets: ApiKeyAuthoringWallets) {
-  const user = userEvent.setup();
-  render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <ApiKeyAuthoringWorkspace
-        mode="edit"
-        authoringWallets={authoringWallets}
-        initialKey={RESTRICTED_KEY}
-      />
-    </I18nProvider>
-  );
-  await user.click(screen.getByRole("button", { name: "Continue" }));
-  await user.click(screen.getByRole("button", { name: "Continue" }));
-  return user;
-}
-
-const SCOPE_LOCKED =
-  "This key has restrictions, so its wallet access can't change while Policies is unavailable. Create a new key instead.";
-const RESTRICTIONS_INACTIVE =
-  "This key's restrictions are kept but don't apply while Policies is unavailable.";
-
-describe("ApiKeyAuthoringWorkspace without the Policies module", () => {
-  it.each([
-    ["in", policiesOn(), true],
-    ["out of", policiesOut(), false],
-  ])(
-    "with Policies %s the release channel, wallet controls show: %s",
-    async (_, wallets, shown) => {
-      const user = await openPermissionsStep(wallets);
-      await user.click(screen.getByRole("button", { name: "Continue" }));
-      expect(screen.queryByText("Add API-key restrictions") !== null).toBe(shown);
-
-      await user.click(screen.getByRole("button", { name: "Continue" }));
-      expect(screen.queryByText("Wallet-control baseline") !== null).toBe(shown);
-      expect(screen.queryByText("Wallet control baseline") !== null).toBe(shown);
-      expect(screen.queryByText(/Wallet controls always apply/) !== null).toBe(shown);
-      expect(screen.queryAllByText(/default allow/i).length > 0).toBe(shown);
-    }
-  );
-
-  it("says a restricted key's wallet scope is locked and keeps Continue disabled", async () => {
-    const user = await openRestrictedKeyWalletsStep(policiesOut());
-    expect(screen.getByText(RESTRICTIONS_INACTIVE)).toBeTruthy();
-    expect(screen.queryByText(SCOPE_LOCKED)).toBeNull();
-
-    await user.click(screen.getByRole("checkbox", { name: "Select Ops" }));
-
-    expect(screen.getByText(SCOPE_LOCKED)).toBeTruthy();
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Continue" }).disabled).toBe(true);
-  });
-
-  it("lets the same scope change through when Policies is in the release channel", async () => {
-    const user = await openRestrictedKeyWalletsStep(policiesOn());
-    await user.click(screen.getByRole("checkbox", { name: "Select Ops" }));
-
-    expect(screen.queryByText(SCOPE_LOCKED)).toBeNull();
-    expect(screen.queryByText(RESTRICTIONS_INACTIVE)).toBeNull();
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /^All operations/ }).checked).toBe(
+      true
+    );
+    expect(screen.queryByRole("checkbox", { name: "Payments" })).toBeNull();
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Continue" }).disabled).toBe(
       false
+    );
+  });
+
+  it("asks for at least one operation once the key is limited, and blocks Continue until then", async () => {
+    const user = await openAccessStep();
+
+    await user.click(screen.getByRole("radio", { name: /^Only selected operations/ }));
+
+    for (const family of ["Payments", "Ramps", "Issuance", "Program interactions", "Privacy"]) {
+      expect(familyBox(family).checked).toBe(false);
+    }
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Continue" }).disabled).toBe(true);
+    expect(
+      screen.getByText("Select at least one operation, or allow all operations.")
+    ).toBeTruthy();
+
+    await user.click(familyBox("Payments"));
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Continue" }).disabled).toBe(
+      false
+    );
+    expect(
+      screen.queryByText("Select at least one operation, or allow all operations.")
+    ).toBeNull();
+  });
+
+  it("shows a ticked family's types, all ticked, and narrows to the remaining types", async () => {
+    const user = await openAccessStep();
+    await user.click(screen.getByRole("radio", { name: /^Only selected operations/ }));
+    await user.click(familyBox("Ramps"));
+
+    const onramp = screen.getByRole<HTMLInputElement>("checkbox", { name: "ramp_onramp_quote" });
+    const offramp = screen.getByRole<HTMLInputElement>("checkbox", { name: "ramp_offramp_quote" });
+    expect(onramp.checked).toBe(true);
+    expect(offramp.checked).toBe(true);
+
+    await user.click(onramp);
+
+    expect(onramp.checked).toBe(false);
+    expect(offramp.checked).toBe(true);
+    // Only part of the family is ticked, so the family box shows a dash, not a tick.
+    expect(familyBox("Ramps").checked).toBe(false);
+    expect(familyBox("Ramps").indeterminate).toBe(true);
+  });
+
+  it("hides a family's types until the family is ticked", async () => {
+    const user = await openAccessStep();
+    await user.click(screen.getByRole("radio", { name: /^Only selected operations/ }));
+
+    expect(screen.queryByRole("checkbox", { name: "ramp_onramp_quote" })).toBeNull();
+    await user.click(familyBox("Ramps"));
+    expect(screen.getByRole("checkbox", { name: "ramp_onramp_quote" })).toBeTruthy();
+    await user.click(familyBox("Ramps"));
+    expect(screen.queryByRole("checkbox", { name: "ramp_onramp_quote" })).toBeNull();
+  });
+
+  it("repeats the choice on the review step", async () => {
+    const user = await openAccessStep();
+    await user.click(screen.getByRole("radio", { name: /^Only selected operations/ }));
+    await user.click(familyBox("Payments"));
+    await user.click(familyBox("Ramps"));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.getAllByText("Payments, Ramps").length).toBeGreaterThan(0);
+  });
+
+  it("saves the ticked operations with the key", async () => {
+    vi.mocked(saveApiKeyAuthoringAction).mockResolvedValue({ ok: true, message: "Saved" });
+    const user = await openAccessStep();
+    await user.click(screen.getByRole("radio", { name: /^Only selected operations/ }));
+    await user.click(familyBox("Payments"));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Create key" }));
+
+    expect(saveApiKeyAuthoringAction).toHaveBeenCalledTimes(1);
+    expect(saveApiKeyAuthoringAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "create",
+        draft: expect.objectContaining({
+          name: "Partner backend",
+          operationsScope: "selected",
+          selectedOperations: ["payment"],
+        }),
+      })
+    );
+  });
+
+  it("saves an unrestricted key without a list", async () => {
+    vi.mocked(saveApiKeyAuthoringAction).mockResolvedValue({ ok: true, message: "Saved" });
+    const user = await openAccessStep();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Create key" }));
+
+    expect(saveApiKeyAuthoringAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        draft: expect.objectContaining({ operationsScope: "all", selectedOperations: [] }),
+      })
+    );
+  });
+
+  it("opens an existing restricted key on its own list", async () => {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiKeyAuthoringWorkspace
+          mode="edit"
+          wallets={WALLETS}
+          initialKey={{ ...EXISTING_KEY, allowedOperations: ["payment", "ramp_offramp_quote"] }}
+        />
+      </I18nProvider>
+    );
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(
+      screen.getByRole<HTMLInputElement>("radio", { name: /^Only selected operations/ }).checked
+    ).toBe(true);
+    expect(familyBox("Payments").checked).toBe(true);
+    expect(familyBox("Ramps").indeterminate).toBe(true);
+    expect(
+      screen.getByRole<HTMLInputElement>("checkbox", { name: "ramp_offramp_quote" }).checked
+    ).toBe(true);
+    expect(
+      screen.getByRole<HTMLInputElement>("checkbox", { name: "ramp_onramp_quote" }).checked
+    ).toBe(false);
+  });
+
+  it("opens an existing unrestricted key on All operations", async () => {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiKeyAuthoringWorkspace mode="edit" wallets={WALLETS} initialKey={EXISTING_KEY} />
+      </I18nProvider>
+    );
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.getByRole<HTMLInputElement>("radio", { name: /^All operations/ }).checked).toBe(
+      true
     );
   });
 });

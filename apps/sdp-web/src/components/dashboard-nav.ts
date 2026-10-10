@@ -4,7 +4,6 @@ import {
   ArrowLeftRightIcon,
   ArrowUpRightIcon,
   BlocksIcon,
-  CircleCheckBigIcon,
   CircleDotDashedIcon,
   CoinsIcon,
   FileTextIcon,
@@ -43,7 +42,6 @@ export type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
-  badge?: number;
   external?: boolean;
   children?: SubNavItem[];
   /** Marks the children as a collapsible disclosure group (chevron + persisted open state). */
@@ -240,7 +238,6 @@ export function getIntegrationActions(
 export function getNavSections(
   t: ReturnType<typeof useTranslations>,
   options: {
-    canReadApprovals: boolean;
     complianceEnabled: boolean;
     custodyEnabled: boolean;
     dvpEnabled: boolean;
@@ -249,8 +246,6 @@ export function getNavSections(
     issuanceEnabled: boolean;
     marketsEnabled: boolean;
     paymentsEnabled: boolean;
-    pendingApprovalCount: number | null;
-    policiesEnabled: boolean;
     privateChannelsEnabled: boolean;
     /** NEW DESIGN; the previous design's labels when off. */
     newDesign?: boolean;
@@ -336,15 +331,6 @@ export function getNavSections(
           href: DASHBOARD_SIDE_NAV_HREFS.apiKeys,
           icon: KeyRoundIcon,
         },
-        ...(options.policiesEnabled
-          ? [
-              {
-                label: t("Shared.dashboardShell.policies"),
-                href: DASHBOARD_SIDE_NAV_HREFS.policies,
-                icon: ShieldCheckIcon,
-              },
-            ]
-          : []),
         {
           label: t("Shared.dashboardShell.integrations"),
           href: DASHBOARD_SIDE_NAV_HREFS.integrations,
@@ -352,16 +338,6 @@ export function getNavSections(
           children: integrationActions,
           subnavKey: "integrations" as const,
         },
-        ...(options.policiesEnabled && options.canReadApprovals
-          ? [
-              {
-                label: t("Shared.dashboardShell.approvals"),
-                href: DASHBOARD_SIDE_NAV_HREFS.approvals,
-                icon: CircleCheckBigIcon,
-                ...(options.pendingApprovalCount ? { badge: options.pendingApprovalCount } : {}),
-              },
-            ]
-          : []),
       ],
     },
   ];

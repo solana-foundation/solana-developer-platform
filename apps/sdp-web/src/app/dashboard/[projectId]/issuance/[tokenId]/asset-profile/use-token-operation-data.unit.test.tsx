@@ -107,7 +107,6 @@ function wrapper({ children }: { children: ReactNode }) {
           issuance: true,
           markets: false,
           payments: false,
-          policies: false,
           privateChannels: false,
           newDesign: true,
           ramps: false,

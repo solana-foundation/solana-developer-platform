@@ -1,11 +1,11 @@
 "use client";
 
 import type {
+  AllowedOperation,
   ApiKeyEnvironment,
   ApiKeyRole,
   ApiKeyStatus,
   ApiKeyWalletBinding,
-  ApiKeyWalletPolicyBindingSummary,
   ApiKeyWalletScope,
   PaymentsDashboardWallet,
 } from "@sdp/types";
@@ -26,6 +26,7 @@ import {
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";
+import { operationsSummaryLabel } from "./api-key-operations-labels";
 
 const PREFIX_COLUMN_CLASS = "hidden @4xl/api-keys-table:table-cell";
 const STATUS_COLUMN_CLASS = "hidden @5xl/api-keys-table:table-cell";
@@ -44,7 +45,8 @@ export interface ApiKeyRecord {
   signingWalletId: string | null;
   signingWalletIds: string[];
   walletBindings: ApiKeyWalletBinding[];
-  policyBindings: ApiKeyWalletPolicyBindingSummary[];
+  /** Empty means the key may perform every operation. */
+  allowedOperations: AllowedOperation[];
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
@@ -75,12 +77,6 @@ function formatWalletLabel(wallet: PaymentsDashboardWallet): string {
   return wallet.label?.trim() || wallet.walletId;
 }
 
-function shortId(value: string | null): string {
-  if (!value) return "";
-  if (value.length <= 14) return value;
-  return `${value.slice(0, 6)}...${value.slice(-6)}`;
-}
-
 function getWalletNames(
   key: ApiKeyRecord,
   walletLabelById: Map<string, string>,
@@ -109,64 +105,6 @@ function getWalletNames(
   };
 }
 
-function formatPolicyBinding(
-  binding: ApiKeyWalletPolicyBindingSummary,
-  t: ReturnType<typeof useTranslations>
-): string {
-  if (binding.apiKeyControlProfileId) {
-    const revision = binding.apiKeyControlProfileRevisionId
-      ? t("DashboardCustody.revision", { id: shortId(binding.apiKeyControlProfileRevisionId) })
-      : "";
-    return t("DashboardCustody.apiProfile", {
-      id: shortId(binding.apiKeyControlProfileId),
-      revision,
-    });
-  }
-
-  if (binding.walletControlProfileId) {
-    const revision = binding.walletControlProfileRevisionId
-      ? t("DashboardCustody.revision", { id: shortId(binding.walletControlProfileRevisionId) })
-      : "";
-    return t("DashboardCustody.walletProfile", {
-      id: shortId(binding.walletControlProfileId),
-      revision,
-    });
-  }
-
-  return t("DashboardCustody.policyBinding");
-}
-
-function getPolicySummary(
-  key: ApiKeyRecord,
-  walletLabelById: Map<string, string>,
-  t: ReturnType<typeof useTranslations>
-): { label: string; title: string } {
-  if (key.policyBindings.length === 0) {
-    return {
-      label: t("DashboardCustody.noApiKeyPolicy"),
-      title: t("DashboardCustody.noAdditionalApiKeyPolicy"),
-    };
-  }
-
-  const policyLabels = key.policyBindings.map((binding) => {
-    const walletLabel =
-      binding.bindingScope === "all"
-        ? t("DashboardCustody.allWallets")
-        : (walletLabelById.get(binding.walletId ?? "") ??
-          binding.walletId ??
-          t("DashboardCustody.selectedWallet"));
-    return `${walletLabel}: ${formatPolicyBinding(binding, t)}`;
-  });
-
-  return {
-    label:
-      key.policyBindings.length === 1
-        ? t("DashboardCustody.policyBindingCount", { count: key.policyBindings.length })
-        : t("DashboardCustody.policyBindingsCount", { count: key.policyBindings.length }),
-    title: policyLabels.join("; "),
-  };
-}
-
 function AccessSummary({
   apiKey,
   walletLabelById,
@@ -176,7 +114,7 @@ function AccessSummary({
 }) {
   const t = useTranslations();
   const walletSummary = getWalletNames(apiKey, walletLabelById, t);
-  const policySummary = getPolicySummary(apiKey, walletLabelById, t);
+  const operationsSummary = operationsSummaryLabel(apiKey.allowedOperations ?? [], t);
 
   return (
     <div className="min-w-0">
@@ -185,9 +123,9 @@ function AccessSummary({
       </p>
       <p
         className="mt-1 truncate text-xs text-secondary"
-        title={`${walletSummary.title} · ${policySummary.title}`}
+        title={`${walletSummary.title} · ${operationsSummary}`}
       >
-        {walletSummary.label} · {policySummary.label}
+        {walletSummary.label} · {operationsSummary}
       </p>
     </div>
   );

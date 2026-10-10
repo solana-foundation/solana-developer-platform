@@ -25,13 +25,10 @@ import type {
   RampProviderEstimateResult,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
-  PaymentWalletPolicy as WalletPolicy,
-  PaymentWalletPolicyEnvelope as WalletPolicyEnvelope,
   PaymentsDashboardWallet as WalletRecord,
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type ComplianceIntent,
@@ -465,56 +462,6 @@ export async function fetchWalletBalances(
   return snapshot;
 }
 
-export async function updateWalletPolicy(
-  walletId: string,
-  policy: Pick<WalletPolicy, "defaultAction" | "rules">,
-  t: Translate,
-  commitMessage?: string,
-  options?: {
-    /**
-     * Active revision id of the server-read policy this edit was based on
-     * (null when no profile was active). Omit only without a server-read
-     * base — the API then skips the stale-write check.
-     */
-    expectedRevisionId?: string | null;
-  }
-): Promise<WalletPolicy> {
-  const trimmedCommitMessage = commitMessage?.trim();
-
-  const response = await dashboardRequest(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/policies`,
-    {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        defaultAction: policy.defaultAction,
-        rules: policy.rules,
-        ...(trimmedCommitMessage ? { commitMessage: trimmedCommitMessage } : {}),
-        ...(options?.expectedRevisionId !== undefined
-          ? { expectedRevisionId: options.expectedRevisionId }
-          : {}),
-      }),
-    }
-  );
-  const body = (await response.json().catch(() => ({}))) as WalletPolicyEnvelope;
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.walletPolicyUpdateFailed", { status: response.status })
-      )
-    );
-  }
-
-  if (!body.data?.policy) {
-    throw new Error(t("DashboardPayments.workspace.walletPolicyUpdateEmpty"));
-  }
-
-  return body.data.policy;
-}
-
 export interface CreateTransferInput {
   transferId?: string;
   sourceCustodyWalletId: string;
@@ -523,10 +470,6 @@ export interface CreateTransferInput {
   amount: string;
   memo?: string;
 }
-
-export type CreateTransferOutcome =
-  | { kind: "submitted"; transfer: TransferRecord }
-  | { kind: "approval_pending"; approvalRequestId: string };
 
 /**
  * An HTTP refusal from the transfer endpoint, carrying the status so the caller
@@ -544,23 +487,7 @@ export class TransferRequestError extends Error {
 }
 
 /**
- * The 202 a policy approval answers with. The approval request id is the one
- * thing the caller needs to point somebody at the decision.
- */
-const signingPendingEnvelopeSchema = z.object({
-  error: z.object({
-    code: z.literal("SIGNING_PENDING"),
-    details: z.object({ approvalRequestId: z.string().min(1) }),
-  }),
-});
-
-/**
  * Creates one transfer.
- *
- * A 202 is inside `response.ok` and is not a transfer: a wallet policy parked
- * the payment until somebody approves it, and the body names that request.
- * Reading it as a transfer turned a held payment into "Transfer failed", and a
- * press of Send again opened a second approval for the same payment.
  *
  * The idempotency key is transport metadata, sent as a header and never in the
  * body. Null for a caller whose request is already single-shot (a ramp transfer
@@ -570,7 +497,7 @@ export async function createTransfer(
   input: CreateTransferInput,
   t: Translate,
   idempotencyKey: string | null
-): Promise<CreateTransferOutcome> {
+): Promise<TransferRecord> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (idempotencyKey !== null) {
     headers[IDEMPOTENCY_KEY_HEADER] = idempotencyKey;
@@ -599,16 +526,6 @@ export async function createTransfer(
   }
 
   const body: unknown = await response.json().catch(() => null);
-  if (response.status === 202) {
-    const held = signingPendingEnvelopeSchema.safeParse(body);
-    if (!held.success) {
-      throw new Error(t("DashboardPayments.workspace.transferMissing"));
-    }
-    return {
-      kind: "approval_pending",
-      approvalRequestId: held.data.error.details.approvalRequestId,
-    };
-  }
   // SAFETY: the transfer endpoint's success envelope is `PaymentTransferEnvelope`
   // (`@sdp/types`); only the presence of the transfer is checked here, as before.
   const envelope = body as TransferEnvelope | null;
@@ -616,7 +533,7 @@ export async function createTransfer(
     throw new Error(t("DashboardPayments.workspace.transferMissing"));
   }
 
-  return { kind: "submitted", transfer: envelope.data.transfer };
+  return envelope.data.transfer;
 }
 
 export async function fetchBatchRecipients(
@@ -688,10 +605,6 @@ export interface CreateTransferBatchResult {
   transfers: TransferRecord[];
 }
 
-export type CreateTransferBatchOutcome =
-  | { kind: "submitted"; result: CreateTransferBatchResult }
-  | { kind: "approval_pending"; message: string };
-
 /**
  * An HTTP refusal from the batch endpoint, carrying the status so the caller
  * can decide the idempotency key's fate: a 4xx is a definitive answer and
@@ -709,18 +622,6 @@ export class TransferBatchRequestError extends Error {
   }
 }
 
-/** An approval hold is specifically the 202 SIGNING_PENDING contract. */
-function isSigningPendingEnvelope(body: unknown): boolean {
-  if (typeof body !== "object" || body === null || !("error" in body)) return false;
-  const error = (body as { error?: unknown }).error;
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "SIGNING_PENDING"
-  );
-}
-
 /**
  * The caller's idempotency key is transport metadata and is never copied into
  * the JSON body; the proxy route forwards that single header upstream.
@@ -729,7 +630,7 @@ export async function createTransferBatch(
   input: PaymentTransferBatchRequest,
   t: Translate,
   idempotencyKey: string
-): Promise<CreateTransferBatchOutcome> {
+): Promise<CreateTransferBatchResult> {
   const response = await dashboardRequest("/api/dashboard/payments/transfers/batch", {
     method: "POST",
     headers: { "Content-Type": "application/json", [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
@@ -746,24 +647,13 @@ export async function createTransferBatch(
     );
   }
   const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
-  // 202 is inside `response.ok`: an approval hold is an accepted request whose
-  // execution is parked, not a refusal.
-  if (response.status === 202 && isSigningPendingEnvelope(body)) {
-    return {
-      kind: "approval_pending",
-      message: getApiError(body, t("DashboardPayments.batchSend.resultApprovalPending")),
-    };
-  }
   if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
     throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
   }
   return {
-    kind: "submitted",
-    result: {
-      batch: body.data.batch,
-      recipients: body.data.recipients,
-      transfers: body.data.transfers,
-    },
+    batch: body.data.batch,
+    recipients: body.data.recipients,
+    transfers: body.data.transfers,
   };
 }
 

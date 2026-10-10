@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
+import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
@@ -27,18 +27,15 @@ import {
   type EarnVaultWithdrawal,
   type EarnVaultWithdrawalPreview,
   fetchEarnVaultWithdrawalPreview,
-  fetchEarnVaultWithdrawalsByRequestId,
   useEarnVaultWithdrawalOutcome,
 } from "./earn-program-data";
 import type { VaultSubmissionObserver } from "./earn-vault-movement";
 
 export { EarnVaultWithdrawalOutcomeTracker } from "./earn-outcome-trackers";
 
-import { EarnVaultApprovalResult } from "./earn-vault-approval-result";
 import {
   mergeObservedVaultMovement,
   observableVaultMovement,
-  vaultApprovalPending,
   vaultMovementPanelKey,
   vaultMovementProcessing,
   vaultMovementProgressStep,
@@ -118,22 +115,10 @@ function shareBalanceHint(
   return t("DashboardEarn.vaultWithdraw.sharesHeld", { shares: withdrawableShares });
 }
 
-type WithdrawalOutcome =
-  | {
-      kind: "approval_pending";
-      approvalRequestId?: string;
-      walletOperationId?: string;
-    }
-  | {
-      kind: "withdrawal";
-      movement: EarnVaultWithdrawal;
-      /**
-       * The approval executor won the race between the held-key pre-flight and
-       * this POST: real money DID move — once, via the approval — but THIS
-       * submission moved nothing. Same rule as the deposit's absorbed case.
-       */
-      absorbedByApproval?: true;
-    };
+type WithdrawalOutcome = {
+  kind: "withdrawal";
+  movement: EarnVaultWithdrawal;
+};
 
 type WithdrawalSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
@@ -142,7 +127,6 @@ type WithdrawalSubmissionResolution =
 function resolveWithdrawalSubmission(
   result: Awaited<ReturnType<typeof createEarnVaultWithdrawal>>,
   fallbackError: string,
-  keyWasHeld: boolean,
   slippageExceededMessage: string
 ): WithdrawalSubmissionResolution {
   if (!result.ok) {
@@ -151,22 +135,11 @@ function resolveWithdrawalSubmission(
     }
     return { kind: "error", message: result.error || fallbackError };
   }
-  if (result.data.kind === "approval_pending") {
-    return { kind: "outcome", outcome: vaultApprovalPending(result.data) };
-  }
-
   const withdrawal = result.data.withdrawal;
   if (withdrawal.status === "failed") {
     return {
       kind: "error",
       message: withdrawal.failureReason || fallbackError,
-    };
-  }
-  if (withdrawal.replayed && keyWasHeld) {
-    return {
-      kind: "outcome",
-      outcome: { kind: "withdrawal", movement: withdrawal, absorbedByApproval: true },
-      withdrawn: withdrawal,
     };
   }
   return {
@@ -183,7 +156,6 @@ function withdrawalProgressStep(
 ): number {
   if (settlement === "provider_order") {
     if (!outcome) return step === "review" ? 1 : 0;
-    if (outcome.kind !== "withdrawal" || outcome.absorbedByApproval) return 2;
     return outcome.movement.status === "confirmed" || outcome.movement.status === "finalized"
       ? 3
       : 2;
@@ -251,22 +223,6 @@ function deriveWithdrawalFormState(
   };
 }
 
-function WithdrawalApprovalResult({
-  outcome,
-  onClose,
-}: {
-  outcome: Extract<WithdrawalOutcome, { kind: "approval_pending" }>;
-  onClose: () => void;
-}) {
-  return (
-    <EarnVaultApprovalResult
-      approvalRequestId={outcome.approvalRequestId}
-      onClose={onClose}
-      walletOperationId={outcome.walletOperationId}
-    />
-  );
-}
-
 interface WithdrawalResultCopy {
   body: string;
   note: string;
@@ -278,20 +234,11 @@ interface WithdrawalResultCopy {
 export type EarnVaultWithdrawalSettlement = "atomic" | "provider_order";
 
 function withdrawalResultCopy(
-  outcome: Extract<WithdrawalOutcome, { kind: "withdrawal" }>,
+  outcome: WithdrawalOutcome,
   t: ReturnType<typeof useTranslations>,
   settlement: EarnVaultWithdrawalSettlement
 ): WithdrawalResultCopy {
   if (settlement === "provider_order") {
-    if (outcome.absorbedByApproval) {
-      return {
-        title: t("DashboardEarn.vaultWithdraw.providerOrderAbsorbedTitle"),
-        body: t("DashboardEarn.vaultWithdraw.providerOrderAbsorbedBody"),
-        note: t("DashboardEarn.vaultWithdraw.providerOrderNote"),
-        status: t("DashboardEarn.vaultWithdraw.absorbedStatus"),
-        statusVariant: "info",
-      };
-    }
     if (outcome.movement.status === "failed") {
       return {
         title: t("DashboardEarn.vaultWithdraw.providerOrderFailedTitle"),
@@ -319,15 +266,6 @@ function withdrawalResultCopy(
           : "DashboardEarn.vaultWithdraw.providerOrderPendingStatus"
       ),
       statusVariant: "warning",
-    };
-  }
-  if (outcome.absorbedByApproval) {
-    return {
-      title: t("DashboardEarn.vaultWithdraw.absorbedTitle"),
-      body: t("DashboardEarn.vaultWithdraw.absorbedBody"),
-      note: t("DashboardEarn.vaultWithdraw.absorbedNote"),
-      status: t("DashboardEarn.vaultWithdraw.absorbedStatus"),
-      statusVariant: "info",
     };
   }
   switch (outcome.movement.status) {
@@ -366,7 +304,7 @@ function withdrawalResultCopy(
   }
 }
 
-function WithdrawalMovementResult({
+function WithdrawalResult({
   outcome,
   environment,
   onClose,
@@ -374,7 +312,7 @@ function WithdrawalMovementResult({
   requestedAmount,
   settlement,
 }: {
-  outcome: Extract<WithdrawalOutcome, { kind: "withdrawal" }>;
+  outcome: WithdrawalOutcome;
   environment: SdpEnvironment;
   onClose: () => void;
   position: EarnVaultPosition;
@@ -389,7 +327,7 @@ function WithdrawalMovementResult({
   const { movement: withdrawal } = outcome;
   const copy = withdrawalResultCopy(outcome, t, settlement);
   const sharedStatus =
-    outcome.absorbedByApproval || settlement === "provider_order"
+    settlement === "provider_order"
       ? null
       : earnVaultPositionStatusLabels(
           earnVaultWithdrawalUiState(withdrawal.status).positionStatus,
@@ -397,9 +335,7 @@ function WithdrawalMovementResult({
         );
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
-  const processing =
-    !outcome.absorbedByApproval &&
-    (withdrawal.status === "requested" || withdrawal.status === "submitted");
+  const processing = withdrawal.status === "requested" || withdrawal.status === "submitted";
 
   return (
     <>
@@ -458,36 +394,6 @@ function WithdrawalMovementResult({
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
       </div>
     </>
-  );
-}
-
-function WithdrawalResult({
-  outcome,
-  environment,
-  onClose,
-  position,
-  requestedAmount,
-  settlement,
-}: {
-  outcome: WithdrawalOutcome;
-  environment: SdpEnvironment;
-  onClose: () => void;
-  position: EarnVaultPosition;
-  requestedAmount: string;
-  settlement: EarnVaultWithdrawalSettlement;
-}) {
-  if (outcome.kind === "approval_pending") {
-    return <WithdrawalApprovalResult onClose={onClose} outcome={outcome} />;
-  }
-  return (
-    <WithdrawalMovementResult
-      environment={environment}
-      onClose={onClose}
-      outcome={outcome}
-      position={position}
-      requestedAmount={requestedAmount}
-      settlement={settlement}
-    />
   );
 }
 
@@ -952,24 +858,13 @@ export function EarnVaultWithdrawModal({
       shares,
       toleranceBps: slippagePolicy === null ? null : slippageBps,
     });
-    const resolvedKey = await resolveHeldIdempotencyKey(
-      vaultWithdrawalIdempotencyKeyStore,
-      fingerprint,
-      controller.signal,
-      fetchEarnVaultWithdrawalsByRequestId
-    );
-    if (resolvedKey.kind === "aborted") return;
-    if (resolvedKey.kind === "unavailable") {
-      setSubmitError(t("DashboardEarn.vaultWithdraw.heldKeyUnavailable"));
-      return;
-    }
+    const resolvedKey = vaultWithdrawalIdempotencyKeyStore.claimReportingReuse(fingerprint);
 
-    // A HELD key must replay the floor it was MINTED with, verbatim — the
-    // deposit modal documents why. A KEPT key — one a prior ambiguous attempt
-    // (a 5xx, a lost answer) left live — must replay its minted floor too,
-    // and worse: the changed-request refusal is a 409, which retires the key
-    // and lets the next submit mint a fresh one while the first attempt may
-    // already have exited. The floor memo answers for both. A fresh key takes
+    // A KEPT key — one a prior ambiguous attempt (a 5xx, a lost answer) left
+    // live — must replay the floor it was MINTED with, verbatim — the deposit
+    // modal documents why. The changed-request refusal is a 409, which retires
+    // the key and lets the next submit mint a fresh one while the first attempt
+    // may already have exited. The floor memo answers for it. A fresh key takes
     // the freshly derived floor, and records it for exactly that future replay.
     // A reuse whose memo LOST the floor cannot re-floor safely at all — it
     // stops here, submitting nothing, rather than pair the live key with a
@@ -1016,7 +911,6 @@ export function EarnVaultWithdrawModal({
     const resolution = resolveWithdrawalSubmission(
       result,
       t("DashboardEarn.vaultWithdraw.submitError"),
-      resolvedKey.wasHeld,
       // A blown floor gets THIS surface's own words and the control that
       // fixes it, not a relayed simulation log.
       t("DashboardEarn.vaultWithdraw.slippageExceeded")

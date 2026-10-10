@@ -377,9 +377,6 @@ importers:
       '@sdp/issuance':
         specifier: workspace:*
         version: link:../../packages/sdp-issuance
-      '@sdp/policy':
-        specifier: workspace:*
-        version: link:../../packages/sdp-policy
       '@sdp/private-channels':
         specifier: workspace:*
         version: link:../../packages/sdp-private-channels

@@ -10,7 +10,7 @@ import {
  * The vault DEPOSIT idempotency key store (PRO-1692).
  *
  * All of the machinery — the per-tab `sessionStorage` tier, the in-memory
- * fallback, the quota-divergence handling, the approval-hold pinning, the
+ * fallback, the quota-divergence handling, the
  * expiring-entry bound — lives in `@/lib/idempotency-key-store.ts`, shared with
  * the withdrawal flow. This module owns the two things that make a DEPOSIT a
  * deposit: its versioned storage key (which existing tabs already hold data

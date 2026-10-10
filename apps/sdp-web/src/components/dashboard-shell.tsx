@@ -44,7 +44,6 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { useTranslations } from "@/i18n/provider";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
 import {
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
@@ -130,7 +129,6 @@ function SidebarGroup({
         ) : null}
       </p>
       <div className="space-y-0.5 refresh:space-y-0">
-        {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: each branch preserves the shared navigation item and accessible payments disclosure in one rendering pass. */}
         {items.map((item) => {
           const Icon = item.icon;
           const active = isDashboardNavItemActive(navigationLocation, item.href);
@@ -154,13 +152,7 @@ function SidebarGroup({
                     onNavigate?.();
                   }}
                   title={isCollapsed ? item.label : undefined}
-                  aria-label={
-                    isCollapsed && item.badge
-                      ? `${item.label}, ${t("Shared.dashboardShell.pendingApprovals", { count: item.badge })}`
-                      : isCollapsed
-                        ? item.label
-                        : undefined
-                  }
+                  aria-label={isCollapsed ? item.label : undefined}
                   className={cn(
                     navItemBase,
                     active ? navItemActive : navItemInactive,
@@ -172,22 +164,7 @@ function SidebarGroup({
                     className="h-5 w-5 shrink-0 refresh:size-5 refresh:text-primary/45"
                     strokeWidth={1.9}
                   />
-                  {isCollapsed ? null : (
-                    <>
-                      <span className="whitespace-nowrap">{item.label}</span>
-                      {item.badge ? (
-                        <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-medium text-on-primary">
-                          {item.badge > 99 ? "99+" : item.badge}
-                        </span>
-                      ) : null}
-                    </>
-                  )}
-                  {isCollapsed && item.badge ? (
-                    <span
-                      className="absolute top-1 right-1 size-2 rounded-full border border-on-primary bg-primary"
-                      aria-hidden="true"
-                    />
-                  ) : null}
+                  {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
                 </Link>
                 {subnavKey && !isCollapsed ? (
                   <button
@@ -383,7 +360,6 @@ function usesWorkspaceViewport(pathname: string): boolean {
   return (
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/issuance/create" ||
-    pathname === "/dashboard/policies" ||
     pathname === "/dashboard/api-keys" ||
     pathname === "/dashboard/api-keys/new" ||
     (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
@@ -393,7 +369,6 @@ function usesWorkspaceViewport(pathname: string): boolean {
     pathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
     pathname.startsWith("/dashboard/integrations/private-channels") ||
-    pathname.startsWith("/dashboard/approvals") ||
     isWalletDetailRoute
   );
 }
@@ -417,7 +392,6 @@ export function DashboardShell({
     markets: marketsEnabled,
     newDesign: newDesignEnabled = false,
     payments: paymentsEnabled,
-    policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
     ramps: rampsEnabled,
   } = flags;
@@ -425,12 +399,11 @@ export function DashboardShell({
   const { isLoaded, isSignedIn, orgId } = useAuth();
   const pathname = useDashboardPathname();
   useSyncDashboardUrlStateWithRouter();
-  const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
+  const { dashboardAccess, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
-  const [pendingApprovalCount, setPendingApprovalCount] = useState<number | null>(null);
   // A page whose title is data (a contact's name) names itself here.
   const [pageTitleOverride, setPageTitleOverride] = useState<DashboardPageTitleOverride | null>(
     null
@@ -466,12 +439,10 @@ export function DashboardShell({
     enabledTransactionModules(flags),
     custodyEnabled,
     paymentsEnabled,
-    policiesEnabled,
     newDesignEnabled,
     flags.newDesignModules
   );
   const navSections = getNavSections(t, {
-    canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     complianceEnabled,
     custodyEnabled,
     dvpEnabled,
@@ -480,8 +451,6 @@ export function DashboardShell({
     issuanceEnabled,
     marketsEnabled,
     paymentsEnabled,
-    pendingApprovalCount,
-    policiesEnabled,
     privateChannelsEnabled,
     newDesign: newDesignEnabled,
     newDesignModules: flags.newDesignModules,
@@ -590,40 +559,6 @@ export function DashboardShell({
       setMobileSidebarOpen(false);
     }
   }, [pathname]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-fetch pending approvals when the URL's Project changes; the request reads it from the URL.
-  useEffect(() => {
-    if (!policiesEnabled || !dashboardAccess.capabilities.canReadApprovals) {
-      setPendingApprovalCount(null);
-      return;
-    }
-
-    let ignored = false;
-    setPendingApprovalCount(null);
-    const refreshPendingCount = async () => {
-      try {
-        const response = await dashboardRequest(
-          "/api/dashboard/approval-requests?status=pending&limit=100",
-          { cache: "no-store" }
-        );
-        const body = (await response.json().catch(() => null)) as {
-          data?: { approvalRequests?: unknown[] };
-        } | null;
-        if (!ignored && response.ok) {
-          setPendingApprovalCount(body?.data?.approvalRequests?.length ?? 0);
-        }
-      } catch {
-        if (!ignored) setPendingApprovalCount(null);
-      }
-    };
-
-    refreshPendingCount();
-    window.addEventListener("sdp:approval-requests-updated", refreshPendingCount);
-    return () => {
-      ignored = true;
-      window.removeEventListener("sdp:approval-requests-updated", refreshPendingCount);
-    };
-  }, [dashboardAccess.capabilities.canReadApprovals, policiesEnabled, selectedProjectId]);
 
   if (!isLoaded) {
     return (
@@ -750,13 +685,11 @@ export function DashboardShell({
             {isMoreSheetOpen ? (
               <DashboardMoreSheet
                 pathname={pathname}
-                canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
                 canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                 dvpEnabled={dvpEnabled}
                 earnEnabled={earnEnabled}
                 heliusRingsEnabled={heliusRingsEnabled}
                 marketsEnabled={marketsEnabled}
-                policiesEnabled={policiesEnabled}
                 onClose={() => setMoreSheetOpen(false)}
               />
             ) : null}

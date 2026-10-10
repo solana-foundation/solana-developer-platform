@@ -9,7 +9,6 @@ import {
   UserRoundIcon,
   WalletIcon,
 } from "lucide-react";
-import Link from "next/link";
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/[projectId]/payments/counterparty/add-external-account-dialog";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
@@ -19,7 +18,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
-import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard";
 import { walletComboboxOptions } from "../wallet-options";
@@ -270,9 +268,8 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
 
 function ReviewStep({ wizard, counterpartyName }: StepProps) {
   const t = useTranslations();
-  const href = useProjectHref();
   const cluster = useSolanaCluster();
-  const { transferResult, heldApprovalRequestId } = wizard;
+  const { transferResult } = wizard;
   const summary = (
     <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
       <ReviewSummary wizard={wizard} counterpartyName={counterpartyName} />
@@ -280,21 +277,6 @@ function ReviewStep({ wizard, counterpartyName }: StepProps) {
   );
   // A finished transfer's outcome is the frame heading (the rail's
   // completionTitle); the step body adds only what that heading does not say.
-  if (heldApprovalRequestId !== null) {
-    return (
-      <div className="flex flex-col gap-6">
-        <p className="text-sm text-tertiary">
-          {t("DashboardPayments.onchainSend.approvalPendingDescription")}
-        </p>
-        {summary}
-        <Button asChild type="button" variant="secondary" className="w-full">
-          <Link href={href(`/dashboard/approvals/${encodeURIComponent(heldApprovalRequestId)}`)}>
-            {t("DashboardPayments.onchainSend.viewApprovalRequest")}
-          </Link>
-        </Button>
-      </div>
-    );
-  }
   if (transferResult === null) {
     return summary;
   }

@@ -1,19 +1,12 @@
 "use client";
 
-import {
-  APPROVAL_REQUEST_STATUSES,
-  canReleaseApprovalPaymentKey,
-  WALLET_OPERATION_STATUSES,
-} from "@sdp/types";
-import { z } from "zod";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
+import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
 import {
   createPaymentIdempotencyStore,
   isIdempotencyKeyConflict,
 } from "./payment-idempotency-store";
 import {
   type CreateTransferInput,
-  type CreateTransferOutcome,
   createTransfer,
   TransferRequestError,
   type Translate,
@@ -22,16 +15,14 @@ import {
 /**
  * Browser-side durability for a single transfer's IDEMPOTENCY KEY.
  *
- * Without a key, pressing Send again after a timeout, or on a payment a policy
- * is holding for approval, is a new payment to the API: it opens another
- * approval request, and approving both sends the money twice. With the same key
- * the approval executor's replay finds the first transfer and sends nothing
- * more. Storage, expiry and holds are the shared store's; this module owns what
- * makes two sends the same payment.
+ * Without a key, pressing Send again after a timeout is a new payment to the
+ * API, and both can send the money. With the same key the API's replay finds
+ * the first transfer and sends nothing more. Storage, expiry and holds are the
+ * shared store's; this module owns what makes two sends the same payment.
  */
 
 const store = createPaymentIdempotencyStore("sdp:payments:transfer:idempotency:v1");
-type TransferSendResult = { outcome: CreateTransferOutcome; fingerprint: string };
+type TransferSendResult = { transfer: TransferRecord; fingerprint: string };
 const pendingSends = new Map<string, Promise<TransferSendResult>>();
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
@@ -60,63 +51,6 @@ export function claimTransferIdempotencyKey(fingerprint: string): string {
   return store.claim(fingerprint);
 }
 
-/** Pin the key while an approval holds the payment; the approval can take hours. */
-export function holdTransferIdempotencyKey(fingerprint: string, approvalRequestId: string): void {
-  store.hold(fingerprint, approvalRequestId);
-}
-
-const approvalStatusSchema = z.object({
-  data: z.object({
-    approvalRequest: z.looseObject({
-      status: z.enum(APPROVAL_REQUEST_STATUSES),
-      operation: z.looseObject({ status: z.enum(WALLET_OPERATION_STATUSES) }).optional(),
-    }),
-  }),
-});
-
-/**
- * Lifts the hold once the approval that caused it has finished, so the next
- * identical payment is a new payment rather than a replay of the old one.
- *
- * A held key is pinned for as long as its approval can still execute, because
- * the executor replays the original request under it. Once the approval is
- * rejected, cancelled, expired, or approved and finished executing, that is no
- * longer true, and keeping the key would answer a genuinely new payment with
- * the old transfer.
- *
- * Anything unreadable leaves the hold in place: keeping a key too long costs a
- * replay the API reports, and dropping one too early costs a second payment.
- *
- * @param fingerprint - What makes two sends the same payment.
- */
-export async function releaseSettledTransferHold(fingerprint: string): Promise<void> {
-  const approvalRequestId = store.heldApproval(fingerprint);
-  if (approvalRequestId === null) {
-    return;
-  }
-  let body: unknown;
-  try {
-    const response = await dashboardRequest(
-      `/api/dashboard/approval-requests/${encodeURIComponent(approvalRequestId)}`,
-      { cache: "no-store" }
-    );
-    if (!response.ok) {
-      return;
-    }
-    body = await response.json();
-  } catch {
-    return;
-  }
-  const parsed = approvalStatusSchema.safeParse(body);
-  if (!parsed.success) {
-    return;
-  }
-  const { status, operation } = parsed.data.data.approvalRequest;
-  if (canReleaseApprovalPaymentKey(status, operation?.status)) {
-    store.release(fingerprint);
-  }
-}
-
 /** Retire the key once the API recorded the transfer or refused it with a 4xx. */
 export function releaseTransferIdempotencyKey(fingerprint: string): void {
   store.release(fingerprint);
@@ -130,10 +64,9 @@ export function isTransferKeyConflict(status: number): boolean {
 /**
  * Sends one transfer under the key that makes a retry a retry.
  *
- * Every caller needs the same four steps in the same order, and each one exists
- * because of a way one payment becomes two: lift a hold whose approval has
- * finished, claim the key before the request goes out, keep the key when an
- * approval parks the payment, and retire it once the API has answered.
+ * Every caller needs the same steps in the same order, and each one exists
+ * because of a way one payment becomes two: claim the key before the request
+ * goes out, and retire it once the API has answered.
  *
  * @param submission - The payment.
  * @param t - Translator, for the API's refusal message.
@@ -145,14 +78,13 @@ async function performTransferUnderKey(
   fingerprint: string,
   providerSession: boolean
 ): Promise<TransferSendResult> {
-  if (!providerSession) await releaseSettledTransferHold(fingerprint);
   const idempotencyKey = claimTransferIdempotencyKey(fingerprint);
   // A provider may repeat its signature callback after a lost event response.
   // Its session still names the same payment, even after the transfer lands.
   if (providerSession) store.hold(fingerprint);
-  let outcome: CreateTransferOutcome;
+  let transfer: TransferRecord;
   try {
-    outcome = await createTransfer(submission, t, idempotencyKey);
+    transfer = await createTransfer(submission, t, idempotencyKey);
   } catch (error) {
     // A provider session always names the same payment, including after an
     // expired login rejects a callback retry. Never release its recorded key.
@@ -170,19 +102,15 @@ async function performTransferUnderKey(
     }
     throw error;
   }
-  if (outcome.kind === "approval_pending") {
-    // The approval executor replays this request under the same key, so the key
-    // outlives the person deciding.
-    holdTransferIdempotencyKey(fingerprint, outcome.approvalRequestId);
-  } else if (!providerSession) {
+  if (!providerSession) {
     // The transfer row exists, so the key is spent: the next identical send is a
     // new payment rather than a retry of this one.
     releaseTransferIdempotencyKey(fingerprint);
   }
-  return { outcome, fingerprint };
+  return { transfer, fingerprint };
 }
 
-/** Joins simultaneous submissions before either can release or claim a held key. */
+/** Joins simultaneous submissions before either can release or claim a key. */
 export function sendTransferUnderKey(
   submission: CreateTransferInput,
   t: Translate,

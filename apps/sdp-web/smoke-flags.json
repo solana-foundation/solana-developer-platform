@@ -2,7 +2,6 @@
   "homepage-open-signup": { "env": "SDP_FLAG_HOMEPAGE_OPEN_SIGNUP", "value": true },
   "custody": { "env": "CUSTODY_ENABLED", "value": true },
   "issuance": { "env": "ISSUANCE_ENABLED", "value": true },
-  "policies": { "env": "POLICIES_ENABLED", "value": true },
   "asset-profiles": { "env": "SDP_FLAG_ASSET_PROFILES", "value": true },
   "private-channels": { "env": "PRIVATE_CHANNELS_ENABLED", "value": false },
   "helius-rings": { "env": "HELIUS_RINGS_ENABLED", "value": false },

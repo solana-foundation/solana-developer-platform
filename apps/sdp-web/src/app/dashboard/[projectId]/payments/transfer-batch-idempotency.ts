@@ -82,17 +82,6 @@ export function claimTransferBatchIdempotencyKey(fingerprint: string): string {
 }
 
 /**
- * Pin a key while a policy approval holds the batch (202 SIGNING_PENDING). The
- * approval executor replays the ORIGINAL request with this exact key, so it
- * must outlive the human deciding.
- */
-export function holdTransferBatchIdempotencyKey(fingerprint: string): void {
-  // The batch 202 names no approval request, so this hold carries none: it
-  // lasts the tab, as before. Single transfers do record theirs.
-  store.hold(fingerprint);
-}
-
-/**
  * Retire a key once the API has answered for it: a recorded batch, or a 4xx
  * refusal other than a key conflict. Never on a 5xx or a network failure.
  */

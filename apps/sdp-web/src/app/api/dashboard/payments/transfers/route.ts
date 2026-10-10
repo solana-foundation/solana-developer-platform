@@ -95,8 +95,7 @@ export async function POST(request: Request) {
     path: "/v1/payments/transfers",
     // Do not pass the inbound header bag. This value is the only client-owned
     // transport metadata the endpoint accepts; proxyToSdpApi owns every other
-    // upstream header. Without it, a retried send is a NEW payment, and a
-    // retry of one held for approval opens a second approval.
+    // upstream header. Without it, a retried send is a NEW payment.
     upstreamHeaders: idempotencyKey ? { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey } : undefined,
   });
 }

@@ -31,9 +31,9 @@ describe("createTransfer", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const outcome = await createTransfer(SUBMISSION, t, "key_1");
+    const transfer = await createTransfer(SUBMISSION, t, "key_1");
 
-    expect(outcome).toEqual({ kind: "submitted", transfer: { id: "xfr_1", status: "confirmed" } });
+    expect(transfer).toEqual({ id: "xfr_1", status: "confirmed" });
     const init = fetchMock.mock.calls[0][1];
     expect(init).toBeDefined();
     expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("key_1");
@@ -52,42 +52,6 @@ describe("createTransfer", () => {
     expect(init).toBeDefined();
     expect(new Headers(init?.headers).get("Idempotency-Key")).toBeNull();
     expect(JSON.parse(String(init?.body)).transferId).toBe("xfr_ramp");
-  });
-
-  it("reads a 202 as a payment held for approval, not a transfer", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        Response.json(
-          {
-            error: {
-              code: "SIGNING_PENDING",
-              message: "Approval required",
-              details: { approvalRequestId: "apr_1" },
-            },
-          },
-          { status: 202 }
-        )
-      )
-    );
-
-    await expect(createTransfer(SUBMISSION, t, "key_1")).resolves.toEqual({
-      kind: "approval_pending",
-      approvalRequestId: "apr_1",
-    });
-  });
-
-  // Nothing on an unreadable 202 says which approval holds the payment, and
-  // pointing somebody at nothing is worse than saying it could not be read.
-  it("refuses a 202 whose body names no approval request", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ error: {} }, { status: 202 }))
-    );
-
-    await expect(createTransfer(SUBMISSION, t, "key_1")).rejects.toThrow(
-      "DashboardPayments.workspace.transferMissing"
-    );
   });
 
   it("refuses a success answer that carries no transfer", async () => {

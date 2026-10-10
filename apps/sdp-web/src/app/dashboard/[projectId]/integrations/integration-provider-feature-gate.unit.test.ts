@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   custody: vi.fn(),
   rampProviders: vi.fn(),
   payments: vi.fn(),
-  policies: vi.fn(),
+  complianceInChannel: vi.fn(),
   fetchProjectProviderAvailability: vi.fn(),
   organizationFetch: vi.fn(),
   projectRequest: vi.fn(),
@@ -18,7 +18,10 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/flags", () => ({
   custody: mocks.custody,
   payments: mocks.payments,
-  policies: mocks.policies,
+}));
+vi.mock("@/flags/release-channel", () => ({
+  isModuleInDeploymentReleaseChannel: (module: string) =>
+    module === "compliance" && mocks.complianceInChannel(),
 }));
 vi.mock("@/flags/ramps", () => ({ getOfferedRampProviders: mocks.rampProviders }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -43,7 +46,7 @@ describe("integration provider route feature gates", () => {
     mocks.custody.mockResolvedValue(false);
     mocks.rampProviders.mockResolvedValue([]);
     mocks.payments.mockResolvedValue(false);
-    mocks.policies.mockResolvedValue(false);
+    mocks.complianceInChannel.mockReturnValue(false);
   });
 
   it.each(["privy", "moonpay", "range"])("404s disabled provider %s", async (provider) => {
@@ -70,7 +73,7 @@ describe("integration provider route availability", () => {
     mocks.custody.mockResolvedValue(true);
     mocks.rampProviders.mockResolvedValue(["moonpay", "bvnk"]);
     mocks.payments.mockResolvedValue(true);
-    mocks.policies.mockResolvedValue(true);
+    mocks.complianceInChannel.mockReturnValue(true);
     mocks.organizationFetch.mockResolvedValue({
       linked: true,
       organization: { id: "org_test" },

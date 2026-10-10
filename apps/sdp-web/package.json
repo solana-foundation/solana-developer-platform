@@ -24,7 +24,6 @@
     "@flags-sdk/vercel": "1.4.9",
     "@sdp/design-tokens": "workspace:*",
     "@sdp/issuance": "workspace:*",
-    "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",
     "@sdp/redaction": "workspace:*",
     "@sdp/solana": "workspace:*",

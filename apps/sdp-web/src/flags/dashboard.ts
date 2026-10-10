@@ -8,16 +8,16 @@ import {
   markets,
   newDesign,
   payments,
-  policies,
   privateChannels,
 } from "@/flags";
 import { getDesignModuleFlags } from "@/flags/new-design";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import type { DesignModuleFlags } from "@/lib/design-modules";
 import { isRampsEnabled } from "./ramps";
 
 export type DashboardFlags = {
   assetProfiles: boolean;
-  /** Compliance integrations follow the `policies` flag until Compliance gets its own visibility rule. */
+  /** Compliance integrations show whenever the deployment's release channel runs the Compliance module. */
   compliance: boolean;
   custody: boolean;
   dvp: boolean;
@@ -30,7 +30,6 @@ export type DashboardFlags = {
   /** Each design module's own flag (lib/design-modules.ts); counts only with NEW DESIGN on. */
   newDesignModules?: DesignModuleFlags;
   payments: boolean;
-  policies: boolean;
   privateChannels: boolean;
   ramps: boolean;
 };
@@ -57,7 +56,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     newDesignEnabled,
     newDesignModules,
     paymentsEnabled,
-    policiesEnabled,
     privateChannelsEnabled,
     rampsEnabled,
   ] = await Promise.all([
@@ -71,14 +69,13 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     newDesign(),
     getDesignModuleFlags(),
     payments(),
-    policies(),
     privateChannels(),
     isRampsEnabled(),
   ]);
 
   return {
     assetProfiles: assetProfilesEnabled,
-    compliance: policiesEnabled,
+    compliance: isModuleInDeploymentReleaseChannel("compliance"),
     custody: custodyEnabled,
     dvp: dvpEnabled,
     earn: earnEnabled,
@@ -88,7 +85,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     newDesign: newDesignEnabled,
     newDesignModules,
     payments: paymentsEnabled,
-    policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
     ramps: rampsEnabled,
   };
