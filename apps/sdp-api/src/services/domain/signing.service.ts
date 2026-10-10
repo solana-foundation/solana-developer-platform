@@ -71,8 +71,6 @@ import {
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
-export { createAdapterFromEncryptedConfig };
-
 const base58 = getBase58Codec();
 
 // ═══════════════════════════════════════════════════════════════════════════

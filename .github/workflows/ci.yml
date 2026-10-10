@@ -476,6 +476,14 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Pins the constructors that turn a stored secret into signing authority
+      # to the custody signer and sponsorship waists, where money admission is
+      # enforced (HOO-1955). Needs the TypeScript checker, so it runs where
+      # dependencies are installed, and before the unit tests so a
+      # test failure cannot hide its result.
+      - name: Check value movement
+        run: pnpm check:value-movement
+
       - name: Validate Doppler OIDC configuration
         if: env.CI_IS_FORK_PULL_REQUEST != 'true'
         run: |
