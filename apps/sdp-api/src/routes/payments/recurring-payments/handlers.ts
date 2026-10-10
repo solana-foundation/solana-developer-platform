@@ -6,6 +6,7 @@ import type {
   PaymentRecurringPaymentResponse,
 } from "@sdp/types";
 import { z } from "zod";
+import { getDb } from "@/db";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
@@ -15,7 +16,10 @@ import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
 import { parseIdempotencyKey } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
+import {
+  assertFreshApiKeyCustodyWalletAccess,
+  getAllowedApiKeyWalletAuthorizationForPermissions,
+} from "@/services/api-key-scope.service";
 import {
   activateRecurringPayment as activateRecurringPaymentRecord,
   cancelRecurringPayment as cancelRecurringPaymentRecord,
@@ -234,7 +238,13 @@ export async function authorizeRecurringPaymentReplay(c: AppContext): Promise<vo
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
   assertPinnedRecurringPayment(recurringPayment);
-  assertPaymentWalletExactAccess(c, recurringPayment.source_custody_wallet_id, ["payments:write"]);
+  const custodyWalletId = recurringPayment.source_custody_wallet_id;
+  assertPaymentWalletExactAccess(c, custodyWalletId, ["payments:write"]);
+  // Read fresh, as the handlers do: a binding removed while the auth cache
+  // still holds it must not read the stored response.
+  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), auth, custodyWalletId, [
+    "payments:write",
+  ]);
 }
 
 export const activateRecurringPayment = async (
