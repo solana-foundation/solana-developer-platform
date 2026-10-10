@@ -1,5 +1,7 @@
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
+import { IDEMPOTENCY_KEY_HEADER } from "./idempotency";
+import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "./idempotency-key-store";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 
 export type DashboardFetchResult<T> =
@@ -15,11 +17,174 @@ export interface DashboardFetchOptions {
 }
 
 /**
+ * Dashboard backend routes that proxy a `stable` module mutation to sdp-api,
+ * which takes an Idempotency-Key on every POST and PATCH (HOO-1918). Ramps
+ * are not `stable` and keep their own handling.
+ */
+const STABLE_MUTATION_PREFIXES = [
+  "/api/dashboard/payments/transfers",
+  "/api/dashboard/payments/requests",
+  "/api/dashboard/payments/recurring-payments",
+  "/api/dashboard/payments/subscription-plans",
+  "/api/dashboard/payments/subscriptions",
+  "/api/dashboard/counterparty",
+  "/api/dashboard/compliance/",
+  "/api/dashboard/approval-requests/",
+] as const;
+
+function isStableMutationPath(path: string): boolean {
+  const pathname = path.split("?", 1)[0] ?? path;
+  return STABLE_MUTATION_PREFIXES.some(
+    (prefix) =>
+      pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)
+  );
+}
+
+const KEYED_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const BODYLESS_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
+
+let mutationKeyStore: IdempotencyKeyStore | null = null;
+
+/**
+ * Created on first use, never at import: server routes import this module, and
+ * the store is a client function that the server may not call.
+ */
+function mutationKeys(): IdempotencyKeyStore {
+  mutationKeyStore ??= createIdempotencyKeyStore("sdp:dashboard:mutation:idempotency:v1");
+  return mutationKeyStore;
+}
+const inFlightMutations = new Map<string, Promise<Response>>();
+
+/**
+ * Whether an answer retires the key, so the next submit is a new action.
+ *
+ * - A success or a refusal other than a conflict or a rate limit is definitive.
+ * - A replayed answer is definitive: sdp-api stored it, so the same key would
+ *   only replay it again.
+ * - A first 5xx is not: on a route that re-runs after a 5xx the same key is
+ *   what makes the retry safe, and on one that stores it the retry comes back
+ *   as a replay, which then retires the key.
+ */
+function retiresKey(response: Response): boolean {
+  if (response.headers.get("Idempotent-Replayed") === "true") return true;
+  return response.status < 500 && response.status !== 409 && response.status !== 429;
+}
+
+function sendWithProject(path: string, init: RequestInit, headers: Headers): Promise<Response> {
+  const { projectId } = parseDashboardPathname(window.location.pathname);
+  if (projectId !== null) {
+    headers.set(PROJECT_HEADER_NAME, projectId);
+  }
+  return fetch(path, { ...init, headers });
+}
+
+/** The action a submit stands for: Project, method, path and body. */
+function actionMaterial(path: string, init: RequestInit): string {
+  const { projectId } = parseDashboardPathname(window.location.pathname);
+  return JSON.stringify([projectId, init.method, path, init.body ?? ""]);
+}
+
+/**
+ * A 64-bit FNV-1a digest of the action, so request bodies (counterparty
+ * details, addresses) never sit in browser storage. Synchronous on purpose:
+ * an async digest would delay the send behind later requests and reorder
+ * them. Not a security boundary; collisions only within one tab's few
+ * pending actions matter, and 64 bits makes those negligible.
+ */
+function storageFingerprint(material: string): string {
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(material)) {
+    hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+function abortable(response: Promise<Response>, signal: AbortSignal | null | undefined) {
+  if (!signal) return response;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<Response>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    response.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+/**
+ * Sends a `stable` mutation under one Idempotency-Key per user action: the
+ * key is minted for the (Project, method, path, body) the user submitted and
+ * reused by every retry and double-click of that same action until the answer
+ * (headers and body) is definitive ({@link retiresKey}). The key is pinned
+ * before the request goes out, so an unanswered write (a reload, a network
+ * failure, a first 5xx) keeps it past its normal expiry. A second
+ * identical submit while the first is in flight joins it, and one caller
+ * aborting never cancels the shared request.
+ */
+async function sendUnderActionKey(
+  path: string,
+  init: RequestInit,
+  headers: Headers
+): Promise<Response> {
+  // Joined synchronously, before any await, so a double submit can never race
+  // past the check. The in-memory map may hold the raw action; storage may not.
+  // A call cancelled before it starts never claims a key or sends anything.
+  if (init.signal?.aborted) {
+    throw init.signal.reason;
+  }
+  const material = actionMaterial(path, init);
+  let sent = inFlightMutations.get(material);
+  if (!sent) {
+    const { signal: _callerSignal, ...shared } = init;
+    const fingerprint = storageFingerprint(material);
+    const keys = mutationKeys();
+    headers.set(IDEMPOTENCY_KEY_HEADER, keys.claim(fingerprint));
+    // Pinned before the request goes out: a reload mid-flight must not let
+    // an unanswered write's key expire or be evicted. When browser storage
+    // refuses the write (private mode, quota), the key lives in memory only:
+    // retries in this page still reuse it, but a reload cannot. Sending anyway
+    // is deliberate; refusing would block every write in such a browser.
+    if (!keys.markUncertain(fingerprint)) {
+      console.warn("Idempotency-Key not persisted; a reload will not recover it");
+    }
+    sent = sendWithProject(path, shared, headers).then(async (response) => {
+      // The answer only counts once its body has arrived: a download that
+      // fails leaves the key pinned, so the retry recovers the first result.
+      const body = await response.arrayBuffer();
+      if (retiresKey(response)) {
+        keys.release(fingerprint);
+      }
+      return new Response(BODYLESS_STATUSES.has(response.status) ? null : body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    });
+    inFlightMutations.set(material, sent);
+    void sent.finally(() => inFlightMutations.delete(material)).catch(() => undefined);
+  }
+  // Every caller gets its own copy, so each can read the body.
+  return (await abortable(sent, init.signal)).clone();
+}
+
+function takesActionKey(path: string, init: RequestInit, headers: Headers): boolean {
+  const method = (init.method ?? "GET").toUpperCase();
+  return (
+    KEYED_METHODS.has(method) &&
+    !headers.has(IDEMPOTENCY_KEY_HEADER) &&
+    (init.body === undefined || init.body === null || typeof init.body === "string") &&
+    isStableMutationPath(path)
+  );
+}
+
+/**
  * `fetch` for the dashboard backend from the browser: sends the Project in this
  * tab's URL as `x-project-id`, so the request acts on the Project the tab
  * renders whatever another tab has selected since (HOO-1965). Outside a
  * Project-scoped URL no header is sent and Project-scoped backend routes
  * refuse the request.
+ *
+ * A `stable` module mutation without a caller-chosen Idempotency-Key gets one
+ * per user action (see `sendUnderActionKey`). Flows that manage their own key
+ * (transfers, batches) set the header and are left alone.
  *
  * @param path - Dashboard backend path, e.g. `/api/dashboard/payments/transfers`.
  * @param init - Standard fetch options; a caller-set `x-project-id` is overwritten.
@@ -27,11 +192,14 @@ export interface DashboardFetchOptions {
  */
 export function dashboardRequest(path: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers);
-  const { projectId } = parseDashboardPathname(window.location.pathname);
-  if (projectId !== null) {
-    headers.set(PROJECT_HEADER_NAME, projectId);
+  if (takesActionKey(path, init, headers)) {
+    return sendUnderActionKey(
+      path,
+      { ...init, method: (init.method ?? "GET").toUpperCase() },
+      headers
+    );
   }
-  return fetch(path, { ...init, headers });
+  return sendWithProject(path, init, headers);
 }
 
 export async function dashboardFetch<T = unknown>(
