@@ -81,8 +81,14 @@ export async function loadApiKeyWalletAuthorization(
   apiKeyId: string,
   organizationId: string,
   projectId: string,
-  preferredSigningWalletId: string | null
+  preferredSigningWalletId: string | null,
+  /**
+   * `any` also resolves bindings to inactive wallets: an Idempotency-Key replay
+   * returns what a completed request answered and moves nothing (HOO-1918).
+   */
+  walletStatus: "active" | "any" = "active"
 ) {
+  const activeWalletOnly = walletStatus === "active" ? "AND w.status = 'active'" : "";
   const permissionResult = await db
     .prepare(
       `SELECT wallet_id, permissions
@@ -111,7 +117,7 @@ export async function loadApiKeyWalletAuthorization(
        WHERE c.organization_id = ?
          AND c.project_id = ?
          AND c.status = 'active'
-         AND w.status = 'active'
+         ${activeWalletOnly}
          AND w.wallet_id IN (${placeholders})
 
        UNION ALL
@@ -122,7 +128,7 @@ export async function loadApiKeyWalletAuthorization(
        WHERE c.organization_id = ?
          AND c.project_id = ?
          AND c.status = 'active'
-         AND w.status = 'active'
+         ${activeWalletOnly}
          AND w.wallet_id IN (${placeholders})`
     )
     .bind(organizationId, projectId, ...walletIds, organizationId, projectId, ...walletIds)
