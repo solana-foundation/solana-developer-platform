@@ -14,7 +14,41 @@
       }
     ]
   },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (pm.request.headers.has(\"Idempotency-Key\") && !pm.collectionVariables.get(\"idempotencyKey\")) {",
+          "  pm.collectionVariables.set(\"idempotencyKey\", pm.variables.replaceIn(\"{{$guid}}\"));",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (pm.request.headers.has(\"Idempotency-Key\")) {",
+          "  const status = pm.response.code;",
+          "  const replayed = pm.response.headers.get(\"Idempotent-Replayed\") === \"true\";",
+          "  if (replayed || (status < 500 && status !== 409 && status !== 429)) {",
+          "    pm.collectionVariables.unset(\"idempotencyKey\");",
+          "  }",
+          "}"
+        ]
+      }
+    }
+  ],
   "variable": [
+    {
+      "key": "idempotencyKey",
+      "value": "",
+      "type": "string",
+      "description": "Idempotency-Key for the operation in progress. Minted on first send and kept across retries until the operation has a final answer; clear it to start a new operation."
+    },
     {
       "key": "baseUrl",
       "value": "https://api.solana.com",
@@ -410,7 +444,7 @@
             "header": [
               {
                 "key": "Idempotency-Key",
-                "value": "{{$guid}}",
+                "value": "{{idempotencyKey}}",
                 "type": "text"
               }
             ],
@@ -1357,7 +1391,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{$guid}}",
+                "value": "{{idempotencyKey}}",
                 "type": "text"
               }
             ],
@@ -1428,7 +1462,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{$guid}}",
+                "value": "{{idempotencyKey}}",
                 "type": "text"
               }
             ],
@@ -1475,7 +1509,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "{{$guid}}",
+                "value": "{{idempotencyKey}}",
                 "type": "text"
               }
             ],
@@ -1532,7 +1566,7 @@
             "header": [
               {
                 "key": "Idempotency-Key",
-                "value": "{{$guid}}",
+                "value": "{{idempotencyKey}}",
                 "type": "text"
               }
             ],
@@ -1547,7 +1581,7 @@
             "header": [
               {
                 "key": "Idempotency-Key",
-                "value": "{{$guid}}",
+                "value": "{{idempotencyKey}}",
                 "type": "text"
               }
             ],
@@ -1562,7 +1596,7 @@
             "header": [
               {
                 "key": "Idempotency-Key",
-                "value": "{{$guid}}",
+                "value": "{{idempotencyKey}}",
                 "type": "text"
               }
             ],
@@ -1577,7 +1611,7 @@
             "header": [
               {
                 "key": "Idempotency-Key",
-                "value": "{{$guid}}",
+                "value": "{{idempotencyKey}}",
                 "type": "text"
               }
             ],

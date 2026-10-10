@@ -180,8 +180,9 @@ function getRequestHeaders(operation) {
     });
   }
 
-  // A route that requires Idempotency-Key 400s without one. Postman's {{$guid}}
-  // mints a fresh key per send, so each send is a new logical operation.
+  // A route that requires Idempotency-Key 400s without one. The key is a saved
+  // collection variable, not {{$guid}}: a retry after a timeout must resend the
+  // same key or it pays twice. IDEMPOTENCY_KEY_EVENTS mints and retires it.
   const requiresIdempotencyKey = (operation.parameters ?? []).some(
     (parameter) =>
       parameter?.in === "header" &&
@@ -192,13 +193,50 @@ function getRequestHeaders(operation) {
   if (requiresIdempotencyKey) {
     headers.push({
       key: "Idempotency-Key",
-      value: "{{$guid}}",
+      value: "{{idempotencyKey}}",
       type: "text",
     });
   }
 
   return headers;
 }
+
+/**
+ * Collection-level scripts for the saved Idempotency-Key. A request that sends
+ * the header gets a new key only when none is saved. The key is retired once
+ * the operation has a final answer: a replay, or any status below 500 other
+ * than 409 and 429 (the rule the dashboard uses). A timeout runs no test
+ * script and a 5xx keeps the key, so pressing Send again retries the same
+ * operation instead of starting a second one.
+ */
+const IDEMPOTENCY_KEY_EVENTS = [
+  {
+    listen: "prerequest",
+    script: {
+      type: "text/javascript",
+      exec: [
+        'if (pm.request.headers.has("Idempotency-Key") && !pm.collectionVariables.get("idempotencyKey")) {',
+        '  pm.collectionVariables.set("idempotencyKey", pm.variables.replaceIn("{{$guid}}"));',
+        "}",
+      ],
+    },
+  },
+  {
+    listen: "test",
+    script: {
+      type: "text/javascript",
+      exec: [
+        'if (pm.request.headers.has("Idempotency-Key")) {',
+        "  const status = pm.response.code;",
+        '  const replayed = pm.response.headers.get("Idempotent-Replayed") === "true";',
+        "  if (replayed || (status < 500 && status !== 409 && status !== 429)) {",
+        '    pm.collectionVariables.unset("idempotencyKey");',
+        "  }",
+        "}",
+      ],
+    },
+  },
+];
 
 function getRequestBody(spec, operation, preferredExampleName) {
   const jsonBody = operation.requestBody?.content?.["application/json"];
@@ -322,7 +360,15 @@ function toPostmanCollection(spec) {
         },
       ],
     },
+    event: IDEMPOTENCY_KEY_EVENTS,
     variable: [
+      {
+        key: "idempotencyKey",
+        value: "",
+        type: "string",
+        description:
+          "Idempotency-Key for the operation in progress. Minted on first send and kept across retries until the operation has a final answer; clear it to start a new operation.",
+      },
       {
         key: "baseUrl",
         value: productionServer,
