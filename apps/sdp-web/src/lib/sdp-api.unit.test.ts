@@ -192,6 +192,30 @@ describe("createRequestScopedSdpApiClients", () => {
   });
 });
 
+describe("server-side Idempotency-Key (HOO-1918)", () => {
+  it("keys a stable mutation a server action sends, and leaves reads and other modules alone", async () => {
+    setApiRequest(SANDBOX_PROJECT.id);
+    const fetchMock = okFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await createSdpApiClient();
+
+    await client.request("/v1/wallets", { method: "POST", body: "{}" });
+    await client.request("/v1/wallets", { method: "GET" });
+    await client.request("/v1/earn/programs", { method: "POST", body: "{}" });
+    await client.request("/v1/wallets/wal_1", {
+      method: "PATCH",
+      body: "{}",
+      headers: { "Idempotency-Key": "caller-key" },
+    });
+
+    const keys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key")
+    );
+    expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(keys.slice(1)).toEqual([null, null, "caller-key"]);
+  });
+});
+
 describe("proxyToSdpApi", () => {
   function browserCall(projectId: string) {
     setApiRequest(projectId);
@@ -226,6 +250,50 @@ describe("proxyToSdpApi", () => {
     expect(headers.get("Authorization")).toBe("Bearer token_test");
     expect(headers.has("X-Inbound-Only")).toBe(false);
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ amount: "1" }));
+  });
+
+  // HOO-1918: every mutation forwards the caller's key, and the replay markers
+  // come back, without any route opting in.
+  it("forwards the caller's Idempotency-Key on a mutation and returns the replay headers", async () => {
+    const fetchMock = apiFetchMock(
+      () =>
+        new Response("{}", {
+          status: 201,
+          headers: { "Idempotent-Replayed": "true", "Content-Type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = browserCall(SANDBOX_PROJECT.id);
+    request.headers.set("Idempotency-Key", "recurring-key");
+
+    const response = await proxyToSdpApi({
+      request,
+      traceSource: "test.proxy.idempotency",
+      path: "/v1/payments/recurring-payments",
+    });
+
+    expect(response.headers.get("Idempotent-Replayed")).toBe("true");
+    const headers = headersOfCall(fetchMock, "/v1/payments/recurring-payments");
+    expect(headers.get("Idempotency-Key")).toBe("recurring-key");
+    expect(headers.has("X-Inbound-Only")).toBe(false);
+  });
+
+  it("keeps a route-selected Idempotency-Key over the inbound one", async () => {
+    const fetchMock = apiFetchMock(() => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = browserCall(SANDBOX_PROJECT.id);
+    request.headers.set("Idempotency-Key", "inbound-key");
+
+    await proxyToSdpApi({
+      request,
+      traceSource: "test.proxy.idempotency-route",
+      path: "/v1/earn/vault-deposits",
+      upstreamHeaders: { "Idempotency-Key": "route-key" },
+    });
+
+    expect(headersOfCall(fetchMock, "/v1/earn/vault-deposits").get("Idempotency-Key")).toBe(
+      "route-key"
+    );
   });
 
   it("refuses a call without the project header before any upstream call", async () => {

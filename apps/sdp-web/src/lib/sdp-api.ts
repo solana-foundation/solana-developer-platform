@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
+import { IDEMPOTENCY_KEY_HEADER } from "./idempotency";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -70,6 +71,30 @@ function createTraceRequestId(traceId: string, sequence: number): string {
   return `${traceId}:${suffix}`.slice(0, 128);
 }
 
+/**
+ * sdp-api `stable` module paths that take an Idempotency-Key on every mutation
+ * (HOO-1918). Ramps and other modules keep their own key handling.
+ */
+const STABLE_API_MUTATION_PREFIXES = [
+  "/v1/wallets",
+  "/v1/payments/transfers",
+  "/v1/payments/transfer-batches",
+  "/v1/payments/requests",
+  "/v1/payments/recurring-payments",
+  "/v1/payments/subscription-plans",
+  "/v1/payments/subscriptions",
+  "/v1/counterparties",
+  "/v1/compliance/",
+] as const;
+
+function takesServerIdempotencyKey(method: string, path: string): boolean {
+  const upper = method.toUpperCase();
+  return (
+    (upper === "POST" || upper === "PATCH" || upper === "PUT" || upper === "DELETE") &&
+    STABLE_API_MUTATION_PREFIXES.some((prefix) => path.startsWith(prefix))
+  );
+}
+
 function createSdpApiRequest(
   token: string,
   projectId: string | null,
@@ -97,8 +122,13 @@ function createSdpApiRequest(
     if (projectId && !headers.has(PROJECT_HEADER_NAME)) {
       headers.set(PROJECT_HEADER_NAME, projectId);
     }
-    const startedAt = performance.now();
     const method = options.method ?? "GET";
+    if (takesServerIdempotencyKey(method, path) && !headers.has(IDEMPOTENCY_KEY_HEADER)) {
+      // A server action is one user action; a browser-keyed proxy call already
+      // carries its key and keeps it.
+      headers.set(IDEMPOTENCY_KEY_HEADER, crypto.randomUUID());
+    }
+    const startedAt = performance.now();
     // The query string is caller-supplied and may carry a pasted credential
     // (e.g. a playground request); the log keeps the route only while the
     // upstream request still receives the full path.
@@ -352,6 +382,36 @@ export function proxyFailure(
 }
 
 /**
+ * The upstream headers plus the caller's Idempotency-Key on a mutation
+ * (HOO-1918). The key is the one piece of client-owned transport metadata every
+ * mutation forwards: without it, a retried request is a new one upstream.
+ */
+function withForwardedIdempotencyKey(
+  request: Request,
+  upstreamHeaders: HeadersInit | undefined
+): HeadersInit | undefined {
+  const idempotencyKey = request.headers.get(IDEMPOTENCY_KEY_HEADER);
+  if (idempotencyKey === null || request.method === "GET" || request.method === "HEAD") {
+    return upstreamHeaders;
+  }
+  const headers = new Headers(upstreamHeaders);
+  if (!headers.has(IDEMPOTENCY_KEY_HEADER)) {
+    headers.set(IDEMPOTENCY_KEY_HEADER, idempotencyKey);
+  }
+  return headers;
+}
+
+/** What sdp-api says about a keyed request, passed back to the browser. */
+function idempotencyResponseHeaders(response: Response): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const name of ["Idempotent-Replayed", "Retry-After"]) {
+    const value = response.headers.get(name);
+    if (value !== null) headers[name] = value;
+  }
+  return headers;
+}
+
+/**
  * Proxies a dashboard API route to sdp-api: forwards the incoming method and
  * body to `path` and streams the upstream response back with trace headers.
  * The project is the one the calling tab sent as `x-project-id`, never the
@@ -396,7 +456,7 @@ export async function proxyToSdpApi({
     const response = await apiClient.request(path, {
       method,
       body: rawBody === "" ? undefined : rawBody,
-      headers: upstreamHeaders,
+      headers: withForwardedIdempotencyKey(request, upstreamHeaders),
     });
 
     logRouteResult(trace, response.status);
@@ -409,6 +469,7 @@ export async function proxyToSdpApi({
         "Cache-Control": "private, no-store",
         "X-SDP-Trace-ID": trace.traceId,
         "Server-Timing": trace.serverTiming(),
+        ...idempotencyResponseHeaders(response),
       },
     });
   } catch (error) {

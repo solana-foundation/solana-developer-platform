@@ -79,9 +79,10 @@ describe("recurring payment write requests", () => {
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/dashboard/payments/recurring-payments", {
+    const [create, update] = fetchMock.mock.calls;
+    expect(create?.[0]).toBe("/api/dashboard/payments/recurring-payments");
+    expect(create?.[1]).toMatchObject({
       method: "POST",
-      headers,
       body: JSON.stringify({
         sourceCustodyWalletId: "cwlt_create",
         counterpartyId: "cpty_1",
@@ -90,17 +91,17 @@ describe("recurring payment write requests", () => {
         amount: "1",
         periodHours: 24,
       }),
-      signal: undefined,
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "/api/dashboard/payments/recurring-payments/prp_1",
-      {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({ sourceCustodyWalletId: "cwlt_replacement" }),
-        signal: undefined,
-      }
-    );
+    expect(update?.[0]).toBe("/api/dashboard/payments/recurring-payments/prp_1");
+    expect(update?.[1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ sourceCustodyWalletId: "cwlt_replacement" }),
+    });
+    for (const call of [create, update]) {
+      const sent = new Headers(call?.[1]?.headers);
+      for (const [name, value] of headers) expect(sent.get(name)).toBe(value);
+      // Each write carries the key for its own user action (HOO-1918).
+      expect(sent.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+    }
   });
 });
