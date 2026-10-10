@@ -793,7 +793,13 @@ export async function assertFreshApiKeyCustodyWalletAccess(
   db: DatabaseClient,
   auth: ApiKeyContext,
   custodyWalletId: string,
-  requiredPermissions: Permission[] = []
+  requiredPermissions: Permission[] = [],
+  /**
+   * `any` for an Idempotency-Key replay check (ADR 0008): the binding must still
+   * stand, but a wallet deactivated since the original request still replays,
+   * because a replay moves nothing.
+   */
+  walletStatus: "active" | "any" = "active"
 ): Promise<void> {
   if (auth.authType !== "api_key" || !hasSelectedWalletScope(auth)) {
     return;
@@ -838,7 +844,8 @@ export async function assertFreshApiKeyCustodyWalletAccess(
     auth.apiKeyId,
     auth.organizationId,
     auth.projectId,
-    currentKey.signing_wallet_id
+    currentKey.signing_wallet_id,
+    walletStatus
   );
   const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(
     { ...auth, ...freshAuthorization },

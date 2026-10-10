@@ -187,9 +187,13 @@ export async function authorizeSourceWalletReplay(c: AppContext): Promise<void> 
   }
   const custodyWalletId = parsed.data.sourceCustodyWalletId;
   assertPaymentWalletExactAccess(c, custodyWalletId, ["payments:write"]);
-  await assertFreshApiKeyCustodyWalletAccess(getDb(c.env), getAuth(c), custodyWalletId, [
-    "payments:write",
-  ]);
+  await assertFreshApiKeyCustodyWalletAccess(
+    getDb(c.env),
+    getAuth(c),
+    custodyWalletId,
+    ["payments:write"],
+    "any"
+  );
 }
 
 export async function admitExactPaymentWallet(
