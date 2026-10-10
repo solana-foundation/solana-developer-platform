@@ -601,13 +601,20 @@ describe("authority-resolution", () => {
 
     await expect(
       resolveAuthoritySigner({
+        movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
         currentAuthority: AUTHORITY,
         requiredWalletPermissions: ["tokens:write"],
       })
     ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
-    expect(exactSigner).toHaveBeenCalledWith(testEnv, "org_test", "proj_test", "cwlt_inactive");
+    expect(exactSigner).toHaveBeenCalledWith(
+      testEnv,
+      "org_test",
+      "proj_test",
+      "cwlt_inactive",
+      "issuance.authority"
+    );
   });
 
   it("resolves an exact draft wallet without performing runtime admission", async () => {
@@ -773,6 +780,7 @@ describe("authority-resolution", () => {
 
     await expect(
       createResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
         custodyWalletId: "cwlt_other",
@@ -792,6 +800,7 @@ describe("authority-resolution", () => {
 
     await expect(
       createResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
         custodyWalletId: "cwlt_authority",
@@ -808,6 +817,7 @@ describe("authority-resolution", () => {
 
     await expect(
       createLegacyResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
         walletId: "wal_connection",
@@ -824,6 +834,7 @@ describe("authority-resolution", () => {
 
     await expect(
       createLegacyResolvedAuthoritySigner({
+        movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
         walletId: "wal_other",

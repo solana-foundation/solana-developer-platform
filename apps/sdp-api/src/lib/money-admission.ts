@@ -1,5 +1,11 @@
-import { organizationStatusMayStartMoney, type ProjectEnvironment } from "@sdp/types";
+import {
+  MOVEMENTS,
+  type MovementId,
+  organizationStatusMayStartMoney,
+  type ProjectEnvironment,
+} from "@sdp/types";
 import { getDb } from "@/db";
+import type { DatabaseExecutor } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { parseOrganizationEntitlements } from "@/lib/production-entitlement";
 import { logEvent } from "@/runtime/money-path-events";
@@ -97,12 +103,66 @@ export function decideMoneyStart(facts: MoneyAdmissionFacts | null): MoneyAdmiss
   return { admitted: true };
 }
 
+/**
+ * Pure. What the custody signer decides for one movement: an exit always
+ * passes (ADR 0002), and a start is {@link decideMoneyStart}.
+ */
+export function decideMovement(
+  movement: MovementId,
+  facts: MoneyAdmissionFacts | null
+): MoneyAdmissionDecision {
+  return MOVEMENTS[movement].kind === "exit" ? { admitted: true } : decideMoneyStart(facts);
+}
+
+/** Where a movement was refused, for the `sdp_money_refused` event. */
+export interface MovementRefusalContext {
+  surface: "signer" | "sponsor";
+  movement: MovementId;
+  organizationId: string;
+  projectId: string | null;
+  /** The custody wallet or sponsored actor the refusal is about. */
+  subjectId: string;
+}
+
+/**
+ * Throws {@link MoneyMovementRefusedError} (403) for a refused decision, after
+ * emitting one `sdp_money_refused` event. The signing sinks call it at the
+ * moment they are asked to sign.
+ */
+export function assertMovementAdmitted(
+  decision: MoneyAdmissionDecision,
+  context: MovementRefusalContext
+): void {
+  if (decision.admitted) {
+    return;
+  }
+  logEvent("warn", {
+    event: "sdp_money_refused",
+    surface: context.surface,
+    movement: context.movement,
+    module: MOVEMENTS[context.movement].module,
+    subject_id: context.subjectId,
+    organization_id: context.organizationId,
+    project_id: context.projectId,
+    reason: decision.reason,
+  });
+  throw new MoneyMovementRefusedError(decision.reason);
+}
+
 /** One primary-key join, scoped by both ids. */
 export async function readMoneyAdmissionFacts(
   env: Env,
   scope: MoneyAdmissionScope
 ): Promise<MoneyAdmissionFacts | null> {
-  const row = await getDb(env)
+  return readMoneyAdmissionFactsWith(getDb(env), scope);
+}
+
+/** {@link readMoneyAdmissionFacts} on a caller's client (a transaction, a service's own). */
+export async function readMoneyAdmissionFactsWith(
+  db: DatabaseExecutor,
+  scope: MoneyAdmissionScope
+): Promise<MoneyAdmissionFacts | null> {
+  const row = await db
     .prepare(
       `SELECT p.environment, o.status, o.settings
          FROM projects p

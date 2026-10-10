@@ -8,6 +8,7 @@ import { createToken2022Service } from "@/services/solana";
 import { resolveRequestSponsorshipScope } from "@/services/sponsorship.service";
 import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import type { IssuanceMovement } from "./handlers/authority-resolution";
 
 export type AppContext = Context<{ Bindings: Env }>;
 
@@ -35,14 +36,18 @@ export const getTenantTokenService = (
 export const createIssuanceMosaicService = (
   c: AppContext,
   signer: TransactionSigner,
-  feePayment: MosaicFeePayment
+  feePayment: MosaicFeePayment,
+  movement: IssuanceMovement
 ) =>
   createMosaicService(
     c.env,
     signer,
     feePayment,
-    feePayment === "sponsored" ? resolveRequestSponsorshipScope(c) : undefined
+    feePayment === "sponsored" ? { ...resolveRequestSponsorshipScope(c), movement } : undefined
   );
 
-export const createIssuanceToken2022Service = (c: AppContext, signer: TransactionSigner) =>
-  createToken2022Service(c.env, signer, resolveRequestSponsorshipScope(c));
+export const createIssuanceToken2022Service = (
+  c: AppContext,
+  signer: TransactionSigner,
+  movement: IssuanceMovement
+) => createToken2022Service(c.env, signer, { ...resolveRequestSponsorshipScope(c), movement });

@@ -238,6 +238,7 @@ export async function depositIntoVault(
   const fee: VaultFeeMode = input.swap
     ? { kind: "wallet-pays" }
     : await resolveVaultSponsorship(env, {
+        movement: "earn.deposit",
         organizationId: input.organizationId,
         projectId: input.projectId,
         walletId: input.wallet.id,

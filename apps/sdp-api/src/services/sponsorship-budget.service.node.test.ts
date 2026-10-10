@@ -12,6 +12,7 @@ import {
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
+import { type MoneyAdmissionFacts, MoneyMovementRefusedError } from "@/lib/money-admission";
 import {
   garbageSignTestTransaction,
   sponsorSignTestTransaction,
@@ -35,6 +36,13 @@ const SCOPE: SponsorshipScope = {
   organizationId: "org_1",
   projectId: "project_1",
   actor: { type: "api_key", id: "key_1" },
+  movement: "payments.transfer",
+};
+
+const ACTIVE_SANDBOX: MoneyAdmissionFacts = {
+  organizationStatus: "active",
+  projectEnvironment: "sandbox",
+  rawSettings: null,
 };
 
 function buildTransaction(version: 0 | "legacy" = 0): Uint8Array {
@@ -111,13 +119,15 @@ function harness(scope: SponsorshipScope = SCOPE) {
     signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
     signAndSend: vi.fn().mockResolvedValue("signature_1" as Signature),
   };
+  const readAdmissionFacts = vi.fn().mockResolvedValue(ACTIVE_SANDBOX);
   const feePayment = new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, provider, {
     repository,
     budgetRedis,
     getNetworkFee: vi.fn().mockResolvedValue(5_000n),
     now: () => new Date("2026-08-03T10:15:00.000Z"),
+    readAdmissionFacts,
   });
-  return { feePayment, provider, repository, budgetRedis };
+  return { feePayment, provider, repository, budgetRedis, readAdmissionFacts };
 }
 
 describe("BudgetedFeePayment", () => {
@@ -662,6 +672,53 @@ describe("BudgetedFeePayment", () => {
 
     expect(repository.markReleased).not.toHaveBeenCalled();
     expect(repository.markChargedUnknown).toHaveBeenCalledOnce();
+  });
+
+  describe("money admission (HOO-1955)", () => {
+    const DELETED = { ...ACTIVE_SANDBOX, organizationStatus: "deleted" };
+
+    it("refuses a new sponsor signature for a start before reserving any budget", async () => {
+      const { feePayment, provider, repository, readAdmissionFacts } = harness();
+      readAdmissionFacts.mockResolvedValue(DELETED);
+
+      const refusal = await feePayment.signAsFeePayer(buildTransaction()).catch((e: unknown) => e);
+
+      expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
+      expect(refusal).toMatchObject({ reason: "organization_inactive" });
+      expect(readAdmissionFacts).toHaveBeenCalledWith(expect.anything(), {
+        organizationId: "org_1",
+        projectId: "project_1",
+      });
+      expect(repository.createReservation).not.toHaveBeenCalled();
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    });
+
+    it("returns a sponsorship already signed as it was, whatever the organization's state", async () => {
+      const { feePayment, provider, repository, readAdmissionFacts } = harness();
+      readAdmissionFacts.mockResolvedValue(DELETED);
+      const requested = buildTransaction();
+      const stored = await sponsorSignTestTransaction(requested);
+      repository.getReservation.mockResolvedValueOnce({
+        status: "signed",
+        attempt: 1,
+        signedTransaction: Buffer.from(stored).toString("base64"),
+      });
+
+      await expect(feePayment.signAsFeePayer(requested)).resolves.toEqual(stored);
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    });
+
+    it("sponsors an exit for a deleted organization", async () => {
+      const { feePayment, provider, readAdmissionFacts } = harness({
+        ...SCOPE,
+        movement: "recurring.cancel",
+      });
+      readAdmissionFacts.mockResolvedValue(DELETED);
+
+      await feePayment.signAsFeePayer(buildTransaction());
+
+      expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
+    });
   });
 
   it("replays stored bytes untouched when they carry the requested message", async () => {

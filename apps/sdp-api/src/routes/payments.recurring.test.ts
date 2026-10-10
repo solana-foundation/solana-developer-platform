@@ -2171,7 +2171,8 @@ describe("Payments routes — recurring", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      TEST_CUSTODY_WALLET_ID
+      TEST_CUSTODY_WALLET_ID,
+      "recurring.collect"
     );
     expect(
       new Set(

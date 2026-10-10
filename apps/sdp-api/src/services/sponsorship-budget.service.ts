@@ -30,6 +30,7 @@ import {
   type SponsorshipReservationStatus,
   sponsorshipNetworkForCluster,
 } from "@/db/repositories/sponsorship-budget.repository";
+import { readMoneyAdmissionFacts } from "@/lib/money-admission";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import {
@@ -46,6 +47,7 @@ import type {
   SponsorshipFeePayment,
   SponsorshipScope,
 } from "./sponsorship.service";
+import { assertSponsorshipAdmitted, readSponsorshipAdmissionFacts } from "./sponsorship-admission";
 
 const MAX_SAFE_LAMPORTS = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -84,6 +86,7 @@ export interface BudgetedFeePaymentDependencies {
   budgetRedis?: BudgetRedis;
   getNetworkFee?: (transaction: Uint8Array) => Promise<bigint>;
   now?: () => Date;
+  readAdmissionFacts?: typeof readMoneyAdmissionFacts;
 }
 
 type AdmissionOperation = "sign" | "send";
@@ -208,6 +211,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   private readonly budgetRedis: BudgetRedis;
   private readonly getNetworkFee: (transaction: Uint8Array) => Promise<bigint>;
   private readonly now: () => Date;
+  private readonly readAdmissionFacts: typeof readMoneyAdmissionFacts;
 
   constructor(
     private readonly env: Env,
@@ -224,6 +228,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       ((transaction) =>
         getTransactionNetworkFee(createNetworkFeeRpc(this.env, this.scope), transaction));
     this.now = dependencies.now ?? (() => new Date());
+    this.readAdmissionFacts = dependencies.readAdmissionFacts ?? readMoneyAdmissionFacts;
   }
 
   getFeePayer(): Promise<Address> {
@@ -507,9 +512,16 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     operation: AdmissionOperation
   ): Promise<AdmissionResult> {
     const context = await this.prepareAdmission(transaction);
-    const durableReservation = await this.readReservation(context);
+    // Money admission (HOO-1955) is read alongside the reservation and decided
+    // after replay: a sponsorship already signed is returned as it was, and only
+    // a new signature can be refused.
+    const [durableReservation, admissionFacts] = await Promise.all([
+      this.readReservation(context),
+      readSponsorshipAdmissionFacts(this.env, this.scope, this.readAdmissionFacts),
+    ]);
     const durableReplay = this.resolveDurableReplay(context, operation, durableReservation);
     if (durableReplay) return durableReplay;
+    assertSponsorshipAdmitted(this.scope, admissionFacts);
     const attempt =
       durableReservation?.status === "released"
         ? durableReservation.attempt + 1

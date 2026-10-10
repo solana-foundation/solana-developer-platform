@@ -1,6 +1,6 @@
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { createRpc } from "@sdp/rpc/solana";
-import type { SolanaCluster } from "@sdp/types";
+import type { MovementId, SolanaCluster } from "@sdp/types";
 import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
 import {
@@ -21,6 +21,12 @@ import {
 } from "./vault-execution.service";
 import { rawSimulationDetails } from "./vault-simulation-error";
 import type { VaultFeeMode } from "./vault-sponsorship";
+
+/** The movement each vault operation signs for: a deposit starts, a withdrawal exits. */
+const VAULT_OPERATION_MOVEMENTS = {
+  deposit: "earn.deposit",
+  withdrawal: "earn.withdraw",
+} as const satisfies Record<"deposit" | "withdrawal", MovementId>;
 
 /**
  * Vault programs' own words for "your floor was too high", as Anchor writes
@@ -175,7 +181,8 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
         env,
         input.organizationId,
         input.projectId,
-        input.walletId
+        input.walletId,
+        VAULT_OPERATION_MOVEMENTS[operation]
       )
     );
     if (signer.address !== input.walletPublicKey) {

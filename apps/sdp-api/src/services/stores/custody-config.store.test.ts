@@ -73,7 +73,8 @@ describe("CustodyConfigStore project scope", () => {
       signingService.getTransactionSignerForWalletRecord(
         ORGANIZATION_ID,
         OTHER_PROJECT_ID,
-        CUSTODY_WALLET_ID
+        CUSTODY_WALLET_ID,
+        "payments.transfer"
       )
     ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
     await expect(

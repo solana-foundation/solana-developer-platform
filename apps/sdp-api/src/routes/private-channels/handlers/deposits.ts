@@ -68,7 +68,8 @@ export async function createPrivateChannelDeposit(
       c.env,
       context.auth.organizationId,
       context.projectId,
-      context.wallet
+      context.wallet,
+      "private_channels.deposit"
     );
     const projectRpc = await loadPrivateChannelProjectRpcClient(c);
 

@@ -840,7 +840,8 @@ describe("Payments routes — transfer policy", () => {
       env,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      TEST_CUSTODY_WALLET_ID
+      TEST_CUSTODY_WALLET_ID,
+      "payments.transfer"
     );
   });
   it("fails a selected-wallet approval replay when its wallet ID becomes ambiguous", async () => {

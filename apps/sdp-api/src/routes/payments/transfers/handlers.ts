@@ -649,7 +649,8 @@ async function executeSponsoredTransfer(
     c.env,
     auth.organizationId,
     requireProjectId(c),
-    params.sourceWallet.id
+    params.sourceWallet.id,
+    "payments.transfer"
   );
 
   if (signer.address !== params.sourceWallet.publicKey) {
@@ -658,7 +659,7 @@ async function executeSponsoredTransfer(
 
   const rpc = solanaRpc.createRpc(c.env);
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayment = getFeePayment(c);
+  const feePayment = getFeePayment(c, "payments.transfer");
   const feePayer = await feePayment.getFeePayer();
   const instructions = await params.buildInstructions({ signer, feePayer, rpc });
 

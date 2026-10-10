@@ -233,7 +233,20 @@ describe("closeDvpTrade", () => {
       env,
       "org_x",
       "prj_x",
-      "cwlt_settlement"
+      "cwlt_settlement",
+      "dvp.settle"
+    );
+  });
+
+  it("signs a cancellation as an exit, since it only refunds each party", async () => {
+    await closeDvpTrade(context, trade(), "cancel", settlement);
+
+    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+      env,
+      "org_x",
+      "prj_x",
+      "cwlt_settlement",
+      "dvp.cancel"
     );
   });
 

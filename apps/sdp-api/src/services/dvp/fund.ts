@@ -298,7 +298,8 @@ export async function executeDvpFunding(
     env,
     plan.signer.organizationId,
     plan.signer.projectId,
-    plan.signer.custodyWalletId
+    plan.signer.custodyWalletId,
+    "dvp.fund"
   );
 
   const [source] = await findAssociatedTokenPda({
@@ -367,6 +368,7 @@ export async function executeDvpFunding(
   }
 
   const feePayment = await createProjectSponsorshipFeePayment(env, {
+    movement: "dvp.fund",
     organizationId: plan.signer.organizationId,
     projectId: plan.signer.projectId,
     actor: { type: "wallet", id: plan.signer.custodyWalletId },

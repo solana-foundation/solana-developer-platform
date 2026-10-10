@@ -27,7 +27,11 @@ import {
   RUNTIME_HEALTH_COMPONENTS,
 } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
-import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
+import {
+  type ApprovalRequestStatus,
+  HELIUS_RINGS_OPERATION_MOVEMENTS,
+  type WalletOperationActor,
+} from "@sdp/types";
 import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db";
 import {
   createHeliusRingsAssetRepository,
@@ -54,6 +58,7 @@ import {
   mapHeliusRingsWalletRow,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { enforceWalletOperationPolicy } from "@/services/policy/enforcement.service";
@@ -1445,6 +1450,7 @@ export class HeliusRingsService {
         projectId: this.tenant.projectId,
         owner,
         unsignedTxBase64: built.outerUnsignedTxBase64,
+        movement: HELIUS_RINGS_OPERATION_MOVEMENTS[current.op_type],
       });
       const signature = await assertRingsSignedTransactionMatches({
         owner,
@@ -1533,6 +1539,17 @@ export class HeliusRingsService {
     operation: HeliusRingsOperationRow,
     error: unknown
   ): Promise<HeliusRingsOperationRow> {
+    if (error instanceof MoneyMovementRefusedError) {
+      // Money admission refused the signature (HOO-1955): a decision, not an
+      // outage. Record it as final and surface the 403 rather than a
+      // retryable gateway failure.
+      await this.fail(operation.id, operation.state, {
+        code: "signer_failed",
+        message: error.message,
+        retryable: false,
+      });
+      throw error;
+    }
     const failed = await this.fail(operation.id, operation.state, describeFailure(error));
     return failed ?? (await this.requireOperation(operation.id));
   }

@@ -171,6 +171,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
 
   try {
     const signer = await createResolvedAuthoritySigner({
+      movement: "issuance.control",
       env: c.env,
       auth,
       custodyWalletId,
@@ -178,7 +179,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
       requiredWalletPermissions: ["tokens:admin"],
     });
 
-    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+    const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.control");
 
     await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.pauseToken({
@@ -365,6 +366,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
 
   try {
     const signer = await createResolvedAuthoritySigner({
+      movement: "issuance.authority",
       env: c.env,
       auth,
       custodyWalletId,
@@ -372,7 +374,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
       requiredWalletPermissions: ["tokens:admin"],
     });
 
-    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+    const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.authority");
 
     await beginApprovedWalletOperationEffect(c);
     const result = await mosaic.unpauseToken({

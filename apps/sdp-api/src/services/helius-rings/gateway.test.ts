@@ -266,3 +266,38 @@ describe("UnconfiguredRingsGateway", () => {
     });
   });
 });
+
+describe("gateway signing movements (HOO-1955)", () => {
+  it.each([
+    ["provisionIdentity", "helius_rings.bring_up"],
+    ["provisionRing", "helius_rings.bring_up"],
+    ["rekeyIdentity", "helius_rings.gateway_transaction"],
+    ["ensureMergingEnabled", "helius_rings.gateway_transaction"],
+  ] as const)("signs %s's transactions as %s", async (method, movement) => {
+    const movements: string[] = [];
+    const signsOnce = (config: CapturedConfig) => async () => {
+      await config.signTransaction("unsigned", "OwnerPublicKey");
+      return {} as never;
+    };
+    const gateway = create(
+      {
+        createGateway: (config) =>
+          gatewayStub({
+            provisionIdentity: signsOnce(config),
+            provisionRing: signsOnce(config),
+            rekeyIdentity: signsOnce(config),
+            ensureMergingEnabled: signsOnce(config),
+          }),
+        signOuterTransaction: async (input) => {
+          movements.push(input.movement);
+          return "signed";
+        },
+      },
+      { ringRpcUrl: "https://ring.invalid" }
+    );
+
+    await (gateway[method] as (input: never) => Promise<unknown>)({} as never);
+
+    expect(movements).toEqual([movement]);
+  });
+});

@@ -7,6 +7,7 @@ import type { z } from "zod";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
+import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
@@ -19,6 +20,11 @@ import {
   beginApprovedWalletOperationEffect,
   reserveMintSupplyAtApprovedEffectBoundary,
 } from "@/services/policy/approved-operation-replay";
+import { resolveRequestSponsorshipScope } from "@/services/sponsorship.service";
+import {
+  assertSponsorshipAdmitted,
+  readSponsorshipAdmissionFacts,
+} from "@/services/sponsorship-admission";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
@@ -496,6 +502,7 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
   }
   const mintAuthority = assertValidAddress(currentAuthority, "mintAuthority");
   const { custodyWalletId, signer } = await resolveAuthoritySigner({
+    movement: "issuance.authority",
     env: c.env,
     auth,
     requestedCustodyWalletId: body.signingCustodyWalletId,
@@ -504,7 +511,7 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
   });
   // Build unsigned transaction using Mosaic
   // Note: amount is decimal (e.g., 100 for 100 tokens), SDK converts to raw
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.authority");
 
   // Preparation must not mutate on-chain compliance state. A destination that
   // is not already on the ABL can only be added by the execute route after its
@@ -875,13 +882,14 @@ export const executeMint = async (c: AppContext) => {
   let addedToAllowlist = false;
   try {
     const signer = await createResolvedAuthoritySigner({
+      movement: "issuance.authority",
       env: c.env,
       auth,
       custodyWalletId: tx.custodyWalletId,
       currentAuthority,
       requiredWalletPermissions: ["tokens:write"],
     });
-    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+    const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.authority");
     addedToAllowlist = ablListAddress
       ? await syncDestinationToOnChainAllowlist({
           c,
@@ -904,6 +912,17 @@ export const executeMint = async (c: AppContext) => {
         feePayer: signer.address,
       },
       async () => {
+        // The sponsor decides money admission only after custody has signed,
+        // and a refusal there submits nothing. Decide it here first, so a
+        // refused mint never reserves supply it will not use (HOO-1955).
+        const sponsorshipScope = {
+          ...resolveRequestSponsorshipScope(c),
+          movement: "issuance.authority" as const,
+        };
+        assertSponsorshipAdmitted(
+          sponsorshipScope,
+          await readSponsorshipAdmissionFacts(c.env, sponsorshipScope)
+        );
         reservedSupply = await reserveMintSupplyAtApprovedEffectBoundary(
           c,
           tokenId,
@@ -940,6 +959,17 @@ export const executeMint = async (c: AppContext) => {
       tokenAccount: settledTokenAccount,
     });
   } catch (error) {
+    // The sponsor decides money admission again when it signs. A refusal there
+    // (a revocation racing the gate above) comes before Kora signs or sends, so
+    // the transaction can never land and its reservation goes back.
+    if (reservedSupply !== null && error instanceof MoneyMovementRefusedError) {
+      await tokenService.releaseUnsentMintReservation(
+        tokenId,
+        amountBaseUnits.toString(),
+        reservedSupply
+      );
+      reservedSupply = null;
+    }
     if (reservedSupply === null) {
       await recordPreSubmissionMintFailure({
         c,

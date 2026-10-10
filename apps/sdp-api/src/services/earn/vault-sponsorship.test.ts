@@ -27,6 +27,7 @@ function scope(env: Partial<Env> = {}) {
       projectId: "prj_1",
       walletId: "cwlt_1",
       deadline: createVaultDeadline(),
+      movement: "earn.deposit" as const,
     },
   };
 }
@@ -114,6 +115,7 @@ describe("resolveVaultSponsorship", () => {
       projectId: "prj_1",
       actor: { type: "wallet", id: "cwlt_1" },
       cluster: "devnet",
+      movement: "earn.deposit",
     });
   });
 

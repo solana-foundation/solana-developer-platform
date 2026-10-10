@@ -37,12 +37,14 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
       env as ApiTestEnv,
       TEST_ORG.id,
       TEST_PROJECT.id,
-      custodyWallet.id
+      custodyWallet.id,
+      "issuance.authority"
     );
     const mosaic = createMosaicService(env as ApiTestEnv, signer, "sponsored", {
       environment: TEST_PROJECT.environment,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
+      movement: "issuance.authority",
       actor: { type: "project", id: TEST_PROJECT.id },
     });
 

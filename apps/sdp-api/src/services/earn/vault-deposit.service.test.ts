@@ -465,7 +465,13 @@ describe("depositIntoVault — validation and custody identity", () => {
   it("resolves signing by the exact custody-wallet row id", async () => {
     await depositIntoVault(env, depositInput());
 
-    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(env, ORG, PROJECT, WALLET_ROW_ID);
+    expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+      env,
+      ORG,
+      PROJECT,
+      WALLET_ROW_ID,
+      "earn.deposit"
+    );
   });
 });
 

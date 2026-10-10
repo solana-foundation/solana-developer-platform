@@ -1,6 +1,10 @@
 import type { Token, TokenTemplate } from "@sdp/types";
 import { describe, expect, it } from "vitest";
-import { getOnChainAllowlistMutationForMint, shouldEnableOnChainAcl } from "./access-control";
+import {
+  controlListMovement,
+  getOnChainAllowlistMutationForMint,
+  shouldEnableOnChainAcl,
+} from "./access-control";
 
 type Shape = Pick<Token, "template" | "requiresAllowlist">;
 type WithAblList = Shape & Pick<Token, "ablListAddress">;
@@ -56,5 +60,19 @@ describe("getOnChainAllowlistMutationForMint", () => {
 
   it("returns null for tokens with disabled access control", () => {
     expect(getOnChainAllowlistMutationForMint(withAblList(denylist("custom")))).toBeNull();
+  });
+});
+
+describe("controlListMovement", () => {
+  it("treats a change that takes access away as a control", () => {
+    expect(controlListMovement(allowlist("stablecoin"), "remove")).toBe("issuance.control");
+    expect(controlListMovement(denylist("stablecoin"), "add")).toBe("issuance.control");
+  });
+
+  it("treats a change that grants access as a start", () => {
+    expect(controlListMovement(allowlist("stablecoin"), "add")).toBe("issuance.authority");
+    expect(controlListMovement(denylist("tokenized-security"), "remove")).toBe(
+      "issuance.authority"
+    );
   });
 });

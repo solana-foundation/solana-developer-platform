@@ -17,7 +17,6 @@ import {
   runApprovedWalletOperationEffectTransaction,
 } from "@/services/policy/approved-operation-replay";
 import type { TokenService } from "@/services/token.service";
-
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -29,6 +28,8 @@ import {
   listAllowlistQuerySchema,
   removeAllowlistQuerySchema,
 } from "../schemas";
+import { controlListMovement } from "./access-control";
+import type { IssuanceMovement } from "./authority-resolution";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
@@ -93,8 +94,9 @@ async function syncNewAllowlistEntryOnChain(opts: {
   entryId: string;
   list: ReturnType<typeof assertValidAddress>;
   wallet: ReturnType<typeof assertValidAddress>;
+  movement: IssuanceMovement;
 }): Promise<TokenAllowlistEntry> {
-  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored", opts.movement);
 
   try {
     await mosaic.addToList({ list: opts.list, wallet: opts.wallet });
@@ -112,8 +114,9 @@ async function removeExistingAllowlistEntryOnChain(opts: {
   signer: TransactionSigner;
   list: ReturnType<typeof assertValidAddress>;
   wallet: ReturnType<typeof assertValidAddress>;
+  movement: IssuanceMovement;
 }): Promise<void> {
-  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored");
+  const mosaic = createIssuanceMosaicService(opts.c, opts.signer, "sponsored", opts.movement);
   const removeOperation = mosaic.removeFromList({
     list: opts.list,
     wallet: opts.wallet,
@@ -173,6 +176,7 @@ async function resolveAllowlistAuthoritySigner(
   auth: ApiKeyContext,
   tokenService: TokenService,
   list: ReturnType<typeof assertValidAddress>,
+  movement: IssuanceMovement,
   signingCustodyWalletId?: string
 ) {
   const authority = await resolveAllowlistAuthority(c.env, list);
@@ -197,6 +201,7 @@ async function resolveAllowlistAuthoritySigner(
     custodyWalletId: authorityWallet.custodyWalletId,
     currentAuthority: authority,
     requiredWalletPermissions: ["tokens:write"],
+    movement,
   });
   return { ...authorityWallet, signer };
 }
@@ -275,12 +280,14 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
     const list = token.ablListAddress
       ? assertValidAddress(token.ablListAddress, "ablListAddress")
       : null;
+    const additionMovement = controlListMovement(token, "add");
     const authorityWallet = list
       ? await resolveAllowlistAuthoritySigner(
           c,
           auth,
           tokenService,
           list,
+          additionMovement,
           body.signingCustodyWalletId
         )
       : null;
@@ -321,6 +328,7 @@ export const addAllowlistEntry = async (c: ValidatedBodyContext<typeof addAllowl
           entryId: entry.id,
           list,
           wallet: assertValidAddress(body.address, "address"),
+          movement: additionMovement,
         });
         await auditService.completeCritical(c, auditIntent, {
           metadata: { syncStatus: "active" },
@@ -389,12 +397,14 @@ export const removeAllowlistEntry = async (c: AppContext) => {
   const list = token.ablListAddress
     ? assertValidAddress(token.ablListAddress, "ablListAddress")
     : null;
+  const removalMovement = controlListMovement(token, "remove");
   const authorityWallet = list
     ? await resolveAllowlistAuthoritySigner(
         c,
         auth,
         tokenService,
         list,
+        removalMovement,
         parsed.data.signingCustodyWalletId
       )
     : null;
@@ -424,6 +434,7 @@ export const removeAllowlistEntry = async (c: AppContext) => {
         signer: authorityWallet.signer,
         list,
         wallet: assertValidAddress(entry.address, "address"),
+        movement: removalMovement,
       });
       authoritativeEffectCompleted = true;
       await tokenService.revokeAllowlistEntry(entryId);

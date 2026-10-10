@@ -1,9 +1,15 @@
-import { ORGANIZATION_STATUSES, type ProjectEnvironment } from "@sdp/types";
+import {
+  MOVEMENTS,
+  type MovementId,
+  ORGANIZATION_STATUSES,
+  type ProjectEnvironment,
+} from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb, runWithSystemDatabaseIdentity } from "@/db";
 import {
   assertMoneyStartAdmitted,
   decideMoneyStart,
+  decideMovement,
   type MoneyAdmissionFacts,
   MoneyMovementRefusedError,
   readMoneyAdmissionFacts,
@@ -83,6 +89,50 @@ describe("decideMoneyStart", () => {
 // middleware/database-identity.ts); the reads here do too.
 const asSystem = <T>(read: () => Promise<T>) =>
   runWithSystemDatabaseIdentity("test:money-admission", read);
+
+describe("MOVEMENTS exits", () => {
+  // SECURITY REVIEW GATE: an exit is never refused, so this list changes only
+  // with a named security reviewer (see packages/sdp-types/src/movements.ts).
+  it("exempts exactly the reviewed exits from admission", () => {
+    const exits = (Object.keys(MOVEMENTS) as MovementId[])
+      .filter((movement) => MOVEMENTS[movement].kind === "exit")
+      .sort();
+    expect(exits).toEqual([
+      "dvp.cancel",
+      "dvp.reclaim",
+      "earn.queued_withdraw_request",
+      "earn.withdraw",
+      "helius_rings.gateway_transaction",
+      "helius_rings.key_derivation",
+      "helius_rings.operation_exit",
+      "issuance.control",
+      "private_channels.withdraw",
+      "recurring.cancel",
+      "recurring.update_cancel_old",
+    ]);
+  });
+});
+
+describe("decideMovement", () => {
+  const cases: [string, MoneyAdmissionFacts | null][] = [
+    ["a deleted organization", facts({ organizationStatus: "deleted" })],
+    ["a suspended organization", facts({ organizationStatus: "suspended" })],
+    ["a production project without the entitlement", facts({ rawSettings: null })],
+    ["a project it cannot find", null],
+    ["an active, entitled organization", facts()],
+  ];
+
+  it.each(
+    (Object.keys(MOVEMENTS) as MovementId[]).flatMap((movement) =>
+      cases.map(([label, subject]) => [movement, label, subject] as const)
+    )
+  )("decides %s for %s", (movement, _label, subject) => {
+    // An exit always passes (ADR 0002); a start is exactly the start decision.
+    expect(decideMovement(movement, subject)).toEqual(
+      MOVEMENTS[movement].kind === "exit" ? { admitted: true } : decideMoneyStart(subject)
+    );
+  });
+});
 
 describe("money admission reads", () => {
   beforeEach(async () => {

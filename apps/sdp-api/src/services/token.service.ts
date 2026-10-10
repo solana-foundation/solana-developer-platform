@@ -1410,6 +1410,44 @@ export class TokenService {
   }
 
   /**
+   * Hand back a reservation whose transaction provably cannot land: the
+   * sponsor refused money admission (HOO-1955) before it signed, so the
+   * transaction lacks its fee payer signature and was never sent. This is the
+   * one case `reserveMintSupply`'s "never hand back" rule does not cover; an
+   * ambiguous send failure still keeps its reservation.
+   *
+   * Only while the record still reads what this reservation wrote
+   * (`recordedSupplyBaseUnits`). A refresh or another mint in between may
+   * already have folded the reservation into a new total, and subtracting from
+   * that would undercount and let a later mint past the cap. Then the
+   * reservation stays, an overcount the next refresh reconciles once the
+   * unsent row is gone.
+   *
+   * @returns whether the reservation was handed back.
+   */
+  async releaseUnsentMintReservation(
+    tokenId: string,
+    deltaBaseUnits: string,
+    recordedSupplyBaseUnits: string
+  ): Promise<boolean> {
+    const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
+    const row = await this.db
+      .prepare(
+        `UPDATE issued_tokens
+         SET total_supply_cached = (total_supply_cached::numeric - ?::numeric)::text,
+             total_supply_updated_at = ?,
+             updated_at = ?
+         WHERE id = ?${tenant.clause}
+           AND total_supply_cached = ?
+         RETURNING total_supply_cached`
+      )
+      .bind(deltaBaseUnits, now, now, tokenId, ...tenant.values, recordedSupplyBaseUnits)
+      .first<{ total_supply_cached: string }>();
+    return Boolean(row);
+  }
+
+  /**
    * Record a supply change that has already settled on-chain — today, a burn.
    *
    * A cache write, not an admission check: the balance is enforced against the
