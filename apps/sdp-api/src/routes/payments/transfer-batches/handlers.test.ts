@@ -1823,6 +1823,60 @@ describe("payment transfer batches", () => {
     });
   });
 
+  // HOO-1918: once the shared key record is gone (24h, or a 5xx freed it), the
+  // batch row is the backstop, and it too ignores recipient order.
+  it("replays a reordered same-key retry from the batch row once the shared record is gone", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+
+    const counterpartyId = await seedCounterparty("batch_reordered_backstop_counterparty");
+    const firstAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const secondAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Idempotency-Key": "batch-reordered-backstop-key",
+    };
+    const first = { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" };
+    const second = { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" };
+    const post = (recipients: (typeof first)[]) =>
+      app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients,
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+    const original = await post([first, second]);
+    expect(original.status).toBe(200);
+    const sends = signAndSendMock.mock.calls.length;
+    await getDb(env).execute("DELETE FROM idempotency_keys");
+    const reordered = await post([second, first]);
+
+    expect(reordered.status).toBe(200);
+    const originalBatch = ((await original.json()) as { data: { batch: { id: string } } }).data;
+    const replayedBatch = ((await reordered.json()) as { data: { batch: { id: string } } }).data;
+    expect(replayedBatch.batch.id).toBe(originalBatch.batch.id);
+    expect(signAndSendMock).toHaveBeenCalledTimes(sends);
+  });
+
   it("replays the original transfer batch for the same idempotency key and payload", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
