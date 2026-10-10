@@ -258,6 +258,36 @@ function startLeaseRenewal(
 }
 
 /**
+ * Who a stored response belongs to: the credential plus everything that
+ * decides what it may reach (role, permissions, wallet bindings, Allowed
+ * Operations). A different credential, or the same one narrowed or widened
+ * since the original request, does not match, so a key whose wallet access was
+ * removed can never read a response produced while it had it. Compared in
+ * plain text on the row, never hashed: none of it is secret.
+ */
+function replayPrincipal(c: Context<{ Bindings: Env }>, auth: ReturnType<typeof getAuth>): string {
+  const access = {
+    id: auth.id,
+    authType: auth.authType,
+    role: auth.role,
+    permissions: [...auth.permissions].sort(),
+    walletScope: auth.walletScope,
+    signingWalletIds: [...auth.signingWalletIds].sort(),
+    walletBindings: auth.walletBindings
+      .map((binding) => ({
+        custodyWalletId: binding.custodyWalletId ?? null,
+        walletId: binding.walletId ?? null,
+        permissions: [...binding.permissions].sort(),
+      }))
+      .map((binding) => JSON.stringify(binding))
+      .sort(),
+    allowedOperations: [...(c.get("apiKey")?.allowedOperations ?? [])].sort(),
+  };
+  // SAFETY: built from strings and string arrays only, so it is a JSON value.
+  return canonicalJson(access as unknown as JsonValue);
+}
+
+/**
  * Runs one request under its Idempotency-Key (HOO-1918; contract and prior art
  * in ADR 0008). Routes use {@link idempotent}; it is exported so a composite
  * route declaration can run it between its own checks.
@@ -310,9 +340,7 @@ export async function runIdempotency(
     projectId: c.get("projectId") ?? null, // null only on routes without project context
     operation,
     idempotencyKey,
-    // Another credential reusing the key is refused (422), so it never reads a
-    // response produced for a narrower or wider credential.
-    principal: auth.id,
+    principal: replayPrincipal(c, auth),
     fingerprint,
     leaseSeconds,
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
