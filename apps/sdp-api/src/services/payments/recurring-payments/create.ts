@@ -4,6 +4,7 @@ import {
   createPaymentRecurringPaymentsRepository,
   type PaymentRecurringPaymentRow,
 } from "@/db/repositories";
+import type { PaymentRecurringWalletAuthorization } from "@/db/repositories/payment-recurring-payments.repository";
 import { AppError, internalError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -29,7 +30,22 @@ export async function createRecurringPayment(input: {
   actor: WalletOperationActor | null;
   /** The request's Idempotency-Key and the fingerprint of what it creates. */
   idempotency: { key: string; fingerprint: string } | null;
+  /** The caller's wallet access, applied when a keyed retry reads its schedule back. */
+  walletAuthorization: PaymentRecurringWalletAuthorization | null;
 }): Promise<PaymentRecurringPaymentRow> {
+  const scope = createTenantScope({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  const repository = createPaymentRecurringPaymentsRepository(input.env, scope);
+  // A retry the shared Idempotency-Key record no longer covers (past 24 hours,
+  // or after a 5xx that frees the key) finds the schedule it already created,
+  // before the mint, counterparty and policy reads run again (HOO-1918).
+  const existing = input.idempotency && (await findKeyedRecurringPayment(repository, input));
+  if (existing) {
+    return existing;
+  }
+
   const [tokenMint, destination] = await Promise.all([
     assertRecurringPaymentTokenMint(input.token, input.organizationId, input.projectId, input.env),
     resolveSolanaCounterpartyAccount({
@@ -41,18 +57,6 @@ export async function createRecurringPayment(input: {
     }),
   ]);
 
-  const scope = createTenantScope({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-  });
-  const repository = createPaymentRecurringPaymentsRepository(input.env, scope);
-  // A retry the shared Idempotency-Key record no longer covers (past 24 hours,
-  // or after a 5xx that frees the key) finds the schedule it already created,
-  // before policy runs again (HOO-1918).
-  const existing = input.idempotency && (await findKeyedRecurringPayment(repository, input));
-  if (existing) {
-    return existing;
-  }
   await enforceRecurringPaymentPolicy({
     env: input.env,
     organizationId: input.organizationId,
@@ -120,6 +124,7 @@ async function findKeyedRecurringPayment(
     organizationId: string;
     projectId: string;
     idempotency: { key: string; fingerprint: string } | null;
+    walletAuthorization: PaymentRecurringWalletAuthorization | null;
   }
 ): Promise<PaymentRecurringPaymentRow | null> {
   if (!input.idempotency) return null;
@@ -132,12 +137,12 @@ async function findKeyedRecurringPayment(
   if (keyed.idempotencyFingerprint !== input.idempotency.fingerprint) {
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
   }
-  // The fingerprint pins the source wallet, and the caller's access to it was
-  // checked before this runs, so the read needs no further wallet filter.
+  // The fingerprint pins the source wallet; the read still applies the
+  // caller's current wallet access, so a narrowed key finds nothing.
   return repository.getRecurringPaymentById({
     recurringPaymentId: keyed.id,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    walletAuthorization: null,
+    walletAuthorization: input.walletAuthorization,
   });
 }

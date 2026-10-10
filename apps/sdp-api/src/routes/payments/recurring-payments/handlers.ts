@@ -9,7 +9,7 @@ import { z } from "zod";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { AppError, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { AppError, badRequestParams, badRequestQuery, internalError } from "@/lib/errors";
 import { canonicalJson, type JsonValue } from "@/lib/idempotency";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
@@ -101,9 +101,12 @@ function recurringPaymentIdempotency(
   c: ValidatedBodyContext<typeof createRecurringPaymentSchema>,
   body: z.output<typeof createRecurringPaymentSchema>,
   sourceCustodyWalletId: string
-): { key: string; fingerprint: string } | null {
+): { key: string; fingerprint: string } {
   const key = parseIdempotencyKey(c);
-  if (key === undefined) return null;
+  if (key === undefined) {
+    // The route's idempotent() step refuses a request without a key first.
+    throw internalError("Recurring payment create reached the handler without an Idempotency-Key");
+  }
   const fingerprint = createHash("sha256")
     .update(canonicalJson({ ...body, sourceCustodyWalletId } as JsonValue))
     .digest("hex");
@@ -137,6 +140,9 @@ export const createRecurringPayment = async (
     apiKeyId: scope.auth.apiKeyId,
     actor: walletOperationActorFromAuth(scope.auth),
     idempotency: recurringPaymentIdempotency(c, body, sourceWallet.id),
+    walletAuthorization: getAllowedApiKeyWalletAuthorizationForPermissions(scope.auth, [
+      "payments:write",
+    ]),
   });
 
   const response: PaymentRecurringPaymentResponse = {
@@ -227,11 +233,8 @@ export async function authorizeRecurringPaymentReplay(c: AppContext): Promise<vo
   if (!recurringPayment) {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
-  if (recurringPayment.source_custody_wallet_id !== null) {
-    assertPaymentWalletExactAccess(c, recurringPayment.source_custody_wallet_id, [
-      "payments:write",
-    ]);
-  }
+  assertPinnedRecurringPayment(recurringPayment);
+  assertPaymentWalletExactAccess(c, recurringPayment.source_custody_wallet_id, ["payments:write"]);
 }
 
 export const activateRecurringPayment = async (
