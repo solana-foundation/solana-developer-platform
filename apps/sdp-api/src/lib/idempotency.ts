@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { conflict } from "@/lib/errors";
+import { AppError, conflict } from "@/lib/errors";
 
 /**
  * Turn a caller's `Idempotency-Key` into the stable request id a provider
@@ -94,7 +94,9 @@ export async function resolveIdentityBoundIdempotencyReplay<
   if (identityMatches(existing) && existing.idempotency_fingerprint === fingerprint) {
     return existing;
   }
-  throw conflict("Idempotency key already used with different request payload");
+  // The row backstop answers like the shared Idempotency-Key step (HOO-1918):
+  // a key reused for a different request is 422, not 409.
+  throw new AppError("IDEMPOTENCY_KEY_REUSED");
 }
 
 /** A JSON value as `JSON.parse` returns it. */
@@ -209,7 +211,13 @@ function transferBatchFingerprint(
       sourceCustodyWalletId,
       sourceAddress: input.sourceAddress,
       token: input.token,
-      recipients: input.recipients,
+      // Order-insensitive, like the shared step's canonicalize (APE-667), so a
+      // reordered retry that reaches this row backstop replays (HOO-1918).
+      recipients: [...input.recipients].sort((a, b) => {
+        const left = JSON.stringify(normalizeForFingerprint(a));
+        const right = JSON.stringify(normalizeForFingerprint(b));
+        return left < right ? -1 : left > right ? 1 : 0;
+      }),
       options: input.options ?? null,
     })
   );

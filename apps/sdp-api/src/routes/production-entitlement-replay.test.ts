@@ -170,7 +170,11 @@ async function openHeldProductionTransfer(actor: Actor) {
     "/v1/payments/transfers",
     {
       method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
+      headers: {
+        "Idempotency-Key": crypto.randomUUID(),
+        ...headers,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         sourceCustodyWalletId: PRODUCTION_CUSTODY_WALLET_ID,
         destination: TEST_SOLANA_ADDRESSES.wallet2,

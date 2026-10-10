@@ -63,6 +63,11 @@ export function createLocalApiClient(
     if (projectId) {
       headers["x-project-id"] = projectId;
     }
+    // One key per logical call, reused across the 429 retries below, the way a
+    // real client retries (HOO-1918). Value-moving routes require it.
+    if (method !== "GET") {
+      headers["Idempotency-Key"] = crypto.randomUUID();
+    }
 
     let response = await fetch(`${normalizedBaseUrl}${path}`, {
       method,

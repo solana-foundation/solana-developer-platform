@@ -60,7 +60,7 @@ const contracts: ValueMovingContract[] = [
       {
         mode: "idempotency_fingerprint",
         file: "apps/sdp-api/src/routes/payments/transfer-batches/handlers.test.ts",
-        evidence: "returns the original batch when a concurrent insert loses the idempotency race",
+        evidence: "answers a concurrent duplicate 409 while the first batch holds its key",
       },
     ],
   },

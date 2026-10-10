@@ -515,6 +515,23 @@ describe("Payments routes — transfer idempotency", () => {
     expect(sendTransactionMock).toHaveBeenCalledOnce();
   });
 
+  it("refuses a transfer without an Idempotency-Key before anything runs", async () => {
+    const response = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      },
+      { idempotencyKey: null }
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "IDEMPOTENCY_KEY_REQUIRED"
+    );
+    expect(await countTransferRows()).toBe(0);
+  });
+
   it("rejects the same Idempotency-Key with a different body", async () => {
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -542,10 +559,13 @@ describe("Payments routes — transfer idempotency", () => {
       },
       { idempotencyKey: headers["Idempotency-Key"] }
     );
-    expect(conflict.status).toBe(409);
+    expect(conflict.status).toBe(422);
+    expect(((await conflict.json()) as { error: { code: string } }).error.code).toBe(
+      "IDEMPOTENCY_KEY_REUSED"
+    );
   });
 
-  it("does not dedup when no Idempotency-Key is supplied", async () => {
+  it("does not dedup two requests under different Idempotency-Keys", async () => {
     const signAndSendMock = vi
       .fn()
       .mockResolvedValueOnce(

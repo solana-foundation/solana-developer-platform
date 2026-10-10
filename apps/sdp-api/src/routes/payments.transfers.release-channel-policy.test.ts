@@ -67,7 +67,12 @@ async function postTransferOn(
     "/v1/payments/transfers",
     {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...API_KEY_HEADERS, ...headers },
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": crypto.randomUUID(),
+        ...API_KEY_HEADERS,
+        ...headers,
+      },
       body: JSON.stringify(transfer),
     },
     onChannel(releaseChannel)

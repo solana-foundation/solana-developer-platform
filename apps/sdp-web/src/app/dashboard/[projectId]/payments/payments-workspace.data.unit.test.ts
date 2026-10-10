@@ -28,7 +28,7 @@ describe("Payments write requests", () => {
     amount: "1",
   };
 
-  it("sends the exact custody wallet id, the tab's Project, and a key only when there is one", async () => {
+  it("sends the exact custody wallet id, the tab's Project, and the caller's key or one per action", async () => {
     const fetch = vi
       .fn()
       .mockImplementation(async () =>
@@ -50,9 +50,10 @@ describe("Payments write requests", () => {
         "x-project-id": "prj_test_sandbox",
       })
     );
-    expect(unkeyed).toEqual(
-      new Headers({ "Content-Type": "application/json", "x-project-id": "prj_test_sandbox" })
-    );
+    // A caller without its own key still gets one per user action (HOO-1918).
+    const unkeyedHeaders = new Headers(unkeyed);
+    expect(unkeyedHeaders.get("x-project-id")).toBe("prj_test_sandbox");
+    expect(unkeyedHeaders.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("reads a policy hold as a pending approval, not a failed transfer", async () => {

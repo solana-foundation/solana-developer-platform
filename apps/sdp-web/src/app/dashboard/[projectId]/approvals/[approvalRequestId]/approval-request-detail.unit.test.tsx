@@ -142,14 +142,19 @@ describe("ApprovalRequestDetail", () => {
 
       expect(await screen.findByText("Request approved")).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
-      const decision = {
-        method: "POST",
-        headers: new Headers({ "x-project-id": "prj_test_production" }),
-      };
-      expect(fetchResponse.mock.calls).toEqual([
-        ["/api/dashboard/approval-requests/apr_1/approve", decision],
-        ["/api/dashboard/approval-requests/apr_1/approve", decision],
+      expect(fetchResponse.mock.calls.map(([path, init]) => [path, init?.method])).toEqual([
+        ["/api/dashboard/approval-requests/apr_1/approve", "POST"],
+        ["/api/dashboard/approval-requests/apr_1/approve", "POST"],
       ]);
+      // A definitive refusal retires the Idempotency-Key, so approving again is
+      // a new action; after a conflict or a 5xx the retry keeps it (HOO-1918).
+      const [refused, approved] = fetchResponse.mock.calls.map(
+        ([, init]) => new Headers(init?.headers)
+      );
+      expect(refused?.get("x-project-id")).toBe("prj_test_production");
+      expect(refused?.get("Idempotency-Key")).toBeTruthy();
+      const sameKey = approved?.get("Idempotency-Key") === refused?.get("Idempotency-Key");
+      expect(sameKey).toBe(status === 409 || status >= 500);
     }
   );
 

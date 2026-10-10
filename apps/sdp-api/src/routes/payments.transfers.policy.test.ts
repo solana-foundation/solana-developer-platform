@@ -526,6 +526,49 @@ describe("Payments routes — transfer policy", () => {
     ]);
     expect(response.status).toBe(400);
   });
+  // Greptile (#2267): the replay check reads wallet access fresh, as the
+  // handler does, so a binding removed while the auth cache still holds it
+  // cannot read the stored response.
+  it("refuses a replay once a selected-wallet key loses its binding", async () => {
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "approve-payment-execution",
+          kind: "approval",
+          operationTypes: ["payment_transfer_execute"],
+        },
+      ],
+    });
+    await getDb(env)
+      .prepare(`INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+         VALUES ('akw_selected_replay_revoked', ?, ?, '["*"]')`)
+      .bind(TEST_API_KEY.id, TEST_WALLET_ID)
+      .run();
+    await seedCachedKey({
+      walletScope: "selected",
+      signingWalletId: TEST_WALLET_ID,
+      signingWalletIds: [TEST_WALLET_ID],
+      walletBindings: [
+        { walletId: TEST_WALLET_ID, custodyWalletId: TEST_CUSTODY_WALLET_ID, permissions: ["*"] },
+      ],
+    });
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+      amount: "0.1",
+    };
+    const idempotencyKey = "selected-replay-revoked";
+    expect((await postTransfer(body, { idempotencyKey })).status).toBe(202);
+
+    await getDb(env)
+      .prepare("DELETE FROM api_key_wallet_permissions WHERE id = 'akw_selected_replay_revoked'")
+      .run();
+    const retry = await postTransfer(body, { idempotencyKey });
+    expect(retry.status).toBe(403);
+    expect(retry.headers.get("Idempotent-Replayed")).toBeNull();
+  });
+
   it("replays a selected-wallet API key approval exactly once", async () => {
     const approverUserId = "usr_test_ungrouped_payment_approver";
     await getDb(env).batch([
@@ -659,7 +702,8 @@ describe("Payments routes — transfer policy", () => {
   });
   it.each([
     ["under the same Idempotency-Key", 1, "pay-same-intent"],
-    ["with no Idempotency-Key", 2, undefined],
+    // Omitted: postTransfer sends a fresh key per call, so two different keys.
+    ["under two different Idempotency-Keys", 2, undefined],
   ] as const)(
     "approving two requests opened %s executes the payment as %i transfer(s)",
     async (_label, expectedTransfers, idempotencyKey) => {
@@ -704,13 +748,20 @@ describe("Payments routes — transfer policy", () => {
       const retryApproval = approvalErrorDetailsSchema.parse(
         (await readErrorResponse(retry)).error.details
       ).approvalRequestId;
-      expect(retryApproval).not.toBe(firstApproval);
+      // The same key replays the held 202 rather than opening a second
+      // approval (APE-568); different keys are two payments.
+      if (idempotencyKey === undefined) {
+        expect(retryApproval).not.toBe(firstApproval);
+      } else {
+        expect(retryApproval).toBe(firstApproval);
+        expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+      }
       expect(await countTransferRows()).toBe(0);
       const adminHeaders = {
         Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), approverUserId, TEST_ORG.id)}`,
         "x-project-id": TEST_PROJECT.id,
       };
-      for (const approvalRequestId of [firstApproval, retryApproval]) {
+      for (const approvalRequestId of new Set([firstApproval, retryApproval])) {
         const approved = await app.request(
           `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
           { method: "POST", headers: adminHeaders },
