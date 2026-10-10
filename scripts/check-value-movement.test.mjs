@@ -214,3 +214,28 @@ declare function register(value: unknown): void;
     "src/allowed.ts:8",
   ]);
 });
+
+test("pins a package constructor however a re-exporting package spells it", () => {
+  const KEYPAIR = {
+    id: "keypair",
+    why: "keypair capability",
+    symbols: [{ module: "kit", name: "fromBytes" }],
+    owners: [],
+    allow: ["src/allowed.ts"],
+  };
+  const found = violations(
+    {
+      "node_modules/signers/package.json": JSON.stringify({ name: "signers", types: "index.d.ts" }),
+      "node_modules/signers/index.d.ts":
+        "export declare function fromBytes(bytes: Uint8Array): unknown;\n",
+      "node_modules/kit/package.json": JSON.stringify({ name: "kit", types: "index.d.ts" }),
+      "node_modules/kit/index.d.ts": 'export * from "signers";\n',
+      "src/allowed.ts": `import { fromBytes } from "signers";\nfromBytes(new Uint8Array());\n`,
+      "src/direct.ts": `import { fromBytes } from "kit";\nfromBytes(new Uint8Array());\n`,
+    },
+    [KEYPAIR]
+  );
+
+  const flagged = new Set(found.map((violation) => violation.split(":")[0]));
+  assert.deepEqual([...flagged], ["src/direct.ts"]);
+});

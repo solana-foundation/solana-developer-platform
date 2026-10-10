@@ -139,8 +139,16 @@ export const CAPABILITIES = [
   },
   {
     id: "keypair-signer",
-    why: "Turns raw private-key bytes into a signer; only local key creation in the signing service may.",
-    symbols: [{ module: "@solana/signers", name: "createKeyPairSignerFromPrivateKeyBytes" }],
+    why: "Turns raw private-key bytes into a signer or key pair; only local key creation in the signing service may.",
+    // Every constructor Kit offers from stored bytes, resolved through
+    // `@solana/kit` so its re-exports of `@solana/signers` and `@solana/keys`
+    // count however they are imported.
+    symbols: [
+      { module: "@solana/kit", name: "createKeyPairSignerFromPrivateKeyBytes" },
+      { module: "@solana/kit", name: "createKeyPairSignerFromBytes" },
+      { module: "@solana/kit", name: "createKeyPairFromPrivateKeyBytes" },
+      { module: "@solana/kit", name: "createKeyPairFromBytes" },
+    ],
     owners: [],
     allow: [`${API}/services/domain/signing.service.ts`],
     shrinkOnly: true,
