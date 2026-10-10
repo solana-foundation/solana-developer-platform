@@ -46,6 +46,11 @@ dropped.
 
 - Classifying a movement as `exit` exempts it from admission, so it is a
   security-reviewed change, as is adding a file to a checker allowlist.
+- Exits that let the caller pick a destination (Private Channels and Rings
+  withdrawals) are accepted as they are. The only organization that reaches
+  them through the API has lost the production entitlement and still owns the
+  funds; a compromised organization is suspended, and a suspended
+  organization's requests are refused before any handler runs.
 - A revoked organization's same-key retry of a completed request gets the
   refusal, not its stored response (ADR 0008, idempotency, #2251). There is no special case.
 - Production entitlement is decided for starts only; the edge's own
