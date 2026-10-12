@@ -13,7 +13,6 @@ import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ram
 import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError } from "@/lib/errors";
-import { invitationWasRevoked } from "@/lib/invitations";
 import { success } from "@/lib/response";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
@@ -27,6 +26,7 @@ import {
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
 import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook-events";
+import { admitOrganizationMember } from "@/services/organization-membership-admission.service";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./ramps/processor";
@@ -200,21 +200,22 @@ async function ensureUserMapping(
     return existing.user_id;
   }
 
+  await db
+    .prepare(
+      `INSERT INTO users (id, email, name, email_verified, status)
+       VALUES (?, ?, ?, 1, 'active')
+       ON CONFLICT (email) DO NOTHING`
+    )
+    .bind(`usr_${crypto.randomUUID()}`, email, user.name)
+    .run();
   const localUser = await db
     .prepare("SELECT id FROM users WHERE email = ?")
     .bind(email)
     .first<{ id: string }>();
-  const userId = localUser?.id ?? `usr_${crypto.randomUUID()}`;
-
   if (!localUser) {
-    await db
-      .prepare(
-        `INSERT INTO users (id, email, name, email_verified, status)
-         VALUES (?, ?, ?, 1, 'active')`
-      )
-      .bind(userId, email, user.name)
-      .run();
+    throw new AppError("INTERNAL_ERROR", "Unable to resolve Clerk user");
   }
+  const userId = localUser.id;
 
   await db
     .prepare(
@@ -247,7 +248,6 @@ async function syncUser(c: AppContext, data: UserJSON) {
         organization: membership.organization,
         userId,
         role: membership.role,
-        reactivateRemoved: false,
       })
     )
   );
@@ -279,7 +279,7 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
   ]);
 }
 
-/** The address the revoked-invitation rule is keyed on. */
+/** The address invitations are keyed on. */
 async function resolveMemberEmail(c: AppContext, userId: string): Promise<string | null> {
   const user = await getDb(c.env)
     .prepare("SELECT email FROM users WHERE id = ?")
@@ -289,78 +289,63 @@ async function resolveMemberEmail(c: AppContext, userId: string): Promise<string
   return user?.email ?? null;
 }
 
+/**
+ * Applies a Clerk membership to SDP through the shared admission rules, then
+ * mirrors the Clerk role onto a member who was already active (the Clerk
+ * organization profile is still where roles change) and provisions the
+ * default projects for an admitted member.
+ *
+ * @param c - Webhook request context
+ * @param data - The Clerk membership being applied
+ * @param data.organization - Clerk organization the membership belongs to
+ * @param data.userId - SDP user id of the member
+ * @param data.role - Clerk organization role
+ * @returns Resolves once the membership is applied or declined
+ */
 async function upsertVerifiedMembership(
   c: AppContext,
   data: {
     organization: OrganizationJSON;
     userId: string;
     role: string;
-    reactivateRemoved: boolean;
   }
 ) {
   const organizationId = await ensureOrganizationMapping(c, data.organization);
-  const role = mapClerkRoleToOrgRole(data.role);
-  const memberId = `mem_${crypto.randomUUID()}`;
-  const existing = await getDb(c.env)
-    .prepare(
-      `SELECT status
-       FROM organization_members
-       WHERE organization_id = ? AND user_id = ?`
-    )
-    .bind(organizationId, data.userId)
-    .first<{ status: string }>();
-
   const email = await resolveMemberEmail(c, data.userId);
+  if (!email) {
+    return;
+  }
+  const clerkRole = mapClerkRoleToOrgRole(data.role);
 
-  // The check and the write share one transaction, and the check locks the
-  // invitation rows. Reading the status and inserting as separate statements
-  // let a revocation commit in between and still admit the member.
-  const admitted = await getDb(c.env).transaction(async (tx) => {
-    if (
-      existing?.status !== "active" &&
-      email &&
-      (await invitationWasRevoked(tx, organizationId, email, { lock: true }))
-    ) {
-      // Clerk says join, we say the invitation was withdrawn. Clerk mints the
-      // acceptance link and we cannot expire it, so this sync is the last point
-      // that can honour the revocation — without this, revoking an invitation
-      // stopped the local token but not the Clerk link.
-      //
-      // Scoped to users who are not already active members, so this can only
-      // decline a join, never strip access from someone who has it. A revoked
-      // invitation for an existing member is stale and irrelevant.
-      return false;
-    }
-
-    await tx
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-       VALUES (?, ?, ?, ?, 'active')
-       ON CONFLICT(organization_id, user_id)
-       DO UPDATE SET
-         role = excluded.role,
-         status = CASE
-           WHEN organization_members.status = 'removed' AND ? = 0
-             THEN organization_members.status
-           ELSE 'active'
-         END`
-      )
-      .bind(memberId, organizationId, data.userId, role, data.reactivateRemoved ? 1 : 0)
-      .run();
-
-    return true;
+  const admission = await admitOrganizationMember(getDb(c.env), {
+    organizationId,
+    userId: data.userId,
+    email,
+    clerkRole,
   });
 
-  if (!admitted) {
+  if (!admission.admitted) {
     getLogger().warn(
       {
         requestId: c.get("requestId"),
         organizationId,
         userId: data.userId,
+        reason: admission.reason,
       },
-      "webhooks: declined membership for a revoked invitation"
+      "webhooks: declined Clerk membership"
     );
     return;
+  }
+
+  if (!admission.joined && admission.role !== clerkRole) {
+    await getDb(c.env)
+      .prepare(
+        `UPDATE organization_members
+            SET role = ?
+          WHERE organization_id = ? AND user_id = ? AND status = 'active'`
+      )
+      .bind(clerkRole, organizationId, data.userId)
+      .run();
   }
 
   const projectService = new ProjectService(getDb(c.env));
@@ -383,7 +368,6 @@ async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON)
     organization: data.organization,
     userId,
     role: data.role,
-    reactivateRemoved: true,
   });
 }
 
