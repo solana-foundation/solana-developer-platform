@@ -79,7 +79,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
   }
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const pauseAuthorityRaw = await resolvePauseAuthority(c.env, mintAddress);
+  const pauseAuthorityRaw = await resolvePauseAuthority(mintAddress);
   if (!pauseAuthorityRaw) {
     throw badRequest("Pause authority is not configured for this token");
   }
@@ -258,7 +258,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
   }
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
-  const pauseAuthorityRaw = await resolvePauseAuthority(c.env, mintAddress);
+  const pauseAuthorityRaw = await resolvePauseAuthority(mintAddress);
   if (!pauseAuthorityRaw) {
     throw badRequest("Pause authority is not configured for this token");
   }

@@ -6,12 +6,30 @@
  */
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { TransactionSigner } from "@solana/kit";
+import type { resolveTokenAccount } from "@solana/mosaic-sdk";
 import { badRequest, transactionFailed } from "@/lib/errors";
 import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 
 export type MosaicFeePayment = "sponsored" | "wallet";
+
+type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
+
+/**
+ * The open cluster scope's RPC client, typed for the Mosaic-family SDKs
+ * (`@solana/mosaic-sdk`, `@solana/token-acl-sdk`). Those SDKs still publish an
+ * older Solana Kit's RPC types over a runtime-compatible client, so this is the
+ * one cross-version cast at the SDK boundary.
+ *
+ * @returns The scope's RPC client, also typed as the Mosaic SDK's RPC.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+export function createMosaicSdkRpc(): SolanaRpc & MosaicSdkRpc {
+  return createClusterRpc() as unknown as SolanaRpc & MosaicSdkRpc;
+}
 
 /**
  * Create a MosaicService with a signer and an explicit fee-payment mode.
@@ -40,7 +58,7 @@ export function createMosaicService(
     feePayment === "sponsored" && env.KORA_RPC_URL && sponsorshipScope
       ? createSponsorshipFeePayment(env, sponsorshipScope)
       : undefined;
-  return new MosaicService(env, signer, sponsor, {
+  return new MosaicService(env, createMosaicSdkRpc(), signer, sponsor, {
     // Keep on-chain failures surfacing as AppError("TRANSACTION_FAILED") so
     // the app's error handler maps them to 400 responses.
     transactionFailedError: transactionFailed,

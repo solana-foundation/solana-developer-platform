@@ -1,4 +1,3 @@
-import { createRpcForSdk } from "@sdp/rpc/solana";
 import { type Address, assertValidAddress } from "@sdp/solana/address";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
 import { getDb } from "@/db";
@@ -6,12 +5,12 @@ import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import { createMosaicSdkRpc } from "@/services/issuance/mosaic";
 import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
-import type { Env } from "@/types/env";
 import {
   createIssuanceToken2022Service,
   getTenantTokenService,
@@ -30,8 +29,6 @@ import {
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
-
-type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
 
 function toBurnOperationAppError(error: unknown): AppError | null {
   if (!(error instanceof Error)) {
@@ -70,14 +67,13 @@ function toBurnOperationAppError(error: unknown): AppError | null {
 }
 
 async function resolveValidatedBurnSource(
-  env: Env,
   authorityAddress: Address,
   requestedSource: Address,
   mintAddress: Address,
   amountBaseUnits: bigint,
   tokenSymbol: string
 ): Promise<Address> {
-  const rpc = createRpcForSdk<MosaicSdkRpc>(env);
+  const rpc = createMosaicSdkRpc();
 
   let authorityAta: Awaited<ReturnType<typeof resolveTokenAccount>>;
   try {
@@ -170,7 +166,6 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     token.decimals
   );
   const normalizedSource = await resolveValidatedBurnSource(
-    c.env,
     signer.address,
     source,
     mintAddress,
@@ -367,7 +362,6 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       requiredWalletPermissions: ["tokens:write"],
     });
     const normalizedSource = await resolveValidatedBurnSource(
-      c.env,
       signer.address,
       source,
       mintAddress,
