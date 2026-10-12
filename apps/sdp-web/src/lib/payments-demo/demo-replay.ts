@@ -378,7 +378,7 @@ function applyPayoutAccount(world: DemoWorld, op: DemoOpOf<"payout-account">): v
 }
 
 function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
-  const wallet = findWallet(world, op.wallet);
+  const wallet = Object.values(world.wallets).find((candidate) => candidate.id === op.wallet);
   if (!wallet) return;
   const createdAt = iso(op.at);
   world.requests.push({
@@ -387,6 +387,7 @@ function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     counterpartyId: op.cp,
+    custodyWalletId: wallet.id,
     walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
     token: op.token,

@@ -26,16 +26,21 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { Hono } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db";
+import type { SponsoredTransactionClaim } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
-import { badRequest, notFound, rateLimited } from "@/lib/errors";
+import { badRequest, notFound, rateLimited, serviceUnavailable } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
+import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
-import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
+import {
+  createProjectSponsorshipFeePayment,
+  type SponsorshipContinuity,
+} from "@/services/sponsorship.service";
 import type { Env } from "@/types/env";
 import { solanaAddressSchema } from "./payments/schemas";
 import {
@@ -134,9 +139,19 @@ pay.post(
         message: `Pay ${request.amount} ${resolveTokenLabel(request.token)} to ${REQUEST_LABEL}`,
       });
 
+    const deploymentMode = isSelfHostedDeployment(c.env) ? "self_hosted" : "managed";
+    let inspectedClaim: SponsoredTransactionClaim | null = null;
     const serveLiveClaim = async () => {
       const claim = await repository.getSponsoredTransactionClaim(request.id);
-      if (claim === null || claim.lastValidBlockHeight < currentBlockHeight) {
+      inspectedClaim = claim;
+      if (claim === null) {
+        return null;
+      }
+      if (claim.lastValidBlockHeight < currentBlockHeight) {
+        // Expiry is not proof of an unsigned or unlinked provider outcome.
+        if (claim.signedTransaction === null || claim.deploymentMode === null) {
+          throw serviceUnavailable("Previous sponsored window requires accounting reconciliation");
+        }
         return null;
       }
       if (claim.account !== payer) {
@@ -149,22 +164,49 @@ pay.post(
       if (claim.signedTransaction !== null) {
         return respondWithClaim(claim.signedTransaction);
       }
-      return signAndStore(claim.unsignedTransaction);
+      return signAndStore(claim, false);
     };
 
     let feePaymentInstance: Awaited<ReturnType<typeof createProjectSponsorshipFeePayment>> | null =
       null;
-    const getFeePayment = async () => {
-      feePaymentInstance ??= await createProjectSponsorshipFeePayment(c.env, {
+    let continuity: SponsorshipContinuity | undefined;
+    let accountingClaim: SponsoredTransactionClaim | null = null;
+    const getFeePayment = async (claim: SponsoredTransactionClaim | null, fresh: boolean) => {
+      if (feePaymentInstance) return feePaymentInstance;
+      continuity = {
+        deploymentMode: claim?.deploymentMode ?? deploymentMode,
+        legacyActor: { type: "wallet", id: request.wallet_id },
+        exactActor: { type: "wallet", id: request.custody_wallet_id as string },
+        admission: fresh ? "legacy_new" : "continue_only",
+        reservationId: claim?.accountingIdentity?.reservationId,
+        persistAccountingIdentity: async (identity) => {
+          if (
+            !accountingClaim ||
+            !(await repository.persistSponsoredTransactionAccountingIdentity({
+              requestId: request.id,
+              account: accountingClaim.account,
+              unsignedTransaction: accountingClaim.unsignedTransaction,
+              lastValidBlockHeight: accountingClaim.lastValidBlockHeight,
+              identity,
+            }))
+          ) {
+            throw serviceUnavailable("Sponsored transaction accounting ownership changed");
+          }
+        },
+      };
+      feePaymentInstance = await createProjectSponsorshipFeePayment(c.env, {
         organizationId: request.organization_id,
         projectId: request.project_id as string,
         actor: { type: "wallet", id: request.wallet_id },
+        continuity,
       });
       return feePaymentInstance;
     };
 
-    const signAndStore = async (unsignedBase64: string) => {
-      const feePayment = await getFeePayment();
+    const signAndStore = async (claim: SponsoredTransactionClaim, fresh: boolean) => {
+      accountingClaim = claim;
+      const unsignedBase64 = claim.unsignedTransaction;
+      const feePayment = await getFeePayment(claim, fresh);
       const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
       const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
       // /pay bytes are partially signed by design: the payer signs client-side.
@@ -181,6 +223,7 @@ pay.post(
           token: request.token,
           destination: request.destination_address,
           walletId: request.wallet_id,
+          custodyWalletId: request.custody_wallet_id,
           signature,
           claimHash: await hashString(unsignedBase64),
         },
@@ -217,9 +260,10 @@ pay.post(
       accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
     });
     const payerSigner = createNoopSigner(payer);
-    const feePayment = await getFeePayment();
+    const feePayment = await getFeePayment(inspectedClaim, inspectedClaim === null);
+    const retainedFeePayer = inspectedClaim === null ? null : await feePayment.getFeePayer();
     const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
-      feePayment.getFeePayer(),
+      retainedFeePayer ?? feePayment.getFeePayer(),
       solanaRpc.getRecentBlockhash(rpc, "confirmed"),
     ]);
 
@@ -262,8 +306,11 @@ pay.post(
       unsignedTransaction: unsignedBase64,
       lastValidBlockHeight,
       currentBlockHeight,
+      deploymentMode,
+      expectedClaim: inspectedClaim,
     });
     if (!claimed) {
+      feePaymentInstance = null;
       const winner = await serveLiveClaim();
       if (winner) {
         return winner;
@@ -271,7 +318,22 @@ pay.post(
       throw rateLimited("Another payer holds this payment request's sponsored transaction");
     }
 
-    return signAndStore(unsignedBase64);
+    // Reuse the proven provider; only the winning new window gets fresh admission.
+    if (continuity) {
+      continuity.admission = "legacy_new";
+      delete continuity.reservationId;
+    }
+    return signAndStore(
+      {
+        account: payer,
+        unsignedTransaction: unsignedBase64,
+        signedTransaction: null,
+        lastValidBlockHeight,
+        deploymentMode,
+        accountingIdentity: null,
+      },
+      true
+    );
   }
 );
 

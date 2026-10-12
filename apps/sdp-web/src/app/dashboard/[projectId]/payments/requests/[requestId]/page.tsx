@@ -47,11 +47,8 @@ async function PaymentRequestDetailRoute({ params }: { params: Promise<{ request
             fetchCounterparty(apiClient.request, request.counterpartyId as string)
           )
         : null;
-      const wallet = request
-        ? (walletsResult.data ?? []).find(
-            (candidate) =>
-              candidate.walletId === request.walletId || candidate.id === request.walletId
-          )
+      const wallet = request?.custodyWalletId
+        ? (walletsResult.data ?? []).find((candidate) => candidate.id === request.custodyWalletId)
         : undefined;
 
       return (

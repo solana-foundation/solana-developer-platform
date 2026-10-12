@@ -291,6 +291,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   // Every read a covered screen makes must have a demo answer.
   expect(harness.state.unhandled).toEqual([]);
@@ -711,6 +712,63 @@ describe("Requests", () => {
       expect(props.contactName === null).toBe(request.counterpartyId === null);
     }
   });
+
+  it.each([
+    { custodyWalletId: "cwlt_recipient_b", expectedName: "Recipient B" },
+    { custodyWalletId: null, expectedName: null },
+    { custodyWalletId: "cwlt_unavailable", expectedName: null },
+  ])(
+    "joins recipient $custodyWalletId only through its exact stored pin",
+    async ({ custodyWalletId, expectedName }) => {
+      const request = {
+        ...demoData<{ paymentRequests: PaymentRequest[] }>("/v1/payments/requests")
+          .paymentRequests[0],
+        custodyWalletId,
+        walletId: "provider_shared",
+        counterpartyId: null,
+      };
+      const originalRequest = harness.apiClient.request;
+      vi.spyOn(harness.apiClient, "request").mockImplementation(async (path, init) => {
+        if (path.startsWith("/v1/payments/requests")) {
+          return Response.json({ data: { paymentRequests: [request], total: 1 } });
+        }
+        if (path.startsWith("/v1/wallets")) {
+          return Response.json({
+            data: {
+              wallets: [
+                {
+                  id: "cwlt_recipient_a",
+                  custodyConfigId: "cfg_a",
+                  walletId: "provider_shared",
+                  publicKey: request.destinationAddress,
+                  label: "Recipient A",
+                  isRuntimeExecutionAllowed: true,
+                },
+                {
+                  id: "cwlt_recipient_b",
+                  custodyConfigId: "cfg_b",
+                  walletId: "provider_shared",
+                  publicKey: request.destinationAddress,
+                  label: "Recipient B",
+                  isRuntimeExecutionAllowed: true,
+                },
+              ],
+            },
+          });
+        }
+        return originalRequest(path, init);
+      });
+      const detail = propsOf<{ children: unknown }>(
+        await PaymentRequestDetailRoute({
+          params: Promise.resolve({ requestId: request.id as string }),
+        })
+      );
+      expect(propsOf<{ walletName: string | null }>(detail.children).walletName).toBe(expectedName);
+      expect(propsOf<{ request: PaymentRequest }>(detail.children).request.destinationAddress).toBe(
+        request.destinationAddress
+      );
+    }
+  );
 });
 
 describe("Schedules", () => {

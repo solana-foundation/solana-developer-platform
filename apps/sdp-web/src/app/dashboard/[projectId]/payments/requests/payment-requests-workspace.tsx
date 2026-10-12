@@ -4,7 +4,6 @@ import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type Counterparty,
   type CounterpartyAccount,
-  type PaymentRequest,
   type PaymentRequestStatus,
   type PaymentsDashboardWallet,
 } from "@sdp/types";
@@ -76,8 +75,10 @@ import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-ke
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
 import {
   deriveTokenOptions,
+  type DashboardPaymentRequest as PaymentRequest,
   type PaymentRequestsLocalErrorCode,
   type PaymentRequestTokenOption,
+  paymentRequestSchema,
 } from "./payment-requests-page.data";
 
 const PaymentRequestsPlayground = dynamic(
@@ -221,7 +222,7 @@ function CreateRequestModal({
   });
   const [submitting, setSubmitting] = useState(false);
 
-  // Option values are the unique id/mint/walletId (not the display label), so
+  // Option values are the exact SDP wallet ID, mint or counterparty ID, so
   // wallets or tokens sharing a label/symbol can't collapse onto each other. The
   // DS Select mirrors each item's text in the trigger, so the label still shows.
   const selectedCounterpartyId =
@@ -261,10 +262,10 @@ function CreateRequestModal({
     const expiresAt = resolveExpiryDate(result.data.expiry);
 
     setSubmitting(true);
-    const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
+    const res = await dashboardFetch<{ data: unknown }>("/api/dashboard/payments/requests", {
       method: "POST",
       body: {
-        walletId: result.data.wallet,
+        custodyWalletId: result.data.wallet,
         token: result.data.token,
         amount: result.data.amount,
         counterpartyId,
@@ -284,8 +285,8 @@ function CreateRequestModal({
     // repopulate and then reopening the row. A response without a `publicToken` still
     // means the request was created, so fall back to closing rather than reporting a
     // failure that did not happen — the row will arrive with the refresh.
-    const created = res.data?.data;
-    onCreated(created?.publicToken ? created : null);
+    const created = paymentRequestSchema.safeParse(res.data?.data);
+    onCreated(created.success ? created.data : null);
   }
 
   return (
@@ -360,7 +361,7 @@ function CreateRequestModal({
               {wallets.map((wallet) => {
                 const name = wallet.label ? wallet.label : shortenAddress(wallet.publicKey);
                 return (
-                  <SelectItem key={wallet.walletId} value={wallet.walletId}>
+                  <SelectItem key={wallet.id} value={wallet.id}>
                     {name}
                   </SelectItem>
                 );
@@ -397,7 +398,7 @@ function CreateRequestModal({
             {selectedCounterpartyId && !accountsLoading && primaryCryptoAccount && (
               <p className="text-xs text-tertiary">
                 {t("DashboardPayments.requests.paysFrom")}{" "}
-                <span className="font-mono text-secondary">
+                <span className="text-secondary">
                   {resolveAccountAddress(primaryCryptoAccount)}
                 </span>
               </p>
@@ -505,7 +506,7 @@ export function PaymentRequestsWorkspace({
   const payLink = selected ? `${window.location.origin}/pay/${selected.publicToken}` : null;
 
   const walletNameById = useMemo(
-    () => new Map(wallets.map((wallet) => [wallet.walletId, wallet.label])),
+    () => new Map(wallets.map((wallet) => [wallet.id, wallet.label])),
     [wallets]
   );
   const tokenSymbolByMint = useMemo(
@@ -524,7 +525,9 @@ export function PaymentRequestsWorkspace({
     const name = counterpartyNameById.get(counterpartyId);
     return name ? name : counterpartyId;
   };
-  const selectedWalletName = selected ? walletNameById.get(selected.walletId) : null;
+  const selectedWalletName = selected?.custodyWalletId
+    ? walletNameById.get(selected.custodyWalletId)
+    : null;
   const selectedTokenSymbol = selected ? tokenSymbolByMint.get(selected.token) : undefined;
 
   return (
@@ -665,7 +668,7 @@ export function PaymentRequestsWorkspace({
                                     {fromLabel(request.counterpartyId)}
                                   </span>
                                 </TableCell>
-                                <TableCell className="font-mono text-sm text-secondary">
+                                <TableCell className="text-sm text-secondary">
                                   <span className="block truncate">
                                     {shortenAddress(request.destinationAddress)}
                                   </span>
@@ -731,9 +734,7 @@ export function PaymentRequestsWorkspace({
             </div>
 
             <div className="flex items-center gap-2 rounded-2xl border border-border-default p-3">
-              <span className="min-w-0 flex-1 truncate font-mono text-sm text-secondary">
-                {payLink}
-              </span>
+              <span className="min-w-0 flex-1 truncate text-sm text-secondary">{payLink}</span>
               <Button
                 type="button"
                 variant="secondary"
@@ -757,7 +758,7 @@ export function PaymentRequestsWorkspace({
                   {selectedWalletName ? (
                     <span className="block font-medium text-primary">{selectedWalletName}</span>
                   ) : null}
-                  <span className="block font-mono text-xs font-normal text-secondary">
+                  <span className="block text-sm font-normal text-secondary">
                     {selected.destinationAddress}
                   </span>
                 </DetailRow>

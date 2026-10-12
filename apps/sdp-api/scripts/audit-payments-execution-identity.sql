@@ -171,13 +171,81 @@ WHERE batch.source_custody_wallet_id IS DISTINCT FROM transfer.custody_wallet_id
 ORDER BY batch.organization_id, batch.id, transfer.id
 LIMIT 100;
 
-\echo '=== 2b. Unresolved nonterminal Payment Requests (review before cutover) ==='
-SELECT id, organization_id, project_id, status
-FROM payment_requests
-WHERE status = 'awaiting_payment'
-  AND custody_wallet_id IS NULL
-ORDER BY organization_id, id
+\echo '=== 2b. Unresolved payable Payment Requests (review before cutover) ==='
+SELECT request.id, request.organization_id, request.project_id, request.status, request.expires_at
+FROM payment_requests request
+JOIN projects project
+  ON project.id = request.project_id AND project.organization_id = request.organization_id
+JOIN organizations organization ON organization.id = request.organization_id
+WHERE request.status = 'awaiting_payment'
+  AND request.custody_wallet_id IS NULL
+  AND (request.expires_at IS NULL OR request.expires_at::TIMESTAMPTZ > NOW())
+  AND project.status = 'active'
+  AND organization.status = 'active'
+  AND CASE WHEN project.environment = 'production'
+           THEN COALESCE(organization.settings::JSONB -> 'enableProductionProject' = 'true'::JSONB, FALSE)
+           ELSE TRUE END
+ORDER BY request.organization_id, request.id
 LIMIT 100;
+
+\echo '=== 2c. All retained Request claims (parent lifecycle never releases exposure) ==='
+-- SQL cannot establish blockhash expiry or prove message/accounting ownership.
+-- Keep terminal and expired parents for the continuity reader; omit bearer bytes.
+SELECT request.id, request.organization_id, request.project_id,
+       request.status AS request_status, request.expires_at,
+       request.custody_wallet_id, request.sponsored_tx_account,
+       request.sponsored_tx_last_valid_block_height,
+       request.sponsored_tx_signed IS NOT NULL AS has_signed_claim,
+       request.sponsored_tx_continuity ->> 'deploymentMode' AS deployment_mode,
+       request.sponsored_tx_continuity #>> '{accountingIdentity,reservationId}' AS reservation_id,
+       CASE
+         WHEN request.sponsored_tx_account IS NULL
+           OR request.sponsored_tx_unsigned IS NULL
+           OR request.sponsored_tx_last_valid_block_height IS NULL
+           THEN 'invalid_claim_shape'
+         WHEN request.sponsored_tx_continuity IS NOT NULL AND (
+           jsonb_typeof(request.sponsored_tx_continuity) IS DISTINCT FROM 'object'
+           OR NOT COALESCE(request.sponsored_tx_continuity ->> 'deploymentMode' IN ('managed', 'self_hosted'), FALSE)
+           OR (request.sponsored_tx_continuity ->> 'deploymentMode' = 'self_hosted'
+               AND request.sponsored_tx_continuity -> 'accountingIdentity' IS DISTINCT FROM 'null'::JSONB)
+         ) THEN 'invalid_continuity_shape'
+         WHEN request.sponsored_tx_continuity IS NOT NULL AND (
+           request.sponsored_tx_continuity ->> 'account' IS DISTINCT FROM request.sponsored_tx_account
+           OR request.sponsored_tx_continuity ->> 'unsignedTransaction' IS DISTINCT FROM request.sponsored_tx_unsigned
+           OR request.sponsored_tx_continuity ->> 'lastValidBlockHeight' IS DISTINCT FROM request.sponsored_tx_last_valid_block_height::TEXT
+         ) THEN 'stale_continuity_projection'
+         WHEN request.sponsored_tx_signed IS NOT NULL THEN 'signed_claim_review'
+         ELSE 'unsigned_claim_review'
+       END AS classification
+FROM payment_requests request
+WHERE request.sponsored_tx_account IS NOT NULL
+   OR request.sponsored_tx_unsigned IS NOT NULL
+   OR request.sponsored_tx_signed IS NOT NULL
+   OR request.sponsored_tx_last_valid_block_height IS NOT NULL
+   OR request.sponsored_tx_continuity IS NOT NULL
+ORDER BY request.organization_id, request.id;
+
+\echo '=== 2d. Outstanding sponsorship accounting (Request ownership requires message proof) ==='
+-- Replaced windows may no longer have a current Request projection. A shared
+-- wallet actor never proves ownership; the Foundation continuity reader does.
+SELECT reservation.id, reservation.organization_id, reservation.project_id,
+       reservation.network, reservation.product_environment,
+       reservation.actor_type, reservation.actor_id, reservation.status,
+       reservation.attempt, reservation.reserved_lamports, reservation.actual_lamports,
+       reservation.signature, reservation.signed_transaction IS NOT NULL AS has_signed_transaction,
+       reservation.transaction_digest, reservation.provider_config_fingerprint,
+       reservation.redis_settled_at, reservation.created_at, reservation.updated_at,
+       CASE
+         WHEN reservation.status = 'reserved' THEN 'in_progress_or_pre_admission'
+         WHEN reservation.status IN ('signed', 'submitted') THEN 'provider_effect_evidence'
+         WHEN reservation.status IN ('committed', 'released') THEN 'redis_settlement_pending'
+         WHEN reservation.status = 'charged_unknown' THEN 'charged_unknown'
+         ELSE 'unknown_accounting_state'
+       END AS classification
+FROM sponsorship_budget_reservations reservation
+WHERE NOT COALESCE(reservation.status IN ('committed', 'released'), FALSE)
+   OR reservation.redis_settled_at IS NULL
+ORDER BY reservation.organization_id, reservation.id;
 
 \echo '=== 3. Executable Payments Approvals that cannot use compatibility replay ==='
 WITH wallet_scope AS (

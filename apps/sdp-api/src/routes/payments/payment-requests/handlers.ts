@@ -1,20 +1,51 @@
 import type { ListPaymentRequestsResponse, PaymentRequest } from "@sdp/types";
+import { getDb } from "@/db";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { badRequestQuery } from "@/lib/errors";
+import { badRequestQuery, conflict, walletNotFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
-import { assertFreshPaymentWalletAccess, resolveScope, resolveWallet } from "../wallets";
+import {
+  assertFreshPaymentWalletAccess,
+  assertPaymentWalletExactAccess,
+  type ResolvedScope,
+  resolveScope,
+  resolveWalletByCustodyWalletId,
+} from "../wallets";
 import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
+
+async function resolveLegacyPaymentRequestWallet(
+  c: AppContext,
+  scope: ResolvedScope,
+  walletId: string
+) {
+  const projectId = requireProjectId(c);
+  // Retained aliases count; creation eligibility is checked on the proven exact ID.
+  const candidates = await getDb(c.env)
+    .prepare(
+      `SELECT w.id FROM custody_wallets w
+       LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+       LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+       WHERE w.wallet_id = ?
+         AND ((cfg.organization_id = ? AND cfg.project_id = ?)
+           OR (conn.organization_id = ? AND conn.project_id = ?))
+       LIMIT 2`
+    )
+    .bind(walletId, scope.auth.organizationId, projectId, scope.auth.organizationId, projectId)
+    .all<{ id: string }>();
+  if (candidates.results.length > 1) throw conflict("Custody wallet ownership is ambiguous");
+  const candidate = candidates.results[0];
+  if (!candidate) throw walletNotFound();
+  return resolveWalletByCustodyWalletId(scope.wallets, candidate.id);
+}
 
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
   const expired = isPaymentRequestExpired(row.expires_at);
@@ -24,6 +55,7 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     organizationId: row.organization_id,
     projectId: row.project_id,
     counterpartyId: row.counterparty_id,
+    custodyWalletId: row.custody_wallet_id,
     walletId: row.wallet_id,
     destinationAddress: row.destination_address,
     token: row.token,
@@ -78,8 +110,11 @@ export async function createPaymentRequest(
   const body = c.req.valid("json");
 
   const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, body.walletId);
-  assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
+  const wallet =
+    body.custodyWalletId !== undefined
+      ? resolveWalletByCustodyWalletId(scope.wallets, body.custodyWalletId)
+      : await resolveLegacyPaymentRequestWallet(c, scope, body.walletId);
+  assertPaymentWalletExactAccess(c, wallet.id, ["payments:write"]);
   await assertFreshPaymentWalletAccess(c, wallet, ["payments:write"]);
 
   const row = await createPaymentRequestsRepository(

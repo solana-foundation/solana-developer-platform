@@ -39,6 +39,23 @@ it("pins only exactly-one Payments identities without mutating live work", async
 
   try {
     await client.query("BEGIN");
+    await client.query(`CREATE TEMP TABLE organizations (
+      id TEXT PRIMARY KEY, status TEXT, settings TEXT
+    )`);
+    await client.query(`CREATE TEMP TABLE projects (
+      id TEXT PRIMARY KEY, organization_id TEXT, environment TEXT, status TEXT DEFAULT 'active'
+    )`);
+    await client.query(`CREATE TEMP TABLE sponsorship_budget_reservations (
+      id TEXT PRIMARY KEY, organization_id TEXT, project_id TEXT,
+      actor_type TEXT, actor_id TEXT, product_environment TEXT, network TEXT,
+      status TEXT, attempt INTEGER, redis_settled_at TEXT,
+      signed_transaction TEXT, signature TEXT, reserved_lamports BIGINT,
+      actual_lamports BIGINT, created_at TEXT, updated_at TEXT,
+      provider_config_fingerprint TEXT, transaction_digest TEXT
+    )`);
+    await client.query("INSERT INTO organizations VALUES ('org_a', 'active', '{}')");
+    await client.query(`INSERT INTO projects (id, organization_id, environment) VALUES
+      ('prj_a', 'org_a', 'sandbox'), ('prj_b', 'org_a', 'sandbox')`);
     await client.query(`CREATE TEMP TABLE custody_configs (
       id TEXT PRIMARY KEY,
       organization_id TEXT NOT NULL,
@@ -83,6 +100,12 @@ it("pins only exactly-one Payments identities without mutating live work", async
       wallet_id TEXT NOT NULL,
       destination_address TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'awaiting_payment',
+      expires_at TEXT,
+      sponsored_tx_account TEXT,
+      sponsored_tx_unsigned TEXT,
+      sponsored_tx_signed TEXT,
+      sponsored_tx_last_valid_block_height BIGINT,
+      sponsored_tx_continuity JSONB,
       canceled_by TEXT,
       lifecycle JSONB NOT NULL DEFAULT '[]'::jsonb,
       created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z',

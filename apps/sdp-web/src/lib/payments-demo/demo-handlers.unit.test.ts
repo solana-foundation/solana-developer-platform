@@ -1,10 +1,11 @@
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, RAMP_PROVIDERS, type RampProviderId } from "@sdp/types";
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildWorld, DEMO_TOKENS, demoPathParts } from "./demo-fixtures";
+import { buildWorld, DEMO_TOKENS, demoPathParts, demoWorldBody } from "./demo-fixtures";
 import { demoFlowRead, demoWrite } from "./demo-handlers";
 import type { DemoOp } from "./demo-ops";
 import { DEMO_RAMP_ASSETS, demoRampPairs, isDemoRampRail } from "./demo-ramp-assets";
 import { applyDemoOps, tokenKeyForRail, transferById } from "./demo-replay";
+import { decodeDemoOps, encodeDemoOps } from "./demo-session";
 
 /*
  * The demo's write handlers on their own: each refuses what the SDP API would refuse, with the
@@ -596,7 +597,7 @@ describe("transfers and batches", () => {
 describe("requests", () => {
   const request = (body: Record<string, unknown>) =>
     write("POST", "/v1/payments/requests", {
-      walletId: TREASURY,
+      custodyWalletId: TREASURY,
       token: USDC,
       amount: "40",
       ...body,
@@ -604,7 +605,7 @@ describe("requests", () => {
 
   it("refuses a request the API would", () => {
     expect(request({ amount: "" })?.status).toBe(400);
-    expect(request({ walletId: "demo_cwlt_nobody" })?.status).toBe(404);
+    expect(request({ custodyWalletId: "demo_cwlt_nobody" })?.status).toBe(404);
     expect(request({ counterpartyId: "demo_cpty_nobody" })?.status).toBe(404);
     expect(request({ expiresAt: "2026-09-01T00:00:00.000Z" })?.status).toBe(400);
     expect(request({ expiresAt: "not a date" })?.status).toBe(400);
@@ -619,10 +620,108 @@ describe("requests", () => {
     expect(created?.status).toBe(201);
     expect(created?.body.data).toEqual(
       expect.objectContaining({
+        custodyWalletId: TREASURY,
         counterpartyId: "demo_cpty_acme",
         expiresAt: "2026-10-28T00:00:00.000Z",
       })
     );
+  });
+
+  it("replays an existing recorded Request without replacing its terms or session entry", () => {
+    const recorded: DemoOp = {
+      k: "request",
+      id: "demo_new_preq_recorded",
+      at: NOW.getTime() - 1_000,
+      wallet: TREASURY,
+      token: USDC,
+      amount: "17.25",
+      cp: "demo_cpty_acme",
+      expires: "2026-10-28T00:00:00.000Z",
+    };
+    ops = decodeDemoOps(encodeDemoOps([recorded]));
+    const response = demoWorldBody(world(), "/v1/payments/requests") as {
+      data: { paymentRequests: Record<string, unknown>[] };
+    };
+    const saved = response.data.paymentRequests.find(({ id }) => id === recorded.id);
+    expect(saved).toMatchObject({
+      id: recorded.id,
+      custodyWalletId: TREASURY,
+      token: USDC,
+      amount: "17.25",
+      counterpartyId: "demo_cpty_acme",
+      expiresAt: "2026-10-28T00:00:00.000Z",
+      createdAt: "2026-09-28T11:59:59.000Z",
+    });
+    expect(saved?.publicToken).toMatch(/^demo_pt_/);
+    expect(saved?.reference).toBeTruthy();
+    expect(ops).toEqual([recorded]);
+  });
+
+  it("accepts an unambiguous legacy reference, and rejects conflicting or malformed selectors", () => {
+    const providerReference = world().wallets.treasury.walletId;
+    expect(
+      write("POST", "/v1/payments/requests", {
+        walletId: providerReference,
+        token: USDC,
+        amount: "5",
+      })?.body.data.custodyWalletId
+    ).toBe(TREASURY);
+    const priorOps = [...ops];
+    for (const body of [
+      { custodyWalletId: TREASURY, walletId: providerReference },
+      { custodyWalletId: providerReference },
+      { custodyWalletId: null },
+      { custodyWalletId: " " },
+      { custodyWalletID: TREASURY },
+      { custodyWalletId: TREASURY, unexpected: true },
+      {},
+    ]) {
+      const result = write("POST", "/v1/payments/requests", { token: USDC, amount: "5", ...body });
+      expect(result?.status).toBeGreaterThanOrEqual(400);
+    }
+    expect(ops).toEqual(priorOps);
+  });
+
+  it("does not interpret a replayed Request's exact wallet ID as a provider reference", () => {
+    const recorded: DemoOp = {
+      k: "request",
+      id: "demo_new_preq_unresolved",
+      at: NOW.getTime(),
+      wallet: world().wallets.treasury.walletId,
+      token: USDC,
+      amount: "5",
+      cp: null,
+      expires: null,
+    };
+    ops = decodeDemoOps(encodeDemoOps([recorded]));
+    const response = demoWorldBody(world(), "/v1/payments/requests") as {
+      data: { paymentRequests: { id: string }[] };
+    };
+    expect(response.data.paymentRequests.some(({ id }) => id === recorded.id)).toBe(false);
+    expect(ops).toEqual([recorded]);
+  });
+
+  it("refuses ambiguous legacy aliases while retaining each exact demo recipient", () => {
+    const aliasedWorld = world();
+    const wallet = aliasedWorld.wallets.treasury;
+    aliasedWorld.wallets.settlement = {
+      ...aliasedWorld.wallets.settlement,
+      walletId: wallet.walletId,
+      publicKey: wallet.publicKey,
+    };
+    const attempt = (selector: Record<string, string>) =>
+      demoWrite("POST", {
+        segments: ["payments", "requests"],
+        body: { ...selector, token: USDC, amount: "5" },
+        world: aliasedWorld,
+        ops: [],
+        now,
+      });
+    const refused = attempt({ walletId: wallet.walletId });
+    expect(refused?.answer(aliasedWorld).status).toBe(400);
+    expect(refused?.ops).toEqual([]);
+    const exact = attempt({ custodyWalletId: aliasedWorld.wallets.settlement.id });
+    expect(exact?.ops).toMatchObject([{ wallet: "demo_cwlt_settlement" }]);
   });
 });
 

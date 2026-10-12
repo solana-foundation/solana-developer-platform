@@ -3,7 +3,6 @@
 import {
   CLUSTER_BY_SDP_ENVIRONMENT,
   type Counterparty,
-  type PaymentRequest,
   type PaymentRequestStatus,
 } from "@sdp/types";
 import { CopyIcon } from "lucide-react";
@@ -38,6 +37,7 @@ import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-
 import {
   deriveTokenOptions,
   PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
+  type DashboardPaymentRequest as PaymentRequest,
   type PaymentRequestsListState,
   type PaymentRequestsLocalErrorCode,
   paymentRequestMatchesSearch,

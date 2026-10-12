@@ -1,6 +1,6 @@
 "use client";
 
-import { CLUSTER_BY_SDP_ENVIRONMENT, type PaymentRequest } from "@sdp/types";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types";
 import { CopyIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -24,7 +24,10 @@ import {
   RecordStateBand,
 } from "../payments-record";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
-import { deriveTokenOptions } from "./payment-requests-page.data";
+import {
+  deriveTokenOptions,
+  type DashboardPaymentRequest as PaymentRequest,
+} from "./payment-requests-page.data";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -90,7 +93,7 @@ function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symb
         {t("DashboardPayments.requestDetail.paymentLink")}
       </span>
       <div className="flex flex-wrap items-center gap-3">
-        <span className="min-w-0 flex-1 truncate font-mono text-body text-primary">
+        <span className="min-w-0 flex-1 truncate text-body text-primary">
           {origin ? payLink : null}
         </span>
         <Button
@@ -214,18 +217,18 @@ function PaymentRequestRecord({
                 {walletName ? (
                   <>
                     {walletName}
-                    <span className="ms-2 font-mono text-secondary">
+                    <span className="ms-2 text-secondary">
                       {shortenAddress(request.destinationAddress)}
                     </span>
                   </>
                 ) : (
-                  <span className="font-mono">{shortenAddress(request.destinationAddress)}</span>
+                  <span>{shortenAddress(request.destinationAddress)}</span>
                 )}
               </RecordRow>
             </RecordList>
             <RecordList>
               <RecordRow label={t("DashboardPayments.requests.reference")}>
-                <span className="font-mono">{request.reference}</span>
+                <span>{request.reference}</span>
               </RecordRow>
               <RecordRow label={t("DashboardPayments.requests.expires")}>
                 {expires ?? t("DashboardPayments.requests.noExpiry")}

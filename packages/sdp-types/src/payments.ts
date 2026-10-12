@@ -934,6 +934,7 @@ export interface PaymentRequest {
   organizationId: string;
   projectId: string | null;
   counterpartyId: string | null;
+  custodyWalletId: string | null;
   walletId: string;
   destinationAddress: string;
   token: string;

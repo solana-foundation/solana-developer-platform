@@ -1259,18 +1259,31 @@ function createBatch({ body, world, now }: WriteContext): DemoWriteResult {
 
 // ─── Requests ────────────────────────────────────────────────────────────────
 
-const requestSchema = z.object({
-  walletId: z.string().min(1),
-  token: z.string().min(1),
-  amount: amountSchema,
-  counterpartyId: z.string().nullish(),
-  expiresAt: z.string().nullish(),
-});
+const requestSchema = z
+  .object({
+    custodyWalletId: z.string().min(1).regex(/^\S+$/).optional(),
+    walletId: z.string().min(1).regex(/^\S+$/).optional(),
+    token: z.string().min(1),
+    amount: amountSchema,
+    counterpartyId: z.string().nullish(),
+    expiresAt: z.string().nullish(),
+  })
+  .strict()
+  .refine(
+    (input) => (input.custodyWalletId === undefined) !== (input.walletId === undefined),
+    "Choose exactly one wallet selector."
+  );
 
 function createRequest({ body, world, now }: WriteContext): DemoWriteResult {
   const input = parse(requestSchema, body);
   if ("failure" in input) return input.failure;
-  const wallet = findWallet(world, input.data.walletId);
+  const matches = Object.values(world.wallets).filter((candidate) =>
+    input.data.custodyWalletId !== undefined
+      ? candidate.id === input.data.custodyWalletId
+      : candidate.walletId === input.data.walletId
+  );
+  if (matches.length > 1) return error(400, "Choose an exact SDP wallet ID.");
+  const wallet = matches[0];
   if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
   const counterpartyId = input.data.counterpartyId ?? null;
   if (counterpartyId !== null && !contactById(world, counterpartyId)) {

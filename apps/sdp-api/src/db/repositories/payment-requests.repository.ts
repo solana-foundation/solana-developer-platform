@@ -1,6 +1,7 @@
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types";
 import { generateKeyPairSigner } from "@solana/kit";
 import { customAlphabet } from "nanoid";
+import type { SponsorshipAccountingIdentity } from "@/services/sponsorship.service";
 
 // URL-safe, dash-only alphabet (nanoid's default also includes "_").
 // biome-ignore lint/security/noSecrets: token alphabet constant, not a secret.
@@ -81,6 +82,8 @@ export interface SponsoredTransactionClaim {
   unsignedTransaction: string;
   signedTransaction: string | null;
   lastValidBlockHeight: bigint;
+  deploymentMode: "managed" | "self_hosted" | null;
+  accountingIdentity: SponsorshipAccountingIdentity | null;
 }
 
 export interface PaymentRequestsRepository {
@@ -98,8 +101,17 @@ export interface PaymentRequestsRepository {
     unsignedTransaction: string;
     lastValidBlockHeight: bigint;
     currentBlockHeight: bigint;
+    deploymentMode?: "managed" | "self_hosted";
+    expectedClaim?: SponsoredTransactionClaim | null;
   }): Promise<boolean>;
   getSponsoredTransactionClaim(requestId: string): Promise<SponsoredTransactionClaim | null>;
+  persistSponsoredTransactionAccountingIdentity(params: {
+    requestId: string;
+    account: string;
+    unsignedTransaction: string;
+    lastValidBlockHeight: bigint;
+    identity: SponsorshipAccountingIdentity;
+  }): Promise<boolean>;
   storeSponsoredTransactionSignature(params: {
     requestId: string;
     account: string;

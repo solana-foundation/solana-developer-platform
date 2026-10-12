@@ -9,7 +9,7 @@ const DEFAULT_WALLET_PUBLIC_KEY = "1".repeat(32);
 describe("turnkey adapter", () => {
   it("signs transaction message bytes via signMessages", async () => {
     const apiKey = createECDH("prime256v1");
-    apiKey.generateKeys();
+    apiKey.setPrivateKey(Buffer.alloc(32, 1));
     const adapter = new KeychainTurnkeyAdapter({
       apiPublicKey: apiKey.getPublicKey("hex", "compressed"),
       apiPrivateKey: apiKey.getPrivateKey("hex"),

@@ -2,6 +2,7 @@ import type { PaymentRequest } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
   fetchPaymentRequestDetail,
+  fetchPaymentRequests,
   loadPaymentRequestsList,
   PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
   PAYMENT_REQUESTS_PAGE_SIZE,
@@ -12,8 +13,61 @@ import {
 } from "./payment-requests-page.data";
 
 function requestRow(id: string): PaymentRequest {
-  return { id } as PaymentRequest;
+  return {
+    id,
+    publicToken: `token_${id}`,
+    organizationId: "org_test",
+    projectId: "prj_test",
+    counterpartyId: null,
+    custodyWalletId: "cwlt_selected",
+    walletId: "provider_reference",
+    destinationAddress: "saved_destination",
+    token: "mint",
+    amount: "12.5",
+    reference: `reference_${id}`,
+    status: "awaiting_payment",
+    expiresAt: null,
+    fulfilledByTransferId: null,
+    canceledBy: null,
+    lifecycle: [{ status: "awaiting_payment", at: "2026-10-12T00:00:00.000Z" }],
+    createdBy: null,
+    createdAt: "2026-10-12T00:00:00.000Z",
+    updatedAt: "2026-10-12T00:00:00.000Z",
+  };
 }
+
+describe("Request response identity", () => {
+  it.each([undefined, "", " ", "cwlt selected", 123])(
+    "refuses a missing or malformed recipient pin %s",
+    async (custodyWalletId) => {
+      const request = async () =>
+        Response.json({
+          data: { paymentRequests: [{ ...requestRow("preq_1"), custodyWalletId }], total: 1 },
+        });
+      expect(await fetchPaymentRequests(request)).toMatchObject({
+        ok: false,
+        data: [],
+        total: 0,
+        error: "Invalid payment request response",
+      });
+    }
+  );
+
+  it.each(["cwlt_selected", null])(
+    "keeps recipient %s without provider metadata",
+    async (custodyWalletId) => {
+      const { walletId: _provider, ...withoutProvider } = requestRow("preq_1");
+      const row = { ...withoutProvider, custodyWalletId };
+      expect(
+        await fetchPaymentRequests(async () =>
+          Response.json({
+            data: { paymentRequests: [row], total: 1 },
+          })
+        )
+      ).toMatchObject({ ok: true, data: [row], total: 1 });
+    }
+  );
+});
 
 /** A list API over `total` requests, newest first, that records each page it serves. */
 function listApi(total: number) {
@@ -60,6 +114,7 @@ describe("parsePaymentRequestsListParams", () => {
 describe("paymentRequestMatchesSearch", () => {
   const request = {
     id: "preq_1",
+    custodyWalletId: "cwlt_selected",
     amount: "12.5",
     token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     counterpartyId: "cp_1",
@@ -146,7 +201,7 @@ function pageApi(rows: PaymentRequest[], total: number) {
 }
 
 function rowWithStatus(id: string, status: PaymentRequest["status"]): PaymentRequest {
-  return { id, status } as PaymentRequest;
+  return { ...requestRow(id), status };
 }
 
 function listState(changes: Partial<PaymentRequestsListState> = {}): PaymentRequestsListState {
