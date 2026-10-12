@@ -5,6 +5,7 @@ import {
   resolveFeePaymentProvider,
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { ProjectEnvironment, SolanaCluster } from "@sdp/types";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
@@ -188,13 +189,22 @@ export function resolveRequestSponsorshipScope(c: AppContext): SponsorshipScope 
   return { ...scope, projectId: requireProjectId(c) };
 }
 
-/** Resolve either project or organization scope from trusted authentication state. */
+/**
+ * Resolve either project or organization scope from trusted authentication state. The cluster is
+ * the open cluster scope's, so the paymaster and budget follow the same cluster as the request's
+ * RPC client.
+ *
+ * @param c - The request context, inside the project middleware's cluster scope.
+ * @returns The sponsorship scope.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
 export function resolveAuthenticatedSponsorshipScope(c: AppContext): SponsorshipScope {
   const auth = getAuth(c);
   const environment = resolveSdpEnvironment(c);
 
   return {
     environment,
+    cluster: currentClusterScope().cluster,
     organizationId: auth.organizationId,
     projectId: c.get("projectId") ?? auth.projectId ?? null,
     actor:

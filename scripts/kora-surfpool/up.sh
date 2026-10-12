@@ -259,7 +259,7 @@ start_cli_surfpool() {
 # lane's cluster (SURFPOOL_CLUSTER, devnet unless set) and every other pool var is blanked, so no
 # test request can reach a real cluster through a provider URL inherited from Doppler.
 write_cluster_pool_env() {
-  local lane_suffix
+  local lane_suffix cluster_suffix provider
   case "${SURFPOOL_CLUSTER:-devnet}" in
     devnet) lane_suffix="DEVNET" ;;
     mainnet-beta) lane_suffix="MAINNET" ;;
