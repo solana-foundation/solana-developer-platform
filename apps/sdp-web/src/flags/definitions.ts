@@ -275,6 +275,11 @@ export function defineDashboardFlags({
     ],
   });
 
+  const newDesignWallets = newDesignModuleFlag(
+    "wallets",
+    "Wallets (the list, the create flow, one wallet's page, pinned wallets in the sidebar)"
+  );
+
   const newDesignContacts = newDesignModuleFlag(
     "contacts",
     "Payments' Contacts (the list, a new contact, one contact's page)"
@@ -307,6 +312,7 @@ export function defineDashboardFlags({
     earn,
     newDesign,
     paymentsDemoMode,
+    newDesignWallets,
     newDesignContacts,
     newDesignPayDeposit,
     newDesignActivity,
