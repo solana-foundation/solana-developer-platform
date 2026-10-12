@@ -188,7 +188,8 @@ class UnsentRequestError extends Error {
 }
 
 /**
- * Whether a JSON-RPC response body says the node can't serve the request yet.
+ * Whether a JSON-RPC response body says the node can't serve the request yet. Kit's Solana
+ * transport parses bodies with BigInt numbers, so the code arrives as a `bigint`.
  *
  * @param response - The decoded JSON-RPC response.
  * @returns `true` when its `error.code` is in `FAILOVER_JSON_RPC_ERROR_CODES`.
@@ -200,8 +201,8 @@ function asksForAnotherEndpoint(response: unknown): boolean {
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    typeof error.code === "number" &&
-    FAILOVER_JSON_RPC_ERROR_CODES.has(error.code)
+    (typeof error.code === "number" || typeof error.code === "bigint") &&
+    FAILOVER_JSON_RPC_ERROR_CODES.has(Number(error.code))
   );
 }
 
