@@ -255,6 +255,30 @@ start_cli_surfpool() {
   wait_for_json_rpc "Surfpool" "${SURFPOOL_RPC_URL}" 90
 }
 
+# The door reads only the per-cluster pool vars. Surfpool is the sole DEFAULT endpoint for the
+# lane's cluster (SURFPOOL_CLUSTER, devnet unless set) and every other pool var is blanked, so no
+# test request can reach a real cluster through a provider URL inherited from Doppler.
+write_cluster_pool_env() {
+  local lane_suffix
+  case "${SURFPOOL_CLUSTER:-devnet}" in
+    devnet) lane_suffix="DEVNET" ;;
+    mainnet-beta) lane_suffix="MAINNET" ;;
+    *)
+      echo "SURFPOOL_CLUSTER must be devnet or mainnet-beta, got ${SURFPOOL_CLUSTER}" >&2
+      exit 1
+      ;;
+  esac
+  for cluster_suffix in DEVNET MAINNET; do
+    for provider in TRITON HELIUS ALCHEMY QUICKNODE VALIDATIONCLOUD NODIT DEFAULT; do
+      if [ "${cluster_suffix}" = "${lane_suffix}" ] && [ "${provider}" = "DEFAULT" ]; then
+        echo "SOLANA_RPC_${provider}_${cluster_suffix}_API_KEY_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
+      else
+        echo "SOLANA_RPC_${provider}_${cluster_suffix}_API_KEY_URL="
+      fi
+    done
+  done
+}
+
 write_runtime_env() {
   umask 077
   {
@@ -263,6 +287,7 @@ write_runtime_env() {
     echo "SOLANA_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
     echo "SOLANA_RPC_CI_PREFERRED_PROVIDER=default"
     echo "SOLANA_RPC_DEFAULT_PROVIDER=default"
+    write_cluster_pool_env
     echo "KORA_RPC_URL=$(shell_quote "${KORA_RPC_URL}")"
     echo "KORA_SHIM_RPC_TIMEOUT_MS=$(shell_quote "${KORA_SHIM_RPC_TIMEOUT_MS}")"
     echo "KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS=$(shell_quote "${KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS}")"

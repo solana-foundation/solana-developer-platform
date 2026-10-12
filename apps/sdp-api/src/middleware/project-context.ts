@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db";
@@ -50,7 +51,7 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
 
     c.set("projectId", scope.projectId);
     c.set("projectEnvironment", scope.environment);
-    await next();
+    await runInClusterScope({ projectId: scope.projectId, environment: scope.environment }, next);
   };
 }
 
