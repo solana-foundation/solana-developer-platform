@@ -1588,8 +1588,9 @@ export async function loadProjectProviderVerdict(
  * applies the project provider rule (release channel, surfacing,
  * entitlement and the deployment's credentials for the project's environment) through the same core the availability read
  * uses, logging a refusal. Re-targeting an existing Earn program passes
- * `program: "existing"`, which skips surfacing alone. Webhooks, reconcilers,
- * reads and Earn exits (ADR 0002) never call it.
+ * `program: "existing"`, which skips surfacing alone. Webhooks, reconcilers
+ * and Earn exits (ADR 0002) never call it, and neither do reads, except a ramp
+ * read that goes on to call the provider (`admitRamp`'s `read` need).
  *
  * @param c - Request context carrying the authenticated project scope.
  * @param request - The ramps or Earn provider being used (Earn: a new position, or `program: "existing"`).
