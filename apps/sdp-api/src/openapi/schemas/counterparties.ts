@@ -1,4 +1,9 @@
-import { COUNTERPARTY_ENTITY_TYPES, COUNTRY_CODES, RAMP_PROVIDERS } from "@sdp/types";
+import {
+  COUNTERPARTY_ENTITY_TYPES,
+  COUNTRY_CODES,
+  PERSISTED_RAMP_PROVIDERS,
+  RAMP_PROVIDERS,
+} from "@sdp/types";
 import { rampDirectionSchema as rampDirectionSchemaBase } from "@/routes/payments/ramps/schemas";
 import {
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
@@ -555,7 +560,7 @@ export const counterpartyProviderAccountSchema = withOpenApi(
       description: "Counterparty provider-account row identifier.",
       example: "counterparty_provider_account_example",
     }),
-    provider: withOpenApi(z.enum(RAMP_PROVIDERS), {
+    provider: withOpenApi(z.enum(PERSISTED_RAMP_PROVIDERS), {
       description: "Ramp provider owning the account. A retired provider's accounts keep its id.",
       example: "lightspark",
     }),
@@ -644,7 +649,7 @@ export const counterpartyProviderAccountSchema = withOpenApi(
             ),
           }),
           z.object({
-            provider: z.enum(RAMP_PROVIDERS.filter((provider) => provider !== "bvnk")),
+            provider: z.enum(PERSISTED_RAMP_PROVIDERS.filter((provider) => provider !== "bvnk")),
             ...customerLinkBaseDocFields,
             providerCustomerReference: withOpenApi(z.string(), {
               description: "Provider-side customer identifier for the counterparty.",
