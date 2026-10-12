@@ -16,7 +16,8 @@ import {
   SDP_RAMP_PROVIDER_STAGES,
 } from "@sdp/types";
 import type { Address } from "@solana/addresses";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { z } from "zod";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
@@ -422,6 +423,8 @@ describe("Payments routes — ramps", () => {
   describe("wallet balances", () => {
     const rpc = installClusterRpcRequestLog();
 
+    const jsonRpcMethodSchema = z.object({ method: z.string() });
+
     function getBalanceResult(slot: number, lamports: number) {
       return { context: { slot }, value: lamports };
     }
@@ -512,6 +515,55 @@ describe("Payments routes — ramps", () => {
           },
         },
       });
+    });
+
+    it("aborts every balance read on the one request deadline and answers 503 without balances", async () => {
+      const deadline = new AbortController();
+      const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+      onTestFinished(() => timeoutSpy.mockRestore());
+      getSplTokenBalancesMock.mockReset();
+      const stalledMethods: string[] = [];
+      const stubbedFetch = globalThis.fetch;
+      const balanceReadsStalled = new Promise<void>((markBalanceReadsStalled) => {
+        globalThis.fetch = async (input, init) => {
+          const { body, signal } = required(init);
+          if (typeof body !== "string") throw new Error("Expected a JSON-RPC body");
+          const { method } = jsonRpcMethodSchema.parse(JSON.parse(body));
+          if (method !== "getBalance" && method !== "getTokenAccountsByOwner") {
+            return stubbedFetch(input, init);
+          }
+          const fetchSignal = required(signal);
+          stalledMethods.push(method);
+          if (stalledMethods.length === 3) markBalanceReadsStalled();
+          return new Promise<Response>((_, reject) => {
+            fetchSignal.addEventListener("abort", () => reject(fetchSignal.reason), { once: true });
+          });
+        };
+      });
+
+      const pendingResponse = app.request(
+        `/v1/payments/wallets/${TEST_WALLET_ID}/balances`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      await balanceReadsStalled;
+      deadline.abort(new DOMException("timeout", "TimeoutError"));
+      const res = await pendingResponse;
+
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "PROVIDER_UNAVAILABLE",
+          message: "Wallet balances are temporarily unavailable. Try again.",
+        },
+        meta: { requestId: expect.any(String) },
+      });
+      expect([...stalledMethods].sort()).toEqual([
+        "getBalance",
+        "getTokenAccountsByOwner",
+        "getTokenAccountsByOwner",
+      ]);
+      expect(timeoutSpy).toHaveBeenCalledExactlyOnceWith(3000);
     });
 
     it.each(["both", "SOL", "SPL"])(
