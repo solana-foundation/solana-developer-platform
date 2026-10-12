@@ -37,6 +37,9 @@ export const refreshTokenSupply = async (c: AppContext) => {
         commitment: "confirmed",
       })
       .send();
+    if (!/^\d+$/.test(tokenSupply.amount)) {
+      throw new Error("RPC returned a token supply that is not a base-unit integer");
+    }
     supplyBaseUnits = tokenSupply.amount;
   } catch (error) {
     throw new AppError(
