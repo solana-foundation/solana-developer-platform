@@ -53,3 +53,34 @@ export function keyAnswerFor(status: number | null, replayed: boolean): ActionKe
   if (status < 400) return "definitive";
   return status < 500 && status !== 409 && status !== 429 ? "refused" : "open";
 }
+
+/**
+ * Whether an answer retires its key, so the next submit is a new action: a
+ * definitive answer always does, a refusal only when no earlier attempt under
+ * the key went unanswered. Every dashboard key holder applies this one rule.
+ *
+ * @param answer - What the answer settles ({@link keyAnswerFor}).
+ * @param earlierAttemptUnanswered - Whether an earlier attempt under this key
+ *   never got a definitive answer, so it may have written.
+ */
+export function answerRetiresKey(
+  answer: ActionKeyAnswer,
+  earlierAttemptUnanswered: boolean
+): boolean {
+  return answer === "definitive" || (answer === "refused" && !earlierAttemptUnanswered);
+}
+
+/**
+ * A 64-bit FNV-1a digest of an action, so request bodies (counterparty
+ * details, addresses) never sit in browser storage. Synchronous on purpose:
+ * an async digest would delay the send behind later requests and reorder
+ * them. Not a security boundary; collisions only within one tab's few
+ * pending actions matter, and 64 bits makes those negligible.
+ */
+export function storageFingerprint(material: string): string {
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(material)) {
+    hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, "0");
+}

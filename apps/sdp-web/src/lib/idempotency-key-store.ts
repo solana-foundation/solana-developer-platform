@@ -1,14 +1,17 @@
 "use client";
 
 import { z } from "zod";
+import { answerRetiresKey, keyAnswerFor } from "./idempotency";
 
 /**
  * Browser-side durability for a value-moving IDEMPOTENCY KEY, per request
  * fingerprint — the machinery behind every dashboard money flow whose API route
  * requires a key: the Earn vault deposit and exit
- * (`markets/earn/earn-vault-{deposit,withdraw}-tracking.ts`) and Private
+ * (`markets/earn/earn-vault-{deposit,withdraw}-tracking.ts`), Private
  * Channels deposit, withdrawal and member transfer
- * (`integrations/private-channels/value-movement-tracking.ts`). It lives here
+ * (`integrations/private-channels/value-movement-tracking.ts`), Payments
+ * transfers and batches (`payments/transfer{,-batch}-idempotency.ts`) and
+ * `dashboard-fetch`'s per-action keys. It lives here
  * rather than beside any one of them because they share every rule, and two
  * copies of a double-spend guard is how one drifts.
  *
@@ -295,6 +298,45 @@ export interface IdempotencyKeyStore {
    * only costs a replay, which the API reports honestly as `replayed`.
    */
   release(fingerprint: string): void;
+}
+
+/**
+ * The steps before a keyed send, in `dashboard-fetch`'s order: read whether an
+ * earlier attempt under this key went unanswered, claim the key, and pin it as
+ * sent (uncertain) before the request goes out, so it outlives a reload and
+ * its normal expiry until a definitive answer.
+ *
+ * @returns The key and whether storage took it (`persisted: false` makes a
+ *   money route refuse; see `dashboardRequestUnderOwnKey`), and whether an
+ *   earlier attempt under this key went unanswered, for {@link refusalRetiresKey}.
+ */
+export function beginKeyedSend(
+  store: IdempotencyKeyStore,
+  fingerprint: string
+): { key: { value: string; persisted: boolean }; earlierAttemptUnanswered: boolean } {
+  const earlierAttemptUnanswered = store.isUncertain(fingerprint) || store.isHeld(fingerprint);
+  const value = store.claim(fingerprint);
+  return { key: { value, persisted: store.markUncertain(fingerprint) }, earlierAttemptUnanswered };
+}
+
+/**
+ * Whether a failed keyed send retires its key, on the dashboard-wide rule
+ * (`answerRetiresKey`): a network failure (`null`), a 5xx, a 409 or a 429
+ * keeps it, and so does any refusal once an earlier attempt went unanswered.
+ * A replay of a stored failure is definitive and retires it.
+ *
+ * @param refusal - The HTTP refusal, or `null` when nothing answered.
+ * @param earlierAttemptUnanswered - From {@link beginKeyedSend}.
+ */
+export function refusalRetiresKey(
+  refusal: { status: number; replayed: boolean } | null,
+  earlierAttemptUnanswered: boolean
+): boolean {
+  if (refusal === null) return false;
+  return answerRetiresKey(
+    keyAnswerFor(refusal.status, refusal.replayed),
+    earlierAttemptUnanswered
+  );
 }
 
 type IdempotencyKeyOutcome =

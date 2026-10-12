@@ -475,18 +475,25 @@ export interface CreateTransferInput {
 }
 
 /**
- * An HTTP refusal from the transfer endpoint, carrying the status so the caller
- * can decide the idempotency key's fate the way batches do: a 4xx retires it,
- * a 5xx or a network failure keeps it.
+ * An HTTP refusal from the transfer endpoint, carrying the status and the
+ * replay mark so the caller can decide the idempotency key's fate on the
+ * shared rule (`answerRetiresKey`).
  */
 export class TransferRequestError extends Error {
   readonly status: number;
+  readonly replayed: boolean;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, replayed = false) {
     super(message);
     this.name = "TransferRequestError";
     this.status = status;
+    this.replayed = replayed;
   }
+}
+
+/** Whether sdp-api answered from a stored result (relayed by the proxy). */
+function isReplayed(response: Response): boolean {
+  return response.headers.get("Idempotent-Replayed") === "true";
 }
 
 /**
@@ -526,7 +533,8 @@ export async function createTransfer(
         body,
         t("DashboardPayments.workspace.transferRequestFailed", { status: response.status })
       ),
-      response.status
+      response.status,
+      isReplayed(response)
     );
   }
 
@@ -611,19 +619,21 @@ export interface CreateTransferBatchResult {
 }
 
 /**
- * An HTTP refusal from the batch endpoint, carrying the status so the caller
- * can decide the idempotency key's fate: a 4xx is a definitive answer and
- * retires the key, while a 5xx or a network failure (a plain Error) keeps it —
+ * An HTTP refusal from the batch endpoint, carrying the status and the replay
+ * mark so the caller can decide the idempotency key's fate on the shared rule
+ * (`answerRetiresKey`). A network failure is a plain Error and keeps the key:
  * the API may have recorded the batch before the response was lost, and only
  * a replay with the SAME key can find out without moving the money again.
  */
 export class TransferBatchRequestError extends Error {
   readonly status: number;
+  readonly replayed: boolean;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, replayed = false) {
     super(message);
     this.name = "TransferBatchRequestError";
     this.status = status;
+    this.replayed = replayed;
   }
 }
 
@@ -653,7 +663,8 @@ export async function createTransferBatch(
         body,
         t("DashboardPayments.workspace.batchTransferRequestFailed", { status: response.status })
       ),
-      response.status
+      response.status,
+      isReplayed(response)
     );
   }
   const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;

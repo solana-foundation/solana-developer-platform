@@ -1,7 +1,12 @@
 import type { IdempotencyRequiredRoute } from "@sdp/types";
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
-import { IDEMPOTENCY_KEY_HEADER, keyAnswerFor } from "./idempotency";
+import {
+  answerRetiresKey,
+  IDEMPOTENCY_KEY_HEADER,
+  keyAnswerFor,
+  storageFingerprint,
+} from "./idempotency";
 import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "./idempotency-key-store";
 import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
@@ -115,7 +120,7 @@ function retiresKey(response: Response, earlierAttemptUnanswered: boolean): bool
     response.status,
     response.headers.get("Idempotent-Replayed") === "true"
   );
-  return answer === "definitive" || (answer === "refused" && !earlierAttemptUnanswered);
+  return answerRetiresKey(answer, earlierAttemptUnanswered);
 }
 
 function sendWithProject(
@@ -142,21 +147,6 @@ function sendWithProject(
 function actionMaterial(path: string, init: RequestInit, demo: boolean): string {
   const { projectId } = parseDashboardPathname(window.location.pathname);
   return JSON.stringify([projectId, demo, init.method, path, init.body ?? ""]);
-}
-
-/**
- * A 64-bit FNV-1a digest of the action, so request bodies (counterparty
- * details, addresses) never sit in browser storage. Synchronous on purpose:
- * an async digest would delay the send behind later requests and reorder
- * them. Not a security boundary; collisions only within one tab's few
- * pending actions matter, and 64 bits makes those negligible.
- */
-function storageFingerprint(material: string): string {
-  let hash = 0xcbf29ce484222325n;
-  for (const byte of new TextEncoder().encode(material)) {
-    hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
-  }
-  return hash.toString(16).padStart(16, "0");
 }
 
 function abortable(response: Promise<Response>, signal: AbortSignal | null | undefined) {
