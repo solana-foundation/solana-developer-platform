@@ -124,11 +124,17 @@ leave a second, unreferenced wallet there.
 | No key on a `required` route; malformed key | No, nothing claimed | 400 (`IDEMPOTENCY_KEY_REQUIRED`) |
 | Same key, different fingerprint | No | 422 `IDEMPOTENCY_KEY_REUSED` |
 | Original still holds its lease | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` |
-| 400, 401, 403, 409, 429 (validation, admission, permissions, conflicts) | No: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again |
+| 400, 401, 403, 409, 429 refused before the handler writes its domain row (validation, admission, permissions, conflicts) | No: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again |
+| Any status once the handler has written its domain row (`markIdempotencyCommitted`), such as a 400 `TRANSACTION_FAILED` after the transfer row | Yes, 24h | Same status and body + `Idempotent-Replayed: true`; past 24h the failed row answers with the same status and code, and its message says to retry with a new key |
 | 5xx, `serverErrors: "store"` | Yes, like Stripe | Replayed; retry with a new key |
 | 5xx, `serverErrors: "rerun"` | No: unlocked, still bound to its fingerprint | A same-key retry runs again |
 | 2xx and other 4xx | Yes, 24h | Same status and body + `Idempotent-Replayed: true` |
 
+- A request that wrote its domain row has spent its key, whatever it answered: the retry gets the
+  same answer, never a different one from the row (a 400 first, then a 200 `status: "failed"`). To
+  try again after fixing the cause, send a new key. Recurring-payment attempts differ on purpose: a
+  failed attempt is left out of their unique index and the schedule returns to its prior state, so a
+  same-key retry runs the action again and its answer is consistent with the row.
 - `serverErrors` is required: each route states which applies. `rerun` is only for a route whose
   handler writes its own row under a unique key before it moves anything and answers a retry from
   that row; every other route stores the 5xx.

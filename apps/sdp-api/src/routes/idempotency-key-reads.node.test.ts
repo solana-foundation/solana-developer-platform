@@ -14,6 +14,8 @@ import { describe, expect, it } from "vitest";
 const PINNED_READS: Record<string, number> = {
   // Reads the key for the domain-row replay; goes when requestGate's last user moves off it.
   "middleware/request-gate.ts": 1,
+  // Wallet create derives the provider request id from the key (custody provider idempotency).
+  "routes/custody/handlers/wallets.ts": 1,
   "routes/dvp/handlers.ts": 4,
   "routes/earn/handlers/external-wallet.ts": 1,
   "routes/earn/handlers/program.ts": 1,

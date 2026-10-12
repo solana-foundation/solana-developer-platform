@@ -10,6 +10,7 @@ import { badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
+import { markIdempotencyCommitted } from "@/middleware/idempotency";
 import { parseIdempotencyKey } from "@/middleware/idempotency-key";
 import type { MovementStepInput } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -228,6 +229,8 @@ export async function createTransferBatch(
     });
     batch = created.batch;
     recipientRows = created.recipients;
+    // The batch row exists under the key: any later answer is stored for its retries.
+    markIdempotencyCommitted(c);
   } catch (error) {
     if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
       const replay = await resolveTransferBatchIdempotencyReplay(
