@@ -593,8 +593,8 @@ export class CustodyRuntimeTargets {
    *
    * This is the one place in the API a custody wallet's signer comes from, so
    * it is where money admission is enforced for every module (HOO-1955,
-   * APE-564): the organization's live state is read alongside the wallet row,
-   * and a refused start gets a signer that refuses to sign (`admittedSigner`).
+   * APE-564): a start's signer reads the organization's live state each time
+   * it signs and refuses if the start is no longer admitted (`admittedSigner`).
    */
   async getTransactionSignerForWalletRecord(
     organizationId: string,
@@ -603,14 +603,11 @@ export class CustodyRuntimeTargets {
     movement: MovementId,
     getConfigAdapter: ConfigAdapterResolver
   ): Promise<TransactionSigner> {
-    // In parallel with the wallet row, so admission adds no round trip; an
-    // exit always passes and reads nothing.
-    const [target, admissionFacts] = await Promise.all([
-      this.resolveRetainedWalletRecord(organizationId, projectId, custodyWalletId),
-      MOVEMENTS[movement].kind === "exit"
-        ? null
-        : readMoneyAdmissionFactsWith(this.db, { organizationId, projectId }),
-    ]);
+    const target = await this.resolveRetainedWalletRecord(
+      organizationId,
+      projectId,
+      custodyWalletId
+    );
     if (!target) {
       this.logMissingExactWallet({ organizationId, projectId, custodyWalletId });
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
@@ -624,12 +621,22 @@ export class CustodyRuntimeTargets {
         : await this.getConnectionAdapter(target, target.wallet);
     const signer = await getTransactionSigner(adapter, target.wallet);
     this.assertSignerMatchesWallet(target, signer, custodyWalletId);
-    return admittedSigner(signer, decideMovement(movement, admissionFacts), {
-      movement,
-      organizationId,
-      projectId,
-      custodyWalletId,
-    });
+    // A start reads the organization's live row each time it signs; an exit
+    // reads nothing.
+    return admittedSigner(
+      signer,
+      async () =>
+        decideMovement(
+          movement,
+          await readMoneyAdmissionFactsWith(this.db, { organizationId, projectId })
+        ),
+      {
+        movement,
+        organizationId,
+        projectId,
+        custodyWalletId,
+      }
+    );
   }
 
   private async resolveConnection(

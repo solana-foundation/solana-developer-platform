@@ -6,7 +6,7 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
-import { MoneyMovementRefusedError } from "@/lib/money-admission";
+import { type MoneyAdmissionDecision, MoneyMovementRefusedError } from "@/lib/money-admission";
 import * as moneyPathEvents from "@/runtime/money-path-events";
 import { admittedSigner } from "./admitted-signer";
 
@@ -17,42 +17,49 @@ const CONTEXT = {
   custodyWalletId: "cwlt_admitted_signer",
 } as const;
 
-describe("admittedSigner", () => {
-  it("hands back the provider's signer unchanged when the movement is admitted", async () => {
-    const signer = await generateKeyPairSigner();
+const ADMITTED: MoneyAdmissionDecision = { admitted: true };
+const REFUSED: MoneyAdmissionDecision = { admitted: false, reason: "organization_inactive" };
 
-    expect(admittedSigner(signer, { admitted: true }, CONTEXT)).toBe(signer);
+type PartialSigner = Extract<TransactionSigner, { signTransactions: unknown }>;
+
+describe("admittedSigner", () => {
+  it("hands back the provider's signer unchanged for an exit, and never decides", async () => {
+    const signer = await generateKeyPairSigner();
+    const decide = vi.fn();
+
+    expect(admittedSigner(signer, decide, { ...CONTEXT, movement: "recurring.cancel" })).toBe(
+      signer
+    );
+    expect(decide).not.toHaveBeenCalled();
   });
 
-  it("refuses every signing method of a refused start and keeps only the address", async () => {
+  it("keeps exactly the real signer's signing kinds, so the kit guards classify it the same", async () => {
     const signer = await generateKeyPairSigner();
-    const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
 
-    const refused = admittedSigner(
-      signer,
-      { admitted: false, reason: "organization_inactive" },
-      CONTEXT
-    );
+    const admitted = admittedSigner(signer, async () => ADMITTED, CONTEXT);
 
-    expect(refused.address).toBe(signer.address);
-    expect(Object.keys(refused).sort()).toEqual(
+    expect(admitted.address).toBe(signer.address);
+    expect(Object.keys(admitted).sort()).toEqual(
       ["address", ...Object.keys(signer).filter((key) => key.startsWith("sign"))].sort()
     );
-    // The kit guards classify it as the real signer would be.
-    expect(isTransactionPartialSigner(refused)).toBe(isTransactionPartialSigner(signer));
-    expect(isMessagePartialSigner(refused)).toBe(isMessagePartialSigner(signer));
-    expect(isTransactionSendingSigner(refused)).toBe(false);
+    expect(isTransactionPartialSigner(admitted)).toBe(isTransactionPartialSigner(signer));
+    expect(isMessagePartialSigner(admitted)).toBe(isMessagePartialSigner(signer));
+    expect(isTransactionSendingSigner(admitted)).toBe(false);
+  });
 
-    const transactionRefusal = await (
-      refused as Extract<TransactionSigner, { signTransactions: unknown }>
-    )
+  it("refuses a start the organization may not make, without reaching the provider", async () => {
+    const { address } = await generateKeyPairSigner();
+    const sign = vi.fn();
+    const signer = { address, signTransactions: sign } as unknown as TransactionSigner;
+    const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
+
+    const refusal = await (admittedSigner(signer, async () => REFUSED, CONTEXT) as PartialSigner)
       .signTransactions([])
       .catch((error: unknown) => error);
-    expect(transactionRefusal).toBeInstanceOf(MoneyMovementRefusedError);
-    expect(transactionRefusal).toMatchObject({
-      code: "FORBIDDEN",
-      reason: "organization_inactive",
-    });
+
+    expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
+    expect(refusal).toMatchObject({ code: "FORBIDDEN", reason: "organization_inactive" });
+    expect(sign).not.toHaveBeenCalled();
     expect(events).toHaveBeenCalledWith("warn", {
       event: "sdp_money_refused",
       surface: "signer",
@@ -66,16 +73,32 @@ describe("admittedSigner", () => {
     events.mockRestore();
   });
 
-  it("refuses only when asked to sign, so resolving a signer that is never used stays harmless", async () => {
+  // A flow can hold a signer across slow calls; a suspension that lands in
+  // between must stop the next start it signs.
+  it("decides again at every signature, so a revocation after resolution still refuses", async () => {
     const { address } = await generateKeyPairSigner();
-    const sign = vi.fn();
+    const sign = vi.fn().mockResolvedValue([]);
     const signer = { address, signTransactions: sign } as unknown as TransactionSigner;
+    const decide = vi.fn().mockResolvedValueOnce(ADMITTED).mockResolvedValueOnce(REFUSED);
     const events = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
+    const admitted = admittedSigner(signer, decide, CONTEXT) as PartialSigner;
 
-    admittedSigner(signer, { admitted: false, reason: "production_not_enabled" }, CONTEXT);
+    await admitted.signTransactions([]);
+    const second = await admitted.signTransactions([]).catch((error: unknown) => error);
 
-    expect(events).not.toHaveBeenCalled();
-    expect(sign).not.toHaveBeenCalled();
+    expect(decide).toHaveBeenCalledTimes(2);
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(second).toBeInstanceOf(MoneyMovementRefusedError);
     events.mockRestore();
+  });
+
+  it("decides only when asked to sign, so resolving a signer that is never used stays harmless", async () => {
+    const { address } = await generateKeyPairSigner();
+    const signer = { address, signTransactions: vi.fn() } as unknown as TransactionSigner;
+    const decide = vi.fn();
+
+    admittedSigner(signer, decide, CONTEXT);
+
+    expect(decide).not.toHaveBeenCalled();
   });
 });

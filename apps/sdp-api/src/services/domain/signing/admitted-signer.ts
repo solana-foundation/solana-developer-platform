@@ -1,4 +1,4 @@
-import type { MovementId } from "@sdp/types";
+import { MOVEMENTS, type MovementId } from "@sdp/types";
 import {
   assertIsTransactionSigner,
   isMessageModifyingSigner,
@@ -18,26 +18,29 @@ export interface AdmittedSignerContext {
 }
 
 /**
- * The custody signer for one movement (HOO-1955). Admission is decided from the
- * organization's state when the signer is resolved and enforced when it signs:
- * an admitted movement gets the provider's signer unchanged, and a refused one
- * gets a signer whose every signing method refuses.
+ * The custody signer for one movement (HOO-1955). An exit gets the provider's
+ * signer unchanged: it is never refused. A start gets a signer that decides
+ * admission again, from the organization's live row, each time it is asked to
+ * sign, and refuses if the organization may no longer start money. A flow that
+ * holds a signer across slow calls (Private Channels' gateway reads, retries)
+ * therefore cannot sign a start after a suspension or entitlement removal that
+ * landed in between.
  *
- * Refusing at signing rather than at resolution keeps work that only confirms
- * an earlier signature working: several flows resolve a signer before they know
- * whether they still need one. Nothing else about the real signer is copied,
- * so a refused signer cannot be used for anything but its address.
+ * Deciding at signing rather than at resolution also keeps work that only
+ * confirms an earlier signature working: several flows resolve a signer before
+ * they know whether they still need one. The wrapper offers exactly the
+ * signing kinds the real signer does, so the kit guards classify it the same.
  */
 export function admittedSigner(
   signer: TransactionSigner,
-  decision: MoneyAdmissionDecision,
+  decide: () => Promise<MoneyAdmissionDecision>,
   context: AdmittedSignerContext
 ): TransactionSigner {
-  if (decision.admitted) {
+  if (MOVEMENTS[context.movement].kind === "exit") {
     return signer;
   }
-  const refuse = async () => {
-    assertMovementAdmitted(decision, {
+  const admit = async () => {
+    assertMovementAdmitted(await decide(), {
       surface: "signer",
       movement: context.movement,
       organizationId: context.organizationId,
@@ -45,16 +48,55 @@ export function admittedSigner(
       subjectId: context.custodyWalletId,
     });
   };
-  // Exactly the kinds of signing the real signer offers, each refusing, so the
-  // kit guards classify the refused signer as they would the real one.
-  const refused = {
+  const admitted = {
     address: signer.address,
-    ...(isTransactionPartialSigner(signer) ? { signTransactions: refuse } : {}),
-    ...(isTransactionModifyingSigner(signer) ? { modifyAndSignTransactions: refuse } : {}),
-    ...(isTransactionSendingSigner(signer) ? { signAndSendTransactions: refuse } : {}),
-    ...(isMessagePartialSigner(signer) ? { signMessages: refuse } : {}),
-    ...(isMessageModifyingSigner(signer) ? { modifyAndSignMessages: refuse } : {}),
+    ...(isTransactionPartialSigner(signer)
+      ? {
+          signTransactions: async (...args: Parameters<typeof signer.signTransactions>) => {
+            await admit();
+            return signer.signTransactions(...args);
+          },
+        }
+      : {}),
+    ...(isTransactionModifyingSigner(signer)
+      ? {
+          modifyAndSignTransactions: async (
+            ...args: Parameters<typeof signer.modifyAndSignTransactions>
+          ) => {
+            await admit();
+            return signer.modifyAndSignTransactions(...args);
+          },
+        }
+      : {}),
+    ...(isTransactionSendingSigner(signer)
+      ? {
+          signAndSendTransactions: async (
+            ...args: Parameters<typeof signer.signAndSendTransactions>
+          ) => {
+            await admit();
+            return signer.signAndSendTransactions(...args);
+          },
+        }
+      : {}),
+    ...(isMessagePartialSigner(signer)
+      ? {
+          signMessages: async (...args: Parameters<typeof signer.signMessages>) => {
+            await admit();
+            return signer.signMessages(...args);
+          },
+        }
+      : {}),
+    ...(isMessageModifyingSigner(signer)
+      ? {
+          modifyAndSignMessages: async (
+            ...args: Parameters<typeof signer.modifyAndSignMessages>
+          ) => {
+            await admit();
+            return signer.modifyAndSignMessages(...args);
+          },
+        }
+      : {}),
   };
-  assertIsTransactionSigner(refused);
-  return refused;
+  assertIsTransactionSigner(admitted);
+  return admitted;
 }
