@@ -126,16 +126,25 @@ describe("Payments routes — transfer idempotency", () => {
       amount: "1",
     };
 
-    const [first, second] = await Promise.all([
+    const responses = await Promise.all([
       postTransfer(body, { idempotencyKey: "xfer-race-key" }),
       postTransfer(body, { idempotencyKey: "xfer-race-key" }),
     ]);
 
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(200);
-    const firstJson = await readTransferResponse(first);
-    const secondJson = await readTransferResponse(second);
-    expect(secondJson.data.transfer.id).toBe(firstJson.data.transfer.id);
+    // The shared step lets one run; the other is told the key is in flight
+    // (HOO-1918) and its retry replays the winner's answer.
+    const winner = responses.find((response) => response.status === 200);
+    const loser = responses.find((response) => response.status === 409);
+    expect(winner).toBeDefined();
+    expect(loser).toBeDefined();
+    expect(((await loser?.json()) as { error: { code: string } }).error.code).toBe(
+      "IDEMPOTENCY_KEY_IN_FLIGHT"
+    );
+    const retry = await postTransfer(body, { idempotencyKey: "xfer-race-key" });
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+    const winnerJson = await readTransferResponse(winner as Response);
+    expect((await readTransferResponse(retry)).data.transfer.id).toBe(winnerJson.data.transfer.id);
     expect(await countTransferRows()).toBe(1);
     expect(sendTransactionMock).toHaveBeenCalledOnce();
   });
