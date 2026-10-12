@@ -189,7 +189,9 @@ Every MDX under `content/docs/` is built and served (static params) and indexed 
 3. Repoint or drop inbound links from other pages; `check:links` fails on a link to a missing page.
 4. Run `pnpm generate:api && pnpm generate:ai` and commit `public/llms*.txt`; CI diffs them against the generated output.
 
-API reference pages are different: they are generated from the public OpenAPI document, so a family disappears by leaving that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch) and by dropping its slug from `PUBLIC_TAG_SLUGS` in `scripts/lib/public-openapi.mjs`.
+API reference pages are different: they are generated from the public OpenAPI document, so a family disappears by leaving that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch) and by dropping its slug from `PUBLIC_TAG_SLUGS` in `scripts/lib/public-openapi.mjs`. Those two must agree: `generate:api` fails on a published family the list omits and on a listed slug the document lacks.
+
+The root `meta.json` is hand-maintained. The generator writes only `reference/api/meta.json`, which the sidebar reaches through `"api"` in `reference/meta.json`, and `llms.txt` lists every page it names.
 
 Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.
 
