@@ -13,11 +13,6 @@ import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
-import { resolveRequestSponsorshipScope } from "@/services/sponsorship.service";
-import {
-  assertSponsorshipAdmitted,
-  readSponsorshipAdmissionFacts,
-} from "@/services/sponsorship-admission";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
@@ -831,17 +826,6 @@ export const executeMint = async (c: AppContext) => {
         feePayer: signer.address,
       },
       async () => {
-        // The sponsor decides money admission only after custody has signed,
-        // and a refusal there submits nothing. Decide it here first, so a
-        // refused mint never reserves supply it will not use (HOO-1955).
-        const sponsorshipScope = {
-          ...resolveRequestSponsorshipScope(c),
-          movement: "issuance.authority" as const,
-        };
-        assertSponsorshipAdmitted(
-          sponsorshipScope,
-          await readSponsorshipAdmissionFacts(c.env, sponsorshipScope)
-        );
         const reserved = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
         if (reserved === null) {
           throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
@@ -878,9 +862,9 @@ export const executeMint = async (c: AppContext) => {
       tokenAccount: settledTokenAccount,
     });
   } catch (error) {
-    // The sponsor decides money admission again when it signs. A refusal there
-    // (a revocation racing the gate above) comes before Kora signs or sends, so
-    // the transaction can never land and its reservation goes back.
+    // The sponsor decides money admission when it signs, after supply is
+    // reserved. A refusal there comes before Kora signs or sends, so the
+    // transaction can never land and its reservation goes back (HOO-1955).
     if (reservedSupply !== null && error instanceof MoneyMovementRefusedError) {
       await tokenService.releaseUnsentMintReservation(
         tokenId,

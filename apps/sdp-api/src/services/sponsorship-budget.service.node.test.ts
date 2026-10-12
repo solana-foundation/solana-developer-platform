@@ -23,6 +23,13 @@ import type { SponsorshipScope } from "./sponsorship.service";
 import { BudgetedFeePayment } from "./sponsorship-budget.service";
 
 const logEvent = vi.hoisted(() => vi.fn());
+// The real reader queries Postgres; the admission decision itself stays real.
+const readMoneyAdmissionFacts = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/money-admission", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/money-admission")>()),
+  readMoneyAdmissionFacts,
+}));
 
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
@@ -119,13 +126,12 @@ function harness(scope: SponsorshipScope = SCOPE) {
     signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
     signAndSend: vi.fn().mockResolvedValue("signature_1" as Signature),
   };
-  const readAdmissionFacts = vi.fn().mockResolvedValue(ACTIVE_SANDBOX);
+  const readAdmissionFacts = readMoneyAdmissionFacts.mockReset().mockResolvedValue(ACTIVE_SANDBOX);
   const feePayment = new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, provider, {
     repository,
     budgetRedis,
     getNetworkFee: vi.fn().mockResolvedValue(5_000n),
     now: () => new Date("2026-08-03T10:15:00.000Z"),
-    readAdmissionFacts,
   });
   return { feePayment, provider, repository, budgetRedis, readAdmissionFacts };
 }

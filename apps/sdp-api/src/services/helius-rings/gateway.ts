@@ -71,8 +71,12 @@ export function ringsEgressFetch(
   return env.ENVIRONMENT === "development" ? undefined : createGuardedFetch(options);
 }
 
-/** Set while the SDK signs for identity registration or ring bring-up. */
-const bringUp = new AsyncLocalStorage<true>();
+/**
+ * Set while the SDK signs for one of the flows known to serve exits. Any
+ * other transaction the SDK signs is a start (bring-up), so a signing method
+ * added to the SDK later is refused by default rather than exempt.
+ */
+const exitFlow = new AsyncLocalStorage<true>();
 
 export function createConfiguredRingsGateway(
   env: Env,
@@ -105,9 +109,9 @@ export function createConfiguredRingsGateway(
           projectId: tenant.projectId,
           owner,
           unsignedTxBase64,
-          movement: bringUp.getStore()
-            ? "helius_rings.bring_up"
-            : "helius_rings.gateway_transaction",
+          movement: exitFlow.getStore()
+            ? "helius_rings.gateway_transaction"
+            : "helius_rings.bring_up",
         })
       ),
     signMessage: (messageBase64: string, owner: string) =>
@@ -126,13 +130,14 @@ export function createConfiguredRingsGateway(
       ),
   };
   const created = create(gatewayConfig);
-  // Identity registration and ring bring-up sign through the same callback as
-  // merge-enabling and re-keying, so the flow is carried alongside the call:
-  // bring-up opens new authority (a start), the rest serve exits (HOO-1955).
+  // Every SDK flow signs through the same callback, so the flow is carried
+  // alongside the call (HOO-1955). Merge-enabling (which merge needs) and
+  // re-keying an identity serve exits; everything else, identity registration
+  // and ring bring-up included, is a start.
   const gateway: RingsGatewayPort = {
     ...created,
-    provisionIdentity: (input) => bringUp.run(true, () => created.provisionIdentity(input)),
-    provisionRing: (input) => bringUp.run(true, () => created.provisionRing(input)),
+    ensureMergingEnabled: (input) => exitFlow.run(true, () => created.ensureMergingEnabled(input)),
+    rekeyIdentity: (input) => exitFlow.run(true, () => created.rekeyIdentity(input)),
   };
   const port = connection.ringRpcUrl
     ? gateway

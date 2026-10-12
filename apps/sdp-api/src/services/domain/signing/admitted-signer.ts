@@ -1,19 +1,14 @@
 import type { MovementId } from "@sdp/types";
-import type { TransactionSigner } from "@solana/kit";
+import {
+  assertIsTransactionSigner,
+  isMessageModifyingSigner,
+  isMessagePartialSigner,
+  isTransactionModifyingSigner,
+  isTransactionPartialSigner,
+  isTransactionSendingSigner,
+  type TransactionSigner,
+} from "@solana/kit";
 import { assertMovementAdmitted, type MoneyAdmissionDecision } from "@/lib/money-admission";
-
-/**
- * Every way a `@solana/kit` signer produces a signature. A refused signer keeps
- * exactly the ones the real signer has, so `isTransactionSendingSigner` and the
- * other kit guards still classify it the same way.
- */
-const SIGNING_METHODS = [
-  "signTransactions",
-  "modifyAndSignTransactions",
-  "signAndSendTransactions",
-  "signMessages",
-  "modifyAndSignMessages",
-] as const;
 
 export interface AdmittedSignerContext {
   movement: MovementId;
@@ -50,13 +45,16 @@ export function admittedSigner(
       subjectId: context.custodyWalletId,
     });
   };
-  const refused: Record<string, unknown> = { address: signer.address };
-  for (const method of SIGNING_METHODS) {
-    if (method in signer) {
-      refused[method] = refuse;
-    }
-  }
-  // SAFETY: `refused` has the real signer's address and exactly its signing
-  // methods, which is all the TransactionSigner union requires of a member.
-  return refused as unknown as TransactionSigner;
+  // Exactly the kinds of signing the real signer offers, each refusing, so the
+  // kit guards classify the refused signer as they would the real one.
+  const refused = {
+    address: signer.address,
+    ...(isTransactionPartialSigner(signer) ? { signTransactions: refuse } : {}),
+    ...(isTransactionModifyingSigner(signer) ? { modifyAndSignTransactions: refuse } : {}),
+    ...(isTransactionSendingSigner(signer) ? { signAndSendTransactions: refuse } : {}),
+    ...(isMessagePartialSigner(signer) ? { signMessages: refuse } : {}),
+    ...(isMessageModifyingSigner(signer) ? { modifyAndSignMessages: refuse } : {}),
+  };
+  assertIsTransactionSigner(refused);
+  return refused;
 }

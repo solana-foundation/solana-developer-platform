@@ -220,7 +220,7 @@ export const activateRecurringPayment = async (
       assertMoneyStartAdmitted(
         c.env,
         { organizationId: auth.organizationId, projectId },
-        { surface: "http", operation: "recurring_payment.activate", subjectId: recurringPayment.id }
+        { surface: "http", movement: "recurring.activate", subjectId: recurringPayment.id }
       ),
   });
   const response: PaymentRecurringPaymentResponse = {
@@ -280,7 +280,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
               { organizationId: auth.organizationId, projectId },
               {
                 surface: "http",
-                operation: "recurring_payment.resume",
+                movement: "recurring.resume",
                 subjectId: recurringPayment.id,
               }
             ),
@@ -341,7 +341,7 @@ export const collectRecurringPayment = async (
       assertMoneyStartAdmitted(
         c.env,
         { organizationId: auth.organizationId, projectId },
-        { surface: "http", operation: "recurring_payment.collect", subjectId: recurringPayment.id }
+        { surface: "http", movement: "recurring.collect", subjectId: recurringPayment.id }
       ),
   });
   const response: PaymentRecurringPaymentCollectionResponse = {

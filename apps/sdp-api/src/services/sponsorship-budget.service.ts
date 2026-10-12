@@ -30,7 +30,6 @@ import {
   type SponsorshipReservationStatus,
   sponsorshipNetworkForCluster,
 } from "@/db/repositories/sponsorship-budget.repository";
-import { readMoneyAdmissionFacts } from "@/lib/money-admission";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import {
@@ -86,7 +85,6 @@ export interface BudgetedFeePaymentDependencies {
   budgetRedis?: BudgetRedis;
   getNetworkFee?: (transaction: Uint8Array) => Promise<bigint>;
   now?: () => Date;
-  readAdmissionFacts?: typeof readMoneyAdmissionFacts;
 }
 
 type AdmissionOperation = "sign" | "send";
@@ -211,7 +209,6 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   private readonly budgetRedis: BudgetRedis;
   private readonly getNetworkFee: (transaction: Uint8Array) => Promise<bigint>;
   private readonly now: () => Date;
-  private readonly readAdmissionFacts: typeof readMoneyAdmissionFacts;
 
   constructor(
     private readonly env: Env,
@@ -228,7 +225,6 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       ((transaction) =>
         getTransactionNetworkFee(createNetworkFeeRpc(this.env, this.scope), transaction));
     this.now = dependencies.now ?? (() => new Date());
-    this.readAdmissionFacts = dependencies.readAdmissionFacts ?? readMoneyAdmissionFacts;
   }
 
   getFeePayer(): Promise<Address> {
@@ -517,7 +513,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     // a new signature can be refused.
     const [durableReservation, admissionFacts] = await Promise.all([
       this.readReservation(context),
-      readSponsorshipAdmissionFacts(this.env, this.scope, this.readAdmissionFacts),
+      readSponsorshipAdmissionFacts(this.env, this.scope),
     ]);
     const durableReplay = this.resolveDurableReplay(context, operation, durableReservation);
     if (durableReplay) return durableReplay;

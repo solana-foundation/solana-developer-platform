@@ -1,5 +1,5 @@
 import type { FeePaymentPort } from "@sdp/payments/fee-payment";
-import type { MovementId, SolanaCluster } from "@sdp/types";
+import type { MovementOf, SolanaCluster } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -53,13 +53,7 @@ export type VaultFeeMode =
 
 export interface ResolveVaultSponsorshipInput {
   /** The movement the sponsored transaction serves (HOO-1955). */
-  movement: Extract<
-    MovementId,
-    | "earn.deposit"
-    | "earn.withdraw"
-    | "earn.queued_withdraw_request"
-    | "earn.queued_withdraw_cancel"
-  >;
+  movement: MovementOf<"earn">;
   organizationId: string;
   projectId: string;
   /** Custody wallet id, used as the sponsorship quota actor. */

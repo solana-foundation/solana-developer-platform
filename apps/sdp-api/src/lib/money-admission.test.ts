@@ -171,7 +171,7 @@ describe("money admission reads", () => {
     const scope = { organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT.id };
     const context = {
       surface: "job",
-      operation: "recurring_payment.collect",
+      movement: "recurring.collect",
       subjectId: "prp_test",
     } as const;
     await getDb(env)
@@ -195,7 +195,7 @@ describe("money admission reads", () => {
     const scope = { organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT.id };
     const context = {
       surface: "job",
-      operation: "recurring_payment.collect",
+      movement: "recurring.collect",
       subjectId: "prp_test",
     } as const;
     const setSettings = (settings: string) =>

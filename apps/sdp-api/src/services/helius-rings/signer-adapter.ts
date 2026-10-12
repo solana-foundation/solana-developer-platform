@@ -1,6 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import { derivationMessageBase64 } from "@sdp/helius-rings-sdk";
-import type { MovementId } from "@sdp/types";
+import type { MovementId, MovementOf } from "@sdp/types";
 import { getBase64Codec } from "@solana/codecs";
 import {
   address,
@@ -8,6 +8,7 @@ import {
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
+  isAddress,
   signatureBytes,
   type Transaction,
   type TransactionWithinSizeLimit,
@@ -109,13 +110,7 @@ export interface SignRingsOuterTransactionInput {
    * The movement the transaction serves; the custody signer refuses a start
    * for an organization that may not start money (HOO-1955).
    */
-  movement: Extract<
-    MovementId,
-    | "helius_rings.operation_start"
-    | "helius_rings.operation_exit"
-    | "helius_rings.bring_up"
-    | "helius_rings.gateway_transaction"
-  >;
+  movement: Exclude<MovementOf<"helius_rings">, "helius_rings.key_derivation">;
   /** Test seam; production resolves the owner's custody wallet. */
   signer?: TransactionSigner;
 }
@@ -210,14 +205,11 @@ type OwnerSignerInput = Pick<
 function ringsMessageMovement(
   input: Pick<SignRingsMessageInput, "owner" | "messageBase64">
 ): "helius_rings.key_derivation" | "helius_rings.bring_up" {
-  let derivationMessage: string;
-  try {
-    derivationMessage = derivationMessageBase64(input.owner);
-  } catch {
-    // Not an address, so not a derivation request; resolving the signer refuses it.
+  // Not an address, so not a derivation request; resolving the signer refuses it.
+  if (!isAddress(input.owner)) {
     return "helius_rings.bring_up";
   }
-  return input.messageBase64 === derivationMessage
+  return input.messageBase64 === derivationMessageBase64(input.owner)
     ? "helius_rings.key_derivation"
     : "helius_rings.bring_up";
 }

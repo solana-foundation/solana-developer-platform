@@ -101,13 +101,16 @@ export const MOVEMENTS = {
   /**
    * Identity registration and custom-ring bring-up (ring config, authority and
    * lookup table, the auditor-key attestation and authority challenge). They
-   * open new authority, so they are starts.
+   * open new authority, so they are starts. Also the default for any other
+   * transaction the Rings SDK signs, so a new SDK flow is refused until
+   * classified.
    */
   "helius_rings.bring_up": { module: "helius_rings", kind: "start" },
   /**
-   * The other transactions the Rings SDK signs on its own: enabling merges
-   * (which merge needs) and re-keying an identity. They move no note value and
-   * must stay open for an organization's exits.
+   * The two SDK flows named as exits: enabling merges (which merge needs) and
+   * re-keying an identity. Re-keying replaces the identity's keys, but over
+   * notes the owner already holds and to the same owner, so it is exit
+   * support; it moves no note value. Security-reviewed as such.
    */
   "helius_rings.gateway_transaction": { module: "helius_rings", kind: "exit" },
   /**
@@ -119,6 +122,11 @@ export const MOVEMENTS = {
 } as const satisfies Record<string, MovementDefinition>;
 
 export type MovementId = keyof typeof MOVEMENTS;
+
+/** The movements one module signs for. */
+export type MovementOf<Module extends SdpModule> = {
+  [Id in MovementId]: (typeof MOVEMENTS)[Id]["module"] extends Module ? Id : never;
+}[MovementId];
 
 /**
  * The movement each Rings operation signs for. A new operation type does not

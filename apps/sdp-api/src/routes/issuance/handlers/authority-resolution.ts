@@ -1,7 +1,7 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
 import { createRpc, createRpcForSdk } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { MovementId, Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
+import type { MovementOf, Permission, TokenTransaction, TokenTransactionType } from "@sdp/types";
 import { type TransactionSigner, unwrapOption } from "@solana/kit";
 import { getListConfig, inspectToken } from "@solana/mosaic-sdk";
 import { getTokenAclMintConfig } from "@solana/token-acl-sdk";
@@ -418,10 +418,7 @@ export async function resolveAuthorityWallet(params: {
 }
 
 /** The issuance movements: compliance controls are exits, everything else a start. */
-export type IssuanceMovement = Extract<
-  MovementId,
-  "issuance.authority" | "issuance.control" | "issuance.seize"
->;
+export type IssuanceMovement = MovementOf<"issuance">;
 
 async function loadResolvedAuthoritySigner(params: {
   env: Env;

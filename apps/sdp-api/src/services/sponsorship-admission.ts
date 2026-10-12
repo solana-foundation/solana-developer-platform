@@ -21,14 +21,16 @@ export interface SponsorshipAdmissionScope {
  */
 export async function readSponsorshipAdmissionFacts(
   env: Env,
-  scope: SponsorshipAdmissionScope,
-  readFacts: typeof readMoneyAdmissionFacts = readMoneyAdmissionFacts
+  scope: SponsorshipAdmissionScope
 ): Promise<MoneyAdmissionFacts | null> {
   // An exit always passes, so it reads nothing.
   if (MOVEMENTS[scope.movement].kind === "exit" || scope.projectId === null) {
     return null;
   }
-  return readFacts(env, { organizationId: scope.organizationId, projectId: scope.projectId });
+  return readMoneyAdmissionFacts(env, {
+    organizationId: scope.organizationId,
+    projectId: scope.projectId,
+  });
 }
 
 /** Throws for a start the organization may not make; an exit always passes. */
