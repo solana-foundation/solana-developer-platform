@@ -1,7 +1,8 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { type Context, Hono, type Next } from "hono";
+import type { z } from "zod";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, notFound } from "@/lib/errors";
 import { isEarnEnabled } from "@/lib/feature-flags";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import {
@@ -25,6 +26,7 @@ import type { Env } from "@/types/env";
 import { getEarnRepository } from "./context";
 import { isEarnExitOrRead } from "./exits";
 import {
+  anonymousExitNeedsStrategy,
   createEarnExternalWalletDeposit,
   createEarnExternalWalletDepositTransaction,
   createEarnExternalWalletWithdrawal,
@@ -244,12 +246,19 @@ async function openKeylessStrategyParamScope(c: Context<{ Bindings: Env }>, next
 }
 
 /** A validated keyless-capable money body: a strategy id, or a keyed-only position id on exits. */
-type EarnStrategyLocatorBody = { strategyId: string } | { positionId: string };
+type EarnStrategyLocatorBody = z.output<
+  | typeof earnVaultDepositPreviewSchema
+  | typeof earnExternalWalletDepositTransactionSchema
+  | typeof earnExternalWalletWithdrawalPreviewSchema
+  | typeof earnExternalWalletWithdrawalTransactionSchema
+  | typeof earnExternalWalletWithdrawalOptionsSchema
+  | typeof earnExternalWalletQueuedWithdrawalPreviewSchema
+>;
 
 /**
  * Open a keyless quote or build's cluster scope from the `strategyId` in its validated body. Keyed
  * callers pass through in their project's scope. A keyless exit that names only a `positionId`
- * is refused here with the same 400 the exit resolver gives, since a position is a tenant row a
+ * is refused here with the exit resolver's own 400, since a position is a tenant row a
  * keyless caller cannot address.
  *
  * @param c - The request context, after `validateBody`.
@@ -266,11 +275,7 @@ async function openKeylessStrategyBodyScope(
     return;
   }
   const body = c.req.valid("json");
-  if (!("strategyId" in body)) {
-    throw badRequest(
-      "strategyId and ownerAddress are required for an anonymous external-wallet exit"
-    );
-  }
+  if (!("strategyId" in body)) throw anonymousExitNeedsStrategy();
   await runInKeylessStrategyScope(c, body.strategyId, next);
 }
 

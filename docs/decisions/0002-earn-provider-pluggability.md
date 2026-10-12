@@ -1322,10 +1322,12 @@ external-wallet queued-withdrawal lifecycle. The public Earn document now pins
 - `POST /v1/earn/external-wallet/queued-withdrawal-previews`
 
 This supersedes two details in the 2026-09-14 addendum. Anonymous strategy
-lists accept `?environment=sandbox|production` and default to production;
-preview and build requests inherit the environment from the named strategy.
-For authenticated requests, the API-key project environment remains
-authoritative. The optional-auth list also grew from six to the eight
+lists accept `?environment=sandbox|production` (first defaulting to production;
+since HOO-1620 it is required and a list without it answers 400); strategy
+reads, preview and build requests follow the environment of the named strategy
+row. For authenticated requests, the API-key project environment remains
+authoritative, and an `?environment=` naming another environment answers 409.
+The optional-auth list also grew from six to the eight
 operations pinned above.
 
 Queued request and cancellation builds, submits, list/detail history, movement
