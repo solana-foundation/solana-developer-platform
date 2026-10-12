@@ -2,6 +2,7 @@ import type { ManagedRpcEnv } from "@sdp/rpc";
 import { GENESIS_HASH_BY_CLUSTER, SOLANA_CLUSTERS, type SolanaCluster } from "@sdp/types";
 import { afterEach, beforeEach, vi } from "vitest";
 import { z } from "zod";
+import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
 
 /**
  * The one managed pool endpoint each cluster serves in tests. Fixed for the whole run, because
@@ -13,28 +14,10 @@ export const CLUSTER_RPC_URLS = {
 } as const satisfies Record<SolanaCluster, string>;
 
 const MANAGED_POOL_ENV = {
-  SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "",
-  SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "",
-  SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: "",
-  SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL: "",
-  SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL: "",
-  SOLANA_RPC_NODIT_DEVNET_API_KEY_URL: "",
+  ...BLANK_MANAGED_POOL_ENV,
   SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: CLUSTER_RPC_URLS.devnet,
-  SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: "",
-  SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "",
-  SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL: "",
-  SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL: "",
-  SOLANA_RPC_VALIDATIONCLOUD_MAINNET_API_KEY_URL: "",
-  SOLANA_RPC_NODIT_MAINNET_API_KEY_URL: "",
   SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL: CLUSTER_RPC_URLS["mainnet-beta"],
 } as const satisfies Required<ManagedRpcEnv>;
-
-/**
- * Every managed pool env key `createClusterRpc()` reads, both clusters. The vitest setup blanks
- * them all so a suite that reaches the door without `installClusterRpcStub()` fails with
- * `RPC_NOT_CONFIGURED` instead of calling whatever pool the CI environment injects.
- */
-export const MANAGED_POOL_ENV_KEYS = Object.keys(MANAGED_POOL_ENV);
 
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
 
