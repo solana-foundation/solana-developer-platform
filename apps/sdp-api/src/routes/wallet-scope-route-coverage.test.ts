@@ -24,14 +24,9 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /",
       "GET /:walletId",
       "GET /aggregate",
-      "GET /approval-requests",
-      "GET /approval-requests/:approvalRequestId",
       "GET /public-key",
       "PATCH /:walletId",
       "POST /",
-      "POST /approval-requests/:approvalRequestId/approve",
-      "POST /approval-requests/:approvalRequestId/cancel",
-      "POST /approval-requests/:approvalRequestId/reject",
       "POST /initialize",
       "POST /signer-check",
     ]);
@@ -41,7 +36,6 @@ describe("wallet-scoped route coverage inventory", () => {
     const allRoutes = extractRoutes(paymentsRoutes);
     const nonWalletScopedRoutes = new Set([
       "ALL /ramps/*",
-      "ALL /wallets/:walletId/policies/*",
       "ALL /recurring-payments",
       "ALL /recurring-payments/*",
       "ALL /subscription-plans",
@@ -76,10 +70,6 @@ describe("wallet-scoped route coverage inventory", () => {
       "GET /transfers",
       "GET /transfers/:transferId",
       "GET /wallets/:walletId/balances",
-      "GET /wallets/:walletId/policies",
-      "GET /wallets/:walletId/policies/evaluations",
-      "GET /wallets/:walletId/policies/evaluations/:policyEvaluationId",
-      "GET /wallets/:walletId/policies/revisions",
       "PATCH /recurring-payments/:id",
       "PATCH /subscription-plans/:planId",
       "POST /ramps/offramp/quote",
@@ -96,7 +86,6 @@ describe("wallet-scoped route coverage inventory", () => {
       "POST /transfer-batches",
       "POST /transfer-batches/estimate",
       "POST /transfers",
-      "PUT /wallets/:walletId/policies",
     ]);
   });
 

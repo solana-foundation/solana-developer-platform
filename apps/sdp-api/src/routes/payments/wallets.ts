@@ -91,7 +91,15 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
 
 export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
 
-export async function resolvePolicyWalletFromParams(
+/**
+ * Resolve the wallet addressed by the `walletId` route param, honoring the
+ * API key's wallet binding. Used by the wallet balances route.
+ *
+ * @param c - Request context.
+ * @param requiredWalletPermissions - Wallet permissions the caller must hold.
+ * @returns The auth context and the resolved operational wallet.
+ */
+export async function resolveWalletFromParams(
   c: AppContext,
   requiredWalletPermissions: Permission[]
 ) {

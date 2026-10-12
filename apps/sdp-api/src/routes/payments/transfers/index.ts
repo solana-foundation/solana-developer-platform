@@ -1,13 +1,13 @@
 import { Hono } from "hono";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
-import { policyGate } from "@/middleware/policy-gate";
+import { requestGate } from "@/middleware/request-gate";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
-  admitTransferRuntimeExecution,
+  admitTransferExecution,
   createTransfer,
-  extractTransferPolicyCandidate,
+  extractTransferRequest,
   findTransferIdempotentKeyReplay,
   getTransfer,
   listTransfers,
@@ -21,10 +21,10 @@ transfers.post(
   requirePermissions("payments:write", "wallets:read"),
   requireAllowedOperation("payment_transfer_execute"),
   validateBody(createTransferSchema),
-  policyGate({
-    extract: extractTransferPolicyCandidate,
+  requestGate({
+    extract: extractTransferRequest,
     findIdempotentKeyReplay: findTransferIdempotentKeyReplay,
-    beforeEnforce: admitTransferRuntimeExecution,
+    admit: admitTransferExecution,
   }),
   createTransfer
 );

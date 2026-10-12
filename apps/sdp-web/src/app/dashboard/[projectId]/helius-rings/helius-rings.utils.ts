@@ -4,6 +4,7 @@
  * render and its hydration agree.
  */
 
+import { type HeliusRingsLiveOperationStatus, isLiveHeliusRingsOperationStatus } from "@sdp/types";
 import {
   type ProjectRing,
   RINGS_ALLOWLISTED_ASSETS,
@@ -22,9 +23,8 @@ export function ringNameByProgramId(rings: readonly ProjectRing[]): Map<string, 
  * States something is actively working through, so the row will change on its
  * own and is worth both a spinner and another poll.
  *
- * `approval_required` is deliberately absent: it is waiting on a person, not on
- * the pipeline, and a spinner there would turn indefinitely. Terminal states
- * are absent for the obvious reason.
+ * Terminal states are absent for the obvious reason, and so is any state this
+ * build does not know: a spinner on a row nothing advances would turn forever.
  */
 const SETTLING: ReadonlySet<RingsOperationState> = new Set<RingsOperationState>([
   "preparing",
@@ -33,6 +33,23 @@ const SETTLING: ReadonlySet<RingsOperationState> = new Set<RingsOperationState>(
   "submitted",
   "indexing",
 ]);
+
+/**
+ * Compile-time guard: the dashboard's label union must be exactly the statuses
+ * an operation can still reach. It fails to build when either side drifts.
+ */
+type SameStates<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+const labelsCoverLiveStatuses: SameStates<RingsOperationState, HeliusRingsLiveOperationStatus> =
+  true;
+
+/**
+ * Narrows a stored state to one with a label. A row can carry a state this
+ * build no longer names (for example `approval_required`, which a retired flow
+ * wrote), and it must render rather than crash the list.
+ */
+export function isKnownOperationState(state: string): state is RingsOperationState {
+  return labelsCoverLiveStatuses && isLiveHeliusRingsOperationStatus(state);
+}
 
 export function isSettling(state: RingsOperationState): boolean {
   return SETTLING.has(state);

@@ -93,15 +93,15 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
 <Step>
 ### Wallet Custody
 
-Provision signing wallets through integrated custody providers, so your team never handles private keys. Hosted keys never leave the provider's MPC or TEE infrastructure and SDP only handles the signed transaction. Local development keys are encrypted at rest with `AES-256-GCM` using per-organization derived keys, and every signing request passes policy and permission checks before it executes.
+Provision signing wallets through integrated custody providers, so your team never handles private keys. Hosted keys never leave the provider's MPC or TEE infrastructure and SDP only handles the signed transaction. Local development keys are encrypted at rest with `AES-256-GCM` using per-organization derived keys, and every signing request passes authentication, permission and allowed-operation checks before it executes.
 
 - **Built on `@solana/keychain`**
 
    The unified Solana signing interface. Every custody backend is a keychain adapter behind the same signing API, which is what makes providers interchangeable.
 
-- **[Wallet policies](/docs/wallet-operations/policies)**
+- **[Allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations)**
 
-   Constrain how a wallet can move funds. Destination controls, amount limits, operation permissions, approval requirements, and audit visibility, enforced before any operation executes.
+   Limit what an API key may do. List the operation families and types a key may perform, and every other operation is refused before it executes.
 
 - **Scoped custody configuration**
 

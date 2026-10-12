@@ -36,8 +36,6 @@ export interface HeliusRingsOperationRow {
   /** Ring the operation was pinned to at prepare; NULL = the default public ring. */
   ring_program_id: string | null;
   intent_key: string;
-  approval_request_id: string | null;
-  policy_evaluation_id: string | null;
   proof_source: "simulated" | "live" | null;
   proof_ref: string | null;
   outer_tx_signature: string | null;
@@ -46,6 +44,8 @@ export interface HeliusRingsOperationRow {
   failure_message: string | null;
   retryable: boolean | null;
   retry_of_operation_id: string | null;
+  /** The API key that started the operation; null for a dashboard session or a row that predates the column. */
+  initiated_by_key_id: string | null;
   /** Denormalized from `helius_rings_timelocks`; that table stays the authority. */
   timelock_unlock_at: string | null;
   /**
@@ -93,6 +93,8 @@ export interface ReserveHeliusRingsIntentInput extends HeliusRingsProjectScope {
   /** Resolved by the service before reserving; immutable for the operation's life. */
   ringProgramId?: string | null;
   retryOfOperationId?: string | null;
+  /** The API key that started the operation. Written once, on the first reserve; a replay keeps it. */
+  initiatedByKeyId?: string | null;
   /** Required for `timelock_create`; writes the escrow row and the denormalized column. */
   timelock?: HeliusRingsTimelockInput | null;
 }
@@ -112,8 +114,6 @@ export interface ReserveHeliusRingsIntentResult {
  * when present, so a transition never blanks a field an earlier step recorded.
  */
 export interface HeliusRingsOperationTransitionPatch {
-  approvalRequestId?: string | null;
-  policyEvaluationId?: string | null;
   proofSource?: "simulated" | "live" | null;
   proofRef?: string | null;
   outerTxSignature?: string | null;

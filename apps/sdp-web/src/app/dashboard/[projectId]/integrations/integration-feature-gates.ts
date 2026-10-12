@@ -9,7 +9,7 @@ export type IntegrationFeatureFlags = {
    * none while Payments is off.
    */
   rampProviders: readonly RampProviderId[];
-  /** The `policies` flag, until Compliance gets its own visibility rule. */
+  /** Whether the deployment's release channel runs the Compliance module. */
   compliance: boolean;
   privateChannels: boolean;
 };

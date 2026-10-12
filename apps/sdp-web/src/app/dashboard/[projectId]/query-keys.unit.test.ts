@@ -9,7 +9,6 @@ const plainKeys = [
   paymentsQueryKeys.actionCounterparties(),
   paymentsQueryKeys.actionWallets(),
   paymentsQueryKeys.counterpartyFieldOptions(),
-  custodyQueryKeys.policyDestinationAccounts(),
   custodyQueryKeys.walletCardBalances(),
   issuanceQueryKeys.createTokenSignerWallets(),
   earnQueryKeys.programs(),
@@ -40,7 +39,6 @@ const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
   [paymentsQueryKeys.transactionFilterOptions({ projectId: "prj_1" }), ["prj_1"]],
   [custodyQueryKeys.walletActivity({ walletId: "wal_1" }), ["wal_1"]],
   [custodyQueryKeys.walletBalances({ walletId: "wal_3", readAt: 1 }), ["wal_3", 1]],
-  [custodyQueryKeys.walletPolicyRevisions({ walletId: "wal_2" }), ["wal_2"]],
   [issuanceQueryKeys.tokens({ query: DEFAULT_ISSUANCE_LIST_QUERY }), [DEFAULT_ISSUANCE_LIST_QUERY]],
   [issuanceQueryKeys.authorityWallets({ tokenId: "token_1" }), ["token_1"]],
   [earnQueryKeys.strategies({ cluster: "devnet" }), ["devnet"]],
@@ -66,10 +64,7 @@ describe("dashboard query-key factories", () => {
     for (const key of matches) {
       expect(custodyQueryKeys.isWalletLiveDataKey(key)).toBe(true);
     }
-    const nonMatches = [
-      custodyQueryKeys.walletPolicyRevisions({ walletId: "wal_1" }),
-      custodyQueryKeys.policyDestinationAccounts(),
-    ];
+    const nonMatches = [paymentsQueryKeys.actionWallets(), earnQueryKeys.fundingWallets()];
     for (const key of nonMatches) {
       expect(custodyQueryKeys.isWalletLiveDataKey(key)).toBe(false);
     }

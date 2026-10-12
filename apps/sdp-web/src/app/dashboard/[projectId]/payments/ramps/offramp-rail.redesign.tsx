@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { WizardSummaryList } from "../wizard-summary-list";
 import { InstructionActionButton } from "./components/manual-instructions-quote.redesign";
 import { OfframpStepContent } from "./components/offramp-step-content.redesign";
@@ -31,6 +32,10 @@ function offrampPrimaryLabel(
       return t("DashboardPayments.processing");
     case verificationPending:
       return t("DashboardPayments.verificationPending");
+    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
+      return wizard.verificationSimulating
+        ? t("DashboardPayments.demo.verification.simulating")
+        : t("DashboardPayments.demo.verification.simulate");
     case verificationUrl !== undefined:
       return t("DashboardPayments.completeVerification");
     case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
@@ -47,6 +52,8 @@ function offrampPrimaryAction(
   verificationUrl: string | undefined
 ): () => void {
   switch (true) {
+    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
+      return () => void wizard.simulateVerification();
     case verificationUrl !== undefined:
       return () => openExternalRampUrl(verificationUrl);
     case wizard.isLastStep:
@@ -56,24 +63,28 @@ function offrampPrimaryAction(
   }
 }
 
+/** Whether the footer's primary button waits: on a quote, a verification, or the wallets. */
+function offrampPrimaryDisabled(wizard: OfframpWizard, verificationPending: boolean): boolean {
+  return (
+    wizard.hostedQuoteLoading ||
+    verificationPending ||
+    wizard.verificationSimulating ||
+    !wizard.canProceed ||
+    (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
+  );
+}
+
 /** The final step's heading once the payout reached an outcome worth naming. */
 function offrampCompletionTitle(wizard: OfframpWizard, t: Translate): string | undefined {
   if (wizard.transferStatus?.status === "completed") {
     return t("DashboardPayments.ramps.payoutComplete");
   }
-  if (wizard.heldApprovalRequestId !== null) {
-    return t("DashboardPayments.ramps.transferApprovalPending");
-  }
   return undefined;
 }
 
-/**
- * Whether the title row carries the polled transfer status. A held send hides
- * it: the heading already says the send waits for approval, and the row still
- * reads `awaiting_payment`, which would ask for a send that is already queued.
- */
+/** Whether the title row carries the polled transfer status. */
 function showOfframpInlineStatus(wizard: OfframpWizard, hosted: boolean): boolean {
-  if (!wizard.onTransactionStage || wizard.heldApprovalRequestId !== null) {
+  if (!wizard.onTransactionStage) {
     return false;
   }
   return hosted || wizard.depositTarget !== null;
@@ -81,7 +92,6 @@ function showOfframpInlineStatus(wizard: OfframpWizard, hosted: boolean): boolea
 
 type OfframpFooterAction =
   | { kind: "transaction" }
-  | { kind: "approval"; approvalRequestId: string }
   | { kind: "send"; depositTarget: NonNullable<OfframpWizard["depositTarget"]> };
 
 /** The one action the final step offers, in precedence order. */
@@ -89,9 +99,6 @@ function offrampFooterAction(wizard: OfframpWizard): OfframpFooterAction | null 
   const transfer = wizard.transferStatus;
   if (transfer !== undefined && getRampTransferState(transfer.status).terminal) {
     return { kind: "transaction" };
-  }
-  if (wizard.heldApprovalRequestId !== null) {
-    return { kind: "approval", approvalRequestId: wizard.heldApprovalRequestId };
   }
   return wizard.depositTarget === null
     ? null
@@ -106,20 +113,15 @@ function OfframpFooterActionButton({
   wizard: OfframpWizard;
 }) {
   const t = useTranslations();
+  const projectHref = useProjectHref();
   switch (action.kind) {
     case "transaction":
       return (
         <Button asChild type="button">
-          <Link href={`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`}>
+          <Link
+            href={projectHref(`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`)}
+          >
             {t("DashboardPayments.goToTransaction")}
-          </Link>
-        </Button>
-      );
-    case "approval":
-      return (
-        <Button asChild type="button">
-          <Link href={`/dashboard/approvals/${encodeURIComponent(action.approvalRequestId)}`}>
-            {t("DashboardPayments.onchainSend.viewApprovalRequest")}
           </Link>
         </Button>
       );
@@ -209,12 +211,7 @@ export function OfframpRail({
       steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
       completionTitle={offrampCompletionTitle(wizard, t)}
-      primaryDisabled={
-        wizard.hostedQuoteLoading ||
-        verificationPending ||
-        !wizard.canProceed ||
-        (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
-      }
+      primaryDisabled={offrampPrimaryDisabled(wizard, verificationPending)}
       primaryLabel={offrampPrimaryLabel(wizard, verificationPending, verificationUrl, t)}
       walletsError={wizard.liveWalletsError}
       onPrimary={offrampPrimaryAction(wizard, verificationUrl)}

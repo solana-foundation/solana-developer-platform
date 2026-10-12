@@ -55,7 +55,7 @@ describe("Payments write requests", () => {
     );
   });
 
-  it("reads a policy hold as a pending approval, not a failed transfer", async () => {
+  it("treats a 202 SIGNING_PENDING body like any other unexpected response", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -72,16 +72,7 @@ describe("Payments write requests", () => {
       )
     );
 
-    await expect(createTransfer(transferInput, t, "idem_transfer_1")).resolves.toEqual({
-      kind: "approval_pending",
-      approvalRequestId: "apr_1",
-    });
-  });
-
-  it("refuses a 202 that names no approval request", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ data: {} }, 202)));
-
-    await expect(createTransfer(transferInput, t, null)).rejects.toThrow(
+    await expect(createTransfer(transferInput, t, "idem_transfer_1")).rejects.toThrow(
       "DashboardPayments.workspace.transferMissing"
     );
   });

@@ -1,7 +1,6 @@
 import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { SOL_MINT } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
@@ -31,7 +30,6 @@ import {
   readErrorResponse,
   readTransferResponse,
   readTransferRow,
-  seedWalletControlProfile,
 } from "@/test/helpers/payments-transfers";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
@@ -55,88 +53,6 @@ describe("Payments routes — on-chain transfers", () => {
     expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).not.toHaveBeenCalled();
     expect(await countTransferRows()).toBe(0);
-  });
-
-  it("blocks create transfer to a destination outside the control-profile allowlist", async () => {
-    await seedWalletControlProfile({
-      rules: [
-        {
-          id: "destination-allowlist",
-          kind: "destination",
-          allowlist: [TEST_SOLANA_ADDRESSES.wallet2],
-          action: "allow",
-        },
-      ],
-    });
-
-    const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet3,
-        token: "SOL",
-        amount: "0.7",
-      },
-      {}
-    );
-
-    expect(res.status).toBe(403);
-    const body = await readErrorResponse(res);
-    expect(body.error.code).toBe("FORBIDDEN");
-    const details = z
-      .object({ decision: z.string(), reason: z.string() })
-      .parse(body.error.details);
-    expect(details.decision).toBe("deny");
-    expect(details.reason).toContain(
-      `Destination ${TEST_SOLANA_ADDRESSES.wallet3} is not allowed by policy.`
-    );
-
-    expect(await countTransferRows()).toBe(0);
-
-    const operation = await getDb(env)
-      .prepare("SELECT status, operation_family, operation_type FROM wallet_operations")
-      .first<{ status: string; operation_family: string; operation_type: string }>();
-    expect(operation).toMatchObject({
-      status: "failed",
-      operation_family: "payment",
-      operation_type: "payment_transfer_execute",
-    });
-
-    const evaluation = await getDb(env)
-      .prepare("SELECT decision FROM policy_evaluations")
-      .first<{ decision: string }>();
-    expect(evaluation?.decision).toBe("deny");
-  });
-
-  it("creates a transfer to a destination on the control-profile allowlist", async () => {
-    await seedWalletControlProfile({
-      rules: [
-        {
-          id: "destination-allowlist",
-          kind: "destination",
-          allowlist: [TEST_SOLANA_ADDRESSES.wallet2],
-          action: "allow",
-        },
-      ],
-    });
-
-    const res = await postTransfer(
-      {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
-        amount: "0.7",
-      },
-      {}
-    );
-
-    expect(res.status).toBe(200);
-    const body = await readTransferResponse(res);
-    expect(body.data.transfer.status).toBe("confirmed");
-
-    const evaluation = await getDb(env)
-      .prepare("SELECT decision FROM policy_evaluations")
-      .first<{ decision: string }>();
-    expect(evaluation?.decision).toBe("allow");
   });
 
   it("blocks create transfer with zero amount before creating a transfer record", async () => {
@@ -424,19 +340,6 @@ describe("Payments routes — on-chain transfers", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ id: transferId, status: "awaiting_payment" });
     expect(rows[0]?.signature).toBeFalsy();
-
-    // A dry run refuses it too, instead of predicting an allowed deposit.
-    const dryRun = await postTransfer(
-      {
-        transferId,
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
-        amount: "1",
-      },
-      { releaseChannel: "stable", dryRun: true }
-    );
-    expect(dryRun.status).toBe(403);
   });
 
   it("persists a signed outbox for an SPL transfer", async () => {

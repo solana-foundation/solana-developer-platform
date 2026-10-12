@@ -10,15 +10,11 @@ import subscriptionPlans from "./subscription-plans";
 import subscriptions from "./subscriptions";
 import transferBatches from "./transfer-batches";
 import transfers from "./transfers";
-import walletPolicies from "./wallet-policies";
+import walletBalances from "./wallet-balances";
 
 const payments = new Hono<{ Bindings: Env }>();
 
 payments.use("/ramps/*", requireModule("ramps"));
-// Refuses policy configuration. Evaluation is skipped in enforcement.service under the
-// same release channel; policyGate (idempotency, operation ledger) and approval requests
-// created earlier keep running.
-payments.use("/wallets/:walletId/policies/*", requireModule("policies"));
 payments.use("*", unifiedAuthMiddleware());
 payments.use("*", projectContextMiddleware());
 
@@ -28,7 +24,7 @@ payments.route("/requests", paymentRequests);
 payments.route("/recurring-payments", recurringPayments);
 payments.route("/subscription-plans", subscriptionPlans);
 payments.route("/subscriptions", subscriptions);
-payments.route("/wallets", walletPolicies);
+payments.route("/wallets", walletBalances);
 payments.route("/ramps", ramps);
 
 export default payments;

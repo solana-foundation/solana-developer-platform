@@ -1,21 +1,20 @@
 ---
 title: Overview
-description: Configure custody-wallet controls, operation permissions, and balances.
+description: Read custody-wallet balances and limit what an API key may do with a wallet.
 ---
 
-This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, signing, and on-chain program activity, whichever product flow initiates the request.
+This section covers balance visibility for a custody wallet. What a caller may do with a wallet is set on the API key: its role and permissions, the wallets it is bound to, and its [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations).
 
 ## What's in this section
 
-- [Wallet policies](/docs/wallet-operations/policies) — configure default decisions, destination controls, amount limits, operation permissions, approval requirements, and audit visibility.
 - [Wallet balances](/docs/wallet-operations/balances) — retrieve token balances and optional USD valuations for a custody wallet.
 
 ## API surface
 
-The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include transfer, payment, ramp, issuance, and program.
+The balance endpoint remains under `/v1/payments/wallets` because it was introduced with the Payments API. Its behavior is wallet-wide.
 
 ## Related
 
-- [Set up wallets](/docs/guides/setup-wallets) — provision the wallet before configuring controls.
-- [Payments](/docs/payments) — payment and ramp flows that can use a policy-controlled wallet.
-- [Manage API keys](/docs/developing-with-sdp/manage-api-keys) — an API key policy narrows or routes to approval; it never expands what the wallet policy allows.
+- [Set up wallets](/docs/guides/setup-wallets) — provision the wallet before binding keys to it.
+- [Payments](/docs/payments) — payment and ramp flows that sign from a custody wallet.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys) — limit a key to the operations it needs.

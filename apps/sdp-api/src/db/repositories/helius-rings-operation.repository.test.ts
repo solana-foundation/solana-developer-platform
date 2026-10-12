@@ -194,6 +194,17 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       expect(replay.operation.ring_program_id).toBe(RING_PROGRAM);
     });
 
+    it("records the initiating key once and keeps it on a replay", async () => {
+      const first = await repo.reserveIntent(shieldIntent({ initiatedByKeyId: "key_first" }));
+      const replay = await repo.reserveIntent(shieldIntent({ initiatedByKeyId: "key_other" }));
+      const session = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:session" }));
+
+      expect(first.operation.initiated_by_key_id).toBe("key_first");
+      expect(replay.reserved).toBe(false);
+      expect(replay.operation.initiated_by_key_id).toBe("key_first");
+      expect(session.operation.initiated_by_key_id).toBeNull();
+    });
+
     it("returns the existing operation on a replay instead of opening a second one", async () => {
       const first = await repo.reserveIntent(shieldIntent());
       // Same intent key, different everything else: a replay must be decided by
@@ -219,13 +230,13 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
         id: first.operation.id,
         expectedState: "draft",
         nextState: "preparing",
-        patch: { policyEvaluationId: "pev_1" },
+        patch: { proofRef: "ref_1" },
       });
 
       const replay = await repo.reserveIntent(shieldIntent());
 
       expect(replay.operation.state).toBe("preparing");
-      expect(replay.operation.policy_evaluation_id).toBe("pev_1");
+      expect(replay.operation.proof_ref).toBe("ref_1");
     });
 
     it("keeps distinct intent keys as distinct operations", async () => {
@@ -323,21 +334,20 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
         ...scope,
         id: operation.id,
         expectedState: "draft",
-        nextState: "approval_required",
-        patch: { approvalRequestId: "apr_1", policyEvaluationId: "pev_1" },
+        nextState: "proving",
+        patch: { proofRef: "ref_1" },
       });
       const later = await repo.transitionState({
         ...scope,
         id: operation.id,
-        expectedState: "approval_required",
-        nextState: "proving",
+        expectedState: "proving",
+        nextState: "ready_to_sign",
         patch: { proofSource: "simulated" },
       });
 
       expect(later).toMatchObject({
-        state: "proving",
-        approval_request_id: "apr_1",
-        policy_evaluation_id: "pev_1",
+        state: "ready_to_sign",
+        proof_ref: "ref_1",
         proof_source: "simulated",
       });
     });
@@ -694,7 +704,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
         ...scope,
         id: waiting.operation.id,
         expectedState: "draft",
-        nextState: "approval_required",
+        nextState: "preparing",
       });
       await repo.transitionState({
         ...scope,
@@ -712,9 +722,9 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
 
       // `draft` is excluded because nothing is in flight yet, `completed`
       // because it is terminal, and the fresh row because it was just touched.
-      // `approval_required` is excluded because it waits on a person: the sweep
-      // cannot advance it, and rows like it are the oldest ones in the table,
-      // so returning them would fill the budget ahead of what it can settle.
+      // `preparing` is excluded because the sweep cannot advance it, and rows
+      // like it are the oldest ones in the table, so returning them would fill
+      // the budget ahead of what it can settle.
       expect(swept.map((row) => row.id)).toEqual([inFlight.operation.id]);
     });
   });

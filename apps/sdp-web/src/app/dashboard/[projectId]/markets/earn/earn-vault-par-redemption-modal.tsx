@@ -31,7 +31,6 @@ import {
   fetchEarnVaultParRedemptionPreview,
   useEarnVaultWithdrawalRequestOutcome,
 } from "./earn-program-data";
-import { EarnVaultApprovalResult } from "./earn-vault-approval-result";
 import {
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
@@ -178,16 +177,11 @@ function parRedemptionAmountState(
   };
 }
 
-function parRedemptionSteps(
-  outcome: EarnVaultQueuedWithdrawalOutcome | null,
-  t: ReturnType<typeof useTranslations>
-): string[] {
+function parRedemptionSteps(t: ReturnType<typeof useTranslations>): string[] {
   return [
     t("DashboardEarn.vaultWithdraw.flowDetails"),
     t("DashboardEarn.vaultWithdraw.flowReview"),
-    outcome?.kind === "approval_pending"
-      ? t("DashboardEarn.queuedWithdraw.flowApproval")
-      : t("DashboardEarn.parRedemption.flowRequested"),
+    t("DashboardEarn.parRedemption.flowRequested"),
   ];
 }
 
@@ -288,7 +282,7 @@ function useParRedemptionSubmission(options: {
       );
       if (result.ok) {
         setOutcome(result.data);
-        if (result.data.kind === "submitted") options.onRequested?.(result.data.withdrawalRequest);
+        options.onRequested?.(result.data.withdrawalRequest);
       } else {
         options.setError(result.error);
       }
@@ -663,22 +657,6 @@ function ParRedemptionReview({
   );
 }
 
-function ParRedemptionApprovalResult({
-  onClose,
-  outcome,
-}: {
-  onClose: () => void;
-  outcome: Extract<EarnVaultQueuedWithdrawalOutcome, { kind: "approval_pending" }>;
-}) {
-  return (
-    <EarnVaultApprovalResult
-      approvalRequestId={outcome.approvalRequestId}
-      onClose={onClose}
-      walletOperationId={outcome.walletOperationId}
-    />
-  );
-}
-
 function ParRedemptionForm({
   amount,
   availableAmount,
@@ -799,12 +777,10 @@ export function EarnVaultParRedemptionModal({
       <div className="p-6">
         <EarnFlowStepper
           currentStep={parRedemptionStepIndex(outcome, step)}
-          steps={parRedemptionSteps(outcome, t)}
+          steps={parRedemptionSteps(t)}
         />
         <EarnFlowTransition stepKey={parRedemptionStepKey(outcome, step)}>
-          {outcome?.kind === "approval_pending" ? (
-            <ParRedemptionApprovalResult onClose={onClose} outcome={outcome} />
-          ) : outcome?.kind === "submitted" ? (
+          {outcome ? (
             <ParRedemptionResult
               environment={environment}
               onClose={onClose}
