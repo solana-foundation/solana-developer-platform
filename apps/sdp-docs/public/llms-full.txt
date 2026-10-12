@@ -22,7 +22,7 @@ SDP provides tokenization, custody, payments, and compliance through one stable 
 | --- | --- |
 | **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
 | **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
-| **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
+| **Payments** | Move funds onchain with transfers, transfer batches, and recurring payments, and request fiat on-ramp quotes |
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
@@ -37,11 +37,11 @@ Assets at this scale need regulated custody, enforceable compliance, and auditab
 <Step>
 ### Unified Programming Interface
 
-SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. The same onramp call works for every ramp provider. The `provider` field is the only thing that changes.
+SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. An on-ramp quote request has the same shape for every ramp provider: the `provider` field names the provider, and each provider supports its own set of currency pairs.
 
 <Tabs items={["JavaScript", "Python", "curl"]}>
 <Tab value="JavaScript">
-```javascript title="onramp-quote.js" rotate-providers
+```javascript title="onramp-quote.js"
 const response = await fetch(
   "https://api.solana.com/v1/payments/ramps/onramp/quote",
   {
@@ -52,9 +52,9 @@ const response = await fetch(
     },
     body: JSON.stringify({
       provider: "moonpay",
-      counterpartyId: "cp_...",
+      counterpartyId: "cpty_...",
       destinationCustodyWalletId: "cwlt_...",
-      assetRail: "usdc.solana",
+      assetRail: "sol.solana",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
     }),
@@ -64,16 +64,16 @@ const quote = await response.json();
 ```
 </Tab>
 <Tab value="Python">
-```python title="onramp_quote.py" rotate-providers
+```python title="onramp_quote.py"
 
 response = requests.post(
     "https://api.solana.com/v1/payments/ramps/onramp/quote",
     headers={"Authorization": "Bearer sk_test_..."},
     json={
         "provider": "moonpay",
-        "counterpartyId": "cp_...",
+        "counterpartyId": "cpty_...",
         "destinationCustodyWalletId": "cwlt_...",
-        "assetRail": "usdc.solana",
+        "assetRail": "sol.solana",
         "fiatCurrency": "USD",
         "fiatAmount": "100.00",
     },
@@ -82,15 +82,15 @@ quote = response.json()
 ```
 </Tab>
 <Tab value="curl">
-```bash title="Terminal" rotate-providers
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",
-    "counterpartyId": "cp_...",
+    "counterpartyId": "cpty_...",
     "destinationCustodyWalletId": "cwlt_...",
-    "assetRail": "usdc.solana",
+    "assetRail": "sol.solana",
     "fiatCurrency": "USD",
     "fiatAmount": "100.00"
   }'
@@ -111,9 +111,9 @@ Provision signing wallets through integrated custody providers, so your team nev
 
    Limit what an API key may do. List the operation families and types a key may perform, and every other operation is refused before it executes.
 
-- **Scoped custody configuration**
+- **Project-scoped custody**
 
-   Custody settings resolve per project, then organization, then environment, so different teams can run different providers side by side.
+   Each project has its own custody setup and wallets. There is no default wallet: a payment names the wallet that pays by its `cwlt_…` ID. Production projects use your own custody provider account only.
 </Step>
 <Step>
 ### Issuance and Compliance with Token-2022
@@ -163,9 +163,9 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 <Step>
 ### Ramps and Onchain Transfers
 
-SDP exposes unified endpoints for onchain transfers and ramps across providers, built on official Solana program implementations like [Subscriptions](https://github.com/solana-program/subscriptions) and [Solana Pay](https://github.com/solana-foundation/pay). These power Recurring Payments, Payment Requests, and Batch Transfers within SDP.
+SDP exposes unified endpoints for onchain transfers and ramps across providers. Recurring Payments are built on the official Solana [Subscriptions](https://github.com/solana-program/subscriptions) program, and Batch Transfers pay many counterparty accounts from one wallet in a single request.
 
-<Tabs items={["Recurring Payments", "Payment Requests", "Batch Transfers"]}>
+<Tabs items={["Recurring Payments", "Batch Transfers"]}>
 <Tab value="Recurring Payments">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/recurring-payments \
@@ -173,25 +173,11 @@ curl -X POST https://api.solana.com/v1/payments/recurring-payments \
   -H "Content-Type: application/json" \
   -d '{
     "sourceCustodyWalletId": "cwlt_123",
-    "counterpartyId": "cp_...",
-    "counterpartyAccountId": "cpa_...",
+    "counterpartyId": "cpty_...",
+    "counterpartyAccountId": "counterparty_account_...",
     "token": "USDC",
     "amount": "25.00",
     "periodHours": 720
-  }'
-```
-</Tab>
-<Tab value="Payment Requests">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/requests \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "walletId": "privy_wallet_123",
-    "counterpartyId": "cp_...",
-    "token": "USDC",
-    "amount": "25.00",
-    "expiresAt": "2026-08-31T00:00:00.000Z"
   }'
 ```
 </Tab>
@@ -207,8 +193,8 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
     "recipients": [
       {
         "externalId": "payroll_row_001",
-        "counterpartyId": "cp_...",
-        "counterpartyAccountId": "cpa_...",
+        "counterpartyId": "cpty_...",
+        "counterpartyAccountId": "counterparty_account_...",
         "amount": "25.00"
       }
     ]
@@ -217,7 +203,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 </Tab>
 </Tabs>
 
-The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
+Ramps follow one pattern across providers: discover which currency pairs each provider supports, request an on-ramp quote from the provider you name, and track the ramp as a transfer. For off-ramps, the public API offers currency discovery only. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
 </Step>
 <Step>
 ### Audit Trails
@@ -226,7 +212,7 @@ Every sensitive operation is recorded automatically. Each entry captures the act
 
 | Area                    | Recorded events                                                                    |
 | ----------------------- | ---------------------------------------------------------------------------------- |
-| API keys                | Create, revoke, and rotate, for both organization and project-scoped keys          |
+| API keys                | Create, revoke, and rotate                                                         |
 | Token issuance          | Deploy, mint, burn, force-burn, supply changes, and authority updates              |
 | Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and Token Access Control changes          |
 | Custody                 | Provider configuration, wallet provisioning, and credential lifecycle changes      |
@@ -3085,36 +3071,61 @@ Reasons to skip SDP and go to RPC directly:
 ### Overview
 Source: https://platform.solana.com/docs/payments
 
-> Build payments on Solana with SDP — concepts, send, accept, and ramps.
+> What SDP Payments covers today — counterparties, transfers, transfer batches, recurring payments, on-ramp quotes, inbound payments, and transaction history.
 
-SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
+SDP Payments sends tokens from the custody wallets in your project and tracks the payments that arrive in them. Every outbound payment names the wallet that pays: you pass its SDP Wallet `id` (`cwlt_…`, from `GET /v1/wallets`) as `sourceCustodyWalletId`. There is no default wallet. SDP signs with that wallet, submits the transaction, and records the result.
 
-If you have not yet provisioned a custody wallet or token, start with [Set Up Wallets](/docs/guides/setup-wallets) and [Tokenize an Asset](/docs/tokens/tokenize-an-asset).
+If you don't have a custody wallet yet, start with [Set Up Wallets](/docs/guides/setup-wallets). [How payments work on SDP](/docs/payments/concepts) explains custody wallets, tokens, fees, and the transfer record.
 
-## What's in this section
+## What Payments covers
 
-- **[How payments work on SDP](/docs/payments/concepts)** — wallets, tokens, signing modes, fees, and the transfer data model.
-- **Send payments** — outbound flows.
-  - [Basic payment](/docs/payments/send-basic-payment) — a single transfer in either signing mode.
-  - [Payment with memo](/docs/payments/send-payment-with-memo) — attach order or customer references to a transfer.
-  - [Payouts and disbursements](/docs/payments/send-payouts) — batched outbound transfers and reconciliation.
-- **Accept payments** — inbound flows.
-  - [Accept overview](/docs/payments/accept-overview) — receiving-address convention and integration options.
-  - [Verifying a payment](/docs/payments/accept-verification) — transfer-status semantics and finality.
-  - [Indexing and reconciliation](/docs/payments/accept-indexing) — listing inbound transfers for your ledger.
-- **Ramps** — fiat on-ramps and off-ramps.
-  - [Ramps overview](/docs/payments/ramps) — corridor discovery, estimates, and the Ramp Quote request shape.
-  - [Ramp providers](/docs/payments/ramps-providers) — capability matrix and configuration for all seven ramp providers.
+### Counterparties
 
-Wallet-wide controls and balances are documented in [Wallet operations](/docs/wallet-operations).
+A counterparty is the record for a customer or beneficiary you pay. Its accounts hold the Solana wallet addresses you pay to. Transfer batches and recurring payments pay counterparty accounts, and on-ramp quotes require a counterparty. See [Counterparties](/docs/payments/counterparties).
+
+### Single transfers
+
+`POST /v1/payments/transfers` sends one amount of one token from a custody wallet to any Solana wallet address, with an optional `memo`. See [Basic payment](/docs/payments/send-basic-payment) and [Payment with memo](/docs/payments/send-payment-with-memo).
+
+### Transfer batches
+
+`POST /v1/payments/transfer-batches` pays up to 500 counterparty accounts in one request, from one wallet and in one token. SDP packs the recipients into Solana transactions and reports a status for each recipient. `POST /v1/payments/transfer-batches/estimate` returns the transaction count and fees before you send. See [Payouts and disbursements](/docs/payments/send-payouts).
+
+### Recurring payments
+
+`POST /v1/payments/recurring-payments` creates a schedule that pays one counterparty account a fixed amount every period. Once you activate it, SDP collects each payment from the source wallet when it falls due. See [Recurring payments](/docs/payments/recurring-payments).
+
+### On-ramp quotes
+
+`POST /v1/payments/ramps/onramp/quote` asks the ramp provider you name for a fiat-to-crypto quote, delivered to one of your custody wallets. The response tells you how the customer pays the provider, and SDP records the ramp as a transfer you can track. For off-ramps, the public API offers currency discovery only. See [Ramps](/docs/payments/ramps) and [Ramp providers](/docs/payments/ramps-providers).
+
+### Accepting payments
+
+SDP has no hosted checkout. You publish the address of a custody wallet, the sender transfers to it, and SDP lists the inbound transfer in `GET /v1/payments/transfers` with `direction=inbound`. See [Accept payments](/docs/payments/accept-overview) for the receiving-address pattern, [Verifying a payment](/docs/payments/accept-verification) for statuses and finality, and [Indexing and reconciliation](/docs/payments/accept-indexing) for listing and deduplicating inbound transfers.
+
+### Transaction history
+
+`GET /v1/transactions` lists your project's payment and issuance transactions in one feed, newest first, with filters, cursor pagination, and search by ID or signature. See [Transaction history](/docs/payments/transactions).
+
+## How payments are signed
+
+Transfers, transfer batches, and recurring payments are execute operations: SDP signs with the source custody wallet and submits the transaction itself. They have no prepare route. Transfers and transfer batches accept an `Idempotency-Key` header, so a retried request returns the original record instead of paying twice. See [Signing modes](/docs/developing-with-sdp/signing-modes) and [Idempotency](/docs/developing-with-sdp/idempotency).
+
+## API key access
+
+Each call checks the API key's permissions: `payments:read` for reads, `payments:write` plus `wallets:read` for transfers, batches, and quotes, and `counterparties:read` or `counterparties:write` for counterparties. Each guide lists the exact set for its endpoints.
+
+A key limited to selected wallets can only pay from those wallets. A key with a non-empty list of [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations) must include the `payment` family, or the specific operation type, for transfers, transfer batches, and recurring payment creation, updates, and collections, and the `ramp` family or type for quotes. An operation the list doesn't include is refused with `403 OPERATION_NOT_ALLOWED` before anything executes.
 
 ## Underlying API
 
-Every page in this section links to specific endpoints in the auto-generated [Payments API reference](/docs/reference/api/payments). The Payments API surface is namespaced under `/v1/payments` and groups into three areas: `transfers`, `ramps`, and `wallets/.../balances`.
+Payments endpoints live under `/v1/payments`, counterparties under `/v1/counterparties`, and the transaction feed at `/v1/transactions`. See the [Payments API reference](/docs/reference/api/payments) and the [Counterparties API reference](/docs/reference/api/counterparties) for every field.
 
 ## Related
 
-- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow) — high-level tutorial covering quote through settlement.
+- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow): create counterparties, pay them with a transfer batch, and find the payments in the transaction history.
+- [Wallet balances](/docs/wallet-operations/balances): check that the source wallet holds enough of the token.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys): roles, wallet bindings, and allowed operations.
 
 ---
 
@@ -3127,7 +3138,7 @@ SDP payments move value between Solana accounts: a custody wallet sends tokens t
 
 ## Custody wallets
 
-Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances for the addresses you control. To limit what an API key may do with them, give the key [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations).
+Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet that belongs to one project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances for the addresses you control. To limit what an API key may do with them, give the key [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations).
 
 You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId` and retain the provider's identifier separately as `providerWalletId` evidence. The **destination** remains the recipient's on-chain Solana address.
 
@@ -3135,7 +3146,7 @@ The on-ramp quote endpoint uses the same public shape for every provider: `desti
 
 ## Tokens and token accounts
 
-Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
+Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` takes the on-chain **mint address**. It also accepts `SOL` for native SOL and well-known symbols such as `USDC`, `USDT`, `PYUSD`, and `EURC`, in any letter case: SDP resolves the symbol to that token's mint on the deployment's cluster, and returns `400` when the token isn't available on that cluster. The transfer stores the resolved mint, with native SOL stored as the wrapped SOL mint. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint, while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
 
 **Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to issuance operations (mint, burn, seize, force-burn) as well as payments transfers. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
 
@@ -3569,7 +3580,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches/estimate \
       "recipientCount": 2,
       "transactionCount": 1,
       "estimatedFees": {
-        "networkFeeLamports": "5000",
+        "networkFeeLamports": "10000",
         "priorityFeeLamports": "0",
         "tokenAccountRentLamports": "2039280",
         "sponsored": true
@@ -3683,7 +3694,7 @@ A `200` returns the batch, one row per recipient, and the transfer record of eac
       "sourceProviderWalletId": "privy_wallet_123",
       "token": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
       "status": "processing",
-      "totalAmount": "225.50",
+      "totalAmount": "225.5",
       "recipientCount": 2,
       "transactionCount": 1
     },
@@ -3694,13 +3705,13 @@ A `200` returns the batch, one row per recipient, and the transfer record of eac
         "externalId": "row_4837",
         "counterpartyAccountId": "counterparty_account_4837",
         "destination": "7xKXz...9fGh",
-        "amount": "150.00",
+        "amount": "150",
         "status": "processing",
         "error": null
       }
     ],
     "transfers": [
-      { "id": "xfr_...", "type": "transfer_batch", "kind": "batch_pay", "status": "processing", "amount": "225.50", "signature": "5Kd3..." }
+      { "id": "xfr_...", "type": "transfer_batch", "kind": "batch_pay", "status": "processing", "amount": "225.5", "signature": "5Kd3..." }
     ]
   },
   "meta": { "requestId": "req_...", "timestamp": "2026-05-14T09:00:01.000Z" }
@@ -6599,18 +6610,593 @@ For deeper API surface beyond what this tutorial covers:
 ### End-to-end Payment Flow
 Source: https://platform.solana.com/docs/tutorials/end-to-end-payment-flow
 
-> A high-level payment flow from quote to settlement.
+> Register two contractors as counterparties, pay both with one transfer batch, track each payment until it settles, and find it in the transaction history.
 
-This walkthrough covers a typical payment integration lifecycle:
+This tutorial pays two contractors in USDC from a custody wallet in your sandbox project. You will:
 
-1. Create or resolve the funding wallet.
-2. Build and validate transfer intent (amount, destination, token).
-3. Submit the transfer — SDP builds the transaction, signs with the source custody wallet, and submits it.
-4. Capture the returned identifiers for observability.
-5. Query transfer status until finalization.
-6. Reconcile with your product ledger and user-facing state.
+1. Register each contractor as a counterparty with a Solana wallet account.
+2. Estimate the transfer batch that pays them.
+3. Create the batch with an `Idempotency-Key`.
+4. Poll the batch until every recipient has settled.
+5. Find the batch's transactions in `GET /v1/transactions`.
 
-Use the [Payments API reference](/docs/reference/api/payments) and [Wallets API reference](/docs/reference/api/wallets) for endpoint-level request and response details.
+Every step uses the public API. Response examples are trimmed to the fields this tutorial uses. The [Payments API reference](/docs/reference/api/payments) and [Counterparties API reference](/docs/reference/api/counterparties) list every field.
+
+## Before you start
+
+### A custody wallet that holds USDC
+
+You need a custody wallet in your sandbox project. A batch names the wallet that pays: you pass its SDP Wallet `id` (`cwlt_…`, from `GET /v1/wallets`) as `sourceCustodyWalletId`. There is no default wallet. If you don't have one yet, see [Set Up Wallets](/docs/guides/setup-wallets).
+
+The wallet must hold at least the batch total in USDC. `USDC` resolves to the USDC mint on your project's network, which is devnet for a sandbox project. Check the balance with [Wallet balances](/docs/wallet-operations/balances). The wallet doesn't need SOL for this flow: SDP's fee payer pays the network fees and the rent for any recipient token account that doesn't exist yet.
+
+### An API key with the right access
+
+Use a sandbox key (`sk_test_…`). It needs these permissions:
+
+| Step | Endpoint | Permissions |
+| --- | --- | --- |
+| 1. Register recipients | `POST /v1/counterparties`, `POST /v1/counterparties/{counterpartyId}/accounts` | `counterparties:write` |
+| 2. Estimate | `POST /v1/payments/transfer-batches/estimate` | `payments:read`, `wallets:read`, `counterparties:read` |
+| 3. Create the batch | `POST /v1/payments/transfer-batches` | `payments:write`, `wallets:read`, `counterparties:read` |
+| 4. Poll the batch | `GET /v1/payments/transfer-batches/{batchId}` | `payments:read` |
+| 5. List transactions | `GET /v1/transactions?module=payments` | `payments:read` |
+
+The `api_admin` and `api_developer` [roles](/docs/developing-with-sdp/manage-api-keys#roles) include all of them. An `api_readonly` key can run steps 2, 4, and 5, but can't create counterparties or batches.
+
+Two more settings on the key can block the payment:
+
+- **Wallet access.** If the key is limited to selected wallets, the source wallet must be one of them, and its binding must include `payments:write` to create the batch and `payments:read` to estimate and read it.
+- **Allowed operations.** If the key carries a non-empty [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations) list, it must include the `payment` family or the `payment_transfer_batch_execute` type. Otherwise creating the batch returns `403 OPERATION_NOT_ALLOWED`. The estimate is not checked against this list.
+
+### Set up your shell or client
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+export SDP_API_KEY="sk_test_..."
+export SDP_WALLET_ID="cwlt_..."
+```
+
+The curl steps use [jq](https://jqlang.org) to build request bodies and to save the IDs the next step needs. To see a full response, run the `curl` command on its own, without the `VAR=$(…)` wrapper and the `| jq …` filter.
+</Tab>
+<Tab value="TypeScript">
+```typescript title="sdp.ts"
+const BASE_URL = "https://api.solana.com";
+const API_KEY = process.env.SDP_API_KEY!; // sk_test_...
+export const WALLET_ID = process.env.SDP_WALLET_ID!; // cwlt_...
+
+export class SdpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly details?: Record<string, unknown>
+  ) {
+    super(`${status} ${code}: ${message}`);
+  }
+}
+
+// Calls the SDP API and returns the `data` field of the success envelope.
+export async function sdp<T>(
+  method: "GET" | "POST",
+  path: string,
+  body?: unknown,
+  headers: Record<string, string> = {}
+): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...headers,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    throw new SdpError(res.status, json.error.code, json.error.message, json.error.details);
+  }
+  return json.data as T;
+}
+```
+
+The TypeScript steps below build one script, `payout.ts`, that imports this helper. Each step's block continues the previous one.
+</Tab>
+</Tabs>
+
+## 1. Register the recipients as counterparties
+
+A transfer batch pays counterparty accounts, not raw addresses. Each contractor needs a **counterparty**, the record of who they are, and a `crypto_wallet` **account** that holds the Solana address you pay.
+
+`POST /v1/counterparties` creates the counterparty. `externalId` is your own reference, and it must be unique among the project's active counterparties. Then `POST /v1/counterparties/{counterpartyId}/accounts` adds the wallet account. `details.network` must be `"solana"` and `details.address` a base58 Solana wallet address.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+COUNTERPARTY_ID_1=$(curl -sS -X POST https://api.solana.com/v1/counterparties \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entityType": "individual",
+    "displayName": "Ana Lima",
+    "externalId": "contractor_0042"
+  }' | jq -r '.data.counterparty.id')
+
+ACCOUNT_ID_1=$(curl -sS -X POST "https://api.solana.com/v1/counterparties/$COUNTERPARTY_ID_1/accounts" \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accountKind": "crypto_wallet",
+    "label": "USDC payout wallet",
+    "details": {
+      "network": "solana",
+      "address": "ASSxhogtgxhRTRaXtAdjXMCTd4uq3QGrDMyt4XiJmBRT"
+    }
+  }' | jq -r '.data.account.id')
+```
+
+Run both requests again for the second contractor, with `"displayName": "Ben Okafor"`, `"externalId": "contractor_0043"`, and the address `JDZrVNAgydPaLQi2p2BBMkxNN47is5vv5zx1JoYYtyXo`. Save the IDs as `COUNTERPARTY_ID_2` and `ACCOUNT_ID_2`.
+</Tab>
+<Tab value="TypeScript">
+```typescript title="payout.ts"
+
+type Counterparty = { id: string; status: "active" | "archived" };
+type CounterpartyAccount = { id: string; counterpartyId: string };
+
+async function registerContractor(displayName: string, externalId: string, address: string) {
+  const { counterparty } = await sdp<{ counterparty: Counterparty }>(
+    "POST",
+    "/v1/counterparties",
+    { entityType: "individual", displayName, externalId }
+  );
+  const { account } = await sdp<{ account: CounterpartyAccount }>(
+    "POST",
+    `/v1/counterparties/${counterparty.id}/accounts`,
+    {
+      accountKind: "crypto_wallet",
+      label: "USDC payout wallet",
+      details: { network: "solana", address },
+    }
+  );
+  return { counterpartyId: counterparty.id, counterpartyAccountId: account.id };
+}
+
+const ana = await registerContractor(
+  "Ana Lima",
+  "contractor_0042",
+  "ASSxhogtgxhRTRaXtAdjXMCTd4uq3QGrDMyt4XiJmBRT"
+);
+const ben = await registerContractor(
+  "Ben Okafor",
+  "contractor_0043",
+  "JDZrVNAgydPaLQi2p2BBMkxNN47is5vv5zx1JoYYtyXo"
+);
+```
+</Tab>
+</Tabs>
+
+Each create returns `201`. The counterparty:
+
+```json title="Response"
+{
+  "data": {
+    "counterparty": {
+      "id": "cpty_d5468c9b-5d67-4277-ac0b-7fcbdb44d5ba",
+      "externalId": "contractor_0042",
+      "entityType": "individual",
+      "displayName": "Ana Lima",
+      "status": "active",
+      "createdBy": "usr_...",
+      "createdAt": "2026-10-12T14:00:00.000Z",
+      "updatedAt": "2026-10-12T14:00:00.000Z"
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-10-12T14:00:00.000Z" }
+}
+```
+
+With an API key, `createdBy` is the user who created that key. The account:
+
+```json title="Response"
+{
+  "data": {
+    "account": {
+      "id": "counterparty_account_858acfbc-0378-4580-8e97-55098618f4cd",
+      "counterpartyId": "cpty_d5468c9b-5d67-4277-ac0b-7fcbdb44d5ba",
+      "accountKind": "crypto_wallet",
+      "label": "USDC payout wallet",
+      "details": {
+        "network": "solana",
+        "address": "ASSxhogtgxhRTRaXtAdjXMCTd4uq3QGrDMyt4XiJmBRT"
+      },
+      "providerAccountData": {},
+      "status": "active",
+      "createdAt": "2026-10-12T14:00:01.000Z",
+      "updatedAt": "2026-10-12T14:00:01.000Z"
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-10-12T14:00:01.000Z" }
+}
+```
+
+Store both IDs with your contractor records. The API has no lookup by `externalId`, and creating a counterparty again with the same `externalId` returns `409 CONFLICT`. See [Counterparties](/docs/payments/counterparties) for listing, updating, and archiving.
+
+## 2. Estimate the batch
+
+`POST /v1/payments/transfer-batches/estimate` takes the same body as the real batch. It runs the same checks: your key's access to the wallet, the token, every counterparty account, and every amount. Then it works out how SDP would split the recipients into Solana transactions. It doesn't sign or submit anything.
+
+Each recipient names its `counterpartyAccountId` and an `amount` in token units. `counterpartyId` is optional; if you send it, it must own the account. `externalId` on the batch and on each recipient is for your own correlation and doesn't deduplicate anything.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+BATCH_BODY=$(jq -n \
+  --arg wallet "$SDP_WALLET_ID" \
+  --arg cp1 "$COUNTERPARTY_ID_1" --arg acct1 "$ACCOUNT_ID_1" \
+  --arg cp2 "$COUNTERPARTY_ID_2" --arg acct2 "$ACCOUNT_ID_2" \
+  '{
+    externalId: "contractors_2026_10",
+    sourceCustodyWalletId: $wallet,
+    token: "USDC",
+    recipients: [
+      { externalId: "contractor_0042", counterpartyId: $cp1, counterpartyAccountId: $acct1, amount: "1200.00" },
+      { externalId: "contractor_0043", counterpartyId: $cp2, counterpartyAccountId: $acct2, amount: "850.50" }
+    ]
+  }')
+
+curl -sS -X POST https://api.solana.com/v1/payments/transfer-batches/estimate \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$BATCH_BODY"
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="payout.ts (continued)"
+const batchBody = {
+  externalId: "contractors_2026_10",
+  sourceCustodyWalletId: WALLET_ID,
+  token: "USDC",
+  recipients: [
+    { externalId: "contractor_0042", ...ana, amount: "1200.00" },
+    { externalId: "contractor_0043", ...ben, amount: "850.50" },
+  ],
+};
+
+const { estimate } = await sdp<{
+  estimate: {
+    recipientCount: number;
+    transactionCount: number;
+    estimatedFees: {
+      networkFeeLamports: string;
+      priorityFeeLamports: string;
+      tokenAccountRentLamports: string;
+      sponsored: boolean;
+    };
+  };
+}>("POST", "/v1/payments/transfer-batches/estimate", batchBody);
+```
+</Tab>
+</Tabs>
+
+```json title="Response"
+{
+  "data": {
+    "estimate": {
+      "recipientCount": 2,
+      "transactionCount": 1,
+      "estimatedFees": {
+        "networkFeeLamports": "10000",
+        "priorityFeeLamports": "0",
+        "tokenAccountRentLamports": "4078560",
+        "sponsored": true
+      }
+    }
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-10-12T14:01:00.000Z" }
+}
+```
+
+- `transactionCount` is `1`: by default SDP puts up to 20 recipients in one Solana transaction. Set `options.maxRecipientsPerTransaction` (1 to 64) to change that.
+- `tokenAccountRentLamports` is the rent for recipient USDC token accounts that don't exist yet. Here neither contractor has one, so it covers two accounts.
+- `sponsored: true` means SDP's fee payer pays these fees, not your wallet.
+
+A clean estimate means the request passed validation. It doesn't check the wallet's USDC balance: a shortfall shows up when SDP simulates the transaction in the next step.
+
+## 3. Create the batch
+
+Send the same body to `POST /v1/payments/transfer-batches` with an `Idempotency-Key` header. Mint one key per payout run and store it with the run before you send, so a retry can reuse it.
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+IDEMPOTENCY_KEY="contractors-2026-10-run-1"
+
+BATCH_ID=$(curl -sS -X POST https://api.solana.com/v1/payments/transfer-batches \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
+  -d "$BATCH_BODY" | jq -r '.data.batch.id')
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="payout.ts (continued)"
+type BatchDetail = {
+  batch: { id: string; status: string; totalAmount: string | null };
+  recipients: {
+    id: string;
+    transferId: string | null;
+    externalId: string | null;
+    amount: string;
+    status: "pending" | "processing" | "confirmed" | "failed" | "archived";
+    error: string | null;
+  }[];
+  transfers: { id: string; status: string; amount?: string; signature: string | null }[];
+};
+
+// Store the key with the payout run before sending; reuse it on every retry.
+const idempotencyKey = crypto.randomUUID();
+
+const created = await sdp<BatchDetail>(
+  "POST",
+  "/v1/payments/transfer-batches",
+  batchBody,
+  { "Idempotency-Key": idempotencyKey }
+);
+// created.batch.id — poll this in the next step
+```
+</Tab>
+</Tabs>
+
+A `200` returns the batch, one row per recipient, and the transfer record for each Solana transaction SDP created:
+
+```json title="Response"
+{
+  "data": {
+    "batch": {
+      "id": "xbatch_c26aa0a7-8ed6-4838-88b6-1fd1d4c65292",
+      "externalId": "contractors_2026_10",
+      "sourceCustodyWalletId": "cwlt_7c9e2f10-4b3a-4d5e-8f61-2a9b0c3d4e5f",
+      "sourceAddress": "PApnTgZhyRDxKAKhUYw3HW8CBVBryAatR5VbqsrvLKG",
+      "token": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "status": "processing",
+      "totalAmount": "2050.5",
+      "recipientCount": 2,
+      "transactionCount": 1
+    },
+    "recipients": [
+      {
+        "id": "xrec_e891b6ab-d499-40d9-a6a0-c6ff97277633",
+        "transferId": "xfr_bea210fb-6b39-4edf-a0b0-4769cc7a4c78",
+        "externalId": "contractor_0042",
+        "counterpartyId": "cpty_d5468c9b-5d67-4277-ac0b-7fcbdb44d5ba",
+        "counterpartyAccountId": "counterparty_account_858acfbc-0378-4580-8e97-55098618f4cd",
+        "destination": "ASSxhogtgxhRTRaXtAdjXMCTd4uq3QGrDMyt4XiJmBRT",
+        "amount": "1200",
+        "status": "processing",
+        "error": null
+      },
+      {
+        "id": "xrec_5b0e7c1a-2f4d-4c8e-9a3b-6d1f0e2c4a77",
+        "transferId": "xfr_bea210fb-6b39-4edf-a0b0-4769cc7a4c78",
+        "externalId": "contractor_0043",
+        "counterpartyId": "cpty_3684300a-8e40-47a4-a470-16c09340c981",
+        "counterpartyAccountId": "counterparty_account_1ff1e781-7a69-4672-b7b5-c7dae7d0068c",
+        "destination": "JDZrVNAgydPaLQi2p2BBMkxNN47is5vv5zx1JoYYtyXo",
+        "amount": "850.5",
+        "status": "processing",
+        "error": null
+      }
+    ],
+    "transfers": [
+      {
+        "id": "xfr_bea210fb-6b39-4edf-a0b0-4769cc7a4c78",
+        "custodyWalletId": "cwlt_7c9e2f10-4b3a-4d5e-8f61-2a9b0c3d4e5f",
+        "type": "transfer_batch",
+        "kind": "batch_pay",
+        "direction": "outbound",
+        "status": "processing",
+        "token": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "amount": "2050.5",
+        "signature": "5dyRPnQhFfY5QE8Ja2gCFUwpXTsGcnN4sZ8ZezTiuKi8DnWEkDpxZdwMT7aH5oF8SnzC5rD7i1PVFJZCmXYTfbA4"
+      }
+    ]
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-10-12T14:02:01.000Z" }
+}
+```
+
+Things to notice:
+
+- **The batch is still `processing`.** SDP signs and submits each transaction, then responds without waiting for confirmation. Background reconciliation settles it.
+- **`token` is the mint address.** `USDC` was resolved to the devnet USDC mint.
+- **Amounts are normalized.** Trailing zeros are dropped, so `"1200.00"` comes back as `"1200"` and `"850.50"` as `"850.5"`.
+- **Both recipients share one transfer.** They were packed into the same Solana transaction, so they succeed or fail together. The transfer's `amount` is that transaction's total.
+
+<Callout type="warn">
+If the request times out, send it again with the same `Idempotency-Key` and the same body. SDP returns the original batch with its current state and submits nothing new. A new key, or no key, creates a second batch and pays everyone twice. The same key with a different body, or a different source wallet, returns `409 CONFLICT`. See [Idempotency](/docs/developing-with-sdp/idempotency).
+</Callout>
+
+## 4. Poll the batch until it settles
+
+`GET /v1/payments/transfer-batches/{batchId}` returns the same shape as the create response. Poll it until `batch.status` is no longer `processing`. Every 15 to 30 seconds is a reasonable pace for a background job; see [Polling cadence](/docs/payments/accept-verification#polling-cadence).
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -sS "https://api.solana.com/v1/payments/transfer-batches/$BATCH_ID" \
+  -H "Authorization: Bearer $SDP_API_KEY" | jq '.data.batch.status'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="payout.ts (continued)"
+async function waitForBatch(batchId: string, maxAttempts = 40): Promise<BatchDetail> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const detail = await sdp<BatchDetail>("GET", `/v1/payments/transfer-batches/${batchId}`);
+    if (detail.batch.status !== "processing") return detail;
+    await new Promise((resolve) => setTimeout(resolve, 15_000));
+  }
+  throw new Error(`Batch ${batchId} is still processing; keep polling, don't resend it`);
+}
+
+const settled = await waitForBatch(created.batch.id);
+const failed = settled.recipients.filter((r) => r.status === "failed");
+// Pay `failed` rows again in a new batch with a new Idempotency-Key.
+```
+</Tab>
+</Tabs>
+
+Once the transaction lands, the batch and its recipients are `confirmed`:
+
+```json title="Response"
+{
+  "data": {
+    "batch": {
+      "id": "xbatch_c26aa0a7-8ed6-4838-88b6-1fd1d4c65292",
+      "status": "confirmed",
+      "totalAmount": "2050.5"
+    },
+    "recipients": [
+      { "externalId": "contractor_0042", "transferId": "xfr_bea210fb-6b39-4edf-a0b0-4769cc7a4c78", "amount": "1200", "status": "confirmed", "error": null },
+      { "externalId": "contractor_0043", "transferId": "xfr_bea210fb-6b39-4edf-a0b0-4769cc7a4c78", "amount": "850.5", "status": "confirmed", "error": null }
+    ],
+    "transfers": [
+      { "id": "xfr_bea210fb-6b39-4edf-a0b0-4769cc7a4c78", "kind": "batch_pay", "status": "confirmed", "amount": "2050.5", "signature": "5dyRPnQhFfY5QE8Ja2gCFUwpXTsGcnN4sZ8ZezTiuKi8DnWEkDpxZdwMT7aH5oF8SnzC5rD7i1PVFJZCmXYTfbA4" }
+    ]
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-10-12T14:02:31.000Z" }
+}
+```
+
+The batch ends in one of three statuses:
+
+| `batch.status` | Meaning | What to do |
+| --- | --- | --- |
+| `confirmed` | Every recipient is `confirmed`. | Nothing. Everyone was paid. |
+| `partially_failed` | Some recipients are `confirmed` and some `failed`. | Pay only the `failed` rows again. |
+| `failed` | No recipient was paid. | Read each recipient's `error`, fix the cause, and pay them again. |
+
+A batch can't be retried in place. Pay `failed` recipients in a new batch with a new `Idempotency-Key`. Never resend recipients that are `pending`, `processing`, or `confirmed`: a recipient stays `processing` while SDP finds out whether its transaction reached the network. See [Payouts and disbursements](/docs/payments/send-payouts#track-recipients) for every recipient and batch status.
+
+## 5. Find the payments in the transaction history
+
+`GET /v1/transactions` lists your project's payments and issuance transactions in one feed, newest first. A transfer batch appears as one `batch_pay` row per Solana transaction, not one row per recipient. Filter on the module, the kind, and the source wallet:
+
+<Tabs items={["curl", "TypeScript"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl -sS "https://api.solana.com/v1/transactions?module=payments&kind=batch_pay&custodyWalletId=$SDP_WALLET_ID&limit=20" \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="payout.ts (continued)"
+type Transaction = {
+  id: string;
+  moduleId: string;
+  kind: string;
+  status: "pending" | "succeeded" | "failed" | "canceled";
+  moduleStatus: string;
+  amount: string | null;
+  signature: string | null;
+};
+
+const params = new URLSearchParams({
+  module: "payments",
+  kind: "batch_pay",
+  custodyWalletId: WALLET_ID,
+  limit: "20",
+});
+const { transactions } = await sdp<{ transactions: Transaction[]; nextCursor: string | null }>(
+  "GET",
+  `/v1/transactions?${params}`
+);
+
+// Each recipient's transferId is the moduleId of its row.
+const transferIds = new Set(settled.transfers.map((t) => t.id));
+const batchRows = transactions.filter((row) => transferIds.has(row.moduleId));
+```
+</Tab>
+</Tabs>
+
+```json title="Response"
+{
+  "data": {
+    "transactions": [
+      {
+        "id": "xfr_bea210fb-6b39-4edf-a0b0-4769cc7a4c78",
+        "moduleId": "xfr_bea210fb-6b39-4edf-a0b0-4769cc7a4c78",
+        "module": "payments",
+        "kind": "batch_pay",
+        "status": "succeeded",
+        "moduleStatus": "finalized",
+        "organizationId": "org_123",
+        "projectId": "prj_123",
+        "custodyWalletId": "cwlt_7c9e2f10-4b3a-4d5e-8f61-2a9b0c3d4e5f",
+        "custodyWalletLabel": "Payouts",
+        "token": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "amount": "2050.5",
+        "counterpartyId": null,
+        "signature": "5dyRPnQhFfY5QE8Ja2gCFUwpXTsGcnN4sZ8ZezTiuKi8DnWEkDpxZdwMT7aH5oF8SnzC5rD7i1PVFJZCmXYTfbA4",
+        "createdAt": "2026-10-12T14:02:00.000Z"
+      }
+    ],
+    "nextCursor": null
+  },
+  "meta": { "requestId": "req_...", "timestamp": "2026-10-12T14:05:00.000Z" }
+}
+```
+
+How to read the row:
+
+- `moduleId` is the transfer ID that the batch's recipient rows carry as `transferId`. To fetch one row directly, use `search` with the full ID: `GET /v1/transactions?search=xfr_bea210fb-6b39-4edf-a0b0-4769cc7a4c78`.
+- `amount` is the total paid in that one transaction. `counterpartyId` is `null` because the transaction paid two recipients; it is set only when a transaction pays a single recipient. Use the batch's recipient rows for per-recipient amounts.
+- `status: "succeeded"` covers both `confirmed` and `finalized`. Wait for `moduleStatus` to reach `finalized` before irreversible side effects, such as posting to your general ledger. See [Finality on Solana](/docs/payments/accept-verification#finality-on-solana).
+
+The list is metered at 60 requests per minute per API key. For pagination, search rules, and a reconciliation worker, see [Transaction history](/docs/payments/transactions).
+
+## Errors you're likely to hit
+
+Errors use the standard envelope: `error.code`, `error.message`, optional `error.details`, and `meta.requestId`.
+
+| Status | `error.code` | When | What to do |
+| --- | --- | --- | --- |
+| `400` | `BAD_REQUEST` | The body fails validation: an unknown field, an amount with more decimal places than the token has, more than 500 recipients, or an account address that isn't base58. | Fix the request. `error.message` describes each problem and the field it is in. |
+| `400` | `BAD_REQUEST` | `Source wallet has no token account for this mint`: the source wallet has never held USDC. | Fund the wallet with USDC first. |
+| `403` | `INSUFFICIENT_PERMISSIONS` | The key lacks a permission from the [table above](#an-api-key-with-the-right-access), for example an `api_readonly` key creating a batch. | Use a key with the permissions. |
+| `403` | `OPERATION_NOT_ALLOWED` | The key's allowed operations don't include `payment`. Only creating the batch is checked. | Add `payment` to the key's list, or use another key. |
+| `403` | `FORBIDDEN` | The key is limited to selected wallets and the source wallet isn't one of them, or its binding lacks the permission. | Bind the wallet to the key, or use a key that can reach it. |
+| `404` | `NOT_FOUND` | The `sourceCustodyWalletId` isn't a wallet in this project, a `counterpartyAccountId` doesn't exist in the project, or a `counterpartyId` doesn't own the account. | Check the IDs. Counterparty accounts belong to one project. |
+| `409` | `CONFLICT` | The `Idempotency-Key` was already used with a different body or source wallet, or a counterparty `externalId` is already taken. | Resend the original body with that key, or mint a new key for a new payout run. For `externalId`, use the counterparty you already created. |
+| `429` | `RATE_LIMITED` | `GET /v1/transactions` is over its metered quota. | Wait the number of seconds in the `Retry-After` header. |
+
+A refused operation returns this body, and SDP records nothing:
+
+```json title="Response"
+{
+  "error": {
+    "code": "OPERATION_NOT_ALLOWED",
+    "message": "This API key may not perform payment_transfer_batch_execute",
+    "details": {
+      "operationType": "payment_transfer_batch_execute",
+      "operationFamily": "payment"
+    }
+  },
+  "meta": { "requestId": "req_..." }
+}
+```
+
+The key's list is checked before the body is validated, so this error can appear even when the body is invalid. To change the list, update the key with `PATCH /v1/api-keys/{keyId}`, using a key with `api-keys:write` such as an `api_admin` key. See [Allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations).
+
+A batch can also come back `200` with `batch.status: "failed"` right away. That means SDP simulated a transaction before sending it and the simulation failed, for example because the wallet doesn't hold enough USDC. Nothing was sent, and each recipient's `error` gives the reason. Top up the wallet and pay the recipients in a new batch with a new `Idempotency-Key`.
+
+## Next steps
+
+- [Payouts and disbursements](/docs/payments/send-payouts): batch limits, chunking, and when to use single transfers instead.
+- [Recurring payments](/docs/payments/recurring-payments): pay a counterparty the same amount on a schedule.
+- [Ramps](/docs/payments/ramps): fund a custody wallet from fiat with an on-ramp quote.
+- [Transaction history](/docs/payments/transactions): pagination, search, and a polling reconciliation worker.
+- [Counterparties](/docs/payments/counterparties): manage counterparty records and their accounts.
 
 ---
 

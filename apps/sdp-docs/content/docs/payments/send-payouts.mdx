@@ -67,7 +67,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches/estimate \
       "recipientCount": 2,
       "transactionCount": 1,
       "estimatedFees": {
-        "networkFeeLamports": "5000",
+        "networkFeeLamports": "10000",
         "priorityFeeLamports": "0",
         "tokenAccountRentLamports": "2039280",
         "sponsored": true
@@ -181,7 +181,7 @@ A `200` returns the batch, one row per recipient, and the transfer record of eac
       "sourceProviderWalletId": "privy_wallet_123",
       "token": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
       "status": "processing",
-      "totalAmount": "225.50",
+      "totalAmount": "225.5",
       "recipientCount": 2,
       "transactionCount": 1
     },
@@ -192,13 +192,13 @@ A `200` returns the batch, one row per recipient, and the transfer record of eac
         "externalId": "row_4837",
         "counterpartyAccountId": "counterparty_account_4837",
         "destination": "7xKXz...9fGh",
-        "amount": "150.00",
+        "amount": "150",
         "status": "processing",
         "error": null
       }
     ],
     "transfers": [
-      { "id": "xfr_...", "type": "transfer_batch", "kind": "batch_pay", "status": "processing", "amount": "225.50", "signature": "5Kd3..." }
+      { "id": "xfr_...", "type": "transfer_batch", "kind": "batch_pay", "status": "processing", "amount": "225.5", "signature": "5Kd3..." }
     ]
   },
   "meta": { "requestId": "req_...", "timestamp": "2026-05-14T09:00:01.000Z" }
