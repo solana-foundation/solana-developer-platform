@@ -1,4 +1,3 @@
-import type { TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
