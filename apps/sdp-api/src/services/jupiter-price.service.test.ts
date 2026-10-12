@@ -1,8 +1,16 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 import { clearJupiterPriceCacheForTests, fetchJupiterUsdPrices } from "./jupiter-price.service";
 
 const env = {} as Env;
+
+function pricesInScope(environment: SdpEnvironment, priceEnv: Env, mints: string[]) {
+  return runInClusterScope({ projectId: null, environment }, () =>
+    fetchJupiterUsdPrices(priceEnv, mints)
+  );
+}
 
 function priceResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -26,7 +34,7 @@ describe("fetchJupiterUsdPrices", () => {
       })
     );
 
-    const prices = await fetchJupiterUsdPrices(env, ["MintA", "MintB"]);
+    const prices = await pricesInScope("sandbox", env, ["MintA", "MintB"]);
 
     expect(prices.get("MintA")).toBeCloseTo(1.0001);
     expect(prices.get("MintB")).toBeCloseTo(74.19);
@@ -36,7 +44,7 @@ describe("fetchJupiterUsdPrices", () => {
     // Jupiter drops unreliable mints from the object entirely: no key, no null, no error.
     vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({ MintA: { usdPrice: 2 } }));
 
-    const prices = await fetchJupiterUsdPrices(env, ["MintA", "MintUnknown"]);
+    const prices = await pricesInScope("sandbox", env, ["MintA", "MintUnknown"]);
 
     expect(prices.get("MintA")).toBe(2);
     expect(prices.has("MintUnknown")).toBe(false);
@@ -45,13 +53,13 @@ describe("fetchJupiterUsdPrices", () => {
   it("returns an empty map instead of throwing when the request fails", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
 
-    await expect(fetchJupiterUsdPrices(env, ["MintA"])).resolves.toEqual(new Map());
+    await expect(pricesInScope("sandbox", env, ["MintA"])).resolves.toEqual(new Map());
   });
 
   it("returns an empty map on a non-ok response", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 429));
 
-    await expect(fetchJupiterUsdPrices(env, ["MintA"])).resolves.toEqual(new Map());
+    await expect(pricesInScope("sandbox", env, ["MintA"])).resolves.toEqual(new Map());
   });
 
   it("ignores non-numeric and negative prices", async () => {
@@ -64,9 +72,9 @@ describe("fetchJupiterUsdPrices", () => {
       })
     );
 
-    await expect(fetchJupiterUsdPrices(env, ["MintA", "MintB", "MintC", "MintD"])).resolves.toEqual(
-      new Map()
-    );
+    await expect(
+      pricesInScope("sandbox", env, ["MintA", "MintB", "MintC", "MintD"])
+    ).resolves.toEqual(new Map());
   });
 
   it("chunks large mint lists and merges the results", async () => {
@@ -77,7 +85,7 @@ describe("fetchJupiterUsdPrices", () => {
       return priceResponse(Object.fromEntries(ids.map((id) => [id, { usdPrice: 1 }])));
     });
 
-    const prices = await fetchJupiterUsdPrices(env, mints);
+    const prices = await pricesInScope("sandbox", env, mints);
 
     // 120 mints at 50 per request.
     expect(fetchSpy).toHaveBeenCalledTimes(3);
@@ -97,7 +105,7 @@ describe("fetchJupiterUsdPrices", () => {
       return priceResponse(Object.fromEntries(ids.map((id) => [id, { usdPrice: 5 }])));
     });
 
-    const prices = await fetchJupiterUsdPrices(env, mints);
+    const prices = await pricesInScope("sandbox", env, mints);
 
     expect(prices.size).toBe(10);
   });
@@ -105,10 +113,11 @@ describe("fetchJupiterUsdPrices", () => {
   it("sends the api key only when one is configured", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}));
 
-    await fetchJupiterUsdPrices(env, ["MintA"]);
+    await pricesInScope("sandbox", env, ["MintA"]);
     expect(fetchSpy.mock.calls[0]?.[1]?.headers).toBeUndefined();
 
-    await fetchJupiterUsdPrices(
+    await pricesInScope(
+      "sandbox",
       { JUPITER_PRICE_API_URL: "https://api.jup.ag/price/v3", JUPITER_PRICE_API_KEY: "k" } as Env,
       ["MintA"]
     );
@@ -120,7 +129,7 @@ describe("fetchJupiterUsdPrices", () => {
   it("makes no request when there is nothing to price", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
-    await expect(fetchJupiterUsdPrices(env, ["", "   "])).resolves.toEqual(new Map());
+    await expect(pricesInScope("sandbox", env, ["", "   "])).resolves.toEqual(new Map());
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -130,13 +139,15 @@ describe("fetchJupiterUsdPrices", () => {
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }));
 
-    await fetchJupiterUsdPrices(env, ["MintA"]);
+    await pricesInScope("sandbox", env, ["MintA"]);
     vi.advanceTimersByTime(29_000);
-    await expect(fetchJupiterUsdPrices(env, ["MintA"])).resolves.toEqual(new Map([["MintA", 2]]));
+    await expect(pricesInScope("sandbox", env, ["MintA"])).resolves.toEqual(
+      new Map([["MintA", 2]])
+    );
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     vi.advanceTimersByTime(1_000);
-    await fetchJupiterUsdPrices(env, ["MintA"]);
+    await pricesInScope("sandbox", env, ["MintA"]);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -146,8 +157,21 @@ describe("fetchJupiterUsdPrices", () => {
       .mockRejectedValueOnce(new Error("network down"))
       .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }));
 
-    await expect(fetchJupiterUsdPrices(env, ["MintA"])).resolves.toEqual(new Map());
-    await expect(fetchJupiterUsdPrices(env, ["MintA"])).resolves.toEqual(new Map([["MintA", 2]]));
+    await expect(pricesInScope("sandbox", env, ["MintA"])).resolves.toEqual(new Map());
+    await expect(pricesInScope("sandbox", env, ["MintA"])).resolves.toEqual(
+      new Map([["MintA", 2]])
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not serve a price cached under devnet to a mainnet-beta lookup", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }));
+
+    await pricesInScope("sandbox", env, ["MintA"]);
+    await pricesInScope("production", env, ["MintA"]);
+
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -157,8 +181,8 @@ describe("fetchJupiterUsdPrices", () => {
       .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }));
 
     const [first, second] = await Promise.all([
-      fetchJupiterUsdPrices(env, ["MintA"]),
-      fetchJupiterUsdPrices(env, ["MintA"]),
+      pricesInScope("sandbox", env, ["MintA"]),
+      pricesInScope("sandbox", env, ["MintA"]),
     ]);
 
     expect(first).toEqual(new Map([["MintA", 2]]));

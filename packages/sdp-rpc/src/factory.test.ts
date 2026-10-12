@@ -5,10 +5,17 @@ import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import {
   type Base64EncodedWireTransaction,
   isSolanaError,
+  SOLANA_ERROR__JSON_RPC__INVALID_PARAMS,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
 } from "@solana/kit";
-import { createClusterRpc } from "./factory";
+import {
+  createClusterDasRpc,
+  createClusterRpc,
+  type DasGetAssetBatchParams,
+  type DasSearchAssetsParams,
+  type DasSearchAssetsResult,
+} from "./factory";
 import { runInClusterScope } from "./scope";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
 import type { ManagedRpcEnv } from "./types";
@@ -178,7 +185,45 @@ function slotRead(url: string): RpcCall {
   return { url, method: "getSlot" };
 }
 
-describe("createClusterRpc", () => {
+type DasEndpointCall = { url: string; method: string; params: unknown };
+
+const DAS_SEARCH_PARAMS: DasSearchAssetsParams = {
+  ownerAddress: "das_owner_factory_test",
+  tokenType: "fungible",
+  page: 1,
+  limit: 100,
+  displayOptions: { showFungible: true },
+};
+
+const DAS_ASSET_BATCH_PARAMS: DasGetAssetBatchParams = {
+  ids: ["das_mint_factory_test"],
+  displayOptions: { showFungible: true },
+};
+
+const DAS_SEARCH_RESULT: DasSearchAssetsResult = {
+  items: [
+    {
+      id: "das_mint_factory_test",
+      token_info: { amount: 3_000_000, decimals: 6, uiAmountString: "3" },
+    },
+  ],
+};
+
+function stubDasEndpoint(genesisHash: string, body: JsonRpcBody): DasEndpointCall[] {
+  const calls: DasEndpointCall[] = [];
+  globalThis.fetch = async (input, init) => {
+    const request = readRequest(input, init);
+    assert.ok(init !== undefined && typeof init.body === "string");
+    const payload: unknown = JSON.parse(init.body);
+    assert.ok(typeof payload === "object" && payload !== null && "params" in payload);
+    calls.push({ url: request.url, method: request.method, params: payload.params });
+    if (request.method === "getGenesisHash") return respond(request.id, { result: genesisHash });
+    return respond(request.id, body);
+  };
+  return calls;
+}
+
+function isolateManagedPool(): void {
   beforeEach(() => {
     ambientPool = Object.fromEntries(
       Object.entries(process.env).filter(([envKey]) => MANAGED_POOL_ENV_KEY.test(envKey))
@@ -192,6 +237,10 @@ describe("createClusterRpc", () => {
     clearManagedPool();
     Object.assign(process.env, ambientPool);
   });
+}
+
+describe("createClusterRpc", () => {
+  isolateManagedPool();
 
   it("refuses to build a client outside a cluster scope", () => {
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-unscoped.example.test" });
@@ -544,5 +593,86 @@ describe("createClusterRpc", () => {
       genesisProbe(proven),
       { url: proven, method: "sendTransaction" },
     ]);
+  });
+});
+
+describe("createClusterDasRpc", () => {
+  isolateManagedPool();
+
+  it("is null when the scope's cluster has no Helius URL, even when the other cluster has one", () => {
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-das-none.example.test",
+      SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "https://mainnet-das-only.example.test",
+    });
+
+    assert.equal(runInClusterScope(SANDBOX, createClusterDasRpc), null);
+  });
+
+  it("sends its argument as the named params object and returns the result as Helius sent it", async () => {
+    const url = "https://devnet-das-params.example.test";
+    configurePool({ SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: url });
+    const calls = stubDasEndpoint(GENESIS_HASH_BY_CLUSTER.devnet, { result: DAS_SEARCH_RESULT });
+    const dasRpc = runInClusterScope(SANDBOX, createClusterDasRpc);
+    assert.ok(dasRpc !== null);
+
+    assert.deepEqual(await dasRpc.searchAssets(DAS_SEARCH_PARAMS).send(), DAS_SEARCH_RESULT);
+    assert.deepEqual(calls, [
+      { url, method: "getGenesisHash", params: [] },
+      { url, method: "searchAssets", params: DAS_SEARCH_PARAMS },
+    ]);
+  });
+
+  it("raises a JSON-RPC error body as kit's SolanaError", async () => {
+    const url = "https://devnet-das-error.example.test";
+    configurePool({ SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: url });
+    stubDasEndpoint(GENESIS_HASH_BY_CLUSTER.devnet, {
+      error: { code: SOLANA_ERROR__JSON_RPC__INVALID_PARAMS, message: "Invalid params" },
+    });
+    const dasRpc = runInClusterScope(SANDBOX, createClusterDasRpc);
+    assert.ok(dasRpc !== null);
+
+    await assert.rejects(dasRpc.getAssetBatch(DAS_ASSET_BATCH_PARAMS).send(), (error) =>
+      isSolanaError(error, SOLANA_ERROR__JSON_RPC__INVALID_PARAMS)
+    );
+  });
+
+  it("refuses a Helius URL that serves another cluster before sending the DAS call", async () => {
+    const url = "https://devnet-das-mismatch.example.test";
+    configurePool({ SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: url });
+    const calls = stubDasEndpoint(GENESIS_HASH_BY_CLUSTER["mainnet-beta"], {
+      result: DAS_SEARCH_RESULT,
+    });
+    const dasRpc = runInClusterScope(SANDBOX, createClusterDasRpc);
+    assert.ok(dasRpc !== null);
+
+    await assert.rejects(dasRpc.searchAssets(DAS_SEARCH_PARAMS).send(), {
+      name: "SdpRpcError",
+      message: "An RPC endpoint configured for devnet serves a different cluster",
+      code: "RPC_CLUSTER_MISMATCH",
+      statusCode: 500,
+      details: { cluster: "devnet", genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] },
+    });
+    assert.deepEqual(calls, [{ url, method: "getGenesisHash", params: [] }]);
+  });
+
+  it("builds a new DAS client once the cluster's Helius URL changes", () => {
+    configurePool({
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "https://devnet-das-key-a.example.test",
+    });
+    const original = runInClusterScope(SANDBOX, createClusterDasRpc);
+    assert.ok(original !== null);
+    assert.equal(
+      runInClusterScope(
+        { projectId: "proj_factory_other", environment: "sandbox" },
+        createClusterDasRpc
+      ),
+      original
+    );
+
+    configurePool({
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "https://devnet-das-key-b.example.test",
+    });
+
+    assert.notEqual(runInClusterScope(SANDBOX, createClusterDasRpc), original);
   });
 });
