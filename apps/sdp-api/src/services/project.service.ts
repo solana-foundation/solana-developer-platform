@@ -37,6 +37,26 @@ function parseStoredProjectSettings(raw: string | null): ProjectSettings | null 
   return stored === null ? null : storedProjectSettingsSchema.parse(stored);
 }
 
+/**
+ * The cluster-scope facts for work that starts from a stored row rather than a project-scoped
+ * request (`/pay`), so the row's Project decides the cluster.
+ *
+ * @param db - Database client.
+ * @param projectId - The Project the row belongs to.
+ * @returns The facts `runInClusterScope` takes.
+ * @throws AppError `NOT_FOUND` when the Project does not exist.
+ */
+export async function clusterScopeForProject(
+  db: DatabaseClient,
+  projectId: string
+): Promise<{ projectId: string; environment: ProjectEnvironment }> {
+  const project = await new ProjectService(db).getProject(projectId);
+  if (!project) {
+    throw notFound("Project");
+  }
+  return { projectId: project.id, environment: project.environment };
+}
+
 export interface UpdateProjectInput {
   name?: string;
   description?: string | null;
