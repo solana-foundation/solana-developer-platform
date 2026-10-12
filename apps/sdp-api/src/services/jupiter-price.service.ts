@@ -106,8 +106,10 @@ async function fetchPriceChunk(
  * A price is reused for 30 seconds per cluster and mint. A mint left unpriced, by
  * Jupiter or by a failed batch, is asked about again on the next call.
  *
- * Never throws. Pricing decorates a balance response; a pricing outage should render
- * balances unpriced, not fail the request that carries them.
+ * Never throws on a provider failure. Pricing decorates a balance response; a pricing
+ * outage should render balances unpriced, not fail the request that carries them.
+ *
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  */
 export async function fetchJupiterUsdPrices(
   env: Env,

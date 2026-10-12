@@ -356,6 +356,26 @@ function managedEndpointUrls(cluster: SolanaCluster): string[] {
 }
 
 /**
+ * One pool endpoint's transport: kit's default HTTP transport with the read socket retry,
+ * wrapped in the genesis guard, wrapped in the per-attempt deadline. Both doors build their
+ * endpoints here so the wrapper order is the same for every endpoint.
+ *
+ * @param cluster - The cluster the endpoint must serve, checked by the genesis guard.
+ * @param endpointUrl - The endpoint's URL; never logged or put in an error.
+ * @returns The guarded transport for the endpoint.
+ */
+function guardedEndpointTransport(cluster: SolanaCluster, endpointUrl: string): RpcTransport {
+  return withAttemptDeadline(
+    withGenesisGuard(
+      withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
+      cluster,
+      endpointUrl
+    ),
+    DEFAULT_RPC_REQUEST_TIMEOUT_MS
+  );
+}
+
+/**
  * The Solana RPC client for the open cluster scope, over that cluster's managed provider pool
  * with per-request failover, a per-attempt deadline, and a genesis guard on every endpoint.
  * Memoized per process by cluster and pool, so every caller on a cluster shares one client;
@@ -373,14 +393,7 @@ export function createClusterRpc(): SolanaRpc {
   const memoizedRpc = clusterRpcs.get(poolKey);
   if (memoizedRpc) return memoizedRpc;
   const endpointTransports = endpointUrls.map((endpointUrl) =>
-    withAttemptDeadline(
-      withGenesisGuard(
-        withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
-        cluster,
-        endpointUrl
-      ),
-      DEFAULT_RPC_REQUEST_TIMEOUT_MS
-    )
+    guardedEndpointTransport(cluster, endpointUrl)
   );
   const rpc = createSolanaRpcFromTransport(createPoolTransport(endpointTransports));
   clusterRpcs.set(poolKey, rpc);
@@ -393,12 +406,12 @@ export function createClusterRpc(): SolanaRpc {
  *
  * @param request - The request kit built from the call.
  * @returns The request with `params` set to the call's argument.
- * @throws Error when the call didn't pass exactly one argument.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the call didn't pass exactly one argument.
  */
 function toNamedParamsRequest<TParams>(request: RpcRequest<TParams>): RpcRequest {
   const callArguments: unknown = request.params;
   if (!Array.isArray(callArguments) || callArguments.length !== 1) {
-    throw new Error(`DAS method ${request.methodName} takes exactly one params object`);
+    throw solanaRpcError(`DAS method ${request.methodName} takes exactly one params object`);
   }
   const namedParams: unknown = callArguments[0];
   return { methodName: request.methodName, params: namedParams };
@@ -439,20 +452,12 @@ export function createClusterDasRpc(): DasRpc | null {
   const dasRpcKey = `${cluster} ${heliusUrl}`;
   const memoizedDasRpc = clusterDasRpcs.get(dasRpcKey);
   if (memoizedDasRpc) return memoizedDasRpc;
-  const endpointTransport = withAttemptDeadline(
-    withGenesisGuard(
-      withReadSocketRetry(createDefaultRpcTransport({ url: heliusUrl })),
-      cluster,
-      heliusUrl
-    ),
-    DEFAULT_RPC_REQUEST_TIMEOUT_MS
-  );
   const dasRpc = createRpc({
     api: createJsonRpcApi<DasApi>({
       requestTransformer: toNamedParamsRequest,
       responseTransformer: toDasResult,
     }),
-    transport: createPoolTransport([endpointTransport]),
+    transport: createPoolTransport([guardedEndpointTransport(cluster, heliusUrl)]),
   });
   clusterDasRpcs.set(dasRpcKey, dasRpc);
   return dasRpc;
