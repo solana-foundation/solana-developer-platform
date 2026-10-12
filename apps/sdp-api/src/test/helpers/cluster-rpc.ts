@@ -84,6 +84,27 @@ function isLoopbackRequest(input: Parameters<typeof fetch>[0]): boolean {
 }
 
 /**
+ * The cluster and parsed body of a JSON-RPC fetch the stub intercepts.
+ *
+ * @param input - The fetch target kit passed.
+ * @param init - The fetch options kit passed.
+ * @returns The cluster whose endpoint was hit and the request's parsed JSON body.
+ * @throws Error when kit did not fetch a string URL with a string body.
+ */
+function readJsonRpcFetch(
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1]
+): { cluster: SolanaCluster; body: unknown } {
+  if (typeof input !== "string") {
+    throw new Error("The cluster RPC stub expects kit to fetch a string URL");
+  }
+  if (init === undefined || typeof init.body !== "string") {
+    throw new Error(`Expected a JSON-RPC body on the fetch to ${input}`);
+  }
+  return { cluster: clusterForUrl(input), body: JSON.parse(init.body) };
+}
+
+/**
  * Point the managed pool of each cluster at its one test endpoint (every other provider blanked)
  * and stub global `fetch` so each endpoint proves its own cluster's genesis hash and answers the
  * results a test registers. Requests to a loopback host (`127.0.0.1`, `localhost`, `[::1]`), such
@@ -107,14 +128,8 @@ export function installClusterRpcStub(): ClusterRpcStub {
       if (isLoopbackRequest(input)) {
         return originalFetch(input, init);
       }
-      if (typeof input !== "string") {
-        throw new Error("The cluster RPC stub expects kit to fetch a string URL");
-      }
-      if (init === undefined || typeof init.body !== "string") {
-        throw new Error(`Expected a JSON-RPC body on the fetch to ${input}`);
-      }
-      const cluster = clusterForUrl(input);
-      const { id, method } = jsonRpcRequestSchema.parse(JSON.parse(init.body));
+      const { cluster, body } = readJsonRpcFetch(input, init);
+      const { id, method } = jsonRpcRequestSchema.parse(body);
       calls.push({ cluster, method });
       if (method === "getGenesisHash") {
         return Response.json({ jsonrpc: "2.0", id, result: GENESIS_HASH_BY_CLUSTER[cluster] });
@@ -174,10 +189,9 @@ export function installClusterRpcRequestLog(): ClusterRpcRequestLog {
   beforeEach(() => {
     const stubbedFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
-      if (typeof input === "string" && init !== undefined && typeof init.body === "string") {
-        const { method, params } = jsonRpcParamsSchema.parse(JSON.parse(init.body));
-        requests.push({ cluster: clusterForUrl(input), method, params });
-      }
+      const { cluster, body } = readJsonRpcFetch(input, init);
+      const { method, params } = jsonRpcParamsSchema.parse(body);
+      requests.push({ cluster, method, params });
       return stubbedFetch(input, init);
     };
   });
@@ -190,7 +204,7 @@ export function installClusterRpcRequestLog(): ClusterRpcRequestLog {
 }
 
 /** A jsonParsed SPL token account a stubbed `getTokenAccountsByOwner` answers with. */
-export interface StubTokenAccount {
+interface StubTokenAccount {
   pubkey: string;
   mint: string;
   amount: string;

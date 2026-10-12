@@ -27,6 +27,7 @@ import {
   restoreBvnkSandboxEnv,
   stubBvnkSandboxEnv,
 } from "@/test/helpers/bvnk";
+import type { JsonRpcResult } from "@/test/helpers/cluster-rpc";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -390,16 +391,11 @@ export async function seedCounterparty(params?: {
   return id;
 }
 
-export function mockTokenSupplyDecimalsOnce(decimals = 6): void {
-  createRpcMock.mockReturnValueOnce({
-    getTokenSupply: () => ({
-      send: async () => ({ value: { decimals } }),
-    }),
-    getFeeForMessage: () => ({
-      send: async () => ({ value: 5000n }),
-    }),
-  } as unknown as ReturnType<typeof solanaRpc.createRpc>);
-}
+/** A stubbed `getTokenSupply` result for a six-decimal USDC mint. */
+export const USDC_TOKEN_SUPPLY_RESULT = {
+  context: { slot: 1 },
+  value: { amount: "1000000000000", decimals: 6, uiAmount: 1000000, uiAmountString: "1000000" },
+} as const satisfies JsonRpcResult;
 
 export function mockRecurringActivationRpc(options: {
   tokenAccounts?: Array<{

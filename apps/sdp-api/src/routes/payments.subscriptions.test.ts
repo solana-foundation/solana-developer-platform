@@ -1,4 +1,17 @@
-import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
+import { WELL_KNOWN_TOKENS } from "@sdp/types";
+import {
+  address,
+  getBase64Decoder,
+  getCompiledTransactionMessageDecoder,
+  getTransactionDecoder,
+} from "@solana/kit";
+import {
+  AccountDiscriminator,
+  CURRENT_PROGRAM_VERSION,
+  getSubscriptionDelegationEncoder,
+  SUBSCRIPTION_SIZE,
+  SUBSCRIPTIONS_PROGRAM_ADDRESS,
+} from "@solana/subscriptions";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
@@ -16,16 +29,23 @@ import {
   preparePaymentSubscriptionPlanResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcStub, type JsonRpcResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
+  fetchMaybeSubscriptionDelegationMock,
+  getAccountInfoMock,
+  getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
-  mockTokenSupplyDecimalsOnce,
   seedCachedKey,
+  seedCounterparty,
+  seedProductionPrivyWalletUnderTestKey,
   TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
+  TEST_USER,
   TEST_WALLET_ID,
+  USDC_TOKEN_SUPPLY_RESULT,
 } from "@/test/helpers/payments-routes";
 import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
@@ -73,9 +93,55 @@ function expectPreparedSubscriptionTransaction(
   }
 }
 
+const PRODUCTION_PLAN_ID = "psp_subscriptions_production";
+
+const PRODUCTION_OWNER_WALLET_ID = "privy_subscriptions_production";
+
+const PREPARED_BLOCKHASH_RESULT = {
+  context: { slot: 1 },
+  value: { blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N", lastValidBlockHeight: 1000 },
+} as const satisfies JsonRpcResult;
+
 describe("Payments routes — subscriptions", () => {
   installPaymentsRouteTestHooks();
-  installClusterRpcStub();
+  const rpc = installClusterRpcStub();
+
+  async function seedProductionSubscriptionPlan(): Promise<void> {
+    await seedProductionPrivyWalletUnderTestKey({
+      custodyWalletId: "cwlt_subscriptions_production",
+      walletId: PRODUCTION_OWNER_WALLET_ID,
+      publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+    });
+    const now = new Date().toISOString();
+    await createPostgresPaymentSubscriptionsRepository(getDb(env)).createPlan({
+      id: PRODUCTION_PLAN_ID,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      ownerWalletId: PRODUCTION_OWNER_WALLET_ID,
+      ownerAddress: TEST_SOLANA_ADDRESSES.wallet1,
+      token: WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address,
+      amount: "25.00",
+      periodHours: 720,
+      programPlanId: "1001",
+      planPda: null,
+      destinationAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      pullerWalletId: null,
+      pullerAddress: null,
+      metadataUri: null,
+      status: "active",
+      createdBy: TEST_USER.id,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  function expectMainnetBetaReadsOnly(methods: readonly string[]): void {
+    for (const method of methods) {
+      expect(rpc.calls).toContainEqual({ cluster: "mainnet-beta", method });
+    }
+    expect(rpc.calls.filter((call) => call.cluster !== "mainnet-beta")).toEqual([]);
+  }
 
   it("requires owner wallet access when updating subscription plans", async () => {
     const planRes = await app.request(
@@ -320,7 +386,7 @@ describe("Payments routes — subscriptions", () => {
       status: "active",
     });
 
-    mockTokenSupplyDecimalsOnce();
+    rpc.answer("getTokenSupply", USDC_TOKEN_SUPPLY_RESULT);
     const preparePlanRes = await app.request(
       `/v1/payments/subscription-plans/${planId}/prepare-create`,
       {
@@ -428,7 +494,6 @@ describe("Payments routes — subscriptions", () => {
       status: "pending_authorization",
     });
 
-    mockTokenSupplyDecimalsOnce();
     const prepareAuthorizationRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
       {
@@ -527,7 +592,6 @@ describe("Payments routes — subscriptions", () => {
     );
     expect(amountOverrideRes.status).toBe(400);
 
-    mockTokenSupplyDecimalsOnce();
     const prepareCollectionRes = await app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-collection`,
       {
@@ -547,5 +611,112 @@ describe("Payments routes — subscriptions", () => {
       TEST_SOLANA_ADDRESSES.wallet1,
       TEST_MOCK_FEE_PAYER,
     ]);
+  });
+
+  it("prepares a Production project's subscription plan from mainnet-beta only", async () => {
+    await seedProductionSubscriptionPlan();
+    getAccountInfoMock.mockReset();
+    getRecentBlockhashMock.mockReset();
+    rpc.answer("getAccountInfo", {
+      context: { slot: 1 },
+      value: {
+        data: ["", "base64"],
+        executable: false,
+        lamports: 1_461_600,
+        owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        rentEpoch: 0,
+        space: 0,
+      },
+    });
+    rpc.answer("getTokenSupply", USDC_TOKEN_SUPPLY_RESULT);
+    rpc.answer("getLatestBlockhash", PREPARED_BLOCKHASH_RESULT);
+
+    const response = await app.request(
+      `/v1/payments/subscription-plans/${PRODUCTION_PLAN_ID}/prepare-create`,
+      { method: "POST", headers: SUBSCRIPTION_HEADERS, body: JSON.stringify({}) },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const body = successResponseSchema(preparePaymentSubscriptionPlanResponseSchema).parse(
+      await response.json()
+    );
+    expectPreparedSubscriptionTransaction(body.data.preparedTransaction, [
+      TEST_SOLANA_ADDRESSES.wallet1,
+      TEST_MOCK_FEE_PAYER,
+    ]);
+    expectMainnetBetaReadsOnly(["getAccountInfo", "getTokenSupply", "getLatestBlockhash"]);
+  });
+
+  it("prepares a Production project's subscription resume from mainnet-beta only", async () => {
+    await seedProductionSubscriptionPlan();
+    const counterpartyId = await seedCounterparty({
+      id: "cpty_subscriptions_production",
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+    });
+    const now = new Date().toISOString();
+    await createPostgresPaymentSubscriptionsRepository(getDb(env)).createSubscription({
+      id: "psub_subscriptions_production",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      planId: PRODUCTION_PLAN_ID,
+      counterpartyId,
+      subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      subscriberTokenAccount: TEST_SOLANA_ADDRESSES.wallet3,
+      subscriptionPda: null,
+      subscriptionAuthorityAddress: null,
+      authorizationSignature: null,
+      status: "canceled",
+      currentPeriodStartAt: now,
+      nextCollectionDueAt: null,
+      createdBy: TEST_USER.id,
+      createdAt: now,
+      updatedAt: now,
+    });
+    fetchMaybeSubscriptionDelegationMock.mockReset();
+    getRecentBlockhashMock.mockReset();
+    const delegationData = getSubscriptionDelegationEncoder().encode({
+      header: {
+        discriminator: AccountDiscriminator.SubscriptionDelegation,
+        version: CURRENT_PROGRAM_VERSION,
+        bump: 255,
+        delegator: address(TEST_SOLANA_ADDRESSES.wallet2),
+        delegatee: address(TEST_SOLANA_ADDRESSES.wallet1),
+        payer: address(TEST_SOLANA_ADDRESSES.wallet2),
+        initId: 0,
+      },
+      terms: { amount: 25_000_000, periodHours: 720, createdAt: 1_700_000_000 },
+      amountPulledInPeriod: 0,
+      currentPeriodStartTs: 1_700_000_000,
+      expiresAtTs: 1_702_592_000,
+    });
+    rpc.answer("getAccountInfo", {
+      context: { slot: 1 },
+      value: {
+        data: [getBase64Decoder().decode(delegationData), "base64"],
+        executable: false,
+        lamports: 2_000_000,
+        owner: SUBSCRIPTIONS_PROGRAM_ADDRESS,
+        rentEpoch: 0,
+        space: SUBSCRIPTION_SIZE,
+      },
+    });
+    rpc.answer("getLatestBlockhash", PREPARED_BLOCKHASH_RESULT);
+
+    const response = await app.request(
+      "/v1/payments/subscriptions/psub_subscriptions_production/prepare-resume",
+      { method: "POST", headers: SUBSCRIPTION_HEADERS },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const body = successResponseSchema(preparePaymentSubscriptionLifecycleResponseSchema).parse(
+      await response.json()
+    );
+    expectPreparedSubscriptionTransaction(body.data.preparedTransaction, [
+      TEST_SOLANA_ADDRESSES.wallet2,
+      TEST_MOCK_FEE_PAYER,
+    ]);
+    expectMainnetBetaReadsOnly(["getAccountInfo", "getLatestBlockhash"]);
   });
 });

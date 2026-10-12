@@ -36,6 +36,7 @@ import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { writeTestPrivyCredentialSecret } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
@@ -50,7 +51,6 @@ import {
   getTransactionMock,
   installPaymentsRouteTestHooks,
   mockRecurringActivationRpc,
-  mockTokenSupplyDecimalsOnce,
   recurringCollectionTransactionForSignature,
   seedCachedKey,
   seedCounterparty,
@@ -66,6 +66,7 @@ import {
   TEST_PROJECT,
   TEST_USER,
   TEST_WALLET_ID,
+  USDC_TOKEN_SUPPLY_RESULT,
 } from "@/test/helpers/payments-routes";
 import { seedConfigOwnedDuplicateProviderWallet } from "@/test/helpers/payments-transfers";
 import {
@@ -491,6 +492,7 @@ const unboundWalletCases: Array<{
 
 describe("Payments routes — recurring", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
   const recurringExecution = installRecurringExecutionHooks();
 
   it("creates recurring work for the exact wallet when Provider wallet IDs are duplicated", async () => {
@@ -2617,7 +2619,7 @@ describe("Payments routes — recurring", () => {
       await mintLookupReleased;
       return getAccountInfo(...args);
     });
-    mockTokenSupplyDecimalsOnce();
+    rpc.answer("getTokenSupply", USDC_TOKEN_SUPPLY_RESULT);
 
     const preparePromise = app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,

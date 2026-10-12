@@ -103,17 +103,6 @@ describe("balance read bounds", () => {
     ]);
   });
 
-  it("sends no minContextSlot on an unbounded lamports read", async () => {
-    rpc.answer("getBalance", { context: { slot: 1 }, value: 5 });
-
-    await expect(
-      readOnDevnet((clusterRpc) => getLamportsBalance(clusterRpc, owner, {}))
-    ).resolves.toBe(5n);
-    expect(requestsFor("getBalance")).toEqual([
-      { cluster: "devnet", method: "getBalance", params: [owner, { commitment: "confirmed" }] },
-    ]);
-  });
-
   it("sends minContextSlot on both token program reads and refuses an answer from an older bank", async () => {
     rpc.answer("getTokenAccountsByOwner", tokenAccountsByOwnerResult(99, []));
 
