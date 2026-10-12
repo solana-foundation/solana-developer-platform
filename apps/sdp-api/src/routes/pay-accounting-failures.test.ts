@@ -25,6 +25,7 @@ import { adminDatabaseUrl, env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
   createRpcMock,
+  getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
@@ -140,6 +141,18 @@ describe("Public payment Request accounting failure recovery", () => {
       [TEST_ORG.id, TEST_PROJECT.id]
     );
 
+  function expireWindow() {
+    createRpcMock.mockReturnValue({
+      getSignaturesForAddress: () => ({ send: async () => [] }),
+      getBlockHeight: () => ({ send: async () => 2000n }),
+      getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
+    } as unknown as ReturnType<typeof import("@sdp/rpc/solana").createRpc>);
+    getRecentBlockhashMock.mockResolvedValue({
+      blockhash: blockhash("1".repeat(32)),
+      lastValidBlockHeight: 3000n,
+    });
+  }
+
   it("releases definitely unsigned admission when the claim accounting write fails, then retries the same reservation", async () => {
     const request = await createRequest();
     await failWrite(
@@ -170,6 +183,38 @@ describe("Public payment Request accounting failure recovery", () => {
       unsignedTransaction: claim?.unsignedTransaction,
       accountingIdentity: { reservationId: released[0].id, attempt: 2 },
       signedTransaction: bytes,
+    });
+    expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a failed pre-effect attempt payable after its released window expires", async () => {
+    const request = await createRequest();
+    await failWrite(
+      "payment_requests",
+      "UPDATE",
+      `NEW.sponsored_tx_continuity #> '{accountingIdentity}' <> 'null'::jsonb
+      AND NEW.sponsored_tx_continuity IS DISTINCT FROM OLD.sponsored_tx_continuity`
+    );
+    expect((await post(request.public_token)).status).toBe(500);
+    const released = await reservations();
+    expect(released).toEqual([
+      { id: expect.any(String), status: "released", attempt: 1, signed_transaction: null },
+    ]);
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    await clearWriteFailure();
+    expireWindow();
+
+    const retry = await post(request.public_token);
+    expect(retry.status).toBe(200);
+    const bytes = ((await retry.json()) as { transaction: string }).transaction;
+    const updated = await reservations();
+    expect(updated).toHaveLength(2);
+    expect(updated).toContainEqual(released[0]);
+    expect(updated).toContainEqual({
+      id: expect.any(String),
+      status: "signed",
+      attempt: 1,
+      signed_transaction: bytes,
     });
     expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
   });
@@ -225,6 +270,55 @@ describe("Public payment Request accounting failure recovery", () => {
         accountingIdentity: unsignedClaim?.accountingIdentity,
       });
       expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each(["audit", "claim signature"] as const)(
+    "recovers a known signed outcome after the %s checkpoint failed and the window expired",
+    async (checkpoint) => {
+      const request = await createRequest();
+      await failWrite(
+        checkpoint === "audit" ? "audit_logs" : "payment_requests",
+        checkpoint === "audit" ? "INSERT" : "UPDATE",
+        checkpoint === "audit"
+          ? "NEW.resource_type = 'payment_request' AND NEW.action = 'sign'"
+          : "NEW.sponsored_tx_signed IS NOT NULL AND NEW.sponsored_tx_signed IS DISTINCT FROM OLD.sponsored_tx_signed"
+      );
+      expect((await post(request.public_token)).status).toBe(500);
+      const original = await reservations();
+      expect(original).toEqual([
+        {
+          id: expect.any(String),
+          status: "signed",
+          attempt: 1,
+          signed_transaction: expect.any(String),
+        },
+      ]);
+      expect(await repository().getSponsoredTransactionClaim(request.id)).toMatchObject({
+        signedTransaction: null,
+        accountingIdentity: { reservationId: original[0].id },
+      });
+      await clearWriteFailure();
+      expireWindow();
+
+      const retry = await post(request.public_token);
+      expect(retry.status).toBe(200);
+      const bytes = ((await retry.json()) as { transaction: string }).transaction;
+      expect(bytes).not.toBe(original[0].signed_transaction);
+      const updated = await reservations();
+      expect(updated).toHaveLength(2);
+      expect(updated).toContainEqual(original[0]);
+      expect(updated).toContainEqual({
+        id: expect.any(String),
+        status: "signed",
+        attempt: 1,
+        signed_transaction: bytes,
+      });
+      expect(await repository().getSponsoredTransactionClaim(request.id)).toMatchObject({
+        signedTransaction: bytes,
+        lastValidBlockHeight: 3000n,
+      });
+      expect(provider.signAsFeePayer).toHaveBeenCalledTimes(2);
     }
   );
 

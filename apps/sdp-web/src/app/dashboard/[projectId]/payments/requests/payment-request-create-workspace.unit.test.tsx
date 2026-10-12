@@ -241,6 +241,10 @@ describe("Previous design requests", () => {
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).toMatchObject({ custodyWalletId: "cwlt_settlement" });
     expect(writes[0]).not.toHaveProperty("walletId");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Create payment request" })).toBeNull()
+    );
+    expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -281,11 +285,16 @@ describe("Previous design requests", () => {
         />,
         { wrapper }
       );
-      await userEvent.click(screen.getAllByRole("button", { name: /5.00 SOL/ })[0]);
+      const user = userEvent.setup();
+      await user.click(screen.getAllByRole("button", { name: /5.00 SOL/ })[0]);
       const detail = within(screen.getByRole("dialog", { name: "Payment request details" }));
       expect(detail.getByText(wallet.publicKey)).toBeTruthy();
       expect(detail.queryByText("Settlement")).toBeNull();
       expect(Boolean(detail.queryByText("Treasury"))).toBe(expectedName !== null);
+      const originalLink = `${window.location.origin}/pay/${request.publicToken}`;
+      expect(detail.getByText(originalLink)).toBeTruthy();
+      await user.click(detail.getByRole("button", { name: /^Copy$/ }));
+      expect(await navigator.clipboard.readText()).toBe(originalLink);
     }
   );
 });

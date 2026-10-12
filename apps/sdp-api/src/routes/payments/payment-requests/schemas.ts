@@ -13,18 +13,31 @@ const walletSelectorSchema = z
   .min(1)
   .regex(/^\S+$/, "Wallet ID must not contain whitespace");
 
-export const createPaymentRequestSchema = z.union([
-  z.strictObject({
-    ...paymentRequestFields,
-    custodyWalletId: walletSelectorSchema,
-    walletId: z.never().optional(),
-  }),
-  z.strictObject({
-    ...paymentRequestFields,
-    walletId: walletSelectorSchema,
-    custodyWalletId: z.never().optional(),
-  }),
-]);
+const paymentRequestTermsSchema = z.object(paymentRequestFields);
+
+// Validate common terms first so selector branching cannot hide their field errors.
+export const createPaymentRequestSchema = z
+  .unknown()
+  .superRefine((value, ctx) => {
+    const terms = paymentRequestTermsSchema.safeParse(value);
+    if (!terms.success) {
+      for (const issue of terms.error.issues) ctx.addIssue({ ...issue });
+    }
+  })
+  .pipe(
+    z.union([
+      z.strictObject({
+        ...paymentRequestFields,
+        custodyWalletId: walletSelectorSchema,
+        walletId: z.never().optional(),
+      }),
+      z.strictObject({
+        ...paymentRequestFields,
+        walletId: walletSelectorSchema,
+        custodyWalletId: z.never().optional(),
+      }),
+    ])
+  );
 
 export const listPaymentRequestsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),

@@ -91,6 +91,8 @@ export interface OwnedSubmissionLifecycle {
 
 /** App-local extension for SDP-owned submission flows. */
 export interface SponsorshipFeePayment extends FeePaymentPort {
+  /** Retained message evidence proves accounting before replacing an expired window. */
+  getFeePayer(transaction?: Uint8Array): Promise<Address>;
   prepareOwnedSubmission(
     transaction: Uint8Array,
     lifecycle: OwnedSubmissionLifecycle
@@ -124,7 +126,10 @@ function withOwnedSubmissionLifecycle(
   };
   return {
     providerId: provider.providerId,
-    getFeePayer: () => sponsor(),
+    getFeePayer: async (transaction) => {
+      if (transaction) await assertAccounting?.(transaction);
+      return sponsor();
+    },
     signAsFeePayer: async (transaction) => (await signVerified(transaction)).signedTransaction,
     signAndSend: async (transaction) => {
       await assertAccounting?.(transaction);

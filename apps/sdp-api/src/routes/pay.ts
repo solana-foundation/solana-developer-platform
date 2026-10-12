@@ -140,17 +140,18 @@ pay.post(
       });
 
     const deploymentMode = isSelfHostedDeployment(c.env) ? "self_hosted" : "managed";
-    let inspectedClaim: SponsoredTransactionClaim | null = null;
+    const inspection: { claim: SponsoredTransactionClaim | null } = { claim: null };
     const serveLiveClaim = async () => {
       const claim = await repository.getSponsoredTransactionClaim(request.id);
-      inspectedClaim = claim;
+      inspection.claim = claim;
       if (claim === null) {
         return null;
       }
       if (claim.lastValidBlockHeight < currentBlockHeight) {
-        // Expiry is not proof of an unsigned or unlinked provider outcome.
-        if (claim.signedTransaction === null || claim.deploymentMode === null) {
-          throw serviceUnavailable("Previous sponsored window requires accounting reconciliation");
+        if (claim.deploymentMode === null && deploymentMode === "self_hosted") {
+          throw serviceUnavailable(
+            "Previous sponsored window requires deployment-mode reconciliation"
+          );
         }
         return null;
       }
@@ -260,8 +261,14 @@ pay.post(
       accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
     });
     const payerSigner = createNoopSigner(payer);
-    const feePayment = await getFeePayment(inspectedClaim, inspectedClaim === null);
-    const retainedFeePayer = inspectedClaim === null ? null : await feePayment.getFeePayer();
+    const feePayment = await getFeePayment(inspection.claim, inspection.claim === null);
+    // Prove the saved message's outcome before replacing an unsigned or unlinked window.
+    const retainedFeePayer =
+      inspection.claim === null
+        ? null
+        : await feePayment.getFeePayer(
+            new Uint8Array(getBase64Encoder().encode(inspection.claim.unsignedTransaction))
+          );
     const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
       retainedFeePayer ?? feePayment.getFeePayer(),
       solanaRpc.getRecentBlockhash(rpc, "confirmed"),
@@ -307,7 +314,7 @@ pay.post(
       lastValidBlockHeight,
       currentBlockHeight,
       deploymentMode,
-      expectedClaim: inspectedClaim,
+      expectedClaim: inspection.claim,
     });
     if (!claimed) {
       feePaymentInstance = null;

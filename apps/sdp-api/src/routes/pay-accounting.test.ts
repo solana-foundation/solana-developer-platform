@@ -113,6 +113,7 @@ describe("Public payment sponsorship accounting continuity", () => {
     expect(getSignaturesForAddress).toHaveBeenCalledTimes(2);
     expect(getBlockHeight).toHaveBeenCalledTimes(2);
     const provider = createFeePaymentAdapterMock.mock.results[0]?.value;
+    expect(provider.getFeePayer).toHaveBeenCalledOnce();
     expect(provider.signAsFeePayer).toHaveBeenCalledOnce();
     expect(provider.getSponsorshipConfiguration).toHaveBeenCalledOnce();
   });
@@ -145,6 +146,89 @@ describe("Public payment sponsorship accounting continuity", () => {
       ).toHaveBeenCalledOnce();
     }
   );
+
+  it.each(["reserved", "charged_unknown"])(
+    "keeps an expired legacy %s outcome blocked without replacing its accounting",
+    async (status) => {
+      const request = await createRequest();
+      expect((await post(request.public_token)).status).toBe(200);
+      await getDb(env).execute(
+        "UPDATE sponsorship_budget_reservations SET status = ? WHERE organization_id = ? AND project_id = ?",
+        [status, TEST_ORG.id, TEST_PROJECT.id]
+      );
+      await getDb(env).execute(
+        "UPDATE payment_requests SET sponsored_tx_continuity = NULL WHERE id = ?",
+        [request.id]
+      );
+      const original = await reservations();
+      const claim = await repository().getSponsoredTransactionClaim(request.id);
+      createRpcMock.mockReturnValue({
+        getSignaturesForAddress: () => ({ send: async () => [] }),
+        getBlockHeight: () => ({ send: async () => 2000n }),
+      } as unknown as ReturnType<typeof import("@sdp/rpc/solana").createRpc>);
+
+      expect((await post(request.public_token)).status).toBe(503);
+      expect(await reservations()).toEqual(original);
+      expect(await repository().getSponsoredTransactionClaim(request.id)).toEqual(claim);
+      expect(getRecentBlockhashMock).toHaveBeenCalledOnce();
+      expect(createFeePaymentAdapterMock).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("keeps a self-hosted public link payable after its unsigned window expires without managed accounting", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    try {
+      const request = await createRequest();
+      expect((await post(request.public_token)).status).toBe(200);
+      await getDb(env).execute(
+        "UPDATE payment_requests SET sponsored_tx_signed = NULL WHERE id = ?",
+        [request.id]
+      );
+      createRpcMock.mockReturnValue({
+        getSignaturesForAddress: () => ({ send: async () => [] }),
+        getBlockHeight: () => ({ send: async () => 2000n }),
+      } as unknown as ReturnType<typeof import("@sdp/rpc/solana").createRpc>);
+      getRecentBlockhashMock.mockResolvedValue({
+        blockhash: blockhash("1".repeat(32)),
+        lastValidBlockHeight: 3000n,
+      });
+
+      expect((await post(request.public_token)).status).toBe(200);
+      expect(await reservations()).toEqual([]);
+      expect(await repository().getSponsoredTransactionClaim(request.id)).toMatchObject({
+        deploymentMode: "self_hosted",
+        accountingIdentity: null,
+        lastValidBlockHeight: 3000n,
+      });
+    } finally {
+      env.SDP_DEPLOYMENT_MODE = undefined;
+    }
+  });
+
+  it("requires deployment-mode reconciliation for an expired mode-less claim on self-hosted", async () => {
+    env.SDP_DEPLOYMENT_MODE = "self_hosted";
+    try {
+      const request = await createRequest();
+      expect((await post(request.public_token)).status).toBe(200);
+      await getDb(env).execute(
+        "UPDATE payment_requests SET sponsored_tx_continuity = NULL WHERE id = ?",
+        [request.id]
+      );
+      const claim = await repository().getSponsoredTransactionClaim(request.id);
+      createRpcMock.mockReturnValue({
+        getSignaturesForAddress: () => ({ send: async () => [] }),
+        getBlockHeight: () => ({ send: async () => 2000n }),
+      } as unknown as ReturnType<typeof import("@sdp/rpc/solana").createRpc>);
+
+      expect((await post(request.public_token)).status).toBe(503);
+      expect(await repository().getSponsoredTransactionClaim(request.id)).toEqual(claim);
+      expect(await reservations()).toEqual([]);
+      expect(getRecentBlockhashMock).toHaveBeenCalledOnce();
+      expect(createFeePaymentAdapterMock).toHaveBeenCalledOnce();
+    } finally {
+      env.SDP_DEPLOYMENT_MODE = undefined;
+    }
+  });
 
   it.each(["reserved", "charged_unknown"])(
     "preserves the %s fence through live retries and expired-window replacement",
@@ -274,6 +358,47 @@ describe("Public payment sponsorship accounting continuity", () => {
       )
     ).toEqual({ spent: "10000" });
   });
+
+  it.each(["signed", "submitted", "committed"])(
+    "keeps an old public link payable after its proven %s legacy window expires",
+    async (status) => {
+      const request = await createRequest();
+      expect((await post(request.public_token)).status).toBe(200);
+      await getDb(env).execute(
+        "UPDATE sponsorship_budget_reservations SET status = ? WHERE organization_id = ? AND project_id = ?",
+        [status, TEST_ORG.id, TEST_PROJECT.id]
+      );
+      await getDb(env).execute(
+        "UPDATE payment_requests SET sponsored_tx_continuity = NULL WHERE id = ?",
+        [request.id]
+      );
+      const original = await reservations();
+      createRpcMock.mockReturnValue({
+        getSignaturesForAddress: () => ({ send: async () => [] }),
+        getBlockHeight: () => ({ send: async () => 2000n }),
+        getFeeForMessage: () => ({ send: async () => ({ value: 5000n }) }),
+      } as unknown as ReturnType<typeof import("@sdp/rpc/solana").createRpc>);
+      getRecentBlockhashMock.mockResolvedValue({
+        blockhash: blockhash("1".repeat(32)),
+        lastValidBlockHeight: 3000n,
+      });
+
+      expect((await post(request.public_token)).status).toBe(200);
+      const updated = await reservations();
+      expect(updated).toHaveLength(2);
+      expect(updated).toContainEqual(original[0]);
+      const retained = await repository().getPaymentRequestByPublicToken(request.public_token);
+      expect(retained).toMatchObject({
+        id: request.id,
+        public_token: request.public_token,
+        reference: request.reference,
+        destination_address: request.destination_address,
+        custody_wallet_id: request.custody_wallet_id,
+        amount: request.amount,
+        token: request.token,
+      });
+    }
+  );
 
   it.each(["suspended", "deleted"])(
     "refuses saved bytes after organization %s without rewriting exposure",

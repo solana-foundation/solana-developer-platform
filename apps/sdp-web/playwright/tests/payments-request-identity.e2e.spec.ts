@@ -217,6 +217,9 @@ test.describe
         await expect(
           page.getByRole("img", { name: "Solana Pay QR code", exact: true })
         ).toBeVisible();
+        await expect(
+          page.getByRole("img", { name: "Solana Pay QR code", exact: true }).locator("svg")
+        ).toBeVisible();
         // biome-ignore lint/security/noSecrets: Public Solana Pay URI selector, not a credential.
         await expect(page.locator('a[href^="solana:"]')).toHaveAttribute(
           "href",
@@ -265,6 +268,42 @@ test.describe
           .getByText("No payment requests yet", { exact: true })
           .or(page.getByText("You haven't created a request yet", { exact: true }))
       ).toBeVisible();
+    });
+
+    test("reopens saved public links with their original QR and payment terms", async ({
+      page,
+    }) => {
+      for (const request of requests) {
+        const link = `${getE2EEnv().baseURL}/pay/${request.publicToken}`;
+        const response = await page.request.get(
+          `${getBootstrapApiBaseUrl()}/pay/${request.publicToken}`
+        );
+        expect(response.ok()).toBe(true);
+        const original = await response.json();
+        expect(original).toMatchObject({
+          recipient: request.destinationAddress,
+          amount: request.amount,
+          token: request.token,
+          reference: request.reference,
+          status: "awaiting_payment",
+        });
+        await page.goto(link);
+        await page.reload();
+        await expect(page).toHaveURL(link);
+        await expect(
+          page.getByRole("img", { name: "Solana Pay QR code", exact: true }).locator("svg")
+        ).toBeVisible();
+        // biome-ignore lint/security/noSecrets: Public Solana Pay URI selector, not a credential.
+        await expect(page.locator('a[href^="solana:"]')).toHaveAttribute(
+          "href",
+          original.solanaPayUrl
+        );
+        expect(
+          await (
+            await page.request.get(`${getBootstrapApiBaseUrl()}/pay/${request.publicToken}`)
+          ).json()
+        ).toEqual(original);
+      }
     });
 
     test("keeps retained destination evidence for null and unavailable exact pins", async ({

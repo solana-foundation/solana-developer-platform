@@ -216,6 +216,38 @@ describe("Payments routes — Payment Requests exact recipient", () => {
     });
   });
 
+  it.each([
+    { field: "amount", value: 25 },
+    { field: "token", value: null },
+    { field: "counterpartyId", value: 12 },
+    { field: "expiresAt", value: 12 },
+  ])("identifies malformed $field terms for both creation selectors", async ({ field, value }) => {
+    for (const selector of [
+      { walletId: TEST_WALLET_ID },
+      { custodyWalletId: TEST_CUSTODY_WALLET_ID },
+    ]) {
+      const response = await createRequest({ ...selector, [field]: value });
+      expect(response.status).toBe(400);
+      const body: { error: { message: string } } = await response.json();
+      expect(body.error.message).toContain(`→ at ${field}`);
+    }
+  });
+
+  it("rejects unknown prototype fields from the original JSON body", async () => {
+    const response = await app.request(
+      "/v1/payments/requests",
+      {
+        method: "POST",
+        headers: HEADERS,
+        body: `{"walletId":"${TEST_WALLET_ID}","token":"${DEVNET_USDC_MINT}","amount":"25.00","__proto__":{}}`,
+      },
+      env
+    );
+    expect(response.status).toBe(400);
+    const body: { error: { message: string } } = await response.json();
+    expect(body.error.message).toContain("__proto__");
+  });
+
   it("does not rescue a failed exact lookup using a matching provider reference", async () => {
     expect((await createRequest({ custodyWalletId: TEST_WALLET_ID })).status).toBe(404);
   });
