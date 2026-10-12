@@ -369,6 +369,8 @@ declare module "hono" {
     authorized?: { loaded: unknown };
     // Set by idempotent() when this request holds its key: the request's fingerprint
     idempotencyFingerprint?: string;
+    // Set by idempotent() with the fingerprint: the key this request claimed
+    idempotencyClaimedKey?: string;
     // Set by markIdempotencyCommitted() once the handler wrote its domain row
     idempotencyCommitted?: boolean;
     apiKey?: {
