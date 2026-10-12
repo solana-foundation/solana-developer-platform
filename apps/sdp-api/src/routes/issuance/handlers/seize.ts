@@ -62,7 +62,7 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     isOnControlList,
   });
 
-  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(tokenService, token);
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
@@ -203,7 +203,7 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     isOnControlList,
   });
 
-  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(tokenService, token);
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }

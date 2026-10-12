@@ -470,7 +470,7 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     destination,
   });
 
-  const currentAuthority = await resolveCurrentAuthorityForRole(tokenService, token, "mint");
+  const currentAuthority = await resolveCurrentAuthorityForRole(token, "mint");
   if (!currentAuthority) {
     throw badRequest("Current mint authority is not available for this token");
   }
@@ -672,7 +672,7 @@ export async function extractMintRequest(
     });
   }
 
-  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(tokenService, token, "mint");
+  const currentAuthorityRaw = await resolveCurrentAuthorityForRole(token, "mint");
   if (!currentAuthorityRaw) {
     throw badRequest("Current mint authority is not available for this token");
   }
