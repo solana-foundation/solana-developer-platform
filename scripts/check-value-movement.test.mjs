@@ -239,3 +239,29 @@ test("pins a package constructor however a re-exporting package spells it", () =
   const flagged = new Set(found.map((violation) => violation.split(":")[0]));
   assert.deepEqual([...flagged], ["src/direct.ts"]);
 });
+
+test("pins every callable a whole module exports, but not its constants", () => {
+  const PROVIDER = {
+    id: "provider",
+    why: "provider capability",
+    symbols: [{ file: "src/lib/provider.ts", name: "*" }],
+    owners: ["src/lib/provider.ts"],
+    allow: [],
+  };
+  const found = violations(
+    {
+      "src/lib/provider.ts": `export class Signer {}
+export function client(): number { return 1; }
+export const LABEL = "provider";
+export type Config = { id: string };
+`,
+      "src/signer.ts": `import { Signer } from "./lib/provider";\nnew Signer();\n`,
+      "src/client.ts": `import { client } from "./lib/provider";\nclient();\n`,
+      "src/label.ts": `import { LABEL, type Config } from "./lib/provider";\nexport const c: Config = { id: LABEL };\n`,
+    },
+    [PROVIDER]
+  );
+
+  const flagged = new Set(found.map((violation) => violation.split(":")[0]));
+  assert.deepEqual([...flagged].sort(), ["src/client.ts", "src/signer.ts"]);
+});

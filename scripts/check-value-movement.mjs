@@ -9,7 +9,9 @@
  * code below them: building a signing adapter from an encrypted config or a
  * provider credential, a provider keychain adapter, a fee-payment adapter, or
  * a keypair from raw bytes, and signing with it directly. This check pins
- * those constructors to the files that use them today.
+ * those constructors to the files that use them today. A provider signer
+ * module or keychain SDK is pinned whole (every callable it exports), so a
+ * signer added to it later is covered without a new entry here.
  *
  * It resolves every identifier with the TypeScript checker, so a reference
  * counts however it is spelled: `@/` alias or relative import, renamed import,
@@ -33,26 +35,15 @@ const API = "apps/sdp-api/src";
 const FEE_PAYMENT = "packages/sdp-payments/src/fee-payment";
 const KEYCHAIN = "packages/sdp-custody/src/keychain";
 
-/** Providers with a `Keychain<Provider>Adapter` in `@sdp/custody/keychain`. */
-const KEYCHAIN_PROVIDERS = [
-  "coinbase",
-  "dfns",
-  "fireblocks",
-  "ibm-haven",
-  "memory",
-  "para",
-  "privy",
-  "turnkey",
-  "utila",
+/** Provider keychain SDKs: each export can hold a provider secret and sign. */
+const KEYCHAIN_SDKS = [
+  "@solana/keychain-cdp",
+  "@solana/keychain-fireblocks",
+  "@solana/keychain-para",
+  "@solana/keychain-privy",
+  "@solana/keychain-turnkey",
+  "@solana/keychain-utila",
 ];
-
-/** `ibm-haven` → `IbmHaven`. */
-function pascalCase(slug) {
-  return slug
-    .split("-")
-    .map((part) => part[0].toUpperCase() + part.slice(1))
-    .join("");
-}
 
 /** @typedef {{ file?: string, module?: string, name: string, member?: string }} CapabilitySymbol */
 /**
@@ -110,16 +101,26 @@ export const CAPABILITIES = [
   {
     id: "keychain-signing-adapter",
     why: "Holds a provider secret and can sign; only the adapter factory and the wallet lifecycle may build one.",
-    symbols: [
-      ...KEYCHAIN_PROVIDERS.map((provider) => ({
-        file: `${KEYCHAIN}/keychain-${provider}.adapter.ts`,
-        name: `Keychain${pascalCase(provider)}Adapter`,
-      })),
-    ],
+    symbols: [{ file: `${KEYCHAIN}/index.ts`, name: "*" }],
     owners: [],
     allow: [
       `${API}/services/adapters/index.ts`,
       `${API}/services/adapters/signing/index.ts`,
+      `${API}/services/domain/signing.service.ts`,
+      `${API}/services/domain/signing/provider-adapter-factory.ts`,
+      `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
+    ],
+    shrinkOnly: true,
+  },
+  {
+    id: "provider-signer",
+    why: "A provider signer or API client builds signing authority from a stored credential; only the signing service, the adapter factory and the wallet lifecycle may use one.",
+    symbols: [
+      { file: "packages/sdp-custody/src/dfns/index.ts", name: "*" },
+      ...KEYCHAIN_SDKS.map((module) => ({ module, name: "*" })),
+    ],
+    owners: [],
+    allow: [
       `${API}/services/domain/signing.service.ts`,
       `${API}/services/domain/signing/provider-adapter-factory.ts`,
       `${API}/services/domain/signing/provider-wallet-lifecycle.ts`,
@@ -254,7 +255,7 @@ function resolveModuleSource(program, specifier) {
   return resolved ? program.getSourceFile(resolved.resolvedFileName) : undefined;
 }
 
-/** Resolves a capability's declared symbol in the program. */
+/** Resolves a capability's declared symbols in the program (`name: "*"` is every value export). */
 function resolveSymbol(checker, program, rootDir, capabilitySymbol) {
   const source = capabilitySymbol.module
     ? resolveModuleSource(program, capabilitySymbol.module)
@@ -265,22 +266,39 @@ function resolveSymbol(checker, program, rootDir, capabilitySymbol) {
     );
   }
   const moduleSymbol = checker.getSymbolAtLocation(source);
+  const resolve = (symbol) =>
+    symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+  if (capabilitySymbol.name === "*") {
+    // Every callable or constructible value the module exports: a provider
+    // SDK or signer module is pinned whole, so a constructor added to it later
+    // is pinned too. Plain constants cannot sign and stay free.
+    const values = (moduleSymbol ? checker.getExportsOfModule(moduleSymbol) : [])
+      .map(resolve)
+      .filter((symbol) => {
+        if (!(symbol.flags & ts.SymbolFlags.Value)) return false;
+        const type = checker.getTypeOfSymbol(symbol);
+        return type.getCallSignatures().length > 0 || type.getConstructSignatures().length > 0;
+      });
+    if (values.length === 0) {
+      throw new Error(`${capabilitySymbol.module ?? capabilitySymbol.file} exports no values`);
+    }
+    return values;
+  }
   const exported = moduleSymbol
     ? checker.getExportsOfModule(moduleSymbol).find((s) => s.name === capabilitySymbol.name)
     : undefined;
   if (!exported) {
     throw new Error(`${capabilitySymbol.file} does not export ${capabilitySymbol.name}`);
   }
-  const target =
-    exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported;
+  const target = resolve(exported);
   if (!capabilitySymbol.member) {
-    return target;
+    return [target];
   }
   const member = target.members?.get(capabilitySymbol.member);
   if (!member) {
     throw new Error(`${capabilitySymbol.name} has no member ${capabilitySymbol.member}`);
   }
-  return member;
+  return [member];
 }
 
 /**
@@ -306,7 +324,9 @@ export function findValueMovementViolations({
   const targets = new Map();
   for (const capability of capabilities) {
     for (const capabilitySymbol of capability.symbols) {
-      targets.set(resolveSymbol(checker, program, rootDir, capabilitySymbol), capability);
+      for (const symbol of resolveSymbol(checker, program, rootDir, capabilitySymbol)) {
+        targets.set(symbol, capability);
+      }
     }
   }
 
