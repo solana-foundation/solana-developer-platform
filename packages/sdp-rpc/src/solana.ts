@@ -7,14 +7,15 @@
 
 import {
   type Address,
-  type Base64EncodedWireTransaction,
   type Blockhash,
   type Commitment,
   commitmentComparator,
   createDefaultRpcTransport,
   type createSolanaRpc,
   createSolanaRpcFromTransport,
+  fetchEncodedAccount,
   getBase64Decoder,
+  getBase64EncodedWireTransaction,
   getTransactionDecoder,
   type RpcTransport,
   type Signature,
@@ -59,16 +60,14 @@ export interface SimulationResult {
   error: string | null;
 }
 
-type SolanaRpcConfig = NonNullable<Parameters<typeof createSolanaRpc>[1]>;
-type AllowedSolanaRpcHeaders = NonNullable<SolanaRpcConfig["headers"]>;
-
-declare const Buffer: {
-  from(data: Uint8Array): { toString(encoding: "base64"): string };
-};
+/** Request headers kit's HTTP transport accepts; it rejects forbidden ones at runtime too. */
+export type RpcRequestHeaders = NonNullable<
+  Parameters<typeof createDefaultRpcTransport>[0]["headers"]
+>;
 
 export interface RpcClientOptions {
   rpcUrl?: string;
-  headers?: Readonly<Record<string, string>>;
+  headers?: RpcRequestHeaders;
   /**
    * Per-request transport deadline. A stalled HTTP request (socket open, no
    * response) rejects after this long instead of hanging the caller forever.
@@ -80,45 +79,6 @@ export interface RpcClientOptions {
 }
 
 export const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 30_000;
-
-const DISALLOWED_RPC_HEADERS = new Set([
-  "accept",
-  "accept-charset",
-  "access-control-request-headers",
-  "access-control-request-method",
-  "connection",
-  "content-length",
-  "content-type",
-  "cookie",
-  "date",
-  "dnt",
-  "expect",
-  "host",
-  "keep-alive",
-  "permissions-policy",
-  "referer",
-  "solana-client",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-  "via",
-]);
-
-function assertAllowedRpcHeaders(
-  headers: Readonly<Record<string, string>>
-): asserts headers is AllowedSolanaRpcHeaders {
-  for (const headerName of Object.keys(headers)) {
-    const normalizedHeaderName = headerName.toLowerCase();
-    if (
-      normalizedHeaderName.startsWith("proxy-") ||
-      normalizedHeaderName.startsWith("sec-") ||
-      DISALLOWED_RPC_HEADERS.has(normalizedHeaderName)
-    ) {
-      throw new Error(`Unsupported RPC header: ${headerName}`);
-    }
-  }
-}
 
 // Type for RPC client
 export type SolanaRpc = ReturnType<typeof createSolanaRpc>;
@@ -212,7 +172,6 @@ export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
   // only ever observes the attempt that answered.
   const buildTransport = (url: string): RpcTransport => {
     if (options?.headers && Object.keys(options.headers).length > 0) {
-      assertAllowedRpcHeaders(options.headers);
       const transport = withReadSocketRetry(
         createDefaultRpcTransport({ headers: options.headers, url })
       );
@@ -352,9 +311,9 @@ export async function sendTransaction(
     maxRetries?: bigint;
   }
 ): Promise<Signature> {
-  const encodedTx = Buffer.from(signedTransaction).toString(
-    "base64"
-  ) as Base64EncodedWireTransaction;
+  const encodedTx = getBase64EncodedWireTransaction(
+    getTransactionDecoder().decode(signedTransaction)
+  );
 
   const signature = await rpc
     .sendTransaction(encodedTx, {
@@ -464,7 +423,7 @@ export async function simulateTransaction(
     commitment?: Commitment;
   }
 ): Promise<SimulationResult> {
-  const encodedTx = Buffer.from(transaction).toString("base64") as Base64EncodedWireTransaction;
+  const encodedTx = getBase64EncodedWireTransaction(getTransactionDecoder().decode(transaction));
 
   const response = await rpc
     .simulateTransaction(encodedTx, {
@@ -559,8 +518,8 @@ export async function accountExists(
   address: Address,
   commitment: Commitment = "confirmed"
 ): Promise<boolean> {
-  const info = await getAccountInfo(rpc, address, commitment);
-  return info !== null;
+  const account = await fetchEncodedAccount(rpc, address, { commitment });
+  return account.exists;
 }
 
 /**
@@ -714,45 +673,53 @@ export interface ParsedTransaction {
   instructions: ParsedInstruction[];
 }
 
-interface RawParsedInstruction {
-  programId?: string;
-  accounts?: string[];
-  data?: string;
-  parsed?: { type?: string; info?: Record<string, unknown> };
+/**
+ * One `jsonParsed` transaction read, typed by kit's `getTransaction` overload.
+ *
+ * @param rpc - The RPC client.
+ * @param signature - The transaction signature.
+ * @param commitment - The read commitment.
+ * @returns The transaction, or `null` when the RPC doesn't know the signature.
+ */
+function fetchJsonParsedTransaction(
+  rpc: SolanaRpc,
+  signature: Signature,
+  commitment: "confirmed" | "finalized"
+) {
+  return rpc
+    .getTransaction(signature, {
+      commitment,
+      encoding: "jsonParsed",
+      maxSupportedTransactionVersion: 0,
+    })
+    .send();
 }
 
-interface RawTokenBalance {
-  accountIndex: number;
-  mint: string;
-  owner?: string;
-  uiTokenAmount: { amount: string; decimals: number };
-}
+type JsonParsedTransaction = NonNullable<Awaited<ReturnType<typeof fetchJsonParsedTransaction>>>;
+type JsonParsedInstruction =
+  JsonParsedTransaction["transaction"]["message"]["instructions"][number];
+type JsonParsedTokenBalance = NonNullable<
+  NonNullable<JsonParsedTransaction["meta"]>["preTokenBalances"]
+>[number];
 
-interface RawGetTransactionResponse {
-  slot: bigint;
-  meta: {
-    err: unknown | null;
-    fee: bigint;
-    preBalances: readonly bigint[];
-    postBalances: readonly bigint[];
-    preTokenBalances?: readonly RawTokenBalance[] | null;
-    postTokenBalances?: readonly RawTokenBalance[] | null;
-    innerInstructions?: Array<{ instructions?: RawParsedInstruction[] }> | null;
-  } | null;
-  transaction: {
-    message: { instructions?: RawParsedInstruction[] };
-  };
-}
+const toParsedInstruction = (ix: JsonParsedInstruction): ParsedInstruction =>
+  "parsed" in ix
+    ? {
+        programId: ix.programId,
+        accounts: [],
+        data: null,
+        parsedType: ix.parsed.type,
+        info: ix.parsed.info ? Object.fromEntries(Object.entries(ix.parsed.info)) : null,
+      }
+    : {
+        programId: ix.programId,
+        accounts: [...ix.accounts],
+        data: ix.data,
+        parsedType: null,
+        info: null,
+      };
 
-const toParsedInstruction = (ix: RawParsedInstruction): ParsedInstruction => ({
-  programId: ix.programId ?? "",
-  accounts: ix.accounts ?? [],
-  data: ix.data ?? null,
-  parsedType: ix.parsed?.type ?? null,
-  info: ix.parsed?.info ?? null,
-});
-
-const toParsedTokenBalance = (balance: RawTokenBalance): ParsedTokenBalance => ({
+const toParsedTokenBalance = (balance: JsonParsedTokenBalance): ParsedTokenBalance => ({
   accountIndex: Number(balance.accountIndex),
   mint: balance.mint,
   owner: balance.owner ?? null,
@@ -803,15 +770,9 @@ export async function getTransaction(
   signature: Signature,
   commitment: "confirmed" | "finalized" = "confirmed"
 ): Promise<ParsedTransaction | null> {
-  const response = (await withTransientRpcRetry(() =>
-    rpc
-      .getTransaction(signature, {
-        commitment,
-        encoding: "jsonParsed",
-        maxSupportedTransactionVersion: 0,
-      })
-      .send()
-  )) as RawGetTransactionResponse | null;
+  const response = await withTransientRpcRetry(() =>
+    fetchJsonParsedTransaction(rpc, signature, commitment)
+  );
 
   if (!response) {
     return null;
