@@ -284,6 +284,8 @@ declare var require: (id: string) => unknown;
     "src/lib/other.ts": `export const value = 1;\n`,
     "src/member.ts": `declare const client: { eval(script: string): number };\nexport const out = client.eval("return 1");\n`,
     "src/typed.ts": `export const call = (fn: Function) => fn;\n`,
+    "src/type-import.ts": `import type { createRequire } from "node:module";\nexport type Loader = typeof createRequire;\n`,
+    "src/type-specifier.ts": `import { type createRequire as Load } from "node:module";\nexport type Loader = typeof Load;\n`,
   });
 
   const flagged = new Set(found.map((violation) => violation.split(":")[0]));

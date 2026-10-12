@@ -232,13 +232,22 @@ function isPinnedUse(checker, node) {
   );
 }
 
-/** Whether a reference only names a type, which can never run. */
+/**
+ * Whether a reference only names a type, which can never run: a type node, or
+ * a type-only import or export (TypeScript erases both).
+ */
 function inTypePosition(node) {
-  for (
-    let ancestor = node.parent;
-    ancestor && !ts.isStatement(ancestor);
-    ancestor = ancestor.parent
-  ) {
+  for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
+    if (
+      (ts.isImportSpecifier(ancestor) ||
+        ts.isImportClause(ancestor) ||
+        ts.isExportSpecifier(ancestor) ||
+        ts.isExportDeclaration(ancestor)) &&
+      ancestor.isTypeOnly
+    ) {
+      return true;
+    }
+    if (ts.isStatement(ancestor)) return false;
     if (ts.isTypeNode(ancestor) && !ts.isExpressionWithTypeArguments(ancestor)) return true;
   }
   return false;
