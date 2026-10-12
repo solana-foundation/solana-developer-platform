@@ -715,6 +715,14 @@ describe("OpenAPI spec", () => {
     }
   });
 
+  it("does not promise webhook delivery for project settings", () => {
+    // webhookUrl is stored but nothing delivers to it; the schema must not promise events.
+    const updateProject = JSON.stringify(
+      createPublicOpenApiDocument().paths?.["/v1/projects/{projectId}"]?.patch
+    );
+    expect(updateProject).toContain("SDP does not deliver webhooks to this URL");
+  });
+
   it("limits the public document to supported public API families", () => {
     const doc = createPublicOpenApiDocument();
 
