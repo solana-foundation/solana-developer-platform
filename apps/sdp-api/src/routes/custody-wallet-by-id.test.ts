@@ -7,6 +7,7 @@ import app from "@/index";
 import * as heliusDasService from "@/services/helius-das.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
@@ -22,7 +23,6 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
-const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const attachUsdValuesMock = vi.spyOn(heliusDasService, "attachUsdValuesToBalances");
 
@@ -151,14 +151,14 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
 }
 
 describe("Custody wallet by ID route", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
-    createRpcMock.mockReset();
     getAccountInfoMock.mockReset();
     attachUsdValuesMock.mockReset();
 
-    createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
     } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
@@ -368,7 +368,6 @@ describe("Custody wallet by ID route", () => {
       amount: "4200000000",
       decimals: 9,
     });
-    expect(createRpcMock).toHaveBeenCalledTimes(1);
     expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
     expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
@@ -433,7 +432,6 @@ describe("Custody wallet by ID route", () => {
       publicKey: TEST_SOLANA_ADDRESSES.wallet2,
     });
     expect(body.data.wallet).not.toHaveProperty("balance");
-    expect(createRpcMock).not.toHaveBeenCalled();
     expect(getAccountInfoMock).not.toHaveBeenCalled();
     expect(attachUsdValuesMock).not.toHaveBeenCalled();
   });
@@ -459,7 +457,6 @@ describe("Custody wallet by ID route", () => {
       };
     };
     expect(body.data.wallet.balance).toMatchObject({ amount: "4200000000" });
-    expect(createRpcMock).toHaveBeenCalledTimes(1);
     expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
     expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
@@ -485,7 +482,6 @@ describe("Custody wallet by ID route", () => {
       };
     };
     expect(body.data.wallet.balance).toMatchObject({ amount: "4200000000" });
-    expect(createRpcMock).toHaveBeenCalledTimes(1);
     expect(getAccountInfoMock).toHaveBeenCalledTimes(1);
     expect(attachUsdValuesMock).toHaveBeenCalledTimes(1);
   });
