@@ -265,6 +265,8 @@ function membershipRefusal(
   switch (reason) {
     case "organization_deleted":
       return forbidden("Organization was deleted");
+    case "user_deleted":
+      return unauthorized("User account was deleted");
     case "membership_removed":
       return unauthorized("Organization membership is inactive");
     case "invitation_revoked":

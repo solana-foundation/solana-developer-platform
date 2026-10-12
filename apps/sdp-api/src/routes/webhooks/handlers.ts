@@ -14,6 +14,7 @@ import { refreshApiKeyCache } from "@/lib/api-key-cache";
 import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError } from "@/lib/errors";
 import {
+  revokePendingInvitationsForDeletedUser,
   revokePendingInvitationsForOrganization,
   revokePendingInvitationsForUser,
 } from "@/lib/invitations";
@@ -173,7 +174,7 @@ async function ensureUserMapping(
     .first<{ user_id: string; email: string }>();
 
   if (existing?.user_id) {
-    const updates = ["status = 'active'"];
+    const updates: string[] = [];
     const params: (string | null)[] = [];
     let identityEmail = existing.email;
 
@@ -194,16 +195,21 @@ async function ensureUserMapping(
     }
 
     params.push(existing.user_id);
-    await db.batch([
-      db.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`).bind(...params),
-      db
-        .prepare(
-          `UPDATE auth_user_identities
-           SET email = ?, updated_at = datetime('now')
-           WHERE provider = 'clerk' AND provider_user_id = ?`
-        )
-        .bind(identityEmail, user.id),
-    ]);
+    const identityUpdate = db
+      .prepare(
+        `UPDATE auth_user_identities
+         SET email = ?, updated_at = datetime('now')
+         WHERE provider = 'clerk' AND provider_user_id = ?`
+      )
+      .bind(identityEmail, user.id);
+    await db.batch(
+      updates.length > 0
+        ? [
+            db.prepare(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`).bind(...params),
+            identityUpdate,
+          ]
+        : [identityUpdate]
+    );
 
     return existing.user_id;
   }
@@ -279,12 +285,17 @@ async function deleteUser(c: AppContext, data: UserDeletedJSON) {
     return;
   }
 
-  await getDb(c.env).batch([
-    getDb(c.env).prepare("UPDATE users SET status = 'deleted' WHERE id = ?").bind(identity.user_id),
-    getDb(c.env)
+  await getDb(c.env).transaction(async (tx) => {
+    await tx
+      .prepare("UPDATE users SET status = 'deleted' WHERE id = ?")
+      .bind(identity.user_id)
+      .run();
+    await revokePendingInvitationsForDeletedUser(tx, identity.user_id);
+    await tx
       .prepare("UPDATE organization_members SET status = 'removed' WHERE user_id = ?")
-      .bind(identity.user_id),
-  ]);
+      .bind(identity.user_id)
+      .run();
+  });
 }
 
 /** The address invitations are keyed on. */

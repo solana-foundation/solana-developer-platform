@@ -105,6 +105,33 @@ export async function revokePendingInvitationsForUser(
 }
 
 /**
+ * Revokes the pending invitations every organization holds for any address the
+ * user is known by, for user deletion. Same address set as
+ * {@link revokePendingInvitationsForUser}.
+ *
+ * @param tx - Open transaction the deletion runs in
+ * @param userId - SDP user being deleted
+ * @returns Resolves once the invitations are revoked
+ */
+export async function revokePendingInvitationsForDeletedUser(
+  tx: DatabaseExecutor,
+  userId: string
+): Promise<void> {
+  await tx
+    .prepare(
+      `UPDATE invitations SET status = 'revoked'
+        WHERE status = 'pending'
+          AND LOWER(email) IN (
+            SELECT LOWER(email) FROM users WHERE id = ?
+            UNION
+            SELECT LOWER(email) FROM auth_user_identities WHERE user_id = ? AND email IS NOT NULL
+          )`
+    )
+    .bind(userId, userId)
+    .run();
+}
+
+/**
  * Revokes every pending invitation an organization holds, for organization deletion.
  *
  * @param tx - Open transaction the deletion runs in

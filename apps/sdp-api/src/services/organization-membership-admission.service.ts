@@ -6,7 +6,7 @@ export type MembershipAdmission =
   | { admitted: true; role: OrganizationRole; joined: boolean }
   | {
       admitted: false;
-      reason: "organization_deleted" | "membership_removed" | "invitation_revoked";
+      reason: "organization_deleted" | "user_deleted" | "membership_removed" | "invitation_revoked";
     };
 
 /**
@@ -17,7 +17,8 @@ export type MembershipAdmission =
  * state; the login path and the Clerk webhooks both call it, so a lost or late
  * webhook changes nothing about who gets in. The rules:
  *
- * - A deleted organization admits nobody.
+ * - A deleted organization admits nobody, and a deleted user joins nothing:
+ *   a Clerk session token can outlive the account it was issued for.
  * - An active member stays as they are. A live invitation still pending for
  *   them is marked accepted, so the directory stops listing it.
  * - A removed member returns only through a live SDP invitation, which is
@@ -31,9 +32,10 @@ export type MembershipAdmission =
  *
  * The organization row is locked first (FOR NO KEY UPDATE, which leaves
  * foreign-key inserts elsewhere unblocked), so admissions into one organization
- * serialize with each other and with its deletion. Every invitation row for
- * the address is locked next, so a revocation either lands first and is seen
- * here or waits for this transaction to commit.
+ * serialize with each other and with its deletion. The user row is share-locked
+ * next, so a user deletion either lands first and is seen here or waits. Every
+ * invitation row for the address is locked after that, so a revocation either
+ * lands first and is seen here or waits for this transaction to commit.
  *
  * @param db - Database client the transaction runs on
  * @param params - The organization, user and roles to admit
@@ -61,6 +63,14 @@ export async function admitOrganizationMember(
       .first<{ status: string }>();
     if (!organization || organization.status === "deleted") {
       return { admitted: false, reason: "organization_deleted" };
+    }
+
+    const user = await tx
+      .prepare("SELECT status FROM users WHERE id = ? FOR SHARE")
+      .bind(params.userId)
+      .first<{ status: string }>();
+    if (!user || user.status === "deleted") {
+      return { admitted: false, reason: "user_deleted" };
     }
 
     const revoked = await invitationWasRevoked(tx, params.organizationId, email, { lock: true });
