@@ -7,6 +7,7 @@ import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
   getAbortablePromise,
+  isJsonRpcPayload,
   type RpcTransport,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
@@ -14,10 +15,10 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
-import { SdpRpcError } from "./errors";
+import { SdpRpcError, solanaRpcError } from "./errors";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
-import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc, withRequestTimeout } from "./solana";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
 import { isTransientRpcError } from "./transient";
 import type { ManagedRpcEnv } from "./types";
 
@@ -78,6 +79,35 @@ const lastAnsweringEndpoint = new Map<string, number>();
 const clusterRpcs = new Map<string, SolanaRpc>();
 
 /**
+ * Bound every request through `transport` by `timeoutMs`, combined with the caller's own signal
+ * when it has one, so a caller signal never removes the deadline. Whichever fires first aborts.
+ *
+ * @param transport - The transport to bound.
+ * @param timeoutMs - The per-attempt deadline.
+ * @returns A transport whose deadline expiry rejects with a transient-classified timeout.
+ */
+function withAttemptDeadline(transport: RpcTransport, timeoutMs: number): RpcTransport {
+  return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]) => {
+    const deadline = new AbortController();
+    const deadlineReason = new Error("RPC attempt deadline elapsed");
+    const timer = setTimeout(() => deadline.abort(deadlineReason), timeoutMs);
+    const signal = rpcRequest.signal
+      ? AbortSignal.any([rpcRequest.signal, deadline.signal])
+      : deadline.signal;
+    try {
+      return await transport<TResponse>({ ...rpcRequest, signal });
+    } catch (cause) {
+      if (signal.aborted && signal.reason === deadlineReason) {
+        throw solanaRpcError(`RPC request timed out after ${timeoutMs}ms`, { timedOut: true });
+      }
+      throw cause;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+/**
  * Prove `endpointTransport` serves `cluster`, sharing one in-flight probe per endpoint.
  *
  * @param endpointTransport - The endpoint's transport below the caller deadline.
@@ -95,7 +125,7 @@ function proveGenesis(
   if (probeInFlight) return probeInFlight;
   const probe = (async () => {
     const servedGenesisHash = await createSolanaRpcFromTransport(
-      withRequestTimeout(endpointTransport, GENESIS_PROBE_TIMEOUT_MS)
+      withAttemptDeadline(endpointTransport, GENESIS_PROBE_TIMEOUT_MS)
     )
       .getGenesisHash()
       .send();
@@ -173,8 +203,9 @@ function asksForAnotherEndpoint(response: unknown): boolean {
  */
 function createPoolTransport(endpointTransports: readonly RpcTransport[], poolKey: string) {
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]): Promise<TResponse> => {
-    const payload = rpcRequest.payload as { method?: unknown } | null | undefined;
-    const attempts = payload?.method === "sendTransaction" ? 1 : endpointTransports.length;
+    const isSend =
+      isJsonRpcPayload(rpcRequest.payload) && rpcRequest.payload.method === "sendTransaction";
+    const attempts = isSend ? 1 : endpointTransports.length;
     const startIndex = lastAnsweringEndpoint.get(poolKey) ?? 0;
     for (let attempt = 0; ; attempt += 1) {
       const endpointIndex = (startIndex + attempt) % endpointTransports.length;
@@ -231,7 +262,7 @@ export function createClusterRpc(): SolanaRpc {
   const memoizedRpc = clusterRpcs.get(poolKey);
   if (memoizedRpc) return memoizedRpc;
   const endpointTransports = endpointUrls.map((endpointUrl) =>
-    withRequestTimeout(
+    withAttemptDeadline(
       withGenesisGuard(
         withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
         cluster,
