@@ -6,7 +6,8 @@ import {
   type CounterpartyProviderAccount,
   type CounterpartyProviderCustomerLink,
   type CounterpartyProviderCustomerLinkAgreement,
-  type RampProviderId,
+  isRetiredRampProviderId,
+  type PersistedRampProviderId,
 } from "@sdp/types";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import {
@@ -24,8 +25,8 @@ import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { useTranslations } from "@/i18n/provider";
 import {
   getRampProviderLabel,
+  getRampProviderLogo,
   RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS,
-  RAMP_PROVIDER_LOGOS,
 } from "@/lib/ramps";
 import { openBvnkCustomerLink } from "@/lib/trusted-ramp-destinations";
 import { cn } from "@/lib/utils";
@@ -150,19 +151,16 @@ function ProviderCustomerHeader({
   provider,
   customerLink,
 }: {
-  provider: RampProviderId;
+  provider: PersistedRampProviderId;
   customerLink: CounterpartyProviderCustomerLink | undefined;
 }) {
   const t = useTranslations();
+  const logo = getRampProviderLogo(provider);
   return (
     <>
-      <Image
-        src={RAMP_PROVIDER_LOGOS[provider]}
-        alt=""
-        width={20}
-        height={20}
-        className="size-5 rounded"
-      />
+      {logo === undefined ? null : (
+        <Image src={logo} alt="" width={20} height={20} className="size-5 rounded" />
+      )}
       <span className="text-sm font-medium text-primary">{getRampProviderLabel(provider)}</span>
       {customerLink !== undefined ? (
         <>
@@ -345,11 +343,13 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   const { provider, customerLink, payoutAccounts, fundingWallets } = group;
+  const hasPayoutAccounts =
+    !isRetiredRampProviderId(provider) && RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
   const expandable =
     payoutAccounts.length > 0 ||
     fundingWallets.length > 0 ||
     (customerLink !== undefined && customerLink.provider === "bvnk") ||
-    RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
+    hasPayoutAccounts;
 
   return (
     <div className="rounded-lg border border-border-default bg-surface-raised">
@@ -381,7 +381,7 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
           {fundingWallets.length > 0 ? <FundingWalletsList accounts={fundingWallets} /> : null}
           {payoutAccounts.length > 0 ? (
             <PayoutAccountsTable accounts={payoutAccounts} />
-          ) : RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider] ? (
+          ) : hasPayoutAccounts ? (
             <p className="border-t border-border-default px-4 py-3 text-sm text-tertiary">
               {t("DashboardPayments.counterparty.noPayoutAccounts")}
             </p>

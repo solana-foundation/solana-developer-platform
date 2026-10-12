@@ -283,7 +283,6 @@ export const DEMO_RAMP_PROVIDERS: Record<
 > = {
   lightspark: { deliveryMode: "manual_instructions", reference: "LS" },
   bvnk: { deliveryMode: "manual_instructions", reference: "BVNK" },
-  mural: { deliveryMode: "manual_instructions", reference: "MRL" },
   moonpay: { deliveryMode: "hosted", reference: "MP" },
   coinbase: { deliveryMode: "hosted", reference: "CB" },
   moneygram: { deliveryMode: "session_widget", reference: "MG" },

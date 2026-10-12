@@ -1,6 +1,6 @@
 "use client";
 
-import { isMuralSandboxPayinCurrency, isTerminalRampTransferStatus } from "@sdp/types";
+import { isTerminalRampTransferStatus } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
@@ -225,10 +225,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
       );
     }
 
-    const labels =
-      quote.provider === "mural" && !isMuralSandboxPayinCurrency(selectedRampPair.fiatCurrency)
-        ? null
-        : simulateActionLabels(quote.provider, t);
+    const labels = simulateActionLabels(quote.provider, t);
     const simulateAction = labels
       ? {
           loading: quoteSimulationLoading,

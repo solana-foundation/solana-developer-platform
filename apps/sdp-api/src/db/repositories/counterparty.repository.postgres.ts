@@ -52,26 +52,6 @@ function assertProviderData(value: unknown): CounterpartyProviderData {
   return providerData;
 }
 
-function nestedString(value: unknown, path: readonly string[]): string | null {
-  let current = value;
-  for (const part of path) {
-    const record = readRecord(current);
-    if (record === undefined) {
-      return null;
-    }
-    current = record[part];
-  }
-  return typeof current === "string" && current.length > 0 ? current : null;
-}
-
-function providerLookupReferences(providerData: CounterpartyProviderData): {
-  muralOrganizationId: string | null;
-} {
-  return {
-    muralOrganizationId: nestedString(providerData, ["mural", "organization", "id"]),
-  };
-}
-
 function mapCounterpartyRow(row: Record<string, unknown>): CounterpartyRow {
   const entityType = assertString(row.entity_type, "entity_type");
   if (entityType !== "individual" && entityType !== "business") {
@@ -97,17 +77,15 @@ async function updateProviderData(
   current: CounterpartyRow,
   providerData: CounterpartyProviderData
 ): Promise<CounterpartyRow | null> {
-  const refs = providerLookupReferences(providerData);
   const row = await db
     .prepare(
       `UPDATE counterparties
           SET provider_data = ?,
-              mural_organization_id = ?,
               updated_at = sdp_iso_now()
         WHERE id = ?
       RETURNING *`
     )
-    .bind(providerData, refs.muralOrganizationId, current.id)
+    .bind(providerData, current.id)
     .first<Record<string, unknown>>();
   return row ? mapCounterpartyRow(row) : null;
 }
@@ -140,15 +118,13 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
   return {
     async createCounterparty(input: CreateCounterpartyInput) {
       const id = generateCounterpartyId();
-      const refs = providerLookupReferences(input.providerData);
 
       const row = await db
         .prepare(
           `INSERT INTO counterparties (
              id, organization_id, project_id, external_id, entity_type,
-             display_name, provider_data,
-             mural_organization_id, status, created_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+             display_name, provider_data, status, created_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
            RETURNING *`
         )
         .bind(
@@ -159,7 +135,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           input.entityType,
           input.displayName,
           input.providerData,
-          refs.muralOrganizationId,
           input.createdBy
         )
         .first<Record<string, unknown>>();
@@ -184,8 +159,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
           return null;
         }
         const current = mapCounterpartyRow(row);
-        const providerData = input.providerData ?? current.provider_data;
-        const refs = providerLookupReferences(providerData);
 
         const updated = await tx
           .prepare(
@@ -194,7 +167,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
                     entity_type = ?,
                     display_name = ?,
                     provider_data = ?,
-                    mural_organization_id = ?,
                     updated_at = sdp_iso_now()
               WHERE id = ?
             RETURNING *`
@@ -204,8 +176,7 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
             input.externalId ?? null,
             input.entityType ?? current.entity_type,
             input.displayName ?? current.display_name,
-            providerData,
-            refs.muralOrganizationId,
+            input.providerData ?? current.provider_data,
             current.id
           )
           .first<Record<string, unknown>>();
@@ -318,29 +289,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
       return mapCounterpartyRow(rows.results[0]);
     },
 
-    async findCounterpartyByMuralOrganizationId(organizationId: string) {
-      const rows = await db
-        .prepare(
-          `SELECT * FROM counterparties
-            WHERE status = 'active'
-              AND (
-                mural_organization_id = ?
-                OR (
-                  mural_organization_id IS NULL
-                  AND provider_data->'mural'->'organization'->>'id' = ?
-                )
-              )
-            ORDER BY id
-            LIMIT 2`
-        )
-        .bind(organizationId, organizationId)
-        .all<Record<string, unknown>>();
-      if (rows.results.length !== 1) {
-        return null;
-      }
-      return mapCounterpartyRow(rows.results[0]);
-    },
-
     async mutateProviderData(params) {
       return mutateProviderDataLocked(db, params);
     },
@@ -361,54 +309,6 @@ export function createPostgresCounterpartiesRepository(db: AppDb): Counterpartie
         provider: "bvnk",
         providerCustomerReference: params.customer.customerReference,
         metadata: parsedMetadata,
-      });
-    },
-
-    async patchMuralOrganizationById(params) {
-      await db.transaction(async (tx) => {
-        const row = await tx
-          .prepare(
-            `SELECT * FROM counterparties
-              WHERE status = 'active'
-                AND (
-                  mural_organization_id = ?
-                  OR (
-                    mural_organization_id IS NULL
-                    AND provider_data->'mural'->'organization'->>'id' = ?
-                  )
-                )
-              LIMIT 1
-              FOR UPDATE`
-          )
-          .bind(params.organizationId, params.organizationId)
-          .first<Record<string, unknown>>();
-        if (!row) {
-          return;
-        }
-        const current = mapCounterpartyRow(row);
-        const mural = readRecord(current.provider_data.mural);
-        if (mural === undefined) {
-          await updateProviderData(tx, current, {
-            ...current.provider_data,
-            mural: { organization: params.organization },
-          });
-          return;
-        }
-        const organization = readRecord(mural.organization);
-        if (organization === undefined) {
-          await updateProviderData(tx, current, {
-            ...current.provider_data,
-            mural: { ...mural, organization: params.organization },
-          });
-          return;
-        }
-        await updateProviderData(tx, current, {
-          ...current.provider_data,
-          mural: {
-            ...mural,
-            organization: { ...organization, ...params.organization },
-          },
-        });
       });
     },
 

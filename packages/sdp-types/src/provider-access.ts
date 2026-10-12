@@ -28,10 +28,25 @@ export const RAMP_PROVIDERS = [
   "bvnk",
   "moneygram",
   "coinbase",
-  "mural",
   "stripe",
 ] as const;
 export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
+
+/**
+ * Ramp providers SDP no longer integrates. Their stored transfers, provider
+ * accounts and webhook events stay readable, but nothing writes or dispatches
+ * to them. A removed provider moves here, and an id is never reused.
+ */
+export const RETIRED_RAMP_PROVIDERS = ["hercle", "mural"] as const;
+export type RetiredRampProviderId = (typeof RETIRED_RAMP_PROVIDERS)[number];
+
+/** Every provider id a stored ramp row can carry: a live provider or a retired one. */
+export const PERSISTED_RAMP_PROVIDERS = [...RAMP_PROVIDERS, ...RETIRED_RAMP_PROVIDERS] as const;
+export type PersistedRampProviderId = (typeof PERSISTED_RAMP_PROVIDERS)[number];
+
+export function isRetiredRampProviderId(value: string): value is RetiredRampProviderId {
+  return (RETIRED_RAMP_PROVIDERS as readonly string[]).includes(value);
+}
 
 /**
  * Vault-infra partners fronting Earn yield strategies.
@@ -549,7 +564,6 @@ export const RAMP_PROVIDER_SURFACING = {
   bvnk: true,
   moneygram: "sandbox",
   coinbase: true,
-  mural: true,
   stripe: true,
 } as const satisfies Record<RampProviderId, RampProviderSurfacing>;
 

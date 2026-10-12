@@ -1,8 +1,10 @@
 import {
   type PaymentTransactionKind,
   type PaymentTransferStatus,
+  PERSISTED_RAMP_PROVIDERS,
   tokenFilterAliases,
 } from "@sdp/types";
+import { z } from "zod";
 import type { DatabaseExecutor } from "@/db";
 import { buildInClause, escapeLikePattern } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
@@ -152,6 +154,9 @@ export type PaymentTransferProjectionRow = Record<string, unknown> & {
   kind: PaymentTransactionKind;
 };
 
+// A retired provider's id still parses; an id this deployment does not know throws.
+const storedTransferProviderSchema = z.enum(PERSISTED_RAMP_PROVIDERS).nullable();
+
 /** Maps a raw `payment_transfers` projection row into the shared row shape; `kind` must ride the SELECT. */
 export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
   return {
@@ -171,7 +176,7 @@ export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransf
     kind: row.kind,
     direction: row.direction as PaymentTransferRow["direction"],
     status: row.status as PaymentTransferRow["status"],
-    provider: row.provider as PaymentTransferRow["provider"],
+    provider: storedTransferProviderSchema.parse(row.provider),
     provider_reference: row.provider_reference as string | null,
     delivery_mode: row.delivery_mode as PaymentTransferRow["delivery_mode"],
     fiat_currency: row.fiat_currency as string | null,

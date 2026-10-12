@@ -20,7 +20,15 @@
 .rpr-track {
   display: flex;
   flex-direction: column;
-  animation: rpr-cycle 21s infinite;
+}
+
+/* One keyframe set per rotation length, about 3s per row. */
+.rpr-track-6 {
+  animation: rpr-cycle-6 18s infinite;
+}
+
+.rpr-track-7 {
+  animation: rpr-cycle-7 21s infinite;
 }
 
 .rpr-item {
@@ -34,7 +42,37 @@
   content: attr(data-name);
 }
 
-@keyframes rpr-cycle {
+@keyframes rpr-cycle-6 {
+  0%,
+  14.37% {
+    transform: translateY(0);
+  }
+  16.67%,
+  31.03% {
+    transform: translateY(-1lh);
+  }
+  33.33%,
+  47.7% {
+    transform: translateY(-2lh);
+  }
+  50%,
+  64.37% {
+    transform: translateY(-3lh);
+  }
+  66.67%,
+  81.03% {
+    transform: translateY(-4lh);
+  }
+  83.33%,
+  97.7% {
+    transform: translateY(-5lh);
+  }
+  100% {
+    transform: translateY(-6lh);
+  }
+}
+
+@keyframes rpr-cycle-7 {
   0%,
   12.3% {
     transform: translateY(0);
@@ -69,7 +107,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rpr-track {
+  .rpr-track-6,
+  .rpr-track-7 {
     animation: none;
   }
 }

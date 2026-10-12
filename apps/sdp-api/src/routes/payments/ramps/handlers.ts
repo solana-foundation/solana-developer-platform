@@ -1,19 +1,11 @@
-import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { RAMP_PROVIDER_CLIENTS, resolveRampProviderClient } from "@sdp/payments/ramps";
 import {
   BVNK_FUNDING_WALLET_FIAT,
   bvnkOnrampRemittance,
   readBvnkOnrampTransferData,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
-import {
-  readMuralOrganization,
-  readMuralTransferAccountId,
-} from "@sdp/payments/ramps/providers/mural/provider-data";
-import { parseDecimalAmount, toNumberAmount } from "@sdp/solana/amount";
-import {
-  CANCELABLE_RAMP_TRANSFER_STATUSES,
-  isCancelableRampTransferStatus,
-  isMuralSandboxPayinCurrency,
-} from "@sdp/types";
+import { toNumberAmount } from "@sdp/solana/amount";
+import { CANCELABLE_RAMP_TRANSFER_STATUSES, isCancelableRampTransferStatus } from "@sdp/types";
 import { getDb } from "@/db";
 import {
   createPostgresCounterpartyProviderAccountsRepository,
@@ -22,7 +14,6 @@ import {
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
-import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { sendOnceUnderTransferClaim } from "@/services/payments/transfer-claim";
@@ -30,7 +21,7 @@ import { assertProviderAvailable } from "@/services/provider-availability.servic
 import { getPaymentsRepository, rampRuntime, resolveSdpEnvironment } from "../context";
 import { mapTransferRow } from "../mappers";
 import { assertPaymentWalletExactAccess, resolveScope } from "../wallets";
-import { MURAL_SANDBOX_PAYIN_RAIL_BY_CURRENCY } from "./providers/mural";
+import { admitRamp } from "./admission";
 import type { cancelRampTransferSchema, simulateSandboxTransferSchema } from "./schemas";
 
 export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRampTransferSchema>) {
@@ -50,17 +41,9 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
   if (!isRampTransferType(transfer.type)) {
     throw badRequest("Only ramp transfers can be canceled through this endpoint.");
   }
-  // A provider the release channel leaves out is off completely, its transfers included.
-  assertTransferRampProviderInChannel(c, transfer);
+  await admitRamp(c, { need: "cancel", transfer });
   if (!isCancelableRampTransferStatus(transfer.status)) {
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
-  }
-
-  if (transfer.provider === "bvnk" && transfer.type === "onramp") {
-    if (transfer.custody_wallet_id === null) {
-      throw internalError("BVNK on-ramp transfer has no custody wallet.");
-    }
-    assertPaymentWalletExactAccess(c, transfer.custody_wallet_id, ["payments:write"]);
   }
 
   const updated = await repository.updateTransferStatusGuarded({
@@ -111,7 +94,8 @@ export async function simulateSandboxTransfer(
   if (transfer.provider === null) {
     throw internalError("On-ramp transfer has no provider.");
   }
-  await assertProviderAvailable(c, { family: "ramps", provider: transfer.provider });
+  const provider = resolveRampProviderClient(transfer.provider).id;
+  await assertProviderAvailable(c, { family: "ramps", provider });
   if (transfer.counterparty_id === null) {
     throw internalError("On-ramp transfer has no counterparty.");
   }
@@ -127,7 +111,7 @@ export async function simulateSandboxTransfer(
     throw notFound("Counterparty");
   }
   let simulate: () => Promise<unknown>;
-  switch (transfer.provider) {
+  switch (provider) {
     case "lightspark": {
       const quoteId = transfer.provider_reference;
       if (quoteId === null) {
@@ -168,32 +152,13 @@ export async function simulateSandboxTransfer(
       simulate = () => RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), payload);
       break;
     }
-    case "mural": {
-      const org = readMuralOrganization(counterparty.provider_data);
-      if (!org.id) {
-        throw internalError("Mural on-ramp counterparty has no organization.");
-      }
-      const fiatCurrency = transfer.fiat_currency;
-      if (!isMuralSandboxPayinCurrency(fiatCurrency)) {
-        throw badRequest(`Mural sandbox pay-in does not support ${fiatCurrency}.`);
-      }
-      const payload = {
-        organizationId: org.id,
-        destinationAccountId: readMuralTransferAccountId(transfer.provider_data),
-        rail: MURAL_SANDBOX_PAYIN_RAIL_BY_CURRENCY[fiatCurrency],
-        amountValue: String(parseDecimalAmount(transfer.fiat_amount, 2)),
-        currencySymbol: fiatCurrency,
-      };
-      simulate = () => RAMP_PROVIDER_CLIENTS.mural.simulatePayin(rampRuntime(c), payload);
-      break;
-    }
     case "moonpay":
     case "moneygram":
     case "coinbase":
     case "stripe":
-      throw badRequest(`Sandbox simulation is not available for provider: ${transfer.provider}.`);
+      throw badRequest(`Sandbox simulation is not available for provider: ${provider}.`);
     default: {
-      const exhaustive: never = transfer.provider;
+      const exhaustive: never = provider;
       throw internalError(`Unknown ramp provider: ${String(exhaustive)}`);
     }
   }
