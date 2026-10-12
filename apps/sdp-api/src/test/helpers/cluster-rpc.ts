@@ -29,6 +29,13 @@ const MANAGED_POOL_ENV = {
   SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL: CLUSTER_RPC_URLS["mainnet-beta"],
 } as const satisfies Required<ManagedRpcEnv>;
 
+/**
+ * Every managed pool env key `createClusterRpc()` reads, both clusters. The vitest setup blanks
+ * them all so a suite that reaches the door without `installClusterRpcStub()` fails with
+ * `RPC_NOT_CONFIGURED` instead of calling whatever pool the CI environment injects.
+ */
+export const MANAGED_POOL_ENV_KEYS = Object.keys(MANAGED_POOL_ENV);
+
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
 
 const jsonRpcRequestSchema = z.object({
