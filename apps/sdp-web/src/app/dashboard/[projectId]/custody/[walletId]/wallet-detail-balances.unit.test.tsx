@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { mockUseSWR } = vi.hoisted(() => ({ mockUseSWR: vi.fn() }));
 
+vi.mock("@/i18n/provider", () => ({ useTranslations: () => () => "Unavailable" }));
 vi.mock("swr", () => ({ default: mockUseSWR }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -77,5 +78,19 @@ describe("wallet detail balances", () => {
     );
     expect(recovered).not.toContain("Balances unavailable");
     expect(recovered).toContain("150");
+  });
+  it("hides cached amounts when a poll fails", () => {
+    mockUseSWR.mockReturnValue({
+      data: [{ ...solBalance("1"), usdValue: 150 }],
+      error: new Error("Unavailable"),
+    });
+    const total = renderToStaticMarkup(
+      <WalletBalanceTotal
+        walletId="wallet-1"
+        initial={trackedBalances([{ ...solBalance("1"), usdValue: 150 }], null)}
+      />
+    );
+    expect(total).not.toContain("150");
+    expect(total).toContain("Unavailable");
   });
 });

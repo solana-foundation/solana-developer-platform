@@ -813,7 +813,8 @@ describe("Payments routes — list transfers", () => {
       expect(forbiddenRes.status).toBe(403);
     });
 
-    it("keeps authorized legacy null-pin transfers visible to selected keys", async () => {
+    it("excludes null pins from selected-key history but keeps tenant-wide access", async () => {
+      await seedTransfer({ id: "xfr_exact_authorized", status: "confirmed" });
       await seedTransfer({
         id: "xfr_legacy_authorized",
         status: "confirmed",
@@ -846,8 +847,40 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(response.status).toBe(200);
-      const body = (await response.json()) as { data: Array<{ id: string }> };
-      expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_legacy_authorized"]);
+      const body = (await response.json()) as {
+        data: Array<{ id: string }>;
+        meta: { total: number };
+      };
+      expect(body.data.map((transfer) => transfer.id)).toEqual(["xfr_exact_authorized"]);
+      expect(body.meta.total).toBe(1);
+      const nextPage = await app.request(
+        "/v1/payments/transfers?includeObserved=false&pageSize=1&page=2",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(nextPage.status).toBe(200);
+      expect(await nextPage.json()).toMatchObject({ data: [], meta: { total: 1 } });
+      const scopedDetail = await app.request(
+        "/v1/payments/transfers/xfr_legacy_authorized",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(scopedDetail.status).toBe(403);
+
+      await seedCachedKey({ walletScope: "all", walletBindings: [] });
+      const tenantDetail = await app.request(
+        "/v1/payments/transfers/xfr_legacy_authorized",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(tenantDetail.status).toBe(200);
+      const tenantList = await app.request(
+        "/v1/payments/transfers?includeObserved=false",
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(tenantList.status).toBe(200);
+      expect(await tenantList.json()).toMatchObject({ meta: { total: 3 } });
     });
 
     it("returns no rows when selected wallets grant no payments:read access", async () => {

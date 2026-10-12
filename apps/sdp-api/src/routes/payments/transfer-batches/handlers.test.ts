@@ -942,8 +942,20 @@ describe("payment transfer batches", () => {
     expect(detailBody.error.code).toBe("CONFLICT");
   });
 
-  it("keeps authorized legacy null-pin batches visible to selected keys", async () => {
+  it("excludes null-pin batches from scoped history while preserving tenant-wide reads", async () => {
     await getDb(env).batch([
+      getDb(env)
+        .prepare(`INSERT INTO payment_transfer_batches
+          (id, organization_id, project_id, source_custody_wallet_id,
+           source_wallet_id, source_address, token)
+          VALUES ('xbatch_exact_authorized', ?, ?, ?, ?, ?, 'SOL')`)
+        .bind(
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_CUSTODY_WALLET_ID,
+          TEST_WALLET_ID,
+          TEST_SOLANA_ADDRESSES.wallet1
+        ),
       getDb(env)
         .prepare(
           `INSERT INTO payment_transfer_batches
@@ -984,8 +996,39 @@ describe("payment transfer batches", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { data: Array<{ id: string }> };
-    expect(body.data.map((batch) => batch.id)).toEqual(["xbatch_legacy_authorized"]);
+    const body = (await response.json()) as {
+      data: Array<{ id: string }>;
+      meta: { total: number };
+    };
+    expect(body.data.map((batch) => batch.id)).toEqual(["xbatch_exact_authorized"]);
+    expect(body.meta.total).toBe(1);
+    const nextPage = await app.request(
+      "/v1/payments/transfer-batches?pageSize=1&page=2",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(nextPage.status).toBe(200);
+    expect(await nextPage.json()).toMatchObject({ data: [], meta: { total: 1 } });
+    const scopedDetail = await app.request(
+      "/v1/payments/transfer-batches/xbatch_legacy_authorized",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(scopedDetail.status).toBe(403);
+    await seedCachedApiKey(env, keyHash, TEST_CACHED_API_KEY);
+    const tenantDetail = await app.request(
+      "/v1/payments/transfer-batches/xbatch_legacy_authorized",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(tenantDetail.status).toBe(200);
+    const tenantList = await app.request(
+      "/v1/payments/transfer-batches",
+      { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(tenantList.status).toBe(200);
+    expect(await tenantList.json()).toMatchObject({ meta: { total: 3 } });
   });
 
   it("keeps exact persisted batch history readable after the wallet becomes inactive", async () => {

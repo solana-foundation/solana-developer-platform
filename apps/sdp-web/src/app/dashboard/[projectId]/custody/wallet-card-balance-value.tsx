@@ -15,7 +15,7 @@ const WALLET_BALANCE_CACHE_TTL_MS = 30_000;
 
 interface WalletCardBalanceValueProps {
   walletId: string;
-  initialBalances: CustodyWalletTokenBalance[];
+  initialBalances?: CustodyWalletTokenBalance[];
 }
 
 export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
@@ -35,7 +35,7 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     {
       key: "wallet-card-balances",
       ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
-      version: 2,
+      version: 3,
     }
   );
   const batchFailed =
@@ -54,6 +54,7 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     },
     {
       key: `wallet-card-balance-fallback.${walletId}`,
+      version: 2,
       ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
     }
   );
@@ -62,12 +63,13 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     ? (fallbackBalances ?? batchBalances?.[walletId] ?? initialBalances)
     : (batchBalances?.[walletId] ?? initialBalances);
   const hasError = batchFailed && (fallbackBalances === undefined || Boolean(fallbackError));
-  const totalBalance = resolveTotalBalance(balances);
+  if (balances === undefined || hasError) {
+    return <span className="font-medium text-muted">{t("DashboardCustody.unavailable")}</span>;
+  }
 
   return (
-    <span className={`font-medium ${hasError ? "text-muted" : "text-primary"}`}>
-      {formatCurrencyAmount(totalBalance)}
-      {hasError ? <span className="sr-only"> {t("DashboardCustody.stale")}</span> : null}
+    <span className="font-medium text-primary">
+      {formatCurrencyAmount(resolveTotalBalance(balances))}
     </span>
   );
 }

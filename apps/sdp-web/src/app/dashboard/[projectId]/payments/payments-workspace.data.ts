@@ -37,6 +37,7 @@ import {
 } from "@/lib/compliance";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { parseWalletBalanceResponse } from "@/lib/wallet-balance-response";
 import {
   type PaymentApiErrorBody as ApiErrorBody,
   getPaymentApiError as getApiError,
@@ -55,7 +56,8 @@ export interface PaymentWalletBalance {
 }
 
 export interface PaymentWalletBalancesSnapshot {
-  walletId: string;
+  custodyWalletId: string;
+  walletId?: string;
   address: string;
   balances: PaymentWalletBalance[];
 }
@@ -258,35 +260,6 @@ interface WalletBalancesEnvelope {
   };
 }
 
-function resolveWalletBalancesSnapshot(
-  envelope: WalletBalancesEnvelope
-): PaymentWalletBalancesSnapshot | null {
-  if (
-    envelope.data &&
-    "walletBalances" in envelope.data &&
-    envelope.data.walletBalances &&
-    typeof envelope.data.walletBalances.walletId === "string"
-  ) {
-    return envelope.data.walletBalances;
-  }
-
-  if (
-    envelope.data &&
-    "walletId" in envelope.data &&
-    typeof envelope.data.walletId === "string" &&
-    typeof envelope.data.address === "string" &&
-    Array.isArray(envelope.data.balances)
-  ) {
-    return {
-      walletId: envelope.data.walletId,
-      address: envelope.data.address,
-      balances: envelope.data.balances,
-    };
-  }
-
-  return null;
-}
-
 export async function fetchTransfers(
   options: {
     pageSize: number;
@@ -454,12 +427,7 @@ export async function fetchWalletBalances(
     );
   }
 
-  const snapshot = resolveWalletBalancesSnapshot(body);
-  if (!snapshot) {
-    throw new Error(t("DashboardPayments.workspace.walletBalancesMissing"));
-  }
-
-  return snapshot;
+  return parseWalletBalanceResponse(body, walletId);
 }
 
 export interface CreateTransferInput {

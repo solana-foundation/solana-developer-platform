@@ -17,6 +17,7 @@ export function filterWallets(
   return wallets.filter((wallet) => {
     const searchableText = [
       wallet.label,
+      wallet.id,
       wallet.walletId,
       wallet.publicKey,
       wallet.provider,

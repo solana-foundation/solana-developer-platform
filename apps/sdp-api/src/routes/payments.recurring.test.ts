@@ -560,6 +560,63 @@ describe("Payments routes — recurring", () => {
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
   });
 
+  it("excludes null-pin recurring history for scoped keys and retains tenant-wide reads", async () => {
+    const exact = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const legacy = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL WHERE id = ?")
+      .bind(legacy.id)
+      .run();
+    await seedCachedKey({
+      walletScope: "selected",
+      walletBindings: [
+        {
+          walletId: TEST_WALLET_ID,
+          custodyWalletId: TEST_CUSTODY_WALLET_ID,
+          permissions: ["payments:read"],
+        },
+      ],
+    });
+    const selected = await app.request(
+      "/v1/payments/recurring-payments",
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect(selected.status).toBe(200);
+    const selectedBody = successResponseSchema(paymentRecurringPaymentListResponseSchema).parse(
+      await selected.json()
+    );
+    expect(selectedBody.data.total).toBe(1);
+    expect(selectedBody.data.recurringPayments.map((row) => row.id)).toEqual([exact.id]);
+    const nextPage = await app.request(
+      "/v1/payments/recurring-payments?pageSize=1&page=2",
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect(nextPage.status).toBe(200);
+    expect(await nextPage.json()).toMatchObject({ data: { recurringPayments: [], total: 1 } });
+    const scopedDetail = await app.request(
+      `/v1/payments/recurring-payments/${legacy.id}`,
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect(scopedDetail.status).toBe(404);
+    await seedCachedKey({ walletScope: "all", walletBindings: [] });
+    const tenantDetail = await app.request(
+      `/v1/payments/recurring-payments/${legacy.id}`,
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect(tenantDetail.status).toBe(200);
+    const tenantList = await app.request(
+      "/v1/payments/recurring-payments",
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect(tenantList.status).toBe(200);
+    expect(await tenantList.json()).toMatchObject({ data: { total: 2 } });
+  });
+
   it("fails closed before signing when a recurring payment has no exact wallet pin", async () => {
     const recurringPaymentId = (
       await createRecurringPaymentFixture({

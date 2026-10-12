@@ -69,6 +69,20 @@ export interface SponsorshipReservation {
   attempt: number;
 }
 
+/** Retained evidence needed to prove one transaction's original accounting identity. */
+export interface SponsorshipReservationEvidence extends SponsorshipReservation {
+  network: SponsorshipNetwork;
+  productEnvironment: "sandbox" | "production";
+  organizationId: string;
+  projectId: string | null;
+  actorType: string;
+  actorId: string;
+  transactionDigest: string;
+  feePayer: string;
+  providerConfigFingerprint: string;
+  recentBlockhash: string;
+}
+
 export type SignaturePersistResult = "persisted" | "stale" | "duplicate_signature";
 
 function isDuplicateSignatureError(error: unknown): boolean {
@@ -295,6 +309,80 @@ export class SponsorshipBudgetRepository {
           attempt: row.attempt,
         }
       : null;
+  }
+
+  async findReservationEvidence(
+    input: {
+      organizationId: string;
+      projectId: string | null;
+    } & (
+      | { transactionDigest: string; reservationId?: string }
+      | { transactionDigest?: undefined; reservationId: string }
+    )
+  ): Promise<SponsorshipReservationEvidence[]> {
+    if (input.transactionDigest === undefined && !input.reservationId) {
+      throw new Error(
+        "Accounting lookup requires a transaction message or retained reservation ID"
+      );
+    }
+    // An ID-only lookup still detects competing same-message reservations.
+    const digest =
+      input.transactionDigest === undefined
+        ? "(SELECT transaction_digest FROM sponsorship_budget_reservations WHERE id = ?)"
+        : "?";
+    const rows = await this.db.queryMany<{
+      id: string;
+      network: SponsorshipNetwork;
+      product_environment: "sandbox" | "production";
+      organization_id: string;
+      project_id: string | null;
+      actor_type: string;
+      actor_id: string;
+      transaction_digest: string;
+      fee_payer: string;
+      provider_config_fingerprint: string;
+      recent_blockhash: string;
+      status: SponsorshipReservationStatus;
+      signature: string | null;
+      signed_transaction: string | null;
+      reserved_lamports: number;
+      actual_lamports: number | null;
+      attempt: number;
+    }>(
+      `SELECT id, network, product_environment, organization_id, project_id,
+              actor_type, actor_id, transaction_digest, fee_payer,
+              provider_config_fingerprint, recent_blockhash, status, signature,
+              signed_transaction, reserved_lamports, actual_lamports, attempt
+       FROM sponsorship_budget_reservations
+       WHERE (organization_id = ? AND project_id IS NOT DISTINCT FROM ?
+              AND transaction_digest = ${digest}) OR id = ?
+       ORDER BY id LIMIT 2`,
+      [
+        input.organizationId,
+        input.projectId,
+        input.transactionDigest ?? input.reservationId,
+        input.reservationId ?? null,
+      ]
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      network: row.network,
+      productEnvironment: row.product_environment,
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      actorType: row.actor_type,
+      actorId: row.actor_id,
+      transactionDigest: row.transaction_digest,
+      feePayer: row.fee_payer,
+      providerConfigFingerprint: row.provider_config_fingerprint,
+      recentBlockhash: row.recent_blockhash,
+      status: row.status,
+      signature: row.signature,
+      signedTransaction: row.signed_transaction,
+      reservedLamports: row.reserved_lamports,
+      actualLamports: row.actual_lamports,
+      attempt: row.attempt,
+    }));
   }
 
   async reopenReleasedReservation(

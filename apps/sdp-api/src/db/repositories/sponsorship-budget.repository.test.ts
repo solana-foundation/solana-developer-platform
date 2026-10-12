@@ -55,6 +55,71 @@ describe("SponsorshipBudgetRepository", () => {
     await insertPolicy({ id: "project_default", scopeType: "project", scopeId: null });
   });
 
+  it("looks up retained message evidence without collapsing conflicting actors or scope", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.createReservation(reservationInput("sbr_legacy"));
+    await repository.createReservation({
+      ...reservationInput("sbr_exact"),
+      actorType: "wallet",
+      actorId: "cwlt_1",
+    });
+    await repository.createReservation({
+      ...reservationInput("sbr_foreign"),
+      projectId: "project_other",
+    });
+    const candidates = await repository.findReservationEvidence({
+      organizationId: "org_1",
+      projectId: "project_1",
+      transactionDigest: "digest_1",
+    });
+    expect(candidates.map((row) => row.id).sort()).toEqual(["sbr_exact", "sbr_legacy"]);
+    await expect(
+      repository.findReservationEvidence({
+        organizationId: "org_1",
+        projectId: "project_1",
+        reservationId: "sbr_legacy",
+      })
+    ).resolves.toEqual(candidates);
+    expect(candidates[0]).toMatchObject({
+      organizationId: "org_1",
+      projectId: "project_1",
+      network: "devnet",
+      productEnvironment: "sandbox",
+      transactionDigest: "digest_1",
+      feePayer: "fee_payer_1",
+      providerConfigFingerprint: "config_1",
+      attempt: 1,
+    });
+    await expect(
+      repository.findReservationEvidence({
+        organizationId: "org_other",
+        projectId: "project_1",
+        transactionDigest: "digest_1",
+      })
+    ).resolves.toEqual([]);
+  });
+
+  it("retains a stored ID's contrary evidence so the caller can refuse a stale linkage", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.createReservation({
+      ...reservationInput("sbr_other_scope"),
+      projectId: "project_other",
+    });
+    const candidates = await repository.findReservationEvidence({
+      organizationId: "org_1",
+      projectId: "project_1",
+      transactionDigest: "missing-message",
+      reservationId: "sbr_other_scope",
+    });
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        id: "sbr_other_scope",
+        projectId: "project_other",
+        transactionDigest: "digest_1",
+      }),
+    ]);
+  });
+
   it("prefers exact tenant policies and falls back independently at each scope", async () => {
     await insertPolicy({
       id: "org_exact",

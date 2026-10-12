@@ -382,9 +382,7 @@ export function RecurringPaymentsWorkspace({
                         <TableCell className="hidden text-sm text-secondary lg:table-cell">
                           {wallet && custodyEnabled ? (
                             <EntityLink
-                              href={href(
-                                `/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`
-                              )}
+                              href={href(`/dashboard/wallets/${encodeURIComponent(wallet.id)}`)}
                               onClick={(event) => event.stopPropagation()}
                             >
                               {getWalletLabel(recurringPayment)}

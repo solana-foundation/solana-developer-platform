@@ -148,7 +148,7 @@ describe("wallets overview search", () => {
   it("keeps the provider catalog out of the existing wallet list", () => {
     const html = renderOverview("", {});
     expect(html).not.toContain("data-provider-selection-card");
-    expect(html).toContain('data-wallet-card="wallet-treasury"');
+    expect(html).toContain('data-wallet-card="wallet-row-1"');
   });
 
   it("shows the catalog without creation actions for read-only members", () => {
@@ -164,8 +164,8 @@ describe("wallets overview search", () => {
     expect(html.match(/data-wallet-search-toolbar="true"/g)).toHaveLength(1);
     expect(html).toContain("flex-col gap-3 sm:flex-row");
     expect(html).toContain('value="treasury"');
-    expect(html).toContain('data-wallet-card="wallet-treasury"');
-    expect(html).not.toContain('data-wallet-card="wallet-issuer"');
+    expect(html).toContain('data-wallet-card="wallet-row-1"');
+    expect(html).not.toContain('data-wallet-card="wallet-row-2"');
     expect(html).not.toContain('data-wallet-create-tile="true"');
     expect(html).toContain("Showing 1 of 2 wallets");
   });

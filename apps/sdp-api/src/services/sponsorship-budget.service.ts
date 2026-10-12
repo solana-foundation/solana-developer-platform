@@ -27,6 +27,7 @@ import {
   SponsorshipBudgetRepository,
   type SponsorshipNetwork,
   type SponsorshipReservation,
+  type SponsorshipReservationEvidence,
   type SponsorshipReservationStatus,
   sponsorshipNetworkForCluster,
 } from "@/db/repositories/sponsorship-budget.repository";
@@ -63,7 +64,8 @@ type BudgetRepository = Pick<
   | "settleReservation"
   | "markRedisSettled"
   | "tripGlobalBreaker"
->;
+> &
+  Partial<Pick<SponsorshipBudgetRepository, "findReservationEvidence">>;
 
 export function getFullySignedSubmission(decoded: Transaction): OwnedSignedSubmission {
   try {
@@ -84,6 +86,7 @@ export interface BudgetedFeePaymentDependencies {
   budgetRedis?: BudgetRedis;
   getNetworkFee?: (transaction: Uint8Array) => Promise<bigint>;
   now?: () => Date;
+  providerForActor?: (actor: SponsorshipScope["actor"]) => FeePaymentPort;
 }
 
 type AdmissionOperation = "sign" | "send";
@@ -97,6 +100,7 @@ type AdmissionResult = {
   settlement: AdmissionSettlement | null;
   feePayer: Address;
   requested: Transaction;
+  provider?: FeePaymentPort;
 };
 type DurableAdmission =
   | { kind: "owned" | "replay"; result: AdmissionResult }
@@ -112,6 +116,7 @@ type AdmissionContext = {
   recentBlockhash: string;
   hourBucket: string;
   dayBucket: string;
+  actor: SponsorshipScope["actor"];
 };
 
 /**
@@ -208,6 +213,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   private readonly budgetRedis: BudgetRedis;
   private readonly getNetworkFee: (transaction: Uint8Array) => Promise<bigint>;
   private readonly now: () => Date;
+  private readonly providerForActor: BudgetedFeePaymentDependencies["providerForActor"];
 
   constructor(
     private readonly env: Env,
@@ -224,10 +230,24 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       ((transaction) =>
         getTransactionNetworkFee(createNetworkFeeRpc(this.env, this.scope), transaction));
     this.now = dependencies.now ?? (() => new Date());
+    this.providerForActor = dependencies.providerForActor;
   }
 
-  getFeePayer(): Promise<Address> {
-    return this.provider.getFeePayer();
+  async getFeePayer(): Promise<Address> {
+    const actor = this.scope.continuity
+      ? (await this.resolveAccountingContinuity()).actor
+      : this.scope.actor;
+    return this.accountingProvider(actor).getFeePayer();
+  }
+
+  private accountingProvider(actor: SponsorshipScope["actor"]): FeePaymentPort {
+    const provider =
+      actor.type === this.scope.actor.type && actor.id === this.scope.actor.id
+        ? this.provider
+        : this.providerForActor?.(actor);
+    if (!provider)
+      throw new FeePaymentError("Original sponsorship actor unavailable", "PROVIDER_NOT_AVAILABLE");
+    return provider;
   }
 
   private async verifySponsorResponse(
@@ -305,7 +325,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     let signed: Uint8Array;
     try {
-      signed = await this.provider.signAsFeePayer(transaction);
+      signed = await (reservation.provider ?? this.provider).signAsFeePayer(transaction);
     } catch (error) {
       if (isStructuredProviderRejection(error)) {
         // Kora answered with a policy verdict, so nothing was signed and the
@@ -373,7 +393,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     let signedTransaction: Uint8Array;
     try {
-      signedTransaction = await this.provider.signAsFeePayer(transaction);
+      signedTransaction = await (reservation.provider ?? this.provider).signAsFeePayer(transaction);
     } catch (error) {
       await this.markAmbiguous(reservation, error);
       throw error;
@@ -465,7 +485,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     let signature: Signature;
     try {
-      signature = await this.provider.signAndSend(transaction);
+      signature = await (reservation.provider ?? this.provider).signAndSend(transaction);
     } catch (error) {
       if (isDeterministicProviderRejection(error)) {
         await this.releaseDeterministic(reservation, error);
@@ -506,19 +526,198 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     transaction: Uint8Array,
     operation: AdmissionOperation
   ): Promise<AdmissionResult> {
-    const context = await this.prepareAdmission(transaction);
-    const durableReservation = await this.readReservation(context);
+    const continuation = this.scope.continuity
+      ? await this.resolveAccountingContinuity(transaction)
+      : null;
+    const actor = continuation?.actor ?? this.scope.actor;
+    const provider = this.accountingProvider(actor);
+    const context = await this.prepareAdmission(transaction, actor, provider);
+    const durableReservation = continuation?.reservation ?? (await this.readReservation(context));
+    if (
+      continuation?.reservation &&
+      (continuation.reservation.id !== context.id ||
+        continuation.reservation.feePayer !== context.feePayer ||
+        continuation.reservation.providerConfigFingerprint !== context.providerConfigFingerprint)
+    ) {
+      throw new FeePaymentError(
+        "Sponsorship security configuration changed",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
     const durableReplay = this.resolveDurableReplay(context, operation, durableReservation);
-    if (durableReplay) return durableReplay;
     const attempt =
       durableReservation?.status === "released"
         ? durableReservation.attempt + 1
         : (durableReservation?.attempt ?? 1);
-    return this.admitAgainstCurrentPolicy(context, operation, attempt);
+    const admitted =
+      durableReplay ?? (await this.admitAgainstCurrentPolicy(context, operation, attempt));
+    admitted.provider = provider;
+    if (this.scope.continuity) {
+      try {
+        await this.scope.continuity.persistAccountingIdentity({
+          reservationId: admitted.id,
+          attempt: admitted.attempt,
+          network: context.network,
+          environment: this.scope.environment,
+          organizationId: this.scope.organizationId,
+          projectId: this.scope.projectId,
+          actor: context.actor,
+          transactionDigest: context.transactionDigest,
+          feePayer: context.feePayer,
+          providerConfigFingerprint: context.providerConfigFingerprint,
+        });
+      } catch (error) {
+        if (!admitted.replay) await this.releaseDeterministic(admitted, error);
+        throw error;
+      }
+    }
+    return admitted;
   }
 
-  private async prepareAdmission(transaction: Uint8Array): Promise<AdmissionContext> {
-    if (!this.provider.getSponsorshipConfiguration) {
+  private async resolveAccountingContinuity(transaction?: Uint8Array): Promise<{
+    actor: SponsorshipScope["actor"];
+    reservation: SponsorshipReservationEvidence | null;
+  }> {
+    const continuity = this.scope.continuity;
+    if (continuity && continuity.deploymentMode !== "managed") {
+      throw new FeePaymentError(
+        "Deployment mode conflicts with retained sponsorship evidence",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    if (!continuity || !this.repository.findReservationEvidence) {
+      throw new FeePaymentError(
+        "Sponsorship accounting lookup unavailable",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    const decoded = transaction === undefined ? null : getTransactionDecoder().decode(transaction);
+    const messageDigest = decoded
+      ? createHash("sha256").update(new Uint8Array(decoded.messageBytes)).digest("hex")
+      : undefined;
+    const reservationId = continuity.reservationId;
+    const actors = [continuity.legacyActor, continuity.exactActor];
+    if (
+      !actors.some(
+        (actor) => actor.type === this.scope.actor.type && actor.id === this.scope.actor.id
+      )
+    ) {
+      throw new FeePaymentError(
+        "Sponsorship actor does not belong to this operation",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    const permittedNewAccounting = () => {
+      if (reservationId || continuity.admission === "continue_only") {
+        throw new FeePaymentError(
+          "Sponsorship accounting absence is not authorized for admission",
+          "PROVIDER_NOT_AVAILABLE"
+        );
+      }
+      if (
+        continuity.admission === "legacy_new" &&
+        (this.scope.actor.type !== continuity.legacyActor.type ||
+          this.scope.actor.id !== continuity.legacyActor.id)
+      ) {
+        throw new FeePaymentError(
+          "New custody actors require writer retirement",
+          "PROVIDER_NOT_AVAILABLE"
+        );
+      }
+      return { actor: this.scope.actor, reservation: null };
+    };
+    // Without a message or retained ID an existing operation cannot prove its actor.
+    if (messageDigest === undefined && reservationId === undefined) return permittedNewAccounting();
+    let candidates: SponsorshipReservationEvidence[];
+    try {
+      const scope = { organizationId: this.scope.organizationId, projectId: this.scope.projectId };
+      if (messageDigest !== undefined) {
+        candidates = await this.repository.findReservationEvidence({
+          ...scope,
+          transactionDigest: messageDigest,
+          reservationId,
+        });
+      } else {
+        if (!reservationId) throw new Error("Retained reservation ID is required");
+        candidates = await this.repository.findReservationEvidence({ ...scope, reservationId });
+      }
+    } catch (error) {
+      return this.accountingUnavailable(
+        this.network,
+        "Sponsorship accounting continuity is unavailable",
+        "Accounting evidence lookup failed",
+        error
+      );
+    }
+    if (candidates.length > 1) {
+      throw new FeePaymentError(
+        "Conflicting sponsorship accounting evidence",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    const reservation = candidates[0];
+    if (!reservation) return permittedNewAccounting();
+    const transactionDigest = messageDigest ?? reservation.transactionDigest;
+    const feePayer = decoded
+      ? getCompiledTransactionMessageDecoder().decode(decoded.messageBytes).staticAccounts[0]
+      : reservation.feePayer;
+    const actor = actors.find(
+      (candidate) =>
+        candidate.type === reservation.actorType && candidate.id === reservation.actorId
+    );
+    const expectedId = actor
+      ? `sbr_${createHash("sha256")
+          .update(
+            JSON.stringify({
+              network: this.network,
+              productEnvironment: this.scope.environment,
+              organizationId: this.scope.organizationId,
+              projectId: this.scope.projectId,
+              actor,
+              feePayer,
+              transactionDigest,
+            })
+          )
+          .digest("hex")}`
+      : null;
+    if (
+      !actor ||
+      reservation.id !== expectedId ||
+      (continuity.reservationId !== undefined && continuity.reservationId !== reservation.id) ||
+      reservation.organizationId !== this.scope.organizationId ||
+      reservation.projectId !== this.scope.projectId ||
+      reservation.network !== this.network ||
+      reservation.productEnvironment !== this.scope.environment ||
+      reservation.transactionDigest !== transactionDigest ||
+      reservation.feePayer !== feePayer ||
+      (transaction !== undefined && reservation.recentBlockhash !== getRecentBlockhash(transaction))
+    ) {
+      throw new FeePaymentError(
+        "Sponsorship accounting identity conflicts with operation evidence",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    if (reservation.status === "charged_unknown") {
+      throw new FeePaymentError(
+        "Previous sponsorship outcome is ambiguous and cannot be retried safely",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    if (reservation.status === "reserved") {
+      throw new FeePaymentError(
+        "An identical sponsorship operation is already in progress",
+        "PROVIDER_NOT_AVAILABLE"
+      );
+    }
+    return { actor, reservation };
+  }
+
+  private async prepareAdmission(
+    transaction: Uint8Array,
+    actor: SponsorshipScope["actor"] = this.scope.actor,
+    provider: FeePaymentPort = this.provider
+  ): Promise<AdmissionContext> {
+    if (!provider.getSponsorshipConfiguration) {
       throw new FeePaymentError(
         "Managed sponsorship provider does not expose fail-closed configuration",
         "PROVIDER_NOT_AVAILABLE"
@@ -531,7 +730,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     let networkFee: bigint;
     try {
       [providerConfig, networkFee] = await Promise.all([
-        this.provider.getSponsorshipConfiguration(),
+        provider.getSponsorshipConfiguration(),
         this.getNetworkFee(transaction),
       ]);
     } catch (error) {
@@ -565,7 +764,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
           productEnvironment: this.scope.environment,
           organizationId: this.scope.organizationId,
           projectId: this.scope.projectId,
-          actor: this.scope.actor,
+          actor,
           feePayer: providerConfig.signerAddress,
           transactionDigest,
         })
@@ -583,6 +782,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       recentBlockhash,
       hourBucket: buckets.hour,
       dayBucket: buckets.day,
+      actor,
     };
   }
 
@@ -769,8 +969,8 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       productEnvironment: this.scope.environment,
       organizationId: this.scope.organizationId,
       projectId: this.scope.projectId,
-      actorType: this.scope.actor.type,
-      actorId: this.scope.actor.id,
+      actorType: context.actor.type,
+      actorId: context.actor.id,
       transactionDigest: context.transactionDigest,
       feePayer: context.feePayer,
       providerConfigFingerprint: context.providerConfigFingerprint,

@@ -106,7 +106,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     return { account, counterparty };
   }
 
-  it("persists exact source identities and authorizes Provider IDs only for legacy rows", async () => {
+  it("persists exact source identities and filters mixed history before pagination", async () => {
     const { account, counterparty } = await seedCounterpartyAccount();
     const createdAt = "2026-06-29T12:00:00.000Z";
     const create = (id: string, sourceCustodyWalletId: string) =>
@@ -184,10 +184,47 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     if (attempt === null) throw new Error("Failed to create recurring payment update attempt");
     expect(exact.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
     expect(attempt.new_source_custody_wallet_id).toBe(TEST_SIBLING_CUSTODY_WALLET_ID);
-    expect(authorized.rows.map((row) => row.id).sort()).toEqual([
-      "recpay_repo_exact_filter",
-      "recpay_repo_legacy_filter",
-    ]);
+    expect(authorized.total).toBe(1);
+    expect(authorized.rows.map((row) => row.id)).toEqual(["recpay_repo_exact_filter"]);
+    const nextPage = await repo.listRecurringPayments({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      walletAuthorization: {
+        custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
+        providerWalletIds: [TEST_PROVIDER_WALLET_ID],
+      },
+      limit: 1,
+      offset: 1,
+    });
+    expect(nextPage).toEqual({ rows: [], total: 1 });
+    const providerOnly = await repo.listRecurringPayments({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [TEST_PROVIDER_WALLET_ID] },
+      limit: 20,
+      offset: 0,
+    });
+    expect(providerOnly).toEqual({ rows: [], total: 0 });
+    const tenantWide = await repo.listRecurringPayments({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      walletAuthorization: null,
+      limit: 20,
+      offset: 0,
+    });
+    expect(tenantWide.total).toBe(3);
+    expect(tenantWide.rows).toHaveLength(3);
+    await expect(
+      repo.getRecurringPaymentById({
+        recurringPaymentId: "recpay_repo_legacy_filter",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        walletAuthorization: {
+          custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
+          providerWalletIds: [TEST_PROVIDER_WALLET_ID],
+        },
+      })
+    ).resolves.toBeNull();
     await expect(
       repo.getRecurringPaymentById({
         recurringPaymentId: "recpay_repo_sibling_filter",

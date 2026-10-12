@@ -75,6 +75,7 @@ import {
 } from "@/app/dashboard/[projectId]/payments/transactions/transactions-page.data.redesign";
 import { parseTransactionFilters } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query.redesign";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { parseWalletBalanceResponse } from "@/lib/wallet-balance-response";
 import { paymentsDemoBody } from "./demo-fixtures";
 
 /*
@@ -409,6 +410,22 @@ describe("demo world", () => {
 });
 
 describe("Payments overview", () => {
+  it("returns exact identity and the actual provider reference through the balance consumer", async () => {
+    const wallets = await fetchPaymentsWallets(harness.request, { includeBalances: true });
+    const wallet = wallets.data?.[0];
+    expect(wallet).toBeDefined();
+    if (!wallet) throw new Error("Missing demo wallet");
+    const body = paymentsDemoBody(
+      `/v1/payments/wallets/${wallet.id}/balances`,
+      RAMP_PROVIDERS,
+      NOW
+    );
+    const parsed = parseWalletBalanceResponse(body, wallet.id);
+    expect(parsed.custodyWalletId).toBe(wallet.id);
+    expect(parsed.walletId).toBe(wallet.walletId);
+    expect(parsed.walletId).not.toBe(parsed.custodyWalletId);
+  });
+
   it("answers the balance with the sum of the wallets", async () => {
     const wallets = await fetchPaymentsWallets(harness.request, { includeBalances: true });
     expect(wallets.ok).toBe(true);

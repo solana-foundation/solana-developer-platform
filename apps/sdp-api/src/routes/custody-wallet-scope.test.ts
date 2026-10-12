@@ -1163,7 +1163,7 @@ describe("Custody wallet scope routes", () => {
     expect(body.data.publicKey).toBe(SEEDED_PUBLIC_KEYS.paraA);
   });
 
-  it("rejects custody record IDs on public command selectors", async () => {
+  it("accepts exact IDs for balances while preserving the public-key command selector", async () => {
     await seedCachedKey({
       walletScope: "selected",
       signingWalletId: "para_wallet_a",
@@ -1178,7 +1178,7 @@ describe("Custody wallet scope routes", () => {
 
     const requests = [
       ["/v1/wallets/public-key?walletId=cwlt_scope_para_a", 404],
-      ["/v1/payments/wallets/cwlt_scope_para_a/balances", 403],
+      ["/v1/payments/wallets/cwlt_scope_para_a/balances", 200],
     ] as const;
 
     for (const [path, expectedStatus] of requests) {

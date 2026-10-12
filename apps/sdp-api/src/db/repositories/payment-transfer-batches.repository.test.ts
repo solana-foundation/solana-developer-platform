@@ -185,7 +185,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     ).toBeNull();
   });
 
-  it("filters batches by exact wallet and exact-wallet allowlist", async () => {
+  it("filters mixed batches by exact pins before pagination and counts", async () => {
     const db = getDb(env);
     await repo.createTransferBatchWithRecipients({
       batch: {
@@ -224,23 +224,35 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     const authorizationDenied = await repo.listTransferBatches({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
+      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [TEST_WALLET_ID] },
       limit: 20,
       offset: 0,
     });
 
     expect(selected.rows).toHaveLength(1);
     expect(selected.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    expect(authorized.rows).toHaveLength(2);
-    expect(authorized.rows).toContainEqual(
-      expect.objectContaining({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID })
-    );
-    expect(authorized.rows).toContainEqual(
-      expect.objectContaining({
-        source_custody_wallet_id: null,
-        source_wallet_id: TEST_WALLET_ID,
-      })
-    );
+    expect(authorized.total).toBe(1);
+    expect(authorized.rows).toHaveLength(1);
+    expect(authorized.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    const nextPage = await repo.listTransferBatches({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      walletAuthorization: {
+        custodyWalletIds: [TEST_CUSTODY_WALLET_ID],
+        providerWalletIds: [TEST_WALLET_ID],
+      },
+      limit: 1,
+      offset: 1,
+    });
+    expect(nextPage).toEqual({ rows: [], total: 1 });
+    const tenantWide = await repo.listTransferBatches({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      limit: 20,
+      offset: 0,
+    });
+    expect(tenantWide.total).toBe(2);
+    expect(tenantWide.rows).toHaveLength(2);
     expect(authorizationDenied).toEqual({ rows: [], total: 0 });
   });
 });

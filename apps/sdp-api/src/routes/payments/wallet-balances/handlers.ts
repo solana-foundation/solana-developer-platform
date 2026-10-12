@@ -92,6 +92,7 @@ export async function getWalletBalances(c: AppContext) {
   return success(c, {
     ...(minimumSlot === undefined ? {} : { balanceReadContext: { minimumSlot } }),
     walletBalances: {
+      custodyWalletId: wallet.id,
       walletId: wallet.walletId,
       address: wallet.publicKey,
       balances,

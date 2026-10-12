@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   createFeePaymentAdapter,
   FeePaymentError,
@@ -6,9 +7,10 @@ import {
   type SponsorshipProviderConfiguration,
 } from "@sdp/payments/fee-payment";
 import type { ProjectEnvironment, SolanaCluster } from "@sdp/types";
-import type { Address, Signature } from "@solana/kit";
+import { type Address, getTransactionDecoder, type Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
@@ -20,6 +22,37 @@ import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budg
 import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
 
 export type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
+
+/** Trusted identity for one managed sponsored transaction message, never a public selector. */
+export interface SponsorshipAccountingIdentity {
+  reservationId: string;
+  attempt: number;
+  network: "devnet" | "mainnet";
+  environment: ProjectEnvironment;
+  organizationId: string;
+  projectId: string | null;
+  actor: SponsorshipScope["actor"];
+  transactionDigest: string;
+  feePayer: string;
+  providerConfigFingerprint: string;
+}
+
+export interface SponsorshipContinuity {
+  /** Retained server-owned execution mode; changing deployment config is not absence proof. */
+  deploymentMode: "managed" | "self_hosted";
+  legacyActor: SponsorshipScope["actor"];
+  exactActor: SponsorshipScope["actor"];
+  /**
+   * `legacy_new` is a genuinely new domain-owned window/message, never an
+   * unlinked old claim. `after_writer_retirement` is a trusted release decision;
+   * successful lookup must still prove absence. Existing work defaults to refusal.
+   */
+  admission: "continue_only" | "legacy_new" | "after_writer_retirement";
+  /** Comes only from retained domain storage and is checked against accounting evidence. */
+  reservationId?: string;
+  /** Domain CAS must fence this specific message/payer/attempt before provider effects. */
+  persistAccountingIdentity(identity: SponsorshipAccountingIdentity): Promise<void>;
+}
 
 export interface SponsorshipScope {
   environment: ProjectEnvironment;
@@ -38,6 +71,7 @@ export interface SponsorshipScope {
    * signed by the devnet paymaster and charged to the devnet budget.
    */
   cluster?: SolanaCluster;
+  continuity?: SponsorshipContinuity;
 }
 
 export interface OwnedSignedSubmission {
@@ -63,7 +97,10 @@ export interface SponsorshipFeePayment extends FeePaymentPort {
   ): Promise<PreparedOwnedSubmission>;
 }
 
-function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeePayment {
+function withOwnedSubmissionLifecycle(
+  provider: FeePaymentPort,
+  assertAccounting?: (transaction: Uint8Array) => Promise<void>
+): SponsorshipFeePayment {
   const getSponsorshipConfiguration = provider.getSponsorshipConfiguration;
   let feePayer: Promise<Address> | undefined;
   const sponsor = () => {
@@ -76,6 +113,7 @@ function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeeP
     return feePayer;
   };
   const signVerified = async (transaction: Uint8Array) => {
+    await assertAccounting?.(transaction);
     const signedTransaction = await provider.signAsFeePayer(transaction);
     const decoded = await assertSponsorSignedSameMessage({
       requested: transaction,
@@ -88,7 +126,10 @@ function withOwnedSubmissionLifecycle(provider: FeePaymentPort): SponsorshipFeeP
     providerId: provider.providerId,
     getFeePayer: () => sponsor(),
     signAsFeePayer: async (transaction) => (await signVerified(transaction)).signedTransaction,
-    signAndSend: (transaction) => provider.signAndSend(transaction),
+    signAndSend: async (transaction) => {
+      await assertAccounting?.(transaction);
+      return provider.signAndSend(transaction);
+    },
     ...(getSponsorshipConfiguration
       ? {
           getSponsorshipConfiguration: () => getSponsorshipConfiguration.call(provider),
@@ -142,13 +183,91 @@ export function createSponsorshipFeePayment(
   env: Env,
   scope: SponsorshipScope
 ): SponsorshipFeePayment {
-  const provider = instrumentVendorPort(
-    resolveFeePaymentProvider(env),
-    createFeePaymentAdapter(env, buildKoraUserId(scope), scope.cluster)
-  );
-  return isSelfHostedDeployment(env)
-    ? withOwnedSubmissionLifecycle(provider)
-    : new BudgetedFeePayment(env, scope, provider);
+  const selfHosted = isSelfHostedDeployment(env);
+  const continuity = scope.continuity;
+  if (continuity && continuity.deploymentMode !== (selfHosted ? "self_hosted" : "managed")) {
+    throw new FeePaymentError(
+      "Deployment mode conflicts with retained sponsorship evidence",
+      "PROVIDER_NOT_AVAILABLE"
+    );
+  }
+  if (
+    continuity &&
+    ![continuity.legacyActor, continuity.exactActor].some(
+      (actor) => actor.type === scope.actor.type && actor.id === scope.actor.id
+    )
+  ) {
+    throw new FeePaymentError(
+      "Sponsorship actor does not belong to this operation",
+      "PROVIDER_NOT_AVAILABLE"
+    );
+  }
+  const initialActor =
+    selfHosted && continuity && continuity.admission !== "after_writer_retirement"
+      ? continuity.legacyActor
+      : scope.actor;
+  const providerId = resolveFeePaymentProvider(env);
+  const providers = new Map<string, FeePaymentPort>();
+  const providerForActor = (actor: SponsorshipScope["actor"]) => {
+    const userId = buildKoraUserId({ ...scope, actor });
+    const cached = providers.get(userId);
+    if (cached) return cached;
+    const created = instrumentVendorPort(
+      providerId,
+      createFeePaymentAdapter(env, userId, scope.cluster)
+    );
+    providers.set(userId, created);
+    return created;
+  };
+  // Continuations prove the retained actor before constructing its provider.
+  // Unrelated callers keep their eager construction behavior.
+  let lazyProvider: FeePaymentPort | undefined;
+  const getProvider = () => (lazyProvider ??= providerForActor(initialActor));
+  const provider: FeePaymentPort = scope.continuity
+    ? {
+        providerId,
+        getFeePayer: () => getProvider().getFeePayer(),
+        signAsFeePayer: (transaction) => getProvider().signAsFeePayer(transaction),
+        signAndSend: (transaction) => getProvider().signAndSend(transaction),
+        getSponsorshipConfiguration: async () => {
+          const selected = getProvider();
+          if (!selected.getSponsorshipConfiguration) {
+            throw new FeePaymentError(
+              "Sponsorship provider configuration unavailable",
+              "PROVIDER_NOT_AVAILABLE"
+            );
+          }
+          return selected.getSponsorshipConfiguration();
+        },
+      }
+    : providerForActor(scope.actor);
+  return selfHosted
+    ? withOwnedSubmissionLifecycle(
+        provider,
+        continuity
+          ? async (transaction) => {
+              const decoded = getTransactionDecoder().decode(transaction);
+              const transactionDigest = createHash("sha256")
+                .update(new Uint8Array(decoded.messageBytes))
+                .digest("hex");
+              const candidates = await new SponsorshipBudgetRepository(
+                getDb(env)
+              ).findReservationEvidence({
+                organizationId: scope.organizationId,
+                projectId: scope.projectId,
+                transactionDigest,
+                reservationId: continuity.reservationId,
+              });
+              if (candidates.length > 0 || continuity.reservationId !== undefined) {
+                throw new FeePaymentError(
+                  "Managed accounting evidence requires a compatible managed reader",
+                  "PROVIDER_NOT_AVAILABLE"
+                );
+              }
+            }
+          : undefined
+      )
+    : new BudgetedFeePayment(env, scope, provider, { providerForActor });
 }
 
 /** Read Kora security configuration through the same owned construction boundary. */
@@ -224,6 +343,7 @@ export async function createProjectSponsorshipFeePayment(
     projectId: string;
     actor: SponsorshipScope["actor"];
     cluster?: SolanaCluster;
+    continuity?: SponsorshipContinuity;
   }
 ): Promise<SponsorshipFeePayment> {
   const project = await new ProjectService(getDb(env)).getProject(input.projectId);
@@ -237,5 +357,6 @@ export async function createProjectSponsorshipFeePayment(
     projectId: project.id,
     actor: input.actor,
     cluster: input.cluster,
+    continuity: input.continuity,
   });
 }

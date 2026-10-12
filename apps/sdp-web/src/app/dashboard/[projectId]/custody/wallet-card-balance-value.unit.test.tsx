@@ -54,7 +54,12 @@ describe("WalletCardBalanceValue", () => {
       "fetch",
       vi.fn(async () =>
         Response.json({
-          data: { wallets: [{ walletId: WALLET_ID }, { walletId: "empty-wallet", balances: [] }] },
+          data: {
+            wallets: [
+              { id: WALLET_ID },
+              { id: "empty-wallet", walletId: "provider-shared", balances: [] },
+            ],
+          },
         })
       )
     );
@@ -69,7 +74,7 @@ describe("WalletCardBalanceValue", () => {
       .mockReturnValueOnce({ data: [balance(10)], error: undefined });
     expect(renderBalance()).toContain("$10.00");
     expect(mockUsePersistedDashboardSWR.mock.calls[1]?.[0]).toBe(
-      `wallet-card-balance-fallback:${WALLET_ID}`
+      `wallet-card-balance-fallback:v2:${WALLET_ID}`
     );
   });
 
@@ -94,13 +99,13 @@ describe("WalletCardBalanceValue", () => {
     const markup = renderBalance();
 
     expect(mockUsePersistedDashboardSWR.mock.calls[1]?.[0]).toBe(
-      `wallet-card-balance-fallback:${WALLET_ID}`
+      `wallet-card-balance-fallback:v2:${WALLET_ID}`
     );
     expect(markup).toContain("$10.00");
     expect(markup).not.toContain("DashboardCustody.stale");
   });
 
-  it("keeps stale data marked when both the shared batch and this wallet fail", () => {
+  it("shows unavailable when both reads fail, even with a cached amount", () => {
     mockUsePersistedDashboardSWR
       .mockReturnValueOnce({
         data: { [WALLET_ID]: [balance(3)] },
@@ -110,7 +115,7 @@ describe("WalletCardBalanceValue", () => {
 
     const markup = renderBalance();
 
-    expect(markup).toContain("$3.00");
-    expect(markup).toContain("DashboardCustody.stale");
+    expect(markup).not.toContain("$3.00");
+    expect(markup).toContain("DashboardCustody.unavailable");
   });
 });

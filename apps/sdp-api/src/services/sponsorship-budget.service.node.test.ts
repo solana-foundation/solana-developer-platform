@@ -1,9 +1,11 @@
 import { FeePaymentError, type FeePaymentPort } from "@sdp/payments/fee-payment";
+import { assertValidAddress } from "@sdp/solana/address";
 import {
   type Blockhash,
   compileTransaction,
   createTransactionMessage,
   getBase58Codec,
+  getBase64Decoder,
   getTransactionEncoder,
   pipe,
   type Signature,
@@ -11,7 +13,10 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
+import type {
+  SponsorshipBudgetPolicy,
+  SponsorshipReservationEvidence,
+} from "@/db/repositories/sponsorship-budget.repository";
 import {
   garbageSignTestTransaction,
   sponsorSignTestTransaction,
@@ -83,6 +88,7 @@ function harness(scope: SponsorshipScope = SCOPE) {
       liveReservations: { hour: [], day: [] },
     }),
     getReservation: vi.fn().mockResolvedValue(null),
+    findReservationEvidence: vi.fn().mockResolvedValue([]),
     createReservation: vi.fn().mockResolvedValue(true),
     reopenReleasedReservation: vi.fn().mockResolvedValue(null),
     markSigned: vi.fn().mockResolvedValue("persisted"),
@@ -111,17 +117,380 @@ function harness(scope: SponsorshipScope = SCOPE) {
     signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
     signAndSend: vi.fn().mockResolvedValue("signature_1" as Signature),
   };
+  const providerForActor = vi.fn().mockReturnValue(provider);
   const feePayment = new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, provider, {
     repository,
     budgetRedis,
     getNetworkFee: vi.fn().mockResolvedValue(5_000n),
     now: () => new Date("2026-08-03T10:15:00.000Z"),
+    providerForActor,
   });
-  return { feePayment, provider, repository, budgetRedis };
+  return { feePayment, provider, repository, budgetRedis, providerForActor };
+}
+
+function continuationScope(persistAccountingIdentity = vi.fn()): SponsorshipScope {
+  return {
+    ...SCOPE,
+    actor: { type: "wallet", id: "cwlt_recipient" },
+    continuity: {
+      deploymentMode: "managed",
+      legacyActor: { type: "wallet", id: "provider_recipient" },
+      exactActor: { type: "wallet", id: "cwlt_recipient" },
+      admission: "continue_only",
+      persistAccountingIdentity,
+    },
+  };
+}
+
+async function recordedLegacyEvidence(): Promise<SponsorshipReservationEvidence> {
+  const legacy = harness({ ...SCOPE, actor: { type: "wallet", id: "provider_recipient" } });
+  const signed = await legacy.feePayment.signAsFeePayer(buildTransaction());
+  const recorded = legacy.repository.createReservation.mock.calls[0]?.[0];
+  if (!recorded) throw new Error("Legacy admission was not recorded");
+  return {
+    ...recorded,
+    status: "signed",
+    attempt: 1,
+    signature: null,
+    signedTransaction: getBase64Decoder().decode(signed),
+    actualLamports: null,
+  };
 }
 
 describe("BudgetedFeePayment", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it.each(["sign", "send", "owned"] as const)(
+    "refuses provider %s when accounting identity cannot be linked durably",
+    async (operation) => {
+      const persistAccountingIdentity = vi.fn().mockRejectedValue(new Error("Claim CAS lost"));
+      const { feePayment, provider, repository } = harness({
+        ...SCOPE,
+        actor: { type: "wallet", id: "cwlt_recipient" },
+        continuity: {
+          deploymentMode: "managed",
+          legacyActor: { type: "wallet", id: "provider_recipient" },
+          exactActor: { type: "wallet", id: "cwlt_recipient" },
+          admission: "after_writer_retirement",
+          persistAccountingIdentity,
+        },
+      });
+
+      const result =
+        operation === "sign"
+          ? feePayment.signAsFeePayer(buildTransaction())
+          : operation === "send"
+            ? feePayment.signAndSend(buildTransaction())
+            : feePayment.prepareOwnedSubmission(buildTransaction(), {
+                persistSigned: vi.fn(),
+                markStarted: vi.fn(),
+                hasStarted: vi.fn(),
+              });
+      await expect(result).rejects.toThrow("Claim CAS lost");
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+      expect(provider.signAndSend).not.toHaveBeenCalled();
+      expect(repository.markReleased).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("keeps a legacy unknown outcome fenced when the same message adopts an exact wallet actor", async () => {
+    const legacy = harness({ ...SCOPE, actor: { type: "wallet", id: "provider_recipient" } });
+    vi.mocked(legacy.provider.signAsFeePayer).mockRejectedValueOnce(new Error("Response lost"));
+    await expect(legacy.feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "Response lost"
+    );
+    const recorded = legacy.repository.createReservation.mock.calls[0]?.[0];
+    if (!recorded) throw new Error("Legacy admission was not recorded");
+    const continued = harness({
+      ...SCOPE,
+      actor: { type: "wallet", id: "cwlt_recipient" },
+      continuity: {
+        deploymentMode: "managed",
+        legacyActor: { type: "wallet", id: "provider_recipient" },
+        exactActor: { type: "wallet", id: "cwlt_recipient" },
+        admission: "continue_only",
+        reservationId: recorded.id,
+        persistAccountingIdentity: vi.fn(),
+      },
+    });
+    continued.repository.findReservationEvidence.mockResolvedValueOnce([
+      {
+        ...recorded,
+        status: "charged_unknown",
+        attempt: 1,
+        signature: null,
+        signedTransaction: null,
+        actualLamports: null,
+      },
+    ]);
+
+    await expect(continued.feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "ambiguous"
+    );
+    expect(continued.provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(continued.repository.createReservation).not.toHaveBeenCalled();
+    expect(continued.repository.markReleased).not.toHaveBeenCalled();
+  });
+
+  it("rejects retained blockhash evidence that disagrees with the claimed message", async () => {
+    const recorded = await recordedLegacyEvidence();
+    const { feePayment, provider, repository } = harness(continuationScope());
+    repository.findReservationEvidence.mockResolvedValueOnce([
+      { ...recorded, recentBlockhash: "another-window" },
+    ]);
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow("conflicts");
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(repository.createReservation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { organizationId: "org_other" },
+    { projectId: "project_other" },
+    { network: "mainnet" },
+    { productEnvironment: "production" },
+    { actorId: "unrelated_wallet" },
+    { transactionDigest: "another-message" },
+    { feePayer: "another-fee-payer" },
+    { providerConfigFingerprint: "another-security-configuration" },
+  ] satisfies Partial<SponsorshipReservationEvidence>[])(
+    "refuses mismatched retained accounting evidence %j",
+    async (mismatch) => {
+      const recorded = await recordedLegacyEvidence();
+      const { feePayment, provider, repository } = harness(continuationScope());
+      repository.findReservationEvidence.mockResolvedValueOnce([{ ...recorded, ...mismatch }]);
+      await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+        code: "PROVIDER_NOT_AVAILABLE",
+      });
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+      expect(repository.createReservation).not.toHaveBeenCalled();
+      expect(repository.markReleased).not.toHaveBeenCalled();
+    }
+  );
+
+  it("does not interpret an unavailable accounting lookup as permission for fresh admission", async () => {
+    const scope = continuationScope();
+    if (!scope.continuity) throw new Error("continuity fixture missing");
+    scope.continuity.admission = "after_writer_retirement";
+    const { feePayment, repository, provider } = harness(scope);
+    repository.findReservationEvidence.mockRejectedValueOnce(new Error("Database unavailable"));
+    await expect(feePayment.signAndSend(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(provider.signAndSend).not.toHaveBeenCalled();
+    expect(repository.createReservation).not.toHaveBeenCalled();
+  });
+
+  it("refuses conflicting legacy and exact accounting candidates before fresh admission", async () => {
+    const recorded = await recordedLegacyEvidence();
+    const { feePayment, repository, provider } = harness(continuationScope());
+    repository.findReservationEvidence.mockResolvedValueOnce([
+      recorded,
+      { ...recorded, id: "sbr_other_actor", actorId: "cwlt_recipient" },
+    ]);
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow("Conflicting");
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(repository.createReservation).not.toHaveBeenCalled();
+  });
+
+  it("does not release an existing response when its domain linkage write fails", async () => {
+    const recorded = await recordedLegacyEvidence();
+    const { feePayment, repository, provider } = harness(
+      continuationScope(vi.fn().mockRejectedValue(new Error("Domain write failed")))
+    );
+    repository.findReservationEvidence.mockResolvedValueOnce([recorded]);
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "Domain write failed"
+    );
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+  });
+
+  it.each(["reserved", "charged_unknown"] as const)(
+    "keeps %s accounting evidence fenced",
+    async (status) => {
+      const recorded = await recordedLegacyEvidence();
+      const { feePayment, repository, provider } = harness(continuationScope());
+      repository.findReservationEvidence.mockResolvedValueOnce([{ ...recorded, status }]);
+      await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+        code: "PROVIDER_NOT_AVAILABLE",
+      });
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+      expect(repository.createReservation).not.toHaveBeenCalled();
+      expect(repository.markReleased).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["signed", "submitted", "committed"] as const)(
+    "replays the original %s response and accounting identity",
+    async (status) => {
+      const recorded = await recordedLegacyEvidence();
+      const persistAccountingIdentity = vi.fn();
+      const { feePayment, repository, provider } = harness(
+        continuationScope(persistAccountingIdentity)
+      );
+      repository.findReservationEvidence.mockResolvedValueOnce([{ ...recorded, status }]);
+      const replay = await feePayment.signAsFeePayer(buildTransaction());
+      expect(getBase64Decoder().decode(replay)).toBe(recorded.signedTransaction);
+      expect(persistAccountingIdentity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reservationId: recorded.id,
+          attempt: 1,
+          actor: { type: "wallet", id: "provider_recipient" },
+        })
+      );
+      expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+      expect(repository.createReservation).not.toHaveBeenCalled();
+      expect(repository.markReleased).not.toHaveBeenCalled();
+    }
+  );
+
+  it("requires explicit permitted absence rather than treating an unlinked old claim as new", async () => {
+    const { feePayment, repository, provider } = harness(continuationScope());
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow("absence");
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(repository.createReservation).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stale persisted reservation link even after writer retirement", async () => {
+    const scope = continuationScope();
+    if (!scope.continuity) throw new Error("continuity fixture missing");
+    scope.continuity.admission = "after_writer_retirement";
+    scope.continuity.reservationId = "sbr_missing";
+    const { feePayment, repository, provider } = harness(scope);
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow("absence");
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(repository.createReservation).not.toHaveBeenCalled();
+  });
+
+  it("links separate Request and recurring messages before their respective provider effects", async () => {
+    const persistAccountingIdentity = vi.fn().mockResolvedValue(undefined);
+    const scope = continuationScope(persistAccountingIdentity);
+    if (!scope.continuity) throw new Error("continuity fixture missing");
+    scope.continuity.admission = "after_writer_retirement";
+    const { feePayment, provider, repository } = harness(scope);
+    await feePayment.signAsFeePayer(buildTransaction());
+    await feePayment.prepareOwnedSubmission(buildTransaction("legacy"), {
+      persistSigned: vi.fn(),
+      markStarted: vi.fn(),
+      hasStarted: vi.fn(),
+    });
+    const requestIdentity = persistAccountingIdentity.mock.calls[0]?.[0];
+    const recurringIdentity = persistAccountingIdentity.mock.calls[1]?.[0];
+    expect(requestIdentity).toMatchObject({
+      attempt: 1,
+      actor: { type: "wallet", id: "cwlt_recipient" },
+    });
+    expect(recurringIdentity).toMatchObject({
+      attempt: 1,
+      actor: { type: "wallet", id: "cwlt_recipient" },
+    });
+    expect(requestIdentity.reservationId).not.toBe(recurringIdentity.reservationId);
+    expect(requestIdentity.transactionDigest).not.toBe(recurringIdentity.transactionDigest);
+    expect(provider.signAsFeePayer).toHaveBeenCalledTimes(2);
+    expect(repository.createReservation).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps legacy new admission on its original actor until retirement is explicitly permitted", async () => {
+    const scope = continuationScope();
+    if (!scope.continuity) throw new Error("continuity fixture missing");
+    scope.continuity.admission = "legacy_new";
+    const refused = harness(scope);
+    await expect(refused.feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
+      "writer retirement"
+    );
+    expect(refused.provider.signAsFeePayer).not.toHaveBeenCalled();
+    const permitted = harness({ ...scope, actor: { type: "wallet", id: "provider_recipient" } });
+    await expect(permitted.feePayment.signAsFeePayer(buildTransaction())).resolves.toBeInstanceOf(
+      Uint8Array
+    );
+    expect(permitted.repository.createReservation.mock.calls[0]?.[0]).toMatchObject({
+      actorId: "provider_recipient",
+    });
+  });
+
+  it("refuses live fee-payer drift before writing a new linkage for retained accounting", async () => {
+    const recorded = await recordedLegacyEvidence();
+    const persistAccountingIdentity = vi.fn();
+    const { feePayment, repository, provider } = harness(
+      continuationScope(persistAccountingIdentity)
+    );
+    repository.findReservationEvidence.mockResolvedValueOnce([recorded]);
+    if (!provider.getSponsorshipConfiguration) throw new Error("configuration fixture missing");
+    vi.mocked(provider.getSponsorshipConfiguration).mockResolvedValue({
+      signerAddress: assertValidAddress(getBase58Codec().decode(new Uint8Array(32).fill(8))),
+      maxAllowedLamports: 1_000_000n,
+      feePayerMayTransferLamports: false,
+      feePayerPolicy: { system: { allow_transfer: false } },
+    });
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(persistAccountingIdentity).not.toHaveBeenCalled();
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(repository.markReleased).not.toHaveBeenCalled();
+  });
+
+  it("retains the independently recorded baseline reservation serialization", async () => {
+    const feePayer = assertValidAddress("11111111111111111111111111111111");
+    const tx = pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) => setTransactionMessageFeePayer(feePayer, message),
+      (message) =>
+        setTransactionMessageLifetimeUsingBlockhash(
+          { blockhash: BLOCKHASH, lastValidBlockHeight: 100n },
+          message
+        )
+    );
+    const { feePayment, provider, repository } = harness();
+    if (!provider.getSponsorshipConfiguration) throw new Error("configuration fixture missing");
+    vi.mocked(provider.getSponsorshipConfiguration).mockResolvedValue({
+      signerAddress: feePayer,
+      maxAllowedLamports: 1_000_000n,
+      feePayerMayTransferLamports: false,
+      feePayerPolicy: { system: { allow_transfer: false } },
+    });
+    await feePayment.signAndSend(
+      new Uint8Array(getTransactionEncoder().encode(compileTransaction(tx)))
+    );
+    // Independent baseline vector: v0 message, zero address, 0x07 blockhash,
+    // empty instructions/lookups, and the pre-migration tenant/actor JSON order.
+    expect(repository.createReservation.mock.calls[0]?.[0]).toMatchObject({
+      transactionDigest: "a0f6ee5647fad475e2aee17b1ca2d2039e6a20f3af25f5107600e3fdf9cf9317",
+      id: "sbr_ccf81482062175e6d873e528d4f616b87bf805d94a127624964655d19dd3862c",
+    });
+  });
+
+  it.each(["continue_only", "legacy_new"] as const)(
+    "refuses an unproven initial getter under %s without provider reads",
+    async (admission) => {
+      const scope = continuationScope();
+      if (!scope.continuity) throw new Error("continuity fixture missing");
+      scope.continuity.admission = admission;
+      const { feePayment, provider, providerForActor, repository } = harness(scope);
+      await expect(feePayment.getFeePayer()).rejects.toMatchObject({
+        code: "PROVIDER_NOT_AVAILABLE",
+      });
+      expect(provider.getFeePayer).not.toHaveBeenCalled();
+      expect(providerForActor).not.toHaveBeenCalled();
+      expect(repository.findReservationEvidence).not.toHaveBeenCalled();
+    }
+  );
+
+  it("validates a retained getter's scope before constructing its original actor provider", async () => {
+    const recorded = await recordedLegacyEvidence();
+    const scope = continuationScope();
+    if (!scope.continuity) throw new Error("continuity fixture missing");
+    scope.continuity.reservationId = recorded.id;
+    const { feePayment, provider, providerForActor, repository } = harness(scope);
+    repository.findReservationEvidence.mockResolvedValueOnce([
+      { ...recorded, projectId: "foreign_project" },
+    ]);
+    await expect(feePayment.getFeePayer()).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+    expect(provider.getFeePayer).not.toHaveBeenCalled();
+    expect(providerForActor).not.toHaveBeenCalled();
+  });
 
   it("preserves the underlying provider contract identifier", () => {
     expect(harness().feePayment.providerId).toBe("kora");

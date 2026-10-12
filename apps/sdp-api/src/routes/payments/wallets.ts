@@ -4,11 +4,11 @@ import type { Permission } from "@sdp/types";
 import { getDb } from "@/db";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, walletNotFound } from "@/lib/errors";
+import { findAuthorizedOperationalWallet } from "@/routes/custody/handlers/wallets";
 import {
   assertApiKeyWalletAccess,
   assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
-  resolveApiKeyCustodyWalletId,
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
@@ -92,8 +92,8 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
 export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
 
 /**
- * Resolve the wallet addressed by the `walletId` route param, honoring the
- * API key's wallet binding. Used by the wallet balances route.
+ * Resolve an exact SDP wallet or a compatible unambiguous provider selector,
+ * honoring the API key's wallet binding. Used by the wallet balances route.
  *
  * @param c - Request context.
  * @param requiredWalletPermissions - Wallet permissions the caller must hold.
@@ -108,21 +108,17 @@ export async function resolveWalletFromParams(
   if (!walletId) {
     throw walletNotFound();
   }
-  const targets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
-  const projectId = requireProjectId(c);
-  const custodyWalletId = resolveApiKeyCustodyWalletId(auth, walletId, requiredWalletPermissions);
-  const wallet = custodyWalletId
-    ? await targets.findOperationalWalletById({
-        organizationId: auth.organizationId,
-        projectId,
-        custodyWalletId,
-      })
-    : await targets.findOperationalWallet({
-        organizationId: auth.organizationId,
-        projectId,
-        walletId,
-      });
-  if (!wallet) {
+  const wallet = await findAuthorizedOperationalWallet(
+    c,
+    walletId,
+    requiredWalletPermissions,
+    true
+  );
+  if (
+    !wallet ||
+    (wallet.id !== walletId &&
+      (walletId.startsWith("cwlt_") || (await findRetainedPaymentWallet(c, walletId))))
+  ) {
     throw walletNotFound();
   }
   return { auth, wallet };
@@ -203,18 +199,15 @@ export function assertPaymentWalletReadAccess(
   c: AppContext,
   wallet: { custodyWalletId: string | null; providerWalletId: string }
 ): void {
-  const auth = getAuth(c);
-  if (wallet.custodyWalletId) {
-    const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, [
-      "payments:read",
-    ]);
-    if (allowedCustodyWalletIds && !allowedCustodyWalletIds.includes(wallet.custodyWalletId)) {
-      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
-    }
-    return;
+  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(getAuth(c), [
+    "payments:read",
+  ]);
+  if (
+    allowedCustodyWalletIds &&
+    (!wallet.custodyWalletId || !allowedCustodyWalletIds.includes(wallet.custodyWalletId))
+  ) {
+    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
-
-  assertApiKeyWalletAccess(auth, wallet.providerWalletId, ["payments:read"]);
 }
 
 export function resolveWalletAddress(

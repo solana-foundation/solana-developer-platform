@@ -1,5 +1,9 @@
 import type { CustodyWalletTokenBalance } from "@sdp/types";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
+import {
+  parseWalletBalanceResponse,
+  walletTokenBalanceSchema,
+} from "@/lib/wallet-balance-response";
 
 export const BALANCE_REFRESH_INTERVAL_MS = 30_000;
 
@@ -12,22 +16,10 @@ interface ApiErrorEnvelope {
 interface WalletBalancesEnvelope extends ApiErrorEnvelope {
   data?: {
     wallets?: Array<{
-      walletId?: string;
+      id?: string;
       balances?: CustodyWalletTokenBalance[];
     }>;
   };
-}
-
-interface WalletBalanceEnvelope extends ApiErrorEnvelope {
-  data?:
-    | {
-        walletBalances?: {
-          balances?: CustodyWalletTokenBalance[];
-        };
-      }
-    | {
-        balances?: CustodyWalletTokenBalance[];
-      };
 }
 
 function getApiError(body: ApiErrorEnvelope, fallback: string): string {
@@ -59,10 +51,12 @@ export async function fetchWalletBalances(): Promise<Record<string, CustodyWalle
   return Object.fromEntries(
     body.data.wallets
       .filter(
-        (wallet): wallet is { walletId: string; balances: CustodyWalletTokenBalance[] } =>
-          Boolean(wallet.walletId) && Array.isArray(wallet.balances)
+        (wallet): wallet is { id: string; balances: CustodyWalletTokenBalance[] } =>
+          typeof wallet.id === "string" &&
+          wallet.id.length > 0 &&
+          walletTokenBalanceSchema.array().safeParse(wallet.balances).success
       )
-      .map((wallet) => [wallet.walletId, wallet.balances])
+      .map((wallet) => [wallet.id, wallet.balances])
   );
 }
 
@@ -74,21 +68,11 @@ export async function fetchWalletBalance(walletId: string): Promise<CustodyWalle
       cache: "no-store",
     }
   );
-  const body = (await response.json().catch(() => ({}))) as WalletBalanceEnvelope;
+  const body = (await response.json().catch(() => ({}))) as ApiErrorEnvelope;
 
   if (!response.ok) {
     throw new Error(getApiError(body, `Wallet balance request failed (${response.status}).`));
   }
 
-  let balances: CustodyWalletTokenBalance[] | undefined;
-  if (body.data && "walletBalances" in body.data) {
-    balances = body.data.walletBalances?.balances;
-  } else if (body.data && "balances" in body.data) {
-    balances = body.data.balances;
-  }
-  if (!Array.isArray(balances)) {
-    throw new Error("Wallet balance response did not include balances.");
-  }
-
-  return balances;
+  return parseWalletBalanceResponse(body, walletId).balances;
 }
