@@ -3,10 +3,12 @@
 import type { SolanaCluster } from "@sdp/types";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { useSWRConfig } from "swr";
 import {
   checkWalletSignerMemoAction,
   requestDevnetSolanaFaucetAction,
 } from "@/app/dashboard/[projectId]/custody/actions";
+import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
@@ -40,6 +42,7 @@ export function useWalletActions({
   supportsSignerCheck?: boolean;
 }) {
   const t = useTranslations();
+  const { mutate } = useSWRConfig();
   const { dashboardAccess, sandboxProject } = useDashboardWorkspace();
   const [isBusy, startTransition] = useTransition();
   const [lastProof, setLastProof] = useState<WalletOwnershipProof | null>(null);
@@ -104,6 +107,8 @@ export function useWalletActions({
 
         if (result.status === "success") {
           const explorerUrl = explorerTxUrl(result.signature, ACTION_EXPLORER_CLUSTER);
+          // The funded wallet's cards read cached balances; refresh them now.
+          void mutate(custodyQueryKeys.isWalletLiveDataKey);
 
           toast.success(t("DashboardCustody.devnetSolRequested", { amount: result.amountSol }), {
             id: toastId,

@@ -9,7 +9,16 @@ import {
   type SdpEnvironment,
 } from "@sdp/types";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import {
+  type ComponentProps,
+  type FormEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
@@ -602,6 +611,61 @@ function DetailsStep({
 }
 
 /**
+ * Step 2 of the flow: the custody mode question where the provider offers more than one, then
+ * the BYOK credential form, or the wallet details once there is nothing left to choose.
+ */
+function DetailsPhase({
+  awaitingModeChoice,
+  byokRecoveryLocked,
+  byokSetupProvider,
+  chosenMode,
+  detailsStep,
+  isByokDetails,
+  modeChoices,
+  onByokPendingChange,
+  onModeChange,
+  onRecoveryLockChange,
+  setupRequestInFlight,
+  t,
+}: {
+  awaitingModeChoice: boolean;
+  byokRecoveryLocked: boolean;
+  byokSetupProvider: ByokCustodyProvider | null;
+  chosenMode: CustodyMode | null;
+  detailsStep: ComponentProps<typeof DetailsStep>;
+  isByokDetails: boolean;
+  modeChoices: AvailableCustodyModes | null;
+  onByokPendingChange: (pending: boolean) => void;
+  onModeChange: (mode: CustodyMode | null) => void;
+  onRecoveryLockChange: (locked: boolean) => void;
+  setupRequestInFlight: boolean;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <>
+      {modeChoices === null ? null : (
+        <CustodyModeField
+          disabled={byokRecoveryLocked || setupRequestInFlight}
+          mode={chosenMode}
+          modes={modeChoices}
+          onModeChange={onModeChange}
+          t={t}
+        />
+      )}
+      {byokSetupProvider === null ? null : (
+        <ByokCredentialForm
+          provider={byokSetupProvider}
+          formId={DETAILS_FORM_ID}
+          onPendingChange={onByokPendingChange}
+          onRecoveryLockChange={onRecoveryLockChange}
+        />
+      )}
+      {isByokDetails || awaitingModeChoice ? null : <DetailsStep {...detailsStep} />}
+    </>
+  );
+}
+
+/**
  * The footer band. Step 1: Cancel and Continue. Step 2: Back, what confirming does, Cancel and
  * Create. A primary action that cannot run yet is outlined, as the design draws it. The Privy
  * credential form carries its own submit, and a submission in an unknown state locks the way out.
@@ -956,49 +1020,39 @@ export function WalletSetupFlow({
             t={t}
           />
         ) : (
-          <>
-            {modeChoices === null ? null : (
-              <CustodyModeField
-                disabled={byokRecoveryLocked || setupRequestInFlight}
-                mode={chosenMode}
-                modes={modeChoices}
-                onModeChange={(mode) => {
-                  setChosenMode(mode);
-                  setErrorMessage(null);
-                }}
-                t={t}
-              />
-            )}
-            {byokSetupProvider === null ? null : (
-              <ByokCredentialForm
-                provider={byokSetupProvider}
-                formId={DETAILS_FORM_ID}
-                onPendingChange={setByokRequestPending}
-                onRecoveryLockChange={setByokRecoveryLocked}
-              />
-            )}
-            {isByokDetails || awaitingModeChoice ? null : (
-              <DetailsStep
-                connectionOptions={connectionOptions}
-                environment={environment}
-                errorMessage={errorMessage}
-                hasManagedConfig={hasManagedConfig}
-                notice={
-                  canProvisionWallet
-                    ? null
-                    : provisioningNotice(selectedProviderEntry?.label ?? null, t)
-                }
-                isConnected={isConnected}
-                onChangeProvider={goToProviderStep}
-                onSubmit={handleDetailsSubmit}
-                onWalletLabelChange={setWalletLabel}
-                providerEntry={selectedProviderEntry}
-                showConnectionPicker={showConnectionPicker}
-                t={t}
-                walletLabel={walletLabel}
-              />
-            )}
-          </>
+          <DetailsPhase
+            awaitingModeChoice={awaitingModeChoice}
+            byokRecoveryLocked={byokRecoveryLocked}
+            byokSetupProvider={byokSetupProvider}
+            chosenMode={chosenMode}
+            detailsStep={{
+              connectionOptions,
+              environment,
+              errorMessage,
+              hasManagedConfig,
+              notice: canProvisionWallet
+                ? null
+                : provisioningNotice(selectedProviderEntry?.label ?? null, t),
+              isConnected,
+              onChangeProvider: goToProviderStep,
+              onSubmit: handleDetailsSubmit,
+              onWalletLabelChange: setWalletLabel,
+              providerEntry: selectedProviderEntry,
+              showConnectionPicker,
+              t,
+              walletLabel,
+            }}
+            isByokDetails={isByokDetails}
+            modeChoices={modeChoices}
+            onByokPendingChange={setByokRequestPending}
+            onModeChange={(mode) => {
+              setChosenMode(mode);
+              setErrorMessage(null);
+            }}
+            onRecoveryLockChange={setByokRecoveryLocked}
+            setupRequestInFlight={setupRequestInFlight}
+            t={t}
+          />
         )}
       </WizardFrame>
     </div>

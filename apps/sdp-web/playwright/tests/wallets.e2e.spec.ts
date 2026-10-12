@@ -433,7 +433,8 @@ test.describe
       });
       const mobileActionsAfterScroll = await setupActions.boundingBox();
       expect(mobileActionsAfterScroll?.y).toBe(mobileActionsBeforeScroll?.y);
-      const lastProvider = setupScrollRegion.getByRole("link", { name: /^Set up / }).last();
+      // Every provider the project can use is a choice in the list; the last one stays reachable.
+      const lastProvider = setupScrollRegion.getByRole("radio").last().locator("xpath=ancestor::label");
       await expect(lastProvider).toBeVisible();
       const mobileScrollBox = await setupScrollRegion.boundingBox();
       const lastProviderBox = await lastProvider.boundingBox();
