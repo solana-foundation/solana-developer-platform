@@ -28,6 +28,7 @@ import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { PAYMENT_REQUESTS_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useFrozenActionBody } from "@/lib/use-frozen-action-body";
 import { cn } from "@/lib/utils";
 import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
 import { shortenAddress } from "../payments-overview.utils";
@@ -412,6 +413,7 @@ function PaymentRequestCreateForm({
   const [pickedFrom, setPickedFrom] = useState(ANYONE);
   const [expiry, setExpiry] = useState<string>("none");
   const [submitting, setSubmitting] = useState(false);
+  const requestBody = useFrozenActionBody<Record<string, string | null>>();
   // Once the link exists the page stays busy: it is on its way to the request, and a second
   // press must not make a second link.
   const [linkCreated, setLinkCreated] = useState(false);
@@ -434,20 +436,30 @@ function PaymentRequestCreateForm({
     setSubmitting(true);
     let created: PaymentRequest | undefined;
     try {
-      const expiresAtOnSubmit = resolveExpiryDate(expiry);
+      const input = JSON.stringify([
+        wallet.walletId,
+        token.mintAddress,
+        amount.trim(),
+        contact?.id ?? null,
+        expiry,
+      ]);
+      // The expiry is read from the clock once per action: a retry resends the
+      // same body, so it reuses the first attempt's key.
+      const body = requestBody.bodyFor(input, () => {
+        const expiresAtOnSubmit = resolveExpiryDate(expiry);
+        return {
+          walletId: wallet.walletId,
+          token: token.mintAddress,
+          amount: amount.trim(),
+          counterpartyId: contact ? contact.id : null,
+          expiresAt: expiresAtOnSubmit ? expiresAtOnSubmit.toISOString() : null,
+        };
+      });
       const res = await dashboardFetch<{ data: PaymentRequest }>(
         "/api/dashboard/payments/requests",
-        {
-          method: "POST",
-          body: {
-            walletId: wallet.walletId,
-            token: token.mintAddress,
-            amount: amount.trim(),
-            counterpartyId: contact ? contact.id : null,
-            expiresAt: expiresAtOnSubmit ? expiresAtOnSubmit.toISOString() : null,
-          },
-        }
+        { method: "POST", body }
       );
+      requestBody.settled(input, res);
       if (!res.ok) {
         toast.error(res.error);
         return;

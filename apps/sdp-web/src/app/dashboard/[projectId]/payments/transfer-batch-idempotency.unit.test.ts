@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 import type { PaymentTransferBatchRequest } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTransferBatch, type Translate } from "./payments-workspace.data";
 import {
   canonicalTransferBatchRequest,
   claimTransferBatchIdempotencyKey,
-  isTransferBatchKeyConflict,
   releaseTransferBatchIdempotencyKey,
   resetTransferBatchIdempotencyStateForTests,
+  transferBatchKeyForSend,
+  transferBatchRefusalKeepsKey,
   transferBatchRequestFingerprint,
 } from "./transfer-batch-idempotency";
 
@@ -56,13 +58,14 @@ describe("canonicalTransferBatchRequest", () => {
   });
 });
 
-describe("isTransferBatchKeyConflict", () => {
-  it("singles out the 409 that must keep the key", () => {
-    expect(isTransferBatchKeyConflict(409)).toBe(true);
-    expect(isTransferBatchKeyConflict(400)).toBe(false);
-    expect(isTransferBatchKeyConflict(403)).toBe(false);
-    expect(isTransferBatchKeyConflict(422)).toBe(false);
-    expect(isTransferBatchKeyConflict(500)).toBe(false);
+describe("transferBatchRefusalKeepsKey", () => {
+  it("singles out the 409 and the local 428 that must keep the key", () => {
+    expect(transferBatchRefusalKeepsKey(409)).toBe(true);
+    expect(transferBatchRefusalKeepsKey(428)).toBe(true);
+    expect(transferBatchRefusalKeepsKey(400)).toBe(false);
+    expect(transferBatchRefusalKeepsKey(403)).toBe(false);
+    expect(transferBatchRefusalKeepsKey(422)).toBe(false);
+    expect(transferBatchRefusalKeepsKey(500)).toBe(false);
   });
 });
 
@@ -131,6 +134,33 @@ describe("claim / release", () => {
 });
 
 describe("degraded storage", () => {
+  // A batch whose key lives in memory only could be sent twice by a reload and
+  // retry, so it is refused like every other money movement.
+  it("refuses to send a batch whose key storage refused, and keeps the key", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const t: Translate = (key) => key;
+    const request = batchRequest();
+    const fingerprint = transferBatchRequestFingerprint(request);
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+    try {
+      const key = transferBatchKeyForSend(fingerprint);
+
+      await expect(createTransferBatch(request, t, key)).rejects.toMatchObject({
+        name: "TransferBatchRequestError",
+        status: 428,
+      });
+      expect(key.persisted).toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(transferBatchRefusalKeepsKey(428)).toBe(true);
+    } finally {
+      setItem.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps the key stable in memory when sessionStorage refuses writes", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("QuotaExceededError");

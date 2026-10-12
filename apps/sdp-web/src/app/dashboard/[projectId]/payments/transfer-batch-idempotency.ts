@@ -1,10 +1,8 @@
 "use client";
 
 import type { PaymentTransferBatchRequest } from "@sdp/types";
-import {
-  createPaymentIdempotencyStore,
-  isIdempotencyKeyConflict,
-} from "./payment-idempotency-store";
+import type { CallerIdempotencyKey } from "@/lib/dashboard-fetch";
+import { createPaymentIdempotencyStore, refusalKeepsKey } from "./payment-idempotency-store";
 
 /**
  * Browser-side durability for the transfer-batch IDEMPOTENCY KEY.
@@ -82,6 +80,16 @@ export function claimTransferBatchIdempotencyKey(fingerprint: string): string {
 }
 
 /**
+ * The key to send this batch under: {@link claimTransferBatchIdempotencyKey},
+ * written to storage first and reporting whether storage took it, so
+ * `createTransferBatch` refuses to send a batch whose key a reload would lose.
+ */
+export function transferBatchKeyForSend(fingerprint: string): CallerIdempotencyKey {
+  const value = store.claim(fingerprint);
+  return { value, persisted: store.persist(fingerprint) };
+}
+
+/**
  * Retire a key once the API has answered for it: a recorded batch, or a 4xx
  * refusal other than a key conflict. Never on a 5xx or a network failure.
  */
@@ -89,7 +97,7 @@ export function releaseTransferBatchIdempotencyKey(fingerprint: string): void {
   store.release(fingerprint);
 }
 
-/** A 409 under our own key is the one 4xx that must keep it. */
-export function isTransferBatchKeyConflict(status: number): boolean {
-  return isIdempotencyKeyConflict(status);
+/** The 4xx answers that keep the key: a 409 under our own key, and the local 428. */
+export function transferBatchRefusalKeepsKey(status: number): boolean {
+  return refusalKeepsKey(status);
 }

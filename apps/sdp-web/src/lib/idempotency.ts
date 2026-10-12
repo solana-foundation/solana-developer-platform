@@ -26,3 +26,29 @@ export function actionIdempotencyHeaders(key: unknown): Record<string, string> |
     ? { [IDEMPOTENCY_KEY_HEADER]: key }
     : undefined;
 }
+
+/**
+ * What an sdp-api answer settles about the write its key carried:
+ *
+ * - `definitive`: a success, or a replay. sdp-api ran or stored the request.
+ * - `refused`: a 4xx other than a conflict or a rate limit. It retires a key
+ *   on its first attempt only; once an earlier attempt went unanswered, a
+ *   refusal settles nothing about that attempt, which may have written.
+ * - `open`: a 5xx, a 409, a 429, or no answer. The write may have run, so the
+ *   key stays for the retry.
+ */
+export type ActionKeyAnswer = "definitive" | "refused" | "open";
+
+/**
+ * The one rule behind {@link ActionKeyAnswer}, shared by `dashboard-fetch` and
+ * the server actions that forward the browser's key.
+ *
+ * @param status - The HTTP status, or `null` when nothing answered.
+ * @param replayed - Whether sdp-api marked the answer `Idempotent-Replayed`.
+ */
+export function keyAnswerFor(status: number | null, replayed: boolean): ActionKeyAnswer {
+  if (replayed) return "definitive";
+  if (status === null) return "open";
+  if (status < 400) return "definitive";
+  return status < 500 && status !== 409 && status !== 429 ? "refused" : "open";
+}

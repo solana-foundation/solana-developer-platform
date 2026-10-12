@@ -67,6 +67,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
+import { useFrozenActionBody } from "@/lib/use-frozen-action-body";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
@@ -220,6 +221,7 @@ function CreateRequestModal({
     expiry: "none",
   });
   const [submitting, setSubmitting] = useState(false);
+  const requestBody = useFrozenActionBody<Record<string, string | null>>();
 
   // Option values are the unique id/mint/walletId (not the display label), so
   // wallets or tokens sharing a label/symbol can't collapse onto each other. The
@@ -258,19 +260,32 @@ function CreateRequestModal({
     }
     const counterpartyId =
       result.data.counterparty === ANYONE_OPTION ? null : result.data.counterparty;
-    const expiresAt = resolveExpiryDate(result.data.expiry);
-
-    setSubmitting(true);
-    const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
-      method: "POST",
-      body: {
+    const input = JSON.stringify([
+      result.data.wallet,
+      result.data.token,
+      result.data.amount,
+      counterpartyId,
+      result.data.expiry,
+    ]);
+    // The expiry is read from the clock once per action: a retry resends the
+    // same body, so it reuses the first attempt's key.
+    const body = requestBody.bodyFor(input, () => {
+      const expiresAt = resolveExpiryDate(result.data.expiry);
+      return {
         walletId: result.data.wallet,
         token: result.data.token,
         amount: result.data.amount,
         counterpartyId,
         expiresAt: expiresAt ? expiresAt.toISOString() : null,
-      },
+      };
     });
+
+    setSubmitting(true);
+    const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
+      method: "POST",
+      body,
+    });
+    requestBody.settled(input, res);
     setSubmitting(false);
     if (!res.ok) {
       toast.error(res.error);

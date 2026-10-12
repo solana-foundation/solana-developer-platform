@@ -124,6 +124,53 @@ describe("New request page", () => {
     expect(creating.hasAttribute("disabled")).toBe(true);
   });
 
+  // The expiry comes from the clock. Read again on the retry, it would be a new
+  // body under a new key, and a first attempt that did create could be repeated.
+  it("resends the first attempt's expiry and key when the user retries", async () => {
+    const sends: { body: { expiresAt: string | null }; key: string | null }[] = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sends.push({
+        body: JSON.parse(String(init?.body)),
+        key: new Headers(init?.headers).get("Idempotency-Key"),
+      });
+      if (sends.length === 1) throw new TypeError("network down");
+      return Response.json({ data: { id: "preq_1", publicToken: "tok_1" } });
+    });
+    render(
+      <PaymentRequestCreateWorkspace
+        wallets={[wallet]}
+        walletsError={null}
+        counterparties={[contact]}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    const create = () => screen.getByRole("button", { name: "Create and copy link" });
+
+    await user.type(screen.getByRole("textbox", { name: "Amount" }), "25");
+    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
+    await user.click(screen.getByRole("button", { name: /Treasury/ }));
+    await user.click(screen.getByRole("button", { name: "Link expires" }));
+    await user.click(screen.getByRole("button", { name: "1 hour" }));
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+    await user.click(create());
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+
+    const later = Date.now() + 60_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(later);
+    try {
+      await user.click(create());
+      await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledTimes(1));
+    } finally {
+      clock.mockRestore();
+    }
+
+    expect(sends).toHaveLength(2);
+    expect(sends[0]?.body.expiresAt).toMatch(/^\d{4}-/);
+    expect(sends[1]?.body).toEqual(sends[0]?.body);
+    expect(sends[1]?.key).toBe(sends[0]?.key);
+  });
+
   it("frees the form when creating the link throws", async () => {
     vi.stubGlobal("fetch", async () => {
       throw new Error("offline");

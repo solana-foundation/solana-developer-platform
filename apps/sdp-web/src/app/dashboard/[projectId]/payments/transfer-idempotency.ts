@@ -1,10 +1,7 @@
 "use client";
 
 import type { PaymentTransferSummary as TransferRecord } from "@sdp/types";
-import {
-  createPaymentIdempotencyStore,
-  isIdempotencyKeyConflict,
-} from "./payment-idempotency-store";
+import { createPaymentIdempotencyStore, refusalKeepsKey } from "./payment-idempotency-store";
 import {
   type CreateTransferInput,
   createTransfer,
@@ -56,9 +53,9 @@ export function releaseTransferIdempotencyKey(fingerprint: string): void {
   store.release(fingerprint);
 }
 
-/** A 409 under our own key is the one 4xx that must keep it. */
-export function isTransferKeyConflict(status: number): boolean {
-  return isIdempotencyKeyConflict(status);
+/** The 4xx answers that keep the key: a 409 under our own key, and the local 428. */
+export function transferRefusalKeepsKey(status: number): boolean {
+  return refusalKeepsKey(status);
 }
 
 /**
@@ -78,10 +75,13 @@ async function performTransferUnderKey(
   fingerprint: string,
   providerSession: boolean
 ): Promise<TransferSendResult> {
-  const idempotencyKey = claimTransferIdempotencyKey(fingerprint);
+  const value = claimTransferIdempotencyKey(fingerprint);
   // A provider may repeat its signature callback after a lost event response.
   // Its session still names the same payment, even after the transfer lands.
   if (providerSession) store.hold(fingerprint);
+  // Written to storage before the send: when storage refuses it, a reload
+  // would lose the key, so `createTransfer` refuses to send (428).
+  const idempotencyKey = { value, persisted: store.persist(fingerprint) };
   let transfer: TransferRecord;
   try {
     transfer = await createTransfer(submission, t, idempotencyKey);
@@ -90,13 +90,14 @@ async function performTransferUnderKey(
     // expired login rejects a callback retry. Never release its recorded key.
     // A 4xx for a new manual send frees the key. A 5xx or a network
     // failure keeps it: the API may have recorded the transfer before the
-    // answer was lost. A 409 under our own key keeps it too.
+    // answer was lost. A 409 under our own key keeps it too, and so does the
+    // local 428, which sent nothing.
     if (
       !providerSession &&
       error instanceof TransferRequestError &&
       error.status >= 400 &&
       error.status < 500 &&
-      !isTransferKeyConflict(error.status)
+      !transferRefusalKeepsKey(error.status)
     ) {
       releaseTransferIdempotencyKey(fingerprint);
     }

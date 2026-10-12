@@ -106,6 +106,13 @@ export interface PaymentIdempotencyStore {
    */
   hold(fingerprint: string): void;
   /**
+   * Write this request's key to browser storage before it is sent, and say
+   * whether storage took it. False means the key lives in memory only, so a
+   * reload would lose it: a money movement must not be sent then (see
+   * `dashboardRequestUnderOwnKey`).
+   */
+  persist(fingerprint: string): boolean;
+  /**
    * Retire a key once the API has ANSWERED for it: a recorded payment (any
    * terminal or processing status: the row exists, replays are safe) or a
    * 4xx refusal. Never on a 5xx or a network failure: a gateway timing out
@@ -167,22 +174,25 @@ export function createPaymentIdempotencyStore(storeKey: string): PaymentIdempote
     });
   }
 
-  function writeEntries(entries: readonly StoredEntry[]): void {
+  /** Writes memory, then storage; true only when storage took the write. */
+  function writeEntries(entries: readonly StoredEntry[]): boolean {
     const bounded = withinStorageBound(entries);
     // Memory first and unconditionally: it must already hold the value if the
     // store refuses the very next write.
     memoryEntries = bounded;
 
     const store = storage();
-    if (!store) return;
+    if (!store) return false;
     try {
       store.setItem(storeKey, JSON.stringify(bounded));
       storageDiverged = false;
+      return true;
     } catch {
       // Quota or a refusing store: losing durability beats losing the payment,
       // but a still-readable storage is now BEHIND memory, so prefer memory until
       // a write lands, or the next read un-writes the just-claimed key.
       storageDiverged = true;
+      return false;
     }
   }
 
@@ -208,6 +218,11 @@ export function createPaymentIdempotencyStore(storeKey: string): PaymentIdempote
         { ...held, expiresAt: null },
       ]);
     },
+    persist(fingerprint) {
+      const entries = readEntries();
+      // Rewritten even when unchanged: an earlier write may have reached memory only.
+      return entries.some((entry) => entry.id === fingerprint) && writeEntries(entries);
+    },
     release(fingerprint) {
       const entries = readEntries();
       if (!entries.some((entry) => entry.id === fingerprint)) return;
@@ -232,4 +247,14 @@ export function createPaymentIdempotencyStore(storeKey: string): PaymentIdempote
  */
 export function isIdempotencyKeyConflict(status: number): boolean {
   return status === 409;
+}
+
+/**
+ * A 4xx that keeps the key: a key conflict ({@link isIdempotencyKeyConflict}),
+ * or the dashboard's own 428 for a key the browser could not persist. That
+ * refusal sent nothing, so it settles nothing; when the key is an earlier
+ * attempt's, that attempt may have written and its retry still needs the key.
+ */
+export function refusalKeepsKey(status: number): boolean {
+  return isIdempotencyKeyConflict(status) || status === 428;
 }

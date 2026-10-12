@@ -66,6 +66,35 @@ describe("sendTransferUnderKey", () => {
 
     expect(claimTransferIdempotencyKey(fingerprint) === sentKey(fetchMock)).toBe(kept);
   });
+
+  // A key held in memory only is lost on reload, and a retry after the reload
+  // would send the payment again under a fresh key.
+  it("refuses to send when storage refuses the key, keeping an earlier attempt's key", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ error: { message: "unavailable" } }, { status: 503 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow();
+    const unanswered = sentKey(fetchMock);
+
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+    try {
+      await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toMatchObject({
+        name: "TransferRequestError",
+        status: 428,
+      });
+    } finally {
+      setItem.mockRestore();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await expect(sendTransferUnderKey(SUBMISSION, t)).rejects.toThrow();
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("Idempotency-Key")).toBe(
+      unanswered
+    );
+  });
 });
 
 describe("concurrent transfer submissions", () => {

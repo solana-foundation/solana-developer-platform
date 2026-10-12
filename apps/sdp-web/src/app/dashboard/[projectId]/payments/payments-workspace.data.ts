@@ -35,8 +35,11 @@ import {
   type ComplianceProviderResult,
   screenAddressCompliance,
 } from "@/lib/compliance";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
-import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import {
+  type CallerIdempotencyKey,
+  dashboardRequest,
+  dashboardRequestUnderOwnKey,
+} from "@/lib/dashboard-fetch";
 import {
   type PaymentApiErrorBody as ApiErrorBody,
   getPaymentApiError as getApiError,
@@ -490,21 +493,19 @@ export class TransferRequestError extends Error {
  * Creates one transfer.
  *
  * The idempotency key is transport metadata, sent as a header and never in the
- * body. Null for a caller whose request is already single-shot (a ramp transfer
- * named by `transferId`).
+ * body; a key its store could not persist is refused (428) before anything is
+ * sent. Null for a caller whose request is already single-shot (a ramp transfer
+ * named by `transferId`), which `dashboardRequest` keys per user action.
  */
 export async function createTransfer(
   input: CreateTransferInput,
   t: Translate,
-  idempotencyKey: string | null
+  idempotencyKey: CallerIdempotencyKey | null
 ): Promise<TransferRecord> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (idempotencyKey !== null) {
-    headers[IDEMPOTENCY_KEY_HEADER] = idempotencyKey;
-  }
-  const response = await dashboardRequest("/api/dashboard/payments/transfers", {
+  const path = "/api/dashboard/payments/transfers";
+  const init: RequestInit = {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ...(input.transferId ? { transferId: input.transferId } : {}),
       sourceCustodyWalletId: input.sourceCustodyWalletId,
@@ -513,7 +514,11 @@ export async function createTransfer(
       amount: input.amount,
       ...(input.memo ? { memo: input.memo } : {}),
     }),
-  });
+  };
+  const response =
+    idempotencyKey === null
+      ? await dashboardRequest(path, init)
+      : await dashboardRequestUnderOwnKey(path, init, idempotencyKey);
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
     throw new TransferRequestError(
@@ -624,18 +629,23 @@ export class TransferBatchRequestError extends Error {
 
 /**
  * The caller's idempotency key is transport metadata and is never copied into
- * the JSON body; the proxy route forwards that single header upstream.
+ * the JSON body; the proxy route forwards that single header upstream. A key
+ * its store could not persist is refused (428) before anything is sent.
  */
 export async function createTransferBatch(
   input: PaymentTransferBatchRequest,
   t: Translate,
-  idempotencyKey: string
+  idempotencyKey: CallerIdempotencyKey
 ): Promise<CreateTransferBatchResult> {
-  const response = await dashboardRequest("/api/dashboard/payments/transfers/batch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
-    body: JSON.stringify(input),
-  });
+  const response = await dashboardRequestUnderOwnKey(
+    "/api/dashboard/payments/transfers/batch",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+    idempotencyKey
+  );
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
     throw new TransferBatchRequestError(

@@ -1,7 +1,7 @@
+import type { IdempotencyRequiredRoute } from "@sdp/types";
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
-import type { IdempotencyRequiredRoute } from "@sdp/types";
-import { IDEMPOTENCY_KEY_HEADER } from "./idempotency";
+import { IDEMPOTENCY_KEY_HEADER, keyAnswerFor } from "./idempotency";
 import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "./idempotency-key-store";
 import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
@@ -111,14 +111,11 @@ function isApiAnswer(response: Response): boolean {
  */
 function retiresKey(response: Response, earlierAttemptUnanswered: boolean): boolean {
   if (!isApiAnswer(response)) return false;
-  if (response.headers.get("Idempotent-Replayed") === "true") return true;
-  if (response.status < 400) return true;
-  return (
-    !earlierAttemptUnanswered &&
-    response.status < 500 &&
-    response.status !== 409 &&
-    response.status !== 429
+  const answer = keyAnswerFor(
+    response.status,
+    response.headers.get("Idempotent-Replayed") === "true"
   );
+  return answer === "definitive" || (answer === "refused" && !earlierAttemptUnanswered);
 }
 
 function sendWithProject(
@@ -204,7 +201,8 @@ async function sendUnderActionKey(
     // Read before this attempt pins the key: an earlier attempt that never got
     // a definitive answer leaves it uncertain.
     const earlierAttemptUnanswered = keys.isUncertain(fingerprint) || keys.isHeld(fingerprint);
-    headers.set(IDEMPOTENCY_KEY_HEADER, keys.claim(fingerprint));
+    const { key, wasReused } = keys.claimReportingReuse(fingerprint);
+    headers.set(IDEMPOTENCY_KEY_HEADER, key);
     // Pinned before the request goes out: a reload mid-flight must not let
     // an unanswered write's key expire or be evicted. When browser storage
     // refuses the write (private mode, quota), the key lives in memory only:
@@ -213,7 +211,9 @@ async function sendUnderActionKey(
     // twice; any other mutation sends, as a duplicate costs at most a replay.
     if (!keys.markUncertain(fingerprint)) {
       if (requiresPersistedKey(init.method ?? "GET", path)) {
-        keys.release(fingerprint);
+        // Only a key this call minted is dropped: a reused one belongs to an
+        // earlier attempt that may have written, and its retry still needs it.
+        if (!wasReused) keys.release(fingerprint);
         return keyNotPersistedResponse();
       }
       console.warn("Idempotency-Key not persisted; a reload will not recover it");
@@ -248,16 +248,25 @@ async function sendUnderActionKey(
 const UNKEYED_PREFIXES = ["/api/playground/", "/api/dashboard/markets/dvp/"] as const;
 
 /**
+ * Read-like POSTs, never keyed: an estimate, a quote or a simulation (the
+ * ramps sandbox's `/simulate` included) writes nothing a retry could repeat,
+ * and they fire as the user types, so each would leave an unanswered key
+ * behind that never expires.
+ */
+const READ_LIKE_POST = /\/(estimate|quote|simulate)$/;
+
+/**
  * Every mutation the dashboard sends takes a key per user action, whatever
  * module it reaches: a route that ignores the header loses nothing, and no
  * second list of routes can drift from the API's. The exceptions are
- * {@link UNKEYED_PREFIXES}.
+ * {@link UNKEYED_PREFIXES} and {@link READ_LIKE_POST}.
  */
 function takesActionKey(path: string, init: RequestInit, headers: Headers): boolean {
   const method = (init.method ?? "GET").toUpperCase();
   return (
     KEYED_METHODS.has(method) &&
     !UNKEYED_PREFIXES.some((prefix) => path.startsWith(prefix)) &&
+    !READ_LIKE_POST.test(path.split("?", 1)[0] ?? path) &&
     !headers.has(IDEMPOTENCY_KEY_HEADER) &&
     (init.body === undefined || init.body === null || typeof init.body === "string")
   );
@@ -285,8 +294,8 @@ function keyNotPersistedResponse(): Response {
  * refuse the request.
  *
  * A `stable` module mutation without a caller-chosen Idempotency-Key gets one
- * per user action (see `sendUnderActionKey`). Flows that manage their own key
- * (transfers, batches) set the header and are left alone.
+ * per user action (see `sendUnderActionKey`). Flows that keep their own key
+ * (transfers, batches) send through {@link dashboardRequestUnderOwnKey}.
  *
  * @param path - Dashboard backend path, e.g. `/api/dashboard/payments/transfers`.
  * @param init - Standard fetch options; a caller-set `x-project-id` is overwritten.
@@ -301,6 +310,40 @@ export function dashboardRequest(path: string, init: RequestInit): Promise<Respo
       headers
     );
   }
+  return sendWithProject(path, init, headers);
+}
+
+/** A key its caller keeps in its own store, and whether that store persisted it. */
+export interface CallerIdempotencyKey {
+  value: string;
+  /** False when browser storage refused the key, so a reload would lose it. */
+  persisted: boolean;
+}
+
+/**
+ * {@link dashboardRequest} for a flow that keeps its own key (transfers,
+ * batches), under the same rule as `sendUnderActionKey`: a money movement
+ * whose key the browser could not persist is refused with the same 428, and
+ * nothing is sent, since a reload and retry could move it twice.
+ *
+ * @param path - Dashboard backend path.
+ * @param init - Standard fetch options.
+ * @param key - The caller's key, and whether its store persisted it.
+ * @returns The raw backend response, or the local 428 refusal.
+ */
+export async function dashboardRequestUnderOwnKey(
+  path: string,
+  init: RequestInit,
+  key: CallerIdempotencyKey
+): Promise<Response> {
+  if (!key.persisted) {
+    if (requiresPersistedKey((init.method ?? "GET").toUpperCase(), path)) {
+      return keyNotPersistedResponse();
+    }
+    console.warn("Idempotency-Key not persisted; a reload will not recover it");
+  }
+  const headers = new Headers(init.headers);
+  headers.set(IDEMPOTENCY_KEY_HEADER, key.value);
   return sendWithProject(path, init, headers);
 }
 

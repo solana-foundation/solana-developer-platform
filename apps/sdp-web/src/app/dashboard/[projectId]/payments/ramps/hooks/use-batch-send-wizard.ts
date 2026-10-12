@@ -28,9 +28,9 @@ import {
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import {
   canonicalTransferBatchRequest,
-  claimTransferBatchIdempotencyKey,
-  isTransferBatchKeyConflict,
   releaseTransferBatchIdempotencyKey,
+  transferBatchKeyForSend,
+  transferBatchRefusalKeepsKey,
   transferBatchRequestFingerprint,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -338,7 +338,7 @@ export function useBatchSendWizard({
     // batch — double press, timeout, reload — carries the SAME key, so the
     // API replays the recorded batch instead of moving the money again.
     const fingerprint = transferBatchRequestFingerprint(request);
-    const idempotencyKey = claimTransferBatchIdempotencyKey(fingerprint);
+    const idempotencyKey = transferBatchKeyForSend(fingerprint);
     try {
       const result = await createTransferBatch(request, t, idempotencyKey);
       // The batch row exists — the key is spent, and the next identical batch
@@ -376,12 +376,13 @@ export function useBatchSendWizard({
       // answer was lost, and only a retry with the SAME key can find out
       // without paying every recipient twice. A 409 is the exception among
       // 4xx: it says this key already carries a batch whose payload the API
-      // read differently, so the key is the only handle on it.
+      // read differently, so the key is the only handle on it. The local 428
+      // (storage refused the key) sent nothing, so it keeps the key too.
       if (
         error instanceof TransferBatchRequestError &&
         error.status >= 400 &&
         error.status < 500 &&
-        !isTransferBatchKeyConflict(error.status)
+        !transferBatchRefusalKeepsKey(error.status)
       ) {
         releaseTransferBatchIdempotencyKey(fingerprint);
       }
