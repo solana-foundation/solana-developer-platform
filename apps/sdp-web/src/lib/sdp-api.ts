@@ -72,30 +72,6 @@ function createTraceRequestId(traceId: string, sequence: number): string {
   return `${traceId}:${suffix}`.slice(0, 128);
 }
 
-/**
- * sdp-api `stable` module paths that take an Idempotency-Key on every mutation
- * (HOO-1918). Ramps and other modules keep their own key handling.
- */
-const STABLE_API_MUTATION_PREFIXES = [
-  "/v1/wallets",
-  "/v1/payments/transfers",
-  "/v1/payments/transfer-batches",
-  "/v1/payments/requests",
-  "/v1/payments/recurring-payments",
-  "/v1/payments/subscription-plans",
-  "/v1/payments/subscriptions",
-  "/v1/counterparties",
-  "/v1/compliance/",
-] as const;
-
-function takesServerIdempotencyKey(method: string, path: string): boolean {
-  const upper = method.toUpperCase();
-  return (
-    (upper === "POST" || upper === "PATCH" || upper === "PUT" || upper === "DELETE") &&
-    STABLE_API_MUTATION_PREFIXES.some((prefix) => path.startsWith(prefix))
-  );
-}
-
 function createSdpApiRequest(
   token: string,
   projectId: string | null,
@@ -124,11 +100,6 @@ function createSdpApiRequest(
       headers.set(PROJECT_HEADER_NAME, projectId);
     }
     const method = options.method ?? "GET";
-    if (takesServerIdempotencyKey(method, path) && !headers.has(IDEMPOTENCY_KEY_HEADER)) {
-      // A server action is one user action; a browser-keyed proxy call already
-      // carries its key and keeps it.
-      headers.set(IDEMPOTENCY_KEY_HEADER, crypto.randomUUID());
-    }
     const startedAt = performance.now();
     // The query string is caller-supplied and may carry a pasted credential
     // (e.g. a playground request); the log keeps the route only while the

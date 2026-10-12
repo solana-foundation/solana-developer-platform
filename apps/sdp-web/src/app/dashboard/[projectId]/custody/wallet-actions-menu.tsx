@@ -21,6 +21,7 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
+import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { cn } from "@/lib/utils";
 
 interface WalletActionsMenuProps {
@@ -60,6 +61,7 @@ export function WalletActionsMenu({
   const t = useTranslations();
   const { dashboardAccess, sandboxProject } = useDashboardWorkspace();
   const [isBusy, startTransition] = useTransition();
+  const signerCheckKey = useActionIdempotencyKey();
   const { mutate } = useSWRConfig();
   const resolvedWalletLabel = formatWalletLabel(walletLabel, walletAddress);
   const resolvedTriggerLabel = triggerLabel ?? t("DashboardCustody.actions");
@@ -80,11 +82,15 @@ export function WalletActionsMenu({
 
     startTransition(() => {
       void (async () => {
-        const result = await checkWalletSignerMemoAction(walletId).catch((error) => ({
+        const result = await checkWalletSignerMemoAction(
+          walletId,
+          signerCheckKey.keyFor(walletId)
+        ).catch((error) => ({
           status: "error" as const,
           message: error instanceof Error ? error.message : t("DashboardCustody.signerCheckFailed"),
         }));
 
+        signerCheckKey.settled(walletId, result.status === "success");
         if (result.status === "success") {
           // The check is verified in simulation and never broadcast, so there
           // is no on-chain transaction to link — an explorer URL for this

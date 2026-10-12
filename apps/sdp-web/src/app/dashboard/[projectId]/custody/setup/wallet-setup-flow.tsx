@@ -36,6 +36,7 @@ import type {
   AvailableCustodyModes,
   ProjectCustodyAvailability,
 } from "@/lib/provider-availability";
+import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 type SetupStep = "provider" | "details";
@@ -547,6 +548,7 @@ export function WalletSetupFlow({
   const [byokRequestPending, setByokRequestPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submissionInFlightRef = useRef(false);
+  const setupKey = useActionIdempotencyKey();
 
   const selectedAvailability = useMemo(() => {
     const match = availability.find((provider) => provider.entry.id === selectedProvider);
@@ -619,10 +621,17 @@ export function WalletSetupFlow({
 
     submissionInFlightRef.current = true;
     setErrorMessage(null);
+    // One key per submitted setup: the same details keep it across retries.
+    const input = JSON.stringify([
+      isConnected,
+      [...formData.entries()].map(([k, v]) => [k, String(v)]),
+    ]);
+    formData.set("idempotencyKey", setupKey.keyFor(input));
 
     startTransition(async () => {
       try {
         const result = await formAction(formData);
+        setupKey.settled(input, result.status === "success");
 
         switch (result.status) {
           case "error":

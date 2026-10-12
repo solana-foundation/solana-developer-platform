@@ -193,26 +193,25 @@ describe("createRequestScopedSdpApiClients", () => {
 });
 
 describe("server-side Idempotency-Key (HOO-1918)", () => {
-  it("keys a stable mutation a server action sends, and leaves reads and other modules alone", async () => {
+  // The server never mints a key: a server-side key would be new on every
+  // retry, so it could not make a retry safe. Callers pass the browser's.
+  it("sends only the key the caller passes, and mints none", async () => {
     setApiRequest(SANDBOX_PROJECT.id);
     const fetchMock = okFetchMock();
     vi.stubGlobal("fetch", fetchMock);
     const client = await createSdpApiClient();
 
     await client.request("/v1/wallets", { method: "POST", body: "{}" });
-    await client.request("/v1/wallets", { method: "GET" });
-    await client.request("/v1/earn/programs", { method: "POST", body: "{}" });
     await client.request("/v1/wallets/wal_1", {
       method: "PATCH",
       body: "{}",
-      headers: { "Idempotency-Key": "caller-key" },
+      headers: { "Idempotency-Key": "browser-key" },
     });
 
     const keys = fetchMock.mock.calls.map(([, init]) =>
       new Headers(init?.headers).get("Idempotency-Key")
     );
-    expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
-    expect(keys.slice(1)).toEqual([null, null, "caller-key"]);
+    expect(keys).toEqual([null, "browser-key"]);
   });
 });
 

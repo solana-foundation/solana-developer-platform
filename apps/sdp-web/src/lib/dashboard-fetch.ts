@@ -1,5 +1,6 @@
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
+import type { IdempotencyRequiredRoute } from "@sdp/types";
 import { IDEMPOTENCY_KEY_HEADER } from "./idempotency";
 import { createIdempotencyKeyStore, type IdempotencyKeyStore } from "./idempotency-key-store";
 import { TAB_DEMO_HEADER_NAME } from "./payments-demo/demo-cookie";
@@ -30,25 +31,40 @@ export function setTabShowsDemo(on: boolean): void {
 }
 
 /**
- * Dashboard backend routes that proxy a `stable` module mutation to sdp-api,
- * which takes an Idempotency-Key on every POST and PATCH (HOO-1918). Ramps
- * are not `stable` and keep their own handling.
+ * The dashboard proxy route for each API route that requires an
+ * Idempotency-Key. `satisfies` makes the map exhaustive: a route added to the
+ * shared list fails this build until it is mapped here.
  */
-const STABLE_MUTATION_PREFIXES = [
-  "/api/dashboard/payments/transfers",
-  "/api/dashboard/payments/requests",
-  "/api/dashboard/payments/recurring-payments",
-  "/api/dashboard/payments/subscription-plans",
-  "/api/dashboard/payments/subscriptions",
-  "/api/dashboard/counterparty",
-  "/api/dashboard/compliance/",
-] as const;
+const DASHBOARD_REQUIRED_ROUTES = {
+  "POST /v1/payments/transfers": "POST /api/dashboard/payments/transfers",
+  "POST /v1/payments/transfer-batches": "POST /api/dashboard/payments/transfers/batch",
+  "POST /v1/payments/recurring-payments": "POST /api/dashboard/payments/recurring-payments",
+  "POST /v1/payments/recurring-payments/:id/activate":
+    "POST /api/dashboard/payments/recurring-payments/:id/activate",
+  "POST /v1/payments/recurring-payments/:id/cancel":
+    "POST /api/dashboard/payments/recurring-payments/:id/cancel",
+  "POST /v1/payments/recurring-payments/:id/collect":
+    "POST /api/dashboard/payments/recurring-payments/:id/collect",
+  "POST /v1/payments/recurring-payments/:id/resume":
+    "POST /api/dashboard/payments/recurring-payments/:id/resume",
+} as const satisfies Record<IdempotencyRequiredRoute, string>;
 
-function isStableMutationPath(path: string): boolean {
+function matchesRoute(pattern: string, method: string, path: string): boolean {
+  const [patternMethod, patternPath = ""] = pattern.split(" ", 2);
+  if (patternMethod !== method) return false;
   const pathname = path.split("?", 1)[0] ?? path;
-  return STABLE_MUTATION_PREFIXES.some(
-    (prefix) =>
-      pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)
+  const expected = patternPath.split("/");
+  const actual = pathname.split("/");
+  return (
+    expected.length === actual.length &&
+    expected.every((segment, index) => segment.startsWith(":") || segment === actual[index])
+  );
+}
+
+/** Whether this mutation moves money, so it must never send under a key that cannot be kept. */
+function requiresPersistedKey(method: string, path: string): boolean {
+  return Object.values(DASHBOARD_REQUIRED_ROUTES).some((pattern) =>
+    matchesRoute(pattern, method, path)
   );
 }
 
@@ -192,9 +208,14 @@ async function sendUnderActionKey(
     // Pinned before the request goes out: a reload mid-flight must not let
     // an unanswered write's key expire or be evicted. When browser storage
     // refuses the write (private mode, quota), the key lives in memory only:
-    // retries in this page still reuse it, but a reload cannot. Sending anyway
-    // is deliberate; refusing would block every write in such a browser.
+    // retries in this page still reuse it, but a reload cannot. A money
+    // movement refuses to send then, since a reload and retry could move it
+    // twice; any other mutation sends, as a duplicate costs at most a replay.
     if (!keys.markUncertain(fingerprint)) {
+      if (requiresPersistedKey(init.method ?? "GET", path)) {
+        keys.release(fingerprint);
+        return keyNotPersistedResponse();
+      }
       console.warn("Idempotency-Key not persisted; a reload will not recover it");
     }
     sent = sendWithProject(path, shared, headers, demo).then(async (response) => {
@@ -217,13 +238,42 @@ async function sendUnderActionKey(
   return (await abortable(sent, init.signal)).clone();
 }
 
+/**
+ * Dashboard routes this layer never keys, each for a reason:
+ * - the API playground sends exactly the request the user composed, including
+ *   one that carries a pasted API secret;
+ * - DvP manages its own keys: a fresh one per fund or reclaim press, none on
+ *   settle or cancel (PRO-1993 owns that choice).
+ */
+const UNKEYED_PREFIXES = ["/api/playground/", "/api/dashboard/markets/dvp/"] as const;
+
+/**
+ * Every mutation the dashboard sends takes a key per user action, whatever
+ * module it reaches: a route that ignores the header loses nothing, and no
+ * second list of routes can drift from the API's. The exceptions are
+ * {@link UNKEYED_PREFIXES}.
+ */
 function takesActionKey(path: string, init: RequestInit, headers: Headers): boolean {
   const method = (init.method ?? "GET").toUpperCase();
   return (
     KEYED_METHODS.has(method) &&
+    !UNKEYED_PREFIXES.some((prefix) => path.startsWith(prefix)) &&
     !headers.has(IDEMPOTENCY_KEY_HEADER) &&
-    (init.body === undefined || init.body === null || typeof init.body === "string") &&
-    isStableMutationPath(path)
+    (init.body === undefined || init.body === null || typeof init.body === "string")
+  );
+}
+
+/** The refusal a money movement gets when its key cannot be kept across a reload. */
+function keyNotPersistedResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: "IDEMPOTENCY_KEY_NOT_PERSISTED",
+        message:
+          "This browser is not keeping the request's retry key (private browsing or storage full), so the payment was not sent. Allow site storage and try again.",
+      },
+    }),
+    { status: 428, headers: { "content-type": "application/json" } }
   );
 }
 
