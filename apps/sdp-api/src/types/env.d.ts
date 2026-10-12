@@ -367,6 +367,8 @@ declare module "hono" {
     requestGate?: RequestGateContext;
     // Set by authorize(): what the route's access check loaded (middleware/authorize.ts)
     authorized?: { loaded: unknown };
+    // Set by idempotent() when this request holds its key: the request's fingerprint
+    idempotencyFingerprint?: string;
     apiKey?: {
       id: string;
       organizationId: string;

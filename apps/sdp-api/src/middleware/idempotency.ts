@@ -90,7 +90,7 @@ const STORED_RESPONSE_HEADERS = ["content-type", "location"] as const;
 /** SHA-256 hex over the canonical form of everything that defines the request. */
 export function requestFingerprint(input: {
   operation: string;
-  params: Record<string, string>;
+  params: JsonValue;
   query: Record<string, string[]>;
   body: JsonValue;
 }): string {
@@ -323,9 +323,11 @@ export async function runIdempotency(
   const auth = getAuth(c);
   const operation = idempotencyOperation(c);
   const leaseSeconds = options.leaseSeconds ?? DEFAULT_IDEMPOTENCY_LEASE_SECONDS;
+  const validatedParams = validatedInput(c).params;
   const fingerprint = requestFingerprint({
     operation,
-    params: c.req.param(),
+    // As the route's param validator left them, like the body.
+    params: toJsonValue(validatedParams),
     // Names are ordered by the canonical form; repeated values keep their order.
     query: c.req.queries(),
     body: await readFingerprintBody(c, options.canonicalize),
@@ -360,6 +362,9 @@ export async function runIdempotency(
       c.header("Retry-After", String(claim.retryAfterSeconds));
       throw new AppError("IDEMPOTENCY_KEY_IN_FLIGHT");
     case "claimed":
+      // The handler records it on its domain row, so a retry past the key's
+      // 24 hours is matched by the same request identity.
+      c.set("idempotencyFingerprint", fingerprint);
       logOutcome(operation, idempotencyKey, claim.fresh ? "claimed" : "taken_over");
       if (claim.replacedUnfinished) {
         // The key's last request expired without recording an outcome.
@@ -477,4 +482,12 @@ export function idempotent(options: IdempotencyOptions): MiddlewareHandler<{ Bin
 /** Reads the key mode an {@link idempotent} handler declares. */
 export function declaredIdempotency(handler: unknown): IdempotencyKeyMode | undefined {
   return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode } | null)?.[IDEMPOTENCY_MARKER];
+}
+
+/**
+ * The fingerprint of the request holding its Idempotency-Key, for a handler
+ * to record on its domain row; undefined when the request carried no key.
+ */
+export function getIdempotencyFingerprint(c: Context<{ Bindings: Env }>): string | undefined {
+  return c.get("idempotencyFingerprint");
 }
