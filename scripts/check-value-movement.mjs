@@ -199,9 +199,7 @@ function isPinnedUse(checker, node) {
   ) {
     return true;
   }
-  for (let ancestor = parent; ancestor && !ts.isStatement(ancestor); ancestor = ancestor.parent) {
-    if (ts.isTypeNode(ancestor) && !ts.isExpressionWithTypeArguments(ancestor)) return true;
-  }
+  if (inTypePosition(node)) return true;
   // `x.sign()` / `X.fromBase58()`: the member access is what gets called.
   let callee = node;
   if (ts.isPropertyAccessExpression(parent) && parent.name === node) {
@@ -234,26 +232,66 @@ function isPinnedUse(checker, node) {
   );
 }
 
-/**
- * Code the checker cannot resolve: an `import()` or `require()` whose
- * specifier is not a literal, `createRequire`, `eval`, and `Function` as a
- * constructor. None of it is needed in API code, so it is refused outright.
- */
-function isOpaqueCodeLoad(node) {
-  if (ts.isCallExpression(node)) {
-    const callee = node.expression;
-    const loadsModule =
-      callee.kind === ts.SyntaxKind.ImportKeyword ||
-      (ts.isIdentifier(callee) && callee.text === "require");
-    if (loadsModule && !(node.arguments[0] && ts.isStringLiteralLike(node.arguments[0]))) {
-      return true;
-    }
-    return ts.isIdentifier(callee) && ["createRequire", "eval", "Function"].includes(callee.text);
+/** Whether a reference only names a type, which can never run. */
+function inTypePosition(node) {
+  for (
+    let ancestor = node.parent;
+    ancestor && !ts.isStatement(ancestor);
+    ancestor = ancestor.parent
+  ) {
+    if (ts.isTypeNode(ancestor) && !ts.isExpressionWithTypeArguments(ancestor)) return true;
   }
-  return (
-    ts.isNewExpression(node) &&
-    ts.isIdentifier(node.expression) &&
-    node.expression.text === "Function"
+  return false;
+}
+
+/** The runtime's ways to load or build code from a value. */
+const CODE_LOADERS = new Set(["createRequire", "eval", "Function", "require"]);
+
+/**
+ * Code the checker cannot resolve: an `import()` whose specifier is not a
+ * literal, or any reference, however it is renamed or reached, to the
+ * runtime's `createRequire`, `eval`, `Function` or `require` (other than
+ * `require` called with a literal, which the module checks follow). None of
+ * it is needed in API code, so it is refused outright.
+ */
+function isOpaqueCodeLoad(checker, node) {
+  if (
+    ts.isCallExpression(node) &&
+    node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+    !(node.arguments[0] && ts.isStringLiteralLike(node.arguments[0]))
+  ) {
+    return true;
+  }
+  let symbol;
+  if (ts.isIdentifier(node)) {
+    symbol = checker.getSymbolAtLocation(node);
+  } else if (
+    ts.isElementAccessExpression(node) &&
+    ts.isStringLiteralLike(node.argumentExpression)
+  ) {
+    symbol = checker.getPropertyOfType(
+      checker.getTypeAtLocation(node.expression),
+      node.argumentExpression.text
+    );
+  }
+  if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+  if (!symbol || !CODE_LOADERS.has(symbol.getName())) return false;
+  // A member of the same name (a Redis client's `eval`) is not the runtime's.
+  if (symbol.flags & (ts.SymbolFlags.Method | ts.SymbolFlags.Property)) return false;
+  // Declared by the runtime (lib or @types/node), not a local of the same name.
+  if (!symbol.declarations?.some((declaration) => declaration.getSourceFile().isDeclarationFile)) {
+    return false;
+  }
+  if (inTypePosition(node)) return false;
+  const call = node.parent;
+  return !(
+    symbol.getName() === "require" &&
+    ts.isCallExpression(call) &&
+    call.expression === node &&
+    call.arguments[0] &&
+    ts.isStringLiteralLike(call.arguments[0])
   );
 }
 
@@ -425,10 +463,11 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
           (ts.isIdentifier(node.expression) && node.expression.text === "require"))
       ) {
         reportModule(node, node.arguments[0]);
-      } else if (isOpaqueCodeLoad(node)) {
+      }
+      if (isOpaqueCodeLoad(checker, node)) {
         const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
         violations.push(
-          `${relativePath}:${line + 1}: loads code the check cannot follow (a computed import or require, createRequire, eval or new Function); name the module literally.`
+          `${relativePath}:${line + 1}: loads code the check cannot follow (a computed import, require, createRequire, eval or Function); name the module literally.`
         );
       }
       ts.forEachChild(node, visit);

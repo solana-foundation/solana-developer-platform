@@ -267,3 +267,28 @@ test("refuses code the checker cannot follow", () => {
     ["src/computed.ts", "src/constructed.ts", "src/evaluated.ts"].sort()
   );
 });
+
+test("refuses a code loader however it is renamed or reached, but not a member of the same name", () => {
+  const found = violations({
+    "src/allowed.ts": `import { mint } from "./lib/cap";\nmint();\n`,
+    "src/runtime.d.ts": `declare module "node:module" {
+  export function createRequire(path: string): (id: string) => unknown;
+}
+declare var require: (id: string) => unknown;
+`,
+    "src/renamed.ts": `import { createRequire as load } from "node:module";\nexport const kit = load("x")("y");\n`,
+    "src/aliased-eval.ts": `const run = eval;\nexport const out = run("1");\n`,
+    "src/global-eval.ts": `export const out = globalThis["eval"]("1");\n`,
+    "src/aliased-require.ts": `const req = require;\nexport const out = req("x");\n`,
+    "src/literal-require.ts": `export const out = require("./lib/other");\n`,
+    "src/lib/other.ts": `export const value = 1;\n`,
+    "src/member.ts": `declare const client: { eval(script: string): number };\nexport const out = client.eval("return 1");\n`,
+    "src/typed.ts": `export const call = (fn: Function) => fn;\n`,
+  });
+
+  const flagged = new Set(found.map((violation) => violation.split(":")[0]));
+  assert.deepEqual(
+    [...flagged].sort(),
+    ["src/aliased-eval.ts", "src/aliased-require.ts", "src/global-eval.ts", "src/renamed.ts"].sort()
+  );
+});
