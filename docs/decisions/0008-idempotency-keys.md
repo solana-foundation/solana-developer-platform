@@ -94,6 +94,12 @@ point finds its row and never signs or sends twice. Unlike Brandur's design the 
 on the domain row, not the key row, because domain rows outlive the key's 24 hours and the
 reconciler works from them.
 
+Recurring payments carve this out: their cron resumes and completes a half-finished row (an
+`activating`, `canceling`, `resuming` or `updating` schedule, or a collection in flight) from the
+signature its attempt recorded; it does not fail the row. A replay of a
+lifecycle action (activate, cancel, resume, PATCH, collect) finds the attempt its key claimed and
+returns the schedule as it stands now, which may still be mid-transition; clients poll GET.
+
 **Outcomes.**
 
 | Case | Stored? | Answer |

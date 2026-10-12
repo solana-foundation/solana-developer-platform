@@ -16,7 +16,12 @@ import {
   cancelRecurringPayment,
   collectRecurringPayment,
   createRecurringPayment,
+  findRecurringPaymentActivateReplay,
+  findRecurringPaymentCancelReplay,
+  findRecurringPaymentCollectReplay,
   findRecurringPaymentCreateReplay,
+  findRecurringPaymentResumeReplay,
+  findRecurringPaymentUpdateReplay,
   getRecurringPayment,
   listRecurringPayments,
   resumeRecurringPayment,
@@ -53,7 +58,10 @@ recurringPayments.patch(
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(updateRecurringPaymentSchema),
   authorize(authorizeRecurringPaymentUpdate),
+  // Each lifecycle attempt carries its key (0130), so a takeover or a 5xx re-run
+  // is answered from the attempt instead of a 409 for the schedule mid-change.
   idempotent({ key: "accepted", serverErrors: "rerun" }),
+  replayFromRecord(findRecurringPaymentUpdateReplay),
   updateRecurringPayment
 );
 recurringPayments.post(
@@ -63,6 +71,7 @@ recurringPayments.post(
   validateBody(activateRecurringPaymentSchema),
   authorize(authorizeRecurringPayment),
   idempotent({ key: "required", serverErrors: "rerun" }),
+  replayFromRecord(findRecurringPaymentActivateReplay),
   activateRecurringPayment
 );
 recurringPayments.post(
@@ -72,6 +81,7 @@ recurringPayments.post(
   validateBody(cancelRecurringPaymentSchema),
   authorize(authorizeRecurringPayment),
   idempotent({ key: "required", serverErrors: "rerun" }),
+  replayFromRecord(findRecurringPaymentCancelReplay),
   cancelRecurringPayment
 );
 recurringPayments.post(
@@ -82,6 +92,7 @@ recurringPayments.post(
   validateBody(collectRecurringPaymentSchema),
   authorize(authorizeRecurringPayment),
   idempotent({ key: "required", serverErrors: "rerun" }),
+  replayFromRecord(findRecurringPaymentCollectReplay),
   collectRecurringPayment
 );
 recurringPayments.post(
@@ -91,6 +102,7 @@ recurringPayments.post(
   validateBody(resumeRecurringPaymentSchema),
   authorize(authorizeRecurringPayment),
   idempotent({ key: "required", serverErrors: "rerun" }),
+  replayFromRecord(findRecurringPaymentResumeReplay),
   resumeRecurringPayment
 );
 recurringPayments.get("/:id", requirePermissions("payments:read"), getRecurringPayment);

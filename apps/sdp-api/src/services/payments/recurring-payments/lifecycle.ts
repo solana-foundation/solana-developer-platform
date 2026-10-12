@@ -118,6 +118,7 @@ async function getOrCreateLifecycleAttempt(input: {
   organizationId: string;
   projectId: string;
   nowIso: string;
+  idempotencyKey: string | null;
 }): Promise<PaymentRecurringPaymentLifecycleAttemptRow> {
   const { claimableStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
     input.operation
@@ -149,6 +150,7 @@ async function getOrCreateLifecycleAttempt(input: {
       metadata: {},
       createdAt: input.nowIso,
       updatedAt: input.nowIso,
+      idempotencyKey: input.idempotencyKey,
     });
   } catch (error) {
     await input.recurringRepo.updateRecurringPaymentLifecycle({
@@ -349,6 +351,8 @@ async function runRecurringPaymentLifecycle(
     projectId: string;
     sourceWallet: CustodyWallet;
     recurringPayment: PaymentRecurringPaymentRow;
+    /** The request's Idempotency-Key, written on the attempt it claims; null for the cron. */
+    idempotencyKey: string | null;
   } & RecurringPaymentLifecycleRun
 ): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
@@ -420,6 +424,7 @@ async function runRecurringPaymentLifecycle(
       organizationId: input.organizationId,
       projectId: input.projectId,
       nowIso,
+      idempotencyKey: input.idempotencyKey,
     });
     return { claimed, attempt };
   });
@@ -624,26 +629,61 @@ export async function cancelRecurringPayment(input: {
   projectId: string;
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
+  /** The request's Idempotency-Key, written on the attempt; null for the cron. */
+  idempotencyKey: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (isPendingActivationRecurringPaymentStatus(input.recurringPayment.status)) {
-    const recurringRepo = createPaymentRecurringPaymentsRepository(
-      input.env,
-      createTenantScope(input)
-    );
+    return cancelPendingRecurringPayment(input);
+  }
+  return runRecurringPaymentLifecycle({ ...input, operation: "cancel" });
+}
+
+/**
+ * Cancels a schedule that never went on chain. The status change and a
+ * confirmed cancel attempt carrying the request's key commit together, so a
+ * retry of the same request is answered from the attempt (HOO-1918).
+ */
+async function cancelPendingRecurringPayment(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  idempotencyKey: string | null;
+}): Promise<PaymentRecurringPaymentRow> {
+  const canceledAt = new Date().toISOString();
+  return getDb(input.env).transaction(async (tx) => {
+    const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const updated = await recurringRepo.updateRecurringPaymentLifecycle({
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
       status: "canceled",
       expectedStatus: "pending_activation",
-      updatedAt: new Date().toISOString(),
+      updatedAt: canceledAt,
     });
     if (!updated) {
       throw conflict("Recurring payment status changed before it could be canceled");
     }
+    const attempt = await recurringRepo.createLifecycleAttempt({
+      id: `prpl_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      operation: "cancel",
+      status: "confirmed",
+      stage: "finalize",
+      signature: null,
+      error: null,
+      metadata: {},
+      createdAt: canceledAt,
+      updatedAt: canceledAt,
+      idempotencyKey: input.idempotencyKey,
+    });
+    if (!attempt) {
+      throw internalError("Failed to journal recurring payment cancellation");
+    }
     return updated;
-  }
-  return runRecurringPaymentLifecycle({ ...input, operation: "cancel" });
+  });
 }
 
 export async function resumeRecurringPayment(input: {
@@ -654,6 +694,8 @@ export async function resumeRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   /** Money admission (HOO-1955), run only if the resume still has to sign. */
   admitStart: () => Promise<void>;
+  /** The request's Idempotency-Key, written on the attempt; null for the cron. */
+  idempotencyKey: string | null;
 }): Promise<PaymentRecurringPaymentRow> {
   return runRecurringPaymentLifecycle({ ...input, operation: "resume" });
 }

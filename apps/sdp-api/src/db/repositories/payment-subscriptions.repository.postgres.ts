@@ -532,8 +532,9 @@ export function createPostgresPaymentSubscriptionsRepository(
              error,
              metadata,
              created_at,
-             updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             updated_at,
+             idempotency_key
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING`
         )
         .bind(
@@ -551,7 +552,8 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.error,
           JSON.stringify(input.metadata),
           input.createdAt,
-          input.updatedAt
+          input.updatedAt,
+          input.idempotencyKey ?? null
         )
         .run();
 
@@ -560,6 +562,24 @@ export function createPostgresPaymentSubscriptionsRepository(
         organizationId: input.organizationId,
         projectId: input.projectId,
       });
+    },
+
+    async findCollectionAttemptByIdempotencyKey({ organizationId, projectId, idempotencyKey }) {
+      const row = await db
+        .prepare(
+          `SELECT *
+             FROM payment_subscription_collection_attempts
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND idempotency_key = ?
+              AND status IN ('pending', 'processing', 'confirmed')
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1`
+        )
+        .bind(organizationId, projectId, idempotencyKey)
+        .first<Record<string, unknown>>();
+
+      return row ? mapAttemptRow(row) : null;
     },
 
     async updateCollectionAttempt(input: UpdatePaymentSubscriptionCollectionAttemptInput) {

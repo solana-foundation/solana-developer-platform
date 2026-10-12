@@ -173,6 +173,8 @@ export interface CreatePaymentSubscriptionCollectionAttemptInput {
   metadata: PaymentSubscriptionCollectionAttemptMetadata;
   createdAt: string;
   updatedAt: string;
+  /** The Idempotency-Key of the manual collect that created this attempt (HOO-1918), or null. */
+  idempotencyKey?: string | null;
 }
 
 export interface UpdatePaymentSubscriptionCollectionAttemptInput {
@@ -252,6 +254,12 @@ export interface PaymentSubscriptionsRepository {
   createCollectionAttempt(
     input: CreatePaymentSubscriptionCollectionAttemptInput
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
+  /** The live (pending, processing or confirmed) attempt a collect request's key created. */
+  findCollectionAttemptByIdempotencyKey(params: {
+    organizationId: string;
+    projectId: string;
+    idempotencyKey: string;
+  }): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
   updateCollectionAttempt(
     input: UpdatePaymentSubscriptionCollectionAttemptInput
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;

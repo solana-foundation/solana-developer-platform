@@ -76,6 +76,8 @@ export interface PaymentRecurringPaymentActivationAttemptRow {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  /** The Idempotency-Key of the request that claimed this attempt (HOO-1918), or null. */
+  idempotency_key: string | null;
 }
 
 export interface PaymentRecurringPaymentLifecycleAttemptRow {
@@ -91,6 +93,8 @@ export interface PaymentRecurringPaymentLifecycleAttemptRow {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  /** The Idempotency-Key of the request that claimed this attempt (HOO-1918), or null. */
+  idempotency_key: string | null;
 }
 
 export interface PaymentRecurringPaymentUpdateAttemptRow {
@@ -118,6 +122,10 @@ export interface PaymentRecurringPaymentUpdateAttemptRow {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** The Idempotency-Key of the request that claimed this attempt (HOO-1918), or null. */
+  idempotency_key: string | null;
+  /** The fingerprint of that request's validated body: the same key with other terms is a 422. */
+  idempotency_fingerprint: string | null;
 }
 
 export interface PaymentRecurringPaymentUpdateEventRow {
@@ -274,6 +282,8 @@ export interface CreatePaymentRecurringPaymentUpdateAttemptInput {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  idempotencyKey?: string | null;
+  idempotencyFingerprint?: string | null;
 }
 
 export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
@@ -329,6 +339,7 @@ export interface CreatePaymentRecurringPaymentActivationAttemptInput {
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  idempotencyKey?: string | null;
 }
 
 export interface UpdatePaymentRecurringPaymentActivationAttemptInput {
@@ -357,6 +368,7 @@ export interface CreatePaymentRecurringPaymentLifecycleAttemptInput {
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  idempotencyKey?: string | null;
 }
 
 export interface UpdatePaymentRecurringPaymentLifecycleAttemptInput {
@@ -369,6 +381,13 @@ export interface UpdatePaymentRecurringPaymentLifecycleAttemptInput {
   error?: string | null;
   metadata?: Record<string, unknown>;
   updatedAt: string;
+}
+
+/** Looks up the live (not failed) attempt a request's Idempotency-Key claimed. */
+export interface FindRecurringPaymentAttemptByIdempotencyKeyInput {
+  organizationId: string;
+  projectId: string;
+  idempotencyKey: string;
 }
 
 export interface GetLatestPaymentRecurringPaymentLifecycleAttemptInput {
@@ -485,6 +504,9 @@ export interface PaymentRecurringPaymentsRepository {
   getLatestActivationAttempt(
     input: GetLatestPaymentRecurringPaymentActivationAttemptInput
   ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
+  findActivationAttemptByIdempotencyKey(
+    input: FindRecurringPaymentAttemptByIdempotencyKeyInput
+  ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
   createLifecycleAttempt(
     input: CreatePaymentRecurringPaymentLifecycleAttemptInput
   ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;
@@ -494,6 +516,11 @@ export interface PaymentRecurringPaymentsRepository {
   getLatestLifecycleAttempt(
     input: GetLatestPaymentRecurringPaymentLifecycleAttemptInput
   ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;
+  findLifecycleAttemptByIdempotencyKey(
+    input: FindRecurringPaymentAttemptByIdempotencyKeyInput & {
+      operation: PaymentRecurringPaymentLifecycleOperation;
+    }
+  ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;
   createUpdateAttempt(
     input: CreatePaymentRecurringPaymentUpdateAttemptInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
@@ -502,6 +529,9 @@ export interface PaymentRecurringPaymentsRepository {
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
   getLatestUpdateAttempt(
     input: GetLatestPaymentRecurringPaymentUpdateAttemptInput
+  ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
+  findUpdateAttemptByIdempotencyKey(
+    input: FindRecurringPaymentAttemptByIdempotencyKeyInput
   ): Promise<PaymentRecurringPaymentUpdateAttemptRow | null>;
   createUpdateEvent(
     input: CreatePaymentRecurringPaymentUpdateEventInput

@@ -77,6 +77,12 @@ import {
   subscriptionProgramMetadataUri,
 } from "./shared";
 
+/** An update request's Idempotency-Key and the fingerprint of its validated body. */
+export interface RecurringPaymentUpdateIdempotency {
+  key: string;
+  fingerprint: string;
+}
+
 type RecurringPaymentUpdateSnapshot = {
   sourceCustodyWalletId: string | null;
   counterpartyId: string;
@@ -437,7 +443,9 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   createdBy: string | null;
   nowIso: string;
   recoveringStaleUpdate: boolean;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentUpdateAttemptRow> {
+  // A stale claim resumes the in-flight attempt under its original key.
   if (input.recoveringStaleUpdate) {
     const existing = await input.recurringRepo.getLatestUpdateAttempt({
       organizationId: input.organizationId,
@@ -494,6 +502,8 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
     createdBy: input.createdBy,
     createdAt: input.nowIso,
     updatedAt: input.nowIso,
+    idempotencyKey: input.idempotency?.key ?? null,
+    idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
   });
 
   if (!attempt) {
@@ -1591,6 +1601,8 @@ export async function updateRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
+  /** The request's Idempotency-Key and body fingerprint, written on the attempt it claims. */
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
 
@@ -1704,6 +1716,7 @@ export async function updateRecurringPayment(input: {
       createdBy: input.createdBy,
       nowIso,
       recoveringStaleUpdate,
+      idempotency: input.idempotency,
     });
     return { claimed, attempt };
   });

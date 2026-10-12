@@ -30,16 +30,14 @@ import {
   findKeyedRecurringPayment,
   type RecurringPaymentIdempotency,
 } from "@/services/payments/recurring-payments/create";
-import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
-import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
 import {
-  assertFreshPaymentWalletAccess,
-  assertPaymentWalletExactAccess,
-  assertPaymentWalletReadAccess,
-  type ResolvedScope,
-  resolveScope,
-  resolveWalletByCustodyWalletId,
-} from "../wallets";
+  type AppContext,
+  getPaymentRecurringPaymentsRepository,
+  getPaymentSubscriptionsRepository,
+  getPaymentsRepository,
+} from "../context";
+import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
+import { assertPaymentWalletReadAccess } from "../wallets";
 import type {
   AuthorizedRecurringPayment,
   AuthorizedRecurringPaymentCreate,
@@ -96,8 +94,8 @@ function recurringPaymentIdempotency(
   body: z.output<typeof createRecurringPaymentSchema>,
   sourceCustodyWalletId: string
 ): RecurringPaymentIdempotency {
-  const key = parseIdempotencyKey(c);
-  if (key === undefined) {
+  const key = requestIdempotencyKey(c);
+  if (key === null) {
     throw internalError("Recurring payment create reached the handler without an Idempotency-Key");
   }
   return { key, fingerprint: recurringPaymentFingerprint(body, sourceCustodyWalletId) };
@@ -137,6 +135,132 @@ export async function findRecurringPaymentCreateReplay(
     recurringPayment: mapRecurringPayment(existing),
   };
   return created(c, response);
+}
+
+/** The request's Idempotency-Key, or null when it sent none (PATCH accepts none). */
+function requestIdempotencyKey(c: AppContext): string | null {
+  return parseIdempotencyKey(c) ?? null;
+}
+
+function updateFingerprint(body: z.output<typeof updateRecurringPaymentSchema>): string {
+  // SAFETY: a validated JSON body is a JSON value.
+  const value = JSON.parse(JSON.stringify(body)) as JsonValue;
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+/**
+ * Answers a lifecycle action from the attempt its Idempotency-Key claimed
+ * (HOO-1918): a takeover after a crash, or a re-run after a 5xx, finds the
+ * schedule mid-transition or already moved on, which the handler would refuse
+ * with a 409 or 400 the idempotency step never stores. A `processing` or
+ * `confirmed` attempt answers with the schedule as it stands now (clients poll
+ * GET for the outcome; the cron finishes a half-done row); a `failed` attempt
+ * or none runs the handler. The same key on another schedule is refused (422).
+ * No RPC, no signing: it reads rows only.
+ */
+function answerFromAttempt(
+  c: AppContext,
+  recurringPayment: PaymentRecurringPaymentRow,
+  attempt: { recurring_payment_id: string } | null
+): Response | null {
+  if (attempt === null) return null;
+  if (attempt.recurring_payment_id !== recurringPayment.id) {
+    throw new AppError("IDEMPOTENCY_KEY_REUSED");
+  }
+  const response: PaymentRecurringPaymentResponse = {
+    recurringPayment: mapRecurringPayment(recurringPayment),
+  };
+  return success(c, response);
+}
+
+function tenant(c: AppContext): { organizationId: string; projectId: string } {
+  return { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) };
+}
+
+/** Activate, answered from its activation attempt. */
+export async function findRecurringPaymentActivateReplay(
+  c: AppContext,
+  input: MovementStepInput<AuthorizedRecurringPayment>,
+  idempotencyKey: string
+): Promise<Response | null> {
+  const attempt = await getPaymentRecurringPaymentsRepository(
+    c
+  ).findActivationAttemptByIdempotencyKey({ ...tenant(c), idempotencyKey });
+  return answerFromAttempt(c, input.authorized.recurringPayment, attempt);
+}
+
+function findLifecycleReplay(operation: "cancel" | "resume") {
+  return async (
+    c: AppContext,
+    input: MovementStepInput<AuthorizedRecurringPayment>,
+    idempotencyKey: string
+  ): Promise<Response | null> => {
+    const attempt = await getPaymentRecurringPaymentsRepository(
+      c
+    ).findLifecycleAttemptByIdempotencyKey({ ...tenant(c), operation, idempotencyKey });
+    return answerFromAttempt(c, input.authorized.recurringPayment, attempt);
+  };
+}
+
+/** Cancel, answered from its cancel attempt (a pending schedule's cancel writes one too). */
+export const findRecurringPaymentCancelReplay = findLifecycleReplay("cancel");
+
+/** Resume, answered from its resume attempt, before money admission runs. */
+export const findRecurringPaymentResumeReplay = findLifecycleReplay("resume");
+
+/** PATCH, answered from its update attempt; the same key with other terms is a 422. */
+export async function findRecurringPaymentUpdateReplay(
+  c: AppContext,
+  input: MovementStepInput<AuthorizedRecurringPaymentUpdate>,
+  idempotencyKey: string
+): Promise<Response | null> {
+  const attempt = await getPaymentRecurringPaymentsRepository(c).findUpdateAttemptByIdempotencyKey({
+    ...tenant(c),
+    idempotencyKey,
+  });
+  // SAFETY: mounted after validateBody(updateRecurringPaymentSchema).
+  const body = input.body as z.output<typeof updateRecurringPaymentSchema>;
+  if (attempt !== null && attempt.idempotency_fingerprint !== updateFingerprint(body)) {
+    throw new AppError("IDEMPOTENCY_KEY_REUSED");
+  }
+  return answerFromAttempt(c, input.authorized.recurringPayment, attempt);
+}
+
+/**
+ * Collect, answered from the collection attempt its key claimed and the
+ * transfer written with it: after the due date moved on, a retry returns the
+ * period it collected instead of a 400, and never pulls a second period.
+ */
+export async function findRecurringPaymentCollectReplay(
+  c: AppContext,
+  input: MovementStepInput<AuthorizedRecurringPayment>,
+  idempotencyKey: string
+): Promise<Response | null> {
+  const attempt = await getPaymentSubscriptionsRepository(c).findCollectionAttemptByIdempotencyKey({
+    ...tenant(c),
+    idempotencyKey,
+  });
+  if (attempt === null) return null;
+  const { recurringPayment } = input.authorized;
+  if (attempt.metadata.recurringPaymentId !== recurringPayment.id) {
+    throw new AppError("IDEMPOTENCY_KEY_REUSED");
+  }
+  const transfer =
+    attempt.transfer_id === null
+      ? null
+      : await getPaymentsRepository(c).getTransferById({
+          ...tenant(c),
+          transferId: attempt.transfer_id,
+        });
+  if (transfer === null) {
+    throw internalError("Recurring payment collection attempt has no transfer");
+  }
+  const response: PaymentRecurringPaymentCollectionResponse = {
+    recurringPayment: mapRecurringPayment(recurringPayment),
+    collectionAttempt: mapCollectionAttemptRow(attempt),
+    transfer: mapTransferRow(transfer),
+  };
+  return success(c, response);
 }
 
 export const createRecurringPayment = async (
@@ -187,6 +311,10 @@ export const updateRecurringPayment = async (
     recurringPayment,
     request: body,
     createdBy: await resolveCreatorUserId(c),
+    idempotency: (() => {
+      const key = requestIdempotencyKey(c);
+      return key === null ? null : { key, fingerprint: updateFingerprint(body) };
+    })(),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
@@ -216,6 +344,7 @@ export const activateRecurringPayment = async (
         { organizationId: auth.organizationId, projectId },
         { surface: "http", operation: "recurring_payment.activate", subjectId: recurringPayment.id }
       ),
+    idempotencyKey: requestIdempotencyKey(c),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(activated),
@@ -238,6 +367,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           projectId,
           sourceWallet,
           recurringPayment,
+          idempotencyKey: requestIdempotencyKey(c),
         })
       : await resumeRecurringPaymentRecord({
           env: c.env,
@@ -255,6 +385,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
                 subjectId: recurringPayment.id,
               }
             ),
+          idempotencyKey: requestIdempotencyKey(c),
         });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
@@ -291,6 +422,7 @@ export const collectRecurringPayment = async (
         { organizationId: auth.organizationId, projectId },
         { surface: "http", operation: "recurring_payment.collect", subjectId: recurringPayment.id }
       ),
+    idempotencyKey: requestIdempotencyKey(c),
   });
   const response: PaymentRecurringPaymentCollectionResponse = {
     recurringPayment: mapRecurringPayment(collected.recurringPayment),

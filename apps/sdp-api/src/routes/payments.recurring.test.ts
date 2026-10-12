@@ -2204,7 +2204,7 @@ describe("Payments routes — recurring", () => {
     expect(recovered.data.transfer.signature).toBe(recovered.data.collectionAttempt.signature);
   });
 
-  it("rolls back the collection transfer when attempt linking fails", async () => {
+  it("rolls back the collection attempt and transfer when linking fails", async () => {
     const signAndSendMock = recurringExecution.signAndSendMock();
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
@@ -2252,7 +2252,8 @@ describe("Payments routes — recurring", () => {
       )
       .bind(activated.subscriptionId, dueAt)
       .first<{ status: string; transfer_id: string | null }>();
-    expect(attempt).toEqual({ status: "failed", transfer_id: null });
+    // The attempt, its transfer and the link commit together (HOO-1918): none is left.
+    expect(attempt).toBeNull();
     const transfers = await getDb(env)
       .prepare(
         `SELECT COUNT(*)::integer AS count
@@ -4338,5 +4339,354 @@ describe("Payments routes — recurring", () => {
     expect(responseBody.error.message).toBe("API key is not authorized for the requested wallet");
     expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
     expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+  });
+
+  describe("Idempotency-Key re-entrancy (HOO-1918)", () => {
+    const keyed = (key: string) => ({ ...RECURRING_HEADERS, "Idempotency-Key": key });
+    const errorCode = async (response: Response) =>
+      z.object({ error: z.object({ code: z.string() }) }).parse(await response.json()).error.code;
+    const actionPath = (id: string, action?: string) =>
+      action === undefined
+        ? `/v1/payments/recurring-payments/${id}`
+        : `/v1/payments/recurring-payments/${id}/${action}`;
+
+    /** The original request crashed after its effects: its key is in progress, its lease lapsed. */
+    async function crashIdempotencyKey(key: string) {
+      await getDb(env)
+        .prepare(
+          `UPDATE idempotency_keys
+              SET status = 'in_progress',
+                  claim_token = 'crashed',
+                  locked_until = now() - interval '1 minute',
+                  response_status = NULL,
+                  response_headers = NULL,
+                  response_body = NULL
+            WHERE idempotency_key = ?`
+        )
+        .bind(key)
+        .run();
+    }
+
+    /** The key's shared record is past its 24 hours; only the attempt row remembers it. */
+    async function forgetIdempotencyKey(key: string) {
+      await getDb(env)
+        .prepare("DELETE FROM idempotency_keys WHERE idempotency_key = ?")
+        .bind(key)
+        .run();
+    }
+
+    /** Puts the schedule back mid-transition (not stale) and its keyed attempt in flight. */
+    async function leaveMidTransition(input: {
+      recurringPaymentId: string;
+      status: string;
+      attemptTable: string;
+      key: string;
+    }) {
+      const now = new Date().toISOString();
+      await getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET status = ?, updated_at = ? WHERE id = ?")
+        .bind(input.status, now, input.recurringPaymentId)
+        .run();
+      const updated = await getDb(env)
+        .prepare(
+          `UPDATE ${input.attemptTable} SET status = 'processing', updated_at = ? WHERE idempotency_key = ?`
+        )
+        .bind(now, input.key)
+        .run();
+      expect(updated).toBe(1);
+    }
+
+    it("answers an activate takeover from its attempt while the schedule is activating", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const request = () =>
+        app.request(
+          actionPath(created.id, "activate"),
+          { method: "POST", headers: keyed(key), body: "{}" },
+          env
+        );
+      expect((await request()).status).toBe(200);
+      await leaveMidTransition({
+        recurringPaymentId: created.id,
+        status: "activating",
+        attemptTable: "payment_recurring_payment_activation_attempts",
+        key,
+      });
+      await crashIdempotencyKey(key);
+      const sendsBefore = send.mock.calls.length;
+
+      const retry = await request();
+
+      expect(retry.status).toBe(200);
+      expect((await parseRecurringResponse(retry)).data.recurringPayment).toMatchObject({
+        id: created.id,
+        status: "activating",
+      });
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
+
+    it("answers a cancel takeover from its attempt while the schedule is canceling", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const request = () =>
+        app.request(
+          actionPath(activated.id, "cancel"),
+          { method: "POST", headers: keyed(key), body: "{}" },
+          env
+        );
+      expect((await request()).status).toBe(200);
+      await leaveMidTransition({
+        recurringPaymentId: activated.id,
+        status: "canceling",
+        attemptTable: "payment_recurring_payment_lifecycle_attempts",
+        key,
+      });
+      await crashIdempotencyKey(key);
+      const sendsBefore = send.mock.calls.length;
+
+      const retry = await request();
+
+      expect(retry.status).toBe(200);
+      expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("canceling");
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
+
+    it("answers a pending schedule's cancel from the attempt it wrote", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const request = () =>
+        app.request(
+          actionPath(created.id, "cancel"),
+          { method: "POST", headers: keyed(key), body: "{}" },
+          env
+        );
+      expect((await request()).status).toBe(200);
+      const attempt = await getDb(env)
+        .prepare(
+          "SELECT operation, status, stage FROM payment_recurring_payment_lifecycle_attempts WHERE idempotency_key = ?"
+        )
+        .bind(key)
+        .first<{ operation: string; status: string; stage: string }>();
+      expect(attempt).toEqual({ operation: "cancel", status: "confirmed", stage: "finalize" });
+      await forgetIdempotencyKey(key);
+
+      const retry = await request();
+
+      expect(retry.status).toBe(200);
+      expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("canceled");
+    });
+
+    it("answers a resume takeover from its attempt before admission, which would refuse", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      expect(
+        (
+          await app.request(
+            actionPath(activated.id, "cancel"),
+            { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+            env
+          )
+        ).status
+      ).toBe(200);
+      const key = crypto.randomUUID();
+      const request = () =>
+        app.request(
+          actionPath(activated.id, "resume"),
+          { method: "POST", headers: keyed(key), body: "{}" },
+          env
+        );
+      expect((await request()).status).toBe(200);
+      await leaveMidTransition({
+        recurringPaymentId: activated.id,
+        status: "resuming",
+        attemptTable: "payment_recurring_payment_lifecycle_attempts",
+        key,
+      });
+      await crashIdempotencyKey(key);
+      // Admission now refuses any new start for the organization.
+      await deleteTestOrganization();
+      const sendsBefore = send.mock.calls.length;
+
+      const retry = await request();
+
+      expect(retry.status).toBe(200);
+      expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("resuming");
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
+
+    it("answers a PATCH takeover from its attempt while the schedule is updating", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const body = JSON.stringify({ metadataUri: "https://example.com/recurring/keyed.json" });
+      const request = () =>
+        app.request(actionPath(activated.id), { method: "PATCH", headers: keyed(key), body }, env);
+      expect((await request()).status).toBe(200);
+      await leaveMidTransition({
+        recurringPaymentId: activated.id,
+        status: "updating",
+        attemptTable: "payment_recurring_payment_update_attempts",
+        key,
+      });
+      await crashIdempotencyKey(key);
+      const sendsBefore = send.mock.calls.length;
+
+      const retry = await request();
+
+      expect(retry.status).toBe(200);
+      expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("updating");
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+    });
+
+    it("answers a collect retry after the due date advanced without pulling a second period", async () => {
+      recurringExecution.signAndSendMock();
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      // Two periods behind: after one pull the next period is still due.
+      await setRecurringCollectionDue({
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        dueAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+      });
+      const key = crypto.randomUUID();
+      const request = () =>
+        app.request(
+          actionPath(activated.id, "collect"),
+          { method: "POST", headers: keyed(key), body: "{}" },
+          env
+        );
+      const first = await request();
+      expect(first.status).toBe(200);
+      const collected = (await parseCollectionResponse(first)).data;
+      expect((await recurringPaymentDueAt(activated.id)).dueAt).toBeLessThan(Date.now());
+
+      for (const lose of [crashIdempotencyKey, forgetIdempotencyKey]) {
+        await lose(key);
+        const retry = await request();
+
+        expect(retry.status).toBe(200);
+        const replayed = (await parseCollectionResponse(retry)).data;
+        expect(replayed.collectionAttempt.id).toBe(collected.collectionAttempt.id);
+        expect(replayed.transfer.id).toBe(collected.transfer.id);
+        expect(replayed.transfer.signature).toBe(collected.transfer.signature);
+      }
+      expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+      expect(await collectionAttempts(activated.subscriptionId)).toHaveLength(1);
+    });
+
+    it("re-runs a failed keyed attempt under the same key", async () => {
+      mockDistinctRecentBlockhashes();
+      recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      confirmTransactionMock.mockResolvedValueOnce({
+        signature: testSignature(1),
+        slot: 100n,
+        confirmationStatus: "confirmed",
+        err: { InstructionError: [0, "Custom"] },
+      });
+      const key = crypto.randomUUID();
+      const request = () =>
+        app.request(
+          actionPath(created.id, "activate"),
+          { method: "POST", headers: keyed(key), body: "{}" },
+          env
+        );
+      expect((await request()).status).toBe(400);
+
+      const retry = await request();
+
+      expect(retry.status).toBe(200);
+      expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("active");
+      const attempts = await getDb(env)
+        .prepare(
+          `SELECT status FROM payment_recurring_payment_activation_attempts
+            WHERE idempotency_key = ? ORDER BY created_at`
+        )
+        .bind(key)
+        .all<{ status: string }>();
+      expect(attempts.results).toEqual([{ status: "failed" }, { status: "confirmed" }]);
+    });
+
+    it("refuses the same key on another schedule (422)", async () => {
+      const send = recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const first = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const second = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      expect(
+        (
+          await app.request(
+            actionPath(first.id, "activate"),
+            { method: "POST", headers: keyed(key), body: "{}" },
+            env
+          )
+        ).status
+      ).toBe(200);
+      await forgetIdempotencyKey(key);
+      const sendsBefore = send.mock.calls.length;
+
+      const response = await app.request(
+        actionPath(second.id, "activate"),
+        { method: "POST", headers: keyed(key), body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(422);
+      expect(await errorCode(response)).toBe("IDEMPOTENCY_KEY_REUSED");
+      expect(send).toHaveBeenCalledTimes(sendsBefore);
+      expect((await recurringPaymentDueAt(second.id)).status).toBe("pending_activation");
+    });
+
+    it("refuses the same key with a different PATCH body (422) and replays the same one", async () => {
+      recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const patch = (metadataUri: string) =>
+        app.request(
+          actionPath(activated.id),
+          { method: "PATCH", headers: keyed(key), body: JSON.stringify({ metadataUri }) },
+          env
+        );
+      expect((await patch("https://example.com/recurring/first.json")).status).toBe(200);
+      await forgetIdempotencyKey(key);
+
+      const different = await patch("https://example.com/recurring/second.json");
+      expect(different.status).toBe(422);
+      expect(await errorCode(different)).toBe("IDEMPOTENCY_KEY_REUSED");
+
+      // The refusal is stored under the key too; past 24 hours the attempt answers.
+      await forgetIdempotencyKey(key);
+      const same = await patch("https://example.com/recurring/first.json");
+      expect(same.status).toBe(200);
+      expect((await parseRecurringResponse(same)).data.recurringPayment.metadataUri).toBe(
+        "https://example.com/recurring/first.json"
+      );
+    });
+
+    it("lets a failed and a live attempt share a key, never two live ones", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const insert = (status: string) =>
+        getDb(env)
+          .prepare(
+            `INSERT INTO payment_recurring_payment_activation_attempts
+               (id, organization_id, project_id, recurring_payment_id, status, stage, idempotency_key)
+             VALUES (?, ?, ?, ?, ?, 'claim', ?)`
+          )
+          .bind(
+            `prpa_${crypto.randomUUID()}`,
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            created.id,
+            status,
+            key
+          )
+          .run();
+
+      await insert("failed");
+      await insert("failed");
+      await insert("processing");
+      await expect(insert("confirmed")).rejects.toThrow();
+    });
   });
 });
