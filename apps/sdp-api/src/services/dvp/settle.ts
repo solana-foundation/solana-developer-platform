@@ -5,6 +5,8 @@
  * fees and ATA rent; closing never selects or provisions another wallet.
  */
 
+import { createClusterRpc } from "@sdp/rpc/factory";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { DVP_CLOSE_REFUSAL } from "@sdp/types";
 import {
@@ -146,7 +148,7 @@ export async function closeDvpTrade(
   // After the local refusals, so a trade the row already rules out is answered
   // without a chain read, and an unreachable RPC cannot mask that answer. Before
   // the custody signer, so a refusal here never calls the provider.
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createClusterRpc();
   const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
     a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
     b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
@@ -291,7 +293,7 @@ export async function closeDvpTrade(
  */
 async function closeOutcome(
   trades: ReturnType<typeof createDvpTradeRepository>,
-  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  rpc: SolanaRpc,
   tradeId: string,
   action: DvpCloseAction,
   closeSignature: Signature

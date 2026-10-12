@@ -10,6 +10,8 @@
  */
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL } from "@sdp/types";
 import {
@@ -105,7 +107,7 @@ export async function reclaimDvpTradeLeg(
   const tokenProgram = isA ? trade.tokenProgramA : trade.tokenProgramB;
   const escrow = isA ? trade.escrowA : trade.escrowB;
 
-  const rpc = solanaRpc.createRpc(env);
+  const rpc = createClusterRpc();
   const held = await readReclaimableEscrow(rpc, trade, side);
 
   await refuseTransferHookMint(rpc, trade.id, mint);
@@ -247,7 +249,6 @@ export async function reclaimDvpTradeLeg(
 }
 
 type FundingClaims = ReturnType<typeof createPostgresDvpLegFundingClaimRepository>;
-type Rpc = ReturnType<typeof solanaRpc.createRpc>;
 
 /**
  * Reads the leg's escrow live and refuses anything reclaim cannot act on: a
@@ -255,7 +256,7 @@ type Rpc = ReturnType<typeof solanaRpc.createRpc>;
  *
  * @returns The escrow balance, in base units.
  */
-async function readReclaimableEscrow(rpc: Rpc, trade: DvpTradeRow, side: DvpTradeSide) {
+async function readReclaimableEscrow(rpc: SolanaRpc, trade: DvpTradeRow, side: DvpTradeSide) {
   const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
     a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
     b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
@@ -301,7 +302,7 @@ async function readReclaimableEscrow(rpc: Rpc, trade: DvpTradeRow, side: DvpTrad
  * Create refuses these mints now (`UNSUPPORTED_MINT_EXTENSIONS`), so this only
  * catches a trade created before that refusal existed.
  */
-async function refuseTransferHookMint(rpc: Rpc, tradeId: string, mint: Address) {
+async function refuseTransferHookMint(rpc: SolanaRpc, tradeId: string, mint: Address) {
   const mintAccount = await fetchMaybeMint(rpc, mint);
   if (!mintAccount.exists) {
     throw badRequest(`DvP trade ${tradeId}: mint ${mint} could not be read`, {
@@ -334,7 +335,7 @@ async function refuseTransferHookMint(rpc: Rpc, tradeId: string, mint: Address) 
  */
 async function takeoverableReceipt(
   claims: FundingClaims,
-  rpc: Rpc,
+  rpc: SolanaRpc,
   tradeId: string,
   side: DvpTradeSide
 ): Promise<string | null> {
@@ -368,7 +369,7 @@ async function takeoverableReceipt(
  */
 async function releaseOnceConfirmed(
   claims: FundingClaims,
-  rpc: Rpc,
+  rpc: SolanaRpc,
   leg: { tradeId: string; side: DvpTradeSide },
   heldSignature: Signature,
   reclaimSignature: Signature
