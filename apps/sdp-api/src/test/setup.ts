@@ -2,7 +2,7 @@ import { afterAll } from "vitest";
 import { closeDatabasePools } from "@/db";
 import { setDefaultDatabaseIdentityForTesting } from "@/db/identity";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
-import { MANAGED_POOL_ENV_KEYS } from "@/test/helpers/cluster-rpc";
+import { MANAGED_POOL_ENV_KEYS } from "@/test/helpers/managed-pool-env";
 
 for (const envKey of MANAGED_POOL_ENV_KEYS) {
   process.env[envKey] = "";
