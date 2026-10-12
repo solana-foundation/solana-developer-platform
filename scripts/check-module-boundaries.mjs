@@ -455,61 +455,6 @@ export function forbiddenPackageSourceImport({ module, filePath, specifier, appS
   return undefined;
 }
 
-/**
- * Repository-relative files that may open a cluster scope: the entry points where work starts
- * (project middleware, job runner, webhook handlers, anonymous Earn). Tests are always allowed.
- */
-const CLUSTER_SCOPE_ENTRY_POINTS = new Set([]);
-
-/**
- * Report a file that opens a cluster scope outside the sanctioned entry points.
- *
- * @param params - The file under check.
- * @param params.filePath - Absolute path of the source file.
- * @param params.source - The file's contents.
- * @param params.repositoryRoot - Absolute repository root.
- * @returns The violation message, or `undefined` when the file is allowed.
- */
-export function forbiddenClusterScopeEntryImport({ filePath, source, repositoryRoot }) {
-  const relative = toPosixPath(path.relative(repositoryRoot, filePath));
-  if (
-    CLUSTER_SCOPE_ENTRY_POINTS.has(relative) ||
-    relative.includes("/test/") ||
-    relative.endsWith(".test.ts") ||
-    relative.endsWith(".spec.ts")
-  ) {
-    return undefined;
-  }
-
-  const scopeSpecifier = "@sdp/rpc/scope";
-  const opaqueImportPatterns = [
-    new RegExp(String.raw`import\s+\*\s+as\s+[\w$]+\s+from\s+["']${scopeSpecifier}["']`),
-    new RegExp(
-      String.raw`import\s+(?!type\b)[\w$]+\s*(?:,[^;]*)?\sfrom\s+["']${scopeSpecifier}["']`
-    ),
-    new RegExp(String.raw`export\s+\*(?:\s+as\s+[\w$]+)?\s+from\s+["']${scopeSpecifier}["']`),
-    new RegExp(String.raw`require\(\s*["']${scopeSpecifier}["']\s*\)`),
-    new RegExp(String.raw`import\(\s*["']${scopeSpecifier}["']\s*\)`),
-  ];
-  if (opaqueImportPatterns.some((pattern) => pattern.test(source))) {
-    return "uses an opaque @sdp/rpc/scope import that can bypass the cluster-scope entry points";
-  }
-
-  const importPattern = /(?:import|export)\s*{([^}]+)}\s*from\s*["']@sdp\/rpc\/scope["']/g;
-  for (const match of source.matchAll(importPattern)) {
-    const importedNames = match[1].split(",").map(
-      (entry) =>
-        entry
-          .trim()
-          .replace(/^type\s+/, "")
-          .split(/\s+as\s+/)[0]
-    );
-    if (importedNames.includes("runInClusterScope"))
-      return "opens a cluster scope outside the sanctioned entry points";
-  }
-  return undefined;
-}
-
 const FEE_PAYMENT_CONSTRUCTORS = new Set([
   "createFeePaymentAdapter",
   "createKoraAdapter",
@@ -685,14 +630,6 @@ export function checkModuleBoundaries(repositoryRoot = REPOSITORY_ROOT, { write 
       filePath,
       source: readFileSync(filePath, "utf8"),
       apiSourceRoot,
-    });
-    if (violation) errors.push(`${toPosixPath(filePath)} ${violation}.`);
-  }
-  for (const filePath of modules.flatMap((module) => listFiles(module.sourceDirectory))) {
-    const violation = forbiddenClusterScopeEntryImport({
-      filePath,
-      source: readFileSync(filePath, "utf8"),
-      repositoryRoot,
     });
     if (violation) errors.push(`${toPosixPath(filePath)} ${violation}.`);
   }

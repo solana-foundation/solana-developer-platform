@@ -214,6 +214,56 @@
           }
         }
       }
+    },
+    {
+      "includes": ["**/apps/sdp-api/**/*.ts", "**/packages/**/*.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@sdp/rpc/scope": {
+                    "allowImportNames": ["currentClusterScope", "ClusterScope"],
+                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/apps/sdp-api/**/*.test.ts",
+        "**/apps/sdp-api/**/test/**/*.ts",
+        "**/packages/**/*.test.ts",
+        "**/packages/**/*.spec.ts",
+        "**/packages/**/test/**/*.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@sdp/rpc/scope": {
+                    "allowImportNames": [
+                      "currentClusterScope",
+                      "ClusterScope",
+                      "runInClusterScope"
+                    ],
+                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "files": {
