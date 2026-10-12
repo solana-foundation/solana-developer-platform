@@ -58,9 +58,6 @@ function testApp(): Hono<{ Bindings: Env }> {
     // SAFETY: the middleware reads only id, organizationId and projectId.
     c.set("apiKey", { id: keyId, organizationId: ORG, projectId } as never);
     c.set("projectId", projectId);
-    if (c.req.header("x-test-approved-operation")) {
-      c.set("approvedWalletOperationId", "wop_test");
-    }
     await next();
   });
   return app;
@@ -116,7 +113,6 @@ const KEY = { "Idempotency-Key": "key-1" };
 describe("requestFingerprint", () => {
   const base = {
     operation: "POST /x",
-    dryRun: false,
     params: {},
     query: {},
     body: { a: 1, b: 2 },
@@ -130,13 +126,9 @@ describe("requestFingerprint", () => {
     );
   });
 
-  it("separates dry run, path parameters and query", () => {
+  it("separates path parameters and query", () => {
     const fingerprint = requestFingerprint(base);
-    for (const variant of [
-      { dryRun: true },
-      { params: { id: "1" } },
-      { query: { force: ["true"] } },
-    ]) {
+    for (const variant of [{ params: { id: "1" } }, { query: { force: ["true"] } }]) {
       expect(requestFingerprint({ ...base, ...variant })).not.toBe(fingerprint);
     }
   });
@@ -253,13 +245,6 @@ describe("idempotent()", () => {
       expect(res.status).toBe(422);
       expect(await errorCode(res)).toBe("IDEMPOTENCY_KEY_REUSED");
     }
-    expect(create).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps a dry run and the real request apart", async () => {
-    const { app, create } = buildApp({ key: "required" }, created);
-    await post(app, "/v1/other", { a: 1 }, { ...KEY, "Dry-Run": "true" });
-    expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(422);
     expect(create).toHaveBeenCalledTimes(1);
   });
 
@@ -465,28 +450,6 @@ describe("idempotent()", () => {
       (await post(app, "/v1/other", { a: 1 }, KEY)).headers.get(IDEMPOTENT_REPLAYED_HEADER)
     ).toBe("true");
     expect(create).toHaveBeenCalledTimes(1);
-  });
-
-  it("lets a dry run reuse a real request's key on a route that honors dry runs", async () => {
-    const { app, create } = buildApp({ key: "required", honorsDryRun: true }, created);
-    await post(app, "/v1/other", { a: 1 }, KEY);
-    const dryRun = await post(app, "/v1/other", { a: 1 }, { ...KEY, "Dry-Run": "true" });
-    expect(dryRun.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBeNull();
-    expect(create).toHaveBeenCalledTimes(2);
-    expect(await storedRows()).toHaveLength(1);
-  });
-
-  it("skips approved-operation executions", async () => {
-    const { app, create } = buildApp({ key: "required" }, created);
-    await post(app, "/v1/other", { a: 1 }, KEY);
-    const executed = await post(
-      app,
-      "/v1/other",
-      { a: 1 },
-      { ...KEY, "x-test-approved-operation": "1" }
-    );
-    expect(executed.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBeNull();
-    expect(create).toHaveBeenCalledTimes(2);
   });
 
   it("applies the route's canonicalize hook before fingerprinting", async () => {

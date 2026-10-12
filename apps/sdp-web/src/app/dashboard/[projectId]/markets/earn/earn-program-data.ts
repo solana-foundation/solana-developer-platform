@@ -737,56 +737,19 @@ export function useEarnExternalWalletPositionSummary({
 }
 
 /**
- * The two envelopes a 2xx vault deposit can answer with, parsed at the
- * boundary rather than narrowed by hand.
- *
- * `dashboardFetch` has already rejected every non-2xx status, so only these
- * two shapes are reachable: the created movement, or the policy hold that the
- * API reports as a `202` carrying an error-shaped body. Parsing both means the
- * deposit RECORD is checked too — the previous `as unknown as EarnVaultDeposit`
- * asserted a movement id and signature that were never looked at.
- *
- * `z.union` rather than `z.discriminatedUnion`: the two envelopes share no
- * common key, so there is no discriminator to switch on — the tag is minted by
- * the transforms below, which is what makes the OUTCOME a discriminated union
- * for every caller.
+ * The envelope a 2xx vault deposit answers with, parsed at the boundary rather
+ * than narrowed by hand, so the deposit RECORD is checked too — the previous
+ * `as unknown as EarnVaultDeposit` asserted a movement id and signature that
+ * were never looked at.
  *
  * The record schema is annotated `z.ZodType<EarnVaultDeposit>` rather than left
  * to inference, so a field added or renamed in `@sdp/types` fails typecheck
  * here instead of being silently stripped from a parsed deposit.
  */
 
-/**
- * The API's 202 approval hold, identical for deposits and withdrawals: the
- * custody wallet still owes the transaction a signature. One schema for both
- * outcome unions so the pending arm cannot drift between the two mirrors.
- */
-const signingPendingOutcomeSchema = z
-  .object({
-    error: z.object({
-      code: z.literal("SIGNING_PENDING"),
-      message: z.string(),
-      details: z
-        .object({
-          approvalRequestId: z.string().optional(),
-          walletOperationId: z.string().optional(),
-        })
-        .optional(),
-    }),
-  })
-  .transform(({ error }) => ({
-    kind: "approval_pending" as const,
-    message: error.message,
-    approvalRequestId: error.details?.approvalRequestId,
-    walletOperationId: error.details?.walletOperationId,
-  }));
-
-const earnVaultDepositOutcomeSchema = z.union([
-  z
-    .object({ data: earnVaultDepositSchema })
-    .transform(({ data }) => ({ kind: "submitted" as const, deposit: data })),
-  signingPendingOutcomeSchema,
-]);
+const earnVaultDepositOutcomeSchema = z
+  .object({ data: earnVaultDepositSchema })
+  .transform(({ data }) => ({ kind: "submitted" as const, deposit: data }));
 
 export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSchema>;
 
@@ -828,10 +791,6 @@ export async function createEarnVaultDeposit(
 
   const parsed = earnVaultDepositOutcomeSchema.safeParse(result.data);
   if (!parsed.success) return invalid;
-  // An approval hold is specifically the 202 contract. A 200 or 201 carrying it
-  // would mean the API reported a deposit as both created and held, and this
-  // must not resolve that contradiction in the customer's favour.
-  if (parsed.data.kind === "approval_pending" && result.status !== 202) return invalid;
 
   return { ok: true, status: result.status, data: parsed.data };
 }
@@ -939,43 +898,6 @@ export async function fetchEarnVaultDeposits(
   });
 }
 
-/**
- * What the store could establish about a key: the deposit it produced, that it
- * produced none, or that the question could not be answered right now.
- *
- * Three outcomes, not two. Collapsing `unavailable` into `absent` is what makes
- * a failed read look like "no deposit exists", and a caller deciding whether a
- * key is spent would then reuse a spent one.
- */
-export type EarnVaultDepositByRequestId =
-  | { kind: "found"; deposit: EarnVaultDepositRecord }
-  | { kind: "absent" }
-  | { kind: "unavailable" };
-
-/**
- * Resolve the deposit a given idempotency key produced, if one exists yet.
- *
- * The approval path needs this: a policy hold creates no movement, so the only
- * handle the client keeps is the key it minted, and "has the write behind this
- * key happened?" is a question only the server can answer.
- *
- * Note there is no 404 to interpret — the list answers 200 with an empty page
- * for a key it has never seen — so a non-ok result really does mean the read
- * failed rather than the deposit being absent.
- */
-export async function fetchEarnVaultDepositByRequestId(
-  requestId: string
-): Promise<EarnVaultDepositByRequestId> {
-  const result = await dashboardFetch<unknown>(
-    `/api/dashboard/markets/earn/vault-deposits?requestId=${encodeURIComponent(requestId)}`
-  );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = earnVaultDepositsPageSchema.safeParse(result.data);
-  if (!parsed.success) return { kind: "unavailable" };
-  const deposit = parsed.data.data.deposits[0];
-  return deposit ? { kind: "found", deposit } : { kind: "absent" };
-}
-
 /** Why a quote declines to price a request; both preview envelopes carry it. */
 const vaultPreviewBlockingIssues = z.array(z.object({ code: z.string(), message: z.string() }));
 
@@ -1076,7 +998,7 @@ export async function fetchEarnVaultWithdrawalPreview(
  * Thirty seconds, and deliberately slower than the per-deposit tracker's five:
  * this list only decides WHICH deposits are worth watching, and each watch then
  * runs its own fast poll. It is also how a deposit signed before a reload — or
- * in another tab, or unblocked by a policy approval minutes later — becomes
+ * in another tab — becomes
  * visible again, which is the whole reason it is a server read rather than
  * browser state.
  */
@@ -1261,20 +1183,16 @@ export function useEarnVaultDepositOutcome(
  * here rather than be silently stripped from a parsed leg.
  */
 
-const earnVaultWithdrawalOutcomeSchema = z.union([
-  z
-    .object({ data: z.object({ withdrawal: earnVaultWithdrawalSchema }) })
-    .transform(({ data }) => ({ kind: "submitted" as const, withdrawal: data.withdrawal })),
-  signingPendingOutcomeSchema,
-]);
+const earnVaultWithdrawalOutcomeSchema = z
+  .object({ data: z.object({ withdrawal: earnVaultWithdrawalSchema }) })
+  .transform(({ data }) => ({ kind: "submitted" as const, withdrawal: data.withdrawal }));
 
 export type EarnVaultWithdrawalOutcome = z.infer<typeof earnVaultWithdrawalOutcomeSchema>;
 
 /**
  * Exit a vault position back to the custody wallet that holds it. Same
- * body-rebuild and 202-contract rules as `createEarnVaultDeposit`: the caller
- * cannot smuggle fields into a value-moving request, and an approval hold is
- * accepted only on a 202.
+ * body-rebuild rule as `createEarnVaultDeposit`: the caller cannot smuggle
+ * fields into a value-moving request.
  */
 export async function createEarnVaultWithdrawal(
   input: EarnVaultWithdrawalRequest,
@@ -1304,7 +1222,6 @@ export async function createEarnVaultWithdrawal(
 
   const parsed = earnVaultWithdrawalOutcomeSchema.safeParse(result.data);
   if (!parsed.success) return invalid;
-  if (parsed.data.kind === "approval_pending" && result.status !== 202) return invalid;
 
   return { ok: true, status: result.status, data: parsed.data };
 }
@@ -1361,33 +1278,9 @@ export async function fetchEarnVaultWithdrawals(
 }
 
 /**
- * The movement a given idempotency key produced, if one exists yet. The held-key
- * pre-flight for the approval path, with the same three-outcome contract as
- * the deposit's: collapsing `unavailable` into `absent` would let a failed
- * read reuse a spent key.
- */
-export type EarnVaultWithdrawalsByRequestId =
-  | { kind: "found"; withdrawal: EarnVaultWithdrawal }
-  | { kind: "absent" }
-  | { kind: "unavailable" };
-
-export async function fetchEarnVaultWithdrawalsByRequestId(
-  requestId: string
-): Promise<EarnVaultWithdrawalsByRequestId> {
-  const result = await dashboardFetch<unknown>(
-    `/api/dashboard/markets/earn/vault-withdrawals?requestId=${encodeURIComponent(requestId)}`
-  );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = earnVaultWithdrawalsPageSchema.safeParse(result.data);
-  if (!parsed.success) return { kind: "unavailable" };
-  const [withdrawal] = parsed.data.data.withdrawals;
-  return withdrawal ? { kind: "found", withdrawal } : { kind: "absent" };
-}
-
-/**
  * The DISCOVERY tier for in-flight withdrawals, 30s, mirroring
- * `useEarnVaultDeposits`, and the reason an exit signed before a reload, in
- * another tab, or unblocked by a policy approval minutes later becomes
+ * `useEarnVaultDeposits`, and the reason an exit signed before a reload or in
+ * another tab becomes
  * visible (and watched) again.
  */
 export function useEarnVaultWithdrawals() {
@@ -1615,13 +1508,12 @@ const queuedMutationEnvelopeSchema = z.object({
   data: z.object({ withdrawalRequest: earnVaultWithdrawalRequestRecordSchema }),
 });
 
-const earnVaultQueuedWithdrawalOutcomeSchema = z.union([
-  queuedMutationEnvelopeSchema.transform(({ data }) => ({
+const earnVaultQueuedWithdrawalOutcomeSchema = queuedMutationEnvelopeSchema.transform(
+  ({ data }) => ({
     kind: "submitted" as const,
     withdrawalRequest: data.withdrawalRequest,
-  })),
-  signingPendingOutcomeSchema,
-]);
+  })
+);
 
 export type EarnVaultQueuedWithdrawalOutcome = z.infer<
   typeof earnVaultQueuedWithdrawalOutcomeSchema
@@ -1666,20 +1558,11 @@ export async function createEarnVaultWithdrawalRequest(
     };
   }
   if (
-    parsed.data.kind === "submitted" &&
-    ((input.mechanism === "operatorRedemption" &&
+    (input.mechanism === "operatorRedemption" &&
       parsed.data.withdrawalRequest.mechanism !== "operatorRedemption") ||
-      (input.mechanism !== "operatorRedemption" &&
-        parsed.data.withdrawalRequest.mechanism === "operatorRedemption"))
+    (input.mechanism !== "operatorRedemption" &&
+      parsed.data.withdrawalRequest.mechanism === "operatorRedemption")
   ) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal response",
-      status: result.status,
-      body: result.data,
-    };
-  }
-  if (parsed.data.kind === "approval_pending" && result.status !== 202) {
     return {
       ok: false,
       error: "Invalid queued withdrawal response",

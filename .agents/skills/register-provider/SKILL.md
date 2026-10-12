@@ -9,7 +9,7 @@ disable-model-invocation: true
 Build the smallest honest skeleton for the capabilities the provider supports. Registration spans three ownership boundaries:
 
 - `packages/sdp-payments`: HTTP adapter and normalized ramp contract.
-- `apps/sdp-api`: auth, policy gates, DB orchestration, provider availability, schemas, and webhooks.
+- `apps/sdp-api`: auth, request gates, DB orchestration, provider availability, schemas, and webhooks.
 - `packages/sdp-types` / `apps/sdp-web`: shared public shapes and provider presentation.
 
 ## 1. Add the closed provider id

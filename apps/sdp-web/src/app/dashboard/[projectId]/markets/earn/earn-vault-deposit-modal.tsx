@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { applyIdempotencyKeyOutcome, resolveHeldIdempotencyKey } from "@/lib/idempotency-key-store";
+import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { cn } from "@/lib/utils";
@@ -46,7 +46,6 @@ import {
   type EarnVaultDeposit,
   type EarnVaultDepositPreview,
   type EarnVaultDepositRecord,
-  fetchEarnVaultDepositByRequestId,
   fetchEarnVaultDepositPreview,
   useEarnVaultDepositOutcome,
 } from "./earn-program-data";
@@ -65,7 +64,6 @@ import {
 import {
   mergeObservedVaultMovement,
   observableVaultMovement,
-  vaultApprovalPending,
   vaultMovementPanelKey,
   vaultMovementProcessing,
   vaultMovementProgressStep,
@@ -195,27 +193,12 @@ function DepositConfirmNote({
   );
 }
 
-type DepositOutcome =
-  | {
-      kind: "approval_pending";
-      approvalRequestId?: string;
-      walletOperationId?: string;
-    }
-  | {
-      kind: "deposit";
-      movement: EarnVaultDeposit;
-      amount: string;
-      walletName: string;
-      /**
-       * The approval executor won the race: it executed this exact intent
-       * between the held-key pre-flight and this POST, so the server absorbed
-       * the submission as a replay of the approval's movement. Real money DID
-       * move — once, via the approval — but THIS submission moved nothing, and
-       * saying "deposit submitted" would leave the customer believing two
-       * deposits happened, or none.
-       */
-      absorbedByApproval?: true;
-    };
+type DepositOutcome = {
+  kind: "deposit";
+  movement: EarnVaultDeposit;
+  amount: string;
+  walletName: string;
+};
 
 type DepositSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
@@ -298,7 +281,6 @@ function resolveDepositSubmission(
   amount: string,
   walletName: string,
   fallbackError: string,
-  keyWasHeld: boolean,
   slippageExceededMessage: string
 ): DepositSubmissionResolution {
   if (!result.ok) {
@@ -307,29 +289,9 @@ function resolveDepositSubmission(
     }
     return { kind: "error", message: result.error || fallbackError };
   }
-  if (result.data.kind === "approval_pending") {
-    return { kind: "outcome", outcome: vaultApprovalPending(result.data) };
-  }
-
   const deposit = result.data.deposit;
   if (deposit.status === "failed") {
     return { kind: "error", message: deposit.failureReason || fallbackError };
-  }
-  // A replay of a HELD key can only be the approval's own execution: the key is
-  // client-minted, so the executor replaying the original Idempotency-Key is
-  // the sole other writer under it. The pre-flight said "absent", the answer
-  // says "already recorded" — the approval landed in between, and no client
-  // read could have closed that window. Announce what actually happened rather
-  // than crediting this submission; the caller still refreshes and watches the
-  // movement, because it is real and may still be settling. Deliberately NOT
-  // retried with a fresh key: auto-resubmitting money after a race is the
-  // double-deposit hazard, so making a second deposit stays a human decision.
-  if (deposit.replayed && keyWasHeld) {
-    return {
-      kind: "outcome",
-      outcome: { kind: "deposit", amount, movement: deposit, walletName, absorbedByApproval: true },
-      deposited: deposit,
-    };
   }
   return {
     kind: "outcome",
@@ -506,68 +468,7 @@ function DepositWalletPicker({
   );
 }
 
-function DepositApprovalResult({
-  outcome,
-  onClose,
-}: {
-  outcome: Extract<DepositOutcome, { kind: "approval_pending" }>;
-  onClose: () => void;
-}) {
-  const t = useTranslations();
-
-  return (
-    <>
-      <EarnOutcomeMark tone="warning" />
-      <h2
-        className="text-base font-medium text-primary outline-none"
-        data-modal-focus-target
-        tabIndex={-1}
-      >
-        {t("DashboardEarn.deposit.vaultApprovalTitle")}
-      </h2>
-      <p className="mt-1 text-sm leading-6 text-secondary">
-        {t("DashboardEarn.deposit.vaultApprovalBody")}
-      </p>
-      {outcome.approvalRequestId || outcome.walletOperationId ? (
-        <dl className="mt-5 rounded-lg border border-border-default bg-fill-subtle p-4 text-sm">
-          {outcome.approvalRequestId ? (
-            <div className="flex items-start justify-between gap-5 py-1">
-              <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultApprovalRequest")}</dt>
-              <dd className="max-w-64 break-all text-right text-primary">
-                {outcome.approvalRequestId}
-              </dd>
-            </div>
-          ) : null}
-          {outcome.walletOperationId ? (
-            <div className="flex items-start justify-between gap-5 py-1">
-              <dt className="text-tertiary">{t("DashboardEarn.withdraw.referenceLabel")}</dt>
-              <dd className="max-w-64 break-all text-right text-primary">
-                {outcome.walletOperationId}
-              </dd>
-            </div>
-          ) : null}
-        </dl>
-      ) : null}
-      <div className="mt-6 flex justify-end">
-        <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
-      </div>
-    </>
-  );
-}
-
-type DepositMovementOutcome = Extract<DepositOutcome, { kind: "deposit" }>;
-
-function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
-  if (outcome.absorbedByApproval) {
-    return {
-      title: t("DashboardEarn.deposit.vaultAbsorbedTitle"),
-      body: t("DashboardEarn.deposit.vaultAbsorbedBody"),
-      note: t("DashboardEarn.deposit.vaultAbsorbedNote"),
-      status: t("DashboardEarn.deposit.vaultAbsorbedStatus"),
-      statusVariant: "info" as const,
-    };
-  }
-
+function depositMovementCopy(outcome: DepositOutcome, t: Translation) {
   if (outcome.movement.status === "failed") {
     return {
       title: t("DashboardEarn.deposit.vaultFailedTitle"),
@@ -619,31 +520,27 @@ function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
   }
 }
 
-function DepositMovementResult({
+function DepositResult({
   fundingMint,
   outcome,
   onClose,
 }: {
   fundingMint: string | undefined;
-  outcome: DepositMovementOutcome;
+  outcome: DepositOutcome;
   onClose: () => void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
 
   const { movement: deposit } = outcome;
-  // The absorbed case overrides the status copy: whatever state the movement is
-  // in, the headline is that THIS submission moved nothing.
   const copy = depositMovementCopy(outcome, t);
-  const sharedStatus = outcome.absorbedByApproval
-    ? null
-    : earnProviderDepositSettlement(deposit.strategy.provider) === "provider_order"
+  const sharedStatus =
+    earnProviderDepositSettlement(deposit.strategy.provider) === "provider_order"
       ? null
       : earnVaultPositionStatusLabels(earnVaultDepositUiState(deposit.status).positionStatus, t);
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
-  const processing =
-    !outcome.absorbedByApproval && (deposit.status === "pending" || deposit.status === "submitted");
+  const processing = deposit.status === "pending" || deposit.status === "submitted";
 
   return (
     <>
@@ -688,21 +585,6 @@ function DepositMovementResult({
       </div>
     </>
   );
-}
-
-function DepositResult({
-  fundingMint,
-  outcome,
-  onClose,
-}: {
-  fundingMint: string | undefined;
-  outcome: DepositOutcome;
-  onClose: () => void;
-}) {
-  if (outcome.kind === "approval_pending") {
-    return <DepositApprovalResult onClose={onClose} outcome={outcome} />;
-  }
-  return <DepositMovementResult fundingMint={fundingMint} onClose={onClose} outcome={outcome} />;
 }
 
 export interface EarnVaultDepositModalProps {
@@ -1353,7 +1235,7 @@ export function EarnVaultDepositModal({
   /**
    * EXPIRY BACKSTOP (PRO-1691), the state half. The quote hook re-quotes on
    * its own, but timers throttle in background tabs, so the floor on screen
-   * can be older than the TTL at submit. A replayed floor — a held or kept
+   * can be older than the TTL at submit. A replayed floor — a kept
    * key's minted floor, which must go out verbatim — or a fresh one passes
    * straight through. An expired one is revalidated first; a rate that moved
    * beyond it stops the submission on THIS side of the API, through the same
@@ -1398,30 +1280,17 @@ export function EarnVaultDepositModal({
       toleranceBps: slippagePolicy === null ? null : slippageBps,
       ...(swapActive ? { sourceTokenMint: fundingToken.mint } : {}),
     });
-    const resolvedKey = await resolveHeldIdempotencyKey(
-      vaultDepositIdempotencyKeyStore,
-      fingerprint,
-      controller.signal,
-      fetchEarnVaultDepositByRequestId
-    );
-    if (resolvedKey.kind === "aborted") return;
-    if (resolvedKey.kind === "unavailable") {
-      setSubmitError(t("DashboardEarn.deposit.vaultHeldKeyUnavailable"));
-      return;
-    }
+    const resolvedKey = vaultDepositIdempotencyKeyStore.claimReportingReuse(fingerprint);
 
-    // A HELD key must replay the floor it was MINTED with, verbatim: the API's
-    // idempotency fingerprint includes `minSharesOut`, so pairing the held key
-    // with a freshly quoted floor would be refused as a changed request —
-    // stranding the approval the hold exists to wait on. A KEPT key — one a
-    // prior ambiguous attempt (a 5xx, a lost answer) left live — must replay
-    // its minted floor too, and worse: the changed-request refusal is a 409,
-    // which retires the key and lets the next submit mint a fresh one while
-    // the first attempt may already have executed. The floor memo answers for
-    // both; a fresh key takes the freshly derived floor, and records it for
-    // exactly that future replay. A reuse whose memo LOST the floor cannot
-    // re-floor safely at all — it stops here, submitting nothing, rather than
-    // pair the live key with a changed request.
+    // A KEPT key — one a prior ambiguous attempt (a 5xx, a lost answer) left
+    // live — must replay the floor it was MINTED with, verbatim: the API's
+    // idempotency fingerprint includes `minSharesOut`, and the changed-request
+    // refusal is a 409, which retires the key and lets the next submit mint a
+    // fresh one while the first attempt may already have executed. The floor
+    // memo answers for it; a fresh key takes the freshly derived floor, and
+    // records it for exactly that future replay. A reuse whose memo LOST the
+    // floor cannot re-floor safely at all — it stops here, submitting nothing,
+    // rather than pair the live key with a changed request.
     const replay = floorToReplay(
       resolvedKey,
       recallVaultDepositFloor,
@@ -1438,12 +1307,9 @@ export function EarnVaultDepositModal({
 
     // The value-moving POST deliberately takes NO abort signal. The server
     // processes the request whether or not this component survives it, so
-    // aborting on unmount only blinds the client to an answer it needs: a
-    // 202 approval hold whose key was never PINNED stays on the 15-minute
-    // TTL while the approval itself lives for hours, and the eventual
-    // resubmit mints a fresh key — a second approval request for one intent.
-    // The controller still exists, but it gates the UI below, never the
-    // request or the key bookkeeping.
+    // aborting on unmount only blinds the client to an answer the key
+    // bookkeeping needs. The controller still exists, but it gates the UI
+    // below, never the request or the key bookkeeping.
     const submittedAt = Date.now();
     const submission = vaultDepositIdempotencyKeyStore.beginSubmission(fingerprint);
     if (!submission) {
@@ -1483,7 +1349,6 @@ export function EarnVaultDepositModal({
       amount,
       walletDisplayName(wallet, t("DashboardEarn.deposit.walletUnnamed")),
       t("DashboardEarn.deposit.vaultSubmitError"),
-      resolvedKey.wasHeld,
       // A blown floor gets THIS surface's own words and the control that
       // fixes it, not a relayed simulation log.
       t("DashboardEarn.deposit.vaultSlippageExceeded")
@@ -1521,8 +1386,7 @@ export function EarnVaultDepositModal({
     const controller = new AbortController();
     requestControllerRef.current?.abort();
     requestControllerRef.current = controller;
-    // Locked BEFORE the first await below, so the spent-key check cannot be
-    // raced by a second press.
+    // Locked BEFORE the first await below, so a second press cannot race it.
     submittingRef.current = true;
     setSubmitting(true);
     const finishSubmission = onSubmissionStart?.(selectedWallet.id);

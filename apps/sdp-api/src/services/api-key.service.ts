@@ -15,10 +15,8 @@ import type {
   ApiKeyWalletScope,
   Permission,
 } from "@sdp/types";
-import type { DatabaseExecutor } from "@/db";
 import { parseOptionalPostgresJson, parsePostgresJson } from "@/db/postgres-utils";
-import type { ApiKeyWalletPolicyBindingRow } from "@/db/repositories";
-import { AppError, badRequest, internalError, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { createApiKeyMaterial } from "./api-key.utils";
 import {
@@ -433,15 +431,6 @@ export class ApiKeyService {
       throw error;
     }
 
-    // A key created BY a key inherits its creator's policy foundation, the
-    // same way rotation clones it: otherwise a policy-bound key could mint a
-    // sibling born free of the per-key rules that govern the creator and act
-    // through it. Runs on the caller's transactional client, so the key and
-    // its cloned policy commit together.
-    if (input.createdByKeyId) {
-      await this.cloneApiKeyPolicyFoundation(this.db, input.createdByKeyId, keyId);
-    }
-
     return {
       id: keyId,
       name: input.name,
@@ -692,8 +681,6 @@ export class ApiKeyService {
             )
             .run();
         }
-
-        await this.cloneApiKeyPolicyFoundation(tx, keyId, newKeyId);
       },
       // The caller owns the post-commit cache refresh (it holds the KV
       // handle) and must never fail the response over it, so nothing runs
@@ -826,155 +813,5 @@ export class ApiKeyService {
       expiresAt: row.expires_at,
       createdAt: row.created_at,
     };
-  }
-
-  private async cloneApiKeyPolicyFoundation(
-    db: DatabaseExecutor,
-    sourceApiKeyId: string,
-    targetApiKeyId: string
-  ): Promise<void> {
-    const profileRows = await db
-      .prepare(
-        `SELECT *
-         FROM api_key_control_profiles
-         WHERE api_key_id = ?
-         ORDER BY created_at ASC`
-      )
-      .bind(sourceApiKeyId)
-      .all<Record<string, unknown>>();
-
-    const profileIdMap = new Map<string, string>();
-    const revisionIdMap = new Map<string, string>();
-
-    for (const profile of profileRows.results) {
-      const sourceProfileId = profile.id as string;
-      const targetProfileId = `akcp_${crypto.randomUUID()}`;
-      profileIdMap.set(sourceProfileId, targetProfileId);
-
-      await db
-        .prepare(
-          `INSERT INTO api_key_control_profiles (
-             id,
-             organization_id,
-             project_id,
-             api_key_id,
-             name,
-             status,
-             created_by,
-             activated_at,
-             archived_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          targetProfileId,
-          profile.organization_id,
-          profile.project_id,
-          targetApiKeyId,
-          profile.name,
-          profile.status,
-          profile.created_by ?? null,
-          profile.activated_at ?? null,
-          profile.archived_at ?? null
-        )
-        .run();
-
-      const revisionRows = await db
-        .prepare(
-          `SELECT *
-           FROM api_key_control_profile_revisions
-           WHERE profile_id = ?
-           ORDER BY revision_number ASC`
-        )
-        .bind(sourceProfileId)
-        .all<Record<string, unknown>>();
-
-      for (const revision of revisionRows.results) {
-        const sourceRevisionId = revision.id as string;
-        const targetRevisionId = `akcpr_${crypto.randomUUID()}`;
-        revisionIdMap.set(sourceRevisionId, targetRevisionId);
-
-        await db
-          .prepare(
-            `INSERT INTO api_key_control_profile_revisions (
-               id,
-               profile_id,
-               revision_number,
-               rules,
-               default_action,
-               created_by,
-               activated_at
-             ) VALUES (?, ?, ?, ?::jsonb, ?, ?, ?)`
-          )
-          .bind(
-            targetRevisionId,
-            targetProfileId,
-            revision.revision_number,
-            stringifyJsonb(revision.rules, []),
-            revision.default_action,
-            revision.created_by ?? null,
-            revision.activated_at ?? null
-          )
-          .run();
-      }
-
-      await db
-        .prepare(
-          `UPDATE api_key_control_profiles
-           SET active_revision_id = ?,
-               updated_at = sdp_iso_now()
-           WHERE id = ?`
-        )
-        .bind(
-          profile.active_revision_id
-            ? (revisionIdMap.get(profile.active_revision_id as string) ?? null)
-            : null,
-          targetProfileId
-        )
-        .run();
-    }
-
-    const bindingRows = await db
-      .prepare(
-        `SELECT *
-         FROM api_key_wallet_policy_bindings
-         WHERE api_key_id = ?
-         ORDER BY created_at ASC`
-      )
-      .bind(sourceApiKeyId)
-      .all<ApiKeyWalletPolicyBindingRow>();
-
-    for (const binding of bindingRows.results) {
-      let apiKeyControlProfileId: string | null = null;
-      if (binding.api_key_control_profile_id !== null) {
-        const mappedProfileId = profileIdMap.get(binding.api_key_control_profile_id);
-        if (mappedProfileId === undefined) {
-          throw internalError("Failed to clone API key policy binding profile");
-        }
-        apiKeyControlProfileId = mappedProfileId;
-      }
-
-      await db
-        .prepare(
-          `INSERT INTO api_key_wallet_policy_bindings (
-             id,
-             api_key_id,
-             binding_scope,
-             wallet_id,
-             custody_wallet_id,
-             wallet_control_profile_id,
-             api_key_control_profile_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          `akwpol_${crypto.randomUUID()}`,
-          targetApiKeyId,
-          binding.binding_scope,
-          binding.wallet_id,
-          binding.custody_wallet_id,
-          binding.wallet_control_profile_id,
-          apiKeyControlProfileId
-        )
-        .run();
-    }
   }
 }

@@ -68,8 +68,6 @@ function operationInput(): BuildOperationInput {
       walletId: "hrw_1",
       opType: "withdraw",
       state: "proving",
-      approvalRequestId: null,
-      policyEvaluationId: null,
       proof: null,
       outerTxSignature: null,
       photonIndexedAt: null,

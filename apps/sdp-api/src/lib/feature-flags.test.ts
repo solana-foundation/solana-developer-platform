@@ -256,7 +256,6 @@ describe("release channels", () => {
         "recurring_payments",
         "ramps",
         "compliance",
-        "policies",
         "issuance",
         "markets",
         "earn",

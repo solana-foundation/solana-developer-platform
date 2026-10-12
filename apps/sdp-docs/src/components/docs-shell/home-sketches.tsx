@@ -158,7 +158,7 @@ export function ArchitectureSketch() {
   );
 }
 
-/** A transaction passes a policy gate (key in a diamond) and exits signed. */
+/** A transaction passes a permission gate (key in a diamond) and exits signed. */
 export function WalletsSketch() {
   return (
     <SketchSvg viewBox="11 7 314 126">

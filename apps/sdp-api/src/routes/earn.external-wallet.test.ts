@@ -976,26 +976,6 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
     expect(submitExternalWalletDeposit).not.toHaveBeenCalled();
   });
 
-  it("refuses Dry-Run: these routes have no policy evaluation to preview", async () => {
-    await seedAuth();
-    const res = await app.request(
-      "/v1/earn/external-wallet/deposits",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
-          "Dry-Run": "true",
-        },
-        body: JSON.stringify({ transactionId: "earn_ext_tx", signedTransaction: "AQ==" }),
-      },
-      env
-    );
-    expect(res.status).toBe(400);
-    expect(submitExternalWalletDeposit).not.toHaveBeenCalled();
-  });
-
   it("rejects a body requestId", async () => {
     await seedAuth();
     const res = await post(

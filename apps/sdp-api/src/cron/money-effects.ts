@@ -25,11 +25,6 @@ export const CRON_MONITOR_MONEY_EFFECTS = {
     effect: "starts",
     admission: { via: "money_admission" },
   },
-  "sdp-api-recover-approved-wallet-operations": {
-    effect: "starts",
-    // Replays re-enter the app, so auth and projectContextMiddleware refuse them.
-    admission: { via: "http_pipeline" },
-  },
   "sdp-api-track-pending-transfers": {
     effect: "starts",
     admission: {

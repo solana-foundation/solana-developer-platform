@@ -827,8 +827,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
 /**
  * The LIST is the discovery tier: it is what lets a client re-derive its own
  * in-flight deposits after losing local state, and — via `?requestId=` — find a
- * deposit that did not exist when it was requested because policy held it for
- * approval.
+ * deposit by the Idempotency-Key the caller kept.
  */
 describe("GET /v1/earn/vault-deposits", () => {
   it("returns this workspace's deposits newest first", async () => {
@@ -910,9 +909,7 @@ describe("GET /v1/earn/vault-deposits", () => {
   });
 
   it("finds a deposit by the caller's own idempotency key", async () => {
-    // This is the approval-gated mechanism: a policy hold returns no movement
-    // id, but the approval executor replays the ORIGINAL Idempotency-Key, so the
-    // movement it eventually creates is findable by the key the caller kept.
+    // A caller that lost the response finds the movement by the key it kept.
     const requestId = `caller-chosen-${crypto.randomUUID()}`;
     const created = await createPosition({ providerReference: "vault_by_key", requestId });
 

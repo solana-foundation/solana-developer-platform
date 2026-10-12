@@ -14,10 +14,7 @@ import { AppError } from "@/lib/errors";
 import { canonicalJson, type JsonValue } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
-// TODO(#2236): the approved-operation door goes away with approvals; drop the bypass then.
-import { approvedWalletOperationId } from "@/services/policy/approved-operation-replay";
 import type { Env } from "@/types/env";
-import { isDryRunRequest } from "./dry-run";
 import { parseIdempotencyKey } from "./idempotency-key";
 
 /** Set on a response replayed from a stored one. */
@@ -64,18 +61,10 @@ export interface IdempotencyOptions {
    *   before this step (authentication, project context, `requirePermissions`,
    *   Allowed Operations), which every replay passes again.
    * - A function: repeats the caller checks the handler makes (an API key's
-   *   wallet bindings, approver eligibility), reading fresh whatever the
+   *   wallet bindings, ownership of the resource), reading fresh whatever the
    *   handler reads fresh. Throw to refuse; nothing is replayed.
    */
   replayAccess: ReplayAccess;
-  /**
-   * The route answers `Dry-Run: true` with a write-free verdict (its policy
-   * gate short-circuits before anything is written), so a dry run skips this
-   * step: it claims nothing and may reuse a real request's key. Leave unset on
-   * routes that ignore the header; there a dry run is fingerprinted apart from
-   * the real request.
-   */
-  honorsDryRun?: boolean;
 }
 
 export const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
@@ -99,7 +88,6 @@ const STORED_RESPONSE_HEADERS = ["content-type", "location"] as const;
 /** SHA-256 hex over the canonical form of everything that defines the request. */
 export function requestFingerprint(input: {
   operation: string;
-  dryRun: boolean;
   params: Record<string, string>;
   query: Record<string, string[]>;
   body: JsonValue;
@@ -277,20 +265,12 @@ function startLeaseRenewal(
  * Place it after authentication, project context, `requirePermissions` and
  * Allowed Operations, so a replay re-checks the caller, and before admission
  * and body validation, so a replay is not admitted again as a new movement.
- * Approved-operation executions skip it: they re-send the original key to
- * execute the operation, not to replay it. So do dry runs on a route that
- * declares `honorsDryRun`.
  */
 export async function runIdempotency(
   c: Context<{ Bindings: Env }>,
   next: Next,
   options: IdempotencyOptions
 ): Promise<Response | undefined> {
-  if (approvedWalletOperationId(c) !== undefined || (options.honorsDryRun && isDryRunRequest(c))) {
-    await next();
-    return undefined;
-  }
-
   const idempotencyKey = parseIdempotencyKey(c);
   if (idempotencyKey === undefined) {
     if (options.key === "required") {
@@ -305,8 +285,6 @@ export async function runIdempotency(
   const leaseSeconds = options.leaseSeconds ?? DEFAULT_IDEMPOTENCY_LEASE_SECONDS;
   const fingerprint = requestFingerprint({
     operation,
-    // A dry run with the key is a different request from the real one.
-    dryRun: isDryRunRequest(c),
     params: c.req.param(),
     // Names are ordered by the canonical form; repeated values keep their order.
     query: c.req.queries(),

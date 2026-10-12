@@ -823,55 +823,6 @@ describe("Custody wallet scope routes", () => {
     expect(signerCheckMocks.createSponsorship).toHaveBeenCalledOnce();
   });
 
-  it("executes signer check without consulting a denying wallet policy", async () => {
-    await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
-      walletId: "privy_wallet_a",
-      permissions: ["wallets:write"],
-    });
-    await seedCachedKey({
-      signingWalletId: "privy_wallet_a",
-      walletBindings: [{ walletId: "privy_wallet_a", permissions: ["wallets:write"] }],
-    });
-    const policyResponse = await app.request(
-      "/v1/payments/wallets/privy_wallet_a/policies",
-      {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          defaultAction: "deny",
-          rules: [{ id: "deny-everything", kind: "always", action: "deny" }],
-        }),
-      },
-      env
-    );
-    expect(policyResponse.status).toBe(200);
-
-    const response = await app.request(
-      "/v1/wallets/signer-check",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({ walletId: "privy_wallet_a" }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(200);
-    expect(simulateTransactionMock).toHaveBeenCalledOnce();
-    expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
-
-    const operationCount = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
-      .first<{ count: number }>();
-    expect(operationCount).toEqual({ count: 0 });
-  });
-
   it("rate-limits the third signer check by the same actor", async () => {
     await upsertApiKeyWalletBinding(getDb(env), TEST_API_KEY.id, {
       walletId: "privy_wallet_a",
@@ -1228,7 +1179,6 @@ describe("Custody wallet scope routes", () => {
     const requests = [
       ["/v1/wallets/public-key?walletId=cwlt_scope_para_a", 404],
       ["/v1/payments/wallets/cwlt_scope_para_a/balances", 403],
-      ["/v1/payments/wallets/cwlt_scope_para_a/policies", 403],
     ] as const;
 
     for (const [path, expectedStatus] of requests) {

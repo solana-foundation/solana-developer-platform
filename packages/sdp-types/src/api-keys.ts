@@ -5,7 +5,6 @@
 import type { AllowedOperation } from "./allowed-operations";
 import type { CustodyWalletOwnerTarget } from "./custody";
 import type { ApiKeyRole, Permission } from "./permissions";
-import type { ApiKeyWalletPolicyBindingScope } from "./policy";
 
 export const SDP_ENVIRONMENTS = ["sandbox", "production"] as const;
 
@@ -27,19 +26,6 @@ export interface ApiKeyWalletBinding {
 /** Internal authorization identity carried only in API-key auth/cache state. */
 export interface ApiKeyWalletAuthorizationBinding extends ApiKeyWalletBinding {
   custodyWalletId?: string;
-}
-
-export interface ApiKeyWalletPolicyBindingSummary {
-  id: string;
-  bindingScope: ApiKeyWalletPolicyBindingScope;
-  walletId: string | null;
-  custodyWalletId: string | null;
-  walletControlProfileId: string | null;
-  walletControlProfileRevisionId: string | null;
-  apiKeyControlProfileId: string | null;
-  apiKeyControlProfileRevisionId: string | null;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface ApiKey {
@@ -66,7 +52,6 @@ export interface ApiKey {
   walletScope?: ApiKeyWalletScope;
   signingWalletIds?: string[]; // Optional multi-wallet bindings (wallet IDs)
   walletBindings?: ApiKeyWalletBinding[]; // Optional wallet-level permission bindings
-  policyBindings?: ApiKeyWalletPolicyBindingSummary[];
   status: ApiKeyStatus;
   createdAt: string;
 }
@@ -92,7 +77,6 @@ export interface CachedApiKey {
   walletScope?: ApiKeyWalletScope;
   signingWalletIds?: string[];
   walletBindings?: ApiKeyWalletAuthorizationBinding[];
-  policyBindings?: ApiKeyWalletPolicyBindingSummary[];
   status: ApiKeyStatus;
   expiresAt: string | null;
   /**
@@ -202,7 +186,6 @@ export interface ListApiKeysResponse {
     signingWalletId: string | null;
     signingWalletIds: string[];
     walletBindings: ApiKeyWalletBinding[];
-    policyBindings: ApiKeyWalletPolicyBindingSummary[];
     allowedOperations: AllowedOperation[];
     lastUsedAt: string | null;
     expiresAt: string | null;

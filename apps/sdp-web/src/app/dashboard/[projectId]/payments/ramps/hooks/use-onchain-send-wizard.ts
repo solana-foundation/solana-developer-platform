@@ -147,10 +147,7 @@ export interface UseOnchainSendWizardProps {
 function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
   const [submitting, setSubmitting] = useState(false);
   const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
-  // The approval request a policy parked this payment behind. Like a result,
-  // it ends the wizard: sending again would only open another approval.
-  const [heldApprovalRequestId, setHeldApprovalRequestId] = useState<string | null>(null);
-  const finished = transferResult !== null || heldApprovalRequestId !== null;
+  const finished = transferResult !== null;
 
   const submitTransfer = async (submission: CreateTransferInput) => {
     if (signingUnavailable) return;
@@ -159,17 +156,7 @@ function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
       position: "bottom-right",
     });
     try {
-      const { outcome } = await sendTransferUnderKey(submission, t);
-      if (outcome.kind === "approval_pending") {
-        setHeldApprovalRequestId(outcome.approvalRequestId);
-        toast.info(t("DashboardPayments.onchainSend.approvalPendingTitle"), {
-          id: toastId,
-          description: t("DashboardPayments.onchainSend.approvalPendingDescription"),
-          position: "bottom-right",
-        });
-        return;
-      }
-      const transfer = outcome.transfer;
+      const { transfer } = await sendTransferUnderKey(submission, t);
       setTransferResult(transfer);
       toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
         id: toastId,
@@ -192,7 +179,7 @@ function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
     }
   };
 
-  return { submitting, transferResult, heldApprovalRequestId, finished, submitTransfer };
+  return { submitting, transferResult, finished, submitTransfer };
 }
 
 function useOnchainAssetSelection(
@@ -287,8 +274,10 @@ export function useOnchainSendWizard({
     return account === undefined ? null : account;
   }, [cryptoAccounts, fields.accountId]);
   const destinationAddress = selectedAccount === null ? null : cryptoWalletAddress(selectedAccount);
-  const { submitting, transferResult, heldApprovalRequestId, finished, submitTransfer } =
-    useOnchainSubmission(signingUnavailable, t);
+  const { submitting, transferResult, finished, submitTransfer } = useOnchainSubmission(
+    signingUnavailable,
+    t
+  );
   const { assetOptions, selectedAsset, selectedAssetBalance, availableAmount, exceedsBalance } =
     useOnchainAssetSelection(selectedWallet, fields, issuedTokenSymbolsByMint, t);
 
@@ -411,7 +400,6 @@ export function useOnchainSendWizard({
     handleAccountAdded,
     submitting,
     transferResult,
-    heldApprovalRequestId,
     finished,
     handlePrimary,
     handleSecondary,

@@ -88,7 +88,7 @@ import { requireAcceptedWithdrawalPlan } from "./vault-withdraw.service";
  *
  * NOTHING here signs, resolves a signer, or touches custody: the owner's
  * own signature is the authorization to move the owner's money, which is
- * why these paths take no wallet policy gate.
+ * why these paths take no request gate.
  */
 
 interface ExternalWalletBuildTenantContext {
