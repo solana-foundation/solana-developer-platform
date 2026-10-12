@@ -32,7 +32,7 @@ vi.mock("./observe", async (importOriginal) => ({
   deriveDvpTradeState: () => ({ status: "funded" }),
 }));
 
-const { observeDvpTradeIfStale } = await import("./observe-now");
+const { observeDvpTradeIfStale, observeDvpTradeWithoutRecording } = await import("./observe-now");
 
 const NOW = Date.parse("2026-09-03T21:00:00.000Z");
 const NEVER_REREAD_STATUSES = ["create_failed"] as const satisfies readonly DvpTradeStatus[];
@@ -190,15 +190,37 @@ describe("observeDvpTradeIfStale", () => {
     expect(recordObservation).not.toHaveBeenCalled();
   });
 
-  it("rejects instead of answering from the row when the devnet pool serves mainnet-beta", async () => {
+  it("keeps answering from the row when a failover endpoint serves mainnet-beta", async () => {
     vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", CLUSTER_RPC_URLS["mainnet-beta"]);
+    const row = trade();
 
-    await expect(observeIfStale(trade(), NOW)).rejects.toMatchObject({
+    await expect(observeIfStale(row, NOW)).resolves.toBe(row);
+    expect(rpc.calls.filter((call) => call.method === "getBlockHeight")).toEqual([]);
+    expect(readDvpTradeObservation).not.toHaveBeenCalled();
+    expect(recordObservation).not.toHaveBeenCalled();
+  });
+});
+
+describe("observeDvpTradeWithoutRecording", () => {
+  const rpc = installClusterRpcStub();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects instead of showing the stored reading when the devnet pool serves mainnet-beta", async () => {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", CLUSTER_RPC_URLS["mainnet-beta"]);
+    const row = trade();
+
+    await expect(
+      runInClusterScope({ projectId: row.projectId, environment: "sandbox" }, () =>
+        observeDvpTradeWithoutRecording(row)
+      )
+    ).rejects.toMatchObject({
       code: "RPC_CLUSTER_MISMATCH",
       details: { cluster: "devnet", genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] },
     });
     expect(rpc.calls.filter((call) => call.method === "getBlockHeight")).toEqual([]);
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
-    expect(recordObservation).not.toHaveBeenCalled();
   });
 });
