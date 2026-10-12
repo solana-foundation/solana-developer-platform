@@ -7,6 +7,7 @@
 
 import {
   type Address,
+  type Base64EncodedWireTransaction,
   type Blockhash,
   type Commitment,
   commitmentComparator,
@@ -15,7 +16,6 @@ import {
   createSolanaRpcFromTransport,
   fetchEncodedAccount,
   getBase64Decoder,
-  getBase64EncodedWireTransaction,
   getTransactionDecoder,
   type RpcTransport,
   type Signature,
@@ -213,6 +213,9 @@ export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
  * same chain). Without one, the process default cluster keeps the full
  * failover client `createRpc` builds, and the other cluster throws, so a
  * caller never silently reads or prices against the wrong chain.
+ *
+ * @deprecated Use `createClusterRpc()` from `@sdp/rpc/factory`, which reads the cluster from the
+ * open cluster scope; this one is deleted once its callers move (HOO-1879).
  */
 export function createClusterRpc(
   env: RpcEnv,
@@ -311,9 +314,7 @@ export async function sendTransaction(
     maxRetries?: bigint;
   }
 ): Promise<Signature> {
-  const encodedTx = getBase64EncodedWireTransaction(
-    getTransactionDecoder().decode(signedTransaction)
-  );
+  const encodedTx = getBase64Decoder().decode(signedTransaction) as Base64EncodedWireTransaction;
 
   const signature = await rpc
     .sendTransaction(encodedTx, {
@@ -423,7 +424,7 @@ export async function simulateTransaction(
     commitment?: Commitment;
   }
 ): Promise<SimulationResult> {
-  const encodedTx = getBase64EncodedWireTransaction(getTransactionDecoder().decode(transaction));
+  const encodedTx = getBase64Decoder().decode(transaction) as Base64EncodedWireTransaction;
 
   const response = await rpc
     .simulateTransaction(encodedTx, {

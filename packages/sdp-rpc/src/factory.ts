@@ -74,8 +74,11 @@ const genesisProofExpiry = new Map<string, number>();
 /** `<cluster> <endpointUrl>` to the probe in flight, so concurrent requests share one probe. */
 const genesisProbes = new Map<string, Promise<void>>();
 
-/** Pool key to the index of the endpoint that last answered, so requests start on a healthy one. */
-const lastAnsweringEndpoint = new Map<string, number>();
+/**
+ * How long an endpoint that failed or couldn't serve stays at the back of its pool's order, so
+ * requests return to the preferred provider once it recovers.
+ */
+const ENDPOINT_COOLDOWN_MS = 30_000;
 
 /** Pool key (cluster plus its endpoint URLs) to the memoized client. */
 const clusterRpcs = new Map<string, SolanaRpc>();
@@ -202,38 +205,60 @@ function asksForAnotherEndpoint(response: unknown): boolean {
 }
 
 /**
- * Per-request failover across a cluster's endpoints, starting at the endpoint that last answered.
- * A transient transport failure or a `FAILOVER_JSON_RPC_ERROR_CODES` body moves to the next
- * endpoint; the last endpoint's answer is returned as-is so kit raises its typed error.
+ * A pool's endpoint indexes in failover order, with those that failed within
+ * `ENDPOINT_COOLDOWN_MS` of `now` moved to the back in their original order.
+ *
+ * @param lastFailedAt - Each endpoint's last failure time, by endpoint index.
+ * @param now - The current time.
+ * @returns The endpoint indexes to attempt, in order.
+ */
+function endpointAttemptOrder(lastFailedAt: readonly number[], now: number): number[] {
+  const endpointIndexes = lastFailedAt.map((_, endpointIndex) => endpointIndex);
+  const isCoolingDown = (endpointIndex: number) =>
+    now - lastFailedAt[endpointIndex] < ENDPOINT_COOLDOWN_MS;
+  return [
+    ...endpointIndexes.filter((endpointIndex) => !isCoolingDown(endpointIndex)),
+    ...endpointIndexes.filter(isCoolingDown),
+  ];
+}
+
+/**
+ * Per-request failover across a cluster's endpoints. Every request walks the endpoints in
+ * failover order, with those that failed in the last `ENDPOINT_COOLDOWN_MS` moved to the back, so
+ * one blip never parks the process on a worse provider. A transient transport failure or a
+ * `FAILOVER_JSON_RPC_ERROR_CODES` body moves to the next endpoint; the last endpoint's answer is
+ * returned as-is so kit raises its typed error, and a caller abort stops the walk.
  * `sendTransaction` fails over only when the request never left SDP (`UnsentRequestError`): any
  * later failure can arrive after the transaction reached the leader, and resubmitting elsewhere
  * is the send primitive's decision, not the pool's.
  *
  * @param endpointTransports - The guarded endpoint transports, in failover order.
- * @param poolKey - The pool's identity for the last-answering index.
  * @returns The pool transport.
  */
-function createPoolTransport(endpointTransports: readonly RpcTransport[], poolKey: string) {
+function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
+  const lastFailedAt = endpointTransports.map(() => Number.NEGATIVE_INFINITY);
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]): Promise<TResponse> => {
     const isSend =
       isJsonRpcPayload(rpcRequest.payload) && rpcRequest.payload.method === "sendTransaction";
-    const startIndex = lastAnsweringEndpoint.get(poolKey) ?? 0;
+    const attemptOrder = endpointAttemptOrder(lastFailedAt, Date.now());
     for (let attempt = 0; ; attempt += 1) {
-      const endpointIndex = (startIndex + attempt) % endpointTransports.length;
-      const isLastEndpoint = attempt === endpointTransports.length - 1;
+      const endpointIndex = attemptOrder[attempt];
+      const isLastEndpoint = attempt === attemptOrder.length - 1;
       let response: TResponse;
       try {
         response = await endpointTransports[endpointIndex]<TResponse>(rpcRequest);
       } catch (error) {
-        if (error instanceof UnsentRequestError) {
-          if (isLastEndpoint) throw error.cause;
-          continue;
-        }
-        if (isSend || isLastEndpoint || !isTransientRpcError(error)) throw error;
+        if (rpcRequest.signal?.aborted) throw error;
+        const isUnsent = error instanceof UnsentRequestError;
+        const isEndpointFailure = isUnsent || isTransientRpcError(error);
+        if (isEndpointFailure) lastFailedAt[endpointIndex] = Date.now();
+        if (!isLastEndpoint && (isUnsent || (isEndpointFailure && !isSend))) continue;
+        throw error instanceof UnsentRequestError ? error.cause : error;
+      }
+      if (!isSend && !isLastEndpoint && asksForAnotherEndpoint(response)) {
+        lastFailedAt[endpointIndex] = Date.now();
         continue;
       }
-      if (!isSend && !isLastEndpoint && asksForAnotherEndpoint(response)) continue;
-      if (endpointIndex !== startIndex) lastAnsweringEndpoint.set(poolKey, endpointIndex);
       return response;
     }
   };
@@ -286,7 +311,7 @@ export function createClusterRpc(): SolanaRpc {
       DEFAULT_RPC_REQUEST_TIMEOUT_MS
     )
   );
-  const rpc = createSolanaRpcFromTransport(createPoolTransport(endpointTransports, poolKey));
+  const rpc = createSolanaRpcFromTransport(createPoolTransport(endpointTransports));
   clusterRpcs.set(poolKey, rpc);
   return rpc;
 }
