@@ -27,13 +27,14 @@ import { readDvpTradeObservation } from "./read-chain";
 /**
  * Observes one trade now and records what it finds.
  *
- * Never fails on a chain read. The caller has already done the thing that
- * mattered — the transfer is broadcast, the money has moved — and failing their
- * request because a follow-up read timed out would report a failure that did
- * not happen. A missed observation costs at most one sweep of latency, which is
- * exactly where this started. Building the client is outside that guarantee:
- * every post-action caller already built it in the same request, so a door
- * misconfiguration has surfaced before money moved.
+ * Never fails on a chain read, including one a failover endpoint refuses as
+ * another cluster's. The caller has already done the thing that mattered — the
+ * transfer is broadcast, the money has moved — and failing their request would
+ * drop the signature and report a failure that did not happen. A missed
+ * observation costs at most one sweep of latency, which is exactly where this
+ * started. Building the client is outside that guarantee: every post-action
+ * caller already built it in the same request, so a door misconfiguration has
+ * surfaced before money moved.
  *
  * @param env - API process environment.
  * @param trade - The trade to re-read.
@@ -43,8 +44,7 @@ import { readDvpTradeObservation } from "./read-chain";
  *   chain, or the sweep having moved the row first, in which case the caller's
  *   own copy is the stale one and it should re-read rather than trust this.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint, or
- *   `RPC_CLUSTER_MISMATCH` when an endpoint serves another cluster.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no endpoint.
  */
 export async function observeDvpTradeNow(
   env: Env,
@@ -97,9 +97,6 @@ export async function observeDvpTradeNow(
         observation.closeResolution === null ? null : observation.closeResolution.signature,
     });
   } catch (error) {
-    if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
-      throw error;
-    }
     getLogger().warn(
       { error, tradeId: trade.id },
       "dvp: could not observe the trade immediately; the sweep will pick it up"
@@ -224,8 +221,8 @@ const OBSERVATION_MAX_AGE_BY_STATUS = {
  * @param trade - The trade as it was last stored.
  * @param now - Current time, injectable for tests.
  * @returns A fresher row when one was written, otherwise the row given.
- * @throws SdpRpcError `CLUSTER_SCOPE_MISSING`, `RPC_NOT_CONFIGURED` or `RPC_CLUSTER_MISMATCH`
- *   from the door when a reading is due.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` or `RPC_NOT_CONFIGURED` from the door when a
+ *   reading is due.
  */
 export async function observeDvpTradeIfStale(
   env: Env,
