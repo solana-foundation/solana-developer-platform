@@ -40,7 +40,7 @@ interface ParsedAccountKey {
 
 interface RpcTokenBalanceAmount {
   amount?: string;
-  decimals?: bigint | number;
+  decimals?: bigint;
   uiAmountString?: string | null;
 }
 
@@ -124,10 +124,6 @@ function resolveObservedTimestamp(blockTime: bigint | number | null | undefined)
   return new Date().toISOString();
 }
 
-function resolveObservedSlot(freshSlot: bigint | null | undefined, cachedSlot: bigint): number {
-  return Number(typeof freshSlot === "bigint" ? freshSlot : cachedSlot);
-}
-
 function readInstructionInfoString(
   info: Record<string, unknown> | undefined,
   key: string
@@ -150,33 +146,18 @@ function readInstructionInfoInteger(
     return BigInt(value.trim());
   }
 
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    Number.isInteger(value) &&
-    value >= 0
-  ) {
-    return BigInt(value);
-  }
-
   return null;
 }
 
 /**
- * A token decimals value as kit decodes it: a `bigint` once upcast, or a `number` where kit
- * leaves it numeric.
+ * A parsed instruction's token decimals, which kit always upcasts to a `bigint` (its
+ * `getTransaction` numeric allow-list never covers instruction `info`).
  *
  * @param value - The raw decimals value.
- * @returns The decimals, or `null` when `value` isn't a whole number.
+ * @returns The decimals, or `null` when `value` isn't a `bigint`.
  */
 function readDecimals(value: unknown): number | null {
-  if (typeof value === "bigint") {
-    return Number(value);
-  }
-
-  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value)
-    ? value
-    : null;
+  return typeof value === "bigint" ? Number(value) : null;
 }
 
 function readTokenAmountInfo(
@@ -409,12 +390,12 @@ function buildObservedTransferRows(
   const signature = String(signatureInfo.signature);
   // A transaction confirmed on a minority fork can be dropped and re-land in a
   // different slot, so slot and blockTime always come from the fresh
-  // signature-history entry; the cached body's copy is only a fallback for
-  // history entries that lack the metadata.
+  // signature-history entry; the cached body's blockTime is only a fallback for
+  // history entries that lack one.
   const timestamp = resolveObservedTimestamp(
     signatureInfo.blockTime ?? parsedTransaction.blockTime
   );
-  const slot = resolveObservedSlot(signatureInfo.slot, parsedTransaction.slot);
+  const slot = Number(signatureInfo.slot);
   const status: TransferStatus = parsedTransaction.meta?.err ? "failed" : "confirmed";
   const fee = parsedTransaction.meta === null ? null : Number(parsedTransaction.meta.fee);
 
@@ -430,10 +411,6 @@ function buildObservedTransferRows(
   const postTokenBalances = parsedTransaction.meta?.postTokenBalances ?? [];
 
   for (const balance of [...preTokenBalances, ...postTokenBalances]) {
-    if (typeof balance.accountIndex !== "number") {
-      continue;
-    }
-
     const accountAddress = accountKeys[balance.accountIndex];
     if (!accountAddress) {
       continue;
