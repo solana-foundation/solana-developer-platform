@@ -285,12 +285,16 @@ beforeEach(() => {
   harness.state.now = NOW;
   harness.state.unhandled.length = 0;
   vi.stubGlobal("fetch", dashboardRouteFetch);
+  // The pages read the deployment's release channel at request scope; the test
+  // provides it instead of depending on the CI environment's own value.
+  vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
   // The client fetchers send the project in the tab's URL.
   vi.stubGlobal("window", { location: { pathname: "/dashboard/prj_test_sandbox/payments" } });
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   // Every read a covered screen makes must have a demo answer.
   expect(harness.state.unhandled).toEqual([]);
 });

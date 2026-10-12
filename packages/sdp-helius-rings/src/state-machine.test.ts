@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { failEdgeFor, nextState, TRANSITIONS, type TransitionGuard } from "./state-machine";
+import { failEdgeFor, nextState, type TransitionGuard } from "./state-machine";
 import type { OperationState } from "./types";
 
 const TERMINAL_STATES: OperationState[] = ["completed", "failed"];
@@ -12,10 +12,14 @@ describe("nextState", () => {
   });
 
   it("advances every guarded transition when the guard matches", () => {
-    const guarded = TRANSITIONS.filter((t) => t.guard);
-    for (const transition of guarded) {
-      expect(nextState(transition.from, transition.guard)).toBe(transition.to);
-    }
+    // Each guarded edge is pinned literally: a lookup that dropped a row,
+    // misnamed a guard, or ignored guards would fail here instead of
+    // re-deriving the answer from the same table it reads.
+    expect(nextState("preparing", "prepared")).toBe("proving");
+    expect(nextState("proving", "proof_received")).toBe("ready_to_sign");
+    expect(nextState("ready_to_sign", "signed")).toBe("submitted");
+    expect(nextState("submitted", "submitted")).toBe("indexing");
+    expect(nextState("indexing", "indexed")).toBe("completed");
   });
 
   it("returns null for an unmatched guard on a guarded transition", () => {
