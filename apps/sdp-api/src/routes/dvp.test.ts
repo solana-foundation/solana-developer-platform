@@ -1,11 +1,13 @@
 import { hashString } from "@sdp/payments/hash";
 import type { CachedApiKey, Permission } from "@sdp/types";
-import { getAddressDecoder } from "@solana/kit";
+import { getAddressDecoder, getBase64Decoder } from "@solana/kit";
+import { getMintEncoder, getMintSize, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
 import app from "@/index";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -577,6 +579,60 @@ describe("DvP routes", () => {
   it("404s an unknown trade", async () => {
     const res = await app.request("/v1/dvp/trades/dvp_missing", { headers: authHeaders() }, env);
     expect(res.status).toBe(404);
+  });
+
+  describe("mint inspection cluster", () => {
+    const rpc = installClusterRpcStub();
+    const INSPECTED_MINT = "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1";
+
+    it("reads a Production project's mint from mainnet-beta only", async () => {
+      await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+        ...TEST_CACHED_API_KEY,
+        projectId: `${TEST_PROJECT.id}_production`,
+        environment: "production",
+      });
+      const mintData = getMintEncoder().encode({
+        mintAuthority: null,
+        supply: 0n,
+        decimals: 6,
+        isInitialized: true,
+        freezeAuthority: null,
+      });
+      rpc.answer("getAccountInfo", {
+        context: { slot: 1 },
+        value: {
+          data: [getBase64Decoder().decode(mintData), "base64"],
+          executable: false,
+          lamports: 1_461_600,
+          owner: TOKEN_PROGRAM_ADDRESS,
+          rentEpoch: 0,
+          space: getMintSize(),
+        },
+      });
+
+      const res = await app.request(
+        `/v1/dvp/mints/${INSPECTED_MINT}`,
+        { headers: authHeaders() },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({
+        data: {
+          mint: {
+            mint: INSPECTED_MINT,
+            tokenProgram: TOKEN_PROGRAM_ADDRESS,
+            decimals: 6,
+            name: null,
+            symbol: null,
+            eligible: true,
+            blockedBy: null,
+          },
+        },
+      });
+      expect(rpc.calls).toContainEqual({ cluster: "mainnet-beta", method: "getAccountInfo" });
+      expect(rpc.calls.filter((call) => call.cluster !== "mainnet-beta")).toEqual([]);
+    });
   });
 
   // The schema takes u64s as strings. A JSON number rounds above 2^53, and for
