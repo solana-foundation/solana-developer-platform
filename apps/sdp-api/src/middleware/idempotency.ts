@@ -10,24 +10,22 @@ import {
   type StoredIdempotentResponse,
 } from "@/db/repositories/idempotency-keys.repository";
 import { getAuth } from "@/lib/auth";
-import { AppError } from "@/lib/errors";
+import { AppError, internalError } from "@/lib/errors";
 import { canonicalJson, type JsonValue } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
+import { hasAuthorized, validatedInput } from "./authorize";
 import { parseIdempotencyKey } from "./idempotency-key";
 
 /** Set on a response replayed from a stored one. */
 export const IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed";
 
 /**
- * Marks an {@link idempotent} handler with its key mode and replay access, for
- * route inventory tests.
+ * Marks an {@link idempotent} handler with its key mode, for route inventory
+ * tests.
  */
 export const IDEMPOTENCY_MARKER = Symbol.for("sdp.idempotency");
-
-/** See {@link IdempotencyOptions.replayAccess}. */
-export type ReplayAccess = "chain" | ((c: Context<{ Bindings: Env }>) => void | Promise<void>);
 
 export interface IdempotencyOptions {
   key: IdempotencyKeyMode;
@@ -38,36 +36,40 @@ export interface IdempotencyOptions {
    */
   leaseSeconds?: number;
   /**
-   * What a 5xx (or an unhandled error) does to the key. `store` (the default,
-   * as Stripe does) replays it, so the caller retries with a new key.
-   * `rerun` frees the key so a retry with the same request runs again; only a
-   * route whose handler writes its own row under a unique key before it moves
-   * anything may choose it, because that row is what recovers the earlier
-   * attempt.
+   * How long the request keeps renewing its lease before it is treated as hung
+   * and its key is let go. Defaults to
+   * {@link MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS}.
    */
-  serverErrors?: "store" | "rerun";
+  maxLeaseRenewalSeconds?: number;
+  /**
+   * What a 5xx (or an unhandled error) does to the key. Required, because the
+   * right answer depends on the handler:
+   *
+   * - `store`, as Stripe does: the 5xx is replayed, so the caller retries with
+   *   a new key. For a route with no recovery point of its own.
+   * - `rerun`: the key is freed so a retry with the same request runs again.
+   *   Only for a route whose handler writes its own row under a unique key
+   *   before it moves anything, and replays that row on a retry, because that
+   *   row is what recovers the earlier attempt.
+   */
+  serverErrors: "store" | "rerun";
   /**
    * Rewrites the parsed JSON body before it is fingerprinted, for a route where
    * two spellings mean the same request (for example, recipients whose order
    * does not matter). Must be pure.
    */
   canonicalize?: (body: JsonValue) => JsonValue;
-  /**
-   * What a replay re-checks before it serves a stored response. Required: a
-   * replay skips the handler, so every check the handler makes about the
-   * caller is skipped with it unless this repeats it (ADR 0008).
-   *
-   * - `"chain"`: the handler checks nothing about the caller beyond the chain
-   *   before this step (authentication, project context, `requirePermissions`,
-   *   Allowed Operations), which every replay passes again.
-   * - A function: repeats the caller checks the handler makes (an API key's
-   *   wallet bindings, ownership of the resource), reading fresh whatever the
-   *   handler reads fresh. Throw to refuse; nothing is replayed.
-   */
-  replayAccess: ReplayAccess;
 }
 
 export const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
+/**
+ * The longest a request keeps renewing its lease. Past it, renewal stops and a
+ * retry can take the key over once the lease runs out: a request still running
+ * after this long is hung, and holding its key would block every retry for the
+ * 24 hours the key lives. Statement and signing timeouts end requests well
+ * before it.
+ */
+export const MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS = 15 * 60;
 export const IDEMPOTENCY_KEY_RETENTION_SECONDS = 24 * 60 * 60;
 /** Bodies up to this size are stored; a larger one is stored without its body. */
 export const MAX_STORED_RESPONSE_BYTES = 1024 * 1024;
@@ -108,23 +110,41 @@ export function idempotencyOperation(c: Context): string {
   return `${c.req.method} ${pattern}`;
 }
 
+/**
+ * The body as the route's validator left it (defaults applied, values
+ * normalised), so two spellings the schema treats as one request fingerprint
+ * the same. A route without a body validator falls back to the parsed JSON.
+ */
 async function readFingerprintBody(
   c: Context<{ Bindings: Env }>,
   canonicalize: IdempotencyOptions["canonicalize"]
 ): Promise<JsonValue> {
-  // Reading the text fills Hono's body cache, so validateBody reads it again.
-  const raw = await c.req.text();
+  const body = validatedInput(c).body;
   let parsed: JsonValue;
-  try {
-    // An empty body reaches validateBody as `{}`, so it is the same request.
-    // SAFETY: JSON.parse returns a JSON value by definition.
-    parsed = raw.trim().length === 0 ? {} : (JSON.parse(raw) as JsonValue);
-  } catch {
-    // Tagged so it can never equal a parsed body. Validation refuses it, and a
-    // refusal is never stored.
-    return ["unparsed", raw];
+  if (body !== undefined) {
+    parsed = toJsonValue(body);
+  } else {
+    const raw = await c.req.text();
+    try {
+      // An empty body reaches validateBody as `{}`, so it is the same request.
+      // SAFETY: JSON.parse returns a JSON value by definition.
+      parsed = raw.trim().length === 0 ? {} : (JSON.parse(raw) as JsonValue);
+    } catch {
+      // Tagged so it can never equal a parsed body.
+      return ["unparsed", raw];
+    }
   }
   return canonicalize ? canonicalize(parsed) : parsed;
+}
+
+/** A validator's output as JSON: dates as ISO strings, bigints as strings, undefined dropped. */
+function toJsonValue(value: unknown): JsonValue {
+  // SAFETY: JSON.parse of JSON.stringify output is a JSON value by definition.
+  return JSON.parse(
+    JSON.stringify(value, (_key, entry: unknown) =>
+      typeof entry === "bigint" ? entry.toString() : entry
+    ) ?? "null"
+  ) as JsonValue;
 }
 
 function replay(c: Context<{ Bindings: Env }>, stored: StoredIdempotentResponse): Response {
@@ -220,24 +240,38 @@ function logOutcome(operation: string, idempotencyKey: string, outcome: string):
 /**
  * Renews the lease every third of its length while the request runs, so a slow
  * handler (a Solana confirmation, a slow custody provider) is never taken over
- * mid-flight. The returned stop waits for a renewal already in flight, so none
- * can land after the key is released.
+ * mid-flight, for at most `maxRenewalSeconds`. The
+ * returned stop waits for a renewal already in flight, so none can land after
+ * the key is released.
  */
 function startLeaseRenewal(
   repository: IdempotencyKeyRepository,
   id: string,
   claimToken: string,
   leaseSeconds: number,
+  maxRenewalSeconds: number,
   operation: string
 ): () => Promise<void> {
   // Renewals are chained, never concurrent: one finishing out of order after
   // the release could otherwise lock the key again.
   let pending: Promise<void> = Promise.resolve();
   let stopped = false;
+  const startedAt = Date.now();
   const timer = setInterval(
     () => {
       pending = pending.then(async () => {
         if (stopped) return;
+        if (Date.now() - startedAt >= maxRenewalSeconds * 1000) {
+          // Hung: let the lease run out so a retry can take the key over. The
+          // handler's own row keeps that retry from moving anything twice.
+          stopped = true;
+          clearInterval(timer);
+          getLogger().error(
+            { event: "sdp_idempotency_lease_renewal_cap", operation },
+            "idempotency: request outlived the renewal cap; releasing its lease"
+          );
+          return;
+        }
         try {
           if (!(await repository.renew(id, claimToken, leaseSeconds))) {
             getLogger().warn({ operation }, "idempotency: lease lost while running");
@@ -262,15 +296,21 @@ function startLeaseRenewal(
  * in ADR 0008). Routes use {@link idempotent}; it is exported so a composite
  * route declaration can run it between its own checks.
  *
- * Place it after authentication, project context, `requirePermissions` and
- * Allowed Operations, so a replay re-checks the caller, and before admission
- * and body validation, so a replay is not admitted again as a new movement.
+ * Place it after validation and the route's `authorize` step, so a replay
+ * passes exactly the access checks a new request does, and before admission
+ * and the handler, so a replay is not admitted again as a new movement. It
+ * refuses to run without an earlier `authorize` (or `authorizeNone`).
  */
 export async function runIdempotency(
   c: Context<{ Bindings: Env }>,
   next: Next,
   options: IdempotencyOptions
 ): Promise<Response | undefined> {
+  if (!hasAuthorized(c)) {
+    // A replay serves a stored response without the handler, so access must be
+    // checked before this step or it is never checked for a replay at all.
+    throw internalError("idempotent() must run after the route's authorize step");
+  }
   const idempotencyKey = parseIdempotencyKey(c);
   if (idempotencyKey === undefined) {
     if (options.key === "required") {
@@ -310,9 +350,6 @@ export async function runIdempotency(
 
   switch (claim.kind) {
     case "completed":
-      if (options.replayAccess !== "chain") {
-        await options.replayAccess(c);
-      }
       logOutcome(operation, idempotencyKey, "replayed");
       return replay(c, claim.response);
     case "mismatch":
@@ -324,13 +361,27 @@ export async function runIdempotency(
       throw new AppError("IDEMPOTENCY_KEY_IN_FLIGHT");
     case "claimed":
       logOutcome(operation, idempotencyKey, claim.fresh ? "claimed" : "taken_over");
+      if (claim.replacedUnfinished) {
+        // The key's last request expired without recording an outcome.
+        getLogger().error(
+          { event: "sdp_idempotency_unfinished_replaced", operation },
+          "idempotency: an expired request that never finished was replaced by a new claim"
+        );
+      }
       break;
   }
 
   const freshClaim = claim.fresh;
   // The lease is renewed until the outcome is written, not just until the
   // handler returns: reading and saving a large response takes time too.
-  const stopRenewal = startLeaseRenewal(repository, id, claimToken, leaseSeconds, operation);
+  const stopRenewal = startLeaseRenewal(
+    repository,
+    id,
+    claimToken,
+    leaseSeconds,
+    options.maxLeaseRenewalSeconds ?? MAX_IDEMPOTENCY_LEASE_RENEWAL_SECONDS,
+    operation
+  );
   let thrown: { error: unknown } | null = null;
   try {
     try {
@@ -420,32 +471,10 @@ async function settle(write: () => Promise<unknown>, operation: string): Promise
 export function idempotent(options: IdempotencyOptions): MiddlewareHandler<{ Bindings: Env }> {
   const middleware: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
     runIdempotency(c, next, options);
-  const declaration: IdempotencyDeclaration = {
-    key: options.key,
-    replayAccess: options.replayAccess === "chain" ? "chain" : "checked",
-  };
-  return Object.assign(middleware, { [IDEMPOTENCY_MARKER]: declaration });
-}
-
-/** What an {@link idempotent} handler declares. */
-export interface IdempotencyDeclaration {
-  key: IdempotencyKeyMode;
-  /** `checked` when the route passes a replay check, `chain` when it relies on the chain. */
-  replayAccess: "chain" | "checked";
-}
-
-function declaration(handler: unknown): IdempotencyDeclaration | undefined {
-  return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyDeclaration } | null)?.[
-    IDEMPOTENCY_MARKER
-  ];
+  return Object.assign(middleware, { [IDEMPOTENCY_MARKER]: options.key });
 }
 
 /** Reads the key mode an {@link idempotent} handler declares. */
 export function declaredIdempotency(handler: unknown): IdempotencyKeyMode | undefined {
-  return declaration(handler)?.key;
-}
-
-/** Reads the replay access an {@link idempotent} handler declares. */
-export function declaredReplayAccess(handler: unknown): "chain" | "checked" | undefined {
-  return declaration(handler)?.replayAccess;
+  return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode } | null)?.[IDEMPOTENCY_MARKER];
 }

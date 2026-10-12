@@ -1,14 +1,15 @@
 import { type Context, Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
+import { authorize } from "./authorize";
 import {
   declaredIdempotency,
-  declaredReplayAccess,
   IDEMPOTENT_REPLAYED_HEADER,
   type IdempotencyOptions,
   idempotent,
@@ -16,6 +17,7 @@ import {
   requestFingerprint,
   runIdempotency,
 } from "./idempotency";
+import { validateBody } from "./validate";
 
 const ORG = "org_idempotency";
 const USER = "usr_idempotency";
@@ -58,16 +60,20 @@ function testApp(): Hono<{ Bindings: Env }> {
     // SAFETY: the middleware reads only id, organizationId and projectId.
     c.set("apiKey", { id: keyId, organizationId: ORG, projectId } as never);
     c.set("projectId", projectId);
+    // Stands in for the route's authorize step, which runs before idempotent().
+    if (!c.req.header("x-test-skip-authorize")) {
+      c.set("authorized", { loaded: undefined });
+    }
     await next();
   });
   return app;
 }
 
 function buildApp(
-  partial: Omit<IdempotencyOptions, "replayAccess"> & Partial<IdempotencyOptions>,
+  partial: Omit<IdempotencyOptions, "serverErrors"> & Partial<IdempotencyOptions>,
   handle: Handle
 ) {
-  const options: IdempotencyOptions = { replayAccess: "chain", ...partial };
+  const options: IdempotencyOptions = { serverErrors: "store", ...partial };
   const create = vi.fn(handle);
   const app = testApp();
   app.post("/v1/things/:thingId/act", idempotent(options), (c) => create(c));
@@ -142,19 +148,13 @@ describe("idempotent()", () => {
   });
 
   it("declares its key mode for route inventories", () => {
-    expect(declaredIdempotency(idempotent({ key: "required", replayAccess: "chain" }))).toBe(
+    expect(declaredIdempotency(idempotent({ key: "required", serverErrors: "store" }))).toBe(
       "required"
     );
-    expect(declaredIdempotency(idempotent({ key: "accepted", replayAccess: "chain" }))).toBe(
+    expect(declaredIdempotency(idempotent({ key: "accepted", serverErrors: "store" }))).toBe(
       "accepted"
     );
     expect(declaredIdempotency(() => undefined)).toBeUndefined();
-    expect(declaredReplayAccess(idempotent({ key: "required", replayAccess: "chain" }))).toBe(
-      "chain"
-    );
-    expect(
-      declaredReplayAccess(idempotent({ key: "required", replayAccess: () => undefined }))
-    ).toBe("checked");
   });
 
   it("runs an unkeyed request on an accepting route without recording anything", async () => {
@@ -182,7 +182,7 @@ describe("idempotent()", () => {
 
   it("refuses to run from a wildcard mount, where every endpoint would share one scope", async () => {
     const app = testApp();
-    app.use("/v1/wild/*", idempotent({ key: "required", replayAccess: "chain" }));
+    app.use("/v1/wild/*", idempotent({ key: "required", serverErrors: "store" }));
     app.post("/v1/wild/:id", (c) => c.json({ ok: true }, 201));
     expect((await post(app, "/v1/wild/a", {}, KEY)).status).toBe(500);
     expect(await storedRows()).toEqual([]);
@@ -293,6 +293,38 @@ describe("idempotent()", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it("lets a hung request's key go once it outlives the renewal cap", async () => {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { app, create } = buildApp(
+      { key: "required", leaseSeconds: 1, maxLeaseRenewalSeconds: 1 },
+      async (c) => {
+        if (create.mock.calls.length === 1) {
+          markStarted();
+          await released;
+        }
+        return c.json({ ok: true }, 201);
+      }
+    );
+
+    const first = post(app, "/v1/other", { a: 1 }, KEY);
+    await started;
+    // Renewal stops at the 1s cap, so the lease runs out and a retry takes over.
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const takeover = await post(app, "/v1/other", { a: 1 }, KEY);
+    release();
+    await first;
+
+    expect(takeover.status).toBe(201);
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
   it("does not store a refusal, so the same key runs again", async () => {
     let refuse = true;
     const { app, create } = buildApp({ key: "required" }, (c) => {
@@ -369,7 +401,7 @@ describe("idempotent()", () => {
           if (!admit) throw forbidden("not admitted");
           c.res = c.json({ ok: true }, 201);
         },
-        { key: "required", replayAccess: "chain" }
+        { key: "required", serverErrors: "store" }
       );
       return res ?? c.res;
     });
@@ -387,7 +419,7 @@ describe("idempotent()", () => {
     app.post(
       "/v1/composite",
       async (c) =>
-        (await runIdempotency(c, run, { key: "required", replayAccess: "chain" })) ?? c.res
+        (await runIdempotency(c, run, { key: "required", serverErrors: "store" })) ?? c.res
     );
 
     expect((await post(app, "/v1/composite", { a: 1 }, KEY)).status).toBe(503);
@@ -408,7 +440,7 @@ describe("idempotent()", () => {
           if (fail) throw new Error("package-level refusal");
           c.res = c.json({ ok: true }, 201);
         },
-        { key: "required", replayAccess: "chain" }
+        { key: "required", serverErrors: "store" }
       );
       return res ?? c.res;
     });
@@ -431,24 +463,50 @@ describe("idempotent()", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
-  it("re-checks resource access before replaying", async () => {
+  it("refuses to run without an earlier authorize step", async () => {
+    const { app, create } = buildApp({ key: "required" }, created);
+    const res = await post(app, "/v1/other", { a: 1 }, { ...KEY, "x-test-skip-authorize": "1" });
+    expect(res.status).toBe(500);
+    expect(create).not.toHaveBeenCalled();
+    expect(await storedRows()).toHaveLength(0);
+  });
+
+  it("runs the route's access check on a replay exactly as on a new request", async () => {
     let allowed = true;
-    const { app, create } = buildApp(
-      {
-        key: "required",
-        replayAccess: () => {
-          if (!allowed) throw forbidden("wallet no longer bound");
-        },
-      },
-      created
+    const create = vi.fn(created);
+    const app = testApp();
+    app.post(
+      "/v1/other",
+      authorize(() => {
+        if (!allowed) throw forbidden("wallet no longer bound");
+      }),
+      idempotent({ key: "required", serverErrors: "store" }),
+      (c) => create(c)
     );
     await post(app, "/v1/other", { a: 1 }, KEY);
     allowed = false;
-    expect((await post(app, "/v1/other", { a: 1 }, KEY)).status).toBe(403);
+    const refused = await post(app, "/v1/other", { a: 1 }, KEY);
+    expect(refused.status).toBe(403);
+    expect(refused.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBeNull();
     allowed = true;
     expect(
       (await post(app, "/v1/other", { a: 1 }, KEY)).headers.get(IDEMPOTENT_REPLAYED_HEADER)
     ).toBe("true");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("fingerprints the body as the validator left it", async () => {
+    const create = vi.fn(created);
+    const app = testApp();
+    app.post(
+      "/v1/other",
+      validateBody(z.object({ amount: z.string().transform((v) => String(Number(v))) })),
+      idempotent({ key: "required", serverErrors: "store" }),
+      (c) => create(c)
+    );
+    await post(app, "/v1/other", { amount: "1.0" }, KEY);
+    const sameAmount = await post(app, "/v1/other", { amount: "1" }, KEY);
+    expect(sameAmount.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
     expect(create).toHaveBeenCalledTimes(1);
   });
 
