@@ -251,7 +251,7 @@ export const prepareCreateSubscriptionPlan = async (
   const pullers = (
     body.pullers ?? (plan.puller_address ? [plan.puller_address] : [plan.owner_address])
   ).map((value) => assertValidAddress(value, "pullers entry"));
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c.env, plan);
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const endTs = body.endTs ? parseU64String(body.endTs, "endTs") : 0n;
   const metadataUri = body.metadataUri ?? plan.metadata_uri ?? "";
 
@@ -269,7 +269,6 @@ export const prepareCreateSubscriptionPlan = async (
   });
   const updatedPlan = await persistPlanPda(c, plan, planPda);
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c.env,
     await getSponsoredFeePayer(c),
     [instruction],
     [owner]

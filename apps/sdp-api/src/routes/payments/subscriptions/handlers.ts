@@ -272,7 +272,7 @@ export const prepareSubscriptionAuthorization = async (
     body.subscriberTokenAccount,
     "subscriberTokenAccount"
   );
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c.env, plan);
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const expectedCreatedAt = parseU64String(body.expectedPlanCreatedAt, "expectedPlanCreatedAt");
   const expectedSubscriptionAuthorityInitId = parseI64String(
     body.expectedSubscriptionAuthorityInitId,
@@ -311,7 +311,6 @@ export const prepareSubscriptionAuthorization = async (
     subscriptionPda,
   });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c.env,
     feePayer,
     [initAuthorityInstruction, subscribeInstruction],
     [subscriber]
@@ -416,7 +415,6 @@ async function prepareSubscriptionLifecycle(
           tokenMint,
         });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c.env,
     await getSponsoredFeePayer(c),
     [instruction],
     [subscriber]
@@ -460,7 +458,7 @@ export const prepareSubscriptionCollection = async (
   const callerWallet = resolveWallet(scope.wallets, plan.puller_wallet_id ?? plan.owner_wallet_id);
   assertApiKeyWalletAccess(scope.auth, callerWallet.walletId, ["payments:write"]);
 
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c.env, plan);
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const { planPda } = await derivePlanAddresses(plan);
   const subscriber = assertValidAddress(subscription.subscriber_address, "subscriberAddress");
   const [derivedSubscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
@@ -480,7 +478,6 @@ export const prepareSubscriptionCollection = async (
     tokenProgram,
   });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c.env,
     await getSponsoredFeePayer(c),
     [instruction],
     [caller]
