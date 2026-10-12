@@ -48,6 +48,7 @@ import {
   PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON,
   runProviderCredentialSecretCleanup,
 } from "./provider-credential-secret-cleanup";
+import { RAMP_TRANSFERS_CRON, runRampTransfersReconciliation } from "./ramp-transfers";
 import {
   RECURRING_PAYMENTS_COLLECTION_CRON,
   runRecurringPaymentsCollection,
@@ -306,6 +307,12 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // an advisory written before an incident flag flip must keep being watched.
   tasks.push(
     scheduleSystemTask(EARN_SPLIT_SWAPS_CRON, "cron:earn-split-swaps", runEarnSplitSwapDetection)
+  );
+
+  // The same ramp list the managed job runs (job.ts). Unconditional: replay
+  // skips providers the release channel leaves out.
+  tasks.push(
+    scheduleSystemTask(RAMP_TRANSFERS_CRON, "cron:ramp-transfers", runRampTransfersReconciliation)
   );
 
   return {
