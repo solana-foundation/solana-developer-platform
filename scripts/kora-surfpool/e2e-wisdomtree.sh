@@ -46,6 +46,7 @@ fi
 
 export SURFPOOL_REMOTE_RPC_URL="${WISDOMTREE_SURFPOOL_MAINNET_RPC_URL}"
 export SOLANA_NETWORK=mainnet-beta
+export SURFPOOL_CLUSTER=mainnet-beta
 export WISDOMTREE_SURFPOOL_E2E=true
 
 STATE_DIR="$(mktemp -d /tmp/sdp-wisdomtree-surfpool.XXXXXX)"
