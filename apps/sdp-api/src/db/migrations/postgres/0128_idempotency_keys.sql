@@ -31,8 +31,8 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     -- The credential (API key id or user id) that first used the key. Another
     -- credential reusing it is refused like a different request.
     principal TEXT NOT NULL,
-    -- SHA-256 hex of the canonical operation, path parameters, query, Dry-Run
-    -- flag and body.
+    -- SHA-256 hex of the canonical operation, path parameters, query and
+    -- body.
     fingerprint TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('in_progress', 'completed')),
     claim_token TEXT,

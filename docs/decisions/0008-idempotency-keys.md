@@ -21,7 +21,7 @@ SDP launches on mainnet on Nov 2 with keys required on the routes that move mone
 ## Decision
 
 One route step, `idempotent({ key })` in `apps/sdp-api/src/middleware/idempotency.ts`, backed by
-one table, `idempotency_keys` (migration 0127). It follows three sources:
+one table, `idempotency_keys` (migration 0128). It follows three sources:
 
 - [draft-ietf-httpapi-idempotency-key-header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)
   for the header and the 400/422/409 codes.
@@ -45,7 +45,6 @@ credential is recorded on the row and compared in plain text rather than hashed:
   never reads a response produced for different wallet access. A retry made after rotating the
   API key is therefore a new request; the resource row's own unique key still stops it moving
   money twice;
-- the Dry-Run flag, so a dry run never replays as the real request.
 
 A route can pass `canonicalize` where two spellings mean one request, such as unordered batch
 recipients.
@@ -89,8 +88,8 @@ about the caller. Each route therefore declares `replayAccess`, and the type mak
 - `"chain"`: the handler checks nothing about the caller beyond the chain before this step
   (authentication, project context, `requirePermissions`, Allowed Operations). Every replay passes
   that chain again, so nothing more is needed.
-- A function: it repeats the handler's caller checks (an API key's wallet bindings, approver
-  eligibility) before any stored response is replayed, reading fresh from the database whatever the
+- A function: it repeats the handler's caller checks (an API key's wallet bindings, ownership of
+  the resource) before any stored response is replayed, reading fresh from the database whatever the
   handler reads fresh. A credential narrowed since the original request is refused (403), not
   served; one narrowed in a way that still covers the resource gets the replay. A resource's own
   state is not re-checked: a wallet deactivated since still replays, because a replay moves nothing.
@@ -101,9 +100,8 @@ The route marker records which one a route chose, and the stable route inventory
 - The stored principal is the credential's id, not a snapshot of its access, so an unrelated
   change to a key (another wallet bound, a permission added) never turns a retry into a 422.
 
-**Bypass.** Approved-operation executions skip the step: they re-send the original key to execute
-the operation, not to replay it. A route that declares `honorsDryRun` (its policy gate answers a
-dry run without writing) lets dry runs skip it too, so a dry run may reuse a real request's key. The bypass goes away with approvals (#2236's stack).
+**No bypass.** Every request on a route with the step goes through it. (Approved-operation
+executions and Dry-Run skipped it until approvals and wallet policies were removed, HOO-1889.)
 
 **Retention.** 24 hours. Expired rows are pruned hourly in-process and on every run of the managed
 reconciliation job. A claim ignores an expired row.
