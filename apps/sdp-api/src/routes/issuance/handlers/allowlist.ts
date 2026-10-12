@@ -168,7 +168,7 @@ async function resolveAllowlistAuthoritySigner(
   list: ReturnType<typeof assertValidAddress>,
   signingCustodyWalletId?: string
 ) {
-  const authority = await resolveAllowlistAuthority(c.env, list);
+  const authority = await resolveAllowlistAuthority(list);
   const authorityWallet = await resolveAuthorityWallet({
     env: c.env,
     auth,

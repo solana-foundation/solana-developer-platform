@@ -1,4 +1,5 @@
-import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db";
 import { badRequest, notFound } from "@/lib/errors";
@@ -61,7 +62,7 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     isOnControlList,
   });
 
-  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(tokenService, token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
@@ -96,7 +97,7 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
 
   let simulation: unknown;
   if (body.options?.simulate) {
-    const rpc = createRpc(c.env);
+    const rpc = createClusterRpc();
     const txBytes = Buffer.from(prepared.serializedTx, "base64");
     simulation = await simulateTransaction(rpc, txBytes);
   }
@@ -202,7 +203,7 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
     isOnControlList,
   });
 
-  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(tokenService, token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
