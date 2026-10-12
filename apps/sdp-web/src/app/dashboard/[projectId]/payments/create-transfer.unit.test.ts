@@ -2,9 +2,7 @@
 /**
  * What `createTransfer` makes of each answer.
  *
- * A 202 is inside `response.ok` and is NOT a transfer: a wallet policy parked
- * the payment until somebody approves it. Reading it as a transfer is what
- * turned a held payment into "Transfer failed" and invited a second send.
+ * Only a response carrying the selected exact source is a completed result.
  */
 
 import { address } from "@solana/kit";
@@ -19,6 +17,12 @@ const SUBMISSION = {
   token: address("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"),
   amount: "250",
 };
+const TRANSFER = {
+  id: "xfr_1",
+  custodyWalletId: "cwlt_1",
+  rampsMemo: {},
+  status: "confirmed",
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -27,13 +31,13 @@ afterEach(() => {
 describe("createTransfer", () => {
   it("sends the idempotency key as a header, never in the body", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+      Response.json({ data: { transfer: TRANSFER } })
     );
     vi.stubGlobal("fetch", fetchMock);
 
     const transfer = await createTransfer(SUBMISSION, t, "key_1");
 
-    expect(transfer).toEqual({ id: "xfr_1", status: "confirmed" });
+    expect(transfer).toEqual(TRANSFER);
     const init = fetchMock.mock.calls[0][1];
     expect(init).toBeDefined();
     expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("key_1");
@@ -42,7 +46,7 @@ describe("createTransfer", () => {
 
   it("carries no key header for a caller whose request is already single-shot", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
-      Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+      Response.json({ data: { transfer: TRANSFER } })
     );
     vi.stubGlobal("fetch", fetchMock);
 

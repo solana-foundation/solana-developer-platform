@@ -57,7 +57,11 @@ async function requireVerifiedCryptoLeg(
   if (leg.source_address !== ramp.source_address) {
     throw badRequest("Crypto transfer was not sent from the off-ramp source wallet.");
   }
-  if (leg.wallet_id !== ramp.wallet_id) {
+  if (
+    ramp.custody_wallet_id === null ||
+    leg.custody_wallet_id === null ||
+    leg.custody_wallet_id !== ramp.custody_wallet_id
+  ) {
     throw badRequest("Crypto transfer was not sent from the off-ramp wallet.");
   }
   if (leg.direction !== "outbound") {

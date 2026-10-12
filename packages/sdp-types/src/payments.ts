@@ -400,7 +400,7 @@ export interface MoneygramTransferDetails {
 export interface PaymentTransferSummary {
   id: string;
   custodyWalletId: string | null;
-  providerWalletId: string;
+  providerWalletId?: string;
   status: PaymentTransferStatus;
   signature: string | null;
   error?: string | null;
@@ -500,7 +500,7 @@ export interface PaymentTransferBatch {
   projectId: string;
   externalId: string | null;
   sourceCustodyWalletId: string | null;
-  sourceProviderWalletId: string;
+  sourceProviderWalletId?: string;
   sourceAddress: string;
   token: string;
   status: PaymentTransferBatchStatus;

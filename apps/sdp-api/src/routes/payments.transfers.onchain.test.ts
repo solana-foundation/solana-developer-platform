@@ -12,6 +12,7 @@ import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
+  getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   mockRecurringActivationRpc,
   sendTransactionMock,
@@ -206,82 +207,89 @@ describe("Payments routes — on-chain transfers", () => {
     expect(JSON.parse(outcome?.metadata ?? "{}").auditPhase).toBe("outcome");
   });
 
-  it("uses the existing off-ramp row for its on-chain deposit", async () => {
-    const transferId = generatePaymentTransferId();
-    const repository = createPostgresPaymentsRepository(
-      getDb(env),
-      createTenantScope({
+  it.each([TEST_WALLET_ID, "retained_provider_wallet_reference"])(
+    "funds the exact off-ramp row while preserving its provider reference (%s)",
+    async (walletId) => {
+      const transferId = generatePaymentTransferId();
+      const repository = createPostgresPaymentsRepository(
+        getDb(env),
+        createTenantScope({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+        })
+      );
+      await repository.createTransfer({
+        id: transferId,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
-      })
-    );
-    await repository.createTransfer({
-      id: transferId,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
-      counterpartyId: null,
-      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
-      destinationAddress: null,
-      token: SOL_MINT,
-      amount: "1",
-      memo: null,
-      type: "offramp",
-      direction: "outbound",
-      status: "awaiting_payment",
-      provider: "moonpay",
-      providerReference: "moonpay-ramp-deposit",
-      deliveryMode: "hosted",
-      fiatCurrency: "USD",
-      fiatAmount: "100",
-      providerData: {
-        cryptoDeposit: {
-          destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-          amount: "1.0",
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId,
+        counterpartyId: null,
+        sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        destinationAddress: null,
+        token: SOL_MINT,
+        amount: "1",
+        memo: null,
+        type: "offramp",
+        direction: "outbound",
+        status: "awaiting_payment",
+        provider: "moonpay",
+        providerReference: "moonpay-ramp-deposit",
+        deliveryMode: "hosted",
+        fiatCurrency: "USD",
+        fiatAmount: "100",
+        providerData: {
+          cryptoDeposit: {
+            destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+            amount: "1.0",
+          },
         },
-      },
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: TEST_API_KEY.id,
-      idempotencyKey: null,
-      idempotencyFingerprint: null,
-    });
+        serializedTx: null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: TEST_API_KEY.id,
+        idempotencyKey: null,
+        idempotencyFingerprint: null,
+      });
 
-    const requestBody = JSON.stringify({
-      transferId,
-      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-      destination: TEST_SOLANA_ADDRESSES.wallet2,
-      token: "SOL",
-      amount: "1",
-    });
-    const res = await postTransfer(JSON.parse(requestBody), {});
+      const requestBody = JSON.stringify({
+        transferId,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      });
+      const res = await postTransfer(JSON.parse(requestBody), {});
 
-    const responseText = await res.text();
-    expect(res.status, responseText).toBe(200);
-    const body = await readTransferResponse(new Response(responseText));
-    expect(body.data.transfer).toMatchObject({
-      id: transferId,
-      status: "settling",
-    });
-    expect(body.data.transfer.signature).toBeTruthy();
+      const responseText = await res.text();
+      expect(res.status, responseText).toBe(200);
+      const body = await readTransferResponse(new Response(responseText));
+      expect(body.data.transfer).toMatchObject({
+        id: transferId,
+        status: "settling",
+      });
+      expect(body.data.transfer.signature).toBeTruthy();
 
-    const rows = await listTransferRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      id: transferId,
-      custody_wallet_id: TEST_CUSTODY_WALLET_ID,
-      status: "settling",
-      destination_address: TEST_SOLANA_ADDRESSES.wallet2,
-    });
-    expect(rows[0]?.signature).toBeTruthy();
-    expect(rows[0]?.signed_transaction).toBeTruthy();
+      const rows = await listTransferRows();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        id: transferId,
+        custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+        wallet_id: walletId,
+        status: "settling",
+        destination_address: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      expect(rows[0]?.signature).toBeTruthy();
+      expect(rows[0]?.signed_transaction).toBeTruthy();
+      expect(getRecentBlockhashMock).toHaveBeenCalledOnce();
+      expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledOnce();
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
 
-    const duplicate = await postTransfer(JSON.parse(requestBody), {});
-    expect(duplicate.status).toBe(409);
-    expect(await countTransferRows()).toBe(1);
-  });
+      const duplicate = await postTransfer(JSON.parse(requestBody), {});
+      expect(duplicate.status).toBe(409);
+      expect(await countTransferRows()).toBe(1);
+    }
+  );
 
   it("refuses to fund an off-ramp deposit at a provider outside the release channel", async () => {
     const transferId = generatePaymentTransferId();

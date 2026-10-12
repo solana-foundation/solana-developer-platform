@@ -6,6 +6,8 @@ import {
   fetchDashboardPaymentTransfersForWallets,
   fetchPaymentsWallets,
   fetchPaymentTransfers,
+  fetchTransferBatches,
+  fetchTransferBatchRecipients,
   WALLET_TRANSFERS_DEADLINE_MS,
 } from "./payments-page.data";
 
@@ -509,7 +511,86 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
   });
 });
 
+describe("fetchTransferBatchRecipients", () => {
+  it("marks a missing successful batch detail unavailable", async () => {
+    const request = vi.fn().mockResolvedValue(Response.json({}));
+    expect(await fetchTransferBatchRecipients(request, "batch-a")).toMatchObject({ ok: false });
+  });
+
+  it.each(["wallet-a", null])(
+    "keeps valid empty recipients with nullable exact pin %s",
+    async (sourceCustodyWalletId) => {
+      const request = vi.fn().mockResolvedValue(
+        Response.json({
+          data: { batch: { id: "batch-a", sourceCustodyWalletId }, recipients: [] },
+        })
+      );
+      expect(await fetchTransferBatchRecipients(request, "batch-a")).toEqual({
+        ok: true,
+        data: [],
+      });
+    }
+  );
+
+  it.each([
+    { batch: { id: "batch-b", sourceCustodyWalletId: "wallet-a" }, recipients: [] },
+    { batch: { id: "batch-a" }, recipients: [] },
+    { batch: { id: "batch-a", sourceCustodyWalletId: "wallet-a" } },
+    { batch: { id: "batch-a", sourceCustodyWalletId: "wallet-a" }, recipients: {} },
+  ])("refuses mismatched or incomplete batch detail %j", async (data) => {
+    const request = vi.fn().mockResolvedValue(Response.json({ data }));
+    expect(await fetchTransferBatchRecipients(request, "batch-a")).toMatchObject({ ok: false });
+  });
+});
+
+describe("fetchTransferBatches", () => {
+  it("preserves exact and nullable batch sources without provider metadata", async () => {
+    const batches = [
+      { id: "batch-a", sourceCustodyWalletId: "wallet-a", sourceAddress: "saved-address-a" },
+      { id: "batch-null", sourceCustodyWalletId: null, sourceAddress: "saved-address-null" },
+    ];
+    const request = vi.fn().mockResolvedValue(Response.json({ data: batches }));
+
+    expect(await fetchTransferBatches(request, 5)).toEqual({ ok: true, data: batches });
+  });
+
+  it.each([{}, { data: [{}] }, { data: [{ id: "batch-a" }] }])(
+    "reports incomplete batch identity as unavailable: %j",
+    async (body) => {
+      const request = vi.fn().mockResolvedValue(Response.json(body));
+
+      expect(await fetchTransferBatches(request, 5)).toMatchObject({ ok: false });
+    }
+  );
+});
+
 describe("fetchPaymentTransfers", () => {
+  it.each([{}, { data: [{}] }, { data: [{ id: "", custodyWalletId: null, rampsMemo: {} }] }])(
+    "reports incomplete transfer history as unavailable rather than empty: %j",
+    async (body) => {
+      const request = vi.fn().mockResolvedValue(Response.json(body));
+
+      expect(await fetchPaymentTransfers(request)).toMatchObject({ ok: false });
+    }
+  );
+
+  it("keeps exact and unresolved history when provider metadata is absent", async () => {
+    const request = vi.fn().mockResolvedValue(
+      transfersResponse([
+        { id: "exact", custodyWalletId: "wallet-a", status: "confirmed", rampsMemo: {} },
+        { id: "unresolved", custodyWalletId: null, status: "confirmed", rampsMemo: {} },
+      ])
+    );
+
+    expect(await fetchPaymentTransfers(request)).toMatchObject({
+      ok: true,
+      data: [
+        { id: "exact", custodyWalletId: "wallet-a" },
+        { id: "unresolved", custodyWalletId: null },
+      ],
+    });
+  });
+
   it("uses one bounded database-backed request for the overview preview", async () => {
     const request = vi.fn(
       async () =>
@@ -570,7 +651,7 @@ describe("fetchPaymentTransfers", () => {
     });
   });
 
-  it.each([undefined, "", "   ", " wallet-1 "])(
+  it.each(["", "   ", " wallet-1 "])(
     "fails closed when providerWalletId is %j",
     async (providerWalletId) => {
       const request = vi.fn(

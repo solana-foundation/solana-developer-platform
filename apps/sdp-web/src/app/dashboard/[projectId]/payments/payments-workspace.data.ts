@@ -29,6 +29,7 @@ import type {
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
+import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import {
   type ComplianceIntent,
@@ -42,6 +43,10 @@ import {
   type PaymentApiErrorBody as ApiErrorBody,
   getPaymentApiError as getApiError,
 } from "./payment-api-errors";
+import {
+  paymentTransferBatchIdentitySchema,
+  paymentTransferRequiredFieldsSchema,
+} from "./payments-page.data";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
 export type { PaymentRampInstruction } from "@sdp/types";
@@ -299,7 +304,7 @@ export async function fetchTransfers(
     );
   }
 
-  if (!body.data) {
+  if (!body.data || !z.array(paymentTransferRequiredFieldsSchema).safeParse(body.data).success) {
     throw new Error(t("DashboardPayments.workspace.transferListMissing"));
   }
 
@@ -333,7 +338,10 @@ export async function fetchTransferById(
       )
     );
   }
-  if (!body.data?.transfer) {
+  if (
+    !body.data?.transfer ||
+    !paymentTransferRequiredFieldsSchema.safeParse(body.data.transfer).success
+  ) {
     throw new Error(t("DashboardPayments.workspace.transferLookupMissing"));
   }
   return body.data.transfer;
@@ -494,10 +502,12 @@ export async function createTransfer(
   }
 
   const body: unknown = await response.json().catch(() => null);
-  // SAFETY: the transfer endpoint's success envelope is `PaymentTransferEnvelope`
-  // (`@sdp/types`); only the presence of the transfer is checked here, as before.
   const envelope = body as TransferEnvelope | null;
-  if (!envelope?.data?.transfer) {
+  if (
+    !envelope?.data?.transfer ||
+    !paymentTransferRequiredFieldsSchema.safeParse(envelope.data.transfer).success ||
+    envelope.data.transfer.custodyWalletId !== input.sourceCustodyWalletId
+  ) {
     throw new Error(t("DashboardPayments.workspace.transferMissing"));
   }
 
@@ -615,7 +625,15 @@ export async function createTransferBatch(
     );
   }
   const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
-  if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
+  if (
+    !body.data?.batch ||
+    !body.data.recipients ||
+    !body.data.transfers ||
+    !paymentTransferBatchIdentitySchema.safeParse(body.data.batch).success ||
+    body.data.batch.sourceCustodyWalletId !== input.sourceCustodyWalletId ||
+    !z.array(paymentTransferRequiredFieldsSchema).safeParse(body.data.transfers).success ||
+    body.data.transfers.some((transfer) => transfer.custodyWalletId !== input.sourceCustodyWalletId)
+  ) {
     throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
   }
   return {

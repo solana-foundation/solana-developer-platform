@@ -7,7 +7,6 @@ import type { Address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import {
   assertPaymentProjectScope,
   assertPositivePaymentAmount,
@@ -16,7 +15,11 @@ import {
 } from "@/services/payment-operation.service";
 import { type AppContext, getCounterpartyAccountsRepository } from "../context";
 import { resolveMintTokenProgram, resolveSourceTokenAccount } from "../token-accounts";
-import { resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
+import {
+  assertPaymentWalletExactAccess,
+  resolveScope,
+  resolveWalletByCustodyWalletId,
+} from "../wallets";
 import type {
   CreateTransferBatchInput,
   ResolvedBatchRequest,
@@ -164,7 +167,7 @@ async function resolveRecipients(params: {
 export async function resolveBatchRequest(
   c: AppContext,
   input: CreateTransferBatchInput,
-  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2],
+  requiredWalletPermissions: Parameters<typeof assertPaymentWalletExactAccess>[2],
   retainedCustodyWalletId?: string
 ): Promise<ResolvedBatchRequest> {
   const projectId = requireProjectId(c);
@@ -172,7 +175,7 @@ export async function resolveBatchRequest(
   assertPaymentProjectScope(input.projectId, scope.auth.projectId);
 
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, input.sourceCustodyWalletId);
-  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, requiredWalletPermissions);
+  assertPaymentWalletExactAccess(c, sourceWallet.id, requiredWalletPermissions);
 
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
   const token = normalizePaymentToken(input.token, c.env);

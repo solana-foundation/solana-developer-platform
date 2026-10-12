@@ -44,9 +44,9 @@ export function assertRampQuoteBindingMatches(
     existing.organization_id === expected.organizationId &&
     existing.project_id === expected.projectId &&
     existing.custody_wallet_id === expected.custodyWalletId &&
-    existing.wallet_id === expected.walletId &&
     existing.counterparty_id === expected.counterpartyId &&
     existing.type === expected.direction &&
+    existing.direction === (expected.direction === "onramp" ? "inbound" : "outbound") &&
     existing.token === expected.token &&
     existing.source_address === expected.sourceAddress &&
     existing.destination_address === expected.destinationAddress &&

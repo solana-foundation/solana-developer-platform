@@ -497,6 +497,85 @@ describe("ramp pay-ins and cancels", () => {
 });
 
 describe("transfers and batches", () => {
+  it("refuses a saved off-ramp when its exact source collides with another provider reference", () => {
+    const collisionWorld = world();
+    const original = Object.values(collisionWorld.wallets)[0];
+    const ramp = transferById(collisionWorld, "demo_xfr_offramp_orbit");
+    if (!original || !ramp) throw new Error("Missing demo wallet or ramp fixture");
+    const source = { ...original, id: "demo_cwlt_collision_source", walletId: "provider_b" };
+    original.walletId = source.id;
+    collisionWorld.wallets.collision = source;
+    ramp.custodyWalletId = source.id;
+    ramp.status = "awaiting_payment";
+    const before = structuredClone(collisionWorld);
+    const result = demoWrite("POST", {
+      segments: ["payments", "transfers"],
+      body: {
+        transferId: ramp.id,
+        sourceCustodyWalletId: source.id,
+        destination: ADDRESS,
+        token: USDC,
+        amount: "1",
+      },
+      world: collisionWorld,
+      ops: [],
+      now,
+    });
+    expect(result?.answer(collisionWorld).status).toBe(404);
+    expect(result?.ops).toEqual([]);
+    expect(collisionWorld).toEqual(before);
+  });
+
+  it.each([
+    [
+      "/v1/payments/transfers",
+      { destination: ADDRESS, token: USDC, amount: "1" },
+      "sourceCustodyWalletId",
+    ],
+    [
+      "/v1/payments/transfer-batches/estimate",
+      {
+        token: USDC,
+        recipients: [
+          { counterpartyId: "demo_cpty_kai", counterpartyAccountId: "demo_cpa_kai", amount: "1" },
+        ],
+      },
+      "sourceCustodyWalletId",
+    ],
+    [
+      "/v1/payments/ramps/onramp/quote",
+      {
+        provider: "lightspark",
+        counterpartyId: "demo_cpty_jane",
+        assetRail: "usdc.solana",
+        fiatCurrency: "USD",
+        fiatAmount: "100",
+      },
+      "destinationCustodyWalletId",
+    ],
+    [
+      "/v1/payments/ramps/offramp/quote",
+      {
+        provider: "lightspark",
+        counterpartyId: "demo_cpty_jane",
+        assetRail: "usdc.solana",
+        fiatCurrency: "USD",
+        cryptoAmount: "100",
+      },
+      "sourceCustodyWalletId",
+    ],
+  ])("refuses a provider reference in the exact selector at %s", (path, body, selector) => {
+    const providerReference = Object.values(world().wallets).find(
+      (wallet) => wallet.id === TREASURY
+    )?.walletId;
+
+    expect(refusal(write("POST", path, { ...body, [selector]: providerReference }))).toEqual([
+      404,
+      "not_found",
+    ]);
+    expect(ops).toEqual([]);
+  });
+
   const send = (body: Record<string, unknown>) =>
     write("POST", "/v1/payments/transfers", {
       sourceCustodyWalletId: TREASURY,
@@ -524,6 +603,21 @@ describe("transfers and batches", () => {
     expect(ops).toHaveLength(1);
     const fresh = send({ transferId: "client_supplied" });
     expect(fresh?.body.data.transfer.id).toMatch(/^demo_new_xfr_/);
+  });
+
+  it("refuses to replay a saved transfer under another exact source", () => {
+    const first = send({ transferId: "demo_new_xfr_source" });
+
+    expect(
+      refusal(
+        send({
+          transferId: first?.body.data.transfer.id,
+          sourceCustodyWalletId: "demo_cwlt_payroll",
+        })
+      )
+    ).toEqual([409, "conflict"]);
+    expect(ops).toHaveLength(1);
+    expect(transferById(world(), "demo_new_xfr_source")?.custodyWalletId).toBe(TREASURY);
   });
 
   it("funds an off-ramp's payout once, from a wallet that can cover it", () => {

@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 
--- Read-only HOO-1023 K3 release audit. Run before the initial backfill and
+-- Read-only Payments release audit. Run before the initial backfill and
 -- again after backfill-payments-execution-identity.sql. Retained wallet history
 -- participates in matching; status is intentionally not filtered.
 
@@ -157,7 +157,10 @@ SELECT DISTINCT
        batch.organization_id,
        batch.project_id,
        batch.source_custody_wallet_id AS batch_custody_wallet_id,
-       transfer.custody_wallet_id AS transfer_custody_wallet_id
+       transfer.custody_wallet_id AS transfer_custody_wallet_id,
+       batch.status AS batch_status, transfer.status AS transfer_status,
+       transfer.signature, transfer.signed_transaction IS NOT NULL AS has_signed_transaction,
+       transfer.submission_started_at
 FROM payment_transfer_batches batch
 JOIN payment_transfer_recipients recipient
   ON recipient.batch_id = batch.id
@@ -179,69 +182,65 @@ WHERE status = 'awaiting_payment'
 ORDER BY organization_id, id
 LIMIT 100;
 
-\echo '=== 3. Executable Payments Approvals that cannot use compatibility replay ==='
-WITH wallet_scope AS (
-  SELECT wallet.id, wallet.wallet_id, wallet.public_key,
-         config.organization_id, config.project_id
-  FROM custody_wallets wallet
-  JOIN custody_configs config ON config.id = wallet.custody_config_id
-  UNION ALL
-  SELECT wallet.id, wallet.wallet_id, wallet.public_key,
-         connection.organization_id, connection.project_id
-  FROM custody_wallets wallet
-  JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
-), audited AS (
-  SELECT operation.*,
-         EXISTS (
-           SELECT 1
-           FROM wallet_scope wallet
-           WHERE wallet.id = operation.custody_wallet_id
-             AND wallet.organization_id = operation.organization_id
-             AND wallet.project_id = operation.project_id
-             AND wallet.wallet_id = operation.wallet_id
-             AND wallet.public_key = operation.raw_payload #>> '{context,sourceAddress}'
-         ) AS exact_wallet_matches
-  FROM wallet_operations operation
-  WHERE operation_type IN ('payment_transfer_execute', 'payment_transfer_batch_execute')
-    AND status IN ('pending_approval', 'executing')
-)
-SELECT id, organization_id, project_id, status, custody_wallet_id,
-       execution_lease_expires_at, execution_effect_started_at,
-       CASE
-         WHEN custody_wallet_id IS NULL THEN 'missing_exact_wallet'
-         WHEN NOT exact_wallet_matches THEN 'mismatched_exact_wallet'
-         WHEN raw_payload ? 'sourceCustodyWalletId'
-           OR (raw_payload #> '{executionRequest,body}') ? 'sourceCustodyWalletId'
-           THEN 'unsupported_exact_envelope'
-         ELSE 'malformed_legacy_envelope'
-       END AS classification
-FROM audited
-WHERE custody_wallet_id IS NULL
-   OR NOT exact_wallet_matches
-   OR (
-    raw_payload ->> 'source' IS DISTINCT FROM wallet_id
-    OR raw_payload ? 'sourceCustodyWalletId'
-    OR jsonb_typeof(raw_payload -> 'executionRequest') IS DISTINCT FROM 'object'
-    OR raw_payload #>> '{executionRequest,method}' IS DISTINCT FROM 'POST'
-    OR (operation_type = 'payment_transfer_execute'
-        AND raw_payload #>> '{executionRequest,path}'
-            IS DISTINCT FROM '/v1/payments/transfers')
-    OR (operation_type = 'payment_transfer_batch_execute'
-        AND raw_payload #>> '{executionRequest,path}'
-            IS DISTINCT FROM '/v1/payments/transfer-batches')
-    OR jsonb_typeof(raw_payload #> '{executionRequest,body}') IS DISTINCT FROM 'object'
-    OR raw_payload #>> '{executionRequest,body,source}' IS DISTINCT FROM wallet_id
-    OR (raw_payload #> '{executionRequest,body}') ? 'sourceCustodyWalletId'
-    OR jsonb_typeof(raw_payload #> '{executionRequest,idempotencyKey}') IS DISTINCT FROM 'string'
-  )
-ORDER BY classification, organization_id, id
-LIMIT 100;
+\echo '=== 3. Unresolved executable transfers, batches and ramps (review before cutover) ==='
+SELECT CASE WHEN transfer.type IN ('onramp', 'offramp') THEN 'ramp' ELSE 'transfer' END AS resource,
+       transfer.id, transfer.organization_id, transfer.project_id, transfer.status
+FROM payment_transfers transfer
+WHERE transfer.custody_wallet_id IS NULL
+  AND (transfer.type IN ('transfer', 'transfer_batch')
+       AND transfer.status IN ('pending', 'processing', 'confirmed')
+    OR transfer.type IN ('onramp', 'offramp')
+       AND transfer.status IN ('pending', 'processing', 'confirmed', 'finalized', 'awaiting_payment', 'settling'))
+UNION ALL
+SELECT 'batch', batch.id, batch.organization_id, batch.project_id, batch.status
+FROM payment_transfer_batches batch
+WHERE batch.source_custody_wallet_id IS NULL
+  AND (batch.status = 'processing' OR EXISTS (
+    SELECT 1 FROM payment_transfer_recipients recipient
+    LEFT JOIN payment_transfers transfer
+      ON transfer.id = recipient.transfer_id
+     AND transfer.organization_id = recipient.organization_id
+     AND transfer.project_id = recipient.project_id
+    WHERE recipient.batch_id = batch.id
+      AND recipient.organization_id = batch.organization_id
+      AND recipient.project_id = batch.project_id
+      AND (recipient.status IN ('pending', 'processing')
+        OR transfer.status IN ('pending', 'processing', 'confirmed')
+        OR transfer.status NOT IN ('finalized', 'completed')
+           AND (transfer.signature IS NOT NULL OR transfer.signed_transaction IS NOT NULL
+             OR transfer.submission_started_at IS NOT NULL))
+  ))
+ORDER BY resource, organization_id, id;
 
-\echo '=== 4. Live approved executions (must drain before catch-up) ==='
-SELECT id, organization_id, project_id, operation_type,
-       execution_attempt_id, execution_lease_expires_at, execution_effect_started_at
-FROM wallet_operations
-WHERE operation_type IN ('payment_transfer_execute', 'payment_transfer_batch_execute')
-  AND status = 'executing'
-  AND execution_lease_expires_at > sdp_iso_now()
-ORDER BY execution_lease_expires_at, id;
+\echo '=== 4. Retained unfinished submission and ramp effects (reconcile before cutover) ==='
+-- Parent status alone does not establish that an external effect is absent.
+SELECT id, organization_id, project_id, type, status, custody_wallet_id,
+       signature, signed_transaction IS NOT NULL AS has_signed_transaction,
+       last_valid_block_height, submission_started_at, provider, provider_reference,
+       provider_data #>> '{moneygram,cryptoTransferId}' AS crypto_transfer_id
+FROM payment_transfers
+WHERE (type IN ('transfer', 'transfer_batch') AND status <> 'finalized'
+    OR type IN ('onramp', 'offramp') AND status <> 'completed')
+  AND (signature IS NOT NULL OR signed_transaction IS NOT NULL OR submission_started_at IS NOT NULL
+    OR provider_data #>> '{moneygram,cryptoTransferId}' IS NOT NULL
+    OR type IN ('onramp', 'offramp') AND provider_reference IS NOT NULL
+       AND status IN ('pending', 'processing', 'confirmed', 'finalized', 'awaiting_payment', 'settling'))
+ORDER BY organization_id, id;
+
+\echo '=== 5. MoneyGram ramp/crypto-leg exact-ID disagreements (review before cutover) ==='
+SELECT ramp.id AS ramp_id, ramp.organization_id, ramp.project_id,
+       ramp.custody_wallet_id AS ramp_custody_wallet_id,
+       ramp.provider_reference, ramp.status AS ramp_status,
+       ramp.provider_data #>> '{moneygram,cryptoTransferId}' AS crypto_transfer_id,
+       leg.custody_wallet_id AS crypto_custody_wallet_id, leg.status AS crypto_status,
+       leg.signature, leg.submission_started_at
+FROM payment_transfers ramp
+LEFT JOIN payment_transfers leg
+  ON leg.id = ramp.provider_data #>> '{moneygram,cryptoTransferId}'
+ AND leg.organization_id = ramp.organization_id
+ AND leg.project_id = ramp.project_id
+WHERE ramp.type = 'offramp' AND ramp.provider = 'moneygram'
+  AND ramp.provider_data #>> '{moneygram,cryptoTransferId}' IS NOT NULL
+  AND (ramp.custody_wallet_id IS NULL OR leg.custody_wallet_id IS NULL
+    OR ramp.custody_wallet_id IS DISTINCT FROM leg.custody_wallet_id)
+ORDER BY ramp.organization_id, ramp.id;

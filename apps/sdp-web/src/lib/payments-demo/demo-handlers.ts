@@ -948,7 +948,9 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
     if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
     if (!onboardedWith(provider, world, counterpartyId, now)) return notOnboarded(provider);
     const wallet = findWallet(world, destinationCustodyWalletId);
-    if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
+    if (!wallet || wallet.id !== destinationCustodyWalletId) {
+      return error(404, "That wallet is not in this project.", "not_found");
+    }
     if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
       return pairRefusal(
         provider,
@@ -1001,7 +1003,9 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
   if (!onboardedWith(provider, world, counterpartyId, now)) return notOnboarded(provider);
   const wallet = findWallet(world, sourceCustodyWalletId);
-  if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
+  if (!wallet || wallet.id !== sourceCustodyWalletId) {
+    return error(404, "That wallet is not in this project.", "not_found");
+  }
   if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
     return pairRefusal(provider, getCryptoRailAssetLabel(assetRail as CryptoRailId), fiatCurrency);
   }
@@ -1118,11 +1122,17 @@ function createTransfer({ body, world, now }: WriteContext): DemoWriteResult {
   const { transferId, sourceCustodyWalletId, destination, token, amount, memo } = input.data;
   const existing = transferId === undefined ? undefined : transferById(world, transferId);
   const at = now.getTime();
+  if (existing && existing.custodyWalletId !== sourceCustodyWalletId) {
+    return error(409, "This payment belongs to a different SDP wallet.", "conflict");
+  }
 
   // Funding an off-ramp: the crypto goes to the provider's deposit address.
   if (existing?.type === "offramp") {
     if (existing.status !== "awaiting_payment") {
       return error(409, "This payout has already been funded.", "conflict");
+    }
+    if (findWallet(world, sourceCustodyWalletId)?.id !== sourceCustodyWalletId) {
+      return error(404, "That wallet is not in this project.", "not_found");
     }
     const notEnough = shortfall(world, sourceCustodyWalletId, token, amount);
     if (notEnough) return error(400, notEnough, "insufficient_funds");
@@ -1135,7 +1145,9 @@ function createTransfer({ body, world, now }: WriteContext): DemoWriteResult {
   if (existing) return record([], () => ok({ data: { transfer: existing } }));
 
   const wallet = findWallet(world, sourceCustodyWalletId);
-  if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
+  if (!wallet || wallet.id !== sourceCustodyWalletId) {
+    return error(404, "That wallet is not in this project.", "not_found");
+  }
   if (destination === wallet.publicKey) {
     return error(400, "Choose an address other than the wallet sending the payment.");
   }
@@ -1174,7 +1186,7 @@ function batchTotal(amounts: readonly string[], mint: string): string {
 }
 
 function checkBatch(world: DemoWorld, input: z.infer<typeof batchSchema>): DemoWriteResult | null {
-  if (!findWallet(world, input.sourceCustodyWalletId)) {
+  if (findWallet(world, input.sourceCustodyWalletId)?.id !== input.sourceCustodyWalletId) {
     return error(404, "That wallet is not in this project.", "not_found");
   }
   for (const recipient of input.recipients) {

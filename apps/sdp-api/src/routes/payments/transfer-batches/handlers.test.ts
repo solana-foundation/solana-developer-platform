@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { type CachedApiKey, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
+import {
+  type CachedApiKey,
+  type Permission,
+  SPL_TOKEN_PROGRAMS,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types";
 import {
   address,
   createNoopSigner,
@@ -326,9 +331,12 @@ async function seedConfigOwnedDuplicateProviderWallet(): Promise<void> {
   });
 }
 
-async function seedSelectedApiKeyWalletBinding(custodyWalletId: string): Promise<void> {
+async function seedSelectedApiKeyWalletBinding(
+  custodyWalletId: string,
+  permissions: Permission[] = ["payments:write"]
+): Promise<void> {
   await replaceApiKeyWalletBindings(getDb(env), TEST_API_KEY.id, [
-    { walletId: TEST_WALLET_ID, permissions: ["payments:write"] },
+    { walletId: TEST_WALLET_ID, permissions },
   ]);
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, {
@@ -340,7 +348,7 @@ async function seedSelectedApiKeyWalletBinding(custodyWalletId: string): Promise
       {
         walletId: TEST_WALLET_ID,
         custodyWalletId,
-        permissions: ["payments:write"],
+        permissions,
       },
     ],
   });
@@ -812,6 +820,35 @@ describe("payment transfer batches", () => {
     expect(listRes.status).toBe(200);
     const listBody = (await listRes.json()) as { data: Array<{ id: string }> };
     expect(listBody.data.map((batch) => batch.id)).toContain(body.data.batch.id);
+  });
+
+  it("refuses a batch estimate for an exact wallet outside the key's alias-equivalent binding", async () => {
+    await seedConfigOwnedDuplicateProviderWallet();
+    await seedSelectedApiKeyWalletBinding(TEST_DUPLICATE_CUSTODY_WALLET_ID, ["payments:read"]);
+    const counterpartyId = await seedCounterparty("batch_estimate_exact_binding");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const response = await app.request(
+      "/v1/payments/transfer-batches/estimate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(403);
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
   });
 
   it("executes the exact Config-owned wallet when a Connection duplicates its Provider ID", async () => {

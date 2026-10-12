@@ -5,6 +5,8 @@ import {
   createTransfer,
   createTransferBatch,
   estimateTransferBatch,
+  fetchTransferById,
+  fetchTransfers,
   TransferRequestError,
 } from "./payments-workspace.data";
 
@@ -29,11 +31,19 @@ describe("Payments write requests", () => {
   };
 
   it("sends the exact custody wallet id, the tab's Project, and a key only when there is one", async () => {
-    const fetch = vi
-      .fn()
-      .mockImplementation(async () =>
-        jsonResponse({ data: { transfer: { id: "trf_1", status: "pending", signature: null } } })
-      );
+    const fetch = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        data: {
+          transfer: {
+            id: "trf_1",
+            custodyWalletId: "cwlt_1",
+            rampsMemo: {},
+            status: "pending",
+            signature: null,
+          },
+        },
+      })
+    );
     vi.stubGlobal("fetch", fetch);
 
     await createTransfer({ ...transferInput, transferId: "xfr_1" }, t, "idem_transfer_1");
@@ -52,6 +62,63 @@ describe("Payments write requests", () => {
     );
     expect(unkeyed).toEqual(
       new Headers({ "Content-Type": "application/json", "x-project-id": "prj_test_sandbox" })
+    );
+  });
+
+  it.each([undefined, null, "cwlt_alias"])(
+    "refuses a created transfer whose exact source is %j",
+    async (custodyWalletId) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          jsonResponse({
+            data: {
+              transfer: {
+                id: "trf_1",
+                custodyWalletId,
+                providerWalletId: "same-provider-reference",
+                rampsMemo: {},
+              },
+            },
+          })
+        )
+      );
+
+      await expect(createTransfer(transferInput, t, "idem_transfer_1")).rejects.toThrow(
+        "DashboardPayments.workspace.transferMissing"
+      );
+    }
+  );
+
+  it("reads exact and nullable history without requiring provider metadata", async () => {
+    const exact = { id: "trf_1", custodyWalletId: "cwlt_1", rampsMemo: {} };
+    const legacy = { id: "trf_legacy", custodyWalletId: null, rampsMemo: {} };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ data: [exact, legacy] }))
+        .mockResolvedValueOnce(jsonResponse({ data: { transfer: legacy } }))
+    );
+
+    expect(await fetchTransfers({ pageSize: 10 }, t)).toEqual([exact, legacy]);
+    expect(await fetchTransferById({ transferId: "trf_legacy" }, t)).toEqual(legacy);
+  });
+
+  it("reports incomplete history and detail as unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ data: [{ id: "trf_1" }] }))
+        .mockResolvedValueOnce(jsonResponse({ data: { transfer: { id: "trf_1" } } }))
+    );
+
+    await expect(fetchTransfers({ pageSize: 10 }, t)).rejects.toThrow(
+      "DashboardPayments.workspace.transferListMissing"
+    );
+    await expect(fetchTransferById({ transferId: "trf_1" }, t)).rejects.toThrow(
+      "DashboardPayments.workspace.transferLookupMissing"
     );
   });
 
@@ -96,7 +163,11 @@ describe("Payments write requests", () => {
       .mockResolvedValueOnce(jsonResponse({ data: { estimate: { transactionCount: 1 } } }))
       .mockResolvedValueOnce(
         jsonResponse({
-          data: { batch: { id: "batch_1" }, recipients: [], transfers: [] },
+          data: {
+            batch: { id: "batch_1", sourceCustodyWalletId: "cwlt_1" },
+            recipients: [],
+            transfers: [],
+          },
         })
       );
     vi.stubGlobal("fetch", fetch);
@@ -116,4 +187,47 @@ describe("Payments write requests", () => {
       expect(JSON.parse(String((init as RequestInit).body))).not.toHaveProperty("source");
     }
   });
+
+  it.each([
+    { batchSource: undefined, chunkSource: "cwlt_1" },
+    { batchSource: null, chunkSource: "cwlt_1" },
+    { batchSource: "cwlt_alias", chunkSource: "cwlt_1" },
+    { batchSource: "cwlt_1", chunkSource: null },
+    { batchSource: "cwlt_1", chunkSource: "cwlt_alias" },
+  ])(
+    "refuses a batch or chunk with another exact source: %j",
+    async ({ batchSource, chunkSource }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          jsonResponse({
+            data: {
+              batch: {
+                id: "batch_1",
+                sourceCustodyWalletId: batchSource,
+                sourceProviderWalletId: "shared-provider-reference",
+              },
+              recipients: [],
+              transfers: [
+                {
+                  id: "trf_chunk",
+                  custodyWalletId: chunkSource,
+                  providerWalletId: "shared-provider-reference",
+                  rampsMemo: {},
+                },
+              ],
+            },
+          })
+        )
+      );
+
+      await expect(
+        createTransferBatch(
+          { sourceCustodyWalletId: "cwlt_1", token: "mint", recipients: [] },
+          t,
+          "idem_batch_1"
+        )
+      ).rejects.toThrow("DashboardPayments.workspace.batchTransferMissing");
+    }
+  );
 });

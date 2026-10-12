@@ -76,6 +76,24 @@ afterEach(() => {
 });
 
 describe("fundMoneygramDeposit", () => {
+  it.each([null, "cwlt_alias"])(
+    "refuses a deposit bound to exact source %j without sending",
+    async (custodyWalletId) => {
+      vi.mocked(fetchTransferById).mockResolvedValue({
+        ...RAMP,
+        custodyWalletId,
+        providerWalletId: RAMP.providerWalletId,
+      });
+      const ctx = context({});
+
+      await expect(fundMoneygramDeposit(DEPOSIT, ctx)).rejects.toThrow(
+        "DashboardPayments.ramps.moneygramDepositUnconfirmed"
+      );
+      expect(sendTransferUnderKey).not.toHaveBeenCalled();
+      expect(ctx.onSigned).not.toHaveBeenCalled();
+    }
+  );
+
   it("funds the API deposit instruction instead of the widget payload and posts signed", async () => {
     const ctx = context({});
     vi.mocked(fetchTransferById).mockImplementation(async () => {

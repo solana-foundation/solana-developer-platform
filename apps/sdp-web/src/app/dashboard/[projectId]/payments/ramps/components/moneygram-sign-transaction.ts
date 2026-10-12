@@ -7,8 +7,8 @@
  * waits for the signature of the transfer that funds it. Every refusal here has
  * to be a refusal MoneyGram can show, because the person is sitting in the
  * provider's flow: a deposit for another chain or asset, a wallet holding none
- * of the token, a payment a wallet policy parked, and a recorded transfer with
- * no signature are each said plainly rather than left to a generic failure.
+ * of the token, a mismatched exact source, and a recorded transfer with no
+ * signature are each said plainly rather than left to a generic failure.
  */
 
 import { address } from "@solana/kit";
@@ -107,7 +107,11 @@ export async function fundMoneygramDeposit(
   const { sessionId, transferId, t } = context;
   await postMoneygramRampEvent({ kind: "deposit_address", sessionId }, t);
   const transfer = await fetchTransferById({ transferId }, t);
-  if (transfer.destination === undefined || transfer.amount === undefined) {
+  if (
+    transfer.custodyWalletId !== context.sourceWalletId ||
+    transfer.destination === undefined ||
+    transfer.amount === undefined
+  ) {
     throw new Error(t("DashboardPayments.ramps.moneygramDepositUnconfirmed"));
   }
   return sendMoneygramTransfer(

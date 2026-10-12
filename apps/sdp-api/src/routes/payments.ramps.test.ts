@@ -157,16 +157,17 @@ async function seedRampEventTransfer(params: {
   await getDb(env)
     .prepare(
       `INSERT INTO payment_transfers (
-         id, organization_id, project_id, wallet_id, source_address, destination_address,
+         id, organization_id, project_id, custody_wallet_id, wallet_id, source_address, destination_address,
          token, amount, memo, type, direction, status, provider, provider_reference,
          delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
          initiated_by_key_id, created_at, updated_at, counterparty_id
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       params.id,
       TEST_ORG.id,
       TEST_PROJECT.id,
+      TEST_CUSTODY_WALLET_ID,
       TEST_WALLET_ID,
       params.type === "offramp" ? TEST_SOLANA_ADDRESSES.wallet1 : null,
       params.type === "onramp" ? TEST_SOLANA_ADDRESSES.wallet2 : null,
@@ -2449,6 +2450,143 @@ describe("Payments routes — ramps", () => {
       expect((await postEvent({ kind: "deposit_address", sessionId })).status).toBe(204);
     }
 
+    async function seedCryptoLeg(custodyWalletId: string | null): Promise<void> {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
+             id, organization_id, project_id, custody_wallet_id, wallet_id,
+             source_address, destination_address, token, amount, type, direction,
+             status, signature, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'USDC', '25', 'transfer', 'outbound',
+                     'confirmed', 'sig_mg_identity_leg', sdp_iso_now(), sdp_iso_now())`
+        )
+        .bind(
+          "xfr_mg_identity_leg",
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          custodyWalletId,
+          TEST_WALLET_ID,
+          TEST_SOLANA_ADDRESSES.wallet1,
+          MG_DEPOSIT_WALLET
+        )
+        .run();
+    }
+
+    it("rejects a MoneyGram crypto leg when both exact custody pins are missing", async () => {
+      await pinDeposit();
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET custody_wallet_id = NULL WHERE id = ?")
+        .bind(transferId)
+        .run();
+      await seedCryptoLeg(null);
+      const before = await readTransfer(transferId);
+      const response = await postEvent({
+        kind: "signed",
+        sessionId,
+        cryptoTransferId: "xfr_mg_identity_leg",
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { message: "Crypto transfer was not sent from the off-ramp wallet." },
+      });
+      expect(await readTransfer(transferId)).toEqual(before);
+    });
+
+    it.each(["signed", "completed"] as const)(
+      "requires equal non-null custody pins for a MoneyGram %s event",
+      async (kind) => {
+        await pinDeposit();
+        await seedCryptoLeg(TEST_CUSTODY_WALLET_ID);
+        await seedActiveConnectionWallet({
+          walletId: TEST_WALLET_ID,
+          publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+        });
+        const event: MoneygramRampEvent =
+          kind === "signed"
+            ? { kind, sessionId, cryptoTransferId: "xfr_mg_identity_leg" }
+            : {
+                kind,
+                sessionId,
+                cryptoTransferId: "xfr_mg_identity_leg",
+                transactionId: "mg_tx_created_1",
+                payoutAmount: 25,
+                payoutStatus: "COMPLETED",
+              };
+        for (const [rampPin, legPin] of [
+          [TEST_CUSTODY_WALLET_ID, TEST_CONNECTION_CUSTODY_WALLET_ID],
+          [TEST_CUSTODY_WALLET_ID, null],
+          [null, TEST_CUSTODY_WALLET_ID],
+          [null, null],
+        ]) {
+          await getDb(env).batch([
+            getDb(env)
+              .prepare("UPDATE payment_transfers SET custody_wallet_id = ? WHERE id = ?")
+              .bind(rampPin, transferId),
+            getDb(env)
+              .prepare("UPDATE payment_transfers SET custody_wallet_id = ? WHERE id = ?")
+              .bind(legPin, "xfr_mg_identity_leg"),
+          ]);
+          const refused = await postEvent(event);
+          expect(refused.status).toBe(400);
+          expect(await refused.json()).toMatchObject({
+            error: { message: "Crypto transfer was not sent from the off-ramp wallet." },
+          });
+        }
+        await getDb(env)
+          .prepare("UPDATE payment_transfers SET custody_wallet_id = ? WHERE id IN (?, ?)")
+          .bind(TEST_CUSTODY_WALLET_ID, transferId, "xfr_mg_identity_leg")
+          .run();
+        // Retained provider evidence cannot override the proven custody identity.
+        await getDb(env)
+          .prepare(
+            "UPDATE payment_transfers SET wallet_id = 'retained_provider_reference' WHERE id = ?"
+          )
+          .bind("xfr_mg_identity_leg")
+          .run();
+        expect((await postEvent(event)).status).toBe(204);
+        const result = await readTransfer(transferId);
+        expect(result.status).toBe(kind === "signed" ? settlingStatus : pendingStatus);
+        if (kind === "completed") {
+          expect(result.provider_data).toMatchObject({ clientEvent: { advisory: true } });
+        }
+      }
+    );
+
+    it.each([
+      ["type", "offramp", "cryptoTransferId must reference a wallet transfer."],
+      [
+        "source_address",
+        TEST_SOLANA_ADDRESSES.wallet2,
+        "Crypto transfer was not sent from the off-ramp source wallet.",
+      ],
+      ["direction", "inbound", "Crypto transfer must be outbound."],
+      ["token", "SOL", "Crypto transfer asset does not match the off-ramp asset."],
+      ["signature", null, "Crypto transfer has no on-chain signature."],
+      ["status", "pending", "Crypto transfer is not confirmed on-chain (status: pending)."],
+    ] as const)(
+      "retains MoneyGram crypto-leg integrity when equal exact pins have invalid %s",
+      async (field, value, message) => {
+        await pinDeposit();
+        await seedCryptoLeg(TEST_CUSTODY_WALLET_ID);
+        await getDb(env)
+          .prepare(`UPDATE payment_transfers SET ${field} = ? WHERE id = ?`)
+          .bind(value, "xfr_mg_identity_leg")
+          .run();
+
+        const response = await postEvent({
+          kind: "completed",
+          sessionId,
+          cryptoTransferId: "xfr_mg_identity_leg",
+          transactionId: "mg_tx_created_1",
+          payoutAmount: 25,
+          payoutStatus: "COMPLETED",
+        });
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({ error: { message } });
+      }
+    );
+
     async function readMoneygramProviderAccounts(): Promise<CounterpartyProviderAccountRow[]> {
       const rows = await getDb(env)
         .prepare(
@@ -2883,14 +3021,15 @@ describe("Payments routes — ramps", () => {
       await getDb(env)
         .prepare(
           `INSERT INTO payment_transfers (
-             id, organization_id, project_id, wallet_id, source_address, destination_address,
+             id, organization_id, project_id, custody_wallet_id, wallet_id, source_address, destination_address,
              token, amount, type, direction, status, signature, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           "xfr_mg_deposit_leg",
           TEST_ORG.id,
           TEST_PROJECT.id,
+          TEST_CUSTODY_WALLET_ID,
           TEST_WALLET_ID,
           TEST_SOLANA_ADDRESSES.wallet1,
           destination,
@@ -2956,14 +3095,15 @@ describe("Payments routes — ramps", () => {
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers (
-           id, organization_id, project_id, wallet_id, source_address, destination_address,
+           id, organization_id, project_id, custody_wallet_id, wallet_id, source_address, destination_address,
            token, amount, type, direction, status, signature, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         "xfr_moneygram_wrong_amount_leg",
         TEST_ORG.id,
         TEST_PROJECT.id,
+        TEST_CUSTODY_WALLET_ID,
         TEST_WALLET_ID,
         TEST_SOLANA_ADDRESSES.wallet1,
         depositWallet,
@@ -3322,6 +3462,13 @@ describe("Payments routes — ramps", () => {
       const created = await createMoneygramOnrampQuote(counterpartyId, "25");
       expect(created.status).toBe(200);
 
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_transfers SET wallet_id = 'retained_provider_reference' WHERE provider_reference = ?"
+        )
+        .bind("mg_sess_reuse_1")
+        .run();
+
       const replayed = await createMoneygramOnrampQuote(counterpartyId, "25");
       expect(replayed.status).toBe(200);
 
@@ -3330,6 +3477,51 @@ describe("Payments routes — ramps", () => {
       const body = (await mutated.json()) as { error: { message: string } };
       expect(body.error.message).toContain("already bound");
       fetchSpy.mockRestore();
+    });
+
+    it.each([
+      ["custody_wallet_id", TEST_CONNECTION_CUSTODY_WALLET_ID],
+      ["custody_wallet_id", null],
+      ["destination_address", TEST_SOLANA_ADDRESSES.wallet2],
+      ["source_address", TEST_SOLANA_ADDRESSES.wallet1],
+      ["token", "SOL"],
+      ["amount", "25"],
+      ["fiat_amount", "26"],
+      ["fiat_currency", "MXN"],
+      ["type", "offramp"],
+      ["direction", "outbound"],
+    ] as const)("refuses session replay with changed %s evidence (%s)", async (field, value) => {
+      const counterpartyId = await seedCounterparty({ externalId: "moneygram_exact_conflict" });
+      await seedActiveConnectionWallet({
+        walletId: TEST_WALLET_ID,
+        publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+        moneygramSessionResponse({
+          sessionId: "mg_sess_exact_conflict",
+          expSeconds: Math.floor(Date.now() / 1000) + 3600,
+          widgetUrl: MONEYGRAM_WIDGET_URL,
+        })
+      );
+      try {
+        const created = await createMoneygramOnrampQuote(counterpartyId, "25");
+        expect(created.status).toBe(200);
+        const initial: { data: { transferId: string } } = await created.json();
+        await getDb(env)
+          .prepare(`UPDATE payment_transfers SET ${field} = ? WHERE id = ?`)
+          .bind(value, initial.data.transferId)
+          .run();
+        const replay = await createMoneygramOnrampQuote(counterpartyId, "25");
+        expect(replay.status).toBe(409);
+        expect(await replay.json()).toMatchObject({
+          error: {
+            message:
+              "Provider quote/session reference is already bound to a different ramp transfer.",
+          },
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
     });
 
     it("fails closed when the provider reference is already bound to another tenant", async () => {
