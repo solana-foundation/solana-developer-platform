@@ -1,6 +1,6 @@
 ---
 name: integrate-offramp
-description: Implement a provider's crypto→fiat createOfframpQuote in @sdp/payments, extend the closed quote contract, and wire API wallet policy, persistence, and dashboard rendering.
+description: Implement a provider's crypto→fiat createOfframpQuote in @sdp/payments, extend the closed quote contract, and wire the API route, persistence, and dashboard rendering.
 disable-model-invocation: true
 ---
 
@@ -20,7 +20,7 @@ Output `PaymentRampQuote` is closed by `provider` and `deliveryMode`; add the pr
 
 ## Two off-ramp-specific resolutions (handler-side)
 
-1. **Source wallet.** The shared policy extraction resolves `sourceWallet` to an SDP wallet/address and gates the value-moving operation through `policyGate`. Do not accept a provider account id in place of the SDP source wallet.
+1. **Source wallet.** The shared request-gate extraction resolves `sourceWallet` to an SDP wallet/address, and the route declares its operation with `requireAllowedOperation`. Do not accept a provider account id in place of the SDP source wallet.
 
 2. **Payout account.** The fiat needs a destination bank account, and a counterparty may hold several active accounts per corridor (per rail). The quote request takes an optional `providerAccountId` (the `counterparty_provider_accounts` row id): when present, the handler resolves it parent-scoped and rejects a mismatched corridor; when absent, it lists the corridor's active rows and applies the provider's selection helper. Accounts are JIT-created by the requirements advance flow — **the raw bank details are sent to the provider and never stored**. Missing/inactive account throws `counterpartyNotProvisioned`; the transfer records the chosen row id as `payoutProviderAccountId` in its provider data.
 
@@ -28,7 +28,7 @@ Output `PaymentRampQuote` is closed by `provider` and `deliveryMode`; add the pr
 
 Add a branch to `apps/sdp-api/src/routes/payments/ramps/offramp/handlers.ts`. The handler resolves counterparty + source wallet + payout account, calls the HTTP-only package method, and persists the transfer. A `reservedTransferId` is minted before the provider call so it can travel upstream as the reference (pass it in a description/reference field where the upstream accepts one); persistence then takes one of two paths: default `persistRampQuoteTransfer` after the quote (off-ramp writes `sourceAddress` + `cryptoAmount`, `direction: "outbound"`, plus `providerData` such as `payoutProviderAccountId`), or a pending transfer created **before** the provider call and completed/failed after it (a `createPending*` → `completePending*` helper pair) when the provider call must be attributable to a row even on failure.
 
-Dashboard runtime route: `POST /v1/payments/ramps/offramp/quote`, gated by provider availability, metered quota, permissions, and `policyGate`. It is not currently in public OpenAPI; do not advertise it as public unless the OpenAPI policy changes.
+Dashboard runtime route: `POST /v1/payments/ramps/offramp/quote`, gated by provider availability, metered quota, permissions, and the key's allowed operations. It is not currently in public OpenAPI; do not advertise it as public unless the OpenAPI policy changes.
 
 ## Variety
 

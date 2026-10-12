@@ -107,8 +107,7 @@ describe("home and payments route loading states", () => {
 
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(5);
     expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
-    // A contact's page, Deposit's terms, and the two blocks of a schedule's page.
-    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(4);
+    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(3);
     expect(markup).toContain("lg:grid-cols-2");
     expect(markup).toContain("size-[208px]");
   });
@@ -152,20 +151,17 @@ describe("home and payments route loading states", () => {
     }
   });
 
-  it("loads Contacts as its list and Requests by the tab the URL carries", () => {
-    // Contacts sends ?tab=playground to the Payments playground, so it loads as its list.
-    // Requests is still the previous design's page, playground tab included.
+  it("loads Contacts and Requests as lists, whatever tab the URL carries", () => {
+    // Both pages redirect ?tab=playground to the Payments playground, so a leftover tab never
+    // swaps in a playground skeleton.
     navigationMock.tab = "playground";
     expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
       'data-loading-layout="counterparty-directory"'
     );
     expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(
-      'data-loading-layout="counterparty-playground"'
-    );
-    navigationMock.tab = null;
-    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(
       'data-loading-layout="payment-requests"'
     );
+    navigationMock.tab = null;
   });
 
   it("opens the schedule wizard on its payment step", () => {
@@ -237,16 +233,17 @@ describe("home and payments route loading states", () => {
   it("keeps the recurring list loader contained at a 390px viewport", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentsLoading />);
 
-    // Schedules is still the previous design's page, so it loads with that list's geometry.
-    expect(markup).toContain("grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]");
-    expect(markup).toContain("flex min-w-0 grow flex-col overflow-hidden");
-    expect(markup).toContain("table-scroll-container overflow-x-auto");
+    // The Schedules list scrolls sideways inside its column, like the other refresh lists.
+    expect(markup).toContain('data-loading-layout="recurring-payments"');
+    expect(markup).toContain("overflow-x-auto");
+    expect(markup).toContain("min-w-[760px]");
   });
 
   it("uses theme-aware surfaces for every authenticated loading state", () => {
     const markup = renderAuthenticatedLoadingStates();
 
-    expect(markup).toContain("bg-surface-raised");
+    // A schedule's band loads on the tile surface; the rest draw on the page.
+    expect(markup).toContain("bg-surface-tile");
     expect(markup).not.toContain("bg-white");
     expect(markup).not.toMatch(/\bbg-white\//);
   });

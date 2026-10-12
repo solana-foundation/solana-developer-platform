@@ -360,10 +360,10 @@ export function assertGrantableApiKeyPermissions(
   requestedPermissions: Permission[] | null | undefined,
   actorApiKeyRole: string | null
 ): void {
-  // The api_admin role carries capabilities beyond its permission list
-  // (wallet policy authoring), so no permission set — including a custom
-  // org:admin grant — lets a lesser API key mint or rotate an api_admin key.
-  // Dashboard actors carry no API-key role and keep the exemptions below.
+  // The api_admin role grants every permission, and an org:admin holder passes
+  // the subset check below, so without this a lesser key carrying a custom
+  // org:admin grant could mint or rotate itself up to api_admin. Dashboard
+  // actors carry no API-key role and keep the exemptions below.
   if (resolvedRole === "api_admin" && actorApiKeyRole !== null && actorApiKeyRole !== "api_admin") {
     throw new AppError(
       "FORBIDDEN",

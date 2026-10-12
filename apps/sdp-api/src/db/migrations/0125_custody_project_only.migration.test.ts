@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ApprovalPolicyRule, CustodyConfigStatus, CustodyProvider } from "@sdp/types";
+import type { CustodyConfigStatus, CustodyProvider } from "@sdp/types";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { adminDatabaseUrl as databaseUrl, env } from "@/test/helpers/env";
@@ -145,7 +145,8 @@ async function seedProfileRevision(revision: {
   profileId: string;
   approvalGroupId: string;
 }): Promise<void> {
-  const rules: ApprovalPolicyRule[] = [
+  // Historical row shape: the migration under test predates the policy engine's removal.
+  const rules = [
     { kind: "approval", families: ["transfer"], approvalGroupId: revision.approvalGroupId },
   ];
   await client.query(

@@ -29,20 +29,6 @@ describe("canManageOrganizationCredentials", () => {
     expect(canManageOrganizationCredentials(auth)).toBe(true);
   });
 
-  it("rejects an approved-operation actor with organization admin permissions", () => {
-    const auth: ApiKeyContext = {
-      ...base,
-      authType: "approved_operation",
-      storedActorType: "clerk",
-      apiKeyId: null,
-      userId: TEST_USER.id,
-      role: "approved_operation",
-      permissions: ["org:admin"],
-    };
-
-    expect(canManageOrganizationCredentials(auth)).toBe(false);
-  });
-
   it("rejects members and API keys, including wildcard API keys", () => {
     const member: ApiKeyContext = {
       ...base,

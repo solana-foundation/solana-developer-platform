@@ -23,11 +23,11 @@ import type { HeliusRingsProjectScope } from "./helius-rings-wallet.repository";
  * The states the resume sweep can actually move forward, a subset of the
  * partial index's predicate so it still reads from that index.
  *
- * `preparing` and `approval_required` are excluded even though the index covers
- * them: neither holds a wallet's spend slot or blocks a later operation, and an
- * approval waits on a person indefinitely. Returning them would let a backlog of
- * rows nothing can advance fill the sweep's row budget, oldest first, and starve
- * the ones it exists to settle.
+ * `preparing` and the retired `approval_required` are excluded even though the
+ * index covers them: neither holds a wallet's spend slot or blocks a later
+ * operation, and the sweep cannot advance them. Returning them would let a
+ * backlog of rows nothing can advance fill the sweep's row budget, oldest first,
+ * and starve the ones it exists to settle.
  */
 const IN_FLIGHT_STATES = ["proving", "ready_to_sign", "submitted", "indexing"] as const;
 
@@ -48,8 +48,6 @@ function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
     transfer_mode: (row.transfer_mode ?? null) as HeliusRingsOperationRow["transfer_mode"],
     ring_program_id: (row.ring_program_id ?? null) as string | null,
     intent_key: row.intent_key as string,
-    approval_request_id: (row.approval_request_id ?? null) as string | null,
-    policy_evaluation_id: (row.policy_evaluation_id ?? null) as string | null,
     proof_source: (row.proof_source ?? null) as HeliusRingsOperationRow["proof_source"],
     proof_ref: (row.proof_ref ?? null) as string | null,
     outer_tx_signature: (row.outer_tx_signature ?? null) as string | null,
@@ -58,6 +56,7 @@ function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
     failure_message: (row.failure_message ?? null) as string | null,
     retryable: (row.retryable ?? null) as boolean | null,
     retry_of_operation_id: (row.retry_of_operation_id ?? null) as string | null,
+    initiated_by_key_id: (row.initiated_by_key_id ?? null) as string | null,
     timelock_unlock_at: (row.timelock_unlock_at ?? null) as string | null,
     input_notes: mapInputNotes(row.input_notes),
     signed_transaction: (row.signed_transaction ?? null) as string | null,
@@ -91,7 +90,7 @@ function mapInputNotes(value: unknown): string[] | null {
  * The SET clause for a transition, covering only the columns the caller named.
  *
  * Only-what-was-named is the contract: a later step in the pipeline must not
- * blank the approval id or the note set an earlier one recorded, and a patch
+ * blank the note set an earlier one recorded, and a patch
  * type where every field is optional is how that is expressed.
  */
 function transitionAssignments(input: TransitionHeliusRingsOperationInput): {
@@ -103,8 +102,6 @@ function transitionAssignments(input: TransitionHeliusRingsOperationInput): {
   const values: unknown[] = [input.nextState];
 
   const columns: ReadonlyArray<readonly [string, unknown]> = [
-    ["approval_request_id", patch.approvalRequestId],
-    ["policy_evaluation_id", patch.policyEvaluationId],
     ["proof_source", patch.proofSource],
     ["proof_ref", patch.proofRef],
     ["outer_tx_signature", patch.outerTxSignature],
@@ -185,8 +182,9 @@ export function createPostgresHeliusRingsOperationRepository(
                transfer_mode,
                ring_program_id,
                retry_of_operation_id,
+               initiated_by_key_id,
                timelock_unlock_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (intent_key)
              -- Self-assignment rather than DO NOTHING: DO NOTHING returns zero
              -- rows on a replay, which is indistinguishable from a failed
@@ -211,6 +209,7 @@ export function createPostgresHeliusRingsOperationRepository(
             input.transferMode ?? null,
             input.ringProgramId ?? null,
             input.retryOfOperationId ?? null,
+            input.initiatedByKeyId ?? null,
             input.timelock?.unlockAt ?? null
           )
           .first<Record<string, unknown>>();

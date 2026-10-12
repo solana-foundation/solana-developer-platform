@@ -58,7 +58,6 @@
     "@sdp/jupiter-lend": "workspace:*",
     "@sdp/ondo": "workspace:*",
     "@sdp/payments": "workspace:*",
-    "@sdp/policy": "workspace:*",
     "@sdp/private-channels": "workspace:*",
     "@sdp/redaction": "workspace:*",
     "@sdp/rpc": "workspace:*",

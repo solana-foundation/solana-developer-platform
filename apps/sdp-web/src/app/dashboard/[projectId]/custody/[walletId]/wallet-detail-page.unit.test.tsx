@@ -17,19 +17,32 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { getTranslations } from "@/i18n/server";
 import { PRODUCTION_PROJECT } from "@/test/projects";
+import { projectProviderAvailability } from "@/test/provider-availability";
 import { setPageRequest } from "@/test/request-project";
 
-const { mockAuth, mockIssuanceFlag, mockLoadWalletActivity, mockPoliciesFlag, mockRequest } =
-  vi.hoisted(() => ({
-    mockAuth: vi.fn(),
-    mockIssuanceFlag: vi.fn(),
-    mockLoadWalletActivity: vi.fn(),
-    mockPoliciesFlag: vi.fn(),
-    mockRequest: vi.fn(),
-  }));
+const {
+  mockAuth,
+  mockFetchProjectProviderAvailability,
+  mockIssuanceFlag,
+  mockLoadWalletActivity,
+  mockPoliciesFlag,
+  mockRequest,
+} = vi.hoisted(() => ({
+  mockAuth: vi.fn(),
+  mockFetchProjectProviderAvailability: vi.fn(),
+  mockIssuanceFlag: vi.fn(),
+  mockLoadWalletActivity: vi.fn(),
+  mockPoliciesFlag: vi.fn(),
+  mockRequest: vi.fn(),
+}));
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: mockAuth,
+}));
+
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/provider-availability.server", () => ({
+  fetchProjectProviderAvailability: mockFetchProjectProviderAvailability,
 }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -142,6 +155,7 @@ beforeEach(() => {
   walletOverrides = {};
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
   mockAuth.mockReset();
+  mockFetchProjectProviderAvailability.mockReset();
   mockIssuanceFlag.mockReset();
   mockLoadWalletActivity.mockReset();
   mockPoliciesFlag.mockReset();
@@ -208,6 +222,7 @@ describe("WalletDetailPage critical path", () => {
     expect(
       mockRequest.mock.calls.some(([path]) => String(path).includes("/custody/connections"))
     ).toBe(false);
+    expect(mockFetchProjectProviderAvailability).not.toHaveBeenCalled();
     const markup = renderWalletIdentity(page);
     expect(markup).toContain("Fast wallet");
     expect(markup).not.toContain("/integrations/privy/connections/");
@@ -216,6 +231,15 @@ describe("WalletDetailPage critical path", () => {
   it("loads the wallet's exact connection and links its label for an admin", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
     mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+    mockFetchProjectProviderAvailability.mockResolvedValue(
+      projectProviderAvailability({
+        project: PRODUCTION_PROJECT,
+        custody: [{ provider: "privy", modes: ["byok"] }],
+        compliance: [],
+        ramps: [],
+        earn: [],
+      })
+    );
 
     const page = await renderPage();
 
@@ -227,6 +251,25 @@ describe("WalletDetailPage critical path", () => {
       `href="/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy/connections/connection_one"`
     );
     expect(markup).toContain("Treasury connection");
+  });
+
+  it("renders the connection label unlinked for an admin when the project does not offer privy in byok", async () => {
+    walletOverrides = { custodyConnectionId: "connection_one" };
+    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+    mockFetchProjectProviderAvailability.mockResolvedValue(
+      projectProviderAvailability({
+        project: PRODUCTION_PROJECT,
+        custody: [],
+        compliance: [],
+        ramps: [],
+        earn: [],
+      })
+    );
+
+    const markup = renderWalletIdentity(await renderPage());
+
+    expect(markup).toContain("Treasury connection");
+    expect(markup).not.toContain("/integrations/privy/connections/");
   });
 
   it.each([403, 404])(
@@ -244,6 +287,7 @@ describe("WalletDetailPage critical path", () => {
 
       expect(markup).toContain("connec..._one");
       expect(markup).not.toContain("/integrations/privy/connections/");
+      expect(mockFetchProjectProviderAvailability).not.toHaveBeenCalled();
     }
   );
 

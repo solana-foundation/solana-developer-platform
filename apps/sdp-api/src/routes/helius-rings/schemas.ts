@@ -34,8 +34,8 @@ export const createProjectRingSchema = z.object({
  * Narrower than `OP_TYPES`, which is the vocabulary the database and the state
  * machine can represent. Anything outside this set is refused at the edge rather
  * than accepted and failed later: an operation row that reaches `proving` for a
- * flow nothing can build has already consumed a policy evaluation and possibly
- * a human approval, and it tells the caller far less than a 400 does.
+ * flow nothing can build has already spent a row and an intent key, and it
+ * tells the caller far less than a 400 does.
  */
 const ENABLED_OP_TYPES = [
   "shield",
@@ -66,8 +66,8 @@ const amountRaw = z
  * Narrower than the `helius_rings_assets` catalogue, and narrower on purpose:
  * these are the two whose settlement path the SDK's builders assemble and the
  * outer-transaction policy re-derives. Refusing anything else here rather than
- * in the adapter means the caller learns before a policy evaluation and
- * possibly a human approval are spent on it.
+ * in the adapter means the caller learns before an operation row is spent on
+ * it.
  *
  * The same two on a custom ring: the ring builders take the asset too, and the
  * wire policy re-derives the SPL settlement on that rail as well.
@@ -78,7 +78,7 @@ const spendMint = z.union([z.literal(SDP_NATIVE_MINT), z.literal(SDP_USDC_MINT)]
 
 /**
  * Per-flow shapes, because accepting a field no builder honours would record a
- * restriction or amount that policy and the activity feed read as real.
+ * restriction or amount that the activity feed reads as real.
  *
  * The nested assets are strict too, so a misspelled or flow-incompatible field
  * is refused rather than silently stripped.

@@ -6,8 +6,6 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   markets: "/dashboard/markets",
   heliusRings: "/dashboard/helius-rings",
   apiKeys: "/dashboard/api-keys",
-  policies: "/dashboard/policies",
-  approvals: "/dashboard/approvals",
   settings: "/dashboard/settings",
   integrations: "/dashboard/integrations",
 } as const;
@@ -41,9 +39,6 @@ export type DashboardLoadingRoute =
   | "wallet-setup"
   | "wallet-connections"
   | "wallet-detail"
-  | "wallet-policy"
-  | "wallet-policy-audit-list"
-  | "wallet-policy-audit-detail"
   | "issuance-overview"
   | "issuance-create"
   | "issuance-detail"
@@ -72,9 +67,6 @@ export type DashboardLoadingRoute =
   | "api-keys-list"
   | "api-key-new"
   | "api-key-edit"
-  | "policies"
-  | "approvals-list"
-  | "approval-detail"
   | "settings"
   | "integrations"
   | "integration-detail"
@@ -101,11 +93,7 @@ function resolveWalletLoadingRoute(pathname: string): DashboardLoadingRoute | nu
 
   const suffix = pathname.slice(prefix.length).split("/").filter(Boolean);
   if (suffix.length < 1) return null;
-  if (suffix[1] !== "policy") return "wallet-detail";
-  if (suffix.length === 2) return "wallet-policy";
-  if (suffix[2] === "audit" && suffix.length === 3) return "wallet-policy-audit-list";
-  if (suffix[2] === "audit" && suffix.length === 4) return "wallet-policy-audit-detail";
-  return null;
+  return "wallet-detail";
 }
 
 function resolveMarketsLoadingRoute(pathname: string): DashboardLoadingRoute | null {
@@ -137,9 +125,6 @@ function resolveOperationsLoadingRoute(pathname: string): DashboardLoadingRoute 
   if (pathname === "/dashboard/api-keys") return "api-keys-list";
   if (pathname === "/dashboard/api-keys/new") return "api-key-new";
   if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
-  if (pathname === "/dashboard/policies") return "policies";
-  if (pathname === "/dashboard/approvals") return "approvals-list";
-  if (/^\/dashboard\/approvals\/[^/]+$/.test(pathname)) return "approval-detail";
   // Members only redirects into Settings, so it loads as the page it lands on.
   if (pathname === "/dashboard/settings" || pathname === "/dashboard/members") return "settings";
   return null;

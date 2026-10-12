@@ -19,10 +19,6 @@ import { describeError, logEvent } from "@/runtime/money-path-events";
 import { noopObservability, type Observability } from "@/runtime/observability";
 import type { Env } from "@/types/env";
 import {
-  APPROVED_WALLET_OPERATIONS_CRON,
-  runApprovedWalletOperationRecovery,
-} from "./approved-wallet-operations";
-import {
   EARN_CATALOGUE_SYNC_CRON,
   EARN_CATALOGUE_SYNC_MONITOR,
   runEarnCatalogueSync,
@@ -196,14 +192,6 @@ export function startCron(deps: CronDeps): CronHandle | null {
       })
     );
   };
-
-  tasks.push(
-    scheduleSystemTask(
-      APPROVED_WALLET_OPERATIONS_CRON,
-      "cron:approved-wallet-operations",
-      runApprovedWalletOperationRecovery
-    )
-  );
 
   tasks.push(
     scheduleSystemTask(

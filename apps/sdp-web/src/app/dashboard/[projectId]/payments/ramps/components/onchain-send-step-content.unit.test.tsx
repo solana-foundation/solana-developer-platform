@@ -65,7 +65,6 @@ const baseWizard = {
   handleAccountAdded: vi.fn(),
   submitting: false,
   transferResult: null,
-  heldApprovalRequestId: null,
   finished: false,
   handlePrimary: vi.fn(async () => undefined),
   handleSecondary: vi.fn(),
@@ -87,7 +86,6 @@ function wrapper({ children }: { children: ReactNode }) {
           issuance: false,
           markets: false,
           payments: true,
-          policies: false,
           privateChannels: false,
           ramps: true,
         }}
@@ -252,21 +250,4 @@ describe("OnchainSendStepContent", () => {
       );
     }
   );
-
-  it("explains a held payment and links the request, with no explorer", () => {
-    renderStep({
-      ...baseWizard,
-      currentStepId: "REVIEW",
-      heldApprovalRequestId: "apr_test",
-      finished: true,
-    });
-
-    expect(screen.queryByText(/Nothing has moved yet/)).not.toBeNull();
-    expect(screen.queryByText("Waiting for approval")).toBeNull();
-    expect(screen.queryByText("Transfer submitted")).toBeNull();
-    expect(screen.queryByRole("button", { name: "View on explorer" })).toBeNull();
-    expect(screen.getByRole("link", { name: "View approval request" }).getAttribute("href")).toBe(
-      "/dashboard/prj_test_sandbox/approvals/apr_test"
-    );
-  });
 });

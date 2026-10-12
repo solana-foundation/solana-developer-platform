@@ -112,7 +112,7 @@ export function meteredQuota(config: MeteredQuotaConfig) {
 /** Preserve an existing keyed quota when its route also admits anonymous callers. */
 export function authenticatedMeteredQuota(config: MeteredQuotaConfig) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (c.get("apiKey") || c.get("clerk") || c.get("approvedOperationActor")) {
+    if (c.get("apiKey") || c.get("clerk")) {
       await enforceMeteredQuota(c, config);
     }
     await next();
@@ -127,7 +127,7 @@ export function authenticatedMeteredQuota(config: MeteredQuotaConfig) {
  */
 export function anonymousMeteredQuota(config: AnonymousMeteredQuotaConfig) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (c.get("apiKey") || c.get("clerk") || c.get("approvedOperationActor")) {
+    if (c.get("apiKey") || c.get("clerk")) {
       await next();
       return;
     }

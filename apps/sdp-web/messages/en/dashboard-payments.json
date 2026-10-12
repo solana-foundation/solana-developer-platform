@@ -1,5 +1,28 @@
 {
   "DashboardPayments": {
+    "demo": {
+      "label": "Demo",
+      "turnOn": "Try Payments with sample data. Payments, contacts and provider steps are simulated: nothing is saved to your project or sent to a payment provider. Address searches still use the real address lookup. Your demo changes reset when you reload the page.",
+      "turnOff": "Turn off demo mode",
+      "sandboxOnly": "Demo mode runs on sandbox projects. Switch to your sandbox project to try it.",
+      "noPayLink": "Demo requests have no pay link to share. Turn off demo mode to create a real one.",
+      "notice": {
+        "state": "Demo mode",
+        "body": "Sample data for presentation. Every action is simulated."
+      },
+      "checkout": {
+        "title": "{provider} checkout",
+        "onrampBody": "In demo mode, {provider}'s checkout doesn't open. Use Simulate deposit below to see the deposit arrive.",
+        "offrampBody": "In demo mode, {provider}'s page doesn't open. Send the funds with the button below to finish the payout.",
+        "settling": "Payment received. {provider} is delivering the funds to the wallet."
+      },
+      "verification": {
+        "simulate": "Simulate verification",
+        "simulating": "Simulating verification",
+        "body": "In demo mode, {provider}'s verification page doesn't open. Use Simulate verification below to approve the contact.",
+        "failed": "Couldn't simulate the verification. Try again."
+      }
+    },
     "signingUnavailable": "Signing is disabled for this wallet.",
     "restricted": "Restricted",
     "page": {
@@ -22,8 +45,6 @@
       "rampEstimateMissing": "Ramp estimate response is missing estimates.",
       "walletBalancesRequestFailed": "Wallet balances request failed ({status}).",
       "walletBalancesMissing": "Wallet balances response is missing balance details.",
-      "walletPolicyUpdateFailed": "Wallet policy update failed ({status}).",
-      "walletPolicyUpdateEmpty": "Wallet policy update returned an empty response.",
       "transferRequestFailed": "Transfer request failed ({status}).",
       "transferMissing": "Transfer response is missing transfer details.",
       "recipientListRequestFailed": "Recipient list request failed ({status}).",
@@ -47,7 +68,6 @@
       "transactionSent": "Transaction sent.",
       "viewOnSolanaExplorer": "View on Solana Explorer",
       "walletsLoadFailed": "Failed to load wallets.",
-      "walletPolicyLoadFailed": "Failed to load wallet policy.",
       "addressRequired": "Address is required.",
       "complianceCheckRequired": "Run compliance check before adding the address.",
       "addressAlreadyAllowlisted": "Address is already in the destination allowlist.",
@@ -179,14 +199,14 @@
       "transferStatus": "Status: {status}",
       "submittingOnchainTransfer": "Submitting on-chain transfer.",
       "simulatingQuoteFunding": "Simulating quote funding.",
+      "simulateDeposit": "Simulate deposit",
+      "simulatingDeposit": "Simulating deposit",
+      "depositSimulated": "Deposit simulated",
       "quoteFundingSimulated": "Quote funding simulated.",
       "quoteSimulationFailed": "Quote simulation failed.",
       "sandboxSimulationFailed": "Sandbox simulation failed.",
       "transferSignatureMissing": "Transfer did not return a signature (status: {status}).",
-      "transferHeldForApproval": "This wallet's policy needs this transfer approved before it's sent, so MoneyGram can't continue. Nothing has moved yet. If it shouldn't go out later, cancel the request in Approvals.",
-      "transferApprovalPending": "Waiting for approval",
       "offrampManualDescription": "Send {amount} {token} to the deposit address below before the quote expires. The provider converts it and settles the fiat as described in the instructions.",
-      "offrampHeldDescription": "Nothing has moved yet. Once approved, {amount} {token} is sent to the deposit address below. If the quote expires first, the send won't go through and you'll need a new quote.",
       "noPayoutProviders": "No payout providers are enabled for this organization.",
       "providerPayout": "{provider} payout",
       "noDepositProviders": "No deposit providers are enabled for this organization.",
@@ -339,10 +359,7 @@
       "transferFailed": "Transfer failed.",
       "transferSuccess": "Your transfer was sent successfully.",
       "transferStatus": "Status: {status}",
-      "viewOnExplorer": "View on explorer",
-      "approvalPendingTitle": "Waiting for approval",
-      "approvalPendingDescription": "This wallet's policy needs someone to approve the transfer before it's sent. Nothing has moved yet.",
-      "viewApprovalRequest": "View approval request"
+      "viewOnExplorer": "View on explorer"
     },
     "onchainReceive": {
       "wallet": "Wallet",
@@ -426,8 +443,6 @@
       "resultPartiallyFailed": "Batch partially failed",
       "resultFailed": "Batch failed",
       "resultSubmitted": "Batch submitted",
-      "resultApprovalPending": "Batch pending approval",
-      "approvalPendingDescription": "This batch requires policy approval before it sends. Nothing has moved yet.",
       "recipientsStep": "Recipients",
       "recipientsTitle": "Pay multiple recipients",
       "reviewStep": "Review",
@@ -789,9 +804,6 @@
       "destinationWalletIdPlaceholder": "Destination wallet ID",
       "sourceWalletIdPlaceholder": "Source wallet ID",
       "getWalletBalances": "Get Wallet Balances",
-      "getWalletPolicy": "Get Wallet Policy",
-      "updateWalletPolicy": "Update Wallet Policy",
-      "policyRulesPlaceholder": "JSON array of policy rules",
       "executeTransfer": "Execute Transfer",
       "solanaAddressPlaceholder": "Solana address (32-44 chars)",
       "usdc": "USDC",
