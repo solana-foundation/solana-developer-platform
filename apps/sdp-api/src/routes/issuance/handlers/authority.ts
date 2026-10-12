@@ -211,7 +211,6 @@ export const prepareUpdateAuthority = async (
 
   const role = body.authority.role;
   const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
-    tokenService,
     token,
     role,
     body.authority.currentAuthority
@@ -344,7 +343,6 @@ export async function extractUpdateAuthorityRequest(
   }
 
   const currentAuthorityRaw = await resolveCurrentAuthorityForRole(
-    tokenService,
     token,
     role,
     input.authority.currentAuthority
