@@ -99,6 +99,62 @@ describe("ApiKeyService.createApiKey and organization deletion (APE-358)", () =>
     expect(await keyCount()).toBe(0);
   });
 
+  it("lets a deletion that starts after a create wait for it, and then revokes the new key", async () => {
+    let releaseCreate!: () => void;
+    const createReleased = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    let markCreated!: () => void;
+    const created = new Promise<void>((resolve) => {
+      markCreated = resolve;
+    });
+    // The create holds its share lock on the organization until released.
+    const creation = runWithTenantDatabaseIdentity({ organizationId: TEST_ORG.id }, () =>
+      getDb(env).transaction(async (tx) => {
+        const key = (await new ApiKeyService(
+          asTransactionalClient(tx),
+          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+        ).createApiKey(INPUT)) as { id: string };
+        markCreated();
+        await createReleased;
+        return key;
+      })
+    );
+
+    let deletion: Promise<unknown> | undefined;
+    try {
+      await created;
+      // The same statements, in the same order, as the organization DELETE.
+      deletion = runWithSystemDatabaseIdentity("test:api-key-lock", () => {
+        const db = getDb(env);
+        return db.batch([
+          db.prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?").bind(TEST_ORG.id),
+          db
+            .prepare(
+              "UPDATE api_keys SET status = 'revoked' WHERE organization_id = ? AND status = 'active'"
+            )
+            .bind(TEST_ORG.id),
+        ]);
+      });
+      await waitForLockWait();
+      releaseCreate();
+      const key = await creation;
+      await deletion;
+
+      const row = await runWithSystemDatabaseIdentity("test:api-key-lock", () =>
+        getDb(env)
+          .prepare("SELECT status FROM api_keys WHERE id = ?")
+          .bind(key.id)
+          .first<{ status: string }>()
+      );
+      expect(row?.status).toBe("revoked");
+    } finally {
+      releaseCreate();
+      await creation.catch(() => {});
+      await deletion?.catch(() => {});
+    }
+  });
+
   it("waits for a deletion in flight before rotating, and then rotates nothing", async () => {
     const created = (await createKey()) as { id: string };
     expect(await keyCount()).toBe(1);

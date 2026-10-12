@@ -2,7 +2,7 @@ import type { ApiKeyStatus } from "@sdp/types";
 
 export function isRotationDeadlineReached(
   rotationDeadline: string | null | undefined,
-  now = Date.now()
+  now: number
 ): boolean {
   if (!rotationDeadline) {
     return false;
@@ -18,7 +18,8 @@ export function isRotationDeadlineReached(
 export interface ApiKeyLifecycleColumns {
   status: ApiKeyStatus;
   expires_at: string | null;
-  rotation_deadline: string | null;
+  /** Undefined only on a legacy cache entry written before deadlines were enforced. */
+  rotation_deadline: string | null | undefined;
 }
 
 /**
@@ -29,7 +30,7 @@ export interface ApiKeyLifecycleColumns {
  */
 export function apiKeyRowRefusal(
   row: ApiKeyLifecycleColumns,
-  now = Date.now()
+  now: number
 ): "revoked" | "expired" | null {
   if (row.status === "expired") {
     return "expired";

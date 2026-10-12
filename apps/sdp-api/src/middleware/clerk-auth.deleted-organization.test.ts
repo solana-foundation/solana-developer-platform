@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { getClerkAuth } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
+import * as organizationAccess from "@/lib/organization-access";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -144,6 +145,34 @@ describe("Clerk auth into a deleted organization", () => {
     );
 
     expect(res.status).toBe(401);
+  });
+
+  it("refuses to provision a membership when the deletion lands after the door's read", async () => {
+    // The door read the organization as active; the deletion commits before
+    // the membership insert, which must then find the organization gone.
+    const original = organizationAccess.enforceOrganizationAccess;
+    const spy = vi
+      .spyOn(organizationAccess, "enforceOrganizationAccess")
+      .mockImplementation(async (c, organizationId) => {
+        const settings = await original(c, organizationId);
+        await deleteOrganization();
+        return settings;
+      });
+    try {
+      const { app, token } = await createApp();
+
+      const res = await app.request(
+        "/protected",
+        { headers: { Authorization: `Bearer ${token}` } },
+        env
+      );
+
+      expect(spy).toHaveBeenCalled();
+      expect(res.status).toBe(401);
+      expect((await provisionedRows()).memberships).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("still provisions a member of an active organization", async () => {

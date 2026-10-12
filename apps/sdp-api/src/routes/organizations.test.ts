@@ -331,6 +331,49 @@ describe("Organizations routes", () => {
         expect(key.status).toBe("revoked");
       }
     });
+    it("revokes pending invitations on delete, so none is a way back in", async () => {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
+           VALUES (?, ?, ?, 'member', ?, ?, ?, 'pending'), (?, ?, ?, 'member', ?, ?, ?, 'accepted')`
+        )
+        .bind(
+          "inv_delete_pending",
+          TEST_ORG.id,
+          "pending@example.com",
+          TEST_USER.id,
+          "hash_delete_pending",
+          "2099-01-01T00:00:00.000Z",
+          "inv_delete_accepted",
+          TEST_ORG.id,
+          "accepted@example.com",
+          TEST_USER.id,
+          "hash_delete_accepted",
+          "2099-01-01T00:00:00.000Z"
+        )
+        .run();
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+      expect(res.status).toBe(204);
+
+      const invitations = await getDb(env)
+        .prepare("SELECT id, status FROM invitations WHERE organization_id = ? ORDER BY id")
+        .bind(TEST_ORG.id)
+        .all<{ id: string; status: string }>();
+      expect(invitations.results).toEqual([
+        { id: "inv_delete_accepted", status: "accepted" },
+        { id: "inv_delete_pending", status: "revoked" },
+      ]);
+    });
     it("marks organization members removed on delete", async () => {
       await app.request(
         `/v1/organizations/${TEST_ORG.id}`,

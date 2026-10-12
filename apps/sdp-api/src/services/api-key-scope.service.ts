@@ -779,7 +779,7 @@ export async function assertFreshApiKeyActive(
   // The same predicate request authentication applies: exists, active, not
   // past expiry, and not past its rotation grace period — a rotated key stays
   // `active` in the row and is retired by the deadline alone.
-  if (!currentKey || apiKeyRowRefusal(currentKey) !== null) {
+  if (!currentKey || apiKeyRowRefusal(currentKey, Date.now()) !== null) {
     throw new AppError("FORBIDDEN", "API key is no longer active");
   }
 }
@@ -820,7 +820,7 @@ export async function assertFreshApiKeyCustodyWalletAccess(
   // key someone just revoked. The predicate request authentication applies:
   // active, not past expiry, not past its rotation grace period (a rotated key
   // stays `active` in the row and is retired by the deadline alone).
-  if (apiKeyRowRefusal(currentKey) !== null) {
+  if (apiKeyRowRefusal(currentKey, Date.now()) !== null) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
 

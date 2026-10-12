@@ -63,6 +63,25 @@ export function organizationNotActive(): AppError {
 }
 
 /**
+ * The session doors' uncached organization read: the organization must exist
+ * and be `active`. Returns its raw settings.
+ */
+export async function readActiveOrganizationSettings(
+  env: Env,
+  organizationId: string
+): Promise<string | null> {
+  const row = await getDb(env)
+    .prepare("SELECT status, settings FROM organizations WHERE id = ?")
+    .bind(organizationId)
+    .first<{ status: string; settings: string | null }>();
+
+  if (!row || !organizationStatusMayAuthenticate(row.status)) {
+    throw organizationNotActive();
+  }
+  return row.settings;
+}
+
+/**
  * Organization access for a session-based door (Clerk): the organization must
  * exist and be `active`, and the origin must pass its allowlist. Call it before
  * the door writes anything, so a refused request leaves no state behind.
@@ -71,16 +90,9 @@ export async function enforceOrganizationAccess(
   c: Context<{ Bindings: Env }>,
   organizationId: string
 ): Promise<string | null> {
-  const row = await getDb(c.env)
-    .prepare("SELECT status, settings FROM organizations WHERE id = ?")
-    .bind(organizationId)
-    .first<{ status: string; settings: string | null }>();
-
-  if (!row || !organizationStatusMayAuthenticate(row.status)) {
-    throw organizationNotActive();
-  }
-  enforceIpAllowlist(c, row.settings);
-  return row.settings;
+  const settings = await readActiveOrganizationSettings(c.env, organizationId);
+  enforceIpAllowlist(c, settings);
+  return settings;
 }
 
 /**
@@ -117,7 +129,7 @@ export async function enforceApiKeyOrganizationAccess(
   if (!row || !organizationStatusMayAuthenticate(row.organization_status)) {
     throw new AppError("REVOKED_API_KEY");
   }
-  const refusal = row.status === null ? null : apiKeyRowRefusal(row);
+  const refusal = row.status === null ? null : apiKeyRowRefusal(row, Date.now());
   if (refusal === "revoked") {
     throw new AppError("REVOKED_API_KEY");
   }

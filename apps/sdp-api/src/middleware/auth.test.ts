@@ -359,6 +359,29 @@ describe("Auth Middleware", () => {
       expect(body.error.code).toBe("EXPIRED_API_KEY");
     });
 
+    // The cached check applies the live row's predicate, so a malformed expiry
+    // fails closed here too instead of reading as "not expired".
+    it("rejects a cached key whose expiry does not parse", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        expiresAt: "not-a-timestamp",
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("EXPIRED_API_KEY");
+    });
+
     it("rejects rotated API keys after their cached grace period ends", async () => {
       await seedCachedApiKey(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,

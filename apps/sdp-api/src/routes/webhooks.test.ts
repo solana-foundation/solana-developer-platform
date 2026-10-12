@@ -810,6 +810,20 @@ describe("Clerk webhooks", () => {
         status: string;
       }>();
     expect(required(removedUser).status).toBe("deleted");
+    await getDb(env)
+      .prepare(
+        `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
+         VALUES (?, ?, ?, 'member', ?, ?, ?, 'pending')`
+      )
+      .bind(
+        "inv_clerk_lifecycle_pending",
+        organization.organization_id,
+        "pending@example.com",
+        userId,
+        "hash_clerk_lifecycle_pending",
+        "2099-01-01T00:00:00.000Z"
+      )
+      .run();
     const deletedOrg = await simulateClerkWebhook({
       type: "organization.deleted",
       data: {
@@ -817,6 +831,12 @@ describe("Clerk webhooks", () => {
       },
     });
     expect(deletedOrg.status).toBe(200);
+    // A pending invitation would be a way back in; deletion revokes it.
+    const invitation = await getDb(env)
+      .prepare("SELECT status FROM invitations WHERE id = ?")
+      .bind("inv_clerk_lifecycle_pending")
+      .first<{ status: string }>();
+    expect(invitation?.status).toBe("revoked");
     const lifecycleState = await getDb(env)
       .prepare(`SELECT o.status AS org_status, om.status AS member_status, ak.status AS api_key_status
          FROM auth_organization_identities aoi

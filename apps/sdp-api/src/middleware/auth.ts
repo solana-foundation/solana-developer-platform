@@ -20,6 +20,7 @@ import type {
   CachedApiKey,
   Permission,
 } from "@sdp/types";
+import { organizationStatusMayAuthenticate } from "@sdp/types";
 import type { Context, Next } from "hono";
 import { getDb, runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db";
 import {
@@ -29,7 +30,7 @@ import {
   loadCachedApiKeyFromDb,
 } from "@/lib/api-key-cache";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
-import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
+import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { isClientIpAllowed } from "@/lib/ip-allowlist";
@@ -311,25 +312,28 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   // row still says active, a key created or rotated after an organization
   // deletion enumerated that org's keys is covered by neither the
   // deletion's revocation nor its cache refresh.
-  if (cachedKey.organizationStatus !== "active") {
+  // A legacy entry without an organization status is refused, as before.
+  if (
+    cachedKey.organizationStatus === undefined ||
+    !organizationStatusMayAuthenticate(cachedKey.organizationStatus)
+  ) {
     throw new AppError("REVOKED_API_KEY");
   }
 
-  // Check status
-  if (cachedKey.status === "revoked" || cachedKey.status === "deactivated") {
+  // The same predicate as the live re-check below, so a malformed expiry
+  // fails closed here too.
+  const cachedRefusal = apiKeyRowRefusal(
+    {
+      status: cachedKey.status,
+      expires_at: cachedKey.expiresAt,
+      rotation_deadline: cachedKey.rotationDeadline,
+    },
+    Date.now()
+  );
+  if (cachedRefusal === "revoked") {
     throw new AppError("REVOKED_API_KEY");
   }
-
-  if (cachedKey.status === "expired") {
-    throw new AppError("EXPIRED_API_KEY");
-  }
-
-  // Check expiration
-  if (cachedKey.expiresAt && new Date(cachedKey.expiresAt) < new Date()) {
-    throw new AppError("EXPIRED_API_KEY");
-  }
-
-  if (isRotationDeadlineReached(cachedKey.rotationDeadline)) {
+  if (cachedRefusal === "expired") {
     throw new AppError("EXPIRED_API_KEY");
   }
 
