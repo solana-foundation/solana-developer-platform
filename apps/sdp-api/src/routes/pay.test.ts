@@ -1,6 +1,4 @@
-import type * as solanaRpc from "@sdp/rpc/solana";
-import { SOL_MINT } from "@sdp/types";
-
+import { SOL_MINT, type SolanaCluster } from "@sdp/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
@@ -9,14 +7,15 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
-  createRpcMock,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_USER,
   TEST_WALLET_ID,
@@ -25,14 +24,15 @@ import { sponsorSignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/
 
 describe("Public payment request routes", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
 
-  function createAwaitingPaymentRequest() {
+  function createAwaitingPaymentRequest(projectId: string) {
     return createPaymentRequestsRepository(
       env,
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      createTenantScope({ organizationId: TEST_ORG.id, projectId })
     ).createPaymentRequest({
       organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
+      projectId,
       counterpartyId: null,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: TEST_WALLET_ID,
@@ -115,17 +115,60 @@ describe("Public payment request routes", () => {
     expect(getRecentBlockhashMock).not.toHaveBeenCalled();
   });
 
+  describe("cluster scope", () => {
+    async function expectServedOnlyFrom(projectId: string, cluster: SolanaCluster) {
+      stubSponsorship();
+      rpc.answer("getSignaturesForAddress", []);
+      rpc.answer("getBlockHeight", 900);
+      const request = await createAwaitingPaymentRequest(projectId);
+
+      const detail = await app.request(`/pay/${request.public_token}`, {}, env);
+      expect(detail.status).toBe(200);
+      await expect(detail.json()).resolves.toMatchObject({
+        status: "awaiting_payment",
+        network: cluster,
+      });
+      expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
+
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+      expect(rpc.calls).toContainEqual({ cluster, method: "getBlockHeight" });
+      expect(rpc.calls.filter((call) => call.cluster !== cluster)).toEqual([]);
+    }
+
+    it("serves a Production request from mainnet-beta only", async () => {
+      await expectServedOnlyFrom(TEST_PRODUCTION_PROJECT_ID, "mainnet-beta");
+    });
+
+    it("serves a Sandbox request from devnet only", async () => {
+      await expectServedOnlyFrom(TEST_PROJECT.id, "devnet");
+    });
+
+    it("answers 404 for a request without a Project", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
+      await getDb(env)
+        .prepare("UPDATE payment_requests SET project_id = NULL WHERE id = ?")
+        .bind(request.id)
+        .run();
+
+      const detail = await app.request(`/pay/${request.public_token}`, {}, env);
+      expect(detail.status).toBe(404);
+      await expect(detail.json()).resolves.toMatchObject({ error: { code: "NOT_FOUND" } });
+      expect((await postTransaction(request.public_token)).status).toBe(404);
+      expect(sponsorship).not.toHaveBeenCalled();
+      expect(rpc.calls).toEqual([]);
+    });
+  });
+
   describe("sponsored transaction window", () => {
     beforeEach(() => {
-      createRpcMock.mockReturnValue({
-        getSignaturesForAddress: () => ({ send: async () => [] }),
-        getBlockHeight: () => ({ send: async () => 900n }),
-      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+      rpc.answer("getSignaturesForAddress", []);
+      rpc.answer("getBlockHeight", 900);
     });
 
     it("signs once per window and replays the stored transaction for the same account", async () => {
       const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest();
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
 
       const first = await postTransaction(request.public_token);
       expect(first.status).toBe(200);
@@ -174,7 +217,7 @@ describe("Public payment request routes", () => {
 
     it("stops sponsoring every request once its organization is deleted (HOO-1955)", async () => {
       const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest();
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
       await getDb(env)
         .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
         .bind(TEST_ORG.id)
@@ -195,13 +238,13 @@ describe("Public payment request routes", () => {
         .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
         .bind(TEST_ORG.id)
         .run();
-      const request = await createAwaitingPaymentRequest();
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
       expect((await postTransaction(request.public_token)).status).toBe(200);
     });
 
     it("answers a different account with 429 and Retry-After while the claim is live", async () => {
       stubSponsorship();
-      const request = await createAwaitingPaymentRequest();
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
       expect((await postTransaction(request.public_token)).status).toBe(200);
 
       const other = await app.request(
@@ -219,13 +262,10 @@ describe("Public payment request routes", () => {
 
     it("lets a new account claim after the window expires", async () => {
       const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest();
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
       expect((await postTransaction(request.public_token)).status).toBe(200);
 
-      createRpcMock.mockReturnValue({
-        getSignaturesForAddress: () => ({ send: async () => [] }),
-        getBlockHeight: () => ({ send: async () => 2_000n }),
-      } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+      rpc.answer("getBlockHeight", 2_000);
 
       const other = await app.request(
         `/pay/${request.public_token}/tx`,
@@ -249,7 +289,7 @@ describe("Public payment request routes", () => {
         signAndSend: () => Promise.reject(new Error("not used")),
         prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
       }));
-      const request = await createAwaitingPaymentRequest();
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
 
       expect((await postTransaction(request.public_token)).status).toBe(500);
       const retried = await postTransaction(request.public_token);
@@ -259,7 +299,7 @@ describe("Public payment request routes", () => {
 
     it("audits a fresh sponsored grant exactly once and keeps replay polls off the ledger", async () => {
       stubSponsorship();
-      const request = await createAwaitingPaymentRequest();
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
 
       expect((await postTransaction(request.public_token)).status).toBe(200);
       expect((await postTransaction(request.public_token)).status).toBe(200);
@@ -281,7 +321,7 @@ describe("Public payment request routes", () => {
 
     it("refuses and does not store the grant when its audit entry cannot be persisted", async () => {
       stubSponsorship();
-      const request = await createAwaitingPaymentRequest();
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
       const failure = vi
         .spyOn(AuditService.prototype, "log")
         .mockRejectedValueOnce(new Error("checkpoint store down"));
@@ -309,7 +349,7 @@ describe("Public payment request routes", () => {
 
     it("does not open a claim for a payload it cannot build a transaction from", async () => {
       const sponsorship = stubSponsorship();
-      const request = await createAwaitingPaymentRequest();
+      const request = await createAwaitingPaymentRequest(TEST_PROJECT.id);
 
       const malformed = await app.request(
         `/pay/${request.public_token}/tx`,
