@@ -1,4 +1,5 @@
 import { getSolanaConfig, type RpcEnv } from "@sdp/rpc";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
 import {
@@ -130,12 +131,11 @@ export function normalizePaymentToken(token: string, env: RpcEnv): string {
  * this boundary; unavailable cluster mints fail loudly.
  *
  * @param assetRail - The canonical quoted crypto rail, e.g. "usdc.solana".
- * @param env - Worker env used to resolve the active cluster.
- * @returns The mint address for the active cluster.
+ * @returns The mint address on the open cluster scope's cluster.
  */
-export function rampTransferTokenMint(assetRail: CryptoRailId, env: RpcEnv): string {
+export function rampTransferTokenMint(assetRail: CryptoRailId): string {
   const symbol = getCryptoRailAssetLabel(assetRail);
-  const cluster = getSolanaConfig(env).network;
+  const { cluster } = currentClusterScope();
   const mint = wellKnownMint(symbol, cluster);
   if (!mint) {
     throw badRequest(`${symbol} is not available on ${cluster}`);

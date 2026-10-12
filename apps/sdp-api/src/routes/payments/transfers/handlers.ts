@@ -1,4 +1,5 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -568,7 +569,7 @@ async function executeSponsoredTransfer(
     throw badRequest("Resolved signing wallet does not match source wallet");
   }
 
-  const rpc = solanaRpc.createRpc(c.env);
+  const rpc = createClusterRpc();
   const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
   const feePayment = getFeePayment(c);
   const feePayer = await feePayment.getFeePayer();
