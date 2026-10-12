@@ -117,7 +117,7 @@ describe("Public payment request routes", () => {
 
   describe("cluster scope", () => {
     async function expectServedOnlyFrom(projectId: string, cluster: SolanaCluster) {
-      stubSponsorship();
+      const sponsorship = stubSponsorship();
       rpc.answer("getSignaturesForAddress", []);
       rpc.answer("getBlockHeight", 900);
       const request = await createAwaitingPaymentRequest(projectId);
@@ -133,6 +133,12 @@ describe("Public payment request routes", () => {
       expect((await postTransaction(request.public_token)).status).toBe(200);
       expect(rpc.calls).toContainEqual({ cluster, method: "getBlockHeight" });
       expect(rpc.calls.filter((call) => call.cluster !== cluster)).toEqual([]);
+      expect(sponsorship).toHaveBeenCalledWith(env, {
+        organizationId: TEST_ORG.id,
+        projectId,
+        actor: { type: "wallet", id: TEST_WALLET_ID },
+        cluster,
+      });
     }
 
     it("serves a Production request from mainnet-beta only", async () => {
