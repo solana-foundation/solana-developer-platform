@@ -11,7 +11,7 @@ Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana 
 
 You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId` and retain the provider's identifier separately as `providerWalletId` evidence. The **destination** remains the recipient's on-chain Solana address.
 
-Ramp quote endpoints use the same public shape for every provider: `destinationCustodyWalletId` (onramp) or `sourceCustodyWalletId` (offramp) identifies a custody wallet you control by its internal custody wallet `id` (the `id` returned by `GET /v1/wallets`). Provider-specific identifiers such as customer and payout-account IDs are resolved server-side from the **Counterparty**'s Provider Requirements — see [Ramps](/docs/payments/ramps).
+The on-ramp quote endpoint uses the same public shape for every provider: `destinationCustodyWalletId` identifies the custody wallet you control that receives the crypto, by its internal custody wallet `id` (the `id` returned by `GET /v1/wallets`). Provider-specific identifiers such as customer IDs are resolved server-side from the **Counterparty** — see [Ramps](/docs/payments/ramps). For off-ramps, the public API offers currency discovery only.
 
 ## Tokens and token accounts
 
