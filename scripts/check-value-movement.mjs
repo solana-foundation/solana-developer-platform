@@ -322,6 +322,21 @@ function isOpaqueCodeLoad(checker, node) {
   );
 }
 
+/**
+ * For a whole-module reference in an allowlisted file: whether it hands the
+ * module out as one value. A plain `export *` re-exports each constructor
+ * under its own name, which every caller still resolves to, and a namespace
+ * import is recorded so its later uses are checked. A named namespace export,
+ * a dynamic import or a require hands the whole module out.
+ */
+function handsModuleOut(checker, node, pinnedNamespaces) {
+  if (ts.isImportDeclaration(node)) {
+    pinnedNamespaces.add(checker.getSymbolAtLocation(node.importClause.namedBindings.name));
+    return false;
+  }
+  return !(ts.isExportDeclaration(node) && !node.exportClause);
+}
+
 /** Resolves a package specifier (an external constructor) the way the program does. */
 function resolveModuleSource(program, specifier) {
   const containingFile = program.getRootFileNames()[0];
@@ -433,12 +448,7 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
           `${relativePath}:${line + 1}: references ${capability.id} (${label}). ${capability.why}`
         );
       } else if (viaModule) {
-        // `export *` re-exports each constructor under its own name, which
-        // every caller still resolves to. A named namespace export, a dynamic
-        // import or a require hands the whole module out as one value.
-        if (ts.isImportDeclaration(node)) {
-          pinnedNamespaces.add(checker.getSymbolAtLocation(node.importClause.namedBindings.name));
-        } else if (!(ts.isExportDeclaration(node) && !node.exportClause)) {
+        if (handsModuleOut(checker, node, pinnedNamespaces)) {
           violations.push(
             `${relativePath}:${line + 1}: hands ${capability.id} out as a module value (${label}); an allowlisted file may only re-export it with a plain \`export *\`. ${capability.why}`
           );
@@ -456,6 +466,14 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
       const parent = node.parent;
       if (ts.isNamespaceImport(parent) && parent.name === node) return;
       if (ts.isPropertyAccessExpression(parent) && parent.expression === node) return;
+      // `ns["mint"]` names its member, which the element-access check resolves.
+      if (
+        ts.isElementAccessExpression(parent) &&
+        parent.expression === node &&
+        ts.isStringLiteralLike(parent.argumentExpression)
+      ) {
+        return;
+      }
       if (inTypePosition(node)) return;
       const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
       violations.push(

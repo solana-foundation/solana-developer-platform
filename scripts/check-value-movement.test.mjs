@@ -320,6 +320,7 @@ test("lets an allowlisted file call through a namespace but not hand the namespa
   const found = violations({
     "src/allowed.ts": `import * as ns from "./lib/cap";
 ns.mint();
+ns["mint"]();
 export * from "./lib/cap";
 export * as direct from "./lib/cap";
 export const leak = ns;
@@ -330,5 +331,5 @@ ns[name]();
   });
 
   const lines = found.map((violation) => violation.split(": ")[0]).sort();
-  assert.deepEqual(lines, ["src/allowed.ts:4", "src/allowed.ts:5", "src/allowed.ts:7"]);
+  assert.deepEqual(lines, ["src/allowed.ts:5", "src/allowed.ts:6", "src/allowed.ts:8"]);
 });
