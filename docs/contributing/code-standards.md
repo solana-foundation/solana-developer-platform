@@ -10,7 +10,7 @@ Rules every change to this repo follows. Reviewers (human and Greptile) flag vio
 - **Gate at the choke point.** A rule lives inside the one function every path already passes through (factory, store write, middleware), and it refuses before any state check or 4xx a loader raises. Any read that reports the same rule (availability, eligibility) calls that gate's decision function, so the two can't disagree. "Call X at every entry point" is the smell.
 - **Related DB writes share one transaction.** Never sequential autocommits that can leave a partially created aggregate. `db.transaction(cb)` plus the executor adapter in `apps/sdp-api/src/db/client.ts` let existing repositories run inside the transaction.
 - **No hand-rolled money math.** Decimal amounts go through `@sdp/payments/decimal` (`sumDecimalAmounts`, `compareDecimalAmounts`, …) and base-unit conversion through `@sdp/solana/amount`. Never a bare `reduce` over amount strings. Exact `bigint` lamport arithmetic is fine. Missing an operation? Add it to `@sdp/payments/decimal`.
-- **Prefer native environment signals.** `NODE_ENV` (and framework equivalents) already distinguish local from deployed; don't add a bespoke variable for that. Check what the runtime provides before adding a new gating variable.
+- **Prefer native environment signals.** `NODE_ENV` (and framework equivalents) distinguish development mode from production mode, not local runs from deployed runs. Local containers can run in production mode. Use the signal that matches the decision, and check existing configuration before adding a new gating variable.
 - **Reuse before you add.** Search the shared modules for an existing helper before writing one; new code goes where similar code lives.
 - **Prefer `@solana/kit` and Mosaic** over hand-rolled transaction, account, token, codec, or RPC code.
 
@@ -32,7 +32,7 @@ Every path that moves money or spends with a third party enumerates its interlea
 - Variant data uses `z.discriminatedUnion` (not `z.union`), and the type is derived with `z.infer`, never written by hand alongside it.
 - **Status sets and their meanings live once, in `@sdp/types`.** A tuple `X_STATUSES as const` with its derived type, and every subset or predicate (terminal, in-flight, editable, transition tables) exported beside it, as in `RAMP_TRANSFER_STATUS_TERMINAL` / `isTerminalRampTransferStatus`. Never a local `const TERMINAL = [...]`, `new Set([...])`, `=== "a" || === "b"`, or SQL `IN ('a', 'b')` in a service, repository, component, or test. Migrations and single-status assignments are the only exceptions.
 - Never a plain `string` where an `@sdp/types` constant set exists. Scripts import canonical types from `@sdp/types`. ISO codes are uppercase.
-- Webhook bodies are fully typed: exact shapes and a discriminated union per event type, never `unknown` or `Record<string, unknown>`.
+- Parsed webhook events are fully typed: exact shapes and a discriminated union per event type, never `unknown` or `Record<string, unknown>`. Raw webhook bodies may use these types while runtime readers or schemas check them at the trust boundary.
 - Three or more branches use a `switch` with an exhaustive `never` default, not nested ternaries.
 - No top-of-file `/** */` docstrings. Function and method JSDoc is fine.
 - Token mints and labels come only from `@sdp/types/well-known-tokens` (`WELL_KNOWN_TOKENS`, `WELL_KNOWN_TOKEN_BY_MINT`, `SOL_MINT`, `wellKnownMint`, `CLUSTER_BY_SDP_ENVIRONMENT`). Never hardcode a mint address or a symbol mapping elsewhere.
@@ -49,7 +49,7 @@ Every path that moves money or spends with a third party enumerates its interlea
 - One directory per provider at `packages/sdp-payments/src/ramps/providers/<id>/`: `client.ts` (HTTP only: auth, signing, parsing; no database or `AppContext`), optional `counterparty.ts` (present only when requirements are non-trivial), optional `provider-data.ts` (JSON codecs).
 - No webhook code in the package. Payload types, parsers, and the `WebhookProcessor` live in `apps/sdp-api/src/routes/webhooks/ramps/<id>.ts`, registered in `routes/webhooks/handlers.ts`, and map to `RampSettlementEvent`. Parsers use the `@sdp/payments/json` readers, never hand-rolled narrowing.
 - Provider instances come only from `RAMP_PROVIDER_CLIENTS`. A second instance breaks the webhook tests' `vi.spyOn` mocks.
-- All database access stays in route handlers.
+- Provider clients never access the database. Route handlers and background jobs access it through repositories.
 
 ## Dashboard (`apps/sdp-web`)
 
