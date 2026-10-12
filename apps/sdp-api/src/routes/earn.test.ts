@@ -426,6 +426,16 @@ describe("Earn routes — environment scoping", () => {
     expect(body.error.message).toBe("Invalid query parameters");
   });
 
+  it("404s an anonymous detail read of an unknown strategy", async () => {
+    await seedStrategy({});
+
+    const res = await getEarnAnonymously("/v1/earn/strategies/strat_missing", {});
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_FOUND");
+  });
+
   it("refuses a key that names a shelf other than its project's", async () => {
     await seedAuth();
     await seedStrategy({});
