@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import * as solanaServices from "@/services/solana";
-import { TokenService } from "@/services/token.service";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env as testEnv } from "@/test/helpers/env";
 import { createTokenTransaction } from "@/test/helpers/factories";
@@ -312,9 +311,7 @@ describe("authority-resolution", () => {
     });
 
     await expect(
-      inSandboxScope(() =>
-        resolveCurrentAuthorityForRole(new TokenService(getDb(testEnv)), createToken(), "mint")
-      )
+      inSandboxScope(() => resolveCurrentAuthorityForRole(createToken(), "mint"))
     ).resolves.toBe(OTHER_AUTHORITY);
     expect(clusterRpc.calls).toContainEqual({ cluster: "devnet", method: "getAccountInfo" });
     expect(clusterRpc.calls.filter((call) => call.cluster !== "devnet")).toEqual([]);
@@ -341,11 +338,7 @@ describe("authority-resolution", () => {
 
     await expect(
       inSandboxScope(() =>
-        resolveCurrentAuthorityForRole(
-          { updateTokenAuthorities: vi.fn() } as never,
-          createToken({ freezeAuthority: AUTHORITY }),
-          "freeze"
-        )
+        resolveCurrentAuthorityForRole(createToken({ freezeAuthority: AUTHORITY }), "freeze")
       )
     ).resolves.toBe(OTHER_AUTHORITY);
     expect(getTokenAclMintConfigMock).toHaveBeenCalledOnce();
@@ -370,26 +363,17 @@ describe("authority-resolution", () => {
     expect(fetchMaybeMintMock).not.toHaveBeenCalled();
   });
 
-  it("reads the on-chain permanent delegate without mutating the token record", async () => {
+  it("reads the on-chain permanent delegate", async () => {
     fetchMaybeMintMock.mockResolvedValue(
       createDecodedMint({
         extensions: [{ __kind: "PermanentDelegate", delegate: AUTHORITY }],
       })
     );
 
-    const tokenService = {
-      updateTokenAuthorities: vi.fn(),
-    } as unknown as {
-      updateTokenAuthorities: ReturnType<typeof vi.fn>;
-    };
-
-    const delegate = await inSandboxScope(() =>
-      resolvePermanentDelegateAuthority(tokenService as never, createToken())
-    );
+    const delegate = await inSandboxScope(() => resolvePermanentDelegateAuthority(createToken()));
 
     expect(delegate).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
     expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
-    expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -424,15 +408,8 @@ describe("authority-resolution", () => {
         })
       );
 
-      const tokenService = {
-        updateTokenAuthorities: vi.fn(),
-      } as unknown as {
-        updateTokenAuthorities: ReturnType<typeof vi.fn>;
-      };
-
       const authority = await inSandboxScope(() =>
         resolveMetadataAuthority(
-          tokenService as never,
           createToken({
             metadataAuthority: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
             mintAuthority: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
@@ -442,7 +419,6 @@ describe("authority-resolution", () => {
 
       expect(authority).toBe(expectedAuthority);
       expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
-      expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
     }
   );
 
@@ -450,28 +426,18 @@ describe("authority-resolution", () => {
     fetchMaybeMintMock.mockResolvedValue(
       createDecodedMint({ mintAuthority: OTHER_AUTHORITY, freezeAuthority: AUTHORITY })
     );
-    const tokenService = { updateTokenAuthorities: vi.fn() };
     const token = createToken({ mintAuthority: AUTHORITY });
 
     await expect(
-      inSandboxScope(() =>
-        resolveCurrentAuthorityForRole(tokenService as never, token, "mint", AUTHORITY)
-      )
+      inSandboxScope(() => resolveCurrentAuthorityForRole(token, "mint", AUTHORITY))
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
   });
 
   it("maps RPC decoding failures to the public RPC error", async () => {
     fetchMaybeMintMock.mockRejectedValue(new Error("RPC returned invalid mint data"));
 
     await expect(
-      inSandboxScope(() =>
-        resolveCurrentAuthorityForRole(
-          { updateTokenAuthorities: vi.fn() } as never,
-          createToken(),
-          "mint"
-        )
-      )
+      inSandboxScope(() => resolveCurrentAuthorityForRole(createToken(), "mint"))
     ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
   });
 
@@ -479,13 +445,7 @@ describe("authority-resolution", () => {
     fetchMaybeMintMock.mockResolvedValue({ exists: false });
 
     await expect(
-      inSandboxScope(() =>
-        resolveCurrentAuthorityForRole(
-          { updateTokenAuthorities: vi.fn() } as never,
-          createToken(),
-          "mint"
-        )
-      )
+      inSandboxScope(() => resolveCurrentAuthorityForRole(createToken(), "mint"))
     ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
   });
 
