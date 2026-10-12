@@ -128,7 +128,9 @@ describe("sendTransferBatchUnderKey", () => {
     Response.json({ data: { batch: { id: "batch_1" }, recipients: [], transfers: [] } });
 
   function sentKeys(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): (string | null)[] {
-    return fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
+    return fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key")
+    );
   }
 
   afterEach(() => {

@@ -1,10 +1,8 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { z } from "zod";
+import { createActionMemo } from "./action-memo";
 import type { ActionKeyAnswer } from "./idempotency";
-
-/** Inputs remembered at once; an unanswered one is never the one dropped. */
-const MAX_REMEMBERED_INPUTS = 8;
 
 /** What a server action reports: its status, and on a failure what it settles about the key. */
 export interface ActionKeyResult {
@@ -12,45 +10,35 @@ export interface ActionKeyResult {
   keyAnswer?: ActionKeyAnswer;
 }
 
+const actionKeys = createActionMemo("sdp:dashboard:action-idempotency-keys:v1", z.string().min(1));
+
+/** Called right before the action is sent. */
+function keyFor(input: string): string {
+  return actionKeys.valueFor(input, () => crypto.randomUUID());
+}
+
+function settled(input: string, result: ActionKeyResult): void {
+  // A thrown action, or a result that does not say, may have written.
+  actionKeys.settle(
+    input,
+    result.status === "success" ? "definitive" : (result.keyAnswer ?? "open")
+  );
+}
+
 /**
  * One Idempotency-Key per user action for a server action (HOO-1918). The same
- * input keeps its key across retries and double submits until the action is
- * definitively answered; changed input is a new action with a new key, so an
- * edit after a failure never reuses a key for a different request (422). Each
- * input keeps its own key, so going A to B and back to A reuses A's key while
- * A's attempt is unanswered.
+ * input keeps its key across retries, double submits, an edit and back (A to
+ * B to A) and a reload, until the action is definitively answered; changed
+ * input is a new action with a new key, so an edit after a failure never
+ * reuses a key for a different request (422). Kept in `sessionStorage` (see
+ * `action-memo.ts`); when the browser refuses storage the key lives as long as
+ * the page, and the action is still sent: these are not money routes.
  *
- * @returns `keyFor(input)` for the submit, and `settled(input, result)` once
- *   it answers. A success or a replay retires the key, and so does a refusal
- *   on the key's first attempt ({@link ActionKeyAnswer}); anything else keeps
- *   it, so the retry is the same request.
+ * @returns `keyFor(input)` right before the send, and `settled(input, result)`
+ *   once it answers. A success or a replay retires the key, and so does a
+ *   refusal when no earlier attempt went unanswered ({@link ActionKeyAnswer});
+ *   anything else keeps it, so the retry is the same request.
  */
 export function useActionIdempotencyKey() {
-  const keys = useRef(new Map<string, { key: string; unanswered: boolean }>());
-
-  const keyFor = useCallback((input: string): string => {
-    const remembered = keys.current.get(input);
-    if (remembered) return remembered.key;
-    const key = crypto.randomUUID();
-    keys.current.set(input, { key, unanswered: false });
-    for (const [stale, entry] of keys.current) {
-      if (keys.current.size <= MAX_REMEMBERED_INPUTS) break;
-      if (!entry.unanswered && stale !== input) keys.current.delete(stale);
-    }
-    return key;
-  }, []);
-
-  const settled = useCallback((input: string, result: ActionKeyResult): void => {
-    const entry = keys.current.get(input);
-    if (!entry) return;
-    // A thrown action, or a result that does not say, may have written.
-    const answer = result.status === "success" ? "definitive" : (result.keyAnswer ?? "open");
-    if (answer === "definitive" || (answer === "refused" && !entry.unanswered)) {
-      keys.current.delete(input);
-    } else {
-      entry.unanswered = true;
-    }
-  }, []);
-
   return { keyFor, settled };
 }

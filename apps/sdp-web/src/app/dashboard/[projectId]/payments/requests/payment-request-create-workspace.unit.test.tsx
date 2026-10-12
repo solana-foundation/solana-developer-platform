@@ -5,9 +5,11 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { resetActionMemosForTests } from "@/lib/action-memo";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { PaymentRequestCreateWorkspace } from "./payment-request-create-workspace";
 import { deriveTokenOptions } from "./payment-requests-page.data";
@@ -55,6 +57,12 @@ function wrapper({ children }: { children: ReactNode }) {
 function readsAs(): string {
   return screen.getByText("Reads as").nextElementSibling?.textContent ?? "";
 }
+
+beforeEach(() => {
+  window.sessionStorage.clear();
+  resetActionMemosForTests();
+  resetIdempotencyKeyStoresForTests();
+});
 
 afterEach(() => {
   cleanup();
@@ -167,6 +175,109 @@ describe("New request page", () => {
 
     expect(sends).toHaveLength(2);
     expect(sends[0]?.body.expiresAt).toMatch(/^\d{4}-/);
+    expect(sends[1]?.body).toEqual(sends[0]?.body);
+    expect(sends[1]?.key).toBe(sends[0]?.key);
+  });
+
+  /** Records each create's body and key; the answers are given in order. */
+  function recordSends(...answers: ("lost" | number)[]) {
+    const sends: { body: { amount: string; expiresAt: string | null }; key: string | null }[] = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sends.push({
+        body: JSON.parse(String(init?.body)),
+        key: new Headers(init?.headers).get("Idempotency-Key"),
+      });
+      const answer = answers.shift() ?? 201;
+      if (answer === "lost") throw new TypeError("Failed to fetch");
+      return answer < 400
+        ? Response.json({ data: { id: "preq_1", publicToken: "tok_1" } }, { status: answer })
+        : Response.json({ error: { message: "unavailable" } }, { status: answer });
+    });
+    return sends;
+  }
+
+  /** Fills the form for `amount` with a one-hour expiry. */
+  async function fillRequest(user: ReturnType<typeof userEvent.setup>, amount: string) {
+    render(
+      <PaymentRequestCreateWorkspace
+        wallets={[wallet]}
+        walletsError={null}
+        counterparties={[contact]}
+      />,
+      { wrapper }
+    );
+    await user.type(screen.getByRole("textbox", { name: "Amount" }), amount);
+    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
+    await user.click(screen.getByRole("button", { name: /Treasury/ }));
+    await user.click(screen.getByRole("button", { name: "Link expires" }));
+    await user.click(screen.getByRole("button", { name: "1 hour" }));
+  }
+
+  /** Presses create at a later minute, so a re-read clock would show, and waits for the answer. */
+  async function createLater(
+    user: ReturnType<typeof userEvent.setup>,
+    sends: readonly unknown[],
+    minutes: number
+  ) {
+    const create = () => screen.getByRole("button", { name: "Create and copy link" });
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+    const sent = sends.length;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 9, 12, 12, minutes));
+    try {
+      await user.click(create());
+      await waitFor(() => expect(sends).toHaveLength(sent + 1));
+    } finally {
+      clock.mockRestore();
+    }
+    // Answered: the form is free again, or the request opened.
+    await waitFor(() =>
+      expect(
+        dashboardRouter.push.mock.calls.length > 0 ||
+          screen
+            .queryByRole("button", { name: "Create and copy link" })
+            ?.hasAttribute("disabled") === false
+      ).toBe(true)
+    );
+  }
+
+  // Browser test (HOO-1918): A's answer was lost, the user edited to B and back
+  // to A, and A was rebuilt with a new expiry, so a second request was created.
+  it("resends A's first expiry and key after an edit to B and back", async () => {
+    const sends = recordSends("lost", 503, 201);
+    const user = userEvent.setup();
+    await fillRequest(user, "25");
+    const amount = () => screen.getByRole("textbox", { name: "Amount" });
+
+    await createLater(user, sends, 0);
+    await user.clear(amount());
+    await user.type(amount(), "26");
+    await createLater(user, sends, 1);
+    await user.clear(amount());
+    await user.type(amount(), "25");
+    await createLater(user, sends, 2);
+
+    expect(sends.map((send) => send.body.amount)).toEqual(["25", "26", "25"]);
+    expect(sends[1]?.key).not.toBe(sends[0]?.key);
+    expect(sends[2]?.body).toEqual(sends[0]?.body);
+    expect(sends[2]?.key).toBe(sends[0]?.key);
+  });
+
+  // Browser test (HOO-1918): with an expiry set, a lost answer, a reload and a
+  // resubmit created a second request under a new key.
+  it("resends the first expiry and key after a reload", async () => {
+    const sends = recordSends("lost", 201);
+    const user = userEvent.setup();
+    await fillRequest(user, "25");
+    await createLater(user, sends, 0);
+
+    // A reload keeps sessionStorage and loses everything in memory.
+    cleanup();
+    resetActionMemosForTests();
+    resetIdempotencyKeyStoresForTests();
+    await fillRequest(user, "25");
+    await createLater(user, sends, 5);
+
+    expect(sends).toHaveLength(2);
     expect(sends[1]?.body).toEqual(sends[0]?.body);
     expect(sends[1]?.key).toBe(sends[0]?.key);
   });

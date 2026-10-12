@@ -333,10 +333,7 @@ export function refusalRetiresKey(
   earlierAttemptUnanswered: boolean
 ): boolean {
   if (refusal === null) return false;
-  return answerRetiresKey(
-    keyAnswerFor(refusal.status, refusal.replayed),
-    earlierAttemptUnanswered
-  );
+  return answerRetiresKey(keyAnswerFor(refusal.status, refusal.replayed), earlierAttemptUnanswered);
 }
 
 type IdempotencyKeyOutcome =

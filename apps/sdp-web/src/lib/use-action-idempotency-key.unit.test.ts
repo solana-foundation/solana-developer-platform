@@ -1,7 +1,18 @@
 // @vitest-environment jsdom
 import { renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetActionMemosForTests } from "./action-memo";
 import { useActionIdempotencyKey } from "./use-action-idempotency-key";
+
+beforeEach(() => {
+  window.sessionStorage.clear();
+  resetActionMemosForTests();
+});
+
+/** What a reload leaves: `sessionStorage`, and no module memory. */
+function reload(): void {
+  resetActionMemosForTests();
+}
 
 describe("useActionIdempotencyKey", () => {
   it("keeps one key per input until it succeeds, and gives changed input its own", () => {
@@ -51,5 +62,45 @@ describe("useActionIdempotencyKey", () => {
     result.current.settled("label=a", { status: "error" });
     result.current.settled("label=a", { status: "error", keyAnswer: "refused" });
     expect(result.current.keyFor("label=a")).toBe(key);
+  });
+
+  // Browser test (HOO-1918): a key only in a React ref died with the page, so
+  // a reload after an unanswered wallet create sent a second wallet.
+  it("keeps an unanswered key across a reload", () => {
+    const { result } = renderHook(() => useActionIdempotencyKey());
+    const key = result.current.keyFor("wallet=treasury");
+    result.current.settled("wallet=treasury", { status: "error", keyAnswer: "open" });
+
+    reload();
+    const { result: reloaded } = renderHook(() => useActionIdempotencyKey());
+
+    expect(reloaded.current.keyFor("wallet=treasury")).toBe(key);
+  });
+
+  it("treats a send cut off by a reload as unanswered, so a refusal keeps its key", () => {
+    const { result } = renderHook(() => useActionIdempotencyKey());
+    const key = result.current.keyFor("wallet=treasury");
+
+    reload();
+    const { result: reloaded } = renderHook(() => useActionIdempotencyKey());
+    expect(reloaded.current.keyFor("wallet=treasury")).toBe(key);
+    reloaded.current.settled("wallet=treasury", { status: "error", keyAnswer: "refused" });
+
+    expect(reloaded.current.keyFor("wallet=treasury")).toBe(key);
+  });
+
+  it("still keeps one key per input in this page when storage refuses writes", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+    try {
+      const { result } = renderHook(() => useActionIdempotencyKey());
+      const key = result.current.keyFor("label=a");
+      result.current.settled("label=a", { status: "error", keyAnswer: "open" });
+
+      expect(result.current.keyFor("label=a")).toBe(key);
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });
