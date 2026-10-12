@@ -216,7 +216,8 @@ function paymentTransferFingerprint(
       sourceAddress: input.sourceAddress,
       destinationAddress: input.destinationAddress,
       token: input.token,
-      amount: input.amount,
+      // "0.0150" and "0.015" move the same, as the key step's fingerprint agrees.
+      amount: input.amount === null ? null : normalizeDecimalString(input.amount),
       memo: input.memo ?? null,
       type: input.type,
     })

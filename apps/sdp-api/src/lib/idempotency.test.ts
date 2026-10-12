@@ -119,6 +119,12 @@ describe("buildPaymentTransferFingerprint", () => {
     );
   });
 
+  it("is the same for two spellings of one amount", () => {
+    expect(buildPaymentTransferFingerprint({ ...base, amount: "0.0150" })).toBe(
+      buildPaymentTransferFingerprint({ ...base, amount: "0.015" })
+    );
+  });
+
   it("differs when the exact SDP Wallet ID changes", () => {
     expect(buildPaymentTransferFingerprint(base)).not.toBe(
       buildPaymentTransferFingerprint({ ...base, custodyWalletId: "cwlt_source_2" })

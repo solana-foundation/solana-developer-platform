@@ -189,6 +189,11 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
     "A request with this Idempotency-Key is still in progress; retry after the Retry-After delay",
 };
 
+/** Whether a value is one of the error codes the API answers with. */
+export function isErrorCode(value: unknown): value is ErrorCode {
+  return typeof value === "string" && Object.hasOwn(ERROR_STATUS_CODES, value);
+}
+
 export class AppError extends Error {
   public readonly code: ErrorCode;
   public readonly statusCode: number;

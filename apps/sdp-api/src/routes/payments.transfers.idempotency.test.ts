@@ -112,9 +112,13 @@ describe("Payments routes — transfer idempotency", () => {
     });
 
     expect(first.status).toBeGreaterThanOrEqual(400);
-    expect(second.status).toBe(200);
-    const secondBody = await readTransferResponse(second);
-    expect(secondBody.data.transfer.status).toBe("failed");
+    // The retry is answered with the same error as the request that failed the row
+    // (HOO-1918), never a 200 for the failed row.
+    expect(second.status).toBe(first.status);
+    const [firstError, secondError] = (await Promise.all([first.json(), second.json()])) as {
+      error: { code: string };
+    }[];
+    expect(secondError?.error.code).toBe(firstError?.error.code);
     expect(signAsFeePayerMock).toHaveBeenCalledOnce();
     expect(signAndSendMock).not.toHaveBeenCalled();
     expect(sendTransactionMock).not.toHaveBeenCalled();

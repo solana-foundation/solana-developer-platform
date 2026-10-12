@@ -76,10 +76,12 @@ export const MAX_STORED_RESPONSE_BYTES = 1024 * 1024;
 const COMPLETE_ATTEMPTS = 3;
 
 /**
- * Statuses that are never stored: the request was refused before it changed
- * anything, so a retry with the same key runs again. Stripe saves no result for
+ * Statuses that are not stored while the request has changed nothing: it was
+ * refused, so a retry with the same key runs again. Stripe saves no result for
  * validation failures or concurrent conflicts; refusals of the caller (401,
- * 403, 429) are re-evaluated on every attempt too.
+ * 403, 429) are re-evaluated on every attempt too. Once the handler has
+ * written its domain row ({@link markIdempotencyCommitted}), any status is
+ * stored: the request did change something, and its retry gets the same answer.
  */
 const UNSTORED_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 409, 429]);
 /** Statuses whose responses carry no body. */
@@ -418,7 +420,7 @@ export async function runIdempotency(
       await release(() => repository.unlock(id, claimToken));
       return;
     }
-    if (UNSTORED_STATUSES.has(response.status)) {
+    if (UNSTORED_STATUSES.has(response.status) && c.get("idempotencyCommitted") !== true) {
       await release(() =>
         freshClaim ? repository.discard(id, claimToken) : repository.unlock(id, claimToken)
       );
@@ -482,6 +484,17 @@ export function idempotent(options: IdempotencyOptions): MiddlewareHandler<{ Bin
 /** Reads the key mode an {@link idempotent} handler declares. */
 export function declaredIdempotency(handler: unknown): IdempotencyKeyMode | undefined {
   return (handler as { [IDEMPOTENCY_MARKER]?: IdempotencyKeyMode } | null)?.[IDEMPOTENCY_MARKER];
+}
+
+/**
+ * Marks that the handler has written its domain row under this request's key,
+ * so its response is stored whatever its status: a 400 or 409 raised after the
+ * row exists is the request's answer, and a same-key retry replays it instead
+ * of being answered from the row with a different status. Call it right after
+ * the row is committed; refusals before it stay unstored and run again.
+ */
+export function markIdempotencyCommitted(c: Context<{ Bindings: Env }>): void {
+  c.set("idempotencyCommitted", true);
 }
 
 /**

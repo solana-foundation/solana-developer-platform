@@ -9,6 +9,7 @@ import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { meteredQuota } from "@/middleware/metered-quota";
+import { replayFromRecord } from "@/middleware/movement-steps";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
@@ -22,6 +23,7 @@ import {
 import {
   createWallet,
   deleteWallet,
+  findCustodyWalletCreateReplay,
   getConfigs,
   getPublicKey,
   getWalletAggregate,
@@ -60,6 +62,8 @@ wallets.post(
   validateBody(createWalletSchema),
   authorize(authorizeCreateWallet),
   idempotent({ key: "accepted", serverErrors: "store" }),
+  // A retry the key could not answer (a crash, a takeover) finds the wallet row.
+  replayFromRecord(findCustodyWalletCreateReplay),
   createWallet
 );
 wallets.delete(

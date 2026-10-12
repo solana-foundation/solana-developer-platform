@@ -38,8 +38,10 @@ import {
   badRequest,
   badRequestQuery,
   conflict,
+  type ErrorCode,
   forbidden,
   internalError,
+  isErrorCode,
   notFound,
   solanaRpcError,
   transactionFailed,
@@ -51,6 +53,7 @@ import {
 import { paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
+import { markIdempotencyCommitted } from "@/middleware/idempotency";
 import { parseIdempotencyKey } from "@/middleware/idempotency-key";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput } from "@/middleware/movement-steps";
@@ -409,7 +412,7 @@ export async function findTransferRecordReplay(
       existing.amount !== null &&
       compareDecimalAmounts(existing.amount, operation.amount) === 0
     ) {
-      return success(c, buildTransferReplayPayload(existing));
+      return replayTransferRow(c, existing);
     }
     return null;
   }
@@ -431,7 +434,7 @@ export async function findTransferRecordReplay(
     buildPaymentTransferFingerprint(fingerprintInput),
     operation.sourceWallet.id
   );
-  return replay ? success(c, buildTransferReplayPayload(replay)) : null;
+  return replay ? replayTransferRow(c, replay) : null;
 }
 
 async function updateTransferRecord(
@@ -445,6 +448,8 @@ async function updateTransferRecord(
     blockTime?: string | null;
     fee?: number | null;
     error?: string | null;
+    /** The error code the request is answered with, kept for a replay of a failed row. */
+    failureCode?: ErrorCode;
   }
 ): Promise<
   { outcome: "updated"; row: TransferRow } | { outcome: "settled_concurrently"; row: TransferRow }
@@ -464,6 +469,9 @@ async function updateTransferRecord(
     blockTime: patch.blockTime,
     fee: patch.fee,
     error: patch.error,
+    ...(patch.failureCode === undefined
+      ? {}
+      : { providerData: executionFailureData(patch.failureCode) }),
     updatedAt: now,
   });
 
@@ -533,19 +541,22 @@ async function settleTransferExecutionFailure(
     return success(c, toPayload(submitted));
   }
   const message = error instanceof Error ? error.message : "Unknown transfer error";
+  const answer = mapTransferExecutionError(error);
   const settled = resolveTransferUpdateResult(
     await updateTransferRecord(c, transfer, {
       status: "failed",
       error: message,
       signature: submitted?.signature,
       blockTime: null,
+      // A replay of the row answers with this same error (HOO-1918).
+      failureCode: answer.code,
     })
   );
   if (settled.status !== "failed") {
     await onConcurrentChainVerdict?.(settled);
     return success(c, toPayload(settled));
   }
-  throw mapTransferExecutionError(error);
+  throw answer;
 }
 
 /**
@@ -685,6 +696,32 @@ function buildTransferReplayPayload(replay: TransferRow) {
   return { transfer: mapTransferRow(replay) };
 }
 
+/** Where a failed transfer keeps the error code its request was answered with. */
+const EXECUTION_FAILURE_KEY = "executionFailure";
+
+function executionFailureData(code: ErrorCode): Record<string, unknown> {
+  return { [EXECUTION_FAILURE_KEY]: { code } };
+}
+
+/**
+ * Answers a request from the transfer row its key wrote (HOO-1918). A failed
+ * transfer answers with the error its request got (the same status and code),
+ * never a 200: the key is spent on that failure, so the message says to retry
+ * with a new Idempotency-Key.
+ */
+function replayTransferRow(c: AppContext, row: TransferRow): Response {
+  if (row.status !== "failed") {
+    return success(c, buildTransferReplayPayload(row));
+  }
+  const recorded = row.provider_data[EXECUTION_FAILURE_KEY] as { code?: unknown } | undefined;
+  const code = isErrorCode(recorded?.code) ? recorded.code : "TRANSACTION_FAILED";
+  throw new AppError(
+    code,
+    `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
+    { transferId: row.id, status: row.status }
+  );
+}
+
 function transferMatchesSearch(row: TransferRow, search: string): boolean {
   const normalizedSearch = search.toLowerCase();
   return [
@@ -767,8 +804,11 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
       });
 
   if (replayed) {
-    return success(c, buildTransferReplayPayload(transfer));
+    return replayTransferRow(c, transfer);
   }
+  // The row exists under the key: from here every answer is the request's own,
+  // stored for its retries even when it is a 400 or 409.
+  markIdempotencyCommitted(c);
 
   const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
   // The tamper-evident ledger admits the movement before any bytes can reach
@@ -799,6 +839,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
     await updateTransferRecord(c, transfer, {
       status: "failed",
       error: "Audit ledger admission failed before execution",
+      failureCode: error instanceof AppError ? error.code : "INTERNAL_ERROR",
     });
     throw error;
   }

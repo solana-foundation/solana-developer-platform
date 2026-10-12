@@ -92,6 +92,25 @@ describe("coinbase account provisioning", () => {
     }
   });
 
+  it("sends the caller's idempotency key as X-Idempotency-Key, and a fresh one without it", async () => {
+    const headers: Array<string | null> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        headers.push(new Headers(init?.headers).get("X-Idempotency-Key"));
+        return jsonResponse({ address: CREATED_ADDRESS }, 200);
+      }
+    );
+
+    const base = { orgId: "org_abc", projectId: "proj_1", walletSeed: "seed-1" };
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), { ...base, idempotencyKey: "req-1" });
+    await provisionCoinbaseCdpAccount(createCoinbaseEnv(), base);
+
+    expect(headers[0]).toBe("req-1");
+    expect(headers[1]).toBe("req-1");
+    expect(headers[2]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
   it("does not derive the identity from truncatable tenant identifiers", async () => {
     const names: string[] = [];
     mockCreateCapturingNames(names);

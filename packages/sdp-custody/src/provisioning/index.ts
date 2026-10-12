@@ -146,6 +146,11 @@ export interface ProvisionCoinbaseCdpOptions {
    */
   reuseExisting?: boolean;
   accountPolicy?: string;
+  /**
+   * Sent as CDP's `X-Idempotency-Key`, so a retried create is answered with
+   * the account the first attempt made. A fresh UUID when omitted.
+   */
+  idempotencyKey?: string;
 }
 
 export interface CoinbaseCdpProvisioningConfig {
@@ -455,7 +460,7 @@ export async function provisionCoinbaseCdpAccount(
       apiKeyId,
       apiKeySecret,
       walletSecret,
-      idempotencyKey: runtime.randomUUID(),
+      idempotencyKey: options.idempotencyKey ?? runtime.randomUUID(),
       body: {
         name,
         ...(options.accountPolicy ? { accountPolicy: options.accountPolicy } : {}),
