@@ -145,3 +145,88 @@ export function installClusterRpcStub(): ClusterRpcStub {
     },
   };
 }
+
+const jsonRpcParamsSchema = z.object({
+  method: z.string(),
+  params: z.array(z.unknown()),
+});
+
+/** One JSON-RPC request that reached a cluster's endpoint, with the params it carried. */
+export interface ClusterRpcRequest extends ClusterRpcCall {
+  params: readonly unknown[];
+}
+
+export interface ClusterRpcRequestLog extends ClusterRpcStub {
+  /** Every request of the current test with its params, in arrival order; emptied after each test. */
+  readonly requests: readonly ClusterRpcRequest[];
+}
+
+/**
+ * {@link installClusterRpcStub}, also recording the params of every request, for tests that
+ * assert what a read asked the cluster for. Register at `describe` level.
+ *
+ * @returns The stub plus the current test's requests with their params.
+ */
+export function installClusterRpcRequestLog(): ClusterRpcRequestLog {
+  const stub = installClusterRpcStub();
+  const requests: ClusterRpcRequest[] = [];
+
+  beforeEach(() => {
+    const stubbedFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (typeof input === "string" && init !== undefined && typeof init.body === "string") {
+        const { method, params } = jsonRpcParamsSchema.parse(JSON.parse(init.body));
+        requests.push({ cluster: clusterForUrl(input), method, params });
+      }
+      return stubbedFetch(input, init);
+    };
+  });
+
+  afterEach(() => {
+    requests.length = 0;
+  });
+
+  return { ...stub, requests };
+}
+
+/** A jsonParsed SPL token account a stubbed `getTokenAccountsByOwner` answers with. */
+export interface StubTokenAccount {
+  pubkey: string;
+  mint: string;
+  amount: string;
+  decimals: number;
+  uiAmountString: string;
+}
+
+/**
+ * A `getTokenAccountsByOwner` result served from the bank at `slot`.
+ *
+ * @param slot - The context slot the answer claims.
+ * @param tokenAccounts - The owner's token accounts.
+ * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
+ */
+export function tokenAccountsByOwnerResult(
+  slot: number,
+  tokenAccounts: readonly StubTokenAccount[]
+): JsonRpcResult {
+  return {
+    context: { slot },
+    value: tokenAccounts.map((tokenAccount) => ({
+      pubkey: tokenAccount.pubkey,
+      account: {
+        data: {
+          parsed: {
+            info: {
+              mint: tokenAccount.mint,
+              tokenAmount: {
+                amount: tokenAccount.amount,
+                decimals: tokenAccount.decimals,
+                uiAmountString: tokenAccount.uiAmountString,
+              },
+            },
+          },
+        },
+      },
+    })),
+  };
+}

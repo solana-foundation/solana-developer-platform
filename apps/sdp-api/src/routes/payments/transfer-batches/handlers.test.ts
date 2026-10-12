@@ -30,6 +30,7 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
@@ -126,41 +127,6 @@ function ownedSubmissionAdapter(
       );
     },
   };
-}
-
-function mockSourceTokenAccountRpc(params: {
-  mint: string;
-  tokenAccount: string;
-  decimals: number;
-}) {
-  createRpcMock.mockReturnValue({
-    getTokenAccountsByOwner: () => ({
-      send: async () => ({
-        value: [
-          {
-            pubkey: params.tokenAccount,
-            account: {
-              data: {
-                parsed: {
-                  info: {
-                    mint: params.mint,
-                    tokenAmount: {
-                      amount: "1000000000",
-                      decimals: params.decimals,
-                      uiAmountString: "1000",
-                    },
-                  },
-                },
-              },
-            },
-          },
-        ],
-      }),
-    }),
-    getFeeForMessage: () => ({
-      send: async () => ({ value: 5000n }),
-    }),
-  } as unknown as ReturnType<typeof solanaRpc.createRpc>);
 }
 
 async function seedAuthAndWallet(): Promise<void> {
@@ -456,6 +422,8 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
 }
 
 describe("payment transfer batches", () => {
+  const rpc = installClusterRpcStub();
+
   beforeEach(async () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
@@ -502,12 +470,7 @@ describe("payment transfer batches", () => {
   });
 
   it("estimates a SOL transfer batch", async () => {
-    const getFeeForMessageMock = vi.fn(() => ({
-      send: async () => ({ value: 5000n }),
-    }));
-    createRpcMock.mockReturnValueOnce({
-      getFeeForMessage: getFeeForMessageMock,
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
 
     const counterpartyId = await seedCounterparty("batch_estimate_counterparty");
     const firstAccountId = await seedCryptoWalletCounterpartyAccount({
@@ -572,16 +535,11 @@ describe("payment transfer batches", () => {
         sponsored: true,
       },
     });
-    expect(getFeeForMessageMock).toHaveBeenCalledTimes(1);
+    expect(rpc.calls.filter((call) => call.method === "getFeeForMessage")).toHaveLength(1);
   });
 
   it("estimates a batch when counterpartyId is omitted (derived from account)", async () => {
-    const getFeeForMessageMock = vi.fn(() => ({
-      send: async () => ({ value: 5000n }),
-    }));
-    createRpcMock.mockReturnValueOnce({
-      getFeeForMessage: getFeeForMessageMock,
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
 
     const counterpartyId = await seedCounterparty("batch_derive_counterparty");
     const accountId = await seedCryptoWalletCounterpartyAccount({
@@ -1675,11 +1633,18 @@ describe("payment transfer batches", () => {
         lamports: 4200000000n,
         owner: tokenProgram,
       } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
-      mockSourceTokenAccountRpc({
-        mint: expectedMint,
-        tokenAccount: TEST_TOKEN_ACCOUNT,
-        decimals: 6,
-      });
+      rpc.answer(
+        "getTokenAccountsByOwner",
+        tokenAccountsByOwnerResult(1, [
+          {
+            pubkey: TEST_TOKEN_ACCOUNT,
+            mint: expectedMint,
+            amount: "1000000000",
+            decimals: 6,
+            uiAmountString: "1000",
+          },
+        ])
+      );
 
       const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
       createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));

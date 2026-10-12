@@ -7,13 +7,13 @@ import { createPostgresPaymentsRepository } from "@/db/repositories/payments.rep
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
-  mockRecurringActivationRpc,
   sendTransactionMock,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
@@ -35,6 +35,23 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 
 describe("Payments routes — on-chain transfers", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
+
+  function answerSourceUsdcTokenAccount() {
+    rpc.answer(
+      "getTokenAccountsByOwner",
+      tokenAccountsByOwnerResult(1, [
+        {
+          pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+          mint: DEVNET_USDC_MINT,
+          amount: "1000000000",
+          decimals: 6,
+          uiAmountString: "1000",
+        },
+      ])
+    );
+  }
+
   it("rejects the retired privateTransfer field at the request boundary", async () => {
     const res = await postRawTransfer(
       {
@@ -343,7 +360,7 @@ describe("Payments routes — on-chain transfers", () => {
   });
 
   it("persists a signed outbox for an SPL transfer", async () => {
-    mockRecurringActivationRpc({});
+    answerSourceUsdcTokenAccount();
 
     const res = await postTransfer(
       {
@@ -394,7 +411,7 @@ describe("Payments routes — on-chain transfers", () => {
   });
 
   it("returns 400 ACCOUNT_FROZEN when the source SPL token account is frozen", async () => {
-    mockRecurringActivationRpc({});
+    answerSourceUsdcTokenAccount();
     sendTransactionMock.mockRejectedValueOnce(
       new Error(
         "Failed to send transaction: RPC Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x11"
