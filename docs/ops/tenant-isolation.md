@@ -58,8 +58,9 @@ Provider webhooks resolve tenants from provider references held on
 Lightspark customer links. A reference therefore resolves to at most one
 tenant; two tenants racing to claim the same reference get a
 unique-violation failure instead of a silent cross-tenant resolution. 0080
-also made a now-retired ramp provider's counterparty-row lookup key unique;
-nothing reads or writes that key any more, and a later migration drops it.
+also made a now-retired ramp provider's counterparty-row lookup key unique.
+Nothing reads or writes that key any more, but its unique indexes remain until
+a follow-up migration removes them.
 
 The customer-link uniqueness applies only to providers whose customers SDP
 creates one-per-counterparty (BVNK — which also routes webhooks by customer
