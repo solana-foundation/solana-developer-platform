@@ -19,7 +19,6 @@ export const PUBLIC_FAMILY_ENTRY_PATHS: Readonly<Record<string, string>> = {
   Projects: "/v1/projects",
   Issuance: "/v1/issuance",
   Payments: "/v1/payments",
-  Policies: "/v1/policies",
   Compliance: "/v1/compliance",
   Counterparties: "/v1/counterparties",
   "Asset Profiles": "/v1/issuance/asset-profiles",
