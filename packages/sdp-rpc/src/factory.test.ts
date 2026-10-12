@@ -10,6 +10,7 @@ import {
 } from "@solana/kit";
 import { createClusterRpc } from "./factory";
 import { runInClusterScope } from "./scope";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
 import type { ManagedRpcEnv } from "./types";
 
 type Answer = { kind: "result" } | { kind: "jsonRpcError"; code: number } | { kind: "fetchFailed" };
@@ -131,6 +132,32 @@ function stubHeldDevnetGenesisProbe(): {
       for (const release of probeReleases) release();
     },
   };
+}
+
+function stubStalledDevnetRead(stalledUrl: string): {
+  calls: RpcCall[];
+  readStalled: Promise<void>;
+} {
+  const calls: RpcCall[] = [];
+  const stallStarts: Array<() => void> = [];
+  const readStalled = new Promise<void>((resolve) => {
+    stallStarts.push(resolve);
+  });
+  globalThis.fetch = async (input, init) => {
+    const request = readRequest(input, init);
+    calls.push({ url: request.url, method: request.method });
+    if (request.method === "getGenesisHash") {
+      return respond(request.id, { result: GENESIS_HASH_BY_CLUSTER.devnet });
+    }
+    if (request.url !== stalledUrl) return respond(request.id, { result: SLOT });
+    const { signal } = request;
+    assert.ok(signal instanceof AbortSignal);
+    for (const markStalled of stallStarts) markStalled();
+    return await new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+  };
+  return { calls, readStalled };
 }
 
 function genesisProbe(url: string): RpcCall {
@@ -380,6 +407,32 @@ describe("createClusterRpc", () => {
       slotRead(down),
       genesisProbe(healthy),
       slotRead(healthy),
+      slotRead(healthy),
+    ]);
+  });
+
+  it("keeps the attempt deadline under a caller's own abort signal and fails a stalled endpoint over", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const stalled = "https://devnet-stalled.example.test";
+    const healthy = "https://devnet-after-stall.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: stalled,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    const stall = stubStalledDevnetRead(stalled);
+    const caller = new AbortController();
+
+    const slot = runInClusterScope(SANDBOX, createClusterRpc)
+      .getSlot()
+      .send({ abortSignal: caller.signal });
+    await stall.readStalled;
+    mock.timers.tick(DEFAULT_RPC_REQUEST_TIMEOUT_MS);
+
+    assert.equal(await slot, BigInt(SLOT));
+    assert.deepEqual(stall.calls, [
+      genesisProbe(stalled),
+      slotRead(stalled),
+      genesisProbe(healthy),
       slotRead(healthy),
     ]);
   });
