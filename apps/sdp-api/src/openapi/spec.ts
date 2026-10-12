@@ -1,6 +1,8 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
-import { DEFAULT_SDP_API_URL } from "@sdp/types";
+import { DEFAULT_SDP_API_URL, SDP_RELEASE_CHANNELS, type SdpReleaseChannel } from "@sdp/types";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
+
+import { routeOwnerOf } from "@/routes/route-modules";
 
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
@@ -41,7 +43,7 @@ const OPENAPI_TAG = {
   },
   PAYMENTS: {
     name: "Payments",
-    description: "Wallet balances, transfer execution, and ramps.",
+    description: "Wallet balances, transfers, and recurring payments.",
   },
   PRIVATE_CHANNELS: {
     name: "Private Channels",
@@ -88,10 +90,56 @@ const OPENAPI_TAG = {
  */
 export const EARN_PUBLIC_SURFACE_PUBLISHED = false;
 
+/**
+ * The release channel the public document describes. Everything partner-facing
+ * is built from that document, so it lists only routes whose module production
+ * runs; a route outside this channel answers 403 there and stays unpublished.
+ */
+export const PUBLIC_OPENAPI_RELEASE_CHANNEL: SdpReleaseChannel = "stable";
+
 export type PublicOpenApiDocumentOptions = {
   /** Include the Earn family. Defaults to `EARN_PUBLIC_SURFACE_PUBLISHED`. */
   publishEarn?: boolean;
+  /**
+   * Publish only routes whose module runs in this release channel. Defaults to
+   * `PUBLIC_OPENAPI_RELEASE_CHANNEL`. A narrower filter on top of `publishEarn`,
+   * never a way around it: Earn is published only when both allow it.
+   */
+  releaseChannel?: SdpReleaseChannel;
 };
+
+/**
+ * Drops every route whose owning module (routes/route-modules.ts) is outside the
+ * release channel. A public route with no owner throws, so a new family cannot
+ * reach the public document without being filed under a module first.
+ */
+function keepRoutesInReleaseChannel(registry: OpenAPIRegistry, releaseChannel: SdpReleaseChannel) {
+  const modules: readonly string[] = SDP_RELEASE_CHANNELS[releaseChannel];
+  return registry.definitions.filter((definition) => {
+    if (definition.type !== "route") return true;
+    const owner = routeOwnerOf(definition.route.path);
+    if (owner === undefined) {
+      throw new Error(
+        `Public OpenAPI path ${definition.route.path} has no owning module in routes/route-modules.ts`
+      );
+    }
+    return owner === "core" || modules.includes(owner);
+  });
+}
+
+/** The public tags that at least one published operation uses, in declared order. */
+function usedTags(document: OpenAPIObject, tags: readonly { name: string }[]) {
+  const used = new Set(
+    Object.values(document.paths ?? {}).flatMap((item) =>
+      Object.values(item ?? {}).flatMap((operation) =>
+        typeof operation === "object" && operation !== null && "tags" in operation
+          ? ((operation as { tags?: string[] }).tags ?? [])
+          : []
+      )
+    )
+  );
+  return tags.filter((tag) => used.has(tag.name));
+}
 
 const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.HEALTH,
@@ -195,9 +243,11 @@ function registerAllPaths(registry: OpenAPIRegistry) {
 function createDocument({
   publicOnly,
   publishEarn,
+  releaseChannel,
 }: {
   publicOnly: boolean;
   publishEarn: boolean;
+  releaseChannel?: SdpReleaseChannel;
 }): OpenAPIObject {
   const registry = new OpenAPIRegistry();
 
@@ -210,9 +260,13 @@ function createDocument({
     registerAllPaths(registry);
   }
 
-  const generator = new OpenApiGeneratorV3(registry.definitions);
+  const generator = new OpenApiGeneratorV3(
+    releaseChannel === undefined
+      ? registry.definitions
+      : keepRoutesInReleaseChannel(registry, releaseChannel)
+  );
 
-  return generator.generateDocument({
+  const document = generator.generateDocument({
     openapi: "3.0.3",
     info: {
       title: "Solana Developer Platform API",
@@ -233,6 +287,10 @@ function createDocument({
       },
     ],
   });
+  if (publicOnly) {
+    document.tags = usedTags(document, document.tags ?? []);
+  }
+  return document;
 }
 
 export function createOpenApiDocument(): OpenAPIObject {
@@ -242,8 +300,12 @@ export function createOpenApiDocument(): OpenAPIObject {
 export function createPublicOpenApiDocument(
   options: PublicOpenApiDocumentOptions = {}
 ): OpenAPIObject {
+  const releaseChannel = options.releaseChannel ?? PUBLIC_OPENAPI_RELEASE_CHANNEL;
   return createDocument({
     publicOnly: true,
-    publishEarn: options.publishEarn ?? EARN_PUBLIC_SURFACE_PUBLISHED,
+    publishEarn:
+      (options.publishEarn ?? EARN_PUBLIC_SURFACE_PUBLISHED) &&
+      SDP_RELEASE_CHANNELS[releaseChannel].includes("earn"),
+    releaseChannel,
   });
 }

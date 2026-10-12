@@ -6,9 +6,7 @@
     "api-keys",
     "wallets",
     "projects",
-    "issuance",
     "payments",
-    "compliance",
-    "asset-profiles"
+    "compliance"
   ]
 }

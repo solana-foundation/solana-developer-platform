@@ -46,10 +46,8 @@ const FEATURE_SUMMARY = [
   "Wallets and custody",
   "API key management",
   "Projects",
-  "Token issuance and lifecycle operations",
-  "Payments, transfers, and ramps",
+  "Payments, transfers, and recurring payments",
   "Compliance screening",
-  "Asset profiles and public token metadata",
 ];
 
 const KEY_PAGE_SLUGS = [
@@ -57,13 +55,8 @@ const KEY_PAGE_SLUGS = [
   "guides/setup-organization",
   "guides/setup-wallets",
   "developing-with-sdp/manage-api-keys",
-  "tokens/tokenize-an-asset",
-  "tokens/create-a-token",
-  "tokens/deploy-a-token",
-  "tokens/mint-and-burn",
   "payments/index",
   "payments/send-basic-payment",
-  "reference/issuance-token-types",
   "tutorials/end-to-end-payment-flow",
   "reference/provider-onboarding",
   "reference/docs-for-ai",
@@ -73,10 +66,8 @@ const KEY_PAGE_SLUGS = [
   "reference/api/api-keys",
   "reference/api/wallets",
   "reference/api/projects",
-  "reference/api/issuance",
   "reference/api/payments",
   "reference/api/compliance",
-  "reference/api/asset-profiles",
 ];
 
 function stripMarkdownFormatting(value: string): string {

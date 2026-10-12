@@ -1,9 +1,7 @@
 import {
-  ArrowLeftRightIcon,
   ArrowRightIcon,
   BotIcon,
   BracesIcon,
-  CircleDollarSignIcon,
   FileTextIcon,
   HandshakeIcon,
   LandmarkIcon,
@@ -19,14 +17,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { HomePageClass } from "./home-page-class";
 import { HOME_SECTIONS } from "./home-sections";
-import {
-  ArchitectureSketch,
-  IssuanceSketch,
-  MarketsSketch,
-  RampsSketch,
-  TransfersSketch,
-  WalletsSketch,
-} from "./home-sketches";
+import { ArchitectureSketch, MarketsSketch, TransfersSketch, WalletsSketch } from "./home-sketches";
 
 /**
  * Section heading that doubles as a deep link: the heading carries the id and
@@ -95,19 +86,6 @@ const PARTNER_ROWS: { category: string; Icon: LucideIcon; partners: Partner[] }[
     ],
   },
   {
-    category: "Ramps",
-    Icon: ArrowLeftRightIcon,
-    partners: [
-      { name: "MoonPay", h: 24, src: "/docs/images/partners/moonpay.svg" },
-      { name: "Lightspark", h: 22, src: "/docs/images/partners/lightspark.svg" },
-      { name: "BVNK", h: 18, src: "/docs/images/partners/bvnk.svg" },
-      { name: "Coinbase", h: 22, src: "/docs/images/partners/coinbase.svg" },
-      { name: "Stripe", h: 30, src: "/docs/images/partners/stripe.svg" },
-      { name: "MoneyGram", h: 24, src: "/docs/images/partners/moneygram.svg" },
-      { name: "Mural Pay", h: 20, src: "/docs/images/partners/muralpay.svg" },
-    ],
-  },
-  {
     category: "Onchain Compliance",
     Icon: ShieldCheckIcon,
     partners: [
@@ -156,18 +134,6 @@ const modelSteps: HomeCard[] = [
     graphic: <WalletsSketch />,
   },
   {
-    name: "Issuance & Operations",
-    desc: "Create and deploy Token-2022 assets with compliance controls.",
-    href: "/docs/tokens/create-a-token",
-    graphic: <IssuanceSketch />,
-  },
-  {
-    name: "Ramps",
-    desc: "Move between fiat and crypto through our onramp and offramp partners.",
-    href: "/docs/payments/ramps",
-    graphic: <RampsSketch />,
-  },
-  {
     name: "Onchain Transfers",
     desc: "Send batch transfers, recurring payments, or public payment requests onchain.",
     href: "/docs/payments/send-basic-payment",
@@ -184,22 +150,10 @@ const modelSteps: HomeCard[] = [
 
 const tutorials: HomeCard[] = [
   {
-    name: "Issue a Regulated Stablecoin",
-    desc: "Build a GENIUS-compliant digital dollar on Solana with institutional custody and integrated compliance.",
-    href: "/docs/tutorials/issue-a-regulated-stablecoin",
-    Icon: CircleDollarSignIcon,
-  },
-  {
     name: "Manage Payroll with Recurring Payments",
     desc: "Schedule recurring onchain transfers to pay your team on time, every time.",
     href: "/docs/payments/send-payouts",
     Icon: RepeatIcon,
-  },
-  {
-    name: "Cash In, Cash Out",
-    desc: "Move between fiat and crypto through our onramp and offramp partners.",
-    href: "/docs/payments/ramps",
-    Icon: ArrowLeftRightIcon,
   },
   {
     name: "Batch Payments",

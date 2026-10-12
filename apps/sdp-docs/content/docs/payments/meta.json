@@ -10,9 +10,6 @@
     "---Accept Payments---",
     "accept-overview",
     "accept-verification",
-    "accept-indexing",
-    "---Ramps---",
-    "ramps",
-    "ramps-providers"
+    "accept-indexing"
   ]
 }

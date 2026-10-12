@@ -113,7 +113,7 @@ If the provider introduces a new onboarding lifecycle, manual instruction shape,
 
 ## 7. Document setup and limits
 
-Update `apps/sdp-docs/content/docs/payments/ramps-providers.mdx` with supported directions, rails, entity/country limits, sandbox behavior, required environment keys, webhook setup, and known limitations. Keep public endpoint claims aligned with `apps/sdp-api/src/openapi/**`, then run:
+Update `apps/sdp-docs/content/unpublished/payments/ramps-providers.mdx` (unpublished until Ramps reaches the `stable` release channel; move it back under `content/docs/` then) with supported directions, rails, entity/country limits, sandbox behavior, required environment keys, webhook setup, and known limitations. Keep public endpoint claims aligned with `apps/sdp-api/src/openapi/**`, then run:
 
 ```bash
 pnpm --filter sdp-docs check:links
