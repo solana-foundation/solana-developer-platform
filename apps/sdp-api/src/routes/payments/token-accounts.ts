@@ -41,14 +41,17 @@ interface GetSplTokenBalancesOptions extends BalanceReadBounds {
 }
 
 /**
- * Rejects an answer served from a bank older than the read's minimum context slot.
+ * Rejects an answer served from a bank older than the read's minimum context slot, or one whose
+ * context slot is missing or malformed, so a bounded read never passes without proving freshness.
  *
  * @param contextSlot - The slot the RPC answered at.
  * @param minContextSlot - The slot the read required, if any.
- * @throws When `contextSlot` is before `minContextSlot`.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the answer cannot be shown to be at or after
+ *   `minContextSlot`.
  */
 function assertReadAtOrAfterSlot(contextSlot: Slot, minContextSlot: Slot | undefined): void {
-  if (minContextSlot !== undefined && contextSlot < minContextSlot) {
+  if (minContextSlot === undefined) return;
+  if (typeof contextSlot !== "bigint" || contextSlot < minContextSlot) {
     throw solanaRpcError("RPC balance read is behind the confirmed transaction slot");
   }
 }
