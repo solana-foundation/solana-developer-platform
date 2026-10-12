@@ -519,6 +519,8 @@ describe("deriveDvpTradeKind", () => {
 });
 
 describe("DvP routes", () => {
+  const rpc = installClusterRpcStub();
+
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     originalMarkets = env.MARKETS_ENABLED;
@@ -582,7 +584,6 @@ describe("DvP routes", () => {
   });
 
   describe("mint inspection cluster", () => {
-    const rpc = installClusterRpcStub();
     const INSPECTED_MINT = "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1";
 
     it("reads a Production project's mint from mainnet-beta only", async () => {
@@ -820,7 +821,6 @@ describe("DvP routes", () => {
   // The reconciler's observations are the whole point of the detail view, and
   // deriving `funded` per client would put the >= threshold in several places.
   describe("per-leg funding", () => {
-    installClusterRpcStub();
     beforeEach(async () => {
       await seedCustodyWallets();
     });
@@ -1186,7 +1186,6 @@ describe("DvP routes", () => {
   // checking spot fields would let an added field pass silently, so the whole
   // trade object is compared.
   describe("derived party objects and kind", () => {
-    installClusterRpcStub();
     beforeEach(async () => {
       await seedCustodyWallets();
     });
