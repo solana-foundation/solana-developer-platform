@@ -16,6 +16,7 @@ import {
   preparePaymentSubscriptionPlanResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -74,6 +75,7 @@ function expectPreparedSubscriptionTransaction(
 
 describe("Payments routes — subscriptions", () => {
   installPaymentsRouteTestHooks();
+  installClusterRpcStub();
 
   it("requires owner wallet access when updating subscription plans", async () => {
     const planRes = await app.request(
