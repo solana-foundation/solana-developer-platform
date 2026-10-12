@@ -97,13 +97,9 @@ export async function enforceOrganizationAccess(
 
 /**
  * Organization access for an API key, with the key's own live row in the same
- * statement: the organization must be `active` and the key's row, when there
- * is one, usable — whatever the cached entry says.
- *
- * A cached key with no row at all is let through on the organization's word.
- * The API never deletes a key row (revocation is a status), the cache-miss
- * path already refuses a key it cannot find, and the reconciliation sweep's
- * orphan pass tombstones such an entry within one tick.
+ * statement: the organization must be `active` and the key's row must exist
+ * and be usable, whatever the cached entry says. A cached key with no row is
+ * refused like an unknown key; nothing falls back to the organization's word.
  */
 export async function enforceApiKeyOrganizationAccess(
   c: Context<{ Bindings: Env }>,
@@ -129,7 +125,12 @@ export async function enforceApiKeyOrganizationAccess(
   if (!row || !organizationStatusMayAuthenticate(row.organization_status)) {
     throw new AppError("REVOKED_API_KEY");
   }
-  const refusal = row.status === null ? null : apiKeyRowRefusal(row, Date.now());
+  // The organization row comes back either way, so a missing key row is told
+  // apart from an inactive organization (which refuses as revoked, above).
+  if (row.status === null) {
+    throw new AppError("INVALID_API_KEY", "Invalid API key");
+  }
+  const refusal = apiKeyRowRefusal(row, Date.now());
   if (refusal === "revoked") {
     throw new AppError("REVOKED_API_KEY");
   }
