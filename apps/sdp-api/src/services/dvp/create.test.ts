@@ -17,10 +17,11 @@ import {
 } from "@solana/kit";
 import { generateKeyPairSigner } from "@solana/signers";
 import { Context } from "hono";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
+import type { ClerkAuthContext } from "@/lib/auth";
 import type { AppError } from "@/lib/errors";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
@@ -155,10 +156,14 @@ async function rowsInDb(): Promise<
 
 describe("createDvpTrade", () => {
   installClusterRpcStub();
+  let clerkContext: ClerkAuthContext;
   let custodyWalletAddress: string;
   let sponsor: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let originalSettlementAuthority: string | undefined;
   let originalEncryptionKey: string | undefined;
+  beforeAll(async () => {
+    clerkContext = await testClerkContext(env);
+  });
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     vi.clearAllMocks();
@@ -319,7 +324,7 @@ describe("createDvpTrade", () => {
       walletId: "new_dvp_authority",
       address: SETTLEMENT_AUTHORITY,
     });
-    auditContext.set("clerk", await testClerkContext(env));
+    auditContext.set("clerk", clerkContext);
     auditContext.set("requestId", "dvp-create-audit-request");
     await clearKVStores(env);
     try {
