@@ -1,5 +1,5 @@
 import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
-import { SOL_MINT } from "@sdp/types";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
@@ -14,16 +14,19 @@ import {
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   installPaymentsRouteTestHooks,
+  seedProductionPrivyWalletUnderTestKey,
   sendTransactionMock,
   TEST_API_KEY,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
+  TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import {
   countTransferRows,
+  listProjectTransferRows,
   listTransferRows,
   postRawTransfer,
   postTransfer,
@@ -357,6 +360,50 @@ describe("Payments routes — on-chain transfers", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ id: transferId, status: "awaiting_payment" });
     expect(rows[0]?.signature).toBeFalsy();
+  });
+
+  it("records and reads a Production project's USDC as the mainnet-beta mint", async () => {
+    const mainnetUsdcMint = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
+    await seedProductionPrivyWalletUnderTestKey({
+      custodyWalletId: "cwlt_payments_production",
+      walletId: "privy_payments_production",
+      publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+      stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "ciphertext" },
+    });
+    rpc.answer(
+      "getTokenAccountsByOwner",
+      tokenAccountsByOwnerResult(1, [
+        {
+          pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+          mint: mainnetUsdcMint,
+          amount: "1000000000",
+          decimals: 6,
+          uiAmountString: "1000",
+        },
+      ])
+    );
+
+    await postTransfer(
+      {
+        sourceCustodyWalletId: "cwlt_payments_production",
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "USDC",
+        amount: "1",
+      },
+      {}
+    );
+
+    expect(await listProjectTransferRows(TEST_PRODUCTION_PROJECT_ID)).toEqual([
+      expect.objectContaining({
+        custody_wallet_id: "cwlt_payments_production",
+        token: mainnetUsdcMint,
+      }),
+    ]);
+    expect(rpc.calls).toContainEqual({
+      cluster: "mainnet-beta",
+      method: "getTokenAccountsByOwner",
+    });
+    expect(rpc.calls.filter((call) => call.cluster !== "mainnet-beta")).toEqual([]);
   });
 
   it("persists a signed outbox for an SPL transfer", async () => {
