@@ -28,7 +28,6 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError, badRequest, payloadTooLarge } from "@/lib/errors";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
-import { dryRunRetiredMiddleware } from "@/middleware/dry-run-retired";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -322,10 +321,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Idempotency-Key validation + response echo (public API only)
   app.use("/v1/*", idempotencyKeyMiddleware());
-
-  // The Dry-Run preview header is retired (ADR 0006). Refuse it on every
-  // public route so a client that relied on it never signs by accident.
-  app.use("/v1/*", dryRunRetiredMiddleware());
 
   // Backstop body bound for the whole public API: request handlers buffer the
   // body whole before zod validation runs, so without a ceiling a single
