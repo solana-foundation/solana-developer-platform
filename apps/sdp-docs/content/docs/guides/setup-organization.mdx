@@ -36,6 +36,8 @@ SDP creates the organization's sandbox and production projects the first time yo
 
 You can't create, delete, or archive projects; every organization has exactly these two. You can rename a project or change its description.
 
+Each project sets up its own custody providers. The production project can only create wallets in custody connections that use your own provider credentials; see [Set Up Wallets](/docs/guides/setup-wallets#custody-modes).
+
 The production project is available once production access is enabled for your organization. Until then, the dashboard lists only the sandbox project and `GET /v1/projects` leaves production out. Contact the SDP team to enable production.
 
 ## Switch between projects
@@ -58,8 +60,8 @@ Organization admins manage members on the **Settings** page, which opens from th
 
 | Role | Access |
 | --- | --- |
-| **Admin** | Full organization control: create, rotate, and delete API keys, invite and remove members, manage custody, and author policies |
-| **Member** | Works with tokens, payments, counterparties, and wallets, and can view API keys, but can't create or change keys, invite members, or author policies |
+| **Admin** | Full organization control: create, rotate, and delete API keys, invite and remove members, and manage custody, including creating wallets and custody connections |
+| **Member** | Works with tokens, payments, counterparties, and existing wallets, and can view API keys, but can't create or change keys, create wallets, manage custody, or invite members |
 
 Members you invite get access to both projects. To remove someone, open the actions menu on their row and click **Remove member**; they lose access to the organization immediately. You can't remove yourself or the organization's last admin.
 
@@ -81,11 +83,12 @@ Use the Projects endpoints to read project details and manage the keys in a proj
 | `GET /v1/projects` | Lists the organization's projects. With an API key, it returns only that key's project |
 | `GET /v1/projects/{projectId}` | Returns one project |
 | `PATCH /v1/projects/{projectId}` | Updates the project's name, description, or settings |
+| `GET /v1/projects/{projectId}/provider-availability` | Lists the custody, compliance, and ramp providers the deployment knows, with whether the project can use each one |
 | `GET /v1/projects/{projectId}/members` | Lists the project's members |
 | `GET /v1/projects/{projectId}/api-keys` | Lists the project's API keys, excluding revoked ones |
 | `POST /v1/projects/{projectId}/api-keys` | Creates an API key in the project |
 
-With an API key, `{projectId}` must be the key's own project; any other ID returns 404. These endpoints need project and API-key permissions that `api_admin` keys have and `api_developer` and `api_readonly` keys don't.
+With an API key, `{projectId}` must be the key's own project; any other ID returns 404. Any key of the project can read provider availability. The other endpoints need project and API-key permissions that `api_admin` keys have and `api_developer` and `api_readonly` keys don't.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
