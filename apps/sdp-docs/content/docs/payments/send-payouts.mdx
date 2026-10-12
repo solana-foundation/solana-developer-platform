@@ -18,8 +18,8 @@ To pay the same counterparty a fixed amount on a schedule, use [Recurring paymen
 
 ## How a batch runs
 
-1. SDP checks the request: your key's access to the source wallet, the token, every counterparty account, and every amount.
-2. SDP evaluates the batch against the source wallet's policy. See [Wallet policy](#wallet-policy).
+1. If your key carries allowed operations, SDP checks that they include the batch. See [Allowed operations](#allowed-operations).
+2. SDP checks the request: your key's access to the source wallet, the token, every counterparty account, and every amount.
 3. SDP packs the recipients into Solana transactions, called chunks. Each chunk holds up to `options.maxRecipientsPerTransaction` recipients (default 20, maximum 64), and fewer if the transaction would exceed Solana's size limit.
 4. Unless you set `options.preflight` to `false`, SDP simulates each chunk first. A chunk that fails simulation isn't sent, and its recipients are marked `failed`.
 5. SDP signs every chunk with the source wallet and submits them concurrently. SDP's fee payer pays the network fees and the rent for any recipient token account that has to be created.
@@ -78,7 +78,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches/estimate \
 }
 ```
 
-`tokenAccountRentLamports` covers recipient token accounts that don't exist yet. `sponsored` tells you whether SDP pays these fees. The estimate doesn't evaluate wallet policy, so a batch that estimates cleanly can still be denied or held.
+`tokenAccountRentLamports` covers recipient token accounts that don't exist yet. `sponsored` tells you whether SDP pays these fees. The estimate doesn't check your key's allowed operations, so a batch that estimates cleanly can still be refused when you create it.
 
 ## Create a batch
 
@@ -137,14 +137,13 @@ const response = await fetch(
   }
 );
 
-if (response.status === 202) {
-  // Held for approval; no batch exists yet. See "Wallet policy" below.
-  const { error } = await response.json();
-  console.log(error.code, error.details.approvalRequestId); // "SIGNING_PENDING", "appr_..."
-} else {
-  const { data } = await response.json();
-  // data.batch.id, data.batch.status, data.recipients[], data.transfers[]
+const body = await response.json();
+if (!response.ok) {
+  // No batch exists, for example after a 403 OPERATION_NOT_ALLOWED.
+  throw new Error(`${body.error.code}: ${body.error.message}`);
 }
+const { data } = body;
+// data.batch.id, data.batch.status, data.recipients[], data.transfers[]
 ```
 </Tab>
 <Tab value="Java">
@@ -216,45 +215,11 @@ Mint one `Idempotency-Key` per payout run and reuse it on every retry of that ex
 
 Keys are scoped to the project. `externalId` is for your own correlation and doesn't deduplicate anything. See [Idempotency](/docs/developing-with-sdp/idempotency).
 
-## Wallet policy
+## Allowed operations
 
-SDP evaluates every batch against the source wallet's policy before it signs anything. The batch is one wallet operation of type `payment_transfer_batch_execute`:
+A batch is operation type `payment_transfer_batch_execute`, in the `payment` family. If your key carries [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations) and the list includes neither, `POST /v1/payments/transfer-batches` returns `403` with `error.code: "OPERATION_NOT_ALLOWED"` before SDP validates the body. SDP creates no batch and submits nothing. `error.details` names the `operationType` and `operationFamily`.
 
-- The operation's amount is the batch total, so amount rules apply to the total.
-- Each recipient is also evaluated as a leg with its own amount and destination, so destination and amount rules check every recipient.
-
-If the decision isn't `allow`, SDP creates no batch and submits nothing:
-
-| Status | `error.code` | Meaning |
-| --- | --- | --- |
-| `403` | `FORBIDDEN` | The policy denied the batch. |
-| `202` | `SIGNING_PENDING` | The policy requires approval. |
-
-A policy `403` or `202` carries `error.details` with `walletOperationId`, `policyEvaluationId`, `decision`, `reasonCode`, `reason`, `requiresApproval` and `approvalRequestId`:
-
-```json title="response.json"
-{
-  "error": {
-    "code": "SIGNING_PENDING",
-    "message": "Wallet operation requires policy approval",
-    "details": {
-      "walletOperationId": "wop_...",
-      "policyEvaluationId": "peval_...",
-      "decision": "approval_required",
-      "reasonCode": "wallet_policy_match",
-      "reason": "Payment matched approval policy.",
-      "requiresApproval": true,
-      "approvalRequestId": "appr_..."
-    }
-  }
-}
-```
-
-A held batch waits on its approval request. Someone other than the requester approves or rejects it with `POST /v1/wallets/approval-requests/{approvalRequestId}/approve` or `/reject`. On approval, SDP runs the stored request itself, so don't resubmit while it's pending. Track it with `GET /v1/wallets/approval-requests/{approvalRequestId}`: `operation.status` moves to `executing`, then `completed` or `failed`, and `operation.executionError` explains a failure.
-
-If you sent an `Idempotency-Key`, the approved batch carries it. Once it has run, repeating the original request with the same key returns the batch. You can also find it with `GET /v1/payments/transfer-batches?externalId=…`.
-
-See [Wallet policies](/docs/wallet-operations/policies) for rule kinds and operation types.
+The check also runs before an `Idempotency-Key` replay, so a key whose list no longer includes batches gets the `403`, not the stored batch.
 
 ## Track recipients
 

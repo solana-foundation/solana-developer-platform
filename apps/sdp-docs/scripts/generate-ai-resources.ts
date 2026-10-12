@@ -45,7 +45,7 @@ type Section = {
 const FEATURE_SUMMARY = [
   "Wallets and custody",
   "API key management",
-  "Wallet and API-key policy controls",
+  "Allowed operations on API keys",
   "Projects",
   "Token issuance and lifecycle operations",
   "Payments, transfers, and ramps",

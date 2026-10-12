@@ -57,7 +57,7 @@ See the full schema in the [Issuance API reference](/docs/reference/api/issuance
 - If the token is paused, minting and transfer operations are unavailable until it is unpaused.
 - Freeze and unfreeze flows accept a holder wallet address; SDP derives the associated token account automatically.
 - SDP operations require the relevant authority on a custody wallet. If an authority has been rotated outside SDP, rotate it back to a controlled wallet before deploying, minting, or running compliance actions.
-- Before SDP signs with a custody wallet, it checks the action against that wallet's policy. Deploy, mint, burn, force-burn, seize, authority changes, freeze and unfreeze, pause and unpause, on-chain metadata updates, and on-chain allowlist changes can all be denied (`403 FORBIDDEN`) or held for approval (`202 SIGNING_PENDING`). See [Wallet policies](/docs/wallet-operations/policies).
+- If an API key carries [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations), deploy, mint, burn, force-burn, seize, authority changes, freeze and unfreeze, pause and unpause, token edits, and allowlist additions and removals must each be in its list. The `issuance` family covers them all, and transfers need `payment`. An operation outside the list returns `403 OPERATION_NOT_ALLOWED`.
 
 ## For AI agents
 

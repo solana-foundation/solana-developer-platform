@@ -32,15 +32,13 @@ A request must clear every layer that is configured on its key:
 
 | Role | Description |
 | --- | --- |
-| `api_admin` | All permissions, including custody administration, token admin operations, API-key and project management, and policy authoring |
+| `api_admin` | All permissions, including custody administration, token admin operations, and API-key and project management |
 | `api_developer` | Read and write access to tokens, payments, counterparties, and wallets, plus read access to compliance. Excludes token admin operations (pause, freeze, seize, force-burn, authority transfer), custody administration, and API-key and project management |
 | `api_readonly` | Read-only access to tokens, payments, counterparties, wallets, and compliance. No access to API keys or projects |
 
 Only an `api_admin` key can create or rotate another `api_admin` key.
 
-### Policy authoring
-
-Policies constrain what keys can do, so only administrators can write them. Updating a wallet's policy (`PUT /v1/payments/wallets/{walletId}/policies`) and creating, revising, activating, or binding API-key policy profiles (`/v1/api-keys/{keyId}/policy-profiles`, `PUT /v1/api-keys/{keyId}/policy-bindings`) require an `api_admin` key. A key with any other role gets `403`, even if its custom permissions include the write permissions those routes check. In the dashboard, only organization admins can author policies.
+Allowed operations restrict only requests made with the key; dashboard sessions aren't API keys and aren't restricted by them. A key can only grant operations inside its own list. See [Allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations) for the families and how to set them.
 
 ## Errors
 
@@ -53,8 +51,8 @@ Authentication and authorization failures are always machine-distinguishable:
 | Key has been revoked | 401 | `REVOKED_API_KEY` |
 | Key past its expiry or rotation deadline | 401 | `EXPIRED_API_KEY` |
 | Request origin not in the key's IP allowlist | 403 | `FORBIDDEN` |
-| Policy authoring with a non-`api_admin` key that holds the route's permissions | 403 | `FORBIDDEN` |
 | Key lacks a required permission | 403 | `INSUFFICIENT_PERMISSIONS` |
+| Operation not in the key's allowed operations | 403 | `OPERATION_NOT_ALLOWED` |
 | Resource belongs to another project | 404 | `NOT_FOUND` |
 | Per-key rate limit exceeded | 429 | `RATE_LIMITED` |
 

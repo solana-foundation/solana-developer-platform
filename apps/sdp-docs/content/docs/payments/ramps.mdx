@@ -213,7 +213,7 @@ HttpRequest request = HttpRequest.newBuilder()
 
 Unknown fields are rejected with `400`.
 
-Before SDP contacts the provider, it checks that the provider is offered in your key's environment and enabled for your organization, that the provider supports the `assetRail` and `fiatCurrency` pair, that the counterparty and wallet exist and the wallet is in your key's scope, and that the destination wallet's policy allows the quote (see [Policy gating](#policy-gating)).
+Before SDP contacts the provider, it checks that your key's allowed operations include the quote (see [Allowed operations](#allowed-operations)), that the provider is offered in your key's environment and enabled for your organization, that the provider supports the `assetRail` and `fiatCurrency` pair, and that the counterparty and wallet exist and the wallet is in your key's scope.
 
 ### What the quote contains
 
@@ -277,15 +277,9 @@ There is no further SDP endpoint to call. The provider moves the money and deliv
 - Poll `GET /v1/payments/transfers/{transferId}` for one ramp, or list ramps with `GET /v1/payments/transfers?category=ramp`.
 - A transfer for a `manual_instructions` quote starts at `awaiting_payment`; other quotes start at the quote's status, usually `pending`. See [Verifying a payment](/docs/payments/accept-verification#status-lifecycle) for every ramp transfer status.
 
-## Policy gating
+## Allowed operations
 
-An on-ramp quote is a wallet operation on the destination wallet, so SDP evaluates the wallet's policy before it contacts the provider. Policy rules match it with operation family `ramp` and operation type `ramp_onramp_quote`. Amount and velocity rules see the request's `fiatAmount` as the amount and the mint of the requested `assetRail` as the asset.
-
-- **Allowed:** SDP creates the quote.
-- **Denied:** the request returns `403` with code `FORBIDDEN`. `error.details` carries the `decision`, `reasonCode`, `reason`, and `policyEvaluationId`. SDP creates no quote and no transfer.
-- **Approval required:** the request returns `202` with code `SIGNING_PENDING`, and `error.details.approvalRequestId` identifies the approval request. SDP does not create the quote at this point.
-
-See [Wallet policies](/docs/wallet-operations/policies) for rule kinds and approvals.
+An on-ramp quote is operation type `ramp_onramp_quote`, in the `ramp` family. If your key carries [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations) and the list includes neither, the request returns `403` with code `OPERATION_NOT_ALLOWED` before SDP validates the body or counts the request against the quote rate limit. SDP creates no quote and no transfer.
 
 ## Sandbox: simulating a pay-in
 
@@ -336,7 +330,8 @@ Errors use the standard envelope: `error.code`, `error.message`, and optional `e
 | `400` | `BAD_REQUEST` | The body or query fails validation, including unknown fields. Also returned for a BVNK on-ramp quote in a fiat currency other than `USD`. |
 | `400` | `UNSUPPORTED_CORRIDOR` | The provider does not support the `assetRail` and `fiatCurrency` pair. `error.details.supportedProviders` lists the providers that do. |
 | `403` | `INSUFFICIENT_PERMISSIONS` | The API key lacks a permission listed under [Permissions](#permissions). |
-| `403` | `FORBIDDEN` | The provider is not offered in your key's environment or not enabled for your organization, the wallet is outside your key's scope, the wallet policy denied the quote, or a sandbox simulation was requested with a production key. |
+| `403` | `OPERATION_NOT_ALLOWED` | The key's allowed operations include neither `ramp` nor `ramp_onramp_quote`. See [Allowed operations](#allowed-operations). |
+| `403` | `FORBIDDEN` | The provider is not offered in your key's environment or not enabled for your organization, the wallet is outside your key's scope, or a sandbox simulation was requested with a production key. |
 | `404` | `NOT_FOUND` | The counterparty, wallet, or transfer does not exist in your project. |
 | `409` | `CONFLICT` | The counterparty is not provisioned with the provider (read its [requirements](#reading-counterparty-requirements)), or one of the sandbox simulation conflicts described above. |
 | `429` | `RATE_LIMITED` | Quote rate limit reached (see below). |
@@ -358,5 +353,5 @@ Over either limit, the request returns `429`. The quotas fail closed: if SDP can
 
 - [Ramp providers](/docs/payments/ramps-providers) — per-provider configuration and capability matrix.
 - [Verifying a payment](/docs/payments/accept-verification) — ramp transfer statuses.
-- [Wallet policies](/docs/wallet-operations/policies) — rules that gate `ramp_onramp_quote`.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys#allowed-operations) — limit a key's operations, including `ramp_onramp_quote`.
 - [Provider onboarding](/docs/reference/provider-onboarding) — how providers are activated for an organization.

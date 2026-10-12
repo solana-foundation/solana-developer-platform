@@ -58,7 +58,7 @@ Use this file as the quick reference for answering tokenization questions on top
   3. Deploy token
   4. Add holders to allowlist before distribution
   5. Mint to allowlisted token accounts
-  6. Use freeze, seize, or force-burn only when policy requires it
+  6. Use freeze, seize, or force-burn only when your compliance process requires it
 
 ### Loyalty, rewards, or game currency
 
@@ -128,3 +128,4 @@ Use this file as the quick reference for answering tokenization questions on top
 - Standard burn takes the SDP wallet `id` (`cwlt_*`) holding the tokens; freeze and unfreeze accept the holder wallet or its token account.
 - The token must be `active` after deploy before minting or operational movement makes sense.
 - Burn, freeze, seize, and related actions depend on the relevant authority actually being controlled by the selected signer.
+- An API key with a non-empty `allowedOperations` list needs `issuance` (or the specific `issuance_*_execute` types) for deploy, mint, burn, freeze and unfreeze, pause and unpause, seize, force-burn, authority changes, token edits, and allowlist changes, and `payment` for transfers. Prepare routes don't check the list. Anything outside the list returns `403 OPERATION_NOT_ALLOWED`. See `apps/sdp-docs/content/docs/developing-with-sdp/manage-api-keys.mdx`, "Allowed operations".

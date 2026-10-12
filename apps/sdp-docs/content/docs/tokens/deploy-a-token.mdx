@@ -98,7 +98,7 @@ Always pass an `Idempotency-Key` — retrying with the same key after a network 
 
 The deployment wallet holds the mint authority. To give the metadata, freeze, or permanent-delegate authority to other wallets, pass their SDP Wallet IDs in `authorityCustodyWalletIds` (`metadata`, `freeze`, `permanentDelegate`); omitted roles keep their template defaults. `feePayment` is `sponsored` (default) or `wallet`.
 
-SDP checks the deploy against the deployment wallet's policy before signing. A `deny` returns `403 FORBIDDEN`; a deploy held for approval returns `202` with error code `SIGNING_PENDING` and `error.details.approvalRequestId`. A separate metadata wallet must be allowed outright: if its policy denies or holds the deploy, the request returns `403`. See [Wallet policies](/docs/wallet-operations/policies).
+If the API key carries [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations), the list must include `issuance` or `issuance_deploy_execute`. Otherwise the deploy returns `403 OPERATION_NOT_ALLOWED` and nothing is signed.
 
 </Tab>
 </Tabs>

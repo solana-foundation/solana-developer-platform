@@ -27,7 +27,7 @@ For mint, burn, seize, force burn, and authority transfer, the prepare route tak
 On an execute route, SDP runs the whole transaction itself:
 
 1. It checks the API key's permissions and its access to the custody wallet that will sign.
-2. Issuance execute routes, transfers, and transfer batches are checked against [wallet policy](/docs/wallet-operations/policies) before SDP signs. A policy can deny the operation or hold it for approval.
+2. Issuance execute routes, transfers, transfer batches, and the recurring payment create, update, and collect routes also check the key's [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations). An operation outside a non-empty list is refused with `403 OPERATION_NOT_ALLOWED`, and nothing is signed.
 3. SDP signs with the custody wallet and submits the transaction.
 4. The response carries the operation record with its on-chain `signature` and `status`. A transfer can come back `processing` while SDP is still confirming it; don't create a replacement transfer for it.
 
@@ -47,7 +47,7 @@ Submit the signed transaction before the cluster passes `lastValidBlockHeight`. 
 
 Prepare routes differ from execute routes in three ways:
 
-- **No policy evaluation.** Prepare routes don't run wallet policy or approvals. Permission checks, wallet access checks, and issuance token rules such as control lists and maximum supply still run.
+- **No allowed-operations check.** Allowed operations restrict execute routes only, so a key whose list leaves out mint can still call `mint/prepare`. Permission checks, wallet access checks, and issuance token rules such as control lists and maximum supply still run.
 - **No idempotent replay.** Prepare routes don't use `Idempotency-Key`. Every call builds a new transaction and creates a new operation record.
 - **SDP doesn't submit.** You submit the signed transaction to Solana and check the outcome on-chain; SDP isn't told whether it landed.
 
@@ -137,7 +137,7 @@ const signature = await rpc
 | If you need | Use |
 | --- | --- |
 | SDP to sign with a custody wallet, submit, and return the recorded result | Execute |
-| Wallet policy and approvals to apply | Execute. Prepare routes don't evaluate policy. |
+| The key's allowed operations to apply | Execute. Prepare routes don't check allowed operations. |
 | Safe retries after timeouts | Execute with an `Idempotency-Key` |
 | SDP to keep the operation record up to date | Execute. Prepared issuance records stay `pending`. |
 | Fee sponsorship | Execute. SDP doesn't sponsor prepared issuance transactions. |
