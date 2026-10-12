@@ -31,7 +31,7 @@ Sign up at [platform.solana.com](https://platform.solana.com) and create or join
 
 ### 2. Custody provider
 
-An institutional issuer in the US pipeline configures [Anchorage Digital Bank](https://www.anchorage.com/platform/stablecoin-issuance) as the custodian. The Anchorage onboarding team provisions the signing wallets and binds them to your SDP organization. If you don't have an Anchorage relationship yet, create a sandbox wallet with another supported provider, such as Privy; see [Set up wallets](/docs/guides/setup-wallets). The API surface is identical; only the wallet record's `provider` field differs.
+An institutional issuer in the US pipeline often holds reserves with a qualified custodian such as [Anchorage Digital Bank](https://www.anchorage.com/platform/stablecoin-issuance). SDP can create Anchorage wallets but doesn't sign with them, so the wallets that deploy, mint, and administer the token come from a provider that signs. In the sandbox project, create them with Privy or another supported provider; see [Set up wallets](/docs/guides/setup-wallets). A production project uses custody connections only, so its signing wallets live in your own Privy account.
 
 ### 3. API keys: the two-key institutional pattern
 
