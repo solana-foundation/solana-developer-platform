@@ -36,6 +36,7 @@ import {
   isManagedCustodyUseAllowed,
 } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
+import { boundSigningTime } from "./signing-timeout";
 
 type ConfigAdapterResolver = (
   organizationId: string,
@@ -1276,7 +1277,9 @@ function getTransactionSigner(
       "INVALID_REQUEST"
     );
   }
-  return adapter.getTransactionSigner(wallet.walletId, wallet.publicKey);
+  // Bounded, so a hung custody provider fails the request instead of holding
+  // its Idempotency-Key (HOO-1918).
+  return adapter.getTransactionSigner(wallet.walletId, wallet.publicKey).then(boundSigningTime);
 }
 
 function connectionTargetSelect(): string {
