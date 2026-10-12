@@ -174,7 +174,7 @@ export function assertPaymentWalletExactAccess(
 const replayedSourceWalletSchema = z.object({ sourceCustodyWalletId: z.string() });
 
 /**
- * `authorizeReplay` for a route that moves money from `sourceCustodyWalletId`
+ * `replayAccess` for a route that moves money from `sourceCustodyWalletId`
  * (HOO-1918): before an Idempotency-Key replay is served, the caller's API key
  * must still be allowed to move money from that wallet, read fresh as the
  * handler would. A body without the field was never stored (validation refuses

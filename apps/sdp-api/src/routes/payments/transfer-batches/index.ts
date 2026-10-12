@@ -38,7 +38,7 @@ transferBatches.post(
     leaseSeconds: 300,
     canonicalize: canonicalizeTransferBatchBody,
     honorsDryRun: true,
-    authorizeReplay: authorizeSourceWalletReplay,
+    replayAccess: authorizeSourceWalletReplay,
   }),
   validateBody(createTransferBatchSchema),
   policyGate({

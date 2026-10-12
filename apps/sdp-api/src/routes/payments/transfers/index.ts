@@ -28,7 +28,7 @@ transfers.post(
     key: "required",
     serverErrors: "rerun",
     honorsDryRun: true,
-    authorizeReplay: authorizeSourceWalletReplay,
+    replayAccess: authorizeSourceWalletReplay,
   }),
   validateBody(createTransferSchema),
   policyGate({
