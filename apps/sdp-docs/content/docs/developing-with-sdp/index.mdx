@@ -40,6 +40,8 @@ Errors return a machine-readable `code` alongside a human-readable `message`:
 }
 ```
 
+The `Dry-Run` header is retired. A request that carries it, with any value, is refused with `400` and the message "Dry-Run is retired". Nothing is signed or sent.
+
 Include the `requestId` when reporting an issue — it links your request to our internal traces and audit records.
 
 ## Execution model

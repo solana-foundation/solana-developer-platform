@@ -49,6 +49,7 @@ import {
   mapHeliusRingsHealthRows,
   mapHeliusRingsProjectRingRow,
   mapHeliusRingsWalletRow,
+  RETIRED_APPROVAL_FAILURE,
 } from "@/db/repositories";
 import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
@@ -1632,16 +1633,20 @@ export class HeliusRingsService {
     row: HeliusRingsOperationRow,
     events: OperationEvent[] = []
   ): PrivateOperation {
+    // A stored `approval_required` row waits on an approval that no longer
+    // exists. Report it as a failure that cannot be retried (ADR 0006).
+    const retired = row.state === "approval_required";
     return {
       id: row.id,
       walletId: row.wallet_id,
       opType: row.op_type,
-      state: row.state,
+      state: retired ? "failed" : row.state,
       proof: null,
       outerTxSignature: row.outer_tx_signature,
       photonIndexedAt: row.photon_indexed_at,
-      failure:
-        row.failure_code && row.failure_message !== null && row.retryable !== null
+      failure: retired
+        ? { ...RETIRED_APPROVAL_FAILURE }
+        : row.failure_code && row.failure_message !== null && row.retryable !== null
           ? { code: row.failure_code, message: row.failure_message, retryable: row.retryable }
           : null,
       ringProgramId: row.ring_program_id ?? null,

@@ -58,6 +58,11 @@ export interface SaveApiKeyAuthoringInput {
   mode: ApiKeyAuthoringMode;
   keyId?: string;
   draft: ApiKeyAuthoringDraft;
+  /**
+   * Edit only: whether the user changed the operations section. A key can hold a stored
+   * value the API no longer accepts, so an untouched list is never sent back.
+   */
+  operationsTouched?: boolean;
 }
 
 export type SaveApiKeyAuthoringResult =
@@ -232,8 +237,9 @@ export async function saveApiKeyAuthoringAction(
         // `walletScope: "all"` alone resets the key to every wallet. The API refuses it
         // next to any wallet field, null included.
         ...walletPayload,
-        // An empty list clears the restriction.
-        allowedOperations: allowedOperations.length > 0 ? allowedOperations : null,
+        ...(input.operationsTouched
+          ? { allowedOperations: allowedOperations.length > 0 ? allowedOperations : null }
+          : {}),
       }),
     });
 
