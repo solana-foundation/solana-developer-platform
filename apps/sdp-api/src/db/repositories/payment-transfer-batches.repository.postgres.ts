@@ -91,6 +91,12 @@ function batchWalletAuthorizationFilter(
     );
     values.push(...authorization.custodyWalletIds);
   }
+  if (authorization.providerWalletIds.length > 0) {
+    clauses.push(
+      `(source_custody_wallet_id IS NULL AND source_wallet_id IN (${authorization.providerWalletIds.map(() => "?").join(", ")}))`
+    );
+    values.push(...authorization.providerWalletIds);
+  }
 
   return { sql: clauses.length > 0 ? `(${clauses.join(" OR ")})` : "1 = 0", values };
 }

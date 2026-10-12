@@ -185,7 +185,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     ).toBeNull();
   });
 
-  it("filters mixed batches by exact pins before pagination and counts", async () => {
+  it("authorizes exact batches and legacy null-pin history before pagination", async () => {
     const db = getDb(env);
     await repo.createTransferBatchWithRecipients({
       batch: {
@@ -224,16 +224,21 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     const authorizationDenied = await repo.listTransferBatches({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [TEST_WALLET_ID] },
+      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [] },
       limit: 20,
       offset: 0,
     });
 
     expect(selected.rows).toHaveLength(1);
     expect(selected.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    expect(authorized.total).toBe(1);
-    expect(authorized.rows).toHaveLength(1);
-    expect(authorized.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
+    expect(authorized.total).toBe(2);
+    expect(authorized.rows).toHaveLength(2);
+    expect(authorized.rows).toContainEqual(
+      expect.objectContaining({ source_custody_wallet_id: TEST_CUSTODY_WALLET_ID })
+    );
+    expect(authorized.rows).toContainEqual(
+      expect.objectContaining({ id: legacy.id, source_custody_wallet_id: null })
+    );
     const nextPage = await repo.listTransferBatches({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
@@ -244,7 +249,19 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       limit: 1,
       offset: 1,
     });
-    expect(nextPage).toEqual({ rows: [], total: 1 });
+    expect(nextPage).toMatchObject({
+      rows: [expect.objectContaining({ source_wallet_id: TEST_WALLET_ID })],
+      total: 2,
+    });
+    const providerOnly = await repo.listTransferBatches({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      walletAuthorization: { custodyWalletIds: [], providerWalletIds: [TEST_WALLET_ID] },
+      limit: 20,
+      offset: 0,
+    });
+    expect(providerOnly.total).toBe(1);
+    expect(providerOnly.rows.map((row) => row.id)).toEqual([legacy.id]);
     const tenantWide = await repo.listTransferBatches({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,

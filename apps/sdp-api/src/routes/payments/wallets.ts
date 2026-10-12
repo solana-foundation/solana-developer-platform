@@ -199,15 +199,19 @@ export function assertPaymentWalletReadAccess(
   c: AppContext,
   wallet: { custodyWalletId: string | null; providerWalletId: string }
 ): void {
-  const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(getAuth(c), [
-    "payments:read",
-  ]);
-  if (
-    allowedCustodyWalletIds &&
-    (!wallet.custodyWalletId || !allowedCustodyWalletIds.includes(wallet.custodyWalletId))
-  ) {
-    throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+  const auth = getAuth(c);
+  if (wallet.custodyWalletId) {
+    const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(auth, [
+      "payments:read",
+    ]);
+    if (allowedCustodyWalletIds && !allowedCustodyWalletIds.includes(wallet.custodyWalletId)) {
+      throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
+    }
+    return;
   }
+
+  // shortcut: preserve null-pin history access until audited backfill and cutover.
+  assertApiKeyWalletAccess(auth, wallet.providerWalletId, ["payments:read"]);
 }
 
 export function resolveWalletAddress(

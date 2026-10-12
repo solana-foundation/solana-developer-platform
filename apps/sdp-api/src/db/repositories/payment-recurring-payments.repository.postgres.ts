@@ -62,6 +62,12 @@ function addWalletAuthorization(
     authorizationClauses.push("source_custody_wallet_id = ANY(?::text[])");
     values.push(authorization.custodyWalletIds);
   }
+  if (authorization.providerWalletIds.length > 0) {
+    authorizationClauses.push(
+      "(source_custody_wallet_id IS NULL AND source_wallet_id = ANY(?::text[]))"
+    );
+    values.push(authorization.providerWalletIds);
+  }
   clauses.push(
     authorizationClauses.length > 0 ? `(${authorizationClauses.join(" OR ")})` : "1 = 0"
   );

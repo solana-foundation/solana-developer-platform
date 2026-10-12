@@ -57,6 +57,12 @@ function buildTransferListWhere(params: ListTransfersInput): {
       );
       values.push(...params.walletAuthorization.custodyWalletIds);
     }
+    if (params.walletAuthorization.providerWalletIds.length > 0) {
+      authorizationClauses.push(
+        `(pt.custody_wallet_id IS NULL AND pt.wallet_id IN (${buildInClause(params.walletAuthorization.providerWalletIds.length)}))`
+      );
+      values.push(...params.walletAuthorization.providerWalletIds);
+    }
     clauses.push(
       authorizationClauses.length > 0 ? `(${authorizationClauses.join(" OR ")})` : "1 = 0"
     );
