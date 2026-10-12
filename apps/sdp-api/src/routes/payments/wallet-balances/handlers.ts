@@ -1,6 +1,6 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
+import { assertValidAddress } from "@sdp/solana/address";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { badRequestQuery, providerUnavailable } from "@/lib/errors";
 import { success } from "@/lib/response";
@@ -20,6 +20,7 @@ const BALANCE_READ_TIMEOUT_MS = 3_000;
 
 export async function getWalletBalances(c: AppContext) {
   const { wallet } = await resolveWalletFromParams(c, ["wallets:read"]);
+  const owner = assertValidAddress(wallet.publicKey, "publicKey");
 
   const parsed = walletBalancesQuerySchema.safeParse(c.req.query());
   if (!parsed.success) throw badRequestQuery({ errors: z.flattenError(parsed.error).fieldErrors });
@@ -32,8 +33,8 @@ export async function getWalletBalances(c: AppContext) {
     minContextSlot: minimumSlot === undefined ? undefined : BigInt(minimumSlot),
   };
   const [solBalanceResult, splBalancesResult] = await Promise.allSettled([
-    tokenAccounts.getLamportsBalance(rpc, wallet.publicKey as Address, bounds),
-    tokenAccounts.getSplTokenBalances(rpc, wallet.publicKey as Address, {
+    tokenAccounts.getLamportsBalance(rpc, owner, bounds),
+    tokenAccounts.getSplTokenBalances(rpc, owner, {
       ...bounds,
       tokenLabelsByMint,
     }),

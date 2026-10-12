@@ -1,3 +1,4 @@
+import { solanaRpcError } from "@sdp/rpc";
 import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -48,7 +49,7 @@ interface GetSplTokenBalancesOptions extends BalanceReadBounds {
  */
 function assertReadAtOrAfterSlot(contextSlot: Slot, minContextSlot: Slot | undefined): void {
   if (minContextSlot !== undefined && contextSlot < minContextSlot) {
-    throw new Error("RPC balance read is behind the confirmed transaction slot");
+    throw solanaRpcError("RPC balance read is behind the confirmed transaction slot");
   }
 }
 
