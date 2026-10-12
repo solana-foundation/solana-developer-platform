@@ -408,6 +408,10 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
     if (!scanRoots.some((scanRoot) => relativePath.startsWith(scanRoot))) continue;
     if (isTestFile(relativePath)) continue;
 
+    // Namespace imports in this file that carry a pinned constructor. An
+    // allowlisted file may call through one (`ns.Adapter(...)`), but not hand
+    // the namespace itself on or index it with a computed name.
+    const pinnedNamespaces = new Set();
     const report = (node, symbol, label, viaModule) => {
       if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
         symbol = checker.getAliasedSymbol(symbol);
@@ -428,11 +432,35 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
         violations.push(
           `${relativePath}:${line + 1}: references ${capability.id} (${label}). ${capability.why}`
         );
-      } else if (!viaModule && !isPinnedUse(checker, node)) {
+      } else if (viaModule) {
+        // `export *` re-exports each constructor under its own name, which
+        // every caller still resolves to. A named namespace export, a dynamic
+        // import or a require hands the whole module out as one value.
+        if (ts.isImportDeclaration(node)) {
+          pinnedNamespaces.add(checker.getSymbolAtLocation(node.importClause.namedBindings.name));
+        } else if (!(ts.isExportDeclaration(node) && !node.exportClause)) {
+          violations.push(
+            `${relativePath}:${line + 1}: hands ${capability.id} out as a module value (${label}); an allowlisted file may only re-export it with a plain \`export *\`. ${capability.why}`
+          );
+        }
+      } else if (!isPinnedUse(checker, node)) {
         violations.push(
           `${relativePath}:${line + 1}: hands ${capability.id} out as a value (${label}); an allowlisted file may only call it, construct it or re-export it by name, so every reference elsewhere still resolves to it. ${capability.why}`
         );
       }
+    };
+    /** A namespace of pinned constructors used as anything but `ns.member`. */
+    const reportNamespaceHandOut = (node) => {
+      const symbol = checker.getSymbolAtLocation(node);
+      if (!symbol || !pinnedNamespaces.has(symbol)) return;
+      const parent = node.parent;
+      if (ts.isNamespaceImport(parent) && parent.name === node) return;
+      if (ts.isPropertyAccessExpression(parent) && parent.expression === node) return;
+      if (inTypePosition(node)) return;
+      const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+      violations.push(
+        `${relativePath}:${line + 1}: hands a namespace of pinned constructors out (${node.text}); call through it by name instead.`
+      );
     };
     // A whole module handed out as a value (namespace import, require, dynamic
     // import, export *) carries every pinned constructor it exports, including
@@ -453,6 +481,7 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
     };
     const visit = (node) => {
       if (ts.isIdentifier(node)) {
+        reportNamespaceHandOut(node);
         report(node, checker.getSymbolAtLocation(node), node.text, false);
       } else if (
         ts.isElementAccessExpression(node) &&

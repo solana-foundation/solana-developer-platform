@@ -315,3 +315,20 @@ test("lets a defining package use its own constructors and checks every other on
   const flagged = new Set(found.map((violation) => violation.split(":")[0]));
   assert.deepEqual([...flagged], ["src/other/uses.ts"]);
 });
+
+test("lets an allowlisted file call through a namespace but not hand the namespace out", () => {
+  const found = violations({
+    "src/allowed.ts": `import * as ns from "./lib/cap";
+ns.mint();
+export * from "./lib/cap";
+export * as direct from "./lib/cap";
+export const leak = ns;
+declare const name: "mint";
+ns[name]();
+`,
+    "src/user.ts": `import { direct } from "./allowed";\nconst name = "mint" as const;\ndirect[name]();\n`,
+  });
+
+  const lines = found.map((violation) => violation.split(": ")[0]).sort();
+  assert.deepEqual(lines, ["src/allowed.ts:4", "src/allowed.ts:5", "src/allowed.ts:7"]);
+});
