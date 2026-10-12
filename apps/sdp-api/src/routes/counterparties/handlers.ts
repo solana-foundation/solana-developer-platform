@@ -41,9 +41,9 @@ import {
   notFound,
 } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
-import { assertRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampRuntime } from "@/routes/payments/context";
+import { admitRamp } from "@/routes/payments/ramps/admission";
 import {
   type BvnkStoredStage,
   bvnkCustomerRequirementsFromMetadata,
@@ -264,7 +264,7 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
     });
   }
 
-  assertRampProviderInChannel(c, query.data.provider);
+  await admitRamp(c, { need: "read", provider: query.data.provider });
 
   const repo = getCounterpartiesRepository(c);
   const counterparty = await repo.getCounterpartyById({

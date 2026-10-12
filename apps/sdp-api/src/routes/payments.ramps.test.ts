@@ -230,6 +230,29 @@ describe("Payments routes — ramps", () => {
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
+  it("refuses ramp quotes from a key without counterparties:read", async () => {
+    await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
+
+    for (const direction of ["onramp", "offramp"]) {
+      const response = await app.request(
+        `/v1/payments/ramps/${direction}/quote`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ provider: "moonpay", counterpartyId: "cpty_quote_permissions" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(403);
+      const body = (await response.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INSUFFICIENT_PERMISSIONS");
+    }
+  });
+
   it("rejects the retired symbol-shaped onramp estimate request", async () => {
     const response = await app.request(
       "/v1/payments/ramps/onramp/estimate",
@@ -1528,19 +1551,21 @@ describe("Payments routes — ramps", () => {
     provider: string;
     providerReference: string;
     status: string;
+    custodyWalletId?: string;
   }): Promise<void> {
     const now = new Date().toISOString();
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers
-           (id, organization_id, project_id, wallet_id, token, amount, type, direction, status, provider, provider_reference, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, organization_id, project_id, wallet_id, custody_wallet_id, token, amount, type, direction, status, provider, provider_reference, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         input.id,
         TEST_ORG.id,
         TEST_PROJECT.id,
         TEST_WALLET_ID,
+        input.custodyWalletId ?? null,
         "USDC",
         null,
         "offramp",
@@ -1780,6 +1805,111 @@ describe("Payments routes — ramps", () => {
       .first<{ status: string }>();
     expect(required(row).status).toBe("awaiting_payment");
   });
+  describe("cancel wallet scope, for every provider", () => {
+    const cancelRampTransfer = (transferId: string) =>
+      app.request(
+        "/v1/payments/ramps/transfers/cancel",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ transferId }),
+        },
+        env
+      );
+    const transferStatus = async (transferId: string) =>
+      required(
+        await getDb(env)
+          .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+          .bind(transferId)
+          .first<{ status: string }>()
+      ).status;
+    const scopeKeyToTestWallet = () =>
+      seedCachedKey({
+        walletBindings: [{ walletId: TEST_WALLET_ID, permissions: ["payments:write"] }],
+      });
+
+    it("denies a wallet-scoped key canceling MoonPay and Stripe transfers in another wallet", async () => {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, 'Sibling wallet', 'transfer', 'active')`
+        )
+        .bind(
+          "cwlt_cancel_sibling",
+          TEST_CONFIG_ID,
+          "wallet_cancel_sibling",
+          TEST_SOLANA_ADDRESSES.wallet2
+        )
+        .run();
+      await scopeKeyToTestWallet();
+
+      for (const provider of ["moonpay", "stripe"]) {
+        const transferId = `xfr_cancel_sibling_${provider}`;
+        await seedRampTransfer({
+          id: transferId,
+          provider,
+          providerReference: `${provider}_ref_cancel_sibling`,
+          status: "awaiting_payment",
+          custodyWalletId: "cwlt_cancel_sibling",
+        });
+
+        const res = await cancelRampTransfer(transferId);
+
+        expect(res.status).toBe(403);
+        expect(await transferStatus(transferId)).toBe("awaiting_payment");
+      }
+    });
+
+    it("lets a wallet-scoped key cancel a transfer in its own wallet", async () => {
+      await scopeKeyToTestWallet();
+      await seedRampTransfer({
+        id: "xfr_cancel_own_wallet",
+        provider: "moonpay",
+        providerReference: "moonpay_ref_cancel_own_wallet",
+        status: "awaiting_payment",
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      });
+
+      const res = await cancelRampTransfer("xfr_cancel_own_wallet");
+
+      expect(res.status).toBe(200);
+      expect(await transferStatus("xfr_cancel_own_wallet")).toBe("canceled");
+    });
+
+    it("denies a wallet-scoped key canceling a transfer bound to no wallet", async () => {
+      await scopeKeyToTestWallet();
+      await seedRampTransfer({
+        id: "xfr_cancel_unbound_scoped",
+        provider: "moonpay",
+        providerReference: "moonpay_ref_cancel_unbound_scoped",
+        status: "awaiting_payment",
+      });
+
+      const res = await cancelRampTransfer("xfr_cancel_unbound_scoped");
+
+      expect(res.status).toBe(403);
+      expect(await transferStatus("xfr_cancel_unbound_scoped")).toBe("awaiting_payment");
+    });
+
+    it("lets a key without wallet scope cancel a transfer bound to no wallet", async () => {
+      await seedRampTransfer({
+        id: "xfr_cancel_unbound_unscoped",
+        provider: "moonpay",
+        providerReference: "moonpay_ref_cancel_unbound_unscoped",
+        status: "awaiting_payment",
+      });
+
+      const res = await cancelRampTransfer("xfr_cancel_unbound_unscoped");
+
+      expect(res.status).toBe(200);
+      expect(await transferStatus("xfr_cancel_unbound_unscoped")).toBe("canceled");
+    });
+  });
+
   describe("sandbox pay-in simulation", () => {
     let originalMuralSandboxApiKey: string | undefined;
     let originalMuralSandboxTransferApiKey: string | undefined;

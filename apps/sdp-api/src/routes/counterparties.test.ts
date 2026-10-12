@@ -17,7 +17,11 @@ import {
   bvnkVerifiedIndividualCustomer,
   bvnkWalletProfilesResponse,
 } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
-import { BVNK_FUNDING_WALLET_STATUS, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types";
+import {
+  BVNK_FUNDING_WALLET_STATUS,
+  type OrganizationProviderOverrides,
+  SDP_RAMP_PROVIDER_STAGES,
+} from "@sdp/types";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
 import { getDb } from "@/db";
@@ -274,6 +278,27 @@ describe("Counterparties Routes", () => {
     return result;
   }
 
+  async function setRampProviderOverrides(
+    ramps: NonNullable<OrganizationProviderOverrides["ramps"]>
+  ): Promise<void> {
+    await getDb(env).execute(
+      `UPDATE organizations
+       SET settings = (COALESCE(NULLIF(settings, ''), '{}')::jsonb
+                       || jsonb_build_object('providerOverrides', ?::jsonb))::text
+       WHERE id = ?`,
+      [JSON.stringify({ ramps }), TEST_ORG.id]
+    );
+  }
+
+  afterEach(async () => {
+    await getDb(env).execute(
+      `UPDATE organizations
+       SET settings = (COALESCE(NULLIF(settings, ''), '{}')::jsonb - 'providerOverrides')::text
+       WHERE id = ?`,
+      [TEST_ORG.id]
+    );
+  });
+
   describe("GET /v1/counterparties/metadata", () => {
     it("returns field options (enums + countries)", async () => {
       const res = await app.request(
@@ -458,6 +483,24 @@ describe("Counterparties Routes", () => {
           }),
         ])
       );
+    });
+
+    it("refuses a provider the organization isn't entitled to before any provider call", async () => {
+      await setRampProviderOverrides({ moonpay: false });
+      const created = await createCounterparty({ externalId: "requirements_unentitled" });
+      const cp = (await created.json()).data.counterparty;
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=${TEST_CP_CUSTODY_WALLET_ID}`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error.details.reason).toBe("provider_not_entitled");
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it("returns enriched Lightspark payout accounts in the payout tree", async () => {
@@ -2779,6 +2822,57 @@ describe("Counterparties Routes", () => {
       expect(response.status).toBe(200);
       const { accounts } = (await response.json()).data as { accounts: { id: string }[] };
       expect(accounts.map((account) => account.id)).toEqual(["provider_account_included_mural"]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("neither lists nor enriches accounts at a provider the organization isn't entitled to", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_unentitled" });
+      const owner = (await created.json()).data.counterparty;
+      await seedProviderAccount({
+        id: "provider_account_unentitled_lightspark",
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:unentitled",
+        externalAccountReference: "ExternalAccount:unentitled",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "ACTIVE",
+        status: "active",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      await seedProviderAccount({
+        id: "provider_account_entitled_mural",
+        counterpartyId: owner.id,
+        provider: "mural",
+        providerCustomerReference: "mural_customer_entitled",
+        externalAccountReference: "mural_external_entitled",
+        fiatCurrency: "GBP",
+        destinationCountry: "GB",
+        paymentRail: "FPS",
+        providerStatus: "ACTIVE",
+        status: "archived",
+        createdAt: "2026-01-02T00:00:00.000Z",
+      });
+      await setRampProviderOverrides({ lightspark: false });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const filtered = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts?provider=lightspark`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(filtered.status).toBe(403);
+      expect((await filtered.json()).error.details.reason).toBe("provider_not_entitled");
+
+      const listed = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+      expect(listed.status).toBe(200);
+      const { accounts } = (await listed.json()).data as { accounts: { id: string }[] };
+      expect(accounts.map((account) => account.id)).toEqual(["provider_account_entitled_mural"]);
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 

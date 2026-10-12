@@ -1102,7 +1102,8 @@ function decideStagedProvider(
 function decideProjectProvider(
   env: Env,
   facts: ProjectProviderFacts,
-  request: ProjectProviderRequest
+  request: ProjectProviderRequest,
+  rampProviderStages: SdpRampProviderStages = SDP_RAMP_PROVIDER_STAGES
 ): ProjectProviderDecision {
   switch (request.family) {
     case "custody": {
@@ -1129,14 +1130,14 @@ function decideProjectProvider(
     }
     case "ramps":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isRampProviderAvailable(env, request.provider, SDP_RAMP_PROVIDER_STAGES),
+        inReleaseChannel: isRampProviderAvailable(env, request.provider, rampProviderStages),
         offered: isRampProviderSurfaced(request.provider, facts.environment),
         entry: facts.availability.providers.ramps[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
     case "compliance":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isModuleAvailable(env, "compliance", SDP_RAMP_PROVIDER_STAGES),
+        inReleaseChannel: isModuleAvailable(env, "compliance", rampProviderStages),
         // Compliance has no surfacing table: every compliance provider is offered.
         offered: true,
         entry: facts.availability.providers.compliance[request.provider],
@@ -1557,9 +1558,10 @@ export interface ProjectProviderVerdict {
 /**
  * Loads the request's project facts once (its active project row and its
  * organization's provider access) and returns the project provider rule over
- * them with the access it read, so a request deciding several providers reads
- * the database once. Evaluating is not refusing: a caller that refuses the
- * request with a refusal throws `refuseProjectProvider(decision)`.
+ * them, against the request's release-channel stages, with the access it read,
+ * so a request deciding several providers reads the database once. Evaluating
+ * is not refusing: a caller that refuses the request with a refusal throws
+ * `refuseProjectProvider(decision)`.
  *
  * @param c - Request context carrying the authenticated project scope.
  * @returns The rule's non-logging `decide` for any provider of the project and
@@ -1574,7 +1576,7 @@ export async function loadProjectProviderVerdict(
     projectId: requireProjectId(c),
   });
   return {
-    decide: (request) => decideProjectProvider(c.env, facts, request),
+    decide: (request) => decideProjectProvider(c.env, facts, request, c.get("rampProviderStages")),
     availability: facts.availability,
   };
 }

@@ -22,7 +22,6 @@ import {
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import { noContent, success } from "@/lib/response";
-import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { sendOnceUnderTransferClaim } from "@/services/payments/transfer-claim";
@@ -30,6 +29,7 @@ import { assertProviderAvailable } from "@/services/provider-availability.servic
 import { getPaymentsRepository, rampRuntime, resolveSdpEnvironment } from "../context";
 import { mapTransferRow } from "../mappers";
 import { assertPaymentWalletExactAccess, resolveScope } from "../wallets";
+import { admitRamp } from "./admission";
 import { MURAL_SANDBOX_PAYIN_RAIL_BY_CURRENCY } from "./providers/mural";
 import type { cancelRampTransferSchema, simulateSandboxTransferSchema } from "./schemas";
 
@@ -50,17 +50,9 @@ export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRa
   if (!isRampTransferType(transfer.type)) {
     throw badRequest("Only ramp transfers can be canceled through this endpoint.");
   }
-  // A provider the release channel leaves out is off completely, its transfers included.
-  assertTransferRampProviderInChannel(c, transfer);
+  await admitRamp(c, { need: "cancel", transfer });
   if (!isCancelableRampTransferStatus(transfer.status)) {
     throw badRequest(`Transfer can no longer be canceled (status: ${transfer.status}).`);
-  }
-
-  if (transfer.provider === "bvnk" && transfer.type === "onramp") {
-    if (transfer.custody_wallet_id === null) {
-      throw internalError("BVNK on-ramp transfer has no custody wallet.");
-    }
-    assertPaymentWalletExactAccess(c, transfer.custody_wallet_id, ["payments:write"]);
   }
 
   const updated = await repository.updateTransferStatusGuarded({
