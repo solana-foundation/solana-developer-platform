@@ -8,7 +8,7 @@ import type {
   PaymentTransferSummary,
   SolanaCluster,
 } from "@sdp/types";
-import type { RampProviderId } from "@sdp/types/provider-access";
+import type { PersistedRampProviderId } from "@sdp/types/provider-access";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { explorerTxUrl } from "@/lib/explorer";
 import {
@@ -444,7 +444,7 @@ function bvnkOfframpBuilder(
  * provider does not serve) contribute nothing.
  */
 const PROVIDER_TRANSFER_DETAIL_FIELDS: Partial<
-  Record<RampProviderId, Partial<Record<RampTransferDirection, ProviderRowBuilder>>>
+  Record<PersistedRampProviderId, Partial<Record<RampTransferDirection, ProviderRowBuilder>>>
 > = {
   moonpay: { onramp: moonpayBuilder, offramp: moonpayBuilder },
   coinbase: { onramp: coinbaseBuilder },

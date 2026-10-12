@@ -1781,25 +1781,17 @@ describe("Payments routes — ramps", () => {
     expect(required(row).status).toBe("awaiting_payment");
   });
   describe("sandbox pay-in simulation", () => {
-    let originalMuralSandboxApiKey: string | undefined;
-    let originalMuralSandboxTransferApiKey: string | undefined;
     let originalCoinbaseApiKeyId: string | undefined;
     let originalCoinbaseApiKeySecret: string | undefined;
 
     beforeEach(() => {
-      originalMuralSandboxApiKey = env.MURAL_PAY_SANDBOX_API_KEY;
-      originalMuralSandboxTransferApiKey = env.MURAL_PAY_SANDBOX_TRANSFER_API_KEY;
       originalCoinbaseApiKeyId = env.COINBASE_CDP_API_KEY_ID;
       originalCoinbaseApiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
-      env.MURAL_PAY_SANDBOX_API_KEY = "test-mural-simulation-api-key";
-      env.MURAL_PAY_SANDBOX_TRANSFER_API_KEY = "test-mural-simulation-transfer-api-key";
       env.COINBASE_CDP_API_KEY_ID = "test-coinbase-simulation-api-key-id";
       env.COINBASE_CDP_API_KEY_SECRET = "test-coinbase-simulation-api-key-secret";
     });
 
     afterEach(() => {
-      env.MURAL_PAY_SANDBOX_API_KEY = originalMuralSandboxApiKey;
-      env.MURAL_PAY_SANDBOX_TRANSFER_API_KEY = originalMuralSandboxTransferApiKey;
       env.COINBASE_CDP_API_KEY_ID = originalCoinbaseApiKeyId;
       env.COINBASE_CDP_API_KEY_SECRET = originalCoinbaseApiKeySecret;
     });
@@ -2149,23 +2141,6 @@ describe("Payments routes — ramps", () => {
         status: 400,
         message: "not available for provider: coinbase",
       },
-      {
-        name: "an unsupported Mural currency",
-        transferId: "xfr_sim_rejected_mural_eur",
-        seed: {
-          ...LIGHTSPARK_SIM_SEED,
-          provider: "mural",
-          providerReference: "Quote:mural-sim-eur",
-          fiatCurrency: "EUR",
-          fiatAmount: "1500.25",
-          providerData: { mural: { accountId: "acct_sim_1" } },
-        },
-        counterpartyProviderData: {
-          mural: { organization: { id: "org_test_sim_1", kycStatus: "approved" } },
-        },
-        status: 400,
-        message: "does not support EUR",
-      },
     ];
 
     it.each(REJECTED_BEFORE_CLAIM_CASES)(
@@ -2177,7 +2152,6 @@ describe("Payments routes — ramps", () => {
         const spies = [
           vi.spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend").mockResolvedValue({}),
           vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin").mockResolvedValue({}),
-          vi.spyOn(RAMP_PROVIDER_CLIENTS.mural, "simulatePayin").mockResolvedValue({}),
         ];
 
         try {
@@ -2199,43 +2173,6 @@ describe("Payments routes — ramps", () => {
         }
       }
     );
-
-    it("derives the Mural account, rail, and amount in cents from the transfer", async () => {
-      const transferId = "xfr_mural_sim_1";
-      const counterpartyId = await seedCounterparty({
-        providerData: { mural: { organization: { id: "org_test_sim_1", kycStatus: "approved" } } },
-      });
-      await seedSimulatableTransfer({
-        id: transferId,
-        provider: "mural",
-        providerReference: "Quote:mural-sim-1",
-        fiatCurrency: "MXN",
-        fiatAmount: "1500.25",
-        counterpartyId,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        providerData: { mural: { accountId: "acct_sim_1" } },
-        type: "onramp",
-        status: "awaiting_payment",
-      });
-      const simulateSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.mural, "simulatePayin")
-        .mockResolvedValue({ accepted: true });
-
-      const res = await simulateRequest(transferId);
-
-      expect(res.status).toBe(204);
-      expect(simulateSpy).toHaveBeenCalledTimes(1);
-      expect(simulateSpy).toHaveBeenCalledWith(expect.anything(), {
-        organizationId: "org_test_sim_1",
-        destinationAccountId: "acct_sim_1",
-        rail: "spei",
-        amountValue: "150025",
-        currencySymbol: "MXN",
-      });
-
-      simulateSpy.mockRestore();
-    });
 
     it("hides another tenant's transfer without calling Lightspark or changing the row", async () => {
       const transferId = "xfr_lightspark_sim_other_tenant";
@@ -3088,17 +3025,14 @@ describe("Payments routes — ramps", () => {
       );
     }
 
-    const NONEXISTENT_MURAL_SIMULATE_BODY = {
+    const NONEXISTENT_SIMULATE_BODY = {
       transferId: "xfr_does_not_exist",
     };
 
     it("refuses the sandbox simulator from a production-project Clerk", async () => {
       await seedClerkAuth();
 
-      const res = await simulateAsClerk(
-        TEST_PRODUCTION_PROJECT_ID,
-        NONEXISTENT_MURAL_SIMULATE_BODY
-      );
+      const res = await simulateAsClerk(TEST_PRODUCTION_PROJECT_ID, NONEXISTENT_SIMULATE_BODY);
 
       expect(res.status).toBe(403);
       const body = (await res.json()) as { error: { message: string } };
@@ -3108,7 +3042,7 @@ describe("Payments routes — ramps", () => {
     it("still lets sandbox-project Clerks past the environment guard", async () => {
       await seedClerkAuth();
 
-      const res = await simulateAsClerk(TEST_PROJECT.id, NONEXISTENT_MURAL_SIMULATE_BODY);
+      const res = await simulateAsClerk(TEST_PROJECT.id, NONEXISTENT_SIMULATE_BODY);
 
       expect(res.status).toBe(404);
       const body = (await res.json()) as { error: { code: string } };

@@ -536,7 +536,8 @@ export const transferSchema = z
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
     amount: tokenAmountSchema.optional(),
     provider: z.enum(RAMP_PROVIDERS).optional().openapi({
-      description: "Ramp provider for on-ramp and off-ramp transfer records.",
+      description:
+        "Ramp provider for on-ramp and off-ramp transfer records. A retired provider's records keep its id.",
       example: "moonpay",
     }),
     counterpartyId: z.string().optional().openapi({

@@ -189,7 +189,6 @@ export const PROVIDER_SETUP_REGISTRY = {
     bvnk: rampSetup("bvnk"),
     moneygram: rampSetup("moneygram"),
     coinbase: rampSetup("coinbase"),
-    mural: rampSetup("mural"),
     stripe: rampSetup("stripe"),
   },
 } as const satisfies ProviderSetupRegistryShape;

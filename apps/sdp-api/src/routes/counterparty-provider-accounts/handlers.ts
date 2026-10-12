@@ -3,6 +3,8 @@ import {
   BVNK_CUSTOMER_LINK_STAGE,
   type BvnkCounterpartyProviderCustomerLink,
   type CounterpartyProviderAccount,
+  type GenericCounterpartyProviderCustomerLink,
+  isRetiredRampProviderId,
   type ListCounterpartyProviderAccountsResponse,
   type ProviderWalletBalance,
 } from "@sdp/types";
@@ -60,7 +62,8 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
   }
 
   // Accounts at a provider the release channel leaves out are neither listed nor
-  // enriched: that provider is off completely.
+  // enriched: that provider is off completely. A retired provider's accounts
+  // are history, so they still list, as stored.
   const rows = (
     await getCounterpartyProviderAccountsRepository(c).listProviderAccounts({
       organizationId: auth.organizationId,
@@ -68,7 +71,9 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
       counterpartyId: counterparty.id,
       ...query.data,
     })
-  ).filter((row) => isRampProviderInChannel(c, row.provider));
+  ).filter(
+    (row) => isRetiredRampProviderId(row.provider) || isRampProviderInChannel(c, row.provider)
+  );
   const runtime = rampRuntime(c);
   const enriched = await enrichCounterpartyProviderAccounts(
     runtime,
@@ -200,9 +205,10 @@ function mapFundingWalletAccount(
 /**
  * Maps a customer-link row into the public customer-link shape, dispatching
  * per provider so BVNK's pre-customer session metadata gets its own stage
- * mapping while every other provider maps from the row columns directly.
- * The provider cases mirror RAMP_PROVIDERS, so a provider added there without
- * a case here fails the exhaustive default at compile time.
+ * mapping while every other provider, retired ones included, maps from the
+ * row columns directly. The provider cases mirror RAMP_PROVIDERS, so a
+ * provider added there without a case here fails the exhaustive default at
+ * compile time.
  *
  * @param row - Parent-scoped customer-link row.
  * @returns Public customer-link object.
@@ -217,21 +223,30 @@ function mapCustomerLink(
     case "lightspark":
     case "moneygram":
     case "coinbase":
-    case "mural":
     case "stripe":
-      return {
-        provider: row.provider,
-        id: row.id,
-        providerCustomerReference: row.provider_customer_reference,
-        status: row.status,
-        providerStatus: row.provider_status,
-        createdAt: row.created_at,
-      };
+      return mapGenericCustomerLink(row, row.provider);
     default: {
+      if (isRetiredRampProviderId(row.provider)) {
+        return mapGenericCustomerLink(row, row.provider);
+      }
       const exhaustive: never = row.provider;
       throw internalError(`Unhandled ramp provider: ${String(exhaustive)}`);
     }
   }
+}
+
+function mapGenericCustomerLink(
+  row: CounterpartyProviderAccountRow,
+  provider: GenericCounterpartyProviderCustomerLink["provider"]
+): GenericCounterpartyProviderCustomerLink {
+  return {
+    provider,
+    id: row.id,
+    providerCustomerReference: row.provider_customer_reference,
+    status: row.status,
+    providerStatus: row.provider_status,
+    createdAt: row.created_at,
+  };
 }
 
 /**

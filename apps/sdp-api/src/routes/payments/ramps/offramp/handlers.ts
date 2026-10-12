@@ -356,8 +356,6 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       });
       break;
     }
-    case "mural":
-      throw internalError("Mural off-ramp quote is not implemented yet.");
     case "coinbase":
       throw badRequest("Coinbase Onramp does not support off-ramp.");
     case "stripe":

@@ -1,4 +1,4 @@
-import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import { isRampProviderId, RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type {
   RampExternalAccountDetails,
   RampProvider,
@@ -92,7 +92,8 @@ async function fetchGroupDetails(
 /**
  * Groups completed rows by provider, fiat currency, and customer reference so
  * rows that drifted to a new provider customer are enriched against their own
- * reference instead of failing the read.
+ * reference instead of failing the read. A retired provider has no client to
+ * ask, so its rows read as stored.
  *
  * @param rows - External provider-account rows to group.
  * @returns Groups keyed by provider, fiat currency, and customer reference.
@@ -106,7 +107,7 @@ function groupProviderAccounts(
     if (row.fiat_currency === null) {
       throw internalError("External provider-account row is missing fiat currency.");
     }
-    if (row.external_account_reference === null) {
+    if (row.external_account_reference === null || !isRampProviderId(row.provider)) {
       continue;
     }
 

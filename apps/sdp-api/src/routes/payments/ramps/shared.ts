@@ -64,7 +64,6 @@ import type { createOfframpQuoteSchema } from "./offramp/schemas";
 import type { createOnrampQuoteSchema } from "./onramp/schemas";
 import { advanceBvnkRequirements } from "./providers/bvnk";
 import { advanceLightsparkRequirements } from "./providers/lightspark";
-import { resolveMuralRequirements } from "./providers/mural";
 import {
   assertRampQuoteBindingMatches,
   isRampQuoteBindingExpired,
@@ -336,8 +335,6 @@ export async function advanceCounterpartyRequirements(
       return advanceLightsparkRequirements(c, input);
     case "bvnk":
       return advanceBvnkRequirements(c, input);
-    case "mural":
-      return resolveMuralRequirements(c, input.counterparty, input.projectId, input.direction);
     case "coinbase":
       return readyCounterparty("coinbase", input.direction);
     case "stripe":

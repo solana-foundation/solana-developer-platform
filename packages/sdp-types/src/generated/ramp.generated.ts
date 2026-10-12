@@ -15,7 +15,7 @@ import type { RampProviderId } from "../provider-access";
 
 export const RAMP_SUPPORT_HASH =
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  "4327e937a4eaea826fc48cba64296e5ada048a2d71cc59bf66e0f1e439f1efb0" as const;
+  "d435176d9b8301f9eb1e8edfb37e221890ee5d072602ebad9f60f15f43ee5edb" as const;
 
 export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
@@ -29,8 +29,6 @@ export const RAMP_PROVIDER_SUPPORT_HASHES = {
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   coinbase: "5f01258d98e8d8402ea69e349823315744598c38a7e1ee075ea806983f3fe138",
   // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
-  mural: "0cb8effa8f7edb6a8d64c9b774abc47f52b17493dad7cda61f6b317b05633d95",
-  // biome-ignore lint/security/noSecrets: deterministic support hash, not a secret.
   stripe: "65c17177d0f4125644b82e65dcbe495380d891c220e171a5106654f4b17a35e6",
 } as const satisfies Record<RampProviderId, string>;
 
@@ -40,7 +38,6 @@ export const RAMP_PROVIDER_SUPPORT_COUNTS = {
   bvnk: { onramp: 8, offramp: 8 },
   moneygram: { onramp: 1, offramp: 147 },
   coinbase: { onramp: 3, offramp: 0 },
-  mural: { onramp: 11, offramp: 0 },
   stripe: { onramp: 2, offramp: 0 },
 } as const satisfies Record<RampProviderId, { onramp: number; offramp: number }>;
 
@@ -205,7 +202,6 @@ export const RAMP_COUNTRY_CODES = [
   "AR",
   "AT",
   "AU",
-  "AX",
   "AZ",
   "BA",
   "BD",
@@ -228,7 +224,6 @@ export const RAMP_COUNTRY_CODES = [
   "CI",
   "CL",
   "CM",
-  "CN",
   "CO",
   "CR",
   "CV",
@@ -254,12 +249,10 @@ export const RAMP_COUNTRY_CODES = [
   "GB",
   "GD",
   "GE",
-  "GF",
   "GH",
   "GI",
   "GM",
   "GN",
-  "GP",
   "GQ",
   "GR",
   "GT",
@@ -297,11 +290,9 @@ export const RAMP_COUNTRY_CODES = [
   "MC",
   "MD",
   "ME",
-  "MF",
   "MH",
   "MK",
   "ML",
-  "MQ",
   "MR",
   "MT",
   "MU",
@@ -329,7 +320,6 @@ export const RAMP_COUNTRY_CODES = [
   "PW",
   "PY",
   "QA",
-  "RE",
   "RO",
   "RS",
   "RW",
@@ -369,22 +359,17 @@ export const RAMP_COUNTRY_CODES = [
   "VN",
   "VU",
   "WS",
-  "YT",
   "ZA",
   "ZM",
 ] as const;
 export type RampCountryCode = (typeof RAMP_COUNTRY_CODES)[number];
 
 export const ONRAMP_SOURCE_CURRENCIES = [
-  "ARS",
   "AUD",
-  "BOB",
   "BRL",
   "CAD",
   "CHF",
-  "CLP",
   "COP",
-  "CRC",
   "CZK",
   "DKK",
   "DOP",
@@ -2312,87 +2297,6 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
       entityTypes: [],
     },
   },
-  mural: {
-    onramp: {
-      currencies: {
-        ARS: { min: null, max: null },
-        BOB: { min: null, max: null },
-        BRL: { min: null, max: null },
-        CLP: { min: null, max: null },
-        COP: { min: null, max: null },
-        CRC: { min: null, max: null },
-        EUR: { min: null, max: null },
-        MXN: { min: null, max: null },
-        PEN: { min: null, max: null },
-        USD: { min: null, max: null },
-        ZAR: { min: null, max: null },
-      },
-      countrySupport: {
-        coverage: "by-country",
-        countries: {
-          AD: ["EUR"],
-          AR: ["ARS"],
-          AT: ["EUR"],
-          AX: ["EUR"],
-          BE: ["EUR"],
-          BG: ["EUR"],
-          BO: ["BOB"],
-          BR: ["BRL"],
-          CH: ["EUR"],
-          CL: ["CLP"],
-          CN: ["USD"],
-          CO: ["COP"],
-          CR: ["CRC"],
-          CY: ["EUR"],
-          CZ: ["EUR"],
-          DE: ["EUR"],
-          DK: ["EUR"],
-          EE: ["EUR"],
-          ES: ["EUR"],
-          FI: ["EUR"],
-          FR: ["EUR"],
-          GB: ["EUR"],
-          GF: ["EUR"],
-          GP: ["EUR"],
-          GR: ["EUR"],
-          HK: ["USD"],
-          HR: ["EUR"],
-          HU: ["EUR"],
-          IE: ["EUR"],
-          IS: ["EUR"],
-          IT: ["EUR"],
-          LI: ["EUR"],
-          LT: ["EUR"],
-          LU: ["EUR"],
-          LV: ["EUR"],
-          MF: ["EUR"],
-          MQ: ["EUR"],
-          MT: ["EUR"],
-          MX: ["MXN"],
-          NL: ["EUR"],
-          NO: ["EUR"],
-          PA: ["USD"],
-          PE: ["PEN", "USD"],
-          PL: ["EUR"],
-          PT: ["EUR"],
-          RE: ["EUR"],
-          RO: ["EUR"],
-          SE: ["EUR"],
-          SI: ["EUR"],
-          SK: ["EUR"],
-          US: ["USD"],
-          YT: ["EUR"],
-          ZA: ["ZAR"],
-        },
-      },
-      entityTypes: ["business"],
-    },
-    offramp: {
-      currencies: {},
-      countrySupport: { coverage: "unreported" },
-      entityTypes: [],
-    },
-  },
   stripe: {
     onramp: {
       currencies: {
@@ -2421,22 +2325,16 @@ export const RAMP_PROVIDER_SUPPORT_DETAILS = {
 >;
 
 export const ONRAMP_SUPPORT = [
-  { source: "ARS", dest: "usdc.solana", providers: ["mural"] },
   { source: "AUD", dest: "sol.solana", providers: ["moonpay"] },
   { source: "AUD", dest: "pyusd.solana", providers: ["moonpay"] },
-  { source: "BOB", dest: "usdc.solana", providers: ["mural"] },
   { source: "BRL", dest: "sol.solana", providers: ["moonpay"] },
-  { source: "BRL", dest: "usdc.solana", providers: ["mural"] },
   { source: "BRL", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "CAD", dest: "sol.solana", providers: ["moonpay"] },
   { source: "CAD", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "CHF", dest: "sol.solana", providers: ["moonpay"] },
   { source: "CHF", dest: "pyusd.solana", providers: ["moonpay"] },
-  { source: "CLP", dest: "usdc.solana", providers: ["mural"] },
   { source: "COP", dest: "sol.solana", providers: ["moonpay"] },
-  { source: "COP", dest: "usdc.solana", providers: ["mural"] },
   { source: "COP", dest: "pyusd.solana", providers: ["moonpay"] },
-  { source: "CRC", dest: "usdc.solana", providers: ["mural"] },
   { source: "CZK", dest: "sol.solana", providers: ["moonpay"] },
   { source: "CZK", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "DKK", dest: "sol.solana", providers: ["moonpay"] },
@@ -2446,7 +2344,7 @@ export const ONRAMP_SUPPORT = [
   { source: "EGP", dest: "sol.solana", providers: ["moonpay"] },
   { source: "EGP", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "EUR", dest: "sol.solana", providers: ["moonpay", "bvnk"] },
-  { source: "EUR", dest: "usdc.solana", providers: ["bvnk", "mural"] },
+  { source: "EUR", dest: "usdc.solana", providers: ["bvnk"] },
   { source: "EUR", dest: "usdt.solana", providers: ["bvnk"] },
   { source: "EUR", dest: "usdg.solana", providers: ["bvnk"] },
   { source: "EUR", dest: "pyusd.solana", providers: ["moonpay"] },
@@ -2467,7 +2365,6 @@ export const ONRAMP_SUPPORT = [
   { source: "LKR", dest: "sol.solana", providers: ["moonpay"] },
   { source: "LKR", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "MXN", dest: "sol.solana", providers: ["moonpay"] },
-  { source: "MXN", dest: "usdc.solana", providers: ["mural"] },
   { source: "MXN", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "NGN", dest: "sol.solana", providers: ["moonpay"] },
   { source: "NGN", dest: "pyusd.solana", providers: ["moonpay"] },
@@ -2478,7 +2375,6 @@ export const ONRAMP_SUPPORT = [
   { source: "OMR", dest: "sol.solana", providers: ["moonpay"] },
   { source: "OMR", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "PEN", dest: "sol.solana", providers: ["moonpay"] },
-  { source: "PEN", dest: "usdc.solana", providers: ["mural"] },
   { source: "PEN", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "PLN", dest: "sol.solana", providers: ["moonpay"] },
   { source: "PLN", dest: "pyusd.solana", providers: ["moonpay"] },
@@ -2496,7 +2392,7 @@ export const ONRAMP_SUPPORT = [
   {
     source: "USD",
     dest: "usdc.solana",
-    providers: ["lightspark", "bvnk", "moneygram", "coinbase", "mural", "stripe"],
+    providers: ["lightspark", "bvnk", "moneygram", "coinbase", "stripe"],
   },
   { source: "USD", dest: "usdt.solana", providers: ["bvnk"] },
   { source: "USD", dest: "usdg.solana", providers: ["bvnk"] },
@@ -2504,7 +2400,6 @@ export const ONRAMP_SUPPORT = [
   { source: "VND", dest: "sol.solana", providers: ["moonpay"] },
   { source: "VND", dest: "pyusd.solana", providers: ["moonpay"] },
   { source: "ZAR", dest: "sol.solana", providers: ["moonpay"] },
-  { source: "ZAR", dest: "usdc.solana", providers: ["mural"] },
   { source: "ZAR", dest: "pyusd.solana", providers: ["moonpay"] },
 ] as const satisfies readonly OnrampPairSupport<RampFiatCurrency>[];
 

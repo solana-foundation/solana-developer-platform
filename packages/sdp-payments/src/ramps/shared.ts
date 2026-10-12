@@ -160,7 +160,4 @@ export const RAMP_RAIL_DUMPS = {
       file: dumpFile("coinbase/buy_options"),
     },
   },
-  mural: {
-    countries: { name: "mural/countries", file: dumpFile("mural/countries") },
-  },
 } as const;

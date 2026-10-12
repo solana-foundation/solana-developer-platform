@@ -6,7 +6,6 @@ import {
   isBvnkCustomerVerified,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { bvnkCustomerStatusSchema } from "@sdp/payments/ramps/providers/bvnk/schemas";
-import { readMuralOrganization } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import type { RampDirection } from "@sdp/types";
 import {
@@ -52,7 +51,6 @@ import {
   presentBvnkStoredStage,
   refreshBvnkCustomerAccount,
 } from "@/routes/payments/ramps/providers/bvnk";
-import { resolveMuralRequirements } from "@/routes/payments/ramps/providers/mural";
 import { advanceCounterpartyRequirements } from "@/routes/payments/ramps/shared";
 import {
   assertPaymentWalletExactAccess,
@@ -275,13 +273,6 @@ export const getCounterpartyRequirements = async (c: AppContext) => {
 
   if (!counterparty) {
     throw notFound("Counterparty");
-  }
-
-  if (query.data.provider === "mural" && readMuralOrganization(counterparty.provider_data).id) {
-    return success(
-      c,
-      await resolveMuralRequirements(c, counterparty, projectId, query.data.direction)
-    );
   }
 
   if (query.data.provider === "bvnk" && query.data.fiatCurrency !== BVNK_FUNDING_WALLET_FIAT) {

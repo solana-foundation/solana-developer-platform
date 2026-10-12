@@ -300,7 +300,6 @@ describe("release channels", () => {
       bvnk: "beta",
       moneygram: "experimental",
       coinbase: "experimental",
-      mural: "experimental",
       stripe: "experimental",
     };
     expect(isModuleInReleaseChannel("beta", "ramps", bvnkInBeta)).toBe(true);

@@ -1,6 +1,8 @@
+import { resolveRampProviderClient } from "@sdp/payments/ramps";
 import {
   isRampTransferType,
   type PaymentTransferType,
+  type PersistedRampProviderId,
   type RampProviderId,
   type SdpModule,
   type SdpRampProviderStages,
@@ -51,11 +53,13 @@ export function assertModuleInChannel(c: ReleaseChannelContext, module: SdpModul
 /**
  * Refuses a request about a stored ramp transfer whose provider the release channel
  * leaves out. A ramp transfer always has a provider, so a missing one is a data bug
- * and fails instead of skipping the gate. Other transfer types pass through.
+ * and fails instead of skipping the gate. A retired provider's transfer answers 503
+ * PROVIDER_NOT_CONFIGURED: it still reads, but nothing acts on it. Other transfer
+ * types pass through.
  */
 export function assertTransferRampProviderInChannel(
   c: ReleaseChannelContext,
-  transfer: { type: PaymentTransferType; provider: RampProviderId | null }
+  transfer: { type: PaymentTransferType; provider: PersistedRampProviderId | null }
 ): void {
   if (!isRampTransferType(transfer.type)) {
     return;
@@ -63,7 +67,7 @@ export function assertTransferRampProviderInChannel(
   if (transfer.provider === null) {
     throw internalError("Ramp transfer has no provider.");
   }
-  assertRampProviderInChannel(c, transfer.provider);
+  assertRampProviderInChannel(c, resolveRampProviderClient(transfer.provider).id);
 }
 
 /**
