@@ -1579,7 +1579,7 @@ Source: https://platform.solana.com/docs/tokens/allowlists
 
 **Token Access Control** gates who may hold or receive your token. This page covers its `allowlist` mode: tokens created with `requiresAllowlist: true` enforce a list of approved destination addresses on allowlist-aware issuance flows such as minting and administrative transfers, and it's required for `tokenized-security` tokens.
 
-This is distinct from a wallet's transfer allowlist (a Wallet Policy concern) and the Platform Allowlist (deployment admission).
+This is distinct from an API key's [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations), which limit what a key may do, and from the Platform Allowlist (deployment admission).
 
 ## Prerequisites
 
@@ -2318,7 +2318,7 @@ Wallet-wide controls and balances are documented in [Wallet operations](/docs/wa
 
 ## Underlying API
 
-Every page in this section links to specific endpoints in the auto-generated [Payments API reference](/docs/reference/api/payments). The Payments API surface is namespaced under `/v1/payments` and groups into four areas: `transfers`, `ramps`, `wallets/.../balances`, and `wallets/.../policies`.
+Every page in this section links to specific endpoints in the auto-generated [Payments API reference](/docs/reference/api/payments). The Payments API surface is namespaced under `/v1/payments` and groups into three areas: `transfers`, `ramps`, and `wallets/.../balances`.
 
 ## Related
 
@@ -2335,7 +2335,7 @@ SDP payments move value between Solana accounts: a custody wallet sends tokens t
 
 ## Custody wallets
 
-Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances and policies for the addresses you control.
+Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances for the addresses you control. To limit what an API key may do with them, give the key [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations).
 
 You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId` and retain the provider's identifier separately as `providerWalletId` evidence. The **destination** remains the recipient's on-chain Solana address.
 
@@ -4329,7 +4329,7 @@ You have a deployed regulated stablecoin, the compliance controls configured, an
     The design and issuance pattern for a tokenized money market fund or treasury bond product under the `tokenized-security` template. Compliance posture differs from the stablecoin pattern in three ways: allowlist on by default, accounts open frozen, and an additional `scaledUiAmount` extension for accrued yield. Most of the Section 5 controls work identically; the differences sit in Sections 3 and 4.
   </Card>
   <Card title="Run Enterprise Stablecoin Payments">
-    Picks up after Section 7. Covers transfer rails for institutional payment flows: bulk transfers, scheduled payments, on-ramp and off-ramp integration with custody bank settlement, and the policy-engine patterns that gate transfers at scale.
+    Picks up after Section 7. Covers transfer rails for institutional payment flows: bulk transfers, scheduled payments, on-ramp and off-ramp integration with custody bank settlement, and per-key allowed operations for transfers at scale.
   </Card>
 </Cards>
 
@@ -5071,7 +5071,7 @@ The public issuance surface currently exposes three **Tokenization Templates**:
 
 These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
 
-Each template also sets the token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — enforced on-chain over who may hold or receive the token. This is distinct from a wallet's own destination allowlist, which is a wallet-policy concern.
+Each template also sets the token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — enforced on-chain over who may hold or receive the token. This is the token's own allowlist. It is separate from an API key's [allowed operations](/docs/developing-with-sdp/manage-api-keys#allowed-operations), which limit what a key may do.
 
 ## Selecting a template
 

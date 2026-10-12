@@ -168,9 +168,6 @@ describe("scope", () => {
     expect((await call("GET", "/v1/counterparties/cpty_real")).status).toBe(404);
     expect((await call("GET", "/v1/payments/transfers/xfr_real")).status).toBe(404);
     expect((await call("GET", "/v1/projects")).status).toBeNull();
-    expect((await call("GET", "/v1/wallets/approval-requests?status=pending")).body).toEqual({
-      data: { approvalRequests: [] },
-    });
   });
 
   it("offers Lightspark as the only ramp, on the organization's real provider answer", async () => {

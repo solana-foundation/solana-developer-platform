@@ -68,7 +68,6 @@ export async function admitUpdateAuthorityRuntimeExecution(
   extraction: RequestGateExtraction
 ): Promise<void> {
   const resolved = extraction.resolved as UpdateAuthorityResolved;
-  if ("replay" in resolved) return;
   const { auth, tokenService, custodyWalletId } = resolved;
   await admitIssuanceRuntimeExecution({
     env: c.env,

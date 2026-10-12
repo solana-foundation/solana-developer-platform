@@ -320,6 +320,16 @@ describe("unified_transactions view (postgres)", () => {
     }
   });
 
+  it("projects a stranded approval_required Rings row as failed, not pending", async () => {
+    const id = await seedRings("approval_required");
+    const row = await getDb(env).queryOne<{ status: string; module_status: string }>(
+      `SELECT status, module_status FROM unified_transactions
+       WHERE organization_id = ? AND project_id = ? AND module = 'rings' AND id = ?`,
+      [TEST_ORG.id, PROJECT, id]
+    );
+    expect(row).toEqual({ status: "failed", module_status: "failed" });
+  });
+
   async function seedVaultWithdrawal(id: string, tokenAmountSettled: string | null) {
     const positionId = "earn_position_vault_direct";
     await getDb(env).execute(
