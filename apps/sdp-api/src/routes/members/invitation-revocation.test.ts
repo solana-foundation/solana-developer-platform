@@ -5,7 +5,6 @@ import app from "@/index";
 import { invitationWasRevoked } from "@/lib/invitations";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import { type InvitationSeed, seedInvitations } from "@/test/helpers/organization-invitations";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -23,22 +22,6 @@ const LOCAL_INVITATION_ID = "inv_revocation_target";
 const INVITER_USER_ID = "usr_revocation_inviter";
 const ADMIN_USER_ID = "usr_revocation_admin";
 const ADMIN_CLERK_USER_ID = "clerk_user_admin";
-
-function targetInvitation(tokenHash: string, clerkInvitationId: string | null): InvitationSeed {
-  return {
-    id: LOCAL_INVITATION_ID,
-    organizationId: ORGANIZATION_ID,
-    email: INVITEE_EMAIL,
-    role: "member",
-    invitedBy: INVITER_USER_ID,
-    tokenHash,
-    status: "pending",
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    createdAt: "2026-01-01 00:00:00",
-    acceptedAt: null,
-    clerkInvitationId,
-  };
-}
 
 interface ClerkInvitationStub {
   id: string;
@@ -136,8 +119,22 @@ async function seedInvitation(clerkInvitationId: string | null): Promise<void> {
          VALUES ('aoi_revocation', 'clerk', ?, ?, 'invitation-revocation')`
       )
       .bind(CLERK_ORG_ID, ORGANIZATION_ID),
+    db
+      .prepare(
+        `INSERT INTO invitations
+           (id, organization_id, email, role, invited_by, token_hash, expires_at, status, clerk_invitation_id)
+         VALUES (?, ?, ?, 'member', ?, ?, ?, 'pending', ?)`
+      )
+      .bind(
+        LOCAL_INVITATION_ID,
+        ORGANIZATION_ID,
+        INVITEE_EMAIL,
+        INVITER_USER_ID,
+        "hash_revocation_target",
+        new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        clerkInvitationId
+      ),
   ]);
-  await seedInvitations(db, [targetInvitation("hash_revocation_target", clerkInvitationId)]);
 
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, {
@@ -185,8 +182,22 @@ async function seedSystemInvitationWithAdmin(): Promise<void> {
          VALUES ('aoi_revocation', 'clerk', ?, ?, 'invitation-revocation')`
       )
       .bind(CLERK_ORG_ID, ORGANIZATION_ID),
+    db
+      .prepare(
+        `INSERT INTO invitations
+           (id, organization_id, email, role, invited_by, token_hash, expires_at, status, clerk_invitation_id)
+         VALUES (?, ?, ?, 'member', ?, ?, ?, 'pending', ?)`
+      )
+      .bind(
+        LOCAL_INVITATION_ID,
+        ORGANIZATION_ID,
+        INVITEE_EMAIL,
+        INVITER_USER_ID,
+        "hash_revocation_system",
+        new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        OUR_CLERK_INVITATION_ID
+      ),
   ]);
-  await seedInvitations(db, [targetInvitation("hash_revocation_system", OUR_CLERK_INVITATION_ID)]);
 
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedCachedApiKey(env, keyHash, {

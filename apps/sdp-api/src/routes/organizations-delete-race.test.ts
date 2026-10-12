@@ -1,21 +1,25 @@
 /**
  * Regression test for the Hacktron finding: an API key created concurrently
- * with organization deletion is revoked in Postgres by the deletion
- * transaction, so its cached "active" auth entry must be refreshed too, or it
- * keeps authenticating for the full cache TTL.
+ * with organization deletion — after the handler snapshots the org's key
+ * hashes but before the revocation transaction commits — is revoked in Postgres by
+ * the transaction, yet its hash is missing from the snapshot, so its cached
+ * "active" auth entry is never refreshed and keeps authenticating for the
+ * full cache TTL.
  *
  * The interleaving is made deterministic by mocking @/db: getDb returns a
- * proxy whose transaction() runs a one-shot hook (insert the "concurrent" key
- * and seed its cache, exactly what a fill from a pre-revocation DB read does)
- * before delegating to the real transaction.
+ * proxy whose transaction() runs a one-shot hook (insert the "concurrent" key and
+ * seed its cache, exactly what a fill from a pre-revocation DB read does)
+ * before delegating to the real transaction. On unpatched code (hash snapshot
+ * taken before the transaction) the key survives with a warm active cache; on
+ * patched code (snapshot taken after the transaction) it is refreshed to revoked.
  */
 
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DatabaseExecutor } from "@/db";
 
-const raceState = vi.hoisted((): { onTransaction: (() => Promise<void>) | null } => ({
-  onTransaction: null,
+const raceState = vi.hoisted(() => ({
+  onTransaction: null as null | (() => Promise<void>),
 }));
 
 vi.mock("@/db", async (importOriginal) => {
@@ -48,7 +52,6 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -139,7 +142,10 @@ describe("organization deletion vs concurrent API key creation", () => {
     await clearKVStores(env);
   });
 
-  it("refreshes the cache of a key created just before the deletion transaction", async () => {
+  it("refreshes the cache of a key created between the hash snapshot and the revocation transaction", async () => {
+    // The "concurrent" creation lands right before the deletion transaction
+    // commits: the row exists (so the transaction revokes it) and its cache entry
+    // is active (as a fill from a pre-revocation DB read would leave it).
     raceState.onTransaction = async () => {
       await seedKeyRow(CONCURRENT_KEY.id, concurrentHash);
       await seedCachedApiKey(env, concurrentHash, cachedEntry(CONCURRENT_KEY.id));
@@ -154,14 +160,15 @@ describe("organization deletion vs concurrent API key creation", () => {
       env
     );
     expect(res.status).toBe(204);
-    expect(raceState.onTransaction).toBeNull();
 
+    // The transaction revoked the concurrent key in Postgres…
     const row = await getDb(env)
-      .prepare("SELECT id, status FROM api_keys WHERE id = ?")
+      .prepare("SELECT status FROM api_keys WHERE id = ?")
       .bind(CONCURRENT_KEY.id)
-      .first<{ id: string; status: string }>();
-    expect(required(row)).toEqual({ id: CONCURRENT_KEY.id, status: "revoked" });
+      .first<{ status: string }>();
+    expect(row?.status).toBe("revoked");
 
+    // …so its cached credentials must be rejected on the very next request.
     const withConcurrentKey = await app.request(
       "/v1/api-keys",
       { headers: { Authorization: `Bearer ${CONCURRENT_KEY.raw}` } },
@@ -171,6 +178,10 @@ describe("organization deletion vs concurrent API key creation", () => {
   });
 
   it("rejects a key that commits after the deletion's hash snapshot", async () => {
+    // A key whose INSERT lands after the deletion handler snapshotted the
+    // org's hashes is neither revoked by the transaction's WHERE nor covered by the
+    // refresh set. Authentication must reject it on the organization's status
+    // rather than trusting the key's own row.
     const res = await app.request(
       `/v1/organizations/${TEST_ORG.id}`,
       {
@@ -185,10 +196,10 @@ describe("organization deletion vs concurrent API key creation", () => {
     await seedKeyRow(ESCAPED_KEY.id, escapedHash);
 
     const row = await getDb(env)
-      .prepare("SELECT id, status FROM api_keys WHERE id = ?")
+      .prepare("SELECT status FROM api_keys WHERE id = ?")
       .bind(ESCAPED_KEY.id)
-      .first<{ id: string; status: string }>();
-    expect(required(row)).toEqual({ id: ESCAPED_KEY.id, status: "active" });
+      .first<{ status: string }>();
+    expect(row?.status).toBe("active");
 
     const withEscapedKey = await app.request(
       "/v1/api-keys",

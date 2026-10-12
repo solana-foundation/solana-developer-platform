@@ -9,22 +9,8 @@ export interface InvitationSeed {
   email: string;
   role: OrganizationRole;
   invitedBy: string;
-  tokenHash: string;
   status: InvitationStatus;
   expiresAt: string;
-  /** Orders invitations for the newest-invitation reads. */
-  createdAt: string;
-  acceptedAt: string | null;
-  clerkInvitationId: string | null;
-}
-
-export interface InvitationRow {
-  id: string;
-  organization_id: string;
-  email: string;
-  role: string;
-  status: string;
-  accepted_at: string | null;
 }
 
 /**
@@ -61,7 +47,7 @@ export async function seedOrganizationsAndUsers(
 }
 
 /**
- * Inserts invitation rows in one batch.
+ * Inserts invitation rows in one batch, each with a token hash derived from its id.
  *
  * @param db - Test database client.
  * @param invitations - Invitations to insert.
@@ -76,8 +62,8 @@ export async function seedInvitations(
       db
         .prepare(
           `INSERT INTO invitations
-             (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at, accepted_at, clerk_invitation_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           invitation.id,
@@ -85,26 +71,25 @@ export async function seedInvitations(
           invitation.email,
           invitation.role,
           invitation.invitedBy,
-          invitation.tokenHash,
+          `hash_${invitation.id}`,
           invitation.expiresAt,
-          invitation.status,
-          invitation.createdAt,
-          invitation.acceptedAt,
-          invitation.clerkInvitationId
+          invitation.status
         )
     )
   );
 }
 
 /**
- * Reads every invitation row, ordered by id.
+ * Reads the id, role and status of every invitation row, ordered by id.
  *
  * @param db - Test database client.
  * @returns The invitation rows.
  */
-export async function readInvitations(db: DatabaseClient): Promise<InvitationRow[]> {
-  return db.queryMany<InvitationRow>(
-    "SELECT id, organization_id, email, role, status, accepted_at FROM invitations ORDER BY id"
+export async function readInvitations(
+  db: DatabaseClient
+): Promise<{ id: string; role: string; status: string }[]> {
+  return db.queryMany<{ id: string; role: string; status: string }>(
+    "SELECT id, role, status FROM invitations ORDER BY id"
   );
 }
 

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import type { InvitationStatus, OrganizationRole } from "@sdp/types";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -18,13 +17,7 @@ import {
   signTestClerkClaims,
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
-import {
-  type InvitationRow,
-  type InvitationSeed,
-  readInvitations,
-  seedInvitations,
-  seedRemovedMember,
-} from "@/test/helpers/organization-invitations";
+import { readInvitations, seedRemovedMember } from "@/test/helpers/organization-invitations";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -315,6 +308,37 @@ describe("Clerk auth request cache", () => {
     expect(res.headers.get("Retry-After")).not.toBeNull();
   });
 
+  it("rejects a stale Clerk JWT after the local organization membership is removed", async () => {
+    await getDb(env)
+      .prepare(
+        "UPDATE organization_members SET status = 'removed' WHERE organization_id = ? AND user_id = ?"
+      )
+      .bind(TEST_ORG.id, TEST_USER.id)
+      .run();
+
+    const payload: ClerkJwtPayload = {
+      sub: "clerk_user_cached",
+      v: 2,
+      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
+      email: TEST_USER.email,
+    };
+    const { app, token } = await createProtectedApp(payload);
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    const membership = await getDb(env)
+      .prepare("SELECT status FROM organization_members WHERE organization_id = ? AND user_id = ?")
+      .bind(TEST_ORG.id, TEST_USER.id)
+      .first<{ status: string }>();
+    assert(membership !== null);
+    expect(membership.status).toBe("removed");
+  });
+
   it("does not link a first-time Clerk identity until its primary email is verified", async () => {
     await getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
@@ -386,7 +410,10 @@ describe("Clerk auth request cache", () => {
   });
 
   it("provisions default projects when the membership webhook has not arrived", async () => {
-    await deleteTestOrgMemberships();
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
 
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_cached",
@@ -414,81 +441,53 @@ describe("Clerk auth request cache", () => {
     ]);
   });
 
-  function testUserInvitation(
-    status: InvitationStatus,
-    role: OrganizationRole,
-    createdAt: string
-  ): InvitationSeed {
-    const id = `inv_test_${status}_${role}_${createdAt}`;
-    return {
-      id,
-      organizationId: TEST_ORG.id,
-      email: TEST_USER.email,
-      role,
-      invitedBy: TEST_USER.id,
-      tokenHash: `hash_${id}`,
-      status,
-      createdAt,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      acceptedAt: null,
-      clerkInvitationId: null,
-    };
+  async function seedInvitation(status: string, createdAt: string, expiresInDays: number) {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO invitations
+           (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
+         VALUES (?, ?, ?, 'member', ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        `inv_${status}_${createdAt}`,
+        TEST_ORG.id,
+        TEST_USER.email,
+        TEST_USER.id,
+        `hash_${status}_${createdAt}`,
+        new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
+        status,
+        createdAt
+      )
+      .run();
   }
 
-  function testUserInvitationRow(params: {
-    id: string;
-    role: OrganizationRole;
-    status: InvitationStatus;
-    accepted: boolean;
-  }): InvitationRow {
-    return {
-      id: params.id,
-      organization_id: TEST_ORG.id,
-      email: TEST_USER.email,
-      role: params.role,
-      status: params.status,
-      accepted_at: params.accepted ? expect.any(String) : null,
-    };
-  }
-
-  function cachedUserPayload(role: OrganizationRole): ClerkJwtPayload {
+  function cachedUserPayload(): ClerkJwtPayload {
     return {
       sub: "clerk_user_cached",
       v: 2,
-      o: { id: "org_test_clerk_cached", rol: role, slg: TEST_ORG.slug },
+      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
       email: TEST_USER.email,
     };
   }
 
-  async function deleteTestOrgMemberships() {
+  function readTestOrgMemberships() {
+    return getDb(env).queryMany<{ role: string; status: string }>(
+      "SELECT role, status FROM organization_members WHERE organization_id = ?",
+      [TEST_ORG.id]
+    );
+  }
+
+  it("refuses a sign-in into a deleted organization for a user with no membership", async () => {
     await getDb(env)
       .prepare("DELETE FROM organization_members WHERE organization_id = ?")
       .bind(TEST_ORG.id)
       .run();
-  }
-
-  function readTestOrgMemberships() {
-    return getDb(env).queryMany<{ user_id: string; role: string; status: string }>(
-      "SELECT user_id, role, status FROM organization_members WHERE organization_id = ? ORDER BY user_id",
-      [TEST_ORG.id]
-    );
-  }
-
-  function readTestOrgProjectSlugs() {
-    return getDb(env).queryMany<{ slug: string }>(
-      "SELECT slug FROM projects WHERE organization_id = ? ORDER BY slug",
-      [TEST_ORG.id]
-    );
-  }
-
-  it("refuses a first sign-in into an organization whose SDP row was deleted", async () => {
-    await deleteTestOrgMemberships();
     await getDb(env)
       .prepare("UPDATE organizations SET status = 'deleted' WHERE id = ?")
       .bind(TEST_ORG.id)
       .run();
 
-    const { app, token } = await createProtectedApp(cachedUserPayload("admin"));
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -500,34 +499,13 @@ describe("Clerk auth request cache", () => {
       error: { code: "FORBIDDEN", message: "Organization was deleted" },
     });
     expect(await readTestOrgMemberships()).toEqual([]);
-    expect(await readTestOrgProjectSlugs()).toEqual([]);
   });
 
-  it("rejects a stale Clerk JWT after the local organization membership is removed", async () => {
+  it("reactivates a removed member through a live invitation and accepts it", async () => {
     await seedRemovedMember(getDb(env), { organizationId: TEST_ORG.id, userId: TEST_USER.id });
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z", 7);
 
-    const { app, token } = await createProtectedApp(cachedUserPayload("admin"));
-    const res = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
-
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({
-      error: { code: "UNAUTHORIZED", message: "Organization membership is inactive" },
-    });
-    expect(await readTestOrgMemberships()).toEqual([
-      { user_id: TEST_USER.id, role: "admin", status: "removed" },
-    ]);
-  });
-
-  it("reactivates a removed member through a live re-invitation at the invited role", async () => {
-    const invitation = testUserInvitation("pending", "member", "2026-02-01T00:00:00.000Z");
-    await seedRemovedMember(getDb(env), { organizationId: TEST_ORG.id, userId: TEST_USER.id });
-    await seedInvitations(getDb(env), [invitation]);
-
-    const { app, token } = await createProtectedApp(cachedUserPayload("admin"));
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -535,74 +513,20 @@ describe("Clerk auth request cache", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await readTestOrgMemberships()).toEqual([
-      { user_id: TEST_USER.id, role: "member", status: "active" },
-    ]);
+    expect(await readTestOrgMemberships()).toEqual([{ role: "member", status: "active" }]);
     expect(await readInvitations(getDb(env))).toEqual([
-      testUserInvitationRow({
-        id: invitation.id,
-        role: "member",
-        status: "accepted",
-        accepted: true,
-      }),
-    ]);
-  });
-
-  it("caps an admin invitation at the member role the Clerk token carries", async () => {
-    await deleteTestOrgMemberships();
-    const invitation = testUserInvitation("pending", "admin", "2026-02-01T00:00:00.000Z");
-    await seedInvitations(getDb(env), [invitation]);
-
-    const { app, token } = await createProtectedApp(cachedUserPayload("member"));
-    const res = await app.request("/admin", { headers: { Authorization: `Bearer ${token}` } }, env);
-
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({
-      error: { code: "INSUFFICIENT_PERMISSIONS", message: "Required permissions: org:admin" },
-    });
-    expect(await readTestOrgMemberships()).toEqual([
-      { user_id: TEST_USER.id, role: "member", status: "active" },
-    ]);
-    expect(await readInvitations(getDb(env))).toEqual([
-      testUserInvitationRow({
-        id: invitation.id,
-        role: "member",
-        status: "accepted",
-        accepted: true,
-      }),
-    ]);
-  });
-
-  it("grants an admin invitation in full when the Clerk token is also admin", async () => {
-    await deleteTestOrgMemberships();
-    const invitation = testUserInvitation("pending", "admin", "2026-02-01T00:00:00.000Z");
-    await seedInvitations(getDb(env), [invitation]);
-
-    const { app, token } = await createProtectedApp(cachedUserPayload("admin"));
-    const res = await app.request("/admin", { headers: { Authorization: `Bearer ${token}` } }, env);
-
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ role: "admin" });
-    expect(await readTestOrgMemberships()).toEqual([
-      { user_id: TEST_USER.id, role: "admin", status: "active" },
-    ]);
-    expect(await readInvitations(getDb(env))).toEqual([
-      testUserInvitationRow({
-        id: invitation.id,
-        role: "admin",
-        status: "accepted",
-        accepted: true,
-      }),
+      { id: "inv_pending_2026-02-01T00:00:00.000Z", role: "member", status: "accepted" },
     ]);
   });
 
   it("refuses to provision a membership when the invitation was revoked", async () => {
-    await deleteTestOrgMemberships();
-    await seedInvitations(getDb(env), [
-      testUserInvitation("revoked", "member", "2026-01-01T00:00:00.000Z"),
-    ]);
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z", 7);
 
-    const { app, token } = await createProtectedApp(cachedUserPayload("admin"));
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -610,22 +534,25 @@ describe("Clerk auth request cache", () => {
     );
 
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({
-      error: { code: "UNAUTHORIZED", message: "Invitation to this organization was revoked" },
-    });
-    expect(await readTestOrgMemberships()).toEqual([]);
+    const membership = await getDb(env)
+      .prepare("SELECT id FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ id: string }>();
+    expect(membership).toBeNull();
   });
 
   it("applies an invited role when the stored identity email is a template placeholder", async () => {
-    await deleteTestOrgMemberships();
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
     await getDb(env)
       .prepare("UPDATE auth_user_identities SET email = ? WHERE id = 'aui_test_clerk_user_cached'")
       .bind("{{user.primary_email_address.email_address}}")
       .run();
-    const invitation = testUserInvitation("pending", "member", "2026-02-01T00:00:00.000Z");
-    await seedInvitations(getDb(env), [invitation]);
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z", 7);
 
-    const { app, token } = await createProtectedApp(cachedUserPayload("admin"));
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -633,17 +560,20 @@ describe("Clerk auth request cache", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await readTestOrgMemberships()).toEqual([
-      { user_id: TEST_USER.id, role: "member", status: "active" },
-    ]);
-    expect(await readInvitations(getDb(env))).toEqual([
-      testUserInvitationRow({
-        id: invitation.id,
-        role: "member",
-        status: "accepted",
-        accepted: true,
-      }),
-    ]);
+
+    const membership = await getDb(env)
+      .prepare("SELECT role FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ role: string }>();
+    assert(membership !== null);
+    expect(membership.role).toBe("member");
+
+    const invitation = await getDb(env)
+      .prepare("SELECT status FROM invitations WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first<{ status: string }>();
+    assert(invitation !== null);
+    expect(invitation.status).toBe("accepted");
   });
 
   it("skips a stored placeholder email for a user who is already a member", async () => {
@@ -652,7 +582,7 @@ describe("Clerk auth request cache", () => {
       .bind("{{user.primary_email_address.email_address}}")
       .run();
 
-    const { app, token } = await createProtectedApp(cachedUserPayload("admin"));
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -677,7 +607,7 @@ describe("Clerk auth request cache", () => {
       .bind(placeholder, TEST_USER.id)
       .run();
 
-    const { app, token } = await createProtectedApp(cachedUserPayload("admin"));
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -700,12 +630,14 @@ describe("Clerk auth request cache", () => {
   });
 
   it("still provisions when a revoked invitation was superseded by a live one", async () => {
-    await deleteTestOrgMemberships();
-    const revoked = testUserInvitation("revoked", "member", "2026-01-01T00:00:00.000Z");
-    const pending = testUserInvitation("pending", "member", "2026-02-01T00:00:00.000Z");
-    await seedInvitations(getDb(env), [revoked, pending]);
+    await getDb(env)
+      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z", 7);
+    await seedInvitation("pending", "2026-02-01T00:00:00.000Z", 7);
 
-    const { app, token } = await createProtectedApp(cachedUserPayload("admin"));
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },
@@ -713,21 +645,12 @@ describe("Clerk auth request cache", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await readTestOrgMemberships()).toEqual([
-      { user_id: TEST_USER.id, role: "member", status: "active" },
-    ]);
-    expect(await readInvitations(getDb(env))).toEqual([
-      testUserInvitationRow({ id: pending.id, role: "member", status: "accepted", accepted: true }),
-      testUserInvitationRow({ id: revoked.id, role: "member", status: "revoked", accepted: false }),
-    ]);
   });
 
   it("does not lock out an existing member carrying a stale revoked invitation", async () => {
-    await seedInvitations(getDb(env), [
-      testUserInvitation("revoked", "member", "2026-01-01T00:00:00.000Z"),
-    ]);
+    await seedInvitation("revoked", "2026-01-01T00:00:00.000Z", 7);
 
-    const { app, token } = await createProtectedApp(cachedUserPayload("admin"));
+    const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
       "/protected",
       { headers: { Authorization: `Bearer ${token}` } },

@@ -5,7 +5,6 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
-import { type InvitationSeed, seedInvitations } from "@/test/helpers/organization-invitations";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
 
@@ -99,25 +98,28 @@ async function seedDirectory(memberCount: number): Promise<void> {
     );
   }
 
+  for (let index = 0; index < 4; index += 1) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO invitations
+             (id, organization_id, email, role, invited_by, token_hash, expires_at, status, clerk_invitation_id, created_at)
+           VALUES (?, ?, ?, 'member', ?, ?, ?, 'pending', ?, ?)`
+        )
+        .bind(
+          `inv_directory_${index}`,
+          ORGANIZATION_ID,
+          `invitee${index}@example.com`,
+          INVITER_USER_ID,
+          `hash_directory_${index}`,
+          expiresAt,
+          `orginv_${index}`,
+          `2025-02-${String(4 - index).padStart(2, "0")}T00:00:00.000Z`
+        )
+    );
+  }
+
   await db.batch(statements);
-  await seedInvitations(
-    db,
-    [0, 1, 2, 3].map(
-      (index): InvitationSeed => ({
-        id: `inv_directory_${index}`,
-        organizationId: ORGANIZATION_ID,
-        email: `invitee${index}@example.com`,
-        role: "member",
-        invitedBy: INVITER_USER_ID,
-        tokenHash: `hash_directory_${index}`,
-        status: "pending",
-        expiresAt,
-        createdAt: `2025-02-${String(4 - index).padStart(2, "0")}T00:00:00.000Z`,
-        acceptedAt: null,
-        clerkInvitationId: `orginv_${index}`,
-      })
-    )
-  );
 }
 
 /** Authenticates every request as an API key holding exactly `permissions`. */

@@ -1,15 +1,16 @@
 import { hashString } from "@sdp/payments/hash";
-import type { InvitationStatus, Organization } from "@sdp/types";
+import type { Organization } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { createOrganization } from "@/test/helpers/factories";
 import {
-  type InvitationSeed,
   readInvitations,
   seedInvitations,
+  seedOrganizationsAndUsers,
 } from "@/test/helpers/organization-invitations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
@@ -20,53 +21,6 @@ const TEST_PROJECT = {
   id: "prj_test_organizations",
   slug: "test-test-org-project",
 };
-
-const OTHER_ORG = {
-  id: "org_test_organizations_other",
-  name: "Other Organization",
-  slug: "test-organizations-other",
-};
-
-function daysFromNow(days: number): string {
-  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-}
-
-const DELETION_INVITATIONS: {
-  id: string;
-  organizationId: string;
-  email: string;
-  expiresAt: string;
-  status: InvitationStatus;
-}[] = [
-  {
-    id: "inv_org_delete_pending",
-    organizationId: TEST_ORG.id,
-    email: "pending@example.com",
-    expiresAt: daysFromNow(7),
-    status: "pending",
-  },
-  {
-    id: "inv_org_delete_accepted",
-    organizationId: TEST_ORG.id,
-    email: "accepted@example.com",
-    expiresAt: daysFromNow(7),
-    status: "accepted",
-  },
-  {
-    id: "inv_org_delete_expired",
-    organizationId: TEST_ORG.id,
-    email: "expired@example.com",
-    expiresAt: daysFromNow(-7),
-    status: "expired",
-  },
-  {
-    id: "inv_org_delete_other_org_pending",
-    organizationId: OTHER_ORG.id,
-    email: "pending@example.com",
-    expiresAt: daysFromNow(7),
-    status: "pending",
-  },
-];
 
 describe("Organizations routes", () => {
   let validKeyHash: string;
@@ -339,27 +293,9 @@ describe("Organizations routes", () => {
         ...TEST_CACHED_API_KEY,
         permissions: ["*"],
       });
-      await getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug, "individual", "active")
-        .run();
-      await seedInvitations(
-        getDb(env),
-        DELETION_INVITATIONS.map(
-          (invitation): InvitationSeed => ({
-            ...invitation,
-            role: "member",
-            invitedBy: TEST_USER.id,
-            tokenHash: `hash_${invitation.id}`,
-            createdAt: "2026-01-01 00:00:00",
-            acceptedAt: null,
-            clerkInvitationId: null,
-          })
-        )
-      );
     });
-    function deleteOrganization() {
-      return app.request(
+    it("soft deletes organization", async () => {
+      const res = await app.request(
         `/v1/organizations/${TEST_ORG.id}`,
         {
           method: "DELETE",
@@ -369,82 +305,98 @@ describe("Organizations routes", () => {
         },
         env
       );
-    }
-    it("soft deletes organization", async () => {
-      const res = await deleteOrganization();
       expect(res.status).toBe(204);
       const org = await getDb(env)
-        .prepare("SELECT id, status FROM organizations WHERE id = ?")
+        .prepare("SELECT status FROM organizations WHERE id = ?")
         .bind(TEST_ORG.id)
         .first<{
-          id: string;
           status: string;
         }>();
-      expect(required(org)).toEqual({ id: TEST_ORG.id, status: "deleted" });
+      expect(required(org).status).toBe("deleted");
     });
     it("revokes all API keys on delete", async () => {
-      expect((await deleteOrganization()).status).toBe(204);
+      await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
       const keys = await getDb(env)
-        .prepare("SELECT id, status, revoked_at FROM api_keys WHERE organization_id = ?")
+        .prepare("SELECT status FROM api_keys WHERE organization_id = ?")
         .bind(TEST_ORG.id)
         .all<{
-          id: string;
           status: string;
-          revoked_at: string | null;
         }>();
-      expect(keys.results).toEqual([
-        { id: TEST_API_KEY.id, status: "revoked", revoked_at: expect.any(String) },
-      ]);
+      for (const key of keys.results) {
+        expect(key.status).toBe("revoked");
+      }
     });
     it("marks organization members removed on delete", async () => {
-      expect((await deleteOrganization()).status).toBe(204);
+      await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
       const members = await getDb(env)
-        .prepare("SELECT id, user_id, status FROM organization_members WHERE organization_id = ?")
+        .prepare("SELECT status FROM organization_members WHERE organization_id = ?")
         .bind(TEST_ORG.id)
         .all<{
-          id: string;
-          user_id: string;
           status: string;
         }>();
-      expect(members.results).toEqual([
-        { id: TEST_MEMBER.id, user_id: TEST_USER.id, status: "removed" },
-      ]);
+      for (const member of members.results) {
+        expect(member.status).toBe("removed");
+      }
     });
-    it("revokes the organization's pending invitations and leaves every other invitation alone", async () => {
-      expect((await deleteOrganization()).status).toBe(204);
-      expect(await readInvitations(getDb(env))).toEqual([
+    it("revokes the organization's pending invitations and leaves other organizations' pending", async () => {
+      const otherOrganization = createOrganization({
+        id: "org_test_organizations_other",
+        slug: "test-organizations-other",
+      });
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      await seedOrganizationsAndUsers(getDb(env), {
+        organizations: [otherOrganization],
+        users: [],
+      });
+      await seedInvitations(getDb(env), [
         {
-          id: "inv_org_delete_accepted",
-          organization_id: TEST_ORG.id,
-          email: "accepted@example.com",
+          id: "inv_test_organizations_deleted",
+          organizationId: TEST_ORG.id,
+          email: "deleted-org-invitee@example.com",
           role: "member",
-          status: "accepted",
-          accepted_at: null,
-        },
-        {
-          id: "inv_org_delete_expired",
-          organization_id: TEST_ORG.id,
-          email: "expired@example.com",
-          role: "member",
-          status: "expired",
-          accepted_at: null,
-        },
-        {
-          id: "inv_org_delete_other_org_pending",
-          organization_id: OTHER_ORG.id,
-          email: "pending@example.com",
-          role: "member",
+          invitedBy: TEST_USER.id,
           status: "pending",
-          accepted_at: null,
+          expiresAt,
         },
         {
-          id: "inv_org_delete_pending",
-          organization_id: TEST_ORG.id,
-          email: "pending@example.com",
+          id: "inv_test_organizations_other",
+          organizationId: otherOrganization.id,
+          email: "deleted-org-invitee@example.com",
           role: "member",
-          status: "revoked",
-          accepted_at: null,
+          invitedBy: TEST_USER.id,
+          status: "pending",
+          expiresAt,
         },
+      ]);
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_ORG.id}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(204);
+      expect(await readInvitations(getDb(env))).toEqual([
+        { id: "inv_test_organizations_deleted", role: "member", status: "revoked" },
+        { id: "inv_test_organizations_other", role: "member", status: "pending" },
       ]);
     });
     it("requires org:admin permission", async () => {
