@@ -895,6 +895,7 @@ function useCreateWallet({
   return { createWallet, isPending };
 }
 
+// react-doctor-disable-next-line no-high-complexity-react-function -- the same two-step wizard state as the previous design's flow (provider, custody mode, details); its submit handling and step 2 are already their own hook and component
 export function WalletSetupFlow({
   connectedProviders,
   custodyAvailability,
