@@ -244,7 +244,8 @@
         "**/packages/**/test/**/*.ts",
         "**/apps/sdp-api/src/middleware/project-context.ts",
         "**/apps/sdp-api/src/services/jobs/track-pending-transfers.ts",
-        "**/apps/sdp-api/src/routes/pay.ts"
+        "**/apps/sdp-api/src/routes/pay.ts",
+        "**/apps/sdp-api/src/routes/earn/index.ts"
       ],
       "linter": {
         "rules": {

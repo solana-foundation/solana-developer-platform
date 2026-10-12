@@ -1,6 +1,7 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { type Context, Hono, type Next } from "hono";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest, notFound } from "@/lib/errors";
 import { isEarnEnabled } from "@/lib/feature-flags";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import {
@@ -21,6 +22,7 @@ import { requestGate } from "@/middleware/request-gate";
 import { validateBody } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
+import { getEarnRepository } from "./context";
 import { isEarnExitOrRead } from "./exits";
 import {
   createEarnExternalWalletDeposit,
@@ -65,6 +67,7 @@ import {
   listEarnExternalWalletWithdrawalRequests,
   listEarnVaultWithdrawalRequests,
 } from "./handlers/queued-withdrawals";
+import { parseParams, parseQuery } from "./handlers/shared";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
   admitEarnVaultRuntimeExecution,
@@ -85,6 +88,7 @@ import {
 } from "./handlers/vault";
 import { getEarnVaultShareReconciliation } from "./handlers/vault-reconciliation";
 import {
+  earnCatalogueEnvironmentQuerySchema,
   earnExternalWalletDepositTransactionSchema,
   earnExternalWalletQueuedWithdrawalPreviewSchema,
   earnExternalWalletSubmitSchema,
@@ -97,6 +101,7 @@ import {
   earnProgramRetargetSchema,
   earnProgramWithdrawalCreateSchema,
   earnProgramWithdrawalPreviewSchema,
+  earnStrategyIdParamsSchema,
   earnVaultDepositPreviewSchema,
   earnVaultDepositSchema,
   earnVaultQueuedWithdrawalPreviewSchema,
@@ -181,6 +186,94 @@ async function observeEarnAccessTier(c: Context<{ Bindings: Env }>, next: Next) 
   }
 }
 
+/**
+ * Open the cluster scope for a keyless catalogue list from the `?environment=` it must name: it
+ * has no project to take one from. A keyed caller already runs in its project's scope and passes
+ * through untouched, so no request ever opens a second scope.
+ *
+ * @param c - The request context.
+ * @param next - The rest of the route chain.
+ * @returns Resolves when the chain has run.
+ * @throws AppError `BAD_REQUEST` when a keyless caller omits or misspells `environment`.
+ */
+async function openKeylessCatalogueScope(c: Context<{ Bindings: Env }>, next: Next) {
+  if (hasEarnAuth(c)) {
+    await next();
+    return;
+  }
+  const { environment } = parseQuery(c, earnCatalogueEnvironmentQuerySchema);
+  await runInClusterScope({ projectId: null, environment }, next);
+}
+
+/**
+ * Open the cluster scope for a keyless request from the environment of the strategy row it
+ * names, before the handler makes any chain call. The handler loads the row again through
+ * `requireEarnStrategyForCaller`, which checks it against this scope.
+ *
+ * @param c - The request context.
+ * @param strategyId - The catalogue strategy id the request names.
+ * @param next - The rest of the route chain.
+ * @returns Resolves when the chain has run.
+ * @throws AppError `NOT_FOUND` when no strategy has that id.
+ */
+async function runInKeylessStrategyScope(
+  c: Context<{ Bindings: Env }>,
+  strategyId: string,
+  next: Next
+) {
+  const strategy = await getEarnRepository(c).getStrategyById(strategyId);
+  if (!strategy) throw notFound("Earn strategy");
+  await runInClusterScope({ projectId: null, environment: strategy.environment }, next);
+}
+
+/**
+ * Open a keyless strategy-detail read's cluster scope from the `:strategyId` it names. Keyed
+ * callers pass through in their project's scope.
+ *
+ * @param c - The request context.
+ * @param next - The rest of the route chain.
+ * @returns Resolves when the chain has run.
+ */
+async function openKeylessStrategyParamScope(c: Context<{ Bindings: Env }>, next: Next) {
+  if (hasEarnAuth(c)) {
+    await next();
+    return;
+  }
+  const { strategyId } = parseParams(c, earnStrategyIdParamsSchema);
+  await runInKeylessStrategyScope(c, strategyId, next);
+}
+
+/** A validated keyless-capable money body: a strategy id, or a keyed-only position id on exits. */
+type EarnStrategyLocatorBody = { strategyId: string } | { positionId: string };
+
+/**
+ * Open a keyless quote or build's cluster scope from the `strategyId` in its validated body. Keyed
+ * callers pass through in their project's scope. A keyless exit that names only a `positionId`
+ * is refused here with the same 400 the exit resolver gives, since a position is a tenant row a
+ * keyless caller cannot address.
+ *
+ * @param c - The request context, after `validateBody`.
+ * @param next - The rest of the route chain.
+ * @returns Resolves when the chain has run.
+ * @throws AppError `BAD_REQUEST` when a keyless body carries no `strategyId`.
+ */
+async function openKeylessStrategyBodyScope(
+  c: Context<{ Bindings: Env }, string, { out: { json: EarnStrategyLocatorBody } }>,
+  next: Next
+) {
+  if (hasEarnAuth(c)) {
+    await next();
+    return;
+  }
+  const body = c.req.valid("json");
+  if (!("strategyId" in body)) {
+    throw badRequest(
+      "strategyId and ownerAddress are required for an anonymous external-wallet exit"
+    );
+  }
+  await runInKeylessStrategyScope(c, body.strategyId, next);
+}
+
 // Hono flattens sub-app `use("*")` middleware into the parent at mount time.
 // Keep this tuple on the eight optional-auth declarations so it can never run on
 // the keyed router that shares the same mount point.
@@ -229,6 +322,7 @@ optionalAuthEarn.get(
   ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:read"),
   cacheEarnCatalogue,
+  openKeylessCatalogueScope,
   listEarnStrategies
 );
 optionalAuthEarn.get(
@@ -236,6 +330,7 @@ optionalAuthEarn.get(
   ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requirePermissionsWhenAuthenticated("earn:read"),
   cacheEarnCatalogue,
+  openKeylessStrategyParamScope,
   getEarnStrategy
 );
 
@@ -255,6 +350,7 @@ optionalAuthEarn.post(
   validateBody(earnVaultDepositPreviewSchema),
   authenticatedMeteredQuota(EARN_PROVIDER_READ_QUOTA),
   anonymousEarnRpcQuota,
+  openKeylessStrategyBodyScope,
   createEarnVaultDepositPreview
 );
 // The deposit BUILD is money-IN, so it takes the same keyed meter as the
@@ -267,6 +363,7 @@ optionalAuthEarn.post(
   validateBody(earnExternalWalletDepositTransactionSchema),
   authenticatedMeteredQuota(EARN_PROVIDER_READ_QUOTA),
   anonymousEarnRpcQuota,
+  openKeylessStrategyBodyScope,
   createEarnExternalWalletDepositTransaction
 );
 optionalAuthEarn.post(
@@ -275,6 +372,7 @@ optionalAuthEarn.post(
   requirePermissionsWhenAuthenticated("earn:read"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletWithdrawalPreviewSchema),
+  openKeylessStrategyBodyScope,
   createEarnExternalWalletWithdrawalPreview
 );
 optionalAuthEarn.post(
@@ -283,6 +381,7 @@ optionalAuthEarn.post(
   requirePermissionsWhenAuthenticated("earn:write"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletWithdrawalTransactionSchema),
+  openKeylessStrategyBodyScope,
   createEarnExternalWalletWithdrawalTransaction
 );
 optionalAuthEarn.post(
@@ -291,6 +390,7 @@ optionalAuthEarn.post(
   requirePermissionsWhenAuthenticated("earn:read"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletWithdrawalOptionsSchema),
+  openKeylessStrategyBodyScope,
   getEarnExternalWalletWithdrawalOptions
 );
 optionalAuthEarn.post(
@@ -299,6 +399,7 @@ optionalAuthEarn.post(
   requirePermissionsWhenAuthenticated("earn:read"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletQueuedWithdrawalPreviewSchema),
+  openKeylessStrategyBodyScope,
   createEarnExternalWalletQueuedWithdrawalPreview
 );
 // Queue action builds live on the keyed router below. Unlike an instant exit,
