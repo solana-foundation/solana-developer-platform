@@ -8,7 +8,6 @@ import {
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
   createPaymentTransferBatchesRepository,
-  createPolicyRepository,
 } from "@/db/repositories";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
@@ -48,10 +47,6 @@ export function getPaymentRecurringPaymentsRepository(c: AppContext) {
 
 export function getPaymentTransferBatchesRepository(c: AppContext) {
   return createPaymentTransferBatchesRepository(c.env, getRequestTenantScope(c));
-}
-
-export function getPolicyRepository(c: AppContext) {
-  return createPolicyRepository(c.env, getRequestTenantScope(c));
 }
 
 export function getFeePayment(c: AppContext) {

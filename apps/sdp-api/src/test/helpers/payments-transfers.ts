@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import type { Permission, PolicyDefaultAction, PolicyRule, SdpReleaseChannel } from "@sdp/types";
+import type { Permission, SdpReleaseChannel } from "@sdp/types";
 import type { z } from "zod";
 import { getDb } from "@/db";
-import { createPostgresPolicyRepository } from "@/db/repositories";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
@@ -18,7 +17,6 @@ import {
   seedCachedKey,
   TEST_API_KEY,
   TEST_CONFIG_ID,
-  TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
   TEST_PROJECT,
   TEST_USER,
@@ -36,7 +34,6 @@ export interface PostTransferOptions {
         kind: "clerk";
         token: string;
       };
-  dryRun?: boolean;
   /** Overrides `SDP_RELEASE_CHANNEL` for this request. */
   releaseChannel?: SdpReleaseChannel;
 }
@@ -66,9 +63,6 @@ export async function postRawTransfer(
   }
   if (options.idempotencyKey !== undefined) {
     headers["Idempotency-Key"] = options.idempotencyKey;
-  }
-  if (options.dryRun === true) {
-    headers["Dry-Run"] = "true";
   }
   return app.request(
     "/v1/payments/transfers",
@@ -125,38 +119,6 @@ export async function listTransferRows(): Promise<PaymentTransferRow[]> {
     offset: 0,
   });
   return result.rows;
-}
-
-export async function seedWalletControlProfile(params: {
-  rules: PolicyRule[];
-  defaultAction?: PolicyDefaultAction;
-  custodyWalletId?: string;
-}): Promise<void> {
-  const repo = createPostgresPolicyRepository(
-    getDb(env),
-    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-  );
-  const custodyWalletId =
-    params.custodyWalletId === undefined ? TEST_CUSTODY_WALLET_ID : params.custodyWalletId;
-  const profile = await repo.createWalletControlProfile({
-    organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT.id,
-    custodyWalletId,
-    name: "Payment controls",
-    createdBy: TEST_USER.id,
-  });
-  assert(profile);
-  const revision = await repo.createWalletControlProfileRevision({
-    profileId: profile.id,
-    rules: params.rules,
-    defaultAction: params.defaultAction,
-    createdBy: TEST_USER.id,
-  });
-  assert(revision);
-  await repo.activateWalletControlProfileRevision({
-    profileId: profile.id,
-    revisionId: revision.id,
-  });
 }
 
 export async function seedCustodyWalletFixture(params: {

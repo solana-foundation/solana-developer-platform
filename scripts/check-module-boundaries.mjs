@@ -32,7 +32,6 @@ const MODULE_METADATA = [
       "@sdp/jupiter-lend",
       "@sdp/ondo",
       "@sdp/payments",
-      "@sdp/policy",
       "@sdp/private-channels",
       "@sdp/redaction",
       "@sdp/rpc",
@@ -187,12 +186,6 @@ const MODULE_METADATA = [
     directory: "packages/sdp-payments",
     purpose: "Payment domain services, fee payment, and ramp providers.",
     allowedDependencies: ["@sdp/redaction", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
-  },
-  {
-    name: "@sdp/policy",
-    directory: "packages/sdp-policy",
-    purpose: "Wallet-operation policy engine: rule evaluation and enforcement orchestration.",
-    allowedDependencies: ["@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/helius-rings",

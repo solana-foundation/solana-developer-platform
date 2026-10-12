@@ -15,41 +15,6 @@ import {
   projectScopeWithRequiredIdempotencyHeaders,
 } from "./helpers";
 
-const dryRun = responses.envelope({
-  decision: z.enum([
-    "allow",
-    "deny",
-    "approval_required",
-    "provider_approval_required",
-    "review",
-    "not_evaluated",
-  ]),
-  reason: z.string(),
-  criteria: z.array(
-    z.object({
-      scope: z.enum(["wallet", "api_key"]),
-      ruleId: z.string().nullable(),
-      kind: z.string(),
-      name: z.string().nullable(),
-      matched: z.boolean(),
-      action: z
-        .enum([
-          "allow",
-          "deny",
-          "approval_required",
-          "provider_approval_required",
-          "review",
-          "not_evaluated",
-        ])
-        .nullable(),
-      reason: z.string().nullable(),
-      leg: z.number().int().nullable(),
-    })
-  ),
-  walletPolicyRevisionId: z.string().nullable(),
-  apiKeyPolicyRevisionId: z.string().nullable(),
-});
-
 /** Internal Treasury contracts. Public Earn publication is gated separately. */
 export function registerEarnTreasuryPaths(
   registry: OpenAPIRegistry,
@@ -69,7 +34,6 @@ export function registerEarnTreasuryPaths(
       query?: Query;
       params?: Query;
       idempotency?: "required" | "either";
-      policy?: boolean;
       created?: boolean;
       description?: string;
     } = {}
@@ -95,35 +59,17 @@ export function registerEarnTreasuryPaths(
           : "") +
         (options.idempotency === "either"
           ? " Supply exactly one UUIDv4 key, through Idempotency-Key or body requestId."
-          : "") +
-        (options.policy
-          ? " Dry-Run: true evaluates policy without signing or writing intent. HTTP 202 means approval is pending, not that funds moved."
           : ""),
       request: {
-        headers: options.policy
-          ? headers.extend({ "Dry-Run": z.literal("true").optional() })
-          : headers,
+        headers,
         ...(options.params ? { params: options.params } : {}),
         ...(options.query ? { query: options.query } : {}),
         ...(options.body ? { body: { required: true, content: jsonContent(options.body) } } : {}),
       },
       responses: {
-        200: {
-          description: options.policy
-            ? "Recorded outcome, replay, or policy dry-run result"
-            : "Result",
-          content: jsonContent(options.policy ? z.union([response, dryRun]) : response),
-        },
+        200: { description: "Result", content: jsonContent(response) },
         ...(options.created
           ? { 201: { description: "Created", content: jsonContent(response) } }
-          : {}),
-        ...(options.policy
-          ? {
-              202: {
-                description: "Awaiting policy approval; no new transfer is confirmed",
-                content: jsonContent(errorResponseSchema),
-              },
-            }
           : {}),
         ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 501, 503]),
       },
@@ -154,7 +100,6 @@ export function registerEarnTreasuryPaths(
         .omit({ requestId: true })
         .openapi({ not: { required: ["requestId"] } }),
       idempotency: "required",
-      policy: true,
     }
   );
   route(
@@ -200,7 +145,6 @@ export function registerEarnTreasuryPaths(
         .omit({ requestId: true })
         .openapi({ not: { required: ["requestId"] } }),
       idempotency: "required",
-      policy: true,
     }
   );
   route(
@@ -259,7 +203,6 @@ export function registerEarnTreasuryPaths(
         )
         .openapi({ not: { required: ["requestId"] } }),
       idempotency: "required",
-      policy: true,
     }
   );
   route(
@@ -348,7 +291,6 @@ export function registerEarnTreasuryPaths(
       params: requests.earnProgramParamsSchema,
       body: requests.earnProgramWithdrawalCreateSchema,
       idempotency: "either",
-      policy: true,
       created: true,
     }
   );

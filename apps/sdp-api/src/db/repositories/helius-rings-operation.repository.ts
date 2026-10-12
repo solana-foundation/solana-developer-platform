@@ -36,8 +36,6 @@ export interface HeliusRingsOperationRow {
   /** Ring the operation was pinned to at prepare; NULL = the default public ring. */
   ring_program_id: string | null;
   intent_key: string;
-  approval_request_id: string | null;
-  policy_evaluation_id: string | null;
   proof_source: "simulated" | "live" | null;
   proof_ref: string | null;
   outer_tx_signature: string | null;
@@ -112,8 +110,6 @@ export interface ReserveHeliusRingsIntentResult {
  * when present, so a transition never blanks a field an earlier step recorded.
  */
 export interface HeliusRingsOperationTransitionPatch {
-  approvalRequestId?: string | null;
-  policyEvaluationId?: string | null;
   proofSource?: "simulated" | "live" | null;
   proofRef?: string | null;
   outerTxSignature?: string | null;

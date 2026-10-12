@@ -33,7 +33,7 @@ Add a branch to `apps/sdp-api/src/routes/payments/ramps/onramp/handlers.ts`. The
 - calls your HTTP-only `createOnrampQuote` with pre-resolved inputs,
 - persists the transfer via `persistRampQuoteTransfer` (dedups by `(provider, providerReference)`; `rampQuoteTransferStatus` maps a `manual_instructions` + `pending` quote to `awaiting_payment`). A `reservedTransferId` is minted before the provider call so it can travel upstream as the reference; a provider whose failed calls must still be attributable to a row pre-creates the pending transfer instead and skips the post-quote persist.
 
-Runtime route: `POST /v1/payments/ramps/onramp/quote`, gated by provider availability, metered quota, permissions, and `policyGate`. This route is public OpenAPI today; update `apps/sdp-api/src/openapi/**` when the new provider changes its request/response shape and regenerate owned artifacts.
+Runtime route: `POST /v1/payments/ramps/onramp/quote`, gated by provider availability, metered quota, permissions, and the key's allowed operations. This route is public OpenAPI today; update `apps/sdp-api/src/openapi/**` when the new provider changes its request/response shape and regenerate owned artifacts.
 
 For `hosted`, decide whether the upstream permits iframe embedding or requires a top-level redirect. Check the provider's CSP / `frame-ancestors` policy and return/render the URL accordingly; the dashboard's default hosted path assumes iframe embedding, so a redirect-only provider needs an explicit renderer instead of inheriting that path.
 

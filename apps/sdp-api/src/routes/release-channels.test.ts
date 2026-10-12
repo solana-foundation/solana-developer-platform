@@ -25,15 +25,6 @@ const MODULE_PROBES = {
     ["GET", "/v1/counterparties/cp_1/provider-accounts"],
   ],
   compliance: [["GET", "/v1/compliance"]],
-  policies: [
-    ["GET", "/v1/policies"],
-    ["GET", "/v1/payments/wallets/wallet_1/policies"],
-    ["PUT", "/v1/payments/wallets/wallet_1/policies"],
-    ["GET", "/v1/payments/wallets/wallet_1/policies/evaluations"],
-    ["POST", "/v1/api-keys/key_1/policy-profiles"],
-    ["POST", "/v1/api-keys/key_1/policy-profiles/profile_1/revisions"],
-    ["PUT", "/v1/api-keys/key_1/policy-bindings"],
-  ],
   issuance: [
     ["GET", "/v1/issuance/templates"],
     ["GET", "/v1/issuance/asset-profiles"],
@@ -100,8 +91,7 @@ describe("release channels at the API", () => {
     });
   }
 
-  // Balances share the wallet-policies router; the policy cut must not take them.
-  it("stable: keeps wallet balances next to the cut policy routes", async () => {
+  it("stable: serves wallet balances", async () => {
     const app = createApp({
       observability: noopObservability,
       rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
