@@ -15,7 +15,9 @@ import type { ManagedRpcEnv } from "./types";
 
 type Answer = { kind: "result" } | { kind: "jsonRpcError"; code: number } | { kind: "fetchFailed" };
 
-type Endpoint = { genesisHash: string; answer: Answer };
+type GenesisAnswer = { kind: "hash"; genesisHash: string } | { kind: "fetchFailed" };
+
+type Endpoint = { genesis: GenesisAnswer; answer: Answer };
 
 type RpcCall = { url: string; method: string };
 
@@ -24,16 +26,20 @@ type JsonRpcBody = { result: unknown } | { error: { code: number; message: strin
 const SLOT = 7;
 
 const SERVES_DEVNET: Endpoint = {
-  genesisHash: GENESIS_HASH_BY_CLUSTER.devnet,
+  genesis: { kind: "hash", genesisHash: GENESIS_HASH_BY_CLUSTER.devnet },
   answer: { kind: "result" },
 };
 const SERVES_MAINNET: Endpoint = {
-  genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"],
+  genesis: { kind: "hash", genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] },
   answer: { kind: "result" },
 };
 const DEVNET_FETCH_FAILS: Endpoint = {
-  genesisHash: GENESIS_HASH_BY_CLUSTER.devnet,
+  genesis: { kind: "hash", genesisHash: GENESIS_HASH_BY_CLUSTER.devnet },
   answer: { kind: "fetchFailed" },
+};
+const GENESIS_PROBE_FETCH_FAILS: Endpoint = {
+  genesis: { kind: "fetchFailed" },
+  answer: { kind: "result" },
 };
 
 type ScopeFacts = Parameters<typeof runInClusterScope>[0];
@@ -61,7 +67,10 @@ function configurePool(pool: ManagedRpcEnv): void {
 }
 
 function devnetJsonRpcError(code: number): Endpoint {
-  return { genesisHash: GENESIS_HASH_BY_CLUSTER.devnet, answer: { kind: "jsonRpcError", code } };
+  return {
+    genesis: { kind: "hash", genesisHash: GENESIS_HASH_BY_CLUSTER.devnet },
+    answer: { kind: "jsonRpcError", code },
+  };
 }
 
 function readRequest(
@@ -92,7 +101,8 @@ function stubEndpoints(endpoints: Readonly<Record<string, Endpoint>>): RpcCall[]
     calls.push({ url: request.url, method: request.method });
     const endpoint = endpoints[request.url];
     if (request.method === "getGenesisHash") {
-      return respond(request.id, { result: endpoint.genesisHash });
+      if (endpoint.genesis.kind === "fetchFailed") throw new TypeError("fetch failed");
+      return respond(request.id, { result: endpoint.genesis.genesisHash });
     }
     if (endpoint.answer.kind === "fetchFailed") throw new TypeError("fetch failed");
     if (endpoint.answer.kind === "jsonRpcError") {
@@ -453,5 +463,25 @@ describe("createClusterRpc", () => {
       { name: "TypeError", message: "fetch failed" }
     );
     assert.deepEqual(calls, [genesisProbe(down), { url: down, method: "sendTransaction" }]);
+  });
+
+  it("fails a cold sendTransaction over when its first endpoint's genesis probe fails transiently", async () => {
+    const unproven = "https://devnet-send-unproven.example.test";
+    const proven = "https://devnet-send-proven.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: unproven,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: proven,
+    });
+    const calls = stubEndpoints({ [unproven]: GENESIS_PROBE_FETCH_FAILS, [proven]: SERVES_DEVNET });
+
+    await runInClusterScope(SANDBOX, createClusterRpc)
+      .sendTransaction("AQ==" as Base64EncodedWireTransaction, { encoding: "base64" })
+      .send();
+
+    assert.deepEqual(calls, [
+      genesisProbe(unproven),
+      genesisProbe(proven),
+      { url: proven, method: "sendTransaction" },
+    ]);
   });
 });
