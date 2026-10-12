@@ -304,6 +304,20 @@ export async function getTransactionNetworkFee(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
+ * The wire transaction's bytes as base64, verbatim.
+ *
+ * @param transactionBytes - The wire transaction.
+ * @returns The base64 wire transaction.
+ */
+function wireTransactionBase64(transactionBytes: Uint8Array): Base64EncodedWireTransaction {
+  // NOTE: kit 7.1.1's base64 decoder encodes the whole backing ArrayBuffer of an offset-zero view
+  // (fixed upstream in kit#1957), so a transaction built inside a larger buffer would be sent with
+  // its slack. `slice()` copies the view to its own exact-size buffer; drop it once the installed
+  // kit includes kit#1957.
+  return getBase64Decoder().decode(transactionBytes.slice()) as Base64EncodedWireTransaction;
+}
+
+/**
  * Send a signed transaction and return the signature
  */
 export async function sendTransaction(
@@ -314,7 +328,7 @@ export async function sendTransaction(
     maxRetries?: bigint;
   }
 ): Promise<Signature> {
-  const encodedTx = getBase64Decoder().decode(signedTransaction) as Base64EncodedWireTransaction;
+  const encodedTx = wireTransactionBase64(signedTransaction);
 
   const signature = await rpc
     .sendTransaction(encodedTx, {
@@ -424,7 +438,7 @@ export async function simulateTransaction(
     commitment?: Commitment;
   }
 ): Promise<SimulationResult> {
-  const encodedTx = getBase64Decoder().decode(transaction) as Base64EncodedWireTransaction;
+  const encodedTx = wireTransactionBase64(transaction);
 
   const response = await rpc
     .simulateTransaction(encodedTx, {
