@@ -504,7 +504,7 @@ export function forbiddenClusterScopeEntryImport({ filePath, source, repositoryR
           .replace(/^type\s+/, "")
           .split(/\s+as\s+/)[0]
     );
-    if (importedNames.includes("withCluster"))
+    if (importedNames.includes("runInClusterScope"))
       return "opens a cluster scope outside the sanctioned entry points";
   }
   return undefined;

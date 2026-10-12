@@ -6,6 +6,7 @@ import {
 import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
+  getAbortablePromise,
   type RpcTransport,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
@@ -115,7 +116,8 @@ function proveGenesis(
  * Wrap one endpoint's transport so it proves the endpoint serves `cluster` before the first
  * request and again once the previous proof is older than `GENESIS_PROOF_TTL_MS`.
  * A probe network error propagates as an ordinary transport failure (failover may hop);
- * a mismatch throws a non-transient error, so failover and retries stop on it.
+ * a mismatch throws a non-transient error, so failover and retries stop on it. A caller whose
+ * signal aborts while the probe runs stops waiting; the probe continues for other callers.
  *
  * @param endpointTransport - The raw transport for `endpointUrl`.
  * @param cluster - The cluster the endpoint is configured for.
@@ -131,7 +133,10 @@ function withGenesisGuard(
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]) => {
     const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
     if (proofExpiresAt === undefined || proofExpiresAt <= Date.now()) {
-      await proveGenesis(endpointTransport, cluster, genesisProofKey);
+      await getAbortablePromise(
+        proveGenesis(endpointTransport, cluster, genesisProofKey),
+        rpcRequest.signal
+      );
     }
     return await endpointTransport<TResponse>(rpcRequest);
   };
