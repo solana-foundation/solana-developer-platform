@@ -43,7 +43,7 @@ const OPENAPI_TAG = {
   },
   PAYMENTS: {
     name: "Payments",
-    description: "Wallet balances, transfers, and recurring payments.",
+    description: "Wallet balances, transfers, and payment flows.",
   },
   PRIVATE_CHANNELS: {
     name: "Private Channels",
@@ -79,7 +79,7 @@ const OPENAPI_TAG = {
 
 /**
  * Whether the public OpenAPI document carries the Earn family. Everything
- * partner-facing derives from that document: api.solana.com/openapi.json and
+ * partner-facing derives from that document, built per release channel: api.solana.com/openapi.json and
  * Swagger UI, the generated API reference, the Postman collection, the
  * playground catalog and the AI discovery files. Held false until launch
  * (PRO-2038): Earn is feature-complete but not announced, so partners must not
@@ -90,22 +90,17 @@ const OPENAPI_TAG = {
  */
 export const EARN_PUBLIC_SURFACE_PUBLISHED = false;
 
-/**
- * The release channel the public document describes. Everything partner-facing
- * is built from that document, so it lists only routes whose module production
- * runs; a route outside this channel answers 403 there and stays unpublished.
- */
-export const PUBLIC_OPENAPI_RELEASE_CHANNEL: SdpReleaseChannel = "stable";
-
 export type PublicOpenApiDocumentOptions = {
+  /**
+   * The deployment's release channel. The document publishes only routes whose
+   * module runs in it, so a deployment never documents a route it refuses with
+   * 403: production (`stable`) documents less than dev (`experimental`). A
+   * narrower filter on top of `publishEarn`, never a way around it: Earn is
+   * published only when both allow it.
+   */
+  releaseChannel: SdpReleaseChannel;
   /** Include the Earn family. Defaults to `EARN_PUBLIC_SURFACE_PUBLISHED`. */
   publishEarn?: boolean;
-  /**
-   * Publish only routes whose module runs in this release channel. Defaults to
-   * `PUBLIC_OPENAPI_RELEASE_CHANNEL`. A narrower filter on top of `publishEarn`,
-   * never a way around it: Earn is published only when both allow it.
-   */
-  releaseChannel?: SdpReleaseChannel;
 };
 
 /**
@@ -297,10 +292,8 @@ export function createOpenApiDocument(): OpenAPIObject {
   return createDocument({ publicOnly: false, publishEarn: true });
 }
 
-export function createPublicOpenApiDocument(
-  options: PublicOpenApiDocumentOptions = {}
-): OpenAPIObject {
-  const releaseChannel = options.releaseChannel ?? PUBLIC_OPENAPI_RELEASE_CHANNEL;
+export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOptions): OpenAPIObject {
+  const { releaseChannel } = options;
   return createDocument({
     publicOnly: true,
     publishEarn:

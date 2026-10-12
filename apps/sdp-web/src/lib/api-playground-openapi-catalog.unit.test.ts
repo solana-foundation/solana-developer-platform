@@ -6,7 +6,10 @@ import { buildCounterpartyPlaygroundEndpointConfigs } from "@/app/dashboard/[pro
 import { buildPaymentsPlaygroundEndpointConfigs } from "@/app/dashboard/[projectId]/payments/payments-playground-config";
 import type { ApiPlaygroundEndpointConfig } from "@/components/api-playground-shell";
 import { getMessages, translate } from "@/i18n/messages";
-import { getOpenApiPlaygroundEndpoints } from "./api-playground-openapi-catalog";
+import {
+  filterPlaygroundEndpointsToReleaseChannel,
+  getOpenApiPlaygroundEndpoints,
+} from "./api-playground-openapi-catalog";
 
 function operationKey(endpoint: ApiPlaygroundEndpointConfig): string {
   return `${endpoint.method} ${endpoint.path.split("?", 1)[0]}`;
@@ -44,6 +47,50 @@ describe("API playground module coverage", () => {
           expect(publicKeys.some((key) => otherKeys.has(key))).toBe(false);
         }
       }
+    }
+  });
+});
+
+describe("API playground release channel", () => {
+  const messages = getMessages("en");
+  const t = (
+    key: Parameters<typeof translate<typeof messages>>[1],
+    values?: Record<string, string | number>
+  ) => translate(messages, key, values);
+  const paths = (endpoints: ApiPlaygroundEndpointConfig[]) =>
+    endpoints.map((endpoint) => endpoint.path.split("?", 1)[0]);
+
+  it("offers no ramp form, curated or generated, on a stable deployment", () => {
+    const payments = buildPaymentsPlaygroundEndpointConfigs({ transfers: [], wallets: [] }, t);
+    expect(paths(payments)).toContain("/v1/payments/ramps/onramp/quote");
+
+    const stable = paths(filterPlaygroundEndpointsToReleaseChannel(payments, "stable"));
+    expect(stable.filter((path) => path.startsWith("/v1/payments/ramps"))).toEqual([]);
+    expect(stable).toContain("/v1/payments/transfers");
+    expect(stable).toContain("/v1/payments/recurring-payments");
+  });
+
+  it("drops counterparty ramp onboarding and every issuance form on a stable deployment", () => {
+    const counterparties = filterPlaygroundEndpointsToReleaseChannel(
+      buildCounterpartyPlaygroundEndpointConfigs([], t),
+      "stable"
+    );
+    expect(
+      paths(counterparties).filter((path) => /requirements|provider-accounts/.test(path))
+    ).toEqual([]);
+    expect(paths(counterparties)).toContain("/v1/counterparties");
+
+    const issuance = buildIssuancePlaygroundEndpointConfigs({ templates: [], tokens: [], t });
+    expect(issuance.length).toBeGreaterThan(0);
+    expect(filterPlaygroundEndpointsToReleaseChannel(issuance, "stable")).toEqual([]);
+  });
+
+  it("keeps every catalog operation on an experimental deployment", () => {
+    for (const module of ["wallets", "payments", "counterparties", "issuance"] as const) {
+      const endpoints = getOpenApiPlaygroundEndpoints(module);
+      expect(filterPlaygroundEndpointsToReleaseChannel(endpoints, "experimental")).toEqual(
+        endpoints
+      );
     }
   });
 });

@@ -4,9 +4,9 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "modules": {
       "wallets": 10,
-      "payments": 30,
-      "counterparties": 11,
-      "issuance": 0
+      "payments": 34,
+      "counterparties": 13,
+      "issuance": 37
     }
   },
   "modules": {
@@ -17,6 +17,7 @@
         "title": "Initialize wallet signing",
         "method": "POST",
         "path": "/v1/wallets/initialize",
+        "releaseModule": "custody",
         "pathFields": [],
         "bodyFields": [
           {
@@ -41,6 +42,7 @@
         "title": "Create wallet",
         "method": "POST",
         "path": "/v1/wallets",
+        "releaseModule": "custody",
         "pathFields": [],
         "bodyFields": [
           {
@@ -80,6 +82,7 @@
         "title": "Delete wallet",
         "method": "DELETE",
         "path": "/v1/wallets",
+        "releaseModule": "custody",
         "pathFields": [],
         "bodyFields": [
           {
@@ -109,6 +112,7 @@
         "title": "List wallets",
         "method": "GET",
         "path": "/v1/wallets?provider={provider}&includeBalances={includeBalances}&view={view}",
+        "releaseModule": "custody",
         "pathFields": [
           {
             "key": "provider",
@@ -220,6 +224,7 @@
         "title": "List wallet signing configs",
         "method": "GET",
         "path": "/v1/wallets/configs",
+        "releaseModule": "custody",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -247,6 +252,7 @@
         "title": "Aggregate wallet balances",
         "method": "GET",
         "path": "/v1/wallets/aggregate?provider={provider}",
+        "releaseModule": "custody",
         "pathFields": [
           {
             "key": "provider",
@@ -329,6 +335,7 @@
         "title": "Get wallet public key",
         "method": "GET",
         "path": "/v1/wallets/public-key?walletId={walletId}",
+        "releaseModule": "custody",
         "pathFields": [
           {
             "key": "walletId",
@@ -349,6 +356,7 @@
         "title": "Check signer via simulated memo transaction",
         "method": "POST",
         "path": "/v1/wallets/signer-check",
+        "releaseModule": "custody",
         "pathFields": [],
         "bodyFields": [
           {
@@ -383,6 +391,7 @@
         "title": "Get wallet by ID",
         "method": "GET",
         "path": "/v1/wallets/{walletId}?includeBalance={includeBalance}",
+        "releaseModule": "custody",
         "pathFields": [
           {
             "key": "walletId",
@@ -438,6 +447,7 @@
         "title": "Update wallet",
         "method": "PATCH",
         "path": "/v1/wallets/{walletId}",
+        "releaseModule": "custody",
         "pathFields": [
           {
             "key": "walletId",
@@ -487,6 +497,7 @@
         "title": "Get wallet balances",
         "method": "GET",
         "path": "/v1/payments/wallets/{walletId}/balances?minimumSlot={minimumSlot}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "walletId",
@@ -536,6 +547,7 @@
         "title": "Execute transfer (custody)",
         "method": "POST",
         "path": "/v1/payments/transfers",
+        "releaseModule": "payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -630,6 +642,7 @@
         "title": "List transfers",
         "method": "GET",
         "path": "/v1/payments/transfers?custodyWalletId={custodyWalletId}&search={search}&token={token}&direction={direction}&status={status}&category={category}&type={type}&counterpartyId={counterpartyId}&provider={provider}&providerReference={providerReference}&from={from}&to={to}&includeObserved={includeObserved}&sortBy={sortBy}&sortDirection={sortDirection}&page={page}&pageSize={pageSize}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "custodyWalletId",
@@ -933,6 +946,7 @@
         "title": "Get transfer",
         "method": "GET",
         "path": "/v1/payments/transfers/{transferId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "transferId",
@@ -1025,6 +1039,7 @@
         "title": "Estimate transfer batch",
         "method": "POST",
         "path": "/v1/payments/transfer-batches/estimate",
+        "releaseModule": "payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -1062,6 +1077,7 @@
         "title": "Create transfer batch",
         "method": "POST",
         "path": "/v1/payments/transfer-batches",
+        "releaseModule": "payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -1190,6 +1206,7 @@
         "title": "List transfer batches",
         "method": "GET",
         "path": "/v1/payments/transfer-batches?sourceCustodyWalletId={sourceCustodyWalletId}&token={token}&status={status}&externalId={externalId}&page={page}&pageSize={pageSize}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "sourceCustodyWalletId",
@@ -1298,6 +1315,7 @@
         "title": "Get transfer batch",
         "method": "GET",
         "path": "/v1/payments/transfer-batches/{batchId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "batchId",
@@ -1424,6 +1442,7 @@
         "title": "Create recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments",
+        "releaseModule": "recurring_payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -1481,6 +1500,7 @@
         "title": "List recurring payments",
         "method": "GET",
         "path": "/v1/payments/recurring-payments?counterpartyId={counterpartyId}&status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -1601,6 +1621,7 @@
         "title": "Update recurring payment",
         "method": "PATCH",
         "path": "/v1/payments/recurring-payments/{id}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -1666,6 +1687,7 @@
         "title": "Get recurring payment",
         "method": "GET",
         "path": "/v1/payments/recurring-payments/{id}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -1721,6 +1743,7 @@
         "title": "Activate recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/activate",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -1776,6 +1799,7 @@
         "title": "Cancel recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/cancel",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -1831,6 +1855,7 @@
         "title": "Collect recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/collect",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -1974,6 +1999,7 @@
         "title": "Resume recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/resume",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "id",
@@ -2029,6 +2055,7 @@
         "title": "Create subscription plan",
         "method": "POST",
         "path": "/v1/payments/subscription-plans",
+        "releaseModule": "recurring_payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -2076,6 +2103,7 @@
         "title": "List subscription plans",
         "method": "GET",
         "path": "/v1/payments/subscription-plans?status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "status",
@@ -2155,6 +2183,7 @@
         "title": "Prepare subscription plan creation",
         "method": "POST",
         "path": "/v1/payments/subscription-plans/{planId}/prepare-create",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "planId",
@@ -2217,6 +2246,7 @@
         "title": "Get subscription plan",
         "method": "GET",
         "path": "/v1/payments/subscription-plans/{planId}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "planId",
@@ -2262,6 +2292,7 @@
         "title": "Update subscription plan",
         "method": "PATCH",
         "path": "/v1/payments/subscription-plans/{planId}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "planId",
@@ -2317,6 +2348,7 @@
         "title": "Create subscription",
         "method": "POST",
         "path": "/v1/payments/subscriptions",
+        "releaseModule": "recurring_payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -2364,6 +2396,7 @@
         "title": "List subscriptions",
         "method": "GET",
         "path": "/v1/payments/subscriptions?planId={planId}&counterpartyId={counterpartyId}&status={status}&dueBefore={dueBefore}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "planId",
@@ -2470,6 +2503,7 @@
         "title": "Prepare subscription authorization",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2533,6 +2567,7 @@
         "title": "Prepare subscription cancellation",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2594,6 +2629,7 @@
         "title": "Prepare subscription resume",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2655,6 +2691,7 @@
         "title": "Prepare subscription collection",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2737,6 +2774,7 @@
         "title": "Get subscription",
         "method": "GET",
         "path": "/v1/payments/subscriptions/{subscriptionId}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2782,6 +2820,7 @@
         "title": "List subscription collection attempts",
         "method": "GET",
         "path": "/v1/payments/subscriptions/{subscriptionId}/collection-attempts?status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2872,11 +2911,1524 @@
         }
       },
       {
+        "id": "list-payment-onramp-currencies",
+        "operationId": "listPaymentOnrampCurrencies",
+        "title": "List on-ramp currency support",
+        "method": "GET",
+        "path": "/v1/payments/ramps/onramp/currency?source={source}&dest={dest}&provider={provider}",
+        "releaseModule": "ramps",
+        "pathFields": [
+          {
+            "key": "source",
+            "label": "source",
+            "description": "Optional fiat source currency filter.",
+            "defaultValue": "USD",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "AED",
+                "value": "AED"
+              },
+              {
+                "label": "AFN",
+                "value": "AFN"
+              },
+              {
+                "label": "ALL",
+                "value": "ALL"
+              },
+              {
+                "label": "AMD",
+                "value": "AMD"
+              },
+              {
+                "label": "AOA",
+                "value": "AOA"
+              },
+              {
+                "label": "ARS",
+                "value": "ARS"
+              },
+              {
+                "label": "AUD",
+                "value": "AUD"
+              },
+              {
+                "label": "AWG",
+                "value": "AWG"
+              },
+              {
+                "label": "BAM",
+                "value": "BAM"
+              },
+              {
+                "label": "BBD",
+                "value": "BBD"
+              },
+              {
+                "label": "BDT",
+                "value": "BDT"
+              },
+              {
+                "label": "BHD",
+                "value": "BHD"
+              },
+              {
+                "label": "BIF",
+                "value": "BIF"
+              },
+              {
+                "label": "BMD",
+                "value": "BMD"
+              },
+              {
+                "label": "BND",
+                "value": "BND"
+              },
+              {
+                "label": "BOB",
+                "value": "BOB"
+              },
+              {
+                "label": "BRL",
+                "value": "BRL"
+              },
+              {
+                "label": "BSD",
+                "value": "BSD"
+              },
+              {
+                "label": "BTN",
+                "value": "BTN"
+              },
+              {
+                "label": "BWP",
+                "value": "BWP"
+              },
+              {
+                "label": "BZD",
+                "value": "BZD"
+              },
+              {
+                "label": "CAD",
+                "value": "CAD"
+              },
+              {
+                "label": "CDF",
+                "value": "CDF"
+              },
+              {
+                "label": "CHF",
+                "value": "CHF"
+              },
+              {
+                "label": "CLP",
+                "value": "CLP"
+              },
+              {
+                "label": "CNY",
+                "value": "CNY"
+              },
+              {
+                "label": "COP",
+                "value": "COP"
+              },
+              {
+                "label": "CRC",
+                "value": "CRC"
+              },
+              {
+                "label": "CUP",
+                "value": "CUP"
+              },
+              {
+                "label": "CVE",
+                "value": "CVE"
+              },
+              {
+                "label": "CZK",
+                "value": "CZK"
+              },
+              {
+                "label": "DJF",
+                "value": "DJF"
+              },
+              {
+                "label": "DKK",
+                "value": "DKK"
+              },
+              {
+                "label": "DOP",
+                "value": "DOP"
+              },
+              {
+                "label": "DZD",
+                "value": "DZD"
+              },
+              {
+                "label": "EGP",
+                "value": "EGP"
+              },
+              {
+                "label": "ERN",
+                "value": "ERN"
+              },
+              {
+                "label": "ETB",
+                "value": "ETB"
+              },
+              {
+                "label": "EUR",
+                "value": "EUR"
+              },
+              {
+                "label": "FJD",
+                "value": "FJD"
+              },
+              {
+                "label": "FKP",
+                "value": "FKP"
+              },
+              {
+                "label": "GBP",
+                "value": "GBP"
+              },
+              {
+                "label": "GEL",
+                "value": "GEL"
+              },
+              {
+                "label": "GHS",
+                "value": "GHS"
+              },
+              {
+                "label": "GIP",
+                "value": "GIP"
+              },
+              {
+                "label": "GMD",
+                "value": "GMD"
+              },
+              {
+                "label": "GNF",
+                "value": "GNF"
+              },
+              {
+                "label": "GTQ",
+                "value": "GTQ"
+              },
+              {
+                "label": "GYD",
+                "value": "GYD"
+              },
+              {
+                "label": "HKD",
+                "value": "HKD"
+              },
+              {
+                "label": "HNL",
+                "value": "HNL"
+              },
+              {
+                "label": "HTG",
+                "value": "HTG"
+              },
+              {
+                "label": "HUF",
+                "value": "HUF"
+              },
+              {
+                "label": "IDR",
+                "value": "IDR"
+              },
+              {
+                "label": "ILS",
+                "value": "ILS"
+              },
+              {
+                "label": "INR",
+                "value": "INR"
+              },
+              {
+                "label": "IQD",
+                "value": "IQD"
+              },
+              {
+                "label": "IRR",
+                "value": "IRR"
+              },
+              {
+                "label": "ISK",
+                "value": "ISK"
+              },
+              {
+                "label": "JMD",
+                "value": "JMD"
+              },
+              {
+                "label": "JOD",
+                "value": "JOD"
+              },
+              {
+                "label": "JPY",
+                "value": "JPY"
+              },
+              {
+                "label": "KES",
+                "value": "KES"
+              },
+              {
+                "label": "KGS",
+                "value": "KGS"
+              },
+              {
+                "label": "KHR",
+                "value": "KHR"
+              },
+              {
+                "label": "KMF",
+                "value": "KMF"
+              },
+              {
+                "label": "KPW",
+                "value": "KPW"
+              },
+              {
+                "label": "KRW",
+                "value": "KRW"
+              },
+              {
+                "label": "KWD",
+                "value": "KWD"
+              },
+              {
+                "label": "KYD",
+                "value": "KYD"
+              },
+              {
+                "label": "KZT",
+                "value": "KZT"
+              },
+              {
+                "label": "LAK",
+                "value": "LAK"
+              },
+              {
+                "label": "LBP",
+                "value": "LBP"
+              },
+              {
+                "label": "LKR",
+                "value": "LKR"
+              },
+              {
+                "label": "LRD",
+                "value": "LRD"
+              },
+              {
+                "label": "LSL",
+                "value": "LSL"
+              },
+              {
+                "label": "LYD",
+                "value": "LYD"
+              },
+              {
+                "label": "MAD",
+                "value": "MAD"
+              },
+              {
+                "label": "MDL",
+                "value": "MDL"
+              },
+              {
+                "label": "MGA",
+                "value": "MGA"
+              },
+              {
+                "label": "MKD",
+                "value": "MKD"
+              },
+              {
+                "label": "MMK",
+                "value": "MMK"
+              },
+              {
+                "label": "MNT",
+                "value": "MNT"
+              },
+              {
+                "label": "MOP",
+                "value": "MOP"
+              },
+              {
+                "label": "MRU",
+                "value": "MRU"
+              },
+              {
+                "label": "MUR",
+                "value": "MUR"
+              },
+              {
+                "label": "MVR",
+                "value": "MVR"
+              },
+              {
+                "label": "MWK",
+                "value": "MWK"
+              },
+              {
+                "label": "MXN",
+                "value": "MXN"
+              },
+              {
+                "label": "MYR",
+                "value": "MYR"
+              },
+              {
+                "label": "MZN",
+                "value": "MZN"
+              },
+              {
+                "label": "NAD",
+                "value": "NAD"
+              },
+              {
+                "label": "NGN",
+                "value": "NGN"
+              },
+              {
+                "label": "NIO",
+                "value": "NIO"
+              },
+              {
+                "label": "NOK",
+                "value": "NOK"
+              },
+              {
+                "label": "NPR",
+                "value": "NPR"
+              },
+              {
+                "label": "NZD",
+                "value": "NZD"
+              },
+              {
+                "label": "OMR",
+                "value": "OMR"
+              },
+              {
+                "label": "PAB",
+                "value": "PAB"
+              },
+              {
+                "label": "PEN",
+                "value": "PEN"
+              },
+              {
+                "label": "PGK",
+                "value": "PGK"
+              },
+              {
+                "label": "PHP",
+                "value": "PHP"
+              },
+              {
+                "label": "PKR",
+                "value": "PKR"
+              },
+              {
+                "label": "PLN",
+                "value": "PLN"
+              },
+              {
+                "label": "PYG",
+                "value": "PYG"
+              },
+              {
+                "label": "QAR",
+                "value": "QAR"
+              },
+              {
+                "label": "RON",
+                "value": "RON"
+              },
+              {
+                "label": "RSD",
+                "value": "RSD"
+              },
+              {
+                "label": "RUB",
+                "value": "RUB"
+              },
+              {
+                "label": "RWF",
+                "value": "RWF"
+              },
+              {
+                "label": "SAR",
+                "value": "SAR"
+              },
+              {
+                "label": "SBD",
+                "value": "SBD"
+              },
+              {
+                "label": "SCR",
+                "value": "SCR"
+              },
+              {
+                "label": "SDG",
+                "value": "SDG"
+              },
+              {
+                "label": "SEK",
+                "value": "SEK"
+              },
+              {
+                "label": "SGD",
+                "value": "SGD"
+              },
+              {
+                "label": "SHP",
+                "value": "SHP"
+              },
+              {
+                "label": "SLE",
+                "value": "SLE"
+              },
+              {
+                "label": "SOS",
+                "value": "SOS"
+              },
+              {
+                "label": "SRD",
+                "value": "SRD"
+              },
+              {
+                "label": "SSP",
+                "value": "SSP"
+              },
+              {
+                "label": "STN",
+                "value": "STN"
+              },
+              {
+                "label": "SYP",
+                "value": "SYP"
+              },
+              {
+                "label": "SZL",
+                "value": "SZL"
+              },
+              {
+                "label": "THB",
+                "value": "THB"
+              },
+              {
+                "label": "TJS",
+                "value": "TJS"
+              },
+              {
+                "label": "TND",
+                "value": "TND"
+              },
+              {
+                "label": "TOP",
+                "value": "TOP"
+              },
+              {
+                "label": "TRY",
+                "value": "TRY"
+              },
+              {
+                "label": "TTD",
+                "value": "TTD"
+              },
+              {
+                "label": "TWD",
+                "value": "TWD"
+              },
+              {
+                "label": "TZS",
+                "value": "TZS"
+              },
+              {
+                "label": "UAH",
+                "value": "UAH"
+              },
+              {
+                "label": "UGX",
+                "value": "UGX"
+              },
+              {
+                "label": "USD",
+                "value": "USD"
+              },
+              {
+                "label": "UYU",
+                "value": "UYU"
+              },
+              {
+                "label": "UZS",
+                "value": "UZS"
+              },
+              {
+                "label": "VND",
+                "value": "VND"
+              },
+              {
+                "label": "VUV",
+                "value": "VUV"
+              },
+              {
+                "label": "WST",
+                "value": "WST"
+              },
+              {
+                "label": "XAF",
+                "value": "XAF"
+              },
+              {
+                "label": "XCD",
+                "value": "XCD"
+              },
+              {
+                "label": "XOF",
+                "value": "XOF"
+              },
+              {
+                "label": "XPF",
+                "value": "XPF"
+              },
+              {
+                "label": "YER",
+                "value": "YER"
+              },
+              {
+                "label": "ZAR",
+                "value": "ZAR"
+              },
+              {
+                "label": "ZMW",
+                "value": "ZMW"
+              }
+            ]
+          },
+          {
+            "key": "dest",
+            "label": "dest",
+            "description": "Optional Solana crypto rail destination filter.",
+            "defaultValue": "usdc.solana",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "sol.solana",
+                "value": "sol.solana"
+              },
+              {
+                "label": "usdc.solana",
+                "value": "usdc.solana"
+              },
+              {
+                "label": "usdt.solana",
+                "value": "usdt.solana"
+              },
+              {
+                "label": "usdg.solana",
+                "value": "usdg.solana"
+              },
+              {
+                "label": "pyusd.solana",
+                "value": "pyusd.solana"
+              }
+            ]
+          },
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Optional ramp provider filter.",
+            "defaultValue": "moonpay",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "moonpay",
+                "value": "moonpay"
+              },
+              {
+                "label": "lightspark",
+                "value": "lightspark"
+              },
+              {
+                "label": "bvnk",
+                "value": "bvnk"
+              },
+              {
+                "label": "moneygram",
+                "value": "moneygram"
+              },
+              {
+                "label": "coinbase",
+                "value": "coinbase"
+              },
+              {
+                "label": "mural",
+                "value": "mural"
+              },
+              {
+                "label": "stripe",
+                "value": "stripe"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "currencies": {
+              "sources": ["USD", "EUR"],
+              "destinations": ["usdc.solana", "sol.solana"]
+            },
+            "pairs": [
+              {
+                "source": "USD",
+                "dest": "usdc.solana",
+                "providers": ["moonpay", "lightspark"]
+              }
+            ],
+            "providerDetails": {
+              "moonpay": {
+                "currencies": {
+                  "USD": {
+                    "min": "20",
+                    "max": "30000"
+                  }
+                },
+                "countrySupport": {
+                  "coverage": "all-currencies",
+                  "countries": ["AL", "US"]
+                },
+                "entityTypes": ["individual"]
+              }
+            },
+            "supportHash": "sha256:example"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "list-payment-offramp-currencies",
+        "operationId": "listPaymentOfframpCurrencies",
+        "title": "List off-ramp currency support",
+        "method": "GET",
+        "path": "/v1/payments/ramps/offramp/currency?source={source}&dest={dest}&provider={provider}",
+        "releaseModule": "ramps",
+        "pathFields": [
+          {
+            "key": "source",
+            "label": "source",
+            "description": "Optional Solana crypto rail source filter.",
+            "defaultValue": "usdc.solana",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "sol.solana",
+                "value": "sol.solana"
+              },
+              {
+                "label": "usdc.solana",
+                "value": "usdc.solana"
+              },
+              {
+                "label": "usdt.solana",
+                "value": "usdt.solana"
+              },
+              {
+                "label": "usdg.solana",
+                "value": "usdg.solana"
+              },
+              {
+                "label": "pyusd.solana",
+                "value": "pyusd.solana"
+              }
+            ]
+          },
+          {
+            "key": "dest",
+            "label": "dest",
+            "description": "Optional fiat destination currency filter.",
+            "defaultValue": "USD",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "AED",
+                "value": "AED"
+              },
+              {
+                "label": "AFN",
+                "value": "AFN"
+              },
+              {
+                "label": "ALL",
+                "value": "ALL"
+              },
+              {
+                "label": "AMD",
+                "value": "AMD"
+              },
+              {
+                "label": "AOA",
+                "value": "AOA"
+              },
+              {
+                "label": "ARS",
+                "value": "ARS"
+              },
+              {
+                "label": "AUD",
+                "value": "AUD"
+              },
+              {
+                "label": "AWG",
+                "value": "AWG"
+              },
+              {
+                "label": "BAM",
+                "value": "BAM"
+              },
+              {
+                "label": "BBD",
+                "value": "BBD"
+              },
+              {
+                "label": "BDT",
+                "value": "BDT"
+              },
+              {
+                "label": "BHD",
+                "value": "BHD"
+              },
+              {
+                "label": "BIF",
+                "value": "BIF"
+              },
+              {
+                "label": "BMD",
+                "value": "BMD"
+              },
+              {
+                "label": "BND",
+                "value": "BND"
+              },
+              {
+                "label": "BOB",
+                "value": "BOB"
+              },
+              {
+                "label": "BRL",
+                "value": "BRL"
+              },
+              {
+                "label": "BSD",
+                "value": "BSD"
+              },
+              {
+                "label": "BTN",
+                "value": "BTN"
+              },
+              {
+                "label": "BWP",
+                "value": "BWP"
+              },
+              {
+                "label": "BZD",
+                "value": "BZD"
+              },
+              {
+                "label": "CAD",
+                "value": "CAD"
+              },
+              {
+                "label": "CDF",
+                "value": "CDF"
+              },
+              {
+                "label": "CHF",
+                "value": "CHF"
+              },
+              {
+                "label": "CLP",
+                "value": "CLP"
+              },
+              {
+                "label": "CNY",
+                "value": "CNY"
+              },
+              {
+                "label": "COP",
+                "value": "COP"
+              },
+              {
+                "label": "CRC",
+                "value": "CRC"
+              },
+              {
+                "label": "CUP",
+                "value": "CUP"
+              },
+              {
+                "label": "CVE",
+                "value": "CVE"
+              },
+              {
+                "label": "CZK",
+                "value": "CZK"
+              },
+              {
+                "label": "DJF",
+                "value": "DJF"
+              },
+              {
+                "label": "DKK",
+                "value": "DKK"
+              },
+              {
+                "label": "DOP",
+                "value": "DOP"
+              },
+              {
+                "label": "DZD",
+                "value": "DZD"
+              },
+              {
+                "label": "EGP",
+                "value": "EGP"
+              },
+              {
+                "label": "ERN",
+                "value": "ERN"
+              },
+              {
+                "label": "ETB",
+                "value": "ETB"
+              },
+              {
+                "label": "EUR",
+                "value": "EUR"
+              },
+              {
+                "label": "FJD",
+                "value": "FJD"
+              },
+              {
+                "label": "FKP",
+                "value": "FKP"
+              },
+              {
+                "label": "GBP",
+                "value": "GBP"
+              },
+              {
+                "label": "GEL",
+                "value": "GEL"
+              },
+              {
+                "label": "GHS",
+                "value": "GHS"
+              },
+              {
+                "label": "GIP",
+                "value": "GIP"
+              },
+              {
+                "label": "GMD",
+                "value": "GMD"
+              },
+              {
+                "label": "GNF",
+                "value": "GNF"
+              },
+              {
+                "label": "GTQ",
+                "value": "GTQ"
+              },
+              {
+                "label": "GYD",
+                "value": "GYD"
+              },
+              {
+                "label": "HKD",
+                "value": "HKD"
+              },
+              {
+                "label": "HNL",
+                "value": "HNL"
+              },
+              {
+                "label": "HTG",
+                "value": "HTG"
+              },
+              {
+                "label": "HUF",
+                "value": "HUF"
+              },
+              {
+                "label": "IDR",
+                "value": "IDR"
+              },
+              {
+                "label": "ILS",
+                "value": "ILS"
+              },
+              {
+                "label": "INR",
+                "value": "INR"
+              },
+              {
+                "label": "IQD",
+                "value": "IQD"
+              },
+              {
+                "label": "IRR",
+                "value": "IRR"
+              },
+              {
+                "label": "ISK",
+                "value": "ISK"
+              },
+              {
+                "label": "JMD",
+                "value": "JMD"
+              },
+              {
+                "label": "JOD",
+                "value": "JOD"
+              },
+              {
+                "label": "JPY",
+                "value": "JPY"
+              },
+              {
+                "label": "KES",
+                "value": "KES"
+              },
+              {
+                "label": "KGS",
+                "value": "KGS"
+              },
+              {
+                "label": "KHR",
+                "value": "KHR"
+              },
+              {
+                "label": "KMF",
+                "value": "KMF"
+              },
+              {
+                "label": "KPW",
+                "value": "KPW"
+              },
+              {
+                "label": "KRW",
+                "value": "KRW"
+              },
+              {
+                "label": "KWD",
+                "value": "KWD"
+              },
+              {
+                "label": "KYD",
+                "value": "KYD"
+              },
+              {
+                "label": "KZT",
+                "value": "KZT"
+              },
+              {
+                "label": "LAK",
+                "value": "LAK"
+              },
+              {
+                "label": "LBP",
+                "value": "LBP"
+              },
+              {
+                "label": "LKR",
+                "value": "LKR"
+              },
+              {
+                "label": "LRD",
+                "value": "LRD"
+              },
+              {
+                "label": "LSL",
+                "value": "LSL"
+              },
+              {
+                "label": "LYD",
+                "value": "LYD"
+              },
+              {
+                "label": "MAD",
+                "value": "MAD"
+              },
+              {
+                "label": "MDL",
+                "value": "MDL"
+              },
+              {
+                "label": "MGA",
+                "value": "MGA"
+              },
+              {
+                "label": "MKD",
+                "value": "MKD"
+              },
+              {
+                "label": "MMK",
+                "value": "MMK"
+              },
+              {
+                "label": "MNT",
+                "value": "MNT"
+              },
+              {
+                "label": "MOP",
+                "value": "MOP"
+              },
+              {
+                "label": "MRU",
+                "value": "MRU"
+              },
+              {
+                "label": "MUR",
+                "value": "MUR"
+              },
+              {
+                "label": "MVR",
+                "value": "MVR"
+              },
+              {
+                "label": "MWK",
+                "value": "MWK"
+              },
+              {
+                "label": "MXN",
+                "value": "MXN"
+              },
+              {
+                "label": "MYR",
+                "value": "MYR"
+              },
+              {
+                "label": "MZN",
+                "value": "MZN"
+              },
+              {
+                "label": "NAD",
+                "value": "NAD"
+              },
+              {
+                "label": "NGN",
+                "value": "NGN"
+              },
+              {
+                "label": "NIO",
+                "value": "NIO"
+              },
+              {
+                "label": "NOK",
+                "value": "NOK"
+              },
+              {
+                "label": "NPR",
+                "value": "NPR"
+              },
+              {
+                "label": "NZD",
+                "value": "NZD"
+              },
+              {
+                "label": "OMR",
+                "value": "OMR"
+              },
+              {
+                "label": "PAB",
+                "value": "PAB"
+              },
+              {
+                "label": "PEN",
+                "value": "PEN"
+              },
+              {
+                "label": "PGK",
+                "value": "PGK"
+              },
+              {
+                "label": "PHP",
+                "value": "PHP"
+              },
+              {
+                "label": "PKR",
+                "value": "PKR"
+              },
+              {
+                "label": "PLN",
+                "value": "PLN"
+              },
+              {
+                "label": "PYG",
+                "value": "PYG"
+              },
+              {
+                "label": "QAR",
+                "value": "QAR"
+              },
+              {
+                "label": "RON",
+                "value": "RON"
+              },
+              {
+                "label": "RSD",
+                "value": "RSD"
+              },
+              {
+                "label": "RUB",
+                "value": "RUB"
+              },
+              {
+                "label": "RWF",
+                "value": "RWF"
+              },
+              {
+                "label": "SAR",
+                "value": "SAR"
+              },
+              {
+                "label": "SBD",
+                "value": "SBD"
+              },
+              {
+                "label": "SCR",
+                "value": "SCR"
+              },
+              {
+                "label": "SDG",
+                "value": "SDG"
+              },
+              {
+                "label": "SEK",
+                "value": "SEK"
+              },
+              {
+                "label": "SGD",
+                "value": "SGD"
+              },
+              {
+                "label": "SHP",
+                "value": "SHP"
+              },
+              {
+                "label": "SLE",
+                "value": "SLE"
+              },
+              {
+                "label": "SOS",
+                "value": "SOS"
+              },
+              {
+                "label": "SRD",
+                "value": "SRD"
+              },
+              {
+                "label": "SSP",
+                "value": "SSP"
+              },
+              {
+                "label": "STN",
+                "value": "STN"
+              },
+              {
+                "label": "SYP",
+                "value": "SYP"
+              },
+              {
+                "label": "SZL",
+                "value": "SZL"
+              },
+              {
+                "label": "THB",
+                "value": "THB"
+              },
+              {
+                "label": "TJS",
+                "value": "TJS"
+              },
+              {
+                "label": "TND",
+                "value": "TND"
+              },
+              {
+                "label": "TOP",
+                "value": "TOP"
+              },
+              {
+                "label": "TRY",
+                "value": "TRY"
+              },
+              {
+                "label": "TTD",
+                "value": "TTD"
+              },
+              {
+                "label": "TWD",
+                "value": "TWD"
+              },
+              {
+                "label": "TZS",
+                "value": "TZS"
+              },
+              {
+                "label": "UAH",
+                "value": "UAH"
+              },
+              {
+                "label": "UGX",
+                "value": "UGX"
+              },
+              {
+                "label": "USD",
+                "value": "USD"
+              },
+              {
+                "label": "UYU",
+                "value": "UYU"
+              },
+              {
+                "label": "UZS",
+                "value": "UZS"
+              },
+              {
+                "label": "VND",
+                "value": "VND"
+              },
+              {
+                "label": "VUV",
+                "value": "VUV"
+              },
+              {
+                "label": "WST",
+                "value": "WST"
+              },
+              {
+                "label": "XAF",
+                "value": "XAF"
+              },
+              {
+                "label": "XCD",
+                "value": "XCD"
+              },
+              {
+                "label": "XOF",
+                "value": "XOF"
+              },
+              {
+                "label": "XPF",
+                "value": "XPF"
+              },
+              {
+                "label": "YER",
+                "value": "YER"
+              },
+              {
+                "label": "ZAR",
+                "value": "ZAR"
+              },
+              {
+                "label": "ZMW",
+                "value": "ZMW"
+              }
+            ]
+          },
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Optional ramp provider filter.",
+            "defaultValue": "moonpay",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "moonpay",
+                "value": "moonpay"
+              },
+              {
+                "label": "lightspark",
+                "value": "lightspark"
+              },
+              {
+                "label": "bvnk",
+                "value": "bvnk"
+              },
+              {
+                "label": "moneygram",
+                "value": "moneygram"
+              },
+              {
+                "label": "coinbase",
+                "value": "coinbase"
+              },
+              {
+                "label": "mural",
+                "value": "mural"
+              },
+              {
+                "label": "stripe",
+                "value": "stripe"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "currencies": {
+              "sources": ["usdc.solana", "sol.solana"],
+              "destinations": ["USD", "EUR"]
+            },
+            "pairs": [
+              {
+                "source": "usdc.solana",
+                "dest": "USD",
+                "providers": ["moonpay", "bvnk"]
+              }
+            ],
+            "providerDetails": {
+              "moonpay": {
+                "currencies": {
+                  "USD": {
+                    "min": "20",
+                    "max": "30000"
+                  }
+                },
+                "countrySupport": {
+                  "coverage": "all-currencies",
+                  "countries": ["AL", "US"]
+                },
+                "entityTypes": ["individual"]
+              }
+            },
+            "supportHash": "sha256:example"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "create-payment-onramp-quote",
+        "operationId": "createPaymentOnrampQuote",
+        "title": "Create on-ramp quote",
+        "method": "POST",
+        "path": "/v1/payments/ramps/onramp/quote",
+        "releaseModule": "ramps",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "quote": {
+              "id": "ramp_quote_example",
+              "provider": "moonpay",
+              "status": "pending",
+              "deliveryMode": "hosted",
+              "paymentInstructions": [
+                {
+                  "provider": "lightspark",
+                  "kind": "crypto_deposit",
+                  "destinationAddress": "So11111111111111111111111111111111111111112",
+                  "cryptoCurrency": "USDC",
+                  "network": "SOLANA",
+                  "accountOrWalletInfo": {
+                    "accountType": "USD_ACCOUNT",
+                    "accountNumber": "0000000000000000",
+                    "routingNumber": "000000000",
+                    "paymentRails": ["ACH", "WIRE"],
+                    "reference": "quote-reference-example",
+                    "bankName": "Example Bank",
+                    "address": "ExampleSolanaWalletAddress11111111111111111",
+                    "assetType": "USDC"
+                  }
+                }
+              ],
+              "sendingCurrency": {
+                "code": "USDC",
+                "decimals": 2
+              },
+              "receivingCurrency": {
+                "code": "USDC",
+                "decimals": 2
+              },
+              "feeCurrency": {
+                "code": "USDC",
+                "decimals": 2
+              },
+              "expiresAt": "2025-01-01T00:00:00.000Z"
+            },
+            "transferId": "transfer_example"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "simulate-sandbox-transfer",
+        "operationId": "simulateSandboxTransfer",
+        "title": "Simulate sandbox transfer",
+        "method": "POST",
+        "path": "/v1/payments/ramps/sandbox/simulate",
+        "releaseModule": "ramps",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"transferId\": \"xfr_example\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {}
+      },
+      {
         "id": "list-unified-transactions",
         "operationId": "listUnifiedTransactions",
         "title": "List transactions",
         "method": "GET",
         "path": "/v1/transactions?module={module}&kind={kind}&status={status}&custodyWalletId={custodyWalletId}&counterpartyId={counterpartyId}&token={token}&search={search}&createdAtFrom={createdAtFrom}&createdAtTo={createdAtTo}&cursor={cursor}&limit={limit}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "module",
@@ -3017,6 +4569,7 @@
         "title": "Get counterparty field options",
         "method": "GET",
         "path": "/v1/counterparties/metadata",
+        "releaseModule": "payments",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -3043,6 +4596,7 @@
         "title": "List counterparties",
         "method": "GET",
         "path": "/v1/counterparties?page={page}&pageSize={pageSize}&includeArchived={includeArchived}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "page",
@@ -3113,6 +4667,7 @@
         "title": "Create counterparty",
         "method": "POST",
         "path": "/v1/counterparties",
+        "releaseModule": "payments",
         "pathFields": [],
         "bodyFields": [
           {
@@ -3152,6 +4707,7 @@
         "title": "Get counterparty",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3189,6 +4745,7 @@
         "title": "Update counterparty",
         "method": "PATCH",
         "path": "/v1/counterparties/{counterpartyId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3236,6 +4793,7 @@
         "title": "Archive counterparty",
         "method": "DELETE",
         "path": "/v1/counterparties/{counterpartyId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3249,11 +4807,708 @@
         "expectedResponse": {}
       },
       {
+        "id": "get-counterparty-requirements",
+        "operationId": "getCounterpartyRequirements",
+        "title": "Get counterparty ramp requirements",
+        "method": "GET",
+        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}&destinationCountry={destinationCountry}",
+        "releaseModule": "ramps",
+        "pathFields": [
+          {
+            "key": "counterpartyId",
+            "label": "{counterpartyId}",
+            "description": "Counterparty identifier.",
+            "defaultValue": "cpty_example",
+            "required": true
+          },
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Ramp provider to evaluate.",
+            "defaultValue": "moonpay",
+            "required": true
+          },
+          {
+            "key": "direction",
+            "label": "direction",
+            "description": "Ramp direction.",
+            "defaultValue": "onramp",
+            "required": true,
+            "kind": "select",
+            "options": [
+              {
+                "label": "onramp",
+                "value": "onramp"
+              },
+              {
+                "label": "offramp",
+                "value": "offramp"
+              }
+            ]
+          },
+          {
+            "key": "assetRail",
+            "label": "assetRail",
+            "description": "Canonical SDP crypto asset rail.",
+            "defaultValue": "usdc.solana",
+            "required": true,
+            "kind": "select",
+            "options": [
+              {
+                "label": "sol.solana",
+                "value": "sol.solana"
+              },
+              {
+                "label": "usdc.solana",
+                "value": "usdc.solana"
+              },
+              {
+                "label": "usdt.solana",
+                "value": "usdt.solana"
+              },
+              {
+                "label": "usdg.solana",
+                "value": "usdg.solana"
+              },
+              {
+                "label": "pyusd.solana",
+                "value": "pyusd.solana"
+              }
+            ]
+          },
+          {
+            "key": "fiatCurrency",
+            "label": "fiatCurrency",
+            "description": "Fiat currency code.",
+            "defaultValue": "USD",
+            "required": true,
+            "kind": "select",
+            "options": [
+              {
+                "label": "AED",
+                "value": "AED"
+              },
+              {
+                "label": "AFN",
+                "value": "AFN"
+              },
+              {
+                "label": "ALL",
+                "value": "ALL"
+              },
+              {
+                "label": "AMD",
+                "value": "AMD"
+              },
+              {
+                "label": "AOA",
+                "value": "AOA"
+              },
+              {
+                "label": "ARS",
+                "value": "ARS"
+              },
+              {
+                "label": "AUD",
+                "value": "AUD"
+              },
+              {
+                "label": "AWG",
+                "value": "AWG"
+              },
+              {
+                "label": "BAM",
+                "value": "BAM"
+              },
+              {
+                "label": "BBD",
+                "value": "BBD"
+              },
+              {
+                "label": "BDT",
+                "value": "BDT"
+              },
+              {
+                "label": "BHD",
+                "value": "BHD"
+              },
+              {
+                "label": "BIF",
+                "value": "BIF"
+              },
+              {
+                "label": "BMD",
+                "value": "BMD"
+              },
+              {
+                "label": "BND",
+                "value": "BND"
+              },
+              {
+                "label": "BOB",
+                "value": "BOB"
+              },
+              {
+                "label": "BRL",
+                "value": "BRL"
+              },
+              {
+                "label": "BSD",
+                "value": "BSD"
+              },
+              {
+                "label": "BTN",
+                "value": "BTN"
+              },
+              {
+                "label": "BWP",
+                "value": "BWP"
+              },
+              {
+                "label": "BZD",
+                "value": "BZD"
+              },
+              {
+                "label": "CAD",
+                "value": "CAD"
+              },
+              {
+                "label": "CDF",
+                "value": "CDF"
+              },
+              {
+                "label": "CHF",
+                "value": "CHF"
+              },
+              {
+                "label": "CLP",
+                "value": "CLP"
+              },
+              {
+                "label": "CNY",
+                "value": "CNY"
+              },
+              {
+                "label": "COP",
+                "value": "COP"
+              },
+              {
+                "label": "CRC",
+                "value": "CRC"
+              },
+              {
+                "label": "CUP",
+                "value": "CUP"
+              },
+              {
+                "label": "CVE",
+                "value": "CVE"
+              },
+              {
+                "label": "CZK",
+                "value": "CZK"
+              },
+              {
+                "label": "DJF",
+                "value": "DJF"
+              },
+              {
+                "label": "DKK",
+                "value": "DKK"
+              },
+              {
+                "label": "DOP",
+                "value": "DOP"
+              },
+              {
+                "label": "DZD",
+                "value": "DZD"
+              },
+              {
+                "label": "EGP",
+                "value": "EGP"
+              },
+              {
+                "label": "ERN",
+                "value": "ERN"
+              },
+              {
+                "label": "ETB",
+                "value": "ETB"
+              },
+              {
+                "label": "EUR",
+                "value": "EUR"
+              },
+              {
+                "label": "FJD",
+                "value": "FJD"
+              },
+              {
+                "label": "FKP",
+                "value": "FKP"
+              },
+              {
+                "label": "GBP",
+                "value": "GBP"
+              },
+              {
+                "label": "GEL",
+                "value": "GEL"
+              },
+              {
+                "label": "GHS",
+                "value": "GHS"
+              },
+              {
+                "label": "GIP",
+                "value": "GIP"
+              },
+              {
+                "label": "GMD",
+                "value": "GMD"
+              },
+              {
+                "label": "GNF",
+                "value": "GNF"
+              },
+              {
+                "label": "GTQ",
+                "value": "GTQ"
+              },
+              {
+                "label": "GYD",
+                "value": "GYD"
+              },
+              {
+                "label": "HKD",
+                "value": "HKD"
+              },
+              {
+                "label": "HNL",
+                "value": "HNL"
+              },
+              {
+                "label": "HTG",
+                "value": "HTG"
+              },
+              {
+                "label": "HUF",
+                "value": "HUF"
+              },
+              {
+                "label": "IDR",
+                "value": "IDR"
+              },
+              {
+                "label": "ILS",
+                "value": "ILS"
+              },
+              {
+                "label": "INR",
+                "value": "INR"
+              },
+              {
+                "label": "IQD",
+                "value": "IQD"
+              },
+              {
+                "label": "IRR",
+                "value": "IRR"
+              },
+              {
+                "label": "ISK",
+                "value": "ISK"
+              },
+              {
+                "label": "JMD",
+                "value": "JMD"
+              },
+              {
+                "label": "JOD",
+                "value": "JOD"
+              },
+              {
+                "label": "JPY",
+                "value": "JPY"
+              },
+              {
+                "label": "KES",
+                "value": "KES"
+              },
+              {
+                "label": "KGS",
+                "value": "KGS"
+              },
+              {
+                "label": "KHR",
+                "value": "KHR"
+              },
+              {
+                "label": "KMF",
+                "value": "KMF"
+              },
+              {
+                "label": "KPW",
+                "value": "KPW"
+              },
+              {
+                "label": "KRW",
+                "value": "KRW"
+              },
+              {
+                "label": "KWD",
+                "value": "KWD"
+              },
+              {
+                "label": "KYD",
+                "value": "KYD"
+              },
+              {
+                "label": "KZT",
+                "value": "KZT"
+              },
+              {
+                "label": "LAK",
+                "value": "LAK"
+              },
+              {
+                "label": "LBP",
+                "value": "LBP"
+              },
+              {
+                "label": "LKR",
+                "value": "LKR"
+              },
+              {
+                "label": "LRD",
+                "value": "LRD"
+              },
+              {
+                "label": "LSL",
+                "value": "LSL"
+              },
+              {
+                "label": "LYD",
+                "value": "LYD"
+              },
+              {
+                "label": "MAD",
+                "value": "MAD"
+              },
+              {
+                "label": "MDL",
+                "value": "MDL"
+              },
+              {
+                "label": "MGA",
+                "value": "MGA"
+              },
+              {
+                "label": "MKD",
+                "value": "MKD"
+              },
+              {
+                "label": "MMK",
+                "value": "MMK"
+              },
+              {
+                "label": "MNT",
+                "value": "MNT"
+              },
+              {
+                "label": "MOP",
+                "value": "MOP"
+              },
+              {
+                "label": "MRU",
+                "value": "MRU"
+              },
+              {
+                "label": "MUR",
+                "value": "MUR"
+              },
+              {
+                "label": "MVR",
+                "value": "MVR"
+              },
+              {
+                "label": "MWK",
+                "value": "MWK"
+              },
+              {
+                "label": "MXN",
+                "value": "MXN"
+              },
+              {
+                "label": "MYR",
+                "value": "MYR"
+              },
+              {
+                "label": "MZN",
+                "value": "MZN"
+              },
+              {
+                "label": "NAD",
+                "value": "NAD"
+              },
+              {
+                "label": "NGN",
+                "value": "NGN"
+              },
+              {
+                "label": "NIO",
+                "value": "NIO"
+              },
+              {
+                "label": "NOK",
+                "value": "NOK"
+              },
+              {
+                "label": "NPR",
+                "value": "NPR"
+              },
+              {
+                "label": "NZD",
+                "value": "NZD"
+              },
+              {
+                "label": "OMR",
+                "value": "OMR"
+              },
+              {
+                "label": "PAB",
+                "value": "PAB"
+              },
+              {
+                "label": "PEN",
+                "value": "PEN"
+              },
+              {
+                "label": "PGK",
+                "value": "PGK"
+              },
+              {
+                "label": "PHP",
+                "value": "PHP"
+              },
+              {
+                "label": "PKR",
+                "value": "PKR"
+              },
+              {
+                "label": "PLN",
+                "value": "PLN"
+              },
+              {
+                "label": "PYG",
+                "value": "PYG"
+              },
+              {
+                "label": "QAR",
+                "value": "QAR"
+              },
+              {
+                "label": "RON",
+                "value": "RON"
+              },
+              {
+                "label": "RSD",
+                "value": "RSD"
+              },
+              {
+                "label": "RUB",
+                "value": "RUB"
+              },
+              {
+                "label": "RWF",
+                "value": "RWF"
+              },
+              {
+                "label": "SAR",
+                "value": "SAR"
+              },
+              {
+                "label": "SBD",
+                "value": "SBD"
+              },
+              {
+                "label": "SCR",
+                "value": "SCR"
+              },
+              {
+                "label": "SDG",
+                "value": "SDG"
+              },
+              {
+                "label": "SEK",
+                "value": "SEK"
+              },
+              {
+                "label": "SGD",
+                "value": "SGD"
+              },
+              {
+                "label": "SHP",
+                "value": "SHP"
+              },
+              {
+                "label": "SLE",
+                "value": "SLE"
+              },
+              {
+                "label": "SOS",
+                "value": "SOS"
+              },
+              {
+                "label": "SRD",
+                "value": "SRD"
+              },
+              {
+                "label": "SSP",
+                "value": "SSP"
+              },
+              {
+                "label": "STN",
+                "value": "STN"
+              },
+              {
+                "label": "SYP",
+                "value": "SYP"
+              },
+              {
+                "label": "SZL",
+                "value": "SZL"
+              },
+              {
+                "label": "THB",
+                "value": "THB"
+              },
+              {
+                "label": "TJS",
+                "value": "TJS"
+              },
+              {
+                "label": "TND",
+                "value": "TND"
+              },
+              {
+                "label": "TOP",
+                "value": "TOP"
+              },
+              {
+                "label": "TRY",
+                "value": "TRY"
+              },
+              {
+                "label": "TTD",
+                "value": "TTD"
+              },
+              {
+                "label": "TWD",
+                "value": "TWD"
+              },
+              {
+                "label": "TZS",
+                "value": "TZS"
+              },
+              {
+                "label": "UAH",
+                "value": "UAH"
+              },
+              {
+                "label": "UGX",
+                "value": "UGX"
+              },
+              {
+                "label": "USD",
+                "value": "USD"
+              },
+              {
+                "label": "UYU",
+                "value": "UYU"
+              },
+              {
+                "label": "UZS",
+                "value": "UZS"
+              },
+              {
+                "label": "VND",
+                "value": "VND"
+              },
+              {
+                "label": "VUV",
+                "value": "VUV"
+              },
+              {
+                "label": "WST",
+                "value": "WST"
+              },
+              {
+                "label": "XAF",
+                "value": "XAF"
+              },
+              {
+                "label": "XCD",
+                "value": "XCD"
+              },
+              {
+                "label": "XOF",
+                "value": "XOF"
+              },
+              {
+                "label": "XPF",
+                "value": "XPF"
+              },
+              {
+                "label": "YER",
+                "value": "YER"
+              },
+              {
+                "label": "ZAR",
+                "value": "ZAR"
+              },
+              {
+                "label": "ZMW",
+                "value": "ZMW"
+              }
+            ]
+          },
+          {
+            "key": "destinationCustodyWalletId",
+            "label": "destinationCustodyWalletId",
+            "description": "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
+            "defaultValue": "cwlt_example",
+            "required": false
+          },
+          {
+            "key": "destinationCountry",
+            "label": "destinationCountry",
+            "description": "Destination payout country as an ISO 3166-1 alpha-2 code, validated against the supported country set. Valid only for Lightspark off-ramp requirements.",
+            "defaultValue": "US",
+            "required": false
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "direction": "onramp",
+            "provider": "moonpay",
+            "status": "ready"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
         "id": "list-counterparty-accounts",
         "operationId": "listCounterpartyAccounts",
         "title": "List counterparty accounts",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/accounts?page={page}&pageSize={pageSize}&includeArchived={includeArchived}&accountKind={accountKind}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3349,6 +5604,7 @@
         "title": "Create counterparty account",
         "method": "POST",
         "path": "/v1/counterparties/{counterpartyId}/accounts",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3395,11 +5651,1129 @@
         }
       },
       {
+        "id": "list-counterparty-provider-accounts",
+        "operationId": "listCounterpartyProviderAccounts",
+        "title": "List counterparty provider accounts",
+        "method": "GET",
+        "path": "/v1/counterparties/{counterpartyId}/provider-accounts?provider={provider}&fiatCurrency={fiatCurrency}&destinationCountry={destinationCountry}",
+        "releaseModule": "ramps",
+        "pathFields": [
+          {
+            "key": "counterpartyId",
+            "label": "{counterpartyId}",
+            "description": "Counterparty identifier.",
+            "defaultValue": "cpty_example",
+            "required": true
+          },
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Filter by ramp provider.",
+            "defaultValue": "lightspark",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "moonpay",
+                "value": "moonpay"
+              },
+              {
+                "label": "lightspark",
+                "value": "lightspark"
+              },
+              {
+                "label": "bvnk",
+                "value": "bvnk"
+              },
+              {
+                "label": "moneygram",
+                "value": "moneygram"
+              },
+              {
+                "label": "coinbase",
+                "value": "coinbase"
+              },
+              {
+                "label": "mural",
+                "value": "mural"
+              },
+              {
+                "label": "stripe",
+                "value": "stripe"
+              }
+            ]
+          },
+          {
+            "key": "fiatCurrency",
+            "label": "fiatCurrency",
+            "description": "Filter by fiat currency.",
+            "defaultValue": "USD",
+            "required": false
+          },
+          {
+            "key": "destinationCountry",
+            "label": "destinationCountry",
+            "description": "Filter by ISO 3166-1 alpha-2 destination country.",
+            "defaultValue": "US",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "AF",
+                "value": "AF"
+              },
+              {
+                "label": "AX",
+                "value": "AX"
+              },
+              {
+                "label": "AL",
+                "value": "AL"
+              },
+              {
+                "label": "DZ",
+                "value": "DZ"
+              },
+              {
+                "label": "AS",
+                "value": "AS"
+              },
+              {
+                "label": "AD",
+                "value": "AD"
+              },
+              {
+                "label": "AO",
+                "value": "AO"
+              },
+              {
+                "label": "AI",
+                "value": "AI"
+              },
+              {
+                "label": "AQ",
+                "value": "AQ"
+              },
+              {
+                "label": "AG",
+                "value": "AG"
+              },
+              {
+                "label": "AR",
+                "value": "AR"
+              },
+              {
+                "label": "AM",
+                "value": "AM"
+              },
+              {
+                "label": "AW",
+                "value": "AW"
+              },
+              {
+                "label": "AU",
+                "value": "AU"
+              },
+              {
+                "label": "AT",
+                "value": "AT"
+              },
+              {
+                "label": "AZ",
+                "value": "AZ"
+              },
+              {
+                "label": "BS",
+                "value": "BS"
+              },
+              {
+                "label": "BH",
+                "value": "BH"
+              },
+              {
+                "label": "BD",
+                "value": "BD"
+              },
+              {
+                "label": "BB",
+                "value": "BB"
+              },
+              {
+                "label": "BY",
+                "value": "BY"
+              },
+              {
+                "label": "BE",
+                "value": "BE"
+              },
+              {
+                "label": "BZ",
+                "value": "BZ"
+              },
+              {
+                "label": "BJ",
+                "value": "BJ"
+              },
+              {
+                "label": "BM",
+                "value": "BM"
+              },
+              {
+                "label": "BT",
+                "value": "BT"
+              },
+              {
+                "label": "BO",
+                "value": "BO"
+              },
+              {
+                "label": "BA",
+                "value": "BA"
+              },
+              {
+                "label": "BW",
+                "value": "BW"
+              },
+              {
+                "label": "BV",
+                "value": "BV"
+              },
+              {
+                "label": "BR",
+                "value": "BR"
+              },
+              {
+                "label": "IO",
+                "value": "IO"
+              },
+              {
+                "label": "VG",
+                "value": "VG"
+              },
+              {
+                "label": "BN",
+                "value": "BN"
+              },
+              {
+                "label": "BG",
+                "value": "BG"
+              },
+              {
+                "label": "BF",
+                "value": "BF"
+              },
+              {
+                "label": "BI",
+                "value": "BI"
+              },
+              {
+                "label": "KH",
+                "value": "KH"
+              },
+              {
+                "label": "CM",
+                "value": "CM"
+              },
+              {
+                "label": "CA",
+                "value": "CA"
+              },
+              {
+                "label": "CV",
+                "value": "CV"
+              },
+              {
+                "label": "BQ",
+                "value": "BQ"
+              },
+              {
+                "label": "KY",
+                "value": "KY"
+              },
+              {
+                "label": "CF",
+                "value": "CF"
+              },
+              {
+                "label": "TD",
+                "value": "TD"
+              },
+              {
+                "label": "CL",
+                "value": "CL"
+              },
+              {
+                "label": "CN",
+                "value": "CN"
+              },
+              {
+                "label": "CX",
+                "value": "CX"
+              },
+              {
+                "label": "CC",
+                "value": "CC"
+              },
+              {
+                "label": "CO",
+                "value": "CO"
+              },
+              {
+                "label": "KM",
+                "value": "KM"
+              },
+              {
+                "label": "CG",
+                "value": "CG"
+              },
+              {
+                "label": "CD",
+                "value": "CD"
+              },
+              {
+                "label": "CK",
+                "value": "CK"
+              },
+              {
+                "label": "CR",
+                "value": "CR"
+              },
+              {
+                "label": "CI",
+                "value": "CI"
+              },
+              {
+                "label": "HR",
+                "value": "HR"
+              },
+              {
+                "label": "CU",
+                "value": "CU"
+              },
+              {
+                "label": "CW",
+                "value": "CW"
+              },
+              {
+                "label": "CY",
+                "value": "CY"
+              },
+              {
+                "label": "CZ",
+                "value": "CZ"
+              },
+              {
+                "label": "DK",
+                "value": "DK"
+              },
+              {
+                "label": "DJ",
+                "value": "DJ"
+              },
+              {
+                "label": "DM",
+                "value": "DM"
+              },
+              {
+                "label": "DO",
+                "value": "DO"
+              },
+              {
+                "label": "EC",
+                "value": "EC"
+              },
+              {
+                "label": "EG",
+                "value": "EG"
+              },
+              {
+                "label": "SV",
+                "value": "SV"
+              },
+              {
+                "label": "GQ",
+                "value": "GQ"
+              },
+              {
+                "label": "ER",
+                "value": "ER"
+              },
+              {
+                "label": "EE",
+                "value": "EE"
+              },
+              {
+                "label": "SZ",
+                "value": "SZ"
+              },
+              {
+                "label": "ET",
+                "value": "ET"
+              },
+              {
+                "label": "FK",
+                "value": "FK"
+              },
+              {
+                "label": "FO",
+                "value": "FO"
+              },
+              {
+                "label": "FJ",
+                "value": "FJ"
+              },
+              {
+                "label": "FI",
+                "value": "FI"
+              },
+              {
+                "label": "FR",
+                "value": "FR"
+              },
+              {
+                "label": "GF",
+                "value": "GF"
+              },
+              {
+                "label": "PF",
+                "value": "PF"
+              },
+              {
+                "label": "TF",
+                "value": "TF"
+              },
+              {
+                "label": "GA",
+                "value": "GA"
+              },
+              {
+                "label": "GM",
+                "value": "GM"
+              },
+              {
+                "label": "GE",
+                "value": "GE"
+              },
+              {
+                "label": "DE",
+                "value": "DE"
+              },
+              {
+                "label": "GH",
+                "value": "GH"
+              },
+              {
+                "label": "GI",
+                "value": "GI"
+              },
+              {
+                "label": "GR",
+                "value": "GR"
+              },
+              {
+                "label": "GL",
+                "value": "GL"
+              },
+              {
+                "label": "GD",
+                "value": "GD"
+              },
+              {
+                "label": "GP",
+                "value": "GP"
+              },
+              {
+                "label": "GU",
+                "value": "GU"
+              },
+              {
+                "label": "GT",
+                "value": "GT"
+              },
+              {
+                "label": "GG",
+                "value": "GG"
+              },
+              {
+                "label": "GN",
+                "value": "GN"
+              },
+              {
+                "label": "GW",
+                "value": "GW"
+              },
+              {
+                "label": "GY",
+                "value": "GY"
+              },
+              {
+                "label": "HT",
+                "value": "HT"
+              },
+              {
+                "label": "HM",
+                "value": "HM"
+              },
+              {
+                "label": "HN",
+                "value": "HN"
+              },
+              {
+                "label": "HK",
+                "value": "HK"
+              },
+              {
+                "label": "HU",
+                "value": "HU"
+              },
+              {
+                "label": "IS",
+                "value": "IS"
+              },
+              {
+                "label": "IN",
+                "value": "IN"
+              },
+              {
+                "label": "ID",
+                "value": "ID"
+              },
+              {
+                "label": "IR",
+                "value": "IR"
+              },
+              {
+                "label": "IQ",
+                "value": "IQ"
+              },
+              {
+                "label": "IE",
+                "value": "IE"
+              },
+              {
+                "label": "IM",
+                "value": "IM"
+              },
+              {
+                "label": "IL",
+                "value": "IL"
+              },
+              {
+                "label": "IT",
+                "value": "IT"
+              },
+              {
+                "label": "JM",
+                "value": "JM"
+              },
+              {
+                "label": "JP",
+                "value": "JP"
+              },
+              {
+                "label": "JE",
+                "value": "JE"
+              },
+              {
+                "label": "JO",
+                "value": "JO"
+              },
+              {
+                "label": "KZ",
+                "value": "KZ"
+              },
+              {
+                "label": "KE",
+                "value": "KE"
+              },
+              {
+                "label": "KI",
+                "value": "KI"
+              },
+              {
+                "label": "KW",
+                "value": "KW"
+              },
+              {
+                "label": "KG",
+                "value": "KG"
+              },
+              {
+                "label": "LA",
+                "value": "LA"
+              },
+              {
+                "label": "LV",
+                "value": "LV"
+              },
+              {
+                "label": "LB",
+                "value": "LB"
+              },
+              {
+                "label": "LS",
+                "value": "LS"
+              },
+              {
+                "label": "LR",
+                "value": "LR"
+              },
+              {
+                "label": "LY",
+                "value": "LY"
+              },
+              {
+                "label": "LI",
+                "value": "LI"
+              },
+              {
+                "label": "LT",
+                "value": "LT"
+              },
+              {
+                "label": "LU",
+                "value": "LU"
+              },
+              {
+                "label": "MO",
+                "value": "MO"
+              },
+              {
+                "label": "MG",
+                "value": "MG"
+              },
+              {
+                "label": "MW",
+                "value": "MW"
+              },
+              {
+                "label": "MY",
+                "value": "MY"
+              },
+              {
+                "label": "MV",
+                "value": "MV"
+              },
+              {
+                "label": "ML",
+                "value": "ML"
+              },
+              {
+                "label": "MT",
+                "value": "MT"
+              },
+              {
+                "label": "MH",
+                "value": "MH"
+              },
+              {
+                "label": "MQ",
+                "value": "MQ"
+              },
+              {
+                "label": "MR",
+                "value": "MR"
+              },
+              {
+                "label": "MU",
+                "value": "MU"
+              },
+              {
+                "label": "YT",
+                "value": "YT"
+              },
+              {
+                "label": "MX",
+                "value": "MX"
+              },
+              {
+                "label": "FM",
+                "value": "FM"
+              },
+              {
+                "label": "MD",
+                "value": "MD"
+              },
+              {
+                "label": "MC",
+                "value": "MC"
+              },
+              {
+                "label": "MN",
+                "value": "MN"
+              },
+              {
+                "label": "ME",
+                "value": "ME"
+              },
+              {
+                "label": "MS",
+                "value": "MS"
+              },
+              {
+                "label": "MA",
+                "value": "MA"
+              },
+              {
+                "label": "MZ",
+                "value": "MZ"
+              },
+              {
+                "label": "MM",
+                "value": "MM"
+              },
+              {
+                "label": "NA",
+                "value": "NA"
+              },
+              {
+                "label": "NR",
+                "value": "NR"
+              },
+              {
+                "label": "NP",
+                "value": "NP"
+              },
+              {
+                "label": "NL",
+                "value": "NL"
+              },
+              {
+                "label": "NC",
+                "value": "NC"
+              },
+              {
+                "label": "NZ",
+                "value": "NZ"
+              },
+              {
+                "label": "NI",
+                "value": "NI"
+              },
+              {
+                "label": "NE",
+                "value": "NE"
+              },
+              {
+                "label": "NG",
+                "value": "NG"
+              },
+              {
+                "label": "NU",
+                "value": "NU"
+              },
+              {
+                "label": "NF",
+                "value": "NF"
+              },
+              {
+                "label": "KP",
+                "value": "KP"
+              },
+              {
+                "label": "MK",
+                "value": "MK"
+              },
+              {
+                "label": "MP",
+                "value": "MP"
+              },
+              {
+                "label": "NO",
+                "value": "NO"
+              },
+              {
+                "label": "OM",
+                "value": "OM"
+              },
+              {
+                "label": "PK",
+                "value": "PK"
+              },
+              {
+                "label": "PW",
+                "value": "PW"
+              },
+              {
+                "label": "PS",
+                "value": "PS"
+              },
+              {
+                "label": "PA",
+                "value": "PA"
+              },
+              {
+                "label": "PG",
+                "value": "PG"
+              },
+              {
+                "label": "PY",
+                "value": "PY"
+              },
+              {
+                "label": "PE",
+                "value": "PE"
+              },
+              {
+                "label": "PH",
+                "value": "PH"
+              },
+              {
+                "label": "PN",
+                "value": "PN"
+              },
+              {
+                "label": "PL",
+                "value": "PL"
+              },
+              {
+                "label": "PT",
+                "value": "PT"
+              },
+              {
+                "label": "PR",
+                "value": "PR"
+              },
+              {
+                "label": "QA",
+                "value": "QA"
+              },
+              {
+                "label": "RE",
+                "value": "RE"
+              },
+              {
+                "label": "RO",
+                "value": "RO"
+              },
+              {
+                "label": "RU",
+                "value": "RU"
+              },
+              {
+                "label": "RW",
+                "value": "RW"
+              },
+              {
+                "label": "WS",
+                "value": "WS"
+              },
+              {
+                "label": "SM",
+                "value": "SM"
+              },
+              {
+                "label": "ST",
+                "value": "ST"
+              },
+              {
+                "label": "SA",
+                "value": "SA"
+              },
+              {
+                "label": "SN",
+                "value": "SN"
+              },
+              {
+                "label": "RS",
+                "value": "RS"
+              },
+              {
+                "label": "SC",
+                "value": "SC"
+              },
+              {
+                "label": "SL",
+                "value": "SL"
+              },
+              {
+                "label": "SG",
+                "value": "SG"
+              },
+              {
+                "label": "SX",
+                "value": "SX"
+              },
+              {
+                "label": "SK",
+                "value": "SK"
+              },
+              {
+                "label": "SI",
+                "value": "SI"
+              },
+              {
+                "label": "SB",
+                "value": "SB"
+              },
+              {
+                "label": "SO",
+                "value": "SO"
+              },
+              {
+                "label": "ZA",
+                "value": "ZA"
+              },
+              {
+                "label": "GS",
+                "value": "GS"
+              },
+              {
+                "label": "KR",
+                "value": "KR"
+              },
+              {
+                "label": "SS",
+                "value": "SS"
+              },
+              {
+                "label": "ES",
+                "value": "ES"
+              },
+              {
+                "label": "LK",
+                "value": "LK"
+              },
+              {
+                "label": "BL",
+                "value": "BL"
+              },
+              {
+                "label": "SH",
+                "value": "SH"
+              },
+              {
+                "label": "KN",
+                "value": "KN"
+              },
+              {
+                "label": "LC",
+                "value": "LC"
+              },
+              {
+                "label": "MF",
+                "value": "MF"
+              },
+              {
+                "label": "PM",
+                "value": "PM"
+              },
+              {
+                "label": "VC",
+                "value": "VC"
+              },
+              {
+                "label": "SD",
+                "value": "SD"
+              },
+              {
+                "label": "SR",
+                "value": "SR"
+              },
+              {
+                "label": "SJ",
+                "value": "SJ"
+              },
+              {
+                "label": "SE",
+                "value": "SE"
+              },
+              {
+                "label": "CH",
+                "value": "CH"
+              },
+              {
+                "label": "SY",
+                "value": "SY"
+              },
+              {
+                "label": "TW",
+                "value": "TW"
+              },
+              {
+                "label": "TJ",
+                "value": "TJ"
+              },
+              {
+                "label": "TZ",
+                "value": "TZ"
+              },
+              {
+                "label": "TH",
+                "value": "TH"
+              },
+              {
+                "label": "TL",
+                "value": "TL"
+              },
+              {
+                "label": "TG",
+                "value": "TG"
+              },
+              {
+                "label": "TK",
+                "value": "TK"
+              },
+              {
+                "label": "TO",
+                "value": "TO"
+              },
+              {
+                "label": "TT",
+                "value": "TT"
+              },
+              {
+                "label": "TN",
+                "value": "TN"
+              },
+              {
+                "label": "TR",
+                "value": "TR"
+              },
+              {
+                "label": "TM",
+                "value": "TM"
+              },
+              {
+                "label": "TC",
+                "value": "TC"
+              },
+              {
+                "label": "TV",
+                "value": "TV"
+              },
+              {
+                "label": "UM",
+                "value": "UM"
+              },
+              {
+                "label": "VI",
+                "value": "VI"
+              },
+              {
+                "label": "UG",
+                "value": "UG"
+              },
+              {
+                "label": "UA",
+                "value": "UA"
+              },
+              {
+                "label": "AE",
+                "value": "AE"
+              },
+              {
+                "label": "GB",
+                "value": "GB"
+              },
+              {
+                "label": "US",
+                "value": "US"
+              },
+              {
+                "label": "UY",
+                "value": "UY"
+              },
+              {
+                "label": "UZ",
+                "value": "UZ"
+              },
+              {
+                "label": "VU",
+                "value": "VU"
+              },
+              {
+                "label": "VA",
+                "value": "VA"
+              },
+              {
+                "label": "VE",
+                "value": "VE"
+              },
+              {
+                "label": "VN",
+                "value": "VN"
+              },
+              {
+                "label": "WF",
+                "value": "WF"
+              },
+              {
+                "label": "EH",
+                "value": "EH"
+              },
+              {
+                "label": "YE",
+                "value": "YE"
+              },
+              {
+                "label": "ZM",
+                "value": "ZM"
+              },
+              {
+                "label": "ZW",
+                "value": "ZW"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "accounts": [
+              {
+                "id": "counterparty_provider_account_example",
+                "provider": "lightspark",
+                "kind": "payout_account",
+                "fiatCurrency": "USD",
+                "destinationCountry": "US",
+                "paymentRail": "ACH",
+                "status": "active",
+                "providerStatus": "ACTIVE",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "bankName": "Example Bank",
+                "accountNumberLast4": "6789",
+                "paymentRails": ["ACH", "WIRE"],
+                "customerLink": {
+                  "provider": "bvnk",
+                  "id": "counterparty_provider_account_customer",
+                  "status": "active",
+                  "providerStatus": "ACTIVE",
+                  "createdAt": "2025-01-01T00:00:00.000Z",
+                  "providerCustomerReference": "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+                  "residenceCountryCode": "US",
+                  "agreements": [
+                    {
+                      "name": "EMBEDDED_PARTNER_PLATFORM_CUSTOMERS_US",
+                      "displayName": "Embedded US Partner Platform Customers Agreement",
+                      "url": "https://help.bvnk.com/hc/en-us/sections/example",
+                      "privacyPolicyUrl": "https://help.bvnk.com/hc/en-us/articles/example",
+                      "signedAt": "2025-01-01T00:00:00.000Z"
+                    }
+                  ]
+                },
+                "providerAccountReference": "a:26091815750755:c1aVEgc:1",
+                "balance": {
+                  "state": "available",
+                  "amount": "9.90",
+                  "currency": "USD"
+                }
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
         "id": "get-counterparty-account",
         "operationId": "getCounterpartyAccount",
         "title": "Get counterparty account",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3448,6 +6822,7 @@
         "title": "Update counterparty account",
         "method": "PATCH",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3506,6 +6881,7 @@
         "title": "Archive counterparty account",
         "method": "DELETE",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
+        "releaseModule": "payments",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3526,6 +6902,2490 @@
         "expectedResponse": {}
       }
     ],
-    "issuance": []
-  }
+    "issuance": [
+      {
+        "id": "list-token-templates",
+        "operationId": "listTokenTemplates",
+        "title": "List token templates",
+        "method": "GET",
+        "path": "/v1/issuance/templates",
+        "releaseModule": "issuance",
+        "pathFields": [],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "templates": [
+              {
+                "id": "stablecoin",
+                "name": "Stablecoin",
+                "description": "USD-backed stablecoins with compliance controls and privacy features",
+                "decimals": 6,
+                "maxDecimals": 18,
+                "requiresAllowlist": true,
+                "allowlistOverridable": true,
+                "requiredExtensions": ["permanentDelegate", "pausable"],
+                "availableExtensions": ["scaledUiAmount", "interestBearing"],
+                "defaultExtensions": {
+                  "defaultAccountState": "initialized"
+                }
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "get-token-template",
+        "operationId": "getTokenTemplate",
+        "title": "Get token template",
+        "method": "GET",
+        "path": "/v1/issuance/templates/{templateId}",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "templateId",
+            "label": "{templateId}",
+            "description": "Template identifier.",
+            "defaultValue": "stablecoin",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "template": {
+              "id": "stablecoin",
+              "name": "Stablecoin",
+              "description": "USD-backed stablecoins with compliance controls and privacy features",
+              "decimals": 6,
+              "maxDecimals": 18,
+              "requiresAllowlist": true,
+              "allowlistOverridable": true,
+              "requiredExtensions": ["permanentDelegate", "pausable"],
+              "availableExtensions": ["scaledUiAmount", "interestBearing"],
+              "defaultExtensions": {
+                "defaultAccountState": "initialized"
+              }
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "create-token",
+        "operationId": "createToken",
+        "title": "Create token",
+        "method": "POST",
+        "path": "/v1/issuance/tokens",
+        "releaseModule": "issuance",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "token": {
+              "id": "tok_example",
+              "projectId": "prj_example",
+              "organizationId": "org_example",
+              "signingCustodyWalletId": "cwlt_example",
+              "mintAddress": "So11111111111111111111111111111111111111112",
+              "mintAuthority": "So11111111111111111111111111111111111111112",
+              "freezeAuthority": "So11111111111111111111111111111111111111112",
+              "ablListAddress": "So11111111111111111111111111111111111111112",
+              "name": "Example Token",
+              "symbol": "EXM",
+              "decimals": 9,
+              "description": "Example token description.",
+              "uri": "https://example.com/metadata.json",
+              "imageUrl": "https://example.com/token.png",
+              "template": "stablecoin",
+              "extensions": {
+                "transferFee": {
+                  "basisPoints": 25,
+                  "maxFee": "0.5",
+                  "transferFeeConfigAuthority": "So11111111111111111111111111111111111111112",
+                  "withdrawWithheldAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "interestBearing": {
+                  "rate": 2.5,
+                  "rateAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "permanentDelegate": "So11111111111111111111111111111111111111112",
+                "pausable": {
+                  "authority": "So11111111111111111111111111111111111111112"
+                },
+                "nonTransferable": false,
+                "defaultAccountState": "initialized",
+                "scaledUiAmount": {
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "multiplier": 1,
+                  "newMultiplier": 2,
+                  "newMultiplierEffectiveTimestamp": 1735689600
+                },
+                "transferHook": {
+                  "programId": "So11111111111111111111111111111111111111112",
+                  "authority": "So11111111111111111111111111111111111111112"
+                }
+              },
+              "totalSupply": "1000000",
+              "totalSupplyUpdatedAt": null,
+              "maxSupply": "10000000",
+              "isMintable": true,
+              "isFreezable": true,
+              "requiresAllowlist": false,
+              "status": "active",
+              "deployedAt": "2025-01-05T00:00:00.000Z",
+              "createdBy": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "list-tokens",
+        "operationId": "listTokens",
+        "title": "List tokens",
+        "method": "GET",
+        "path": "/v1/issuance/tokens?page={page}&pageSize={pageSize}&search={search}&status={status}&deploymentStatus={deploymentStatus}&template={template}&createdAfter={createdAfter}&createdBefore={createdBefore}&sortBy={sortBy}&sortDirection={sortDirection}",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Items per page (max 100).",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "search",
+            "label": "search",
+            "description": "Contains-style, case-insensitive match over name, symbol, mint address and token id. LIKE wildcards are matched literally. A blank value is treated as no search filter.",
+            "defaultValue": "usdc",
+            "required": false
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Filter by the stored lifecycle column.",
+            "defaultValue": "active",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "active",
+                "value": "active"
+              },
+              {
+                "label": "paused",
+                "value": "paused"
+              },
+              {
+                "label": "revoked",
+                "value": "revoked"
+              }
+            ]
+          },
+          {
+            "key": "deploymentStatus",
+            "label": "deploymentStatus",
+            "description": "Filter by derived lifecycle state: draft until the token has a mint, paused when the mint is paused, active otherwise.",
+            "defaultValue": "active",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "draft",
+                "value": "draft"
+              },
+              {
+                "label": "active",
+                "value": "active"
+              },
+              {
+                "label": "paused",
+                "value": "paused"
+              }
+            ]
+          },
+          {
+            "key": "template",
+            "label": "template",
+            "description": "Exact-match template id. Use GET /v1/issuance/tokens/facets for the ids present in the project (older tokens may hold legacy ids).",
+            "defaultValue": "stablecoin",
+            "required": false
+          },
+          {
+            "key": "createdAfter",
+            "label": "createdAfter",
+            "description": "Inclusive lower bound on creation time (ISO 8601).",
+            "defaultValue": "2026-01-01T00:00:00.000Z",
+            "required": false
+          },
+          {
+            "key": "createdBefore",
+            "label": "createdBefore",
+            "description": "Inclusive upper bound on creation time (ISO 8601).",
+            "defaultValue": "2026-06-30T23:59:59.999Z",
+            "required": false
+          },
+          {
+            "key": "sortBy",
+            "label": "sortBy",
+            "description": "Field used to sort the token list.",
+            "defaultValue": "createdAt",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "createdAt",
+                "value": "createdAt"
+              },
+              {
+                "label": "name",
+                "value": "name"
+              }
+            ]
+          },
+          {
+            "key": "sortDirection",
+            "label": "sortDirection",
+            "description": "Sort direction.",
+            "defaultValue": "desc",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "asc",
+                "value": "asc"
+              },
+              {
+                "label": "desc",
+                "value": "desc"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": [
+            {
+              "id": "tok_example",
+              "projectId": "prj_example",
+              "organizationId": "org_example",
+              "signingCustodyWalletId": "cwlt_example",
+              "mintAddress": "So11111111111111111111111111111111111111112",
+              "mintAuthority": "So11111111111111111111111111111111111111112",
+              "freezeAuthority": "So11111111111111111111111111111111111111112",
+              "ablListAddress": "So11111111111111111111111111111111111111112",
+              "name": "Example Token",
+              "symbol": "EXM",
+              "decimals": 9,
+              "description": "Example token description.",
+              "uri": "https://example.com/metadata.json",
+              "imageUrl": "https://example.com/token.png",
+              "template": "stablecoin",
+              "extensions": {
+                "transferFee": {
+                  "basisPoints": 25,
+                  "maxFee": "0.5",
+                  "transferFeeConfigAuthority": "So11111111111111111111111111111111111111112",
+                  "withdrawWithheldAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "interestBearing": {
+                  "rate": 2.5,
+                  "rateAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "permanentDelegate": "So11111111111111111111111111111111111111112",
+                "pausable": {
+                  "authority": "So11111111111111111111111111111111111111112"
+                },
+                "nonTransferable": false,
+                "defaultAccountState": "initialized",
+                "scaledUiAmount": {
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "multiplier": 1,
+                  "newMultiplier": 2,
+                  "newMultiplierEffectiveTimestamp": 1735689600
+                },
+                "transferHook": {
+                  "programId": "So11111111111111111111111111111111111111112",
+                  "authority": "So11111111111111111111111111111111111111112"
+                }
+              },
+              "totalSupply": "1000000",
+              "totalSupplyUpdatedAt": null,
+              "maxSupply": "10000000",
+              "isMintable": true,
+              "isFreezable": true,
+              "requiresAllowlist": false,
+              "status": "active",
+              "deployedAt": "2025-01-05T00:00:00.000Z",
+              "createdBy": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          ],
+          "meta": {
+            "total": 1,
+            "page": 1,
+            "pageSize": 1,
+            "hasMore": false,
+            "requestId": "req_example"
+          }
+        }
+      },
+      {
+        "id": "list-token-facets",
+        "operationId": "listTokenFacets",
+        "title": "List token filter facets",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/facets",
+        "releaseModule": "issuance",
+        "pathFields": [],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "templates": [
+              {
+                "template": "stablecoin",
+                "count": 12
+              }
+            ],
+            "deploymentStatuses": {
+              "draft": 3,
+              "active": 8,
+              "paused": 1
+            },
+            "total": 12
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "list-issuance-transactions",
+        "operationId": "listIssuanceTransactions",
+        "title": "List issuance transactions",
+        "method": "GET",
+        "path": "/v1/issuance/transactions?custodyWalletId={custodyWalletId}&walletId={walletId}&type={type}&status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "description": "Filter to transactions where this exact SDP wallet's address participated. This is participant history, not a signer-only filter.",
+            "defaultValue": "cwlt_example",
+            "required": false
+          },
+          {
+            "key": "walletId",
+            "label": "walletId",
+            "description": "Legacy Provider wallet ID filter. Cannot be combined with custodyWalletId.",
+            "defaultValue": "privy_wallet_123",
+            "required": false
+          },
+          {
+            "key": "type",
+            "label": "type",
+            "description": "Filter by transaction type. Repeat this query parameter for multiple values, for example type=burn&type=force_burn.",
+            "defaultValue": "[\"burn\",\"force_burn\"]",
+            "required": false,
+            "valueType": "string_array"
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Filter by token transaction status.",
+            "defaultValue": "confirmed",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "processing",
+                "value": "processing"
+              },
+              {
+                "label": "confirmed",
+                "value": "confirmed"
+              },
+              {
+                "label": "finalized",
+                "value": "finalized"
+              },
+              {
+                "label": "failed",
+                "value": "failed"
+              }
+            ]
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Number of items per page.",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": [
+            {
+              "token": {
+                "id": "tok_example",
+                "name": "Example Token",
+                "symbol": "EXM",
+                "mintAddress": null
+              },
+              "transaction": {
+                "id": "ttx_example",
+                "tokenId": "tok_example",
+                "organizationId": "org_example",
+                "type": "mint",
+                "status": "confirmed",
+                "signature": "sig_example",
+                "idempotencyKey": "idem_example_12345",
+                "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+                "serializedTx": "AQID",
+                "params": {},
+                "slot": 123456,
+                "blockTime": "2025-01-01T00:00:00.000Z",
+                "fee": 5000,
+                "error": "Signature failed",
+                "initiatedByKeyId": "key_example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
+            }
+          ],
+          "meta": {
+            "total": 1,
+            "page": 1,
+            "pageSize": 1,
+            "hasMore": false,
+            "requestId": "req_example"
+          }
+        }
+      },
+      {
+        "id": "get-token",
+        "operationId": "getToken",
+        "title": "Get token",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeFreezeAuthority={includeFreezeAuthority}&includeMetadataAuthority={includeMetadataAuthority}&includePauseAuthority={includePauseAuthority}",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "includeAllowlistAuthority",
+            "label": "includeAllowlistAuthority",
+            "description": "Opt in to a read-only RPC lookup of the current on-chain list authority for wallet selection. Ordinary token reads do not perform this lookup.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
+            "key": "includeFreezeAuthority",
+            "label": "includeFreezeAuthority",
+            "description": "Opt in to a read-only lookup of the authority that controls freeze operations. Token ACL mints return the live mint-config controller.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
+            "key": "includeMetadataAuthority",
+            "label": "includeMetadataAuthority",
+            "description": "Opt in to a read-only lookup of the current metadata authority for wallet selection. Tokens with a mint use live chain state; tokens without a mint use the stored metadata authority, falling back to stored mint authority, without RPC. Ordinary token reads do not perform this lookup.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          },
+          {
+            "key": "includePauseAuthority",
+            "label": "includePauseAuthority",
+            "description": "Opt in to a read-only lookup of the live Token-2022 pausable authority for wallet selection.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "token": {
+              "id": "tok_example",
+              "projectId": "prj_example",
+              "organizationId": "org_example",
+              "signingCustodyWalletId": "cwlt_example",
+              "mintAddress": "So11111111111111111111111111111111111111112",
+              "mintAuthority": "So11111111111111111111111111111111111111112",
+              "freezeAuthority": "So11111111111111111111111111111111111111112",
+              "ablListAddress": "So11111111111111111111111111111111111111112",
+              "name": "Example Token",
+              "symbol": "EXM",
+              "decimals": 9,
+              "description": "Example token description.",
+              "uri": "https://example.com/metadata.json",
+              "imageUrl": "https://example.com/token.png",
+              "template": "stablecoin",
+              "extensions": {
+                "transferFee": {
+                  "basisPoints": 25,
+                  "maxFee": "0.5",
+                  "transferFeeConfigAuthority": "So11111111111111111111111111111111111111112",
+                  "withdrawWithheldAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "interestBearing": {
+                  "rate": 2.5,
+                  "rateAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "permanentDelegate": "So11111111111111111111111111111111111111112",
+                "pausable": {
+                  "authority": "So11111111111111111111111111111111111111112"
+                },
+                "nonTransferable": false,
+                "defaultAccountState": "initialized",
+                "scaledUiAmount": {
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "multiplier": 1,
+                  "newMultiplier": 2,
+                  "newMultiplierEffectiveTimestamp": 1735689600
+                },
+                "transferHook": {
+                  "programId": "So11111111111111111111111111111111111111112",
+                  "authority": "So11111111111111111111111111111111111111112"
+                }
+              },
+              "totalSupply": "1000000",
+              "totalSupplyUpdatedAt": null,
+              "maxSupply": "10000000",
+              "isMintable": true,
+              "isFreezable": true,
+              "requiresAllowlist": false,
+              "status": "active",
+              "deployedAt": "2025-01-05T00:00:00.000Z",
+              "createdBy": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "update-token",
+        "operationId": "updateToken",
+        "title": "Update token",
+        "method": "PATCH",
+        "path": "/v1/issuance/tokens/{tokenId}",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"name\": \"Example Token Updated\",\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "token": {
+              "id": "tok_example",
+              "projectId": "prj_example",
+              "organizationId": "org_example",
+              "signingCustodyWalletId": "cwlt_example",
+              "mintAddress": "So11111111111111111111111111111111111111112",
+              "mintAuthority": "So11111111111111111111111111111111111111112",
+              "freezeAuthority": "So11111111111111111111111111111111111111112",
+              "ablListAddress": "So11111111111111111111111111111111111111112",
+              "name": "Example Token",
+              "symbol": "EXM",
+              "decimals": 9,
+              "description": "Example token description.",
+              "uri": "https://example.com/metadata.json",
+              "imageUrl": "https://example.com/token.png",
+              "template": "stablecoin",
+              "extensions": {
+                "transferFee": {
+                  "basisPoints": 25,
+                  "maxFee": "0.5",
+                  "transferFeeConfigAuthority": "So11111111111111111111111111111111111111112",
+                  "withdrawWithheldAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "interestBearing": {
+                  "rate": 2.5,
+                  "rateAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "permanentDelegate": "So11111111111111111111111111111111111111112",
+                "pausable": {
+                  "authority": "So11111111111111111111111111111111111111112"
+                },
+                "nonTransferable": false,
+                "defaultAccountState": "initialized",
+                "scaledUiAmount": {
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "multiplier": 1,
+                  "newMultiplier": 2,
+                  "newMultiplierEffectiveTimestamp": 1735689600
+                },
+                "transferHook": {
+                  "programId": "So11111111111111111111111111111111111111112",
+                  "authority": "So11111111111111111111111111111111111111112"
+                }
+              },
+              "totalSupply": "1000000",
+              "totalSupplyUpdatedAt": null,
+              "maxSupply": "10000000",
+              "isMintable": true,
+              "isFreezable": true,
+              "requiresAllowlist": false,
+              "status": "active",
+              "deployedAt": "2025-01-05T00:00:00.000Z",
+              "createdBy": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "get-token-metadata-json",
+        "operationId": "getTokenMetadataJson",
+        "title": "Get public token metadata JSON",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/metadata.json",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "name": "example",
+          "symbol": "example"
+        }
+      },
+      {
+        "id": "refresh-token-supply",
+        "operationId": "refreshTokenSupply",
+        "title": "Refresh cached token supply",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/supply/refresh",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "token": {
+              "id": "tok_example",
+              "projectId": "prj_example",
+              "organizationId": "org_example",
+              "signingCustodyWalletId": "cwlt_example",
+              "mintAddress": "So11111111111111111111111111111111111111112",
+              "mintAuthority": "So11111111111111111111111111111111111111112",
+              "freezeAuthority": "So11111111111111111111111111111111111111112",
+              "ablListAddress": "So11111111111111111111111111111111111111112",
+              "name": "Example Token",
+              "symbol": "EXM",
+              "decimals": 9,
+              "description": "Example token description.",
+              "uri": "https://example.com/metadata.json",
+              "imageUrl": "https://example.com/token.png",
+              "template": "stablecoin",
+              "extensions": {
+                "transferFee": {
+                  "basisPoints": 25,
+                  "maxFee": "0.5",
+                  "transferFeeConfigAuthority": "So11111111111111111111111111111111111111112",
+                  "withdrawWithheldAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "interestBearing": {
+                  "rate": 2.5,
+                  "rateAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "permanentDelegate": "So11111111111111111111111111111111111111112",
+                "pausable": {
+                  "authority": "So11111111111111111111111111111111111111112"
+                },
+                "nonTransferable": false,
+                "defaultAccountState": "initialized",
+                "scaledUiAmount": {
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "multiplier": 1,
+                  "newMultiplier": 2,
+                  "newMultiplierEffectiveTimestamp": 1735689600
+                },
+                "transferHook": {
+                  "programId": "So11111111111111111111111111111111111111112",
+                  "authority": "So11111111111111111111111111111111111111112"
+                }
+              },
+              "totalSupply": "1000000",
+              "totalSupplyUpdatedAt": null,
+              "maxSupply": "10000000",
+              "isMintable": true,
+              "isFreezable": true,
+              "requiresAllowlist": false,
+              "status": "active",
+              "deployedAt": "2025-01-05T00:00:00.000Z",
+              "createdBy": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "list-token-transactions",
+        "operationId": "listTokenTransactions",
+        "title": "List token transactions",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/transactions?type={type}&status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "type",
+            "label": "type",
+            "description": "Filter by token transaction type.",
+            "defaultValue": "burn",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "mint",
+                "value": "mint"
+              },
+              {
+                "label": "burn",
+                "value": "burn"
+              },
+              {
+                "label": "freeze",
+                "value": "freeze"
+              },
+              {
+                "label": "unfreeze",
+                "value": "unfreeze"
+              },
+              {
+                "label": "seize",
+                "value": "seize"
+              },
+              {
+                "label": "force_burn",
+                "value": "force_burn"
+              },
+              {
+                "label": "update_authority",
+                "value": "update_authority"
+              },
+              {
+                "label": "pause",
+                "value": "pause"
+              },
+              {
+                "label": "unpause",
+                "value": "unpause"
+              },
+              {
+                "label": "deploy",
+                "value": "deploy"
+              }
+            ]
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Filter by token transaction status.",
+            "defaultValue": "confirmed",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "processing",
+                "value": "processing"
+              },
+              {
+                "label": "confirmed",
+                "value": "confirmed"
+              },
+              {
+                "label": "finalized",
+                "value": "finalized"
+              },
+              {
+                "label": "failed",
+                "value": "failed"
+              }
+            ]
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Number of items per page.",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": [
+            {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          ],
+          "meta": {
+            "total": 1,
+            "page": 1,
+            "pageSize": 1,
+            "hasMore": false,
+            "requestId": "req_example"
+          }
+        }
+      },
+      {
+        "id": "get-asset-audit-history",
+        "operationId": "getAssetAuditHistory",
+        "title": "Get asset audit history",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/audit?action={action}&page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "action",
+            "label": "action",
+            "description": "Filter by audit action.",
+            "required": false
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Number of items per page.",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": [
+            {
+              "id": "_example",
+              "action": "freeze",
+              "resourceType": "frozen_account",
+              "resourceId": "resource_example",
+              "actorType": "user",
+              "actorLabel": "Jordan Lee",
+              "status": "success",
+              "createdAt": "2026-07-19T12:00:00.000Z",
+              "metadata": {}
+            }
+          ],
+          "meta": {
+            "total": 1,
+            "page": 1,
+            "pageSize": 1,
+            "hasMore": false,
+            "requestId": "req_example"
+          }
+        }
+      },
+      {
+        "id": "deploy-token",
+        "operationId": "deployToken",
+        "title": "Deploy token",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authorityCustodyWalletIds\": {\n    \"metadata\": \"cwlt_metadata\",\n    \"freeze\": \"cwlt_freeze\",\n    \"permanentDelegate\": \"cwlt_recovery\"\n  },\n  \"feePayment\": \"sponsored\"\n}",
+            "required": false
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "token": {
+              "id": "tok_example",
+              "projectId": "prj_example",
+              "organizationId": "org_example",
+              "signingCustodyWalletId": "cwlt_example",
+              "mintAddress": "So11111111111111111111111111111111111111112",
+              "mintAuthority": "So11111111111111111111111111111111111111112",
+              "freezeAuthority": "So11111111111111111111111111111111111111112",
+              "ablListAddress": "So11111111111111111111111111111111111111112",
+              "name": "Example Token",
+              "symbol": "EXM",
+              "decimals": 9,
+              "description": "Example token description.",
+              "uri": "https://example.com/metadata.json",
+              "imageUrl": "https://example.com/token.png",
+              "template": "stablecoin",
+              "extensions": {
+                "transferFee": {
+                  "basisPoints": 25,
+                  "maxFee": "0.5",
+                  "transferFeeConfigAuthority": "So11111111111111111111111111111111111111112",
+                  "withdrawWithheldAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "interestBearing": {
+                  "rate": 2.5,
+                  "rateAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "permanentDelegate": "So11111111111111111111111111111111111111112",
+                "pausable": {
+                  "authority": "So11111111111111111111111111111111111111112"
+                },
+                "nonTransferable": false,
+                "defaultAccountState": "initialized",
+                "scaledUiAmount": {
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "multiplier": 1,
+                  "newMultiplier": 2,
+                  "newMultiplierEffectiveTimestamp": 1735689600
+                },
+                "transferHook": {
+                  "programId": "So11111111111111111111111111111111111111112",
+                  "authority": "So11111111111111111111111111111111111111112"
+                }
+              },
+              "totalSupply": "1000000",
+              "totalSupplyUpdatedAt": null,
+              "maxSupply": "10000000",
+              "isMintable": true,
+              "isFreezable": true,
+              "requiresAllowlist": false,
+              "status": "active",
+              "deployedAt": "2025-01-05T00:00:00.000Z",
+              "createdBy": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "prepare-deploy-token",
+        "operationId": "prepareDeployToken",
+        "title": "Prepare token deploy transaction",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "serialized": "AQID",
+              "blockhash": "blockhash_example",
+              "lastValidBlockHeight": "123456"
+            },
+            "mint": "So11111111111111111111111111111111111111112",
+            "listAddress": "So11111111111111111111111111111111111111112",
+            "metadataUriFollowUp": {
+              "required": true,
+              "uri": "https://example.com"
+            },
+            "simulation": {
+              "success": true,
+              "logs": ["Program log: success"],
+              "unitsConsumed": 20000,
+              "error": "Insufficient funds"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "confirm-deploy",
+        "operationId": "confirmDeploy",
+        "title": "Confirm non-custodial deploy",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/confirm",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signature\": \"5x...signature\",\n  \"mint\": \"So11111111111111111111111111111111111111112\",\n  \"listAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "token": {
+              "id": "tok_example",
+              "projectId": "prj_example",
+              "organizationId": "org_example",
+              "signingCustodyWalletId": "cwlt_example",
+              "mintAddress": "So11111111111111111111111111111111111111112",
+              "mintAuthority": "So11111111111111111111111111111111111111112",
+              "freezeAuthority": "So11111111111111111111111111111111111111112",
+              "ablListAddress": "So11111111111111111111111111111111111111112",
+              "name": "Example Token",
+              "symbol": "EXM",
+              "decimals": 9,
+              "description": "Example token description.",
+              "uri": "https://example.com/metadata.json",
+              "imageUrl": "https://example.com/token.png",
+              "template": "stablecoin",
+              "extensions": {
+                "transferFee": {
+                  "basisPoints": 25,
+                  "maxFee": "0.5",
+                  "transferFeeConfigAuthority": "So11111111111111111111111111111111111111112",
+                  "withdrawWithheldAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "interestBearing": {
+                  "rate": 2.5,
+                  "rateAuthority": "So11111111111111111111111111111111111111112"
+                },
+                "permanentDelegate": "So11111111111111111111111111111111111111112",
+                "pausable": {
+                  "authority": "So11111111111111111111111111111111111111112"
+                },
+                "nonTransferable": false,
+                "defaultAccountState": "initialized",
+                "scaledUiAmount": {
+                  "authority": "So11111111111111111111111111111111111111112",
+                  "multiplier": 1,
+                  "newMultiplier": 2,
+                  "newMultiplierEffectiveTimestamp": 1735689600
+                },
+                "transferHook": {
+                  "programId": "So11111111111111111111111111111111111111112",
+                  "authority": "So11111111111111111111111111111111111111112"
+                }
+              },
+              "totalSupply": "1000000",
+              "totalSupplyUpdatedAt": null,
+              "maxSupply": "10000000",
+              "isMintable": true,
+              "isFreezable": true,
+              "requiresAllowlist": false,
+              "status": "active",
+              "deployedAt": "2025-01-05T00:00:00.000Z",
+              "createdBy": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "allowlistAuthority": "So11111111111111111111111111111111111111112",
+            "freezeAuthority": "So11111111111111111111111111111111111111112",
+            "metadataAuthority": "So11111111111111111111111111111111111111112",
+            "pauseAuthority": "So11111111111111111111111111111111111111112"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "prepare-deploy-metadata",
+        "operationId": "prepareDeployMetadata",
+        "title": "Prepare metadata-URI follow-up transaction",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "serialized": "AQID",
+              "blockhash": "blockhash_example",
+              "lastValidBlockHeight": "123456"
+            },
+            "uri": "https://api.example.com/v1/issuance/tokens/tok_123/metadata.json",
+            "simulation": {
+              "success": true,
+              "logs": ["Program log: success"],
+              "unitsConsumed": 20000,
+              "error": "Insufficient funds"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "prepare-mint",
+        "operationId": "prepareMint",
+        "title": "Prepare mint transaction",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/mint/prepare",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "preparedTransaction": {
+              "serialized": "AQID",
+              "blockhash": "blockhash_example",
+              "lastValidBlockHeight": "123456"
+            },
+            "tokenAccount": "So11111111111111111111111111111111111111112",
+            "simulation": {
+              "success": true,
+              "logs": ["Program log: success"],
+              "unitsConsumed": 20000,
+              "error": "Insufficient funds"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "execute-mint",
+        "operationId": "executeMint",
+        "title": "Execute mint",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/mint",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "tokenAccount": "So11111111111111111111111111111111111111112"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "prepare-burn",
+        "operationId": "prepareBurn",
+        "title": "Prepare burn transaction",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/burn/prepare",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "preparedTransaction": {
+              "serialized": "AQID",
+              "blockhash": "blockhash_example",
+              "lastValidBlockHeight": "123456"
+            },
+            "simulation": {
+              "success": true,
+              "logs": ["Program log: success"],
+              "unitsConsumed": 20000,
+              "error": "Insufficient funds"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "execute-burn",
+        "operationId": "executeBurn",
+        "title": "Execute burn",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/burn",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "prepare-seize",
+        "operationId": "prepareSeize",
+        "title": "Prepare seize transaction",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/seize/prepare",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "preparedTransaction": {
+              "serialized": "AQID",
+              "blockhash": "blockhash_example",
+              "lastValidBlockHeight": "123456"
+            },
+            "simulation": {
+              "success": true,
+              "logs": ["Program log: success"],
+              "unitsConsumed": 20000,
+              "error": "Insufficient funds"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "execute-seize",
+        "operationId": "executeSeize",
+        "title": "Execute seize",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/seize",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"seize\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance seizure\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "prepare-force-burn",
+        "operationId": "prepareForceBurn",
+        "title": "Prepare force burn transaction",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/force-burn/prepare",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "preparedTransaction": {
+              "serialized": "AQID",
+              "blockhash": "blockhash_example",
+              "lastValidBlockHeight": "123456"
+            },
+            "simulation": {
+              "success": true,
+              "logs": ["Program log: success"],
+              "unitsConsumed": 20000,
+              "error": "Insufficient funds"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "execute-force-burn",
+        "operationId": "executeForceBurn",
+        "title": "Execute force burn",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/force-burn",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"forceBurn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"250\",\n    \"delegateAuthority\": \"So11111111111111111111111111111111111111112\",\n    \"memo\": \"Compliance burn\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "prepare-update-authority",
+        "operationId": "prepareUpdateAuthority",
+        "title": "Prepare authority update",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/authority/prepare",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            },
+            "preparedTransaction": {
+              "serialized": "AQID",
+              "blockhash": "blockhash_example",
+              "lastValidBlockHeight": "123456"
+            },
+            "simulation": {
+              "success": true,
+              "logs": ["Program log: success"],
+              "unitsConsumed": 20000,
+              "error": "Insufficient funds"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "execute-update-authority",
+        "operationId": "executeUpdateAuthority",
+        "title": "Execute authority update",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/authority",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"authority\": {\n    \"role\": \"mint\",\n    \"newAuthority\": \"So11111111111111111111111111111111111111112\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "pause-token",
+        "operationId": "pauseToken",
+        "title": "Pause token transfers",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/pause",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "unpause-token",
+        "operationId": "unpauseToken",
+        "title": "Unpause token transfers",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/unpause",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "transaction": {
+              "id": "ttx_example",
+              "tokenId": "tok_example",
+              "organizationId": "org_example",
+              "type": "mint",
+              "status": "confirmed",
+              "signature": "sig_example",
+              "idempotencyKey": "idem_example_12345",
+              "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+              "serializedTx": "AQID",
+              "params": {},
+              "slot": 123456,
+              "blockTime": "2025-01-01T00:00:00.000Z",
+              "fee": 5000,
+              "error": "Signature failed",
+              "initiatedByKeyId": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-02T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "freeze-account",
+        "operationId": "freezeAccount",
+        "title": "Freeze account",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/freeze",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"reason\": \"Compliance hold\",\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "frozenAccount": {
+              "id": "frz_example",
+              "tokenId": "tok_example",
+              "accountAddress": "So11111111111111111111111111111111111111112",
+              "reason": "Compliance hold",
+              "frozenAt": "2025-01-05T00:00:00.000Z",
+              "frozenBy": "key_example",
+              "unfrozenAt": "2025-01-10T00:00:00.000Z",
+              "unfrozenBy": "example",
+              "signature": "sig_example"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "unfreeze-account",
+        "operationId": "unfreezeAccount",
+        "title": "Unfreeze account",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/unfreeze",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"accountAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "frozenAccount": {
+              "id": "frz_example",
+              "tokenId": "tok_example",
+              "accountAddress": "So11111111111111111111111111111111111111112",
+              "reason": "Compliance hold",
+              "frozenAt": "2025-01-05T00:00:00.000Z",
+              "frozenBy": "key_example",
+              "unfrozenAt": "2025-01-10T00:00:00.000Z",
+              "unfrozenBy": "example",
+              "signature": "sig_example"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "list-frozen-accounts",
+        "operationId": "listFrozenAccounts",
+        "title": "List frozen accounts",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/frozen?page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Number of items per page.",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": [
+            {
+              "id": "frz_example",
+              "tokenId": "tok_example",
+              "accountAddress": "So11111111111111111111111111111111111111112",
+              "reason": "Compliance hold",
+              "frozenAt": "2025-01-05T00:00:00.000Z",
+              "frozenBy": "key_example",
+              "unfrozenAt": "2025-01-10T00:00:00.000Z",
+              "unfrozenBy": "example",
+              "signature": "sig_example"
+            }
+          ],
+          "meta": {
+            "total": 1,
+            "page": 1,
+            "pageSize": 1,
+            "hasMore": false,
+            "requestId": "req_example"
+          }
+        }
+      },
+      {
+        "id": "list-token-allowlist",
+        "operationId": "listTokenAllowlist",
+        "title": "List token allowlist",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/allowlist?page={page}&pageSize={pageSize}&search={search}&label={label}",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Number of items per page.",
+            "defaultValue": "50",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "search",
+            "label": "search",
+            "description": "Contains-style search over the entry address and label. A blank value is treated as no search filter.",
+            "defaultValue": "So1",
+            "required": false
+          },
+          {
+            "key": "label",
+            "label": "label",
+            "description": "Filter to entries with this exact label (values come from the labels endpoint).",
+            "defaultValue": "Treasury",
+            "required": false
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": [
+            {
+              "id": "tal_example",
+              "tokenId": "tok_example",
+              "address": "So11111111111111111111111111111111111111112",
+              "label": "Treasury",
+              "status": "active",
+              "addedBy": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "revokedAt": "2025-02-01T00:00:00.000Z"
+            }
+          ],
+          "meta": {
+            "total": 1,
+            "page": 1,
+            "pageSize": 1,
+            "hasMore": false,
+            "requestId": "req_example"
+          }
+        }
+      },
+      {
+        "id": "add-token-allowlist-entry",
+        "operationId": "addTokenAllowlistEntry",
+        "title": "Add token allowlist entry",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/allowlist",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"address\": \"So11111111111111111111111111111111111111112\",\n  \"label\": \"Treasury\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "entry": {
+              "id": "tal_example",
+              "tokenId": "tok_example",
+              "address": "So11111111111111111111111111111111111111112",
+              "label": "Treasury",
+              "status": "active",
+              "addedBy": "key_example",
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "revokedAt": "2025-02-01T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "list-token-allowlist-labels",
+        "operationId": "listTokenAllowlistLabels",
+        "title": "List token allowlist labels",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "labels": ["Treasury", "Market maker"],
+            "total": 42
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "remove-token-allowlist-entry",
+        "operationId": "removeTokenAllowlistEntry",
+        "title": "Remove token allowlist entry",
+        "method": "DELETE",
+        "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          },
+          {
+            "key": "entryId",
+            "label": "{entryId}",
+            "description": "Allowlist entry identifier.",
+            "defaultValue": "al_example",
+            "required": true
+          },
+          {
+            "key": "signingCustodyWalletId",
+            "label": "signingCustodyWalletId",
+            "description": "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.",
+            "defaultValue": "cwlt_example",
+            "required": false
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {}
+      },
+      {
+        "id": "list-holders",
+        "operationId": "listHolders",
+        "title": "List verified holders",
+        "method": "GET",
+        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "holders": [{}]
+          },
+          "meta": {}
+        }
+      },
+      {
+        "id": "enroll-holder",
+        "operationId": "enrollHolder",
+        "title": "Enroll a verified holder",
+        "method": "POST",
+        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "releaseModule": "issuance",
+        "pathFields": [
+          {
+            "key": "tokenId",
+            "label": "{tokenId}",
+            "description": "Token identifier.",
+            "defaultValue": "tok_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletAddress\": \"11111111111111111111111111111111\",\n  \"reviewMode\": \"auto\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "enrollment": {}
+          },
+          "meta": {}
+        }
+      }
+    ]
+  },
+  "routeOwners": [
+    ["^\\/v1\\/payments\\/ramps(\\/|$)", "ramps"],
+    ["^\\/webhooks\\/payments\\/ramps\\/", "ramps"],
+    [
+      "^\\/v1\\/counterparties\\/:counterpartyId\\/(requirements|provider-accounts)(\\/|$)",
+      "ramps"
+    ],
+    ["^\\/v1\\/issuance(\\/|$)", "issuance"],
+    ["^\\/v1\\/earn(\\/|$)", "earn"],
+    ["^\\/v1\\/dvp(\\/|$)", "dvp"],
+    ["^\\/v1\\/private-channels(\\/|$)", "private_channels"],
+    ["^\\/(v1|internal\\/dashboard)\\/helius-rings(\\/|$)", "helius_rings"],
+    [
+      "^\\/v1\\/payments\\/(recurring-payments|subscription-plans|subscriptions)(\\/|$)",
+      "recurring_payments"
+    ],
+    ["^\\/(v1\\/payments|v1\\/counterparties|v1\\/transactions|pay)(\\/|$)", "payments"],
+    ["^\\/(v1\\/wallets|internal\\/dashboard\\/custody)(\\/|$)", "custody"],
+    ["^\\/v1\\/compliance(\\/|$)", "compliance"],
+    [
+      "^\\/(health|docs|openapi\\.json|llms\\.txt|admin|webhooks\\/clerk|internal\\/playground)(\\/|$)",
+      "core"
+    ],
+    ["^\\/v1\\/(members|organizations|projects|onboarding|places|rpc|api-keys)(\\/|$)", "core"],
+    ["^\\/$", "core"]
+  ]
 }

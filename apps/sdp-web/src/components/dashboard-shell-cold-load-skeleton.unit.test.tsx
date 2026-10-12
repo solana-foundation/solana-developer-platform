@@ -51,6 +51,7 @@ function renderColdLoad(pathname: string): string {
         markets: false,
         payments: true,
         privateChannels: false,
+        releaseChannel: "experimental",
         newDesign: false,
         ramps: true,
       }}

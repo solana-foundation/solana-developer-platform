@@ -50,6 +50,13 @@ To create additional wallets, click **Create Wallet** in the top right and repea
 
 Each provider supports a different set of operations shown as capability chips:
 
+
+<InChannel module="issuance">
+
+- **Issuance** — can deploy and mint tokens
+
+</InChannel>
+
 - **Transfers** — can sign payment transactions
 - **Compliance** — can sign freeze/unfreeze instructions
 
@@ -196,7 +203,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-Every operation that signs names its wallet; there is no default wallet. Transfers take the wallet's `id` (`cwlt_…`) as `sourceCustodyWalletId`. Wallet-scoped API keys bind the wallet's `walletId` in `signingWalletIds`.
+Every operation that signs names its wallet; there is no default wallet. Transfers take the wallet's `id` (`cwlt_…`) as `sourceCustodyWalletId`<InChannel module="issuance">, and issuance takes it as `signingCustodyWalletId`</InChannel>. Wallet-scoped API keys bind the wallet's `walletId` in `signingWalletIds`.
 
 ```typescript title="transfer-request.ts"
 const body = {

@@ -1,7 +1,9 @@
 import {
+  ArrowLeftRightIcon,
   ArrowRightIcon,
   BotIcon,
   BracesIcon,
+  CircleDollarSignIcon,
   FileTextIcon,
   HandshakeIcon,
   LandmarkIcon,
@@ -13,11 +15,20 @@ import {
   ServerIcon,
   ShieldCheckIcon,
 } from "lucide-react";
+import type { SdpModule } from "@sdp/types";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { docsReleaseChannel, isDocsModuleInChannel } from "@/lib/release-channel";
 import { HomePageClass } from "./home-page-class";
 import { HOME_SECTIONS } from "./home-sections";
-import { ArchitectureSketch, MarketsSketch, TransfersSketch, WalletsSketch } from "./home-sketches";
+import {
+  ArchitectureSketch,
+  IssuanceSketch,
+  MarketsSketch,
+  RampsSketch,
+  TransfersSketch,
+  WalletsSketch,
+} from "./home-sketches";
 
 /**
  * Section heading that doubles as a deep link: the heading carries the id and
@@ -69,7 +80,13 @@ function HomeCardLink({ card }: { card: HomeCard }) {
 
 type Partner = { name: string; src: string; h: number };
 
-const PARTNER_ROWS: { category: string; Icon: LucideIcon; partners: Partner[] }[] = [
+const PARTNER_ROWS: {
+  category: string;
+  Icon: LucideIcon;
+  partners: Partner[];
+  /** Shown only when the deployment's release channel runs this module. */
+  module?: SdpModule;
+}[] = [
   {
     category: "Institutional Custody",
     Icon: LandmarkIcon,
@@ -83,6 +100,19 @@ const PARTNER_ROWS: { category: string; Icon: LucideIcon; partners: Partner[] }[
       { name: "IBM Haven", h: 22, src: "/docs/images/partners/ibm-haven.svg" },
       { name: "Para", h: 20, src: "/docs/images/partners/para.svg" },
       { name: "Utila", h: 20, src: "/docs/images/partners/utila.svg" },
+    ],
+  },
+  {
+    category: "Ramps",
+    Icon: ArrowLeftRightIcon,
+    module: "ramps",
+    partners: [
+      { name: "MoonPay", h: 24, src: "/docs/images/partners/moonpay.svg" },
+      { name: "Lightspark", h: 22, src: "/docs/images/partners/lightspark.svg" },
+      { name: "BVNK", h: 18, src: "/docs/images/partners/bvnk.svg" },
+      { name: "Coinbase", h: 22, src: "/docs/images/partners/coinbase.svg" },
+      { name: "Stripe", h: 30, src: "/docs/images/partners/stripe.svg" },
+      { name: "MoneyGram", h: 24, src: "/docs/images/partners/moneygram.svg" },
     ],
   },
   {
@@ -117,6 +147,8 @@ type HomeCard = {
   name: string;
   desc: string;
   badge?: string;
+  /** Shown only when the deployment's release channel runs this module. */
+  module?: SdpModule;
 } & ({ Icon: LucideIcon } | { graphic: ReactNode }) &
   ({ href: string } | { disabled: true });
 
@@ -134,6 +166,20 @@ const modelSteps: HomeCard[] = [
     graphic: <WalletsSketch />,
   },
   {
+    name: "Issuance & Operations",
+    desc: "Create and deploy Token-2022 assets with compliance controls.",
+    href: "/docs/tokens/create-a-token",
+    graphic: <IssuanceSketch />,
+    module: "issuance",
+  },
+  {
+    name: "Ramps",
+    desc: "Move between fiat and crypto through our onramp and offramp partners.",
+    href: "/docs/payments/ramps",
+    graphic: <RampsSketch />,
+    module: "ramps",
+  },
+  {
     name: "Onchain Transfers",
     desc: "Send batch transfers, recurring payments, or public payment requests onchain.",
     href: "/docs/payments/send-basic-payment",
@@ -144,16 +190,31 @@ const modelSteps: HomeCard[] = [
     desc: "Enable secondary market activity for your issued assets.",
     graphic: <MarketsSketch />,
     badge: "Coming soon",
+    module: "markets",
     disabled: true,
   },
 ];
 
 const tutorials: HomeCard[] = [
   {
+    name: "Issue a Regulated Stablecoin",
+    desc: "Build a GENIUS-compliant digital dollar on Solana with institutional custody and integrated compliance.",
+    href: "/docs/tutorials/issue-a-regulated-stablecoin",
+    Icon: CircleDollarSignIcon,
+    module: "issuance",
+  },
+  {
     name: "Manage Payroll with Recurring Payments",
     desc: "Schedule recurring onchain transfers to pay your team on time, every time.",
     href: "/docs/payments/send-payouts",
     Icon: RepeatIcon,
+  },
+  {
+    name: "Cash In, Cash Out",
+    desc: "Move between fiat and crypto through our onramp and offramp partners.",
+    href: "/docs/payments/ramps",
+    Icon: ArrowLeftRightIcon,
+    module: "ramps",
   },
   {
     name: "Batch Payments",
@@ -196,6 +257,11 @@ const aiResources: HomeCard[] = [
   },
 ];
 
+function inChannel<T extends { module?: SdpModule }>(items: T[]): T[] {
+  const releaseChannel = docsReleaseChannel();
+  return items.filter((item) => isDocsModuleInChannel(item.module, releaseChannel));
+}
+
 export function DocsHome() {
   return (
     <div className="launch-home">
@@ -212,7 +278,7 @@ export function DocsHome() {
       <section className="launch-home-section">
         <SectionHeading {...HOME_SECTIONS.gettingStarted} />
         <div className="launch-home-outcomes launch-home-model-cards">
-          {modelSteps.map((step) => (
+          {inChannel(modelSteps).map((step) => (
             <HomeCardLink key={step.name} card={step} />
           ))}
         </div>
@@ -222,7 +288,7 @@ export function DocsHome() {
       <section className="launch-home-section">
         <SectionHeading {...HOME_SECTIONS.tutorials} />
         <div className="launch-home-outcomes launch-home-model-cards">
-          {tutorials.map((tutorial) => (
+          {inChannel(tutorials).map((tutorial) => (
             <HomeCardLink key={tutorial.name} card={tutorial} />
           ))}
         </div>
@@ -246,7 +312,7 @@ export function DocsHome() {
           consistent API and dashboard to utilize these providers according to your requirements.
         </p>
         <div className="launch-home-partners">
-          {PARTNER_ROWS.map((row) => (
+          {inChannel(PARTNER_ROWS).map((row) => (
             <div key={row.category} className="launch-home-partners-row">
               <div className="launch-home-partners-category">
                 <row.Icon size={17} aria-hidden="true" />

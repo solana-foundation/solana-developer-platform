@@ -2,6 +2,13 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { SdpModule } from "@sdp/types";
+import {
+  docsReleaseChannel,
+  isDocsModuleInChannel,
+  isPageSourceInChannel,
+  resolveInChannelBlocks,
+} from "../src/lib/release-channel";
 import { canonicalSite } from "../src/lib/site";
 
 const {
@@ -42,21 +49,47 @@ type Section = {
   pages: DocsPage[];
 };
 
-const FEATURE_SUMMARY = [
-  "Wallets and custody",
-  "API key management",
-  "Projects",
-  "Payments, transfers, and recurring payments",
-  "Compliance screening",
+// The llms files describe only the modules this deployment's release channel runs.
+const releaseChannel = docsReleaseChannel();
+
+type Feature = { summary: string; module?: SdpModule };
+
+const FEATURES: Feature[] = [
+  { summary: "Wallets and custody" },
+  { summary: "API key management" },
+  { summary: "Projects" },
+  { summary: "Token issuance and lifecycle operations", module: "issuance" },
+  { summary: "Payments, transfers, and recurring payments" },
+  { summary: "Fiat on-ramps and off-ramps", module: "ramps" },
+  { summary: "Compliance screening" },
+  { summary: "Asset profiles and public token metadata", module: "issuance" },
 ];
+
+const FEATURE_SUMMARY = FEATURES.filter((feature) =>
+  isDocsModuleInChannel(feature.module, releaseChannel)
+).map((feature) => feature.summary);
+
+/**
+ * Generated API reference pages carry no frontmatter; their family exists only
+ * when the release channel runs its module.
+ */
+const KEY_PAGE_MODULES: Record<string, SdpModule> = {
+  "reference/api/issuance": "issuance",
+  "reference/api/asset-profiles": "issuance",
+};
 
 const KEY_PAGE_SLUGS = [
   "introduction",
   "guides/setup-organization",
   "guides/setup-wallets",
   "developing-with-sdp/manage-api-keys",
+  "tokens/tokenize-an-asset",
+  "tokens/create-a-token",
+  "tokens/deploy-a-token",
+  "tokens/mint-and-burn",
   "payments/index",
   "payments/send-basic-payment",
+  "reference/issuance-token-types",
   "tutorials/end-to-end-payment-flow",
   "reference/provider-onboarding",
   "reference/docs-for-ai",
@@ -66,8 +99,10 @@ const KEY_PAGE_SLUGS = [
   "reference/api/api-keys",
   "reference/api/wallets",
   "reference/api/projects",
+  "reference/api/issuance",
   "reference/api/payments",
   "reference/api/compliance",
+  "reference/api/asset-profiles",
 ];
 
 function stripMarkdownFormatting(value: string): string {
@@ -116,6 +151,9 @@ function toPageSlug(filePath: string): string {
   return relativePath.replace(/\.mdx$/, "");
 }
 
+/** Pages a `module:` tag leaves out of this release channel. */
+const excludedSlugs = new Set<string>();
+
 async function loadPages(): Promise<Map<string, DocsPage>> {
   const files = await listFiles(docsContentDir);
   const mdxFiles = files.filter((filePath) => filePath.endsWith(".mdx"));
@@ -123,7 +161,12 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
 
   for (const filePath of mdxFiles) {
     const slug = toPageSlug(filePath);
-    const source = await fs.readFile(filePath, "utf8");
+    const raw = await fs.readFile(filePath, "utf8");
+    if (!isPageSourceInChannel(raw, releaseChannel, filePath)) {
+      excludedSlugs.add(slug);
+      continue;
+    }
+    const source = resolveInChannelBlocks(raw, releaseChannel, filePath);
     const { title, description } = parseFrontmatter(source);
 
     pages.set(slug, {
@@ -212,6 +255,10 @@ function buildSections(
       return;
     }
 
+    if (excludedSlugs.has(fullSlug)) {
+      return;
+    }
+
     const folderMeta = folderMetas.get(fullSlug);
     if (!folderMeta) {
       console.warn(`generate-ai-resources: no page or folder for entry "${fullSlug}" — skipping`);
@@ -237,7 +284,11 @@ function buildSections(
 }
 
 function buildKeyPages(pages: Map<string, DocsPage>): DocsPage[] {
-  return KEY_PAGE_SLUGS.map((slug) => {
+  const inChannel = KEY_PAGE_SLUGS.filter(
+    (slug) =>
+      !excludedSlugs.has(slug) && isDocsModuleInChannel(KEY_PAGE_MODULES[slug], releaseChannel)
+  );
+  return inChannel.map((slug) => {
     const page = pages.get(slug);
     if (!page) {
       throw new Error(`Missing required key docs page "${slug}" for llms.txt generation`);

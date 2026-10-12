@@ -2,6 +2,7 @@
   "title": "Reference",
   "pages": [
     "index",
+    "issuance-token-types",
     "provider-onboarding",
     "docs-for-ai",
     "postman-collection",

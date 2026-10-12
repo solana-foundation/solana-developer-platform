@@ -1,12 +1,11 @@
 import { readFileSync } from "node:fs";
-import { SDP_RELEASE_CHANNELS } from "@sdp/types";
+import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import { routeOwnerOf } from "@/routes/route-modules";
-import {
-  createOpenApiDocument,
-  createPublicOpenApiDocument,
-  PUBLIC_OPENAPI_RELEASE_CHANNEL,
-} from "./spec";
+import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
+
+/** The widest public document: every module's routes, as dev serves it. */
+const EXPERIMENTAL = { releaseChannel: "experimental" } as const;
 
 /**
  * The publishable Earn document: the Earn hold lifted on a release channel that
@@ -78,7 +77,9 @@ describe("OpenAPI spec", () => {
   });
 
   it("documents exact signer-check runtime failures without changing its Provider-ID request", () => {
-    const operation = createPublicOpenApiDocument().paths?.["/v1/wallets/signer-check"]?.post;
+    const operation = createPublicOpenApiDocument({ releaseChannel: "stable" }).paths?.[
+      "/v1/wallets/signer-check"
+    ]?.post;
     expect(operation?.responses).toHaveProperty("403");
     expect(operation?.responses).toHaveProperty("404");
     expect(operation?.responses).toHaveProperty("409");
@@ -131,7 +132,7 @@ describe("OpenAPI spec", () => {
     // carries no Earn operation and no Earn tag. Flipping
     // EARN_PUBLIC_SURFACE_PUBLISHED is a PRO-1872 security sign-off PR; when it
     // flips, move these assertions to the publishable document below.
-    const publicDocument = createPublicOpenApiDocument();
+    const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
     expect(Object.keys(publicDocument.paths ?? {}).filter((p) => p.startsWith("/v1/earn"))).toEqual(
       []
     );
@@ -720,7 +721,7 @@ describe("OpenAPI spec", () => {
   });
 
   it("documents no wallet policy, approval or policy-profile endpoints (ADR 0006)", () => {
-    for (const doc of [createOpenApiDocument(), createPublicOpenApiDocument()]) {
+    for (const doc of [createOpenApiDocument(), createPublicOpenApiDocument(EXPERIMENTAL)]) {
       const paths = Object.keys(doc.paths ?? {});
       expect(paths.filter((path) => /polic|approval-requests/.test(path))).toEqual([]);
       expect(doc.tags?.map((tag) => tag.name)).not.toContain("Policies");
@@ -729,16 +730,18 @@ describe("OpenAPI spec", () => {
   });
 
   it("limits the public document to supported public API families", () => {
-    const doc = createPublicOpenApiDocument();
+    const doc = createPublicOpenApiDocument(EXPERIMENTAL);
 
     expect(doc.tags?.map((tag) => tag.name)).toEqual([
       "Health",
       "API Keys",
       "Wallets",
       "Projects",
+      "Issuance",
       "Payments",
       "Compliance",
       "Counterparties",
+      "Asset Profiles",
     ]);
     expect(createPublicOpenApiDocument(PUBLISHABLE_EARN).tags?.map((tag) => tag.name)).toContain(
       "Earn"
@@ -755,16 +758,36 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
   });
 
-  // Production runs the stable release channel and refuses every other module
-  // with 403, so the document partners read must not list those routes.
-  it("publishes no path whose module is outside the stable release channel", () => {
-    expect(PUBLIC_OPENAPI_RELEASE_CHANNEL).toBe("stable");
-    const stable: readonly string[] = SDP_RELEASE_CHANNELS.stable;
-    const outside = Object.keys(createPublicOpenApiDocument().paths ?? {})
-      .map((path) => [path, routeOwnerOf(path)] as const)
-      .filter(([, owner]) => owner === undefined || (owner !== "core" && !stable.includes(owner)))
-      .map(([path, owner]) => `${owner} ${path}`);
-    expect(outside).toEqual([]);
+  // A deployment refuses every module outside its release channel with 403, so
+  // the document it publishes must not list those routes.
+  for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+    it(`${releaseChannel}: publishes no path whose module is outside the release channel`, () => {
+      const modules: readonly string[] = SDP_RELEASE_CHANNELS[releaseChannel];
+      const outside = Object.keys(createPublicOpenApiDocument({ releaseChannel }).paths ?? {})
+        .map((path) => [path, routeOwnerOf(path)] as const)
+        .filter(
+          ([, owner]) => owner === undefined || (owner !== "core" && !modules.includes(owner))
+        )
+        .map(([path, owner]) => `${owner} ${path}`);
+      expect(outside).toEqual([]);
+    });
+  }
+
+  it("documents only the stable modules for production", () => {
+    const stable = createPublicOpenApiDocument({ releaseChannel: "stable" });
+    expect(stable.tags?.map((tag) => tag.name)).toEqual([
+      "Health",
+      "API Keys",
+      "Wallets",
+      "Projects",
+      "Payments",
+      "Compliance",
+      "Counterparties",
+    ]);
+    expect(stable.paths?.["/v1/payments/recurring-payments"]?.post).toBeDefined();
+    expect(stable.paths?.["/v1/payments/ramps/onramp/quote"]).toBeUndefined();
+    expect(stable.paths?.["/v1/counterparties/{counterpartyId}/requirements"]).toBeUndefined();
+    expect(stable.paths?.["/v1/issuance/tokens"]).toBeUndefined();
   });
 
   it("keeps Earn unpublished on every release channel while the hold is on", () => {
@@ -779,20 +802,13 @@ describe("OpenAPI spec", () => {
     expect(JSON.stringify(stable)).not.toMatch(/\/v1\/earn/);
   });
 
-  it("publishes a module's routes once its release channel is the public one", () => {
-    const experimental = createPublicOpenApiDocument({ releaseChannel: "experimental" });
-    expect(experimental.paths?.["/v1/issuance/tokens"]?.post).toBeDefined();
-    expect(experimental.paths?.["/v1/payments/ramps/onramp/quote"]?.post).toBeDefined();
-    expect(experimental.tags?.map((tag) => tag.name)).toContain("Issuance");
-  });
-
   // DvP is documented internally and deliberately withheld from the public
   // document: the swap program is devnet-only and the family is flag-gated off,
   // so every environment a customer can reach answers 403. Publishing it would
   // document an endpoint nobody can call. Promoting it is a product decision.
   it("documents the DvP trade routes on the internal document only", () => {
     const internal = createOpenApiDocument();
-    const publicDocument = createPublicOpenApiDocument();
+    const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
 
     expect(internal.paths?.["/v1/dvp/trades"]?.post).toBeDefined();
     expect(internal.paths?.["/v1/dvp/trades"]?.get).toBeDefined();

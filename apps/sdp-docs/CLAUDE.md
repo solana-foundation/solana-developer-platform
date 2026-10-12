@@ -189,9 +189,9 @@ Every MDX under `content/docs/` is built and served (static params) and indexed 
 3. Repoint or drop inbound links from other pages; `check:links` fails on a link to a missing page.
 4. Run `pnpm generate:api && pnpm generate:ai` and commit `public/llms*.txt`; CI diffs them against the generated output.
 
-API reference pages are different: they are generated from the public OpenAPI document, so a family disappears by leaving that document and by dropping its slug from `PUBLIC_TAG_SLUGS` in `scripts/lib/public-openapi.mjs`. The document carries only modules in the `stable` release channel (`PUBLIC_OPENAPI_RELEASE_CHANNEL` in `apps/sdp-api/src/openapi/spec.ts`); Earn also needs `EARN_PUBLIC_SURFACE_PUBLISHED`.
+API reference pages are different: they are generated from the public OpenAPI document, so a family disappears by leaving that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch) and by dropping its slug from `PUBLIC_TAG_SLUGS` in `scripts/lib/public-openapi.mjs`.
 
-Currently unpublished, because their modules are outside the `stable` release channel: Issuance (`tokens/`, `tutorials/issue-a-regulated-stablecoin`, `reference/issuance-token-types`, and the Issuance and Asset Profiles API reference) and Ramps (`payments/ramps`, `payments/ramps-providers`). The whole Earn family, guide and API reference, is also held until PRO-2038. When a module reaches `stable`, `git mv` its pages back and restore their nav entries and inbound links.
+Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.
 
 ---
 

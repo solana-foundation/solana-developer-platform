@@ -3,12 +3,13 @@ export const PUBLIC_TAG_SLUGS = new Set([
   "api-keys",
   "wallets",
   "projects",
+  "issuance",
   "payments",
   "compliance",
-  // The public OpenAPI document carries only modules in the `stable` release
-  // channel (PUBLIC_OPENAPI_RELEASE_CHANNEL in apps/sdp-api/src/openapi/spec.ts).
-  // "issuance" and "asset-profiles" return when Issuance reaches stable;
-  // "earn" also needs EARN_PUBLIC_SURFACE_PUBLISHED (PRO-2038).
+  "asset-profiles",
+  // A family renders only when the OpenAPI document for the build's release
+  // channel carries it (SDP_RELEASE_CHANNEL; see createPublicOpenApiDocument).
+  // "earn" returns with EARN_PUBLIC_SURFACE_PUBLISHED (apps/sdp-api/src/openapi/spec.ts), PRO-2038.
 ]);
 
 export const POSTMAN_COLLECTION_ROUTE = "/docs/postman/collection.json";

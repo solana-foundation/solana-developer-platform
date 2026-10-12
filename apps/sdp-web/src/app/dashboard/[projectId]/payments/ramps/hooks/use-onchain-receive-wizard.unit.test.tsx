@@ -48,6 +48,7 @@ function wrapper({ children }: { children: ReactNode }) {
           markets: false,
           payments: true,
           privateChannels: false,
+          releaseChannel: "experimental",
           ramps: true,
         }}
         serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}

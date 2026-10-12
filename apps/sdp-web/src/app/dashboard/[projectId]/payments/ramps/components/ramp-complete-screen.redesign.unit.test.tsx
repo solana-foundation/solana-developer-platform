@@ -100,6 +100,7 @@ function renderScreen(transfer: PaymentTransferSummary): string {
         markets: false,
         payments: true,
         privateChannels: false,
+        releaseChannel: "experimental",
         ramps: true,
         newDesign: true,
       }}

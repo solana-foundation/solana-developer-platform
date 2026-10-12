@@ -2,6 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  docsReleaseChannel,
+  isPageSourceInChannel,
+  resolveInChannelBlocks,
+} from "../src/lib/release-channel";
 import { getDocsPagePath } from "../src/lib/site";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,6 +17,12 @@ const docsPublicDir = path.resolve(__dirname, "../public");
 const docsMetaPath = path.resolve(docsContentDir, "meta.json");
 const configPath = path.resolve(__dirname, "link-check.config.json");
 const EXTERNAL_URL_TIMEOUT_MS = 10_000;
+
+// Links are checked as the build for SDP_RELEASE_CHANNEL renders them: pages a
+// `module:` tag leaves out do not exist, and neither do links inside an
+// `<InChannel>` block for a module outside the channel. CI runs this per channel.
+const releaseChannel = docsReleaseChannel();
+const excludedSlugs = new Set<string>();
 
 type DocsMeta = {
   pages?: string[];
@@ -106,7 +117,12 @@ async function loadDocPages(): Promise<Map<string, string>> {
   const pages = new Map<string, string>();
 
   for (const filePath of mdxFiles) {
-    pages.set(toPageSlug(filePath), filePath);
+    const raw = await fs.readFile(filePath, "utf8");
+    if (isPageSourceInChannel(raw, releaseChannel, filePath)) {
+      pages.set(toPageSlug(filePath), filePath);
+    } else {
+      excludedSlugs.add(toPageSlug(filePath));
+    }
   }
 
   return pages;
@@ -236,7 +252,7 @@ async function collectLinks(pages: Map<string, string>): Promise<LinkReference[]
 
   for (const [slug, filePath] of pages) {
     const raw = await fs.readFile(filePath, "utf8");
-    const source = stripMarkdownSource(raw);
+    const source = stripMarkdownSource(resolveInChannelBlocks(raw, releaseChannel, filePath));
 
     for (const link of extractMarkdownLinks(source)) {
       references.push({
@@ -262,7 +278,7 @@ function findMissingNavEntries(
     if (isDividerEntry(entry)) {
       continue;
     }
-    if (!pages.has(entry) && !sectionDirs.has(entry)) {
+    if (!pages.has(entry) && !sectionDirs.has(entry) && !excludedSlugs.has(entry)) {
       findings.push(`Missing docs page for navigation entry "${entry}" in ${docsMetaPath}`);
     }
   }
@@ -343,7 +359,7 @@ async function run(): Promise<void> {
   }
 
   console.log(
-    `Docs link integrity passed: ${pages.size} pages, ${links.length} markdown links, ${externalUrls.size} external URLs checked.`
+    `Docs link integrity passed (${releaseChannel}): ${pages.size} pages, ${links.length} markdown links, ${externalUrls.size} external URLs checked.`
   );
 }
 

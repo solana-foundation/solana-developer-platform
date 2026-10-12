@@ -144,9 +144,26 @@ const extractRenderedRows = (content) => {
     );
 };
 
-const validateGeneratedTagPages = async ({ outputDir, tagPages, groupedOperations }) => {
+// Families every release channel runs, so every build must render them.
+const ALWAYS_PUBLIC_TAG_SLUGS = ["health", "api-keys", "wallets", "projects"];
+
+const validateGeneratedTagPages = async ({
+  outputDir,
+  tagPages,
+  groupedOperations,
+  tagDescriptions,
+}) => {
   const generatedSlugs = new Set(tagPages.map((tagPage) => tagPage.slug));
-  const missingPublicPages = [...PUBLIC_TAG_SLUGS].filter((slug) => !generatedSlugs.has(slug));
+  // The OpenAPI document is already narrowed to the build's release channel
+  // (SDP_RELEASE_CHANNEL), so every public family it declares needs a page.
+  const declaredSlugs = new Set([...tagDescriptions.keys()].map(slugify));
+  const requiredSlugs = [
+    ...new Set([
+      ...ALWAYS_PUBLIC_TAG_SLUGS,
+      ...[...PUBLIC_TAG_SLUGS].filter((slug) => declaredSlugs.has(slug)),
+    ]),
+  ];
+  const missingPublicPages = requiredSlugs.filter((slug) => !generatedSlugs.has(slug));
 
   if (missingPublicPages.length > 0) {
     throw new Error(
@@ -330,6 +347,7 @@ const run = async () => {
     outputDir,
     tagPages,
     groupedOperations,
+    tagDescriptions,
   });
 
   console.log(
