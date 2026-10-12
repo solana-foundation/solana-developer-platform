@@ -75,11 +75,11 @@ test("restricts fee-payment constructors to the owned sponsorship boundary", () 
   );
 });
 
-test("reports withCluster imports from the cluster scope outside entry points", () => {
+test("reports runInClusterScope imports from the cluster scope outside entry points", () => {
   for (const [name, source] of [
-    ["named", 'import { withCluster } from "@sdp/rpc/scope";'],
-    ["aliased", 'import { withCluster as open } from "@sdp/rpc/scope";'],
-    ["re-export", 'export { withCluster } from "@sdp/rpc/scope";'],
+    ["named", 'import { runInClusterScope } from "@sdp/rpc/scope";'],
+    ["aliased", 'import { runInClusterScope as open } from "@sdp/rpc/scope";'],
+    ["re-export", 'export { runInClusterScope } from "@sdp/rpc/scope";'],
   ]) {
     assert.match(
       forbiddenClusterScopeEntryImport({
@@ -96,8 +96,7 @@ test("allows reading the cluster scope without opening one", () => {
   assert.equal(
     forbiddenClusterScopeEntryImport({
       filePath: "/repo/packages/sdp-payments/src/ramps/reader.ts",
-      source:
-        'import { clusterScope, currentClusterScope, type ClusterScope } from "@sdp/rpc/scope";',
+      source: 'import { currentClusterScope, type ClusterScope } from "@sdp/rpc/scope";',
       repositoryRoot: "/repo",
     }),
     undefined
@@ -108,7 +107,7 @@ test("reports opaque cluster scope imports", () => {
   for (const [name, source] of [
     ["namespace", 'import * as scope from "@sdp/rpc/scope";'],
     ["default", 'import scope from "@sdp/rpc/scope";'],
-    ["default-plus-named", 'import scope, { clusterScope } from "@sdp/rpc/scope";'],
+    ["default-plus-named", 'import scope, { runInClusterScope } from "@sdp/rpc/scope";'],
     ["require", 'const scope = require("@sdp/rpc/scope");'],
     ["dynamic", 'const scope = await import("@sdp/rpc/scope");'],
     ["star-export", 'export * from "@sdp/rpc/scope";'],
@@ -133,7 +132,7 @@ test("allows test files to open a cluster scope", () => {
     assert.equal(
       forbiddenClusterScopeEntryImport({
         filePath,
-        source: 'import { withCluster } from "@sdp/rpc/scope";',
+        source: 'import { runInClusterScope } from "@sdp/rpc/scope";',
         repositoryRoot: "/repo",
       }),
       undefined

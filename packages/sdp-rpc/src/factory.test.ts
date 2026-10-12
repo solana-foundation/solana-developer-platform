@@ -9,7 +9,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
 } from "@solana/kit";
 import { createClusterRpc } from "./factory";
-import { clusterScope, withCluster } from "./scope";
+import { runInClusterScope } from "./scope";
 import type { ManagedRpcEnv } from "./types";
 
 type Answer = { kind: "result" } | { kind: "jsonRpcError"; code: number } | { kind: "fetchFailed" };
@@ -35,11 +35,13 @@ const DEVNET_FETCH_FAILS: Endpoint = {
   answer: { kind: "fetchFailed" },
 };
 
-const SANDBOX = clusterScope({ projectId: "proj_factory_sandbox", environment: "sandbox" });
-const PRODUCTION = clusterScope({
+type ScopeFacts = Parameters<typeof runInClusterScope>[0];
+
+const SANDBOX: ScopeFacts = { projectId: "proj_factory_sandbox", environment: "sandbox" };
+const PRODUCTION: ScopeFacts = {
   projectId: "proj_factory_production",
   environment: "production",
-});
+};
 
 const MANAGED_POOL_ENV_KEY = /^SOLANA_RPC_[A-Z]+_(?:DEVNET|MAINNET)_API_KEY_URL$/;
 
@@ -174,10 +176,13 @@ describe("createClusterRpc", () => {
     });
     const calls = stubEndpoints({ [devnet]: SERVES_DEVNET, [mainnet]: SERVES_MAINNET });
 
-    assert.equal(await withCluster(SANDBOX, createClusterRpc).getSlot().send(), BigInt(SLOT));
+    assert.equal(await runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), BigInt(SLOT));
     assert.deepEqual(calls, [genesisProbe(devnet), slotRead(devnet)]);
 
-    assert.equal(await withCluster(PRODUCTION, createClusterRpc).getSlot().send(), BigInt(SLOT));
+    assert.equal(
+      await runInClusterScope(PRODUCTION, createClusterRpc).getSlot().send(),
+      BigInt(SLOT)
+    );
     assert.deepEqual(calls, [
       genesisProbe(devnet),
       slotRead(devnet),
@@ -191,22 +196,22 @@ describe("createClusterRpc", () => {
       SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-memo.example.test",
       SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: "https://mainnet-memo.example.test",
     });
-    const sandboxRpc = withCluster(SANDBOX, createClusterRpc);
+    const sandboxRpc = runInClusterScope(SANDBOX, createClusterRpc);
 
     assert.equal(
-      withCluster(
-        clusterScope({ projectId: "proj_factory_other", environment: "sandbox" }),
+      runInClusterScope(
+        { projectId: "proj_factory_other", environment: "sandbox" },
         createClusterRpc
       ),
       sandboxRpc
     );
-    assert.notEqual(withCluster(PRODUCTION, createClusterRpc), sandboxRpc);
+    assert.notEqual(runInClusterScope(PRODUCTION, createClusterRpc), sandboxRpc);
   });
 
   it("refuses a scope whose cluster has no configured endpoint when the client is requested", () => {
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-only.example.test" });
 
-    assert.throws(() => withCluster(PRODUCTION, createClusterRpc), {
+    assert.throws(() => runInClusterScope(PRODUCTION, createClusterRpc), {
       name: "SdpRpcError",
       message: "No RPC endpoint is configured for mainnet-beta",
       code: "RPC_NOT_CONFIGURED",
@@ -224,7 +229,7 @@ describe("createClusterRpc", () => {
     });
     const calls = stubEndpoints({ [wrongCluster]: SERVES_MAINNET, [healthy]: SERVES_DEVNET });
 
-    await assert.rejects(withCluster(SANDBOX, createClusterRpc).getSlot().send(), {
+    await assert.rejects(runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), {
       name: "SdpRpcError",
       message: "An RPC endpoint configured for devnet serves a different cluster",
       code: "RPC_CLUSTER_MISMATCH",
@@ -234,12 +239,31 @@ describe("createClusterRpc", () => {
     assert.deepEqual(calls, [genesisProbe(wrongCluster)]);
   });
 
+  it("proves an endpoint URL configured for both clusters separately per cluster", async () => {
+    const url = "https://both-clusters.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: url,
+      SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: url,
+    });
+    const calls = stubEndpoints({ [url]: SERVES_DEVNET });
+
+    assert.equal(await runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), BigInt(SLOT));
+    await assert.rejects(runInClusterScope(PRODUCTION, createClusterRpc).getSlot().send(), {
+      name: "SdpRpcError",
+      message: "An RPC endpoint configured for mainnet-beta serves a different cluster",
+      code: "RPC_CLUSTER_MISMATCH",
+      statusCode: 500,
+      details: { cluster: "mainnet-beta", genesisHash: GENESIS_HASH_BY_CLUSTER.devnet },
+    });
+    assert.deepEqual(calls, [genesisProbe(url), slotRead(url), genesisProbe(url)]);
+  });
+
   it("trusts a genesis proof for 30 seconds, then re-proves", async () => {
     mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
     const url = "https://devnet-ttl.example.test";
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: url });
     const calls = stubEndpoints({ [url]: SERVES_DEVNET });
-    const rpc = withCluster(SANDBOX, createClusterRpc);
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
 
     assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
     mock.timers.tick(29_999);
@@ -257,32 +281,46 @@ describe("createClusterRpc", () => {
     ]);
   });
 
-  it("keeps the shared genesis probe alive when one caller aborts", async () => {
+  it("rejects an aborted caller while the shared genesis probe is held and still answers the other caller", async () => {
     const url = "https://devnet-abort.example.test";
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: url });
     const held = stubHeldDevnetGenesisProbe();
-    const rpc = withCluster(SANDBOX, createClusterRpc);
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
     const caller = new AbortController();
+    const callerDeadline = new Error("caller deadline passed");
 
-    const abortedRead = Promise.allSettled([rpc.getSlot().send({ abortSignal: caller.signal })]);
+    const abortedOutcome = rpc
+      .getSlot()
+      .send({ abortSignal: caller.signal })
+      .then(
+        () => "answered",
+        (error: unknown) => error
+      );
     const read = rpc.getBlockHeight().send();
     await nextTurn();
-    caller.abort();
-    held.releaseProbe();
+    assert.deepEqual(held.calls, [genesisProbe(url)]);
 
-    assert.equal(await read, BigInt(SLOT));
-    await abortedRead;
+    caller.abort(callerDeadline);
+
+    assert.equal(
+      await Promise.race([abortedOutcome, nextTurn().then(() => "still waiting on the probe")]),
+      callerDeadline
+    );
     assert.deepEqual(
       held.probeSignals.map((probeSignal) => probeSignal.aborted),
       [false]
     );
+
+    held.releaseProbe();
+    assert.equal(await read, BigInt(SLOT));
+    assert.deepEqual(held.calls, [genesisProbe(url), { url, method: "getBlockHeight" }]);
   });
 
   it("shares one genesis probe between concurrent first requests to an endpoint", async () => {
     const url = "https://devnet-shared-probe.example.test";
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: url });
     const held = stubHeldDevnetGenesisProbe();
-    const rpc = withCluster(SANDBOX, createClusterRpc);
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
 
     const slot = rpc.getSlot().send();
     await nextTurn();
@@ -313,7 +351,7 @@ describe("createClusterRpc", () => {
       [unhealthy]: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY),
     });
 
-    await assert.rejects(withCluster(SANDBOX, createClusterRpc).getSlot().send(), (error) =>
+    await assert.rejects(runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), (error) =>
       isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY)
     );
     assert.deepEqual(calls, [
@@ -332,7 +370,7 @@ describe("createClusterRpc", () => {
       SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
     });
     const calls = stubEndpoints({ [down]: DEVNET_FETCH_FAILS, [healthy]: SERVES_DEVNET });
-    const rpc = withCluster(SANDBOX, createClusterRpc);
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
 
     assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
     assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
@@ -356,7 +394,7 @@ describe("createClusterRpc", () => {
     const calls = stubEndpoints({ [down]: DEVNET_FETCH_FAILS, [healthy]: SERVES_DEVNET });
 
     await assert.rejects(
-      withCluster(SANDBOX, createClusterRpc)
+      runInClusterScope(SANDBOX, createClusterRpc)
         .sendTransaction("AQ==" as Base64EncodedWireTransaction, { encoding: "base64" })
         .send(),
       { name: "TypeError", message: "fetch failed" }
