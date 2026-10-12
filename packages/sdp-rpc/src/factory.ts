@@ -5,11 +5,16 @@ import {
 } from "@sdp/types";
 import {
   createDefaultRpcTransport,
+  createJsonRpcApi,
+  createRpc,
   createSolanaRpcFromTransport,
   getAbortablePromise,
   getSolanaErrorFromJsonRpcError,
   isJsonRpcPayload,
   isSolanaError,
+  type Rpc,
+  type RpcRequest,
+  type RpcResponse,
   type RpcTransport,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
@@ -82,6 +87,72 @@ const ENDPOINT_COOLDOWN_MS = 30_000;
 
 /** Pool key (cluster plus its endpoint URLs) to the memoized client. */
 const clusterRpcs = new Map<string, SolanaRpc>();
+
+/** `<cluster> <heliusUrl>` to the memoized DAS client. */
+const clusterDasRpcs = new Map<string, DasRpc>();
+
+/** Helius DAS `displayOptions`. */
+export type DasDisplayOptions = Readonly<{ showFungible: boolean }>;
+
+/** Helius DAS `searchAssets` params, as SDP sends them (one owner's fungible tokens). */
+export type DasSearchAssetsParams = Readonly<{
+  ownerAddress: string;
+  tokenType: "fungible";
+  page: number;
+  limit: number;
+  displayOptions: DasDisplayOptions;
+}>;
+
+/** Helius DAS `getAssetBatch` params. */
+export type DasGetAssetBatchParams = Readonly<{
+  ids: readonly string[];
+  displayOptions: DasDisplayOptions;
+}>;
+
+/**
+ * The fungible-token fields of a Helius DAS asset that SDP reads. Every field is optional:
+ * Helius omits what it doesn't index, and amounts arrive as numbers or strings.
+ */
+export type DasTokenInfo = Readonly<{
+  amount?: number | string | null;
+  balance?: number | string | null;
+  decimals?: number | null;
+  mint?: string | null;
+  symbol?: string | null;
+  uiAmount?: number | string | null;
+  ui_amount?: number | string | null;
+  uiAmountString?: string | null;
+  ui_amount_string?: string | null;
+  price_info?: Readonly<{
+    price_per_token?: number | null;
+    currency?: string | null;
+  }> | null;
+}>;
+
+/** One Helius DAS asset, narrowed to the fields SDP reads. */
+export type DasAsset = Readonly<{
+  id?: string;
+  content?: Readonly<{
+    metadata?: Readonly<{
+      symbol?: string | null;
+    }>;
+  }>;
+  token_info?: DasTokenInfo | null;
+}>;
+
+/** Helius DAS `searchAssets` result. */
+export type DasSearchAssetsResult = Readonly<{
+  items?: readonly DasAsset[];
+}>;
+
+/** The Helius DAS methods SDP calls. */
+export type DasApi = {
+  searchAssets(params: DasSearchAssetsParams): DasSearchAssetsResult;
+  getAssetBatch(params: DasGetAssetBatchParams): readonly DasAsset[];
+};
+
+/** A kit RPC client over {@link DasApi}. */
+export type DasRpc = Rpc<DasApi>;
 
 /**
  * Bound every request through `transport` by `timeoutMs`, combined with the caller's own signal
@@ -314,4 +385,75 @@ export function createClusterRpc(): SolanaRpc {
   const rpc = createSolanaRpcFromTransport(createPoolTransport(endpointTransports));
   clusterRpcs.set(poolKey, rpc);
   return rpc;
+}
+
+/**
+ * Send a DAS call's one argument as the JSON-RPC `params` object: DAS methods take named
+ * params, and kit's JSON-RPC API sends the argument list as a positional array.
+ *
+ * @param request - The request kit built from the call.
+ * @returns The request with `params` set to the call's argument.
+ * @throws Error when the call didn't pass exactly one argument.
+ */
+function toNamedParamsRequest<TParams>(request: RpcRequest<TParams>): RpcRequest {
+  const callArguments: unknown = request.params;
+  if (!Array.isArray(callArguments) || callArguments.length !== 1) {
+    throw new Error(`DAS method ${request.methodName} takes exactly one params object`);
+  }
+  const namedParams: unknown = callArguments[0];
+  return { methodName: request.methodName, params: namedParams };
+}
+
+/**
+ * A DAS JSON-RPC response's `result`, or kit's typed error for its `error`. No bigint upcast:
+ * DAS amounts stay as the JSON numbers and strings Helius sends.
+ *
+ * @param response - The decoded JSON-RPC response.
+ * @returns The response's `result`.
+ * @throws SolanaError mapped from the response's JSON-RPC `error`.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the body is neither a result nor an error.
+ */
+function toDasResult(response: RpcResponse): RpcResponse {
+  if (typeof response === "object" && response !== null) {
+    if ("error" in response) throw getSolanaErrorFromJsonRpcError(response.error);
+    if ("result" in response) return response.result;
+  }
+  throw solanaRpcError("A DAS response carried neither a result nor an error");
+}
+
+/**
+ * The Helius DAS client for the open cluster scope, over that cluster's
+ * `SOLANA_RPC_HELIUS_<CLUSTER>_API_KEY_URL`, with the per-attempt deadline, read socket retry
+ * and genesis guard every pool endpoint gets. Only Helius serves DAS, so the pool holds that
+ * one endpoint: it never fails over, and only unwraps a failed genesis probe to its own error.
+ * Memoized per process by cluster and URL; the URL is never returned or logged.
+ *
+ * @returns The DAS client for the scope's cluster, or `null` when the cluster has no Helius
+ *   URL configured (DAS is then unavailable).
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ */
+export function createClusterDasRpc(): DasRpc | null {
+  const { cluster } = currentClusterScope();
+  const heliusUrl = process.env[MANAGED_RPC_ENV_KEYS[cluster].helius];
+  if (!heliusUrl) return null;
+  const dasRpcKey = `${cluster} ${heliusUrl}`;
+  const memoizedDasRpc = clusterDasRpcs.get(dasRpcKey);
+  if (memoizedDasRpc) return memoizedDasRpc;
+  const endpointTransport = withAttemptDeadline(
+    withGenesisGuard(
+      withReadSocketRetry(createDefaultRpcTransport({ url: heliusUrl })),
+      cluster,
+      heliusUrl
+    ),
+    DEFAULT_RPC_REQUEST_TIMEOUT_MS
+  );
+  const dasRpc = createRpc({
+    api: createJsonRpcApi<DasApi>({
+      requestTransformer: toNamedParamsRequest,
+      responseTransformer: toDasResult,
+    }),
+    transport: createPoolTransport([endpointTransport]),
+  });
+  clusterDasRpcs.set(dasRpcKey, dasRpc);
+  return dasRpc;
 }

@@ -208,7 +208,7 @@ async function getBalancesByWalletId(
     ])
   );
 
-  const balancesMap = await attachTokenSymbolsToBalanceMap(c.env, labeledBalances);
+  const balancesMap = await attachTokenSymbolsToBalanceMap(labeledBalances);
 
   if (options.includeUsdValues === false) {
     return balancesMap;
