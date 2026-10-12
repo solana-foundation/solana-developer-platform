@@ -83,11 +83,20 @@ step** → admission → validation → handler.
 **Lease.** 60 seconds by default, set per route, and renewed every third of the lease while the
 handler runs. A crashed request's key frees when the lease runs out.
 
-**Replay authorization.** A route whose resource access is checked after this step (an API key's
-wallet bindings, for example) passes `authorizeReplay`, which runs before any stored response is
-replayed. It reads that access fresh from the database, as the handler does, not from the cached
-auth snapshot. A credential narrowed since the original request is refused (403), not served; one
-narrowed in a way that still covers the resource gets the replay.
+**Replay authorization.** A replay skips the handler, so it skips every check the handler makes
+about the caller. Each route therefore declares `replayAccess`, and the type makes it required:
+
+- `"chain"`: the handler checks nothing about the caller beyond the chain before this step
+  (authentication, project context, `requirePermissions`, Allowed Operations). Every replay passes
+  that chain again, so nothing more is needed.
+- A function: it repeats the handler's caller checks (an API key's wallet bindings, approver
+  eligibility) before any stored response is replayed, reading fresh from the database whatever the
+  handler reads fresh. A credential narrowed since the original request is refused (403), not
+  served; one narrowed in a way that still covers the resource gets the replay. A resource's own
+  state is not re-checked: a wallet deactivated since still replays, because a replay moves nothing.
+
+The route marker records which one a route chose, and the stable route inventory pins every
+`"chain"` route with its reason, so relying on the chain is a reviewed decision.
 
 - The stored principal is the credential's id, not a snapshot of its access, so an unrelated
   change to a key (another wallet bound, a permission added) never turns a retry into a 422.

@@ -8,6 +8,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 import {
   declaredIdempotency,
+  declaredReplayAccess,
   IDEMPOTENT_REPLAYED_HEADER,
   type IdempotencyOptions,
   idempotent,
@@ -65,7 +66,11 @@ function testApp(): Hono<{ Bindings: Env }> {
   return app;
 }
 
-function buildApp(options: IdempotencyOptions, handle: Handle) {
+function buildApp(
+  partial: Omit<IdempotencyOptions, "replayAccess"> & Partial<IdempotencyOptions>,
+  handle: Handle
+) {
+  const options: IdempotencyOptions = { replayAccess: "chain", ...partial };
   const create = vi.fn(handle);
   const app = testApp();
   app.post("/v1/things/:thingId/act", idempotent(options), (c) => create(c));
@@ -145,9 +150,19 @@ describe("idempotent()", () => {
   });
 
   it("declares its key mode for route inventories", () => {
-    expect(declaredIdempotency(idempotent({ key: "required" }))).toBe("required");
-    expect(declaredIdempotency(idempotent({ key: "accepted" }))).toBe("accepted");
+    expect(declaredIdempotency(idempotent({ key: "required", replayAccess: "chain" }))).toBe(
+      "required"
+    );
+    expect(declaredIdempotency(idempotent({ key: "accepted", replayAccess: "chain" }))).toBe(
+      "accepted"
+    );
     expect(declaredIdempotency(() => undefined)).toBeUndefined();
+    expect(declaredReplayAccess(idempotent({ key: "required", replayAccess: "chain" }))).toBe(
+      "chain"
+    );
+    expect(
+      declaredReplayAccess(idempotent({ key: "required", replayAccess: () => undefined }))
+    ).toBe("checked");
   });
 
   it("runs an unkeyed request on an accepting route without recording anything", async () => {
@@ -175,7 +190,7 @@ describe("idempotent()", () => {
 
   it("refuses to run from a wildcard mount, where every endpoint would share one scope", async () => {
     const app = testApp();
-    app.use("/v1/wild/*", idempotent({ key: "required" }));
+    app.use("/v1/wild/*", idempotent({ key: "required", replayAccess: "chain" }));
     app.post("/v1/wild/:id", (c) => c.json({ ok: true }, 201));
     expect((await post(app, "/v1/wild/a", {}, KEY)).status).toBe(500);
     expect(await storedRows()).toEqual([]);
@@ -369,7 +384,7 @@ describe("idempotent()", () => {
           if (!admit) throw forbidden("not admitted");
           c.res = c.json({ ok: true }, 201);
         },
-        { key: "required" }
+        { key: "required", replayAccess: "chain" }
       );
       return res ?? c.res;
     });
@@ -386,7 +401,8 @@ describe("idempotent()", () => {
     });
     app.post(
       "/v1/composite",
-      async (c) => (await runIdempotency(c, run, { key: "required" })) ?? c.res
+      async (c) =>
+        (await runIdempotency(c, run, { key: "required", replayAccess: "chain" })) ?? c.res
     );
 
     expect((await post(app, "/v1/composite", { a: 1 }, KEY)).status).toBe(503);
@@ -407,7 +423,7 @@ describe("idempotent()", () => {
           if (fail) throw new Error("package-level refusal");
           c.res = c.json({ ok: true }, 201);
         },
-        { key: "required" }
+        { key: "required", replayAccess: "chain" }
       );
       return res ?? c.res;
     });
@@ -435,7 +451,7 @@ describe("idempotent()", () => {
     const { app, create } = buildApp(
       {
         key: "required",
-        authorizeReplay: () => {
+        replayAccess: () => {
           if (!allowed) throw forbidden("wallet no longer bound");
         },
       },
