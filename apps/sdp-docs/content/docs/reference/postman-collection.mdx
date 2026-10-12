@@ -19,3 +19,5 @@ When you import the collection into Postman, set:
 
 - `baseUrl` to the SDP API environment you want to target
 - `sdpApiKey` to your bearer API key
+
+Requests to routes that require an `Idempotency-Key` send a saved per-operation key, the `idempotencyKey.<operationId>` collection variable. The collection mints it when unset and clears it after a definitive answer, so resending after a timeout or a `5xx` retries the same operation. See [Idempotency](/docs/developing-with-sdp/idempotency#the-dashboard-and-the-postman-collection).

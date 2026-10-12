@@ -1,5 +1,15 @@
 import { readFileSync } from "node:fs";
+import {
+  IDEMPOTENCY_REQUIRED_ROUTES,
+  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RELEASE_CHANNELS,
+  type SdpModule,
+} from "@sdp/types";
 import { describe, expect, it } from "vitest";
+import { createApp } from "@/app";
+import { declaredIdempotency } from "@/middleware/idempotency";
+import { noopObservability } from "@/runtime/observability";
+import { ownerOf } from "@/test/helpers/route-owners";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 interface TestJsonSchema {
@@ -778,5 +788,166 @@ describe("OpenAPI spec", () => {
     const createBody = JSON.stringify(doc.paths?.["/v1/dvp/trades"]?.post?.requestBody);
     expect(createBody).not.toContain('"type":"number"');
     expect(createBody).not.toContain('"type":"integer"');
+  });
+});
+
+/**
+ * The documented `Idempotency-Key` header follows each route's declared
+ * `idempotent()` mode (ADR 0008), so the reference cannot drift from the code:
+ * required where the chain requires it, optional where it accepts it, and
+ * absent on every other mutating route of a `stable` module.
+ */
+describe("OpenAPI Idempotency-Key headers", () => {
+  const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "DELETE"]);
+  const STABLE_MODULES: ReadonlySet<SdpModule> = new Set(SDP_RELEASE_CHANNELS.stable);
+  // Declared routes with no public operation yet; adding one is deliberate.
+  const UNDOCUMENTED = ["POST /v1/payments/requests"];
+
+  function declaredModes() {
+    const app = createApp({
+      observability: noopObservability,
+      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    });
+    const modes = new Map<string, ReturnType<typeof declaredIdempotency>>();
+    for (const route of app.routes) {
+      const method = route.method.toUpperCase();
+      if (!MUTATING_METHODS.has(method)) continue;
+      const owner = ownerOf(route.path);
+      if (owner === undefined || owner === "core" || !STABLE_MODULES.has(owner)) continue;
+      const key = `${method} ${route.path.replace(/:([A-Za-z0-9_]+)/g, "{$1}")}`;
+      const mode = declaredIdempotency(route.handler);
+      if (mode !== undefined || !modes.has(key)) modes.set(key, mode ?? modes.get(key));
+    }
+    return modes;
+  }
+
+  const doc = createOpenApiDocument();
+
+  function documentedHeader(route: string) {
+    const [method, path] = route.split(" ") as [string, string];
+    const operation =
+      doc.paths?.[path]?.[method.toLowerCase() as "post" | "patch" | "put" | "delete"];
+    if (operation === undefined) return undefined;
+    const header = (operation.parameters ?? []).find(
+      (parameter) =>
+        "in" in parameter && parameter.in === "header" && parameter.name === "Idempotency-Key"
+    );
+    if (header === undefined) return "absent";
+    return "required" in header && header.required ? "required" : "accepted";
+  }
+
+  const modes = declaredModes();
+
+  it("documents the header as each route's chain declares it", () => {
+    const documented = [...modes].map(([route, mode]) => [
+      route,
+      documentedHeader(route) ?? "undocumented",
+      mode ?? "absent",
+    ]);
+    const drift = documented.filter(([route, header, mode]) =>
+      header === "undocumented"
+        ? mode !== "absent" && !UNDOCUMENTED.includes(route as string)
+        : header !== mode
+    );
+    expect(drift).toEqual([]);
+    expect(documented.filter(([, header]) => header === "required").length).toBeGreaterThan(0);
+    expect(documented.filter(([, header]) => header === "accepted").length).toBeGreaterThan(0);
+  });
+
+  it("documents the idempotency error codes on every route that takes a key", () => {
+    const missing = [...modes]
+      .filter(([route, mode]) => mode !== undefined && !UNDOCUMENTED.includes(route))
+      .flatMap(([route]) => {
+        const [method, path] = route.split(" ") as [string, string];
+        const responses =
+          doc.paths?.[path]?.[method.toLowerCase() as "post" | "patch" | "put" | "delete"]
+            ?.responses ?? {};
+        return ["400", "409", "422"]
+          .filter((status) => !(status in responses))
+          .map((status) => `${route} ${status}`);
+      });
+    expect(missing).toEqual([]);
+  });
+});
+
+/**
+ * Every route in the shared `IDEMPOTENCY_REQUIRED_ROUTES` (the list the route
+ * inventory asserts against the chains) is documented as requiring the key on
+ * every public surface a caller copies from: the public OpenAPI document, the
+ * Postman collection, the idempotency guide and llms-full.txt. Adding a route
+ * to the list fails here until each surface says so.
+ */
+describe("Idempotency-Key required routes on public surfaces", () => {
+  interface PostmanItem {
+    item?: PostmanItem[];
+    request?: {
+      method: string;
+      url: string | { raw?: string };
+      header?: { key: string; value: string }[];
+    };
+  }
+
+  const toOpenApiPath = (path: string) => path.replace(/:([A-Za-z0-9_]+)/g, "{$1}");
+  const required = IDEMPOTENCY_REQUIRED_ROUTES.map((route) => {
+    const [method, path] = route.split(" ") as [string, string];
+    return { route, method, path: toOpenApiPath(path) };
+  });
+  const readDocsFile = (relative: string) =>
+    readFileSync(new URL(`../../../sdp-docs/${relative}`, import.meta.url), "utf8");
+
+  it("marks the header required in the public OpenAPI document", () => {
+    const publicDocument = createPublicOpenApiDocument();
+    const notRequired = required
+      .filter(({ method, path }) => {
+        const operation =
+          publicDocument.paths?.[path]?.[
+            method.toLowerCase() as "post" | "patch" | "put" | "delete"
+          ];
+        const header = (operation?.parameters ?? []).find(
+          (parameter) =>
+            "in" in parameter && parameter.in === "header" && parameter.name === "Idempotency-Key"
+        );
+        return !(header !== undefined && "required" in header && header.required === true);
+      })
+      .map(({ route }) => route);
+    expect(notRequired).toEqual([]);
+  });
+
+  it("sends a saved per-operation key from the Postman collection", () => {
+    const collection = JSON.parse(
+      readDocsFile("public/postman/solana-developer-platform-public.postman_collection.json")
+    ) as PostmanItem;
+    const keyed = new Set<string>();
+    const walk = (items: PostmanItem[]) => {
+      for (const item of items) {
+        if (item.item) walk(item.item);
+        const request = item.request;
+        if (!request) continue;
+        const raw = typeof request.url === "string" ? request.url : (request.url.raw ?? "");
+        const header = request.header?.find((h) => h.key === "Idempotency-Key");
+        if (header && /^\{\{idempotencyKey\.[^}]+\}\}$/.test(header.value)) {
+          const path = raw.replace("{{baseUrl}}", "").replace(/\{\{([A-Za-z0-9_]+)\}\}/g, "{$1}");
+          keyed.add(`${request.method} ${path}`);
+        }
+      }
+    };
+    walk(collection.item ?? []);
+    const missing = required
+      .filter(({ method, path }) => !keyed.has(`${method} ${path}`))
+      .map(({ route }) => route);
+    expect(missing).toEqual([]);
+  });
+
+  it("lists every required route in the idempotency guide and llms-full.txt", () => {
+    const guide = readDocsFile("content/docs/developing-with-sdp/idempotency.mdx");
+    const llms = readDocsFile("public/llms-full.txt");
+    const missing = required.flatMap(({ route, method, path }) => {
+      const line = `- \`${method} ${path}\``;
+      return [
+        ...(guide.includes(line) ? [] : [`guide: ${route}`]),
+        ...(llms.includes(line) ? [] : [`llms-full.txt: ${route}`]),
+      ];
+    });
+    expect(missing).toEqual([]);
   });
 });
