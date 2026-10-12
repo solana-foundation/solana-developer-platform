@@ -306,9 +306,9 @@ describe("reconcilePaymentRequest", () => {
     ).rejects.toThrow("rpc exploded");
   });
 
-  it("best-effort returns the stored row and logs when reconcile errors unexpectedly", async () => {
+  it("best-effort returns the stored row and logs on a transient RPC failure", async () => {
     const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
-    findReferenceSpy.mockRejectedValue(new Error("rpc exploded"));
+    findReferenceSpy.mockRejectedValue(new TypeError("fetch failed"));
     const request = await createRequest();
 
     const result = await reconcileInProjectScope(request, { bestEffort: true });
@@ -316,6 +316,16 @@ describe("reconcilePaymentRequest", () => {
     expect(result).toBe(request);
     expect(errorSpy).toHaveBeenCalled();
     expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
+  it("best-effort rethrows a non-transient RPC failure instead of serving the stored row", async () => {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "");
+    const request = await createRequest();
+
+    await expect(reconcileInProjectScope(request, { bestEffort: true })).rejects.toMatchObject({
+      code: "RPC_NOT_CONFIGURED",
+    });
+    expect(findReferenceSpy).not.toHaveBeenCalled();
   });
 
   it("best-effort still rethrows invariant violations", async () => {
