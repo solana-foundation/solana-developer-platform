@@ -45,8 +45,9 @@ credential is recorded on the row and compared in plain text rather than hashed:
   treats as one request match;
 - the credential (API key id or user id), so another credential reusing the key gets 422 and
   never reads a response produced for it. A rotated API key is a new credential, so a same-key
-  retry after rotation gets 422; retry with a new key, and the resource row's own unique key still
-  stops it moving money twice.
+  retry after rotation gets 422. The domain row is found by the key too, so a retry under a new key
+  is a new request: after a rotation, read the resource with GET to learn whether the original
+  request ran before sending it again.
 
 A route can pass `canonicalize` where two spellings mean one request, such as unordered batch
 recipients.
