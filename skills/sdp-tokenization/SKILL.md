@@ -45,18 +45,17 @@ Default to these sections unless the user asks for something narrower:
 
 - Recommend `stablecoin` for fiat-backed issuance with pause and delegated admin controls.
 - Recommend `tokenized-security` for regulated assets that usually need allowlists and stronger compliance controls.
-- Recommend `arcade` for closed-loop, loyalty, or gaming-style tokens.
-- Recommend `custom` only when templates do not fit the issuance model.
+- Recommend `custom` for closed-loop, loyalty, or gaming-style tokens, and whenever the other two templates do not fit the issuance model. There are exactly three templates: `stablecoin`, `tokenized-security`, and `custom`.
 - Prefer SDP-controlled custody wallets for mint, freeze, metadata, and other authorities by default.
 - Treat external or multisig authorities as an advanced path and state that clearly.
 
 ## Operational guidance
 
 - A token must be created before it can be deployed, and deployed before it can be minted or transferred.
-- Amounts are usually submitted in smallest-unit token amounts, not UI-decimal strings.
-- Burn, freeze, and similar account-level operations often require a token account address rather than a wallet address.
+- Amounts are decimal strings in UI units (`"1.5"` is one and a half tokens); SDP converts them using the token's decimals.
+- Standard burn takes the SDP wallet `id` (`cwlt_*`) holding the tokens; freeze and unfreeze accept the holder wallet or its token account.
 - If a token is paused, minting and transfer-related actions should be treated as unavailable until it is unpaused.
-- If a workflow needs SDP to sign directly, recommend execute flows first; use prepare flows only when the signer needs to be external to SDP.
+- If a workflow needs SDP to sign directly, recommend execute flows first; use prepare flows only when the signer needs to be external to SDP. The execution model section of `apps/sdp-docs/content/docs/developing-with-sdp/index.mdx` explains both.
 
 ## When to open more references
 

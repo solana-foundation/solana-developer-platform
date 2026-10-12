@@ -23,9 +23,25 @@ function renderPermissions(
 }
 
 beforeEach(() => setDashboardUrl("/dashboard/prj_test_sandbox/issuance/create?step=3", {}));
+
+const originalDocsUrl = process.env.NEXT_PUBLIC_SDP_DOCS_URL;
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  if (originalDocsUrl === undefined) {
+    delete process.env.NEXT_PUBLIC_SDP_DOCS_URL;
+  } else {
+    process.env.NEXT_PUBLIC_SDP_DOCS_URL = originalDocsUrl;
+  }
+});
+
+it("links the approved-recipients guide through the configured docs origin", () => {
+  setDashboardUrl("/dashboard/prj_test_sandbox/issuance/create?step=2", {});
+  process.env.NEXT_PUBLIC_SDP_DOCS_URL = "https://docs.example.com";
+  renderPermissions();
+  const link = screen.getByRole("link", { name: /How approved recipients work/ });
+  expect(link.getAttribute("href")).toBe("https://docs.example.com/tokens/allowlists");
 });
 
 it("links to the wallet page separately and refreshes the inventory on return", () => {
