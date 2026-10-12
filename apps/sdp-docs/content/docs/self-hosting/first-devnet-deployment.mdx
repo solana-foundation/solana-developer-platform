@@ -11,8 +11,8 @@ first useful devnet workflow: dashboard login, local wallet initialization,
 wallet-scoped API key creation, and an authenticated API call.
 
 Use this after the [Quickstart](/docs/self-hosting/quickstart). The path here is
-devnet-only and uses the default local signer. Provider-specific signing setup
-belongs in a later hardening pass.
+devnet-only and uses the local signer, which the configurator selects by
+default. Provider-specific signing setup belongs in a later hardening pass.
 
 <Callout type="warn">
 The public Solana devnet RPC endpoint is useful for smoke tests, but it can be
@@ -120,8 +120,8 @@ Look for Clerk webhook errors, session token claim mismatches, or missing
 
 ## Initialize a local custody wallet
 
-In the dashboard, open **Wallets**, choose the local provider, and create a wallet
-named `Devnet local wallet`.
+In the dashboard, open **Wallets**, choose **Local Signer**, and create a wallet
+labeled `Devnet local wallet`.
 
 If you prefer the API path, use an admin key from the dashboard:
 
