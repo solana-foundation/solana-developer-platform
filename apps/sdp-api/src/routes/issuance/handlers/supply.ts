@@ -1,3 +1,4 @@
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Context } from "hono";
@@ -42,6 +43,9 @@ export const refreshTokenSupply = async (c: AppContext) => {
     }
     supplyBaseUnits = tokenSupply.amount;
   } catch (error) {
+    if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
+      throw error;
+    }
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to refresh token supply"
