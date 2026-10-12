@@ -3402,8 +3402,6 @@ describe("Issuance Routes", () => {
         expect(body.data.token.imageUrl).toBe("https://example.com/token.png");
 
         expect(resolveCurrentAuthoritySpy).toHaveBeenCalledWith(
-          env,
-          expect.anything(),
           expect.objectContaining({ id: activeTokenId }),
           "metadata"
         );
