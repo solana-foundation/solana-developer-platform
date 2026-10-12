@@ -18,6 +18,10 @@ import {
   CUSTODY_DEFAULTS_DROP_MIGRATION,
   restorePreCustodyDefaultsDropSchema,
 } from "./custody-defaults-schema";
+import {
+  POLICY_ENGINE_DROP_MIGRATION,
+  restorePolicyEngineTablesForMigration0125,
+} from "./policy-engine-schema";
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 const migrationFile = "0125_custody_project_only.sql";
@@ -247,14 +251,15 @@ afterAll(async () => {
 describe("0125 custody project-only migration", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
+    await restorePolicyEngineTablesForMigration0125(client);
     await restorePreCustodyDefaultsDropSchema(client);
     await restorePreProjectOnlySchema();
   });
 
   afterEach(async () => {
     await seedTestDatabase(env);
-    await client.query("DELETE FROM schema_migrations WHERE version = $1", [
-      CUSTODY_DEFAULTS_DROP_MIGRATION,
+    await client.query("DELETE FROM schema_migrations WHERE version = ANY($1)", [
+      [CUSTODY_DEFAULTS_DROP_MIGRATION, POLICY_ENGINE_DROP_MIGRATION],
     ]);
     await runPostgresMigrations({ databaseUrl, migrationsDir });
   });
