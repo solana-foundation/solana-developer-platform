@@ -168,6 +168,38 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
   });
 
+  // Greptile (#2252): an expired session's 401 settles nothing about the
+  // unanswered attempt before it, so signing in and retrying reuses its key.
+  it("keeps an unanswered attempt's key through a later refusal", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = vi
+      .fn(
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response("{}", { status: 201 })
+      )
+      .mockRejectedValueOnce(new TypeError("network down"))
+      .mockResolvedValueOnce(new Response("{}", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submit()).rejects.toThrow("network down");
+    expect((await submit()).status).toBe(401);
+    await submit();
+
+    expect(keyOfCall(fetchMock, 1)).toBe(keyOfCall(fetchMock, 0));
+    expect(keyOfCall(fetchMock, 2)).toBe(keyOfCall(fetchMock, 0));
+  });
+
+  it("retires a fresh key on a first-attempt refusal", async () => {
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
+    const fetchMock = statusFetchMock(400, 201);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submit();
+    await submit();
+
+    expect(keyOfCall(fetchMock, 1)).not.toBe(keyOfCall(fetchMock, 0));
+  });
+
   it("keeps the key when a success's body fails to download", async () => {
     setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/payments/recurring`);
     const brokenBody = () =>

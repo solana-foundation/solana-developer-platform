@@ -68,18 +68,27 @@ function mutationKeys(): IdempotencyKeyStore {
 const inFlightMutations = new Map<string, Promise<Response>>();
 
 /**
- * Whether an answer retires the key, so the next submit is a new action.
+ * Whether an answer retires the key, so the next submit is a new action. The
+ * vault flows' rule (`applyIdempotencyKeyOutcome`):
  *
- * - A success or a refusal other than a conflict or a rate limit is definitive.
- * - A replayed answer is definitive: sdp-api stored it, so the same key would
- *   only replay it again.
- * - A first 5xx is not: on a route that re-runs after a 5xx the same key is
- *   what makes the retry safe, and on one that stores it the retry comes back
- *   as a replay, which then retires the key.
+ * - A success, or a replay, is definitive: sdp-api ran or stored the request.
+ * - A refusal (4xx other than a conflict or a rate limit) retires a fresh key.
+ *   Once an earlier attempt went unanswered it does not: a refusal sdp-api
+ *   never stores, or a local 401 from an expired session, settles nothing about
+ *   that attempt, which may have written. Only a success or a replay does.
+ * - A 5xx is not definitive: on a route that re-runs after a 5xx the same key
+ *   is what makes the retry safe, and on one that stores it the retry comes
+ *   back as a replay, which then retires the key.
  */
-function retiresKey(response: Response): boolean {
+function retiresKey(response: Response, earlierAttemptUnanswered: boolean): boolean {
   if (response.headers.get("Idempotent-Replayed") === "true") return true;
-  return response.status < 500 && response.status !== 409 && response.status !== 429;
+  if (response.status < 400) return true;
+  return (
+    !earlierAttemptUnanswered &&
+    response.status < 500 &&
+    response.status !== 409 &&
+    response.status !== 429
+  );
 }
 
 function sendWithProject(
@@ -162,6 +171,9 @@ async function sendUnderActionKey(
     const { signal: _callerSignal, ...shared } = init;
     const fingerprint = storageFingerprint(material);
     const keys = mutationKeys();
+    // Read before this attempt pins the key: an earlier attempt that never got
+    // a definitive answer leaves it uncertain.
+    const earlierAttemptUnanswered = keys.isUncertain(fingerprint) || keys.isHeld(fingerprint);
     headers.set(IDEMPOTENCY_KEY_HEADER, keys.claim(fingerprint));
     // Pinned before the request goes out: a reload mid-flight must not let
     // an unanswered write's key expire or be evicted. When browser storage
@@ -175,7 +187,7 @@ async function sendUnderActionKey(
       // The answer only counts once its body has arrived: a download that
       // fails leaves the key pinned, so the retry recovers the first result.
       const body = await response.arrayBuffer();
-      if (retiresKey(response)) {
+      if (retiresKey(response, earlierAttemptUnanswered)) {
         keys.release(fingerprint);
       }
       return new Response(BODYLESS_STATUSES.has(response.status) ? null : body, {
