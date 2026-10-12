@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   findWorkspaceDependencyCycles,
+  forbiddenClusterScopeEntryImport,
   forbiddenFeePaymentConstructorImport,
   forbiddenPackageSourceImport,
   validateModuleBoundaries,
@@ -72,6 +73,72 @@ test("restricts fee-payment constructors to the owned sponsorship boundary", () 
     }),
     undefined
   );
+});
+
+test("reports withCluster imports from the cluster scope outside entry points", () => {
+  for (const [name, source] of [
+    ["named", 'import { withCluster } from "@sdp/rpc/scope";'],
+    ["aliased", 'import { withCluster as open } from "@sdp/rpc/scope";'],
+    ["re-export", 'export { withCluster } from "@sdp/rpc/scope";'],
+  ]) {
+    assert.match(
+      forbiddenClusterScopeEntryImport({
+        filePath: `/repo/apps/sdp-api/src/services/${name}.ts`,
+        source,
+        repositoryRoot: "/repo",
+      }),
+      /opens a cluster scope outside the sanctioned entry points/
+    );
+  }
+});
+
+test("allows reading the cluster scope without opening one", () => {
+  assert.equal(
+    forbiddenClusterScopeEntryImport({
+      filePath: "/repo/packages/sdp-payments/src/ramps/reader.ts",
+      source:
+        'import { clusterScope, currentClusterScope, type ClusterScope } from "@sdp/rpc/scope";',
+      repositoryRoot: "/repo",
+    }),
+    undefined
+  );
+});
+
+test("reports opaque cluster scope imports", () => {
+  for (const [name, source] of [
+    ["namespace", 'import * as scope from "@sdp/rpc/scope";'],
+    ["default", 'import scope from "@sdp/rpc/scope";'],
+    ["default-plus-named", 'import scope, { clusterScope } from "@sdp/rpc/scope";'],
+    ["require", 'const scope = require("@sdp/rpc/scope");'],
+    ["dynamic", 'const scope = await import("@sdp/rpc/scope");'],
+    ["star-export", 'export * from "@sdp/rpc/scope";'],
+  ]) {
+    assert.match(
+      forbiddenClusterScopeEntryImport({
+        filePath: `/repo/apps/sdp-api/src/routes/${name}-bypass.ts`,
+        source,
+        repositoryRoot: "/repo",
+      }),
+      /opaque @sdp\/rpc\/scope import/
+    );
+  }
+});
+
+test("allows test files to open a cluster scope", () => {
+  for (const filePath of [
+    "/repo/apps/sdp-api/src/services/earn.test.ts",
+    "/repo/packages/sdp-rpc/src/scope.spec.ts",
+    "/repo/apps/sdp-api/src/test/helpers/cluster.ts",
+  ]) {
+    assert.equal(
+      forbiddenClusterScopeEntryImport({
+        filePath,
+        source: 'import { withCluster } from "@sdp/rpc/scope";',
+        repositoryRoot: "/repo",
+      }),
+      undefined
+    );
+  }
 });
 
 const api = {
