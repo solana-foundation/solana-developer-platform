@@ -5,14 +5,11 @@ import {
   type CryptoRailId,
   getCryptoRailAssetLabel,
   isWellKnownTokenSymbol,
-  type Permission,
   SOL_MINT,
   wellKnownMint,
 } from "@sdp/types";
 import { type Address, getI64Encoder, getU64Encoder } from "@solana/kit";
-import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, walletNotFound } from "@/lib/errors";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 
 export { SOL_MINT };
@@ -155,23 +152,17 @@ export function resolvePaymentWallet(
 }
 
 export function resolveOutboundPaymentOperation(input: {
-  auth: ApiKeyContext;
   wallets: CustodyWallet[];
   sourceCustodyWalletId: string;
   destination: string;
   token: string;
   amount: string;
   env: RpcEnv;
-  requiredWalletPermissions?: Permission[];
 }): OutboundPaymentOperation {
   const amount = assertPositivePaymentAmount(input.amount);
 
+  // The caller checks the credential's access to the wallet, read fresh.
   const sourceWallet = resolvePaymentWallet(input.wallets, input.sourceCustodyWalletId);
-  assertApiKeyWalletAccess(
-    input.auth,
-    sourceWallet.walletId,
-    input.requiredWalletPermissions ?? []
-  );
 
   return {
     sourceWallet,

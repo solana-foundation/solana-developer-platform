@@ -13,11 +13,10 @@ import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import { parseIdempotencyKey } from "@/middleware/idempotency-key";
 import type { MovementStepInput } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import * as solanaServices from "@/services/solana";
 import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../context";
-import { admitPaymentWalletRuntimeExecution, assertPaymentWalletExactAccess } from "../wallets";
+import { admitPaymentWalletRuntimeExecution, authorizeCustodyPaymentWallet } from "../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import {
   type AuthorizedBatchRequest,
@@ -54,21 +53,15 @@ export async function authorizeTransferBatch(
 ): Promise<AuthorizedBatchRequest> {
   // SAFETY: mounted after validateBody(createTransferBatchSchema).
   const body = input.body as CreateTransferBatchInput;
-  assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
-  const authorized = await authorizeBatchRequest(
+  // Read fresh, never from the cached snapshot, which drops a binding once its
+  // wallet is inactive and would refuse the replay of a batch that ran.
+  await authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
+  return authorizeBatchRequest(
     c,
     body,
-    ["payments:write"],
+    null,
     parseIdempotencyKey(c) !== undefined ? body.sourceCustodyWalletId : undefined
   );
-  await assertFreshApiKeyCustodyWalletAccess(
-    getDb(c.env),
-    authorized.scope.auth,
-    authorized.sourceWallet.id,
-    ["payments:write"],
-    "any"
-  );
-  return authorized;
 }
 
 /** The custody runtime takes the source wallet: state, after the replay exits. */

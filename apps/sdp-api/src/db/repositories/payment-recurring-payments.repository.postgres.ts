@@ -885,6 +885,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                     CASE WHEN ?::boolean THEN ? ELSE authorization_signature END,
                   error = CASE WHEN ?::boolean THEN ? ELSE error END,
                   metadata = CASE WHEN ?::boolean THEN ?::jsonb ELSE metadata END,
+                  idempotency_key = COALESCE(idempotency_key, ?),
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
@@ -901,6 +902,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.error ?? null,
           input.metadata !== undefined,
           input.metadata === undefined ? null : JSON.stringify(input.metadata),
+          input.adoptIdempotencyKey ?? null,
           input.updatedAt,
           input.attemptId,
           input.organizationId,
@@ -1015,6 +1017,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
                   error = CASE WHEN ?::boolean THEN ? ELSE error END,
                   metadata = CASE WHEN ?::boolean THEN ?::jsonb ELSE metadata END,
+                  idempotency_key = COALESCE(idempotency_key, ?),
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
@@ -1030,6 +1033,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.error ?? null,
           input.metadata !== undefined,
           input.metadata === undefined ? null : JSON.stringify(input.metadata),
+          input.adoptIdempotencyKey ?? null,
           input.updatedAt,
           input.attemptId,
           input.organizationId,
@@ -1189,6 +1193,10 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                   after_values =
                     CASE WHEN ?::boolean THEN ?::jsonb ELSE after_values END,
                   error = CASE WHEN ?::boolean THEN ? ELSE error END,
+                  -- Both read the row as it was: the fingerprint is adopted with the key.
+                  idempotency_fingerprint = CASE WHEN idempotency_key IS NULL
+                    THEN COALESCE(?, idempotency_fingerprint) ELSE idempotency_fingerprint END,
+                  idempotency_key = COALESCE(idempotency_key, ?),
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
@@ -1220,6 +1228,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.afterValues === undefined ? null : JSON.stringify(input.afterValues),
           input.error !== undefined,
           input.error ?? null,
+          input.adoptIdempotencyFingerprint ?? null,
+          input.adoptIdempotencyKey ?? null,
           input.updatedAt,
           input.attemptId,
           input.organizationId,

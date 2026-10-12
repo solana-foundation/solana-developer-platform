@@ -582,6 +582,24 @@ export function createPostgresPaymentSubscriptionsRepository(
       return row ? mapAttemptRow(row) : null;
     },
 
+    async adoptCollectionAttemptIdempotencyKey({
+      attemptId,
+      organizationId,
+      projectId,
+      idempotencyKey,
+    }) {
+      await db
+        .prepare(
+          `UPDATE payment_subscription_collection_attempts
+              SET idempotency_key = COALESCE(idempotency_key, ?)
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?`
+        )
+        .bind(idempotencyKey, attemptId, organizationId, projectId)
+        .run();
+    },
+
     async updateCollectionAttempt(input: UpdatePaymentSubscriptionCollectionAttemptInput) {
       const row = await db
         .prepare(

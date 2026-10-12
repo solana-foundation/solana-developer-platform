@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { canonicalizeDecimalFields, type JsonValue } from "@/lib/idempotency";
 import { requireAllowedOperation } from "@/middleware/allowed-operations";
 import { requirePermissions } from "@/middleware/auth";
 import { authorize } from "@/middleware/authorize";
@@ -39,6 +40,9 @@ import {
 
 const recurringPayments = new Hono<{ Bindings: Env }>();
 
+/** "1.0" and "1" collect the same amount, so they fingerprint as one request. */
+const canonicalAmount = (body: JsonValue) => canonicalizeDecimalFields(body, ["amount"]);
+
 recurringPayments.post(
   "/",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
@@ -46,7 +50,7 @@ recurringPayments.post(
   validateBody(createRecurringPaymentSchema),
   authorize(authorizeRecurringPaymentCreate),
   // The schedule row carries its key (0129), so a 5xx re-runs and the row answers.
-  idempotent({ key: "required", serverErrors: "rerun" }),
+  idempotent({ key: "required", serverErrors: "rerun", canonicalize: canonicalAmount }),
   replayFromRecord(findRecurringPaymentCreateReplay),
   createRecurringPayment
 );
@@ -60,7 +64,7 @@ recurringPayments.patch(
   authorize(authorizeRecurringPaymentUpdate),
   // Each lifecycle attempt carries its key (0130), so a takeover or a 5xx re-run
   // is answered from the attempt instead of a 409 for the schedule mid-change.
-  idempotent({ key: "accepted", serverErrors: "rerun" }),
+  idempotent({ key: "accepted", serverErrors: "rerun", canonicalize: canonicalAmount }),
   replayFromRecord(findRecurringPaymentUpdateReplay),
   updateRecurringPayment
 );

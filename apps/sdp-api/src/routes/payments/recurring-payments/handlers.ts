@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
   ListPaymentRecurringPaymentsResponse,
   PaymentRecurringPayment,
@@ -9,11 +8,17 @@ import { z } from "zod";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { AppError, badRequestParams, badRequestQuery, internalError } from "@/lib/errors";
-import { canonicalJson, type JsonValue } from "@/lib/idempotency";
+import {
+  AppError,
+  badRequestParams,
+  badRequestQuery,
+  internalError,
+  walletNotFound,
+} from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
+import { getIdempotencyFingerprint } from "@/middleware/idempotency";
 import { parseIdempotencyKey } from "@/middleware/idempotency-key";
 import type { MovementStepInput } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -30,6 +35,7 @@ import {
   findKeyedRecurringPayment,
   type RecurringPaymentIdempotency,
 } from "@/services/payments/recurring-payments/create";
+import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import {
   type AppContext,
   getPaymentRecurringPaymentsRepository,
@@ -86,28 +92,27 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
 }
 
 /**
- * The create request's Idempotency-Key and the fingerprint of the schedule it
- * creates, recorded on the row (migration 0129). The route requires the key.
+ * The request's Idempotency-Key and the fingerprint the key step computed for
+ * it, recorded on the domain row (migrations 0129, 0130) so a retry past the
+ * key's 24 hours is matched by the same request identity; null without a key.
  */
-function recurringPaymentIdempotency(
-  c: ValidatedBodyContext<typeof createRecurringPaymentSchema>,
-  body: z.output<typeof createRecurringPaymentSchema>,
-  sourceCustodyWalletId: string
-): RecurringPaymentIdempotency {
+function requestIdempotency(c: AppContext): RecurringPaymentIdempotency | null {
   const key = requestIdempotencyKey(c);
-  if (key === null) {
-    throw internalError("Recurring payment create reached the handler without an Idempotency-Key");
+  if (key === null) return null;
+  const fingerprint = getIdempotencyFingerprint(c);
+  if (fingerprint === undefined) {
+    throw internalError("A keyed recurring payment request reached its handler unfingerprinted");
   }
-  return { key, fingerprint: recurringPaymentFingerprint(body, sourceCustodyWalletId) };
+  return { key, fingerprint };
 }
 
-function recurringPaymentFingerprint(
-  body: z.output<typeof createRecurringPaymentSchema>,
-  sourceCustodyWalletId: string
-): string {
-  // SAFETY: a validated JSON body plus a string is a JSON value.
-  const value = JSON.parse(JSON.stringify({ ...body, sourceCustodyWalletId })) as JsonValue;
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+/** As {@link requestIdempotency}, for a route that requires the key. */
+function requiredIdempotency(c: AppContext): RecurringPaymentIdempotency {
+  const idempotency = requestIdempotency(c);
+  if (idempotency === null) {
+    throw internalError("Recurring payment request reached the handler without an Idempotency-Key");
+  }
+  return idempotency;
 }
 
 /**
@@ -117,19 +122,10 @@ function recurringPaymentFingerprint(
  */
 export async function findRecurringPaymentCreateReplay(
   c: AppContext,
-  input: MovementStepInput<AuthorizedRecurringPaymentCreate>,
-  idempotencyKey: string
+  _input: MovementStepInput<AuthorizedRecurringPaymentCreate>,
+  _idempotencyKey: string
 ): Promise<Response | null> {
-  // SAFETY: mounted after validateBody(createRecurringPaymentSchema).
-  const body = input.body as z.output<typeof createRecurringPaymentSchema>;
-  const existing = await findKeyedRecurringPayment(
-    c.env,
-    { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) },
-    {
-      key: idempotencyKey,
-      fingerprint: recurringPaymentFingerprint(body, input.authorized.sourceWallet.id),
-    }
-  );
+  const existing = await findKeyedRecurringPayment(c.env, tenant(c), requiredIdempotency(c));
   if (!existing) return null;
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(existing),
@@ -142,10 +138,12 @@ function requestIdempotencyKey(c: AppContext): string | null {
   return parseIdempotencyKey(c) ?? null;
 }
 
-function updateFingerprint(body: z.output<typeof updateRecurringPaymentSchema>): string {
-  // SAFETY: a validated JSON body is a JSON value.
-  const value = JSON.parse(JSON.stringify(body)) as JsonValue;
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+/** The schedule's pinned source wallet; an unresolved pin is refused for new work (state). */
+function pinnedSourceWallet(authorized: AuthorizedRecurringPayment): CustodyWallet {
+  if (authorized.sourceWallet === null) {
+    throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
+  }
+  return authorized.sourceWallet;
 }
 
 /**
@@ -218,9 +216,7 @@ export async function findRecurringPaymentUpdateReplay(
     ...tenant(c),
     idempotencyKey,
   });
-  // SAFETY: mounted after validateBody(updateRecurringPaymentSchema).
-  const body = input.body as z.output<typeof updateRecurringPaymentSchema>;
-  if (attempt !== null && attempt.idempotency_fingerprint !== updateFingerprint(body)) {
+  if (attempt !== null && attempt.idempotency_fingerprint !== requiredIdempotency(c).fingerprint) {
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
   }
   return answerFromAttempt(c, input.authorized.recurringPayment, attempt);
@@ -269,6 +265,11 @@ export const createRecurringPayment = async (
   const body = c.req.valid("json");
   const projectId = requireProjectId(c);
   const { scope, sourceWallet } = getAuthorized<AuthorizedRecurringPaymentCreate>(c);
+  // Authorize resolves the named wallet whatever its status, so a replay is
+  // answered after it is deactivated; a new schedule needs an active one.
+  if (sourceWallet.status !== "active") {
+    throw walletNotFound();
+  }
 
   const recurringPayment = await createRecurringPaymentRecord({
     env: c.env,
@@ -283,7 +284,7 @@ export const createRecurringPayment = async (
     firstCollectionAt: body.firstCollectionAt === undefined ? null : body.firstCollectionAt,
     metadataUri: body.metadataUri === undefined ? null : body.metadataUri,
     createdBy: await resolveCreatorUserId(c),
-    idempotency: recurringPaymentIdempotency(c, body, sourceWallet.id),
+    idempotency: requiredIdempotency(c),
   });
 
   const response: PaymentRecurringPaymentResponse = {
@@ -299,8 +300,14 @@ export const updateRecurringPayment = async (
   const projectId = requireProjectId(c);
 
   const body = c.req.valid("json");
-  const { recurringPayment, sourceWallet, nextSourceWallet } =
-    getAuthorized<AuthorizedRecurringPaymentUpdate>(c);
+  const authorized = getAuthorized<AuthorizedRecurringPaymentUpdate>(c);
+  const { recurringPayment, nextSourceWallet } = authorized;
+  const sourceWallet = pinnedSourceWallet(authorized);
+  // Authorize resolves the named wallet whatever its status; moving a
+  // schedule onto it needs an active one.
+  if (nextSourceWallet && nextSourceWallet.status !== "active") {
+    throw walletNotFound();
+  }
 
   const updated = await updateRecurringPaymentRecord({
     env: c.env,
@@ -311,10 +318,7 @@ export const updateRecurringPayment = async (
     recurringPayment,
     request: body,
     createdBy: await resolveCreatorUserId(c),
-    idempotency: (() => {
-      const key = requestIdempotencyKey(c);
-      return key === null ? null : { key, fingerprint: updateFingerprint(body) };
-    })(),
+    idempotency: requestIdempotency(c),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
@@ -329,7 +333,9 @@ export const activateRecurringPayment = async (
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const { recurringPayment, sourceWallet } = getAuthorized<AuthorizedRecurringPayment>(c);
+  const authorized = getAuthorized<AuthorizedRecurringPayment>(c);
+  const { recurringPayment } = authorized;
+  const sourceWallet = pinnedSourceWallet(authorized);
 
   const activated = await activateRecurringPaymentRecord({
     env: c.env,
@@ -357,7 +363,9 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const { recurringPayment, sourceWallet } = getAuthorized<AuthorizedRecurringPayment>(c);
+  const authorized = getAuthorized<AuthorizedRecurringPayment>(c);
+  const { recurringPayment } = authorized;
+  const sourceWallet = pinnedSourceWallet(authorized);
 
   const updated =
     operation === "cancel"
@@ -406,7 +414,9 @@ export const collectRecurringPayment = async (
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const { recurringPayment, sourceWallet } = getAuthorized<AuthorizedRecurringPayment>(c);
+  const authorized = getAuthorized<AuthorizedRecurringPayment>(c);
+  const { recurringPayment } = authorized;
+  const sourceWallet = pinnedSourceWallet(authorized);
 
   const collected = await collectRecurringPaymentRecord({
     env: c.env,

@@ -305,7 +305,8 @@ async function createClaimedActivationAttempt(input: {
   recoveringStaleActivation: boolean;
   idempotencyKey: string | null;
 }): Promise<PaymentRecurringPaymentActivationAttemptRow> {
-  // A stale claim resumes the in-flight attempt under its original key.
+  // A stale claim resumes the in-flight attempt under its original key, or
+  // records this request's key on it when it has none.
   if (input.recoveringStaleActivation) {
     let existing: PaymentRecurringPaymentActivationAttemptRow | null = null;
     try {
@@ -343,6 +344,7 @@ async function createClaimedActivationAttempt(input: {
             label: "Recurring payment authorization",
           }),
           error: null,
+          adoptIdempotencyKey: input.idempotencyKey,
           updatedAt: input.nowIso,
         });
         if (resumed === null) {

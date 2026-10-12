@@ -132,7 +132,22 @@ async function getOrCreateLifecycleAttempt(input: {
   });
 
   if (existing) {
-    return existing;
+    // A stale claim resumes the in-flight attempt under its original key, or
+    // records this request's key on it when it has none (same transaction).
+    if (input.idempotencyKey === null || existing.idempotency_key !== null) {
+      return existing;
+    }
+    const adopted = await input.recurringRepo.updateLifecycleAttempt({
+      attemptId: existing.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      adoptIdempotencyKey: input.idempotencyKey,
+      updatedAt: input.nowIso,
+    });
+    if (adopted === null) {
+      throw conflict("Recurring payment lifecycle attempt changed concurrently");
+    }
+    return adopted;
   }
 
   let attempt: PaymentRecurringPaymentLifecycleAttemptRow | null = null;

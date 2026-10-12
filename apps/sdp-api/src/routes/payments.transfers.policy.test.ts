@@ -9,6 +9,7 @@ import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
   installPaymentsRouteTestHooks,
+  reloadTestApiKeyCache,
   seedCachedKey,
   sendTransactionMock,
   TEST_API_KEY,
@@ -195,6 +196,9 @@ describe("Payments routes — transfer wallet access", () => {
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
       .bind(TEST_CUSTODY_WALLET_ID)
       .run();
+    // The real path: once the key's snapshot reloads, its binding to the
+    // now-inactive wallet is gone from it; only the fresh read still sees it.
+    await reloadTestApiKeyCache();
     createOrgSignerForCustodyWalletMock.mockClear();
     const replay = await postTransfer(JSON.parse(body), {
       idempotencyKey: headers["Idempotency-Key"],

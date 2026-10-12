@@ -59,10 +59,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { isRampQuoteBindingExpired } from "@/routes/payments/ramps/quote-binding";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import {
-  assertFreshApiKeyCustodyWalletAccess,
-  getAllowedApiKeyWalletAuthorizationForPermissions,
-} from "@/services/api-key-scope.service";
+import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
@@ -85,8 +82,8 @@ import { transferIdParamsSchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
 import {
   admitPaymentWalletRuntimeExecution,
-  assertPaymentWalletExactAccess,
   assertPaymentWalletReadAccess,
+  authorizeCustodyPaymentWallet,
   type ResolvedScope,
   resolveScope,
   resolveWalletByCustodyWalletId,
@@ -226,6 +223,8 @@ type CreateTransferBody = z.output<typeof createTransferSchema>;
 interface TransferResolved {
   scope: ResolvedScope;
   operation: OutboundPaymentOperation;
+  /** The ramp deposit a `transferId` request funds, in the caller's project, whatever its state. */
+  rampTransfer: TransferRow | null;
 }
 
 function rampTransferHasOnchainValues(transfer: TransferRow): boolean {
@@ -255,20 +254,19 @@ function getRampCryptoDeposit(transfer: TransferRow) {
 async function updateOnchainTransferForRamp(
   c: AppContext,
   input: {
-    transferId: string;
+    /** The deposit row authorize loaded in the caller's project. */
+    existing: TransferRow;
     scope: ResolvedScope;
     operation: OutboundPaymentOperation;
     destinationAddress: string;
   }
 ): Promise<TransferRow> {
-  const { transferId, scope, operation, destinationAddress } = input;
+  const { existing, scope, operation, destinationAddress } = input;
   const tenant = {
-    transferId,
+    transferId: existing.id,
     organizationId: scope.auth.organizationId,
     projectId: scope.auth.projectId,
   };
-  const existing = await getPaymentsRepository(c).getTransferById(tenant);
-  if (!existing) throw notFound("Ramp transfer");
   // A provider the release channel leaves out is off completely: never fund its deposits.
   assertTransferRampProviderInChannel(c, existing);
 
@@ -335,30 +333,34 @@ export async function authorizeTransfer(
 ): Promise<TransferResolved> {
   // SAFETY: mounted after validateBody(createTransferSchema).
   const body = input.body as CreateTransferBody;
-  assertPaymentWalletExactAccess(c, body.sourceCustodyWalletId, ["payments:write"]);
+  // Read fresh, never from the cached snapshot, which drops a binding once its
+  // wallet is inactive and would refuse the replay of a transfer that ran.
+  await authorizeCustodyPaymentWallet(c, body.sourceCustodyWalletId, ["payments:write"]);
   const scope = await resolveScope(
     c,
     parseIdempotencyKey(c) !== undefined ? body.sourceCustodyWalletId : undefined
   );
   assertPaymentProjectScope(body.projectId, scope.auth.projectId);
   const operation = resolveOutboundPaymentOperation({
-    auth: scope.auth,
     wallets: scope.wallets,
     sourceCustodyWalletId: body.sourceCustodyWalletId,
     destination: body.destination,
     token: body.token,
     amount: body.amount,
     env: c.env,
-    requiredWalletPermissions: ["payments:write"],
   });
-  await assertFreshApiKeyCustodyWalletAccess(
-    getDb(c.env),
-    scope.auth,
-    operation.sourceWallet.id,
-    ["payments:write"],
-    "any"
-  );
-  return { scope, operation };
+  // A ramp deposit the request funds is named by id: it must be in the
+  // project before the key is claimed, so a wrong id is never stored as a 404.
+  let rampTransfer: TransferRow | null = null;
+  if (body.transferId) {
+    rampTransfer = await getPaymentsRepository(c).getTransferById({
+      transferId: body.transferId,
+      organizationId: scope.auth.organizationId,
+      projectId: scope.auth.projectId,
+    });
+    if (!rampTransfer) throw notFound("Ramp transfer");
+  }
+  return { scope, operation, rampTransfer };
 }
 
 /**
@@ -370,18 +372,10 @@ export async function admitTransferExecution(
   c: AppContext,
   input: MovementStepInput<TransferResolved>
 ): Promise<void> {
-  // SAFETY: mounted after validateBody(createTransferSchema).
-  const body = input.body as CreateTransferBody;
-  if (body.transferId) {
-    const existing = await getPaymentsRepository(c).getTransferById({
-      transferId: body.transferId,
-      organizationId: input.authorized.scope.auth.organizationId,
-      projectId: input.authorized.scope.auth.projectId,
-    });
-    if (existing) {
-      // An excluded provider's deposit is never funded.
-      assertTransferRampProviderInChannel(c, existing);
-    }
+  const { rampTransfer } = input.authorized;
+  if (rampTransfer) {
+    // An excluded provider's deposit is never funded.
+    assertTransferRampProviderInChannel(c, rampTransfer);
   }
   await admitPaymentWalletRuntimeExecution(c, input.authorized.operation.sourceWallet);
 }
@@ -404,13 +398,8 @@ export async function findTransferRecordReplay(
 ): Promise<Response | null> {
   // SAFETY: mounted after validateBody(createTransferSchema).
   const body = input.body as CreateTransferBody;
-  const { scope, operation } = input.authorized;
+  const { scope, operation, rampTransfer: existing } = input.authorized;
   if (body.transferId) {
-    const existing = await getPaymentsRepository(c).getTransferById({
-      transferId: body.transferId,
-      organizationId: scope.auth.organizationId,
-      projectId: scope.auth.projectId,
-    });
     if (
       existing &&
       rampTransferHasOnchainValues(existing) &&
@@ -748,14 +737,14 @@ function compareTransferRows(
 
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
-  const { scope, operation } = getAuthorized<TransferResolved>(c);
+  const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
   const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
 
-  const reusedRampTransfer = body.transferId !== undefined;
-  const { row: transfer, replayed } = body.transferId
+  const reusedRampTransfer = rampTransfer !== null;
+  const { row: transfer, replayed } = rampTransfer
     ? {
         row: await updateOnchainTransferForRamp(c, {
-          transferId: body.transferId,
+          existing: rampTransfer,
           scope,
           operation,
           destinationAddress: body.destination,

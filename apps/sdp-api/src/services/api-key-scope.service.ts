@@ -788,20 +788,24 @@ export async function assertFreshApiKeyActive(
   }
 }
 
-export async function assertFreshApiKeyCustodyWalletAccess(
+/**
+ * The credential with its wallet bindings re-read from Postgres. The auth
+ * context is a cache snapshot up to an hour old, built from active wallets
+ * only; this is the authority for wallet access (HOO-1918, ADR 0008). Callers
+ * that are not wallet-scoped API keys are returned unchanged.
+ */
+export async function loadFreshApiKeyWalletScope(
   db: DatabaseClient,
   auth: ApiKeyContext,
-  custodyWalletId: string,
-  requiredPermissions: Permission[] = [],
   /**
-   * `any` for an Idempotency-Key replay check (ADR 0008): the binding must still
-   * stand, but a wallet deactivated since the original request still replays,
-   * because a replay moves nothing.
+   * `any` keeps bindings to wallets deactivated since (ADR 0008): access is the
+   * binding, and whether the wallet is active is state for the handler. A
+   * replay of a request that already ran moves nothing.
    */
   walletStatus: "active" | "any" = "active"
-): Promise<void> {
+): Promise<ApiKeyContext> {
   if (auth.authType !== "api_key" || !hasSelectedWalletScope(auth)) {
-    return;
+    return auth;
   }
   if (!auth.projectId) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
@@ -846,11 +850,36 @@ export async function assertFreshApiKeyCustodyWalletAccess(
     currentKey.signing_wallet_id,
     walletStatus
   );
+  // Still wallet-scoped when every binding is gone: no bindings means no wallet.
+  return { ...auth, ...freshAuthorization, walletScope: "selected" };
+}
+
+/** Whether a credential, as given, may act on this custody wallet; throws 403 if not. */
+export function assertApiKeyCustodyWalletAccess(
+  auth: ApiKeyContext,
+  custodyWalletId: string,
+  requiredPermissions: Permission[] = []
+): void {
   const allowedCustodyWalletIds = getAllowedApiKeyCustodyWalletIdsForPermissions(
-    { ...auth, ...freshAuthorization },
+    auth,
     requiredPermissions
   );
-  if (!allowedCustodyWalletIds?.includes(custodyWalletId)) {
+  if (allowedCustodyWalletIds && !allowedCustodyWalletIds.includes(custodyWalletId)) {
     throw new AppError("FORBIDDEN", "API key is not authorized for the requested wallet");
   }
+}
+
+export async function assertFreshApiKeyCustodyWalletAccess(
+  db: DatabaseClient,
+  auth: ApiKeyContext,
+  custodyWalletId: string,
+  requiredPermissions: Permission[] = [],
+  /** As {@link loadFreshApiKeyWalletScope}: `any` keeps bindings to deactivated wallets. */
+  walletStatus: "active" | "any" = "active"
+): Promise<void> {
+  assertApiKeyCustodyWalletAccess(
+    await loadFreshApiKeyWalletScope(db, auth, walletStatus),
+    custodyWalletId,
+    requiredPermissions
+  );
 }

@@ -4688,5 +4688,243 @@ describe("Payments routes — recurring", () => {
       await insert("processing");
       await expect(insert("confirmed")).rejects.toThrow();
     });
+
+    /** How many shared key records the request left: 0 means it was refused before the claim. */
+    async function keyRecords(key: string): Promise<number> {
+      const row = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?"
+        )
+        .bind(key)
+        .first<{ count: number }>();
+      return row?.count ?? 0;
+    }
+
+    /** The create body the default fixture sends, for a schedule it made. */
+    function createBody(created: { counterpartyId: string; counterpartyAccountId: string }) {
+      return {
+        sourceCustodyWalletId: DEFAULT_RECURRING_FIXTURE.sourceCustodyWalletId,
+        counterpartyId: created.counterpartyId,
+        counterpartyAccountId: created.counterpartyAccountId,
+        token: DEFAULT_RECURRING_FIXTURE.token,
+        amount: DEFAULT_RECURRING_FIXTURE.amount,
+        periodHours: DEFAULT_RECURRING_FIXTURE.periodHours,
+      };
+    }
+
+    const postCreate = (key: string, body: Record<string, unknown>) =>
+      app.request(
+        "/v1/payments/recurring-payments",
+        { method: "POST", headers: keyed(key), body: JSON.stringify(body) },
+        env
+      );
+
+    it("refuses a new schedule on an inactive source wallet (404) but answers one made before", async () => {
+      const key = crypto.randomUUID();
+      const created = await createRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: keyed(key),
+      });
+      await getDb(env)
+        .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+        .bind(TEST_CUSTODY_WALLET_ID)
+        .run();
+      await forgetIdempotencyKey(key);
+
+      const replay = await postCreate(key, createBody(created));
+      expect(replay.status).toBe(201);
+      expect((await parseRecurringResponse(replay)).data.recurringPayment.id).toBe(created.id);
+
+      const fresh = await postCreate(crypto.randomUUID(), createBody(created));
+      expect(fresh.status).toBe(404);
+      const schedules = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::integer AS count FROM payment_recurring_payments WHERE counterparty_id = ?"
+        )
+        .bind(created.counterpartyId)
+        .first<{ count: number }>();
+      expect(schedules).toEqual({ count: 1 });
+    });
+
+    it("refuses a PATCH naming a counterparty account outside the project before claiming the key", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+
+      const response = await app.request(
+        actionPath(created.id),
+        {
+          method: "PATCH",
+          headers: keyed(key),
+          body: JSON.stringify({ counterpartyAccountId: "counterparty_account_other_tenant" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(404);
+      expect(errorResponseSchema.parse(await response.json()).error.message).toBe(
+        "Counterparty account not found"
+      );
+      // Refused before the claim: no 404 is stored under the key for 24 hours.
+      expect(await keyRecords(key)).toBe(0);
+    });
+
+    it("answers a keyed action from its attempt after the wallet pin is lost; new work is a 409", async () => {
+      recurringExecution.signAndSendMock().mockResolvedValue(testSignature(3));
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const cancel = (idempotencyKey: string) =>
+        app.request(
+          actionPath(activated.id, "cancel"),
+          { method: "POST", headers: keyed(idempotencyKey), body: "{}" },
+          env
+        );
+      expect((await cancel(key)).status).toBe(200);
+      await forgetIdempotencyKey(key);
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET source_custody_wallet_id = NULL WHERE id = ?"
+        )
+        .bind(activated.id)
+        .run();
+
+      // An unresolved pin is state: the retry of a cancel that ran is still answered.
+      const retry = await cancel(key);
+      expect(retry.status).toBe(200);
+      expect((await parseRecurringResponse(retry)).data.recurringPayment.status).toBe("canceled");
+
+      const resume = await app.request(
+        actionPath(activated.id, "resume"),
+        { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+        env
+      );
+      expect(resume.status).toBe(409);
+    });
+
+    it("fingerprints a create's amount canonically, so 25.0 and 25.00 are one request", async () => {
+      const first = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const created = await postCreate(key, { ...createBody(first), amount: "25.0" });
+      expect(created.status).toBe(201);
+
+      const respelled = await postCreate(key, { ...createBody(first), amount: "25.00" });
+
+      expect(respelled.status).toBe(201);
+      expect(respelled.headers.get("Idempotent-Replayed")).toBe("true");
+      expect((await parseRecurringResponse(respelled)).data.recurringPayment.id).toBe(
+        (await parseRecurringResponse(created)).data.recurringPayment.id
+      );
+    });
+
+    it("records a keyed collect's key on the collection it recovers, so its retry pulls nothing", async () => {
+      recurringExecution.signAndSendMock();
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      // Two periods behind: after one pull the next period is still due.
+      await setRecurringCollectionDue({
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        dueAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+      });
+      sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
+      const ambiguous = await app.request(
+        actionPath(activated.id, "collect"),
+        { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+        env
+      );
+      expect(ambiguous.status).toBe(200);
+      // As if the cron had claimed the period: the in-flight attempt carries no key.
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_subscription_collection_attempts SET idempotency_key = NULL WHERE subscription_id = ?"
+        )
+        .bind(activated.subscriptionId)
+        .run();
+
+      const key = crypto.randomUUID();
+      const collect = () =>
+        app.request(
+          actionPath(activated.id, "collect"),
+          { method: "POST", headers: keyed(key), body: "{}" },
+          env
+        );
+      const recovered = await collect();
+      expect(recovered.status).toBe(200);
+      const recoveredAttempt = (await parseCollectionResponse(recovered)).data.collectionAttempt;
+      expect(recoveredAttempt.status).toBe("confirmed");
+      expect((await recurringPaymentDueAt(activated.id)).dueAt).toBeLessThan(Date.now());
+
+      await crashIdempotencyKey(key);
+      const retry = await collect();
+
+      expect(retry.status).toBe(200);
+      expect((await parseCollectionResponse(retry)).data.collectionAttempt.id).toBe(
+        recoveredAttempt.id
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+      expect(await collectionAttempts(activated.subscriptionId)).toHaveLength(1);
+    });
+
+    it("journals a pending schedule's PATCH as a keyed attempt and answers its retry from it", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const patch = (amount: string) =>
+        app.request(
+          actionPath(created.id),
+          { method: "PATCH", headers: keyed(key), body: JSON.stringify({ amount }) },
+          env
+        );
+      expect((await patch("30.00")).status).toBe(200);
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, stage, idempotency_fingerprint IS NOT NULL AS fingerprinted
+             FROM payment_recurring_payment_update_attempts
+            WHERE idempotency_key = ?`
+        )
+        .bind(key)
+        .first<{ status: string; stage: string; fingerprinted: boolean }>();
+      expect(attempt).toEqual({ status: "confirmed", stage: "finalize", fingerprinted: true });
+      await forgetIdempotencyKey(key);
+
+      const different = await patch("31.00");
+      expect(different.status).toBe(422);
+      expect(await errorCode(different)).toBe("IDEMPOTENCY_KEY_REUSED");
+      expect((await recurringPaymentDueAt(created.id)).status).toBe("pending_activation");
+      const row = await getDb(env)
+        .prepare("SELECT amount FROM payment_recurring_payments WHERE id = ?")
+        .bind(created.id)
+        .first<{ amount: string }>();
+      expect(row?.amount).toBe("30.00");
+
+      await forgetIdempotencyKey(key);
+      const same = await patch("30.00");
+      expect(same.status).toBe(200);
+      expect((await parseRecurringResponse(same)).data.recurringPayment.amount).toBe("30.00");
+    });
+
+    it("creates once when two same-key creates race; the loser is told the key is in flight", async () => {
+      const first = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const key = crypto.randomUUID();
+      const body = { ...createBody(first), periodHours: 48 };
+
+      const responses = await Promise.all([postCreate(key, body), postCreate(key, body)]);
+
+      const winner = responses.find((response) => response.status === 201);
+      const loser = responses.find((response) => response.status === 409);
+      if (!winner || !loser) {
+        throw new Error(`expected one 201 and one 409, got ${responses.map((r) => r.status)}`);
+      }
+      expect(await errorCode(loser)).toBe("IDEMPOTENCY_KEY_IN_FLIGHT");
+      const retry = await postCreate(key, body);
+      expect(retry.status).toBe(201);
+      expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+      const created = (await parseRecurringResponse(winner)).data.recurringPayment;
+      expect((await parseRecurringResponse(retry)).data.recurringPayment.id).toBe(created.id);
+      const schedules = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::integer AS count FROM payment_recurring_payments WHERE idempotency_key = ?"
+        )
+        .bind(key)
+        .first<{ count: number }>();
+      expect(schedules).toEqual({ count: 1 });
+    });
   });
 });

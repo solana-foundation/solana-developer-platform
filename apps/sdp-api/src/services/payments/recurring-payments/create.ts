@@ -3,7 +3,8 @@ import {
   createPaymentRecurringPaymentsRepository,
   type PaymentRecurringPaymentRow,
 } from "@/db/repositories";
-import { AppError, internalError } from "@/lib/errors";
+import { internalError } from "@/lib/errors";
+import { resolveIdentityBoundIdempotencyReplay } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -99,15 +100,20 @@ export async function findKeyedRecurringPayment(
   idempotency: RecurringPaymentIdempotency
 ): Promise<PaymentRecurringPaymentRow | null> {
   const repository = createPaymentRecurringPaymentsRepository(env, createTenantScope(tenant));
-  const keyed = await repository.findRecurringPaymentByIdempotencyKey({
-    organizationId: tenant.organizationId,
-    projectId: tenant.projectId,
-    idempotencyKey: idempotency.key,
-  });
+  const keyed = await resolveIdentityBoundIdempotencyReplay(
+    async () => {
+      const row = await repository.findRecurringPaymentByIdempotencyKey({
+        organizationId: tenant.organizationId,
+        projectId: tenant.projectId,
+        idempotencyKey: idempotency.key,
+      });
+      return row && { id: row.id, idempotency_fingerprint: row.idempotencyFingerprint };
+    },
+    idempotency.fingerprint,
+    // The key is scoped to the project; the fingerprint is the request identity.
+    () => true
+  );
   if (!keyed) return null;
-  if (keyed.idempotencyFingerprint !== idempotency.fingerprint) {
-    throw new AppError("IDEMPOTENCY_KEY_REUSED");
-  }
   // The route's authorize step already checked the caller's wallet access.
   return repository.getRecurringPaymentById({
     recurringPaymentId: keyed.id,

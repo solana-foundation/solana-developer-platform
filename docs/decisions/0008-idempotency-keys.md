@@ -49,8 +49,8 @@ credential is recorded on the row and compared in plain text rather than hashed:
   is a new request: after a rotation, read the resource with GET to learn whether the original
   request ran before sending it again.
 
-A route can pass `canonicalize` where two spellings mean one request, such as unordered batch
-recipients.
+A route can pass `canonicalize` where two spellings mean one request: unordered batch recipients,
+decimal amounts (`"1.0"` and `"1"`) on the money routes, and an empty batch `options` object.
 
 **Order.** Authentication → project context → `requirePermissions` → Allowed Operations →
 validation → **`authorize`** → **this step** → replay from the domain row → admission → handler.
@@ -62,8 +62,12 @@ validation → **`authorize`** → **this step** → replay from the domain row 
   earlier `authorize` or `authorizeNone(reason)`; the stable route inventory pins every
   `authorizeNone` with its reason.
 - **Access, never state.** `authorize` answers "may this caller act on these resources?" (an API
-  key bound to the wallet, a schedule in the caller's project), read fresh where the handler reads
-  fresh. State ("the wallet is active", "the schedule is active") stays in the handler. A state
+  key bound to the wallet, a schedule in the caller's project). A wallet-scoped key's bindings are
+  read fresh, deactivated wallets kept, never from the cached auth snapshot: the snapshot is built
+  from active wallets only, so it would refuse the replay of a request whose wallet was deactivated
+  since. Every id the request names (a counterparty account, a ramp deposit, a custody wallet) is
+  looked up in the project here, whatever its status, so a wrong id is never stored as a 404 for
+  24 hours. State ("the wallet is active", "the schedule is active") stays in the handler. A state
   check before this step would refuse the retry of a request that succeeded (the schedule is
   active because the first activate worked) instead of replaying its stored answer. A credential
   narrowed since the original request gets 403; one narrowed in a way that still covers the

@@ -303,6 +303,14 @@ export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
   beforeValues?: Record<string, unknown>;
   afterValues?: Record<string, unknown>;
   error?: string | null;
+  /**
+   * A keyed request that adopts this attempt (a stale claim, a takeover)
+   * records its Idempotency-Key on it when it has none (HOO-1918), so a retry
+   * is answered from the attempt instead of running the action again.
+   */
+  adoptIdempotencyKey?: string | null;
+  /** The adopting request's fingerprint, recorded only with its key. */
+  adoptIdempotencyFingerprint?: string | null;
   updatedAt: string;
 }
 
@@ -352,6 +360,12 @@ export interface UpdatePaymentRecurringPaymentActivationAttemptInput {
   authorizationSignature?: string | null;
   error?: string | null;
   metadata?: Record<string, unknown>;
+  /**
+   * A keyed request that adopts this attempt (a stale claim, a takeover)
+   * records its Idempotency-Key on it when it has none (HOO-1918), so a retry
+   * is answered from the attempt instead of running the action again.
+   */
+  adoptIdempotencyKey?: string | null;
   updatedAt: string;
 }
 
@@ -380,6 +394,12 @@ export interface UpdatePaymentRecurringPaymentLifecycleAttemptInput {
   signature?: string | null;
   error?: string | null;
   metadata?: Record<string, unknown>;
+  /**
+   * A keyed request that adopts this attempt (a stale claim, a takeover)
+   * records its Idempotency-Key on it when it has none (HOO-1918), so a retry
+   * is answered from the attempt instead of running the action again.
+   */
+  adoptIdempotencyKey?: string | null;
   updatedAt: string;
 }
 

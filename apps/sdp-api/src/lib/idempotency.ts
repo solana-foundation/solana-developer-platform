@@ -109,6 +109,25 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 /**
+ * For an Idempotency-Key fingerprint (HOO-1918): the body with each named
+ * decimal-string field spelled canonically, so "1.0" and "1" are one request.
+ * A field that is not a string is left as sent; validation already ran.
+ */
+export function canonicalizeDecimalFields(body: JsonValue, fields: readonly string[]): JsonValue {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return body;
+  }
+  const canonical = { ...body };
+  for (const field of fields) {
+    const value = canonical[field];
+    if (typeof value === "string") {
+      canonical[field] = normalizeDecimalString(value);
+    }
+  }
+  return canonical;
+}
+
+/**
  * Serializes a JSON value with object keys sorted by UTF-16 code unit, so equal
  * values always produce equal text (RFC 8785's ordering; numbers use
  * ECMAScript's canonical form). Unlike `normalizeForFingerprint`, the order
@@ -256,7 +275,7 @@ export interface EarnVaultDepositFingerprintInput {
 }
 
 /** Canonicalize decimal spelling without rounding or passing through a float. */
-function normalizeDecimalString(value: string): string {
+export function normalizeDecimalString(value: string): string {
   const [integer = "0", fraction = ""] = value.split(".");
   const normalizedInteger = integer.replace(/^0+(?=\d)/, "") || "0";
   const normalizedFraction = fraction.replace(/0+$/, "");

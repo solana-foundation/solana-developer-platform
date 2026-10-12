@@ -162,7 +162,8 @@ export interface AuthorizedBatchRequest {
 export async function authorizeBatchRequest(
   c: AppContext,
   input: CreateTransferBatchInput,
-  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2],
+  /** Null when the caller already checked the source wallet's binding fresh. */
+  requiredWalletPermissions: Parameters<typeof assertApiKeyWalletAccess>[2] | null,
   retainedCustodyWalletId?: string
 ): Promise<AuthorizedBatchRequest> {
   const projectId = requireProjectId(c);
@@ -170,7 +171,9 @@ export async function authorizeBatchRequest(
   assertPaymentProjectScope(input.projectId, scope.auth.projectId);
 
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, input.sourceCustodyWalletId);
-  assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, requiredWalletPermissions);
+  if (requiredWalletPermissions !== null) {
+    assertApiKeyWalletAccess(scope.auth, sourceWallet.walletId, requiredWalletPermissions);
+  }
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
 
   const rows = await getCounterpartyAccountsRepository(c).listCounterpartyAccountsByIdsInProject({

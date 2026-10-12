@@ -13,6 +13,25 @@ describe("canonicalizeTransferBatchBody", () => {
     );
   });
 
+  it("spells recipient amounts canonically and drops empty options", () => {
+    const body = {
+      sourceCustodyWalletId: "cwlt_1",
+      token: "SOL",
+      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
+    };
+    const respelled = {
+      ...body,
+      options: {},
+      recipients: [{ counterpartyAccountId: "cpa_a", amount: "01.000" }],
+    };
+
+    expect(canonicalizeTransferBatchBody(respelled)).toEqual(canonicalizeTransferBatchBody(body));
+    expect(canonicalizeTransferBatchBody({ ...body, options: { preflight: false } })).toEqual({
+      ...body,
+      options: { preflight: false },
+    });
+  });
+
   it("leaves a body without a recipients array untouched for validation to refuse", () => {
     expect(canonicalizeTransferBatchBody({ recipients: "nope" })).toEqual({ recipients: "nope" });
     expect(canonicalizeTransferBatchBody(["unparsed", "{"])).toEqual(["unparsed", "{"]);

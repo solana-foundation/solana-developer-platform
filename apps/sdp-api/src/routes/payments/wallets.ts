@@ -8,6 +8,7 @@ import {
   assertApiKeyWalletAccess,
   assertFreshApiKeyCustodyWalletAccess,
   getAllowedApiKeyCustodyWalletIdsForPermissions,
+  loadFreshApiKeyWalletScope,
   resolveApiKeyCustodyWalletId,
 } from "@/services/api-key-scope.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -15,7 +16,11 @@ import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 
-async function findRetainedPaymentWallet(
+/**
+ * A custody wallet of the caller's project by its id, whatever its status: for an
+ * access check, where whether the wallet is active is state for the handler.
+ */
+export async function findRetainedPaymentWallet(
   c: AppContext,
   custodyWalletId: string
 ): Promise<CustodyWallet | null> {
@@ -153,30 +158,41 @@ export function resolveWalletByCustodyWalletId(
 
 /**
  * The access check for a route that names a wallet by its provider wallet ID
- * (HOO-1918, ADR 0008): the key's snapshot binding, and that binding read
- * fresh where the handler reads it fresh (`freshness`). Resolving the wallet (ownership, whether it is active) stays in the
- * handler: a stored response is scoped to this project and credential, so only
- * the credential's access can change before a replay.
+ * (HOO-1918, ADR 0008): the key's binding, read fresh with deactivated wallets
+ * kept. The cached snapshot is never consulted, because it drops a binding once
+ * its wallet is inactive and would refuse the replay of a request that ran.
+ * Resolving the wallet (ownership, whether it is active) stays in the handler.
  */
 export async function authorizeProviderWallet(
   c: AppContext,
   walletId: string,
-  requiredWalletPermissions: Permission[],
-  freshness: "snapshot" | "fresh"
+  requiredWalletPermissions: Permission[]
 ): Promise<void> {
-  const auth = getAuth(c);
-  assertApiKeyWalletAccess(auth, walletId, requiredWalletPermissions);
-  if (freshness === "snapshot") return;
-  const custodyWalletId = resolveApiKeyCustodyWalletId(auth, walletId, requiredWalletPermissions);
-  if (custodyWalletId !== null) {
-    await assertFreshApiKeyCustodyWalletAccess(
-      getDb(c.env),
-      auth,
-      custodyWalletId,
-      requiredWalletPermissions,
-      "any"
-    );
-  }
+  assertApiKeyWalletAccess(
+    await loadFreshApiKeyWalletScope(getDb(c.env), getAuth(c), "any"),
+    walletId,
+    requiredWalletPermissions
+  );
+}
+
+/**
+ * The access check for a route that names a custody wallet by its id
+ * (HOO-1918, ADR 0008): the key's binding, read fresh with deactivated wallets
+ * kept, never the cached snapshot (see {@link authorizeProviderWallet}). A
+ * no-op for callers that are not wallet-scoped API keys.
+ */
+export async function authorizeCustodyPaymentWallet(
+  c: AppContext,
+  custodyWalletId: string,
+  requiredWalletPermissions: Permission[]
+): Promise<void> {
+  await assertFreshApiKeyCustodyWalletAccess(
+    getDb(c.env),
+    getAuth(c),
+    custodyWalletId,
+    requiredWalletPermissions,
+    "any"
+  );
 }
 
 export async function assertFreshPaymentWalletAccess(

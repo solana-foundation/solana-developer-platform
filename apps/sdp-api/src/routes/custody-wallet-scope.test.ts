@@ -8,7 +8,10 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
-import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
+import {
+  replaceApiKeyWalletBindings,
+  upsertApiKeyWalletBinding,
+} from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -217,6 +220,14 @@ async function seedCachedKey(override: Partial<CachedApiKey>): Promise<void> {
         })
       )
     : undefined;
+  if (override.walletBindings) {
+    // Access checks read the bindings fresh (HOO-1918), so Postgres holds them too.
+    await replaceApiKeyWalletBindings(
+      getDb(env),
+      TEST_API_KEY.id,
+      override.walletBindings.map(({ walletId, permissions }) => ({ walletId, permissions }))
+    );
+  }
   await seedCachedApiKey(env, keyHash, {
     ...TEST_CACHED_API_KEY,
     ...override,
@@ -1136,9 +1147,11 @@ describe("Custody wallet scope routes", () => {
       },
       env
     );
-    expect(selectedDelete.status).toBe(400);
+    // A delete's access check reads the binding fresh (HOO-1918). Postgres binds the key by
+    // Provider wallet ID, which two Connections share here, so the fresh read is deny-only.
+    expect(selectedDelete.status).toBe(404);
     expect(await selectedDelete.json()).toMatchObject({
-      error: { message: "Wallet deletion not supported for provider: privy" },
+      error: { message: "Custody wallet not found" },
     });
   });
 
@@ -1554,6 +1567,33 @@ describe("Custody wallet scope routes", () => {
       .first<{ label: string | null }>();
 
     expect(required(updated).label).toBe("Operations");
+  });
+
+  it("refuses a PATCH naming a wallet outside the project before claiming the key", async () => {
+    const res = await app.request(
+      "/v1/wallets/wallet_of_no_project",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": "wallet-patch-missing",
+        },
+        body: JSON.stringify({ label: "Operations" }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({
+      error: { code: "NOT_FOUND", message: "Wallet not found" },
+    });
+    // Refused before the claim: no 404 is stored under the key for 24 hours.
+    const keys = await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?")
+      .bind("wallet-patch-missing")
+      .first<{ count: number }>();
+    expect(keys).toEqual({ count: 0 });
   });
 
   it("returns 404 when updating a wallet outside the API key bindings", async () => {

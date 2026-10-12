@@ -18,6 +18,7 @@ import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeEach, vi } from "vitest";
 import { getDb } from "@/db";
+import { loadCachedApiKeyFromDb } from "@/lib/api-key-cache";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import * as solanaServices from "@/services/solana";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -297,6 +298,17 @@ export async function seedCachedKey(override: Partial<CachedApiKey>): Promise<vo
     ...TEST_CACHED_API_KEY,
     ...override,
   });
+}
+
+/**
+ * Replaces the test key's cache entry with what auth loads from Postgres once
+ * its snapshot expires: bindings to wallets that are no longer active drop out.
+ */
+export async function reloadTestApiKeyCache(rawKey: string = TEST_API_KEY.raw): Promise<void> {
+  const keyHash = await hashString(rawKey, env.API_KEY_PEPPER);
+  const fresh = await loadCachedApiKeyFromDb(getDb(env), keyHash);
+  if (!fresh) throw new Error("Test API key is missing from Postgres");
+  await seedCachedApiKey(env, keyHash, fresh);
 }
 
 export async function seedCounterparty(params?: {

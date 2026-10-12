@@ -27,13 +27,7 @@ function planIdParam(input: AuthorizeInput): string {
 
 /** Payment-request create: the receiving wallet. */
 export async function authorizePaymentRequest(c: AppContext, input: AuthorizeInput) {
-  // The handler reads the binding fresh, so the check does too.
-  await authorizeProviderWallet(
-    c,
-    body<{ walletId: string }>(input).walletId,
-    ["payments:write"],
-    "fresh"
-  );
+  await authorizeProviderWallet(c, body<{ walletId: string }>(input).walletId, ["payments:write"]);
 }
 
 async function authorizePlanWallets(
@@ -41,10 +35,9 @@ async function authorizePlanWallets(
   ownerWalletId: string,
   pullerWalletId: string | null | undefined
 ): Promise<void> {
-  // The plan handlers check the key's snapshot binding only, so the check does too.
-  await authorizeProviderWallet(c, ownerWalletId, ["payments:write"], "snapshot");
+  await authorizeProviderWallet(c, ownerWalletId, ["payments:write"]);
   if (typeof pullerWalletId === "string") {
-    await authorizeProviderWallet(c, pullerWalletId, ["payments:write"], "snapshot");
+    await authorizeProviderWallet(c, pullerWalletId, ["payments:write"]);
   }
 }
 

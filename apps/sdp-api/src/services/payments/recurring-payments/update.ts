@@ -369,6 +369,12 @@ async function recordRecurringPaymentUpdateEvent(input: {
   }
 }
 
+/**
+ * Updates a schedule that never went on chain. The row, a confirmed update
+ * attempt carrying the request's key and fingerprint, and the update event
+ * commit together, so a retry of the same request is answered from the attempt
+ * (HOO-1918), as a pending schedule's cancel is.
+ */
 async function updatePendingRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -376,6 +382,7 @@ async function updatePendingRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   resolved: ResolvedRecurringPaymentUpdate;
   createdBy: string | null;
+  idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   if (input.resolved.changedFields.length === 0) {
     return input.recurringPayment;
@@ -385,10 +392,75 @@ async function updatePendingRecurringPayment(input: {
     input.resolved.destinationAddress !== input.recurringPayment.destination_address ||
     input.resolved.token !== input.recurringPayment.token;
   const updatedAt = new Date().toISOString();
-  const recurringRepo = createPaymentRecurringPaymentsRepository(
-    input.env,
-    createTenantScope(input)
-  );
+  return getDb(input.env).transaction(async (tx) => {
+    const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    const updated = await updatePendingRecurringPaymentRow(recurringRepo, {
+      ...input,
+      changedDestinationOrToken,
+      updatedAt,
+    });
+    const attempt = await recurringRepo.createUpdateAttempt({
+      id: `prpu_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      mode: "metadata_schedule",
+      status: "confirmed",
+      stage: "finalize",
+      oldPlanId: null,
+      oldSubscriptionId: null,
+      newPlanId: null,
+      newSubscriptionId: null,
+      newSourceCustodyWalletId:
+        input.resolved.sourceWallet.id === input.recurringPayment.source_custody_wallet_id
+          ? null
+          : input.resolved.sourceWallet.id,
+      planUpdateSignature: null,
+      planCreationSignature: null,
+      authorizationSetupSignature: null,
+      authorizationSignature: null,
+      oldCancelSignature: null,
+      changedFields: input.resolved.changedFields.map(String),
+      beforeValues: input.resolved.beforeValues,
+      afterValues: input.resolved.afterValues,
+      error: null,
+      createdBy: input.createdBy,
+      createdAt: updatedAt,
+      updatedAt,
+      idempotencyKey: input.idempotency?.key ?? null,
+      idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
+    });
+    if (!attempt) {
+      throw internalError("Failed to journal recurring payment update");
+    }
+    await recordRecurringPaymentUpdateEvent({
+      recurringRepo,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      attemptId: null,
+      changedFields: input.resolved.changedFields.map(String),
+      beforeValues: input.resolved.beforeValues,
+      afterValues: input.resolved.afterValues,
+      createdBy: input.createdBy,
+      createdAt: updatedAt,
+    });
+    return updated;
+  });
+}
+
+async function updatePendingRecurringPaymentRow(
+  recurringRepo: PaymentRecurringPaymentsRepository,
+  input: {
+    organizationId: string;
+    projectId: string;
+    recurringPayment: PaymentRecurringPaymentRow;
+    resolved: ResolvedRecurringPaymentUpdate;
+    changedDestinationOrToken: boolean;
+    updatedAt: string;
+  }
+): Promise<PaymentRecurringPaymentRow> {
+  const { changedDestinationOrToken, updatedAt } = input;
   const updated = await recurringRepo.updateRecurringPayment({
     recurringPaymentId: input.recurringPayment.id,
     organizationId: input.organizationId,
@@ -413,20 +485,6 @@ async function updatePendingRecurringPayment(input: {
   if (!updated) {
     throw conflict("Recurring payment changed while updating; retry with the latest payment");
   }
-
-  await recordRecurringPaymentUpdateEvent({
-    recurringRepo,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.recurringPayment.id,
-    attemptId: null,
-    changedFields: input.resolved.changedFields.map(String),
-    beforeValues: input.resolved.beforeValues,
-    afterValues: input.resolved.afterValues,
-    createdBy: input.createdBy,
-    createdAt: updatedAt,
-  });
-
   return updated;
 }
 
@@ -445,7 +503,8 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   recoveringStaleUpdate: boolean;
   idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<PaymentRecurringPaymentUpdateAttemptRow> {
-  // A stale claim resumes the in-flight attempt under its original key.
+  // A stale claim resumes the in-flight attempt under its original key, or
+  // records this request's key and fingerprint on it when it has none.
   if (input.recoveringStaleUpdate) {
     const existing = await input.recurringRepo.getLatestUpdateAttempt({
       organizationId: input.organizationId,
@@ -471,6 +530,8 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
           organizationId: input.organizationId,
           projectId: input.projectId,
           error: null,
+          adoptIdempotencyKey: input.idempotency?.key ?? null,
+          adoptIdempotencyFingerprint: input.idempotency?.fingerprint ?? null,
           updatedAt: input.nowIso,
         })
       );
@@ -1621,6 +1682,7 @@ export async function updateRecurringPayment(input: {
       recurringPayment: input.recurringPayment,
       resolved,
       createdBy: input.createdBy,
+      idempotency: input.idempotency,
     });
   }
 

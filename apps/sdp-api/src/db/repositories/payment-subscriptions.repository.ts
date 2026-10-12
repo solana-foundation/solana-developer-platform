@@ -260,6 +260,17 @@ export interface PaymentSubscriptionsRepository {
     projectId: string;
     idempotencyKey: string;
   }): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
+  /**
+   * Records a keyed collect request's Idempotency-Key on the attempt it adopts
+   * (a recovered collection), when the attempt has none (HOO-1918), so its
+   * retry is answered from the attempt instead of pulling another period.
+   */
+  adoptCollectionAttemptIdempotencyKey(params: {
+    attemptId: string;
+    organizationId: string;
+    projectId: string;
+    idempotencyKey: string;
+  }): Promise<void>;
   updateCollectionAttempt(
     input: UpdatePaymentSubscriptionCollectionAttemptInput
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;

@@ -2,7 +2,9 @@ import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { FeePaymentError } from "@sdp/payments/fee-payment";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import { describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { env } from "@/test/helpers/env";
 import {
   createFeePaymentAdapterMock,
   getRecentBlockhashMock,
@@ -148,6 +150,52 @@ describe("Payments routes — transfer idempotency", () => {
     expect((await readTransferResponse(retry)).data.transfer.id).toBe(winnerJson.data.transfer.id);
     expect(await countTransferRows()).toBe(1);
     expect(sendTransactionMock).toHaveBeenCalledOnce();
+  });
+
+  it("fingerprints the amount canonically, so 1.0 and 1 are one transfer", async () => {
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "SOL",
+    };
+
+    const first = await postTransfer(
+      { ...body, amount: "1.0" },
+      { idempotencyKey: "xfer-spelling" }
+    );
+    expect(first.status).toBe(200);
+    const respelled = await postTransfer(
+      { ...body, amount: "1" },
+      { idempotencyKey: "xfer-spelling" }
+    );
+
+    expect(respelled.status).toBe(200);
+    expect(respelled.headers.get("Idempotent-Replayed")).toBe("true");
+    expect((await readTransferResponse(respelled)).data.transfer.id).toBe(
+      (await readTransferResponse(first)).data.transfer.id
+    );
+    expect(await countTransferRows()).toBe(1);
+  });
+
+  it("refuses an unknown ramp transferId before claiming the key", async () => {
+    const response = await postTransfer(
+      {
+        transferId: "ptx_missing_ramp_deposit",
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      },
+      { idempotencyKey: "xfer-missing-ramp" }
+    );
+
+    expect(response.status).toBe(404);
+    // Refused before the claim: no 404 is stored under the key for 24 hours.
+    const keys = await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM idempotency_keys WHERE idempotency_key = ?")
+      .bind("xfer-missing-ramp")
+      .first<{ count: number }>();
+    expect(keys).toEqual({ count: 0 });
   });
 
   it("refuses a transfer without an Idempotency-Key before anything runs", async () => {

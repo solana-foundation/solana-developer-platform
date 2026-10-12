@@ -4,8 +4,8 @@ import { AppError, badRequest } from "@/lib/errors";
 import type { AuthorizeInput } from "@/middleware/authorize";
 import {
   assertApiKeyNotWalletScoped,
-  assertFreshApiKeyCustodyWalletAccess,
   isApiKeyWalletAccessDenied,
+  loadFreshApiKeyWalletScope,
   resolveApiKeyCustodyWalletId,
   resolveApiKeySigningWalletId,
 } from "@/services/api-key-scope.service";
@@ -26,37 +26,81 @@ function body<T>(input: AuthorizeInput): T {
 
 const walletNotFound = () => new AppError("NOT_FOUND", "Custody wallet not found");
 
+type WalletPermissions = Parameters<typeof resolveApiKeyCustodyWalletId>[2];
+
 /**
- * A custody wallet the request names by custody wallet id or provider wallet
- * id: the key's snapshot binding, and that binding read fresh where the handler
- * reads it fresh (`freshness`). Resolving the
- * wallet itself (ownership, ambiguity, whether it is usable) stays in the
- * handler: a stored response is scoped to this project and credential, so only
- * the credential's access can change before a replay.
+ * A custody wallet the request names by provider wallet id (or custody wallet
+ * id): the key's binding, read fresh with deactivated wallets kept, never the
+ * cached snapshot, which drops a binding once its wallet is inactive. A denied
+ * binding reads as a missing wallet, as the handlers answer.
+ */
+async function authorizeCustodyWalletBinding(
+  c: AppContext,
+  walletId: string,
+  requiredPermissions: WalletPermissions,
+  notFound: () => AppError
+): Promise<void> {
+  const access = await loadFreshApiKeyWalletScope(getDb(c.env), getAuth(c), "any");
+  try {
+    resolveApiKeyCustodyWalletId(access, walletId, requiredPermissions, true);
+  } catch (error) {
+    if (isApiKeyWalletAccessDenied(error)) throw notFound();
+    throw error;
+  }
+}
+
+/**
+ * The named wallet belongs to the caller's project, whatever its status or its
+ * owner's: checked before the key is claimed, so a wrong id is never stored as
+ * a 404. Ambiguity, and whether the wallet is usable, stay in the handler.
+ */
+async function assertCustodyWalletInProject(
+  c: AppContext,
+  walletId: string,
+  allowRecordIdAlias: boolean,
+  notFound: () => AppError
+): Promise<void> {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const row = await getDb(c.env)
+    .prepare(
+      `SELECT w.id
+         FROM custody_wallets w
+         LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+         LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+        WHERE (w.wallet_id = ? OR (?::boolean AND w.id = ?))
+          AND ((cfg.organization_id = ? AND cfg.project_id = ?)
+            OR (conn.organization_id = ? AND conn.project_id = ?))
+        LIMIT 1`
+    )
+    .bind(
+      walletId,
+      allowRecordIdAlias,
+      walletId,
+      auth.organizationId,
+      projectId,
+      auth.organizationId,
+      projectId
+    )
+    .first<{ id: string }>();
+  if (!row) {
+    throw notFound();
+  }
+}
+
+/**
+ * A wallet the request names: the credential's binding (a denial reads as
+ * "Custody wallet not found"), then the wallet in the project (`notFound`, the
+ * handler's own answer for a missing wallet).
  */
 async function authorizeCustodyWallet(
   c: AppContext,
   walletId: string,
-  requiredPermissions: Parameters<typeof resolveApiKeyCustodyWalletId>[2],
-  freshness: "snapshot" | "fresh"
+  requiredPermissions: WalletPermissions,
+  options: { allowRecordIdAlias: boolean; notFound: () => AppError }
 ): Promise<void> {
-  const auth = getAuth(c);
-  let custodyWalletId: string | null;
-  try {
-    custodyWalletId = resolveApiKeyCustodyWalletId(auth, walletId, requiredPermissions, true);
-  } catch (error) {
-    if (isApiKeyWalletAccessDenied(error)) throw walletNotFound();
-    throw error;
-  }
-  if (custodyWalletId !== null && freshness === "fresh") {
-    await assertFreshApiKeyCustodyWalletAccess(
-      getDb(c.env),
-      auth,
-      custodyWalletId,
-      requiredPermissions,
-      "any"
-    );
-  }
+  await authorizeCustodyWalletBinding(c, walletId, requiredPermissions, walletNotFound);
+  await assertCustodyWalletInProject(c, walletId, options.allowRecordIdAlias, options.notFound);
 }
 
 /** Provider initialize: never a wallet-scoped key (the new wallet is outside its bindings). */
@@ -87,22 +131,24 @@ export async function authorizeUpdateWallet(c: AppContext, input: AuthorizeInput
   if (!walletId) {
     throw badRequest("Invalid wallet ID");
   }
-  return authorizeCustodyWallet(c, walletId, ["wallets:write"], "snapshot");
+  // The handler resolves the path's id with its record-id alias and answers "Wallet not found".
+  return authorizeCustodyWallet(c, walletId, ["wallets:write"], {
+    allowRecordIdAlias: true,
+    notFound: () => new AppError("NOT_FOUND", "Wallet not found"),
+  });
 }
 
 /** Wallet delete: the wallet the body names. */
 export async function authorizeDeleteWallet(c: AppContext, input: AuthorizeInput): Promise<void> {
-  return authorizeCustodyWallet(
-    c,
-    body<{ walletId: string }>(input).walletId,
-    ["wallets:write"],
-    "snapshot"
-  );
+  return authorizeCustodyWallet(c, body<{ walletId: string }>(input).walletId, ["wallets:write"], {
+    allowRecordIdAlias: false,
+    notFound: walletNotFound,
+  });
 }
 
 /** Signer check: the wallet the body names, or the key's own signing wallet. */
 export async function authorizeSignerCheck(c: AppContext, input: AuthorizeInput): Promise<void> {
-  const auth = getAuth(c);
+  const auth = await loadFreshApiKeyWalletScope(getDb(c.env), getAuth(c), "any");
   const walletId = resolveApiKeySigningWalletId(auth, body<{ walletId?: string }>(input).walletId, [
     "wallets:write",
   ]);
@@ -113,5 +159,6 @@ export async function authorizeSignerCheck(c: AppContext, input: AuthorizeInput)
         : "walletId is required for session or Clerk authentication"
     );
   }
-  return authorizeCustodyWallet(c, walletId, ["wallets:write"], "fresh");
+  // An unknown wallet is a 400 here, which is never stored, so the handler resolves it.
+  return authorizeCustodyWalletBinding(c, walletId, ["wallets:write"], walletNotFound);
 }

@@ -1310,6 +1310,8 @@ async function recoverRecurringPaymentCollection(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
   dueAt: string;
+  /** A keyed collect request adopting the attempt records its key on it (HOO-1918). */
+  idempotencyKey?: string | null;
 }): Promise<{
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
@@ -1391,6 +1393,16 @@ async function recoverRecurringPaymentCollection(input: {
   }
   const recoveredAttempt = existing;
   const recoveredTransfer = transfer;
+  if (input.idempotencyKey) {
+    // This request now answers for the period: a retry of it finds the attempt
+    // instead of collecting the next one once the due date moves on.
+    await input.subscriptionsRepo.adoptCollectionAttemptIdempotencyKey({
+      attemptId: existing.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
 
   try {
     await confirmSubscriptionSignature(
@@ -1592,6 +1604,7 @@ export async function collectRecurringPayment(input: {
     recurringPayment: input.recurringPayment,
     subscription,
     dueAt,
+    idempotencyKey: input.idempotencyKey,
   });
   if (recovered) return recovered;
   if (!isCollectableRecurringPaymentStatus(input.recurringPayment.status)) {
@@ -1680,6 +1693,7 @@ export async function collectRecurringPayment(input: {
         recurringPayment: input.recurringPayment,
         subscription,
         dueAt,
+        idempotencyKey: input.idempotencyKey,
       });
       if (recoveredAfterConflict) {
         return recoveredAfterConflict;
