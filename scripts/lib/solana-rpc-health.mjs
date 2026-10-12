@@ -1,5 +1,12 @@
 const GET_LATEST_BLOCKHASH_METHOD = "getLatestBlockhash";
 
+/**
+ * Devnet's genesis hash, mirroring `GENESIS_HASH_BY_CLUSTER.devnet` in `@sdp/types`: these
+ * scripts run as plain Node and cannot import the TypeScript source.
+ */
+// biome-ignore lint/security/noSecrets: Solana devnet's public genesis hash
+const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+
 const PROVIDERS = [
   { id: "alchemy", urlKey: "SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL" },
   { id: "quicknode", urlKey: "SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL" },
@@ -101,6 +108,11 @@ function orderProviders(preferred) {
 }
 
 async function assertSolanaRpcHealthy(rpcUrl, options) {
+  const genesisHash = await solanaJsonRpc(rpcUrl, "getGenesisHash", [], options);
+  if (genesisHash !== DEVNET_GENESIS_HASH) {
+    throw new Error("serves a cluster other than devnet");
+  }
+
   const payload = await solanaJsonRpc(
     rpcUrl,
     GET_LATEST_BLOCKHASH_METHOD,
