@@ -1,3 +1,4 @@
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES } from "@sdp/types";
 import { type Address, address } from "@solana/kit";
@@ -1027,8 +1028,12 @@ export const inspectMint = async (c: AppContext) => {
   let inspection: Awaited<ReturnType<typeof inspectDvpMint>>;
   try {
     inspection = await inspectDvpMint(rpc, parsed);
-  } catch {
-    // The read failed, so nothing is known about the mint: retryable, never "not found".
+  } catch (error) {
+    // A door fault (cluster mismatch, scope, configuration) is not a failed read and keeps its
+    // own status. A failed read means nothing is known about the mint: retryable, never "not found".
+    if (error instanceof SdpRpcError && error.code !== "SOLANA_RPC_ERROR") {
+      throw error;
+    }
     throw solanaRpcError("Could not read the mint from Solana. Try again.");
   }
   if (!inspection) {
