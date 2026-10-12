@@ -428,11 +428,7 @@ describe("payment transfer batches", () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
 
-    createRpcMock.mockReturnValue({
-      getFeeForMessage: () => ({
-        send: async () => ({ value: 5000n }),
-      }),
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
+    createRpcMock.mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
