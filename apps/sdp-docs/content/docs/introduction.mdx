@@ -13,7 +13,7 @@ SDP provides tokenization, custody, payments, and compliance through one stable 
 | --- | --- |
 | **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
 | **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
-| **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
+| **Payments** | Move funds onchain with transfers, transfer batches, and recurring payments, and request fiat on-ramp quotes |
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
@@ -28,11 +28,11 @@ Assets at this scale need regulated custody, enforceable compliance, and auditab
 <Step>
 ### Unified Programming Interface
 
-SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. The same onramp call works for every ramp provider. The `provider` field is the only thing that changes.
+SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. An on-ramp quote request has the same shape for every ramp provider: the `provider` field names the provider, and each provider supports its own set of currency pairs.
 
 <Tabs items={["JavaScript", "Python", "curl"]}>
 <Tab value="JavaScript">
-```javascript title="onramp-quote.js" rotate-providers
+```javascript title="onramp-quote.js"
 const response = await fetch(
   "https://api.solana.com/v1/payments/ramps/onramp/quote",
   {
@@ -43,9 +43,9 @@ const response = await fetch(
     },
     body: JSON.stringify({
       provider: "moonpay",
-      counterpartyId: "cp_...",
+      counterpartyId: "cpty_...",
       destinationCustodyWalletId: "cwlt_...",
-      assetRail: "usdc.solana",
+      assetRail: "sol.solana",
       fiatCurrency: "USD",
       fiatAmount: "100.00",
     }),
@@ -55,7 +55,7 @@ const quote = await response.json();
 ```
 </Tab>
 <Tab value="Python">
-```python title="onramp_quote.py" rotate-providers
+```python title="onramp_quote.py"
 import requests
 
 response = requests.post(
@@ -63,9 +63,9 @@ response = requests.post(
     headers={"Authorization": "Bearer sk_test_..."},
     json={
         "provider": "moonpay",
-        "counterpartyId": "cp_...",
+        "counterpartyId": "cpty_...",
         "destinationCustodyWalletId": "cwlt_...",
-        "assetRail": "usdc.solana",
+        "assetRail": "sol.solana",
         "fiatCurrency": "USD",
         "fiatAmount": "100.00",
     },
@@ -74,15 +74,15 @@ quote = response.json()
 ```
 </Tab>
 <Tab value="curl">
-```bash title="Terminal" rotate-providers
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",
-    "counterpartyId": "cp_...",
+    "counterpartyId": "cpty_...",
     "destinationCustodyWalletId": "cwlt_...",
-    "assetRail": "usdc.solana",
+    "assetRail": "sol.solana",
     "fiatCurrency": "USD",
     "fiatAmount": "100.00"
   }'
@@ -103,9 +103,9 @@ Provision signing wallets through integrated custody providers, so your team nev
 
    Limit what an API key may do. List the operation families and types a key may perform, and every other operation is refused before it executes.
 
-- **Scoped custody configuration**
+- **Project-scoped custody**
 
-   Custody settings resolve per project, then organization, then environment, so different teams can run different providers side by side.
+   Each project has its own custody setup and wallets. There is no default wallet: a payment names the wallet that pays by its `cwlt_…` ID. Production projects use your own custody provider account only.
 </Step>
 <Step>
 ### Issuance and Compliance with Token-2022
@@ -156,9 +156,9 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 <Step>
 ### Ramps and Onchain Transfers
 
-SDP exposes unified endpoints for onchain transfers and ramps across providers, built on official Solana program implementations like [Subscriptions](https://github.com/solana-program/subscriptions) and [Solana Pay](https://github.com/solana-foundation/pay). These power Recurring Payments, Payment Requests, and Batch Transfers within SDP.
+SDP exposes unified endpoints for onchain transfers and ramps across providers. Recurring Payments are built on the official Solana [Subscriptions](https://github.com/solana-program/subscriptions) program, and Batch Transfers pay many counterparty accounts from one wallet in a single request.
 
-<Tabs items={["Recurring Payments", "Payment Requests", "Batch Transfers"]}>
+<Tabs items={["Recurring Payments", "Batch Transfers"]}>
 <Tab value="Recurring Payments">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/recurring-payments \
@@ -166,25 +166,11 @@ curl -X POST https://api.solana.com/v1/payments/recurring-payments \
   -H "Content-Type: application/json" \
   -d '{
     "sourceCustodyWalletId": "cwlt_123",
-    "counterpartyId": "cp_...",
-    "counterpartyAccountId": "cpa_...",
+    "counterpartyId": "cpty_...",
+    "counterpartyAccountId": "counterparty_account_...",
     "token": "USDC",
     "amount": "25.00",
     "periodHours": 720
-  }'
-```
-</Tab>
-<Tab value="Payment Requests">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/requests \
-  -H "Authorization: Bearer sk_test_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "walletId": "privy_wallet_123",
-    "counterpartyId": "cp_...",
-    "token": "USDC",
-    "amount": "25.00",
-    "expiresAt": "2026-08-31T00:00:00.000Z"
   }'
 ```
 </Tab>
@@ -200,8 +186,8 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
     "recipients": [
       {
         "externalId": "payroll_row_001",
-        "counterpartyId": "cp_...",
-        "counterpartyAccountId": "cpa_...",
+        "counterpartyId": "cpty_...",
+        "counterpartyAccountId": "counterparty_account_...",
         "amount": "25.00"
       }
     ]
@@ -210,7 +196,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 </Tab>
 </Tabs>
 
-The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
+Ramps follow one pattern across providers: discover which currency pairs each provider supports, request an on-ramp quote from the provider you name, and track the ramp as a transfer. For off-ramps, the public API offers currency discovery only. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
 </Step>
 <Step>
 ### Audit Trails
@@ -219,7 +205,7 @@ Every sensitive operation is recorded automatically. Each entry captures the act
 
 | Area                    | Recorded events                                                                    |
 | ----------------------- | ---------------------------------------------------------------------------------- |
-| API keys                | Create, revoke, and rotate, for both organization and project-scoped keys          |
+| API keys                | Create, revoke, and rotate                                                         |
 | Token issuance          | Deploy, mint, burn, force-burn, supply changes, and authority updates              |
 | Compliance actions      | Freeze, unfreeze, pause, unpause, seize, and Token Access Control changes          |
 | Custody                 | Provider configuration, wallet provisioning, and credential lifecycle changes      |
