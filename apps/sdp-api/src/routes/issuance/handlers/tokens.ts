@@ -86,11 +86,7 @@ async function resolveMetadataUpdate(params: {
     return null;
   }
 
-  const currentAuthority = await resolveCurrentAuthorityForRole(
-    params.tokenService,
-    params.token,
-    "metadata"
-  );
+  const currentAuthority = await resolveCurrentAuthorityForRole(params.token, "metadata");
   if (!currentAuthority) {
     throw badRequest("Metadata authority is not available for this token");
   }
@@ -290,7 +286,7 @@ export const getToken = async (c: AppContext) => {
     authorities.freezeAuthority = await resolveFreezeOperationAuthority(token);
   }
   if (parsed.data.includeMetadataAuthority === "true") {
-    authorities.metadataAuthority = await resolveMetadataAuthority(tokenService, token);
+    authorities.metadataAuthority = await resolveMetadataAuthority(token);
   }
   if (parsed.data.includePauseAuthority === "true") {
     authorities.pauseAuthority = token.mintAddress

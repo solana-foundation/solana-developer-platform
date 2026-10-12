@@ -54,7 +54,7 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
 
   const { mosaicAmount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
-  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(tokenService, token);
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }
@@ -188,7 +188,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
 
   const { mosaicAmount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
-  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(tokenService, token);
+  const permanentDelegateRaw = await resolvePermanentDelegateAuthority(token);
   if (!permanentDelegateRaw) {
     throw badRequest("Permanent delegate is not configured for this token");
   }

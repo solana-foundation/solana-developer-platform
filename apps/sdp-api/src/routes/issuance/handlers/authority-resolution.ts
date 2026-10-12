@@ -162,7 +162,6 @@ async function fetchMintAuthorities(mintAddress: string): Promise<{
 }
 
 export async function resolvePermanentDelegateAuthority(
-  _tokenService: TokenService,
   token: TokenRecord
 ): Promise<string | null> {
   if (!token) {
@@ -185,10 +184,7 @@ export async function resolvePermanentDelegateAuthority(
   }
 }
 
-export async function resolveMetadataAuthority(
-  _tokenService: TokenService,
-  token: TokenRecord
-): Promise<string | null> {
+export async function resolveMetadataAuthority(token: TokenRecord): Promise<string | null> {
   if (!token) {
     return null;
   }
@@ -239,7 +235,6 @@ export async function resolveFreezeOperationAuthority(token: TokenRecord): Promi
 }
 
 export async function resolveCurrentAuthorityForRole(
-  tokenService: TokenService,
   token: TokenRecord,
   role: AuthorityRole,
   override?: string
@@ -271,10 +266,10 @@ export async function resolveCurrentAuthorityForRole(
       break;
     }
     case "permanentDelegate":
-      currentAuthority = await resolvePermanentDelegateAuthority(tokenService, token);
+      currentAuthority = await resolvePermanentDelegateAuthority(token);
       break;
     case "metadata":
-      currentAuthority = await resolveMetadataAuthority(tokenService, token);
+      currentAuthority = await resolveMetadataAuthority(token);
       break;
   }
 
