@@ -80,6 +80,12 @@ export interface CounterpartiesRepository {
     counterpartyId: string;
     organizationId: string;
     projectId: string;
+    /**
+     * `any` for an access check (HOO-1918): the row must belong to the project
+     * whatever its status, so the retry of a request that archived it is still
+     * answered.
+     */
+    status?: "active" | "any";
   }): Promise<CounterpartyRow | null>;
   getCounterpartyByExternalId(params: {
     externalId: string;

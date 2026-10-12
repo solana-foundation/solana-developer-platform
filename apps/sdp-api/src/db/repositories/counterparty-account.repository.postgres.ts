@@ -169,7 +169,7 @@ export function createPostgresCounterpartyAccountsRepository(
               AND id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status = 'active'`
+              ${params.status === "any" ? "" : "AND status = 'active'"}`
         )
         .bind(
           params.counterpartyId,

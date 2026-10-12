@@ -151,6 +151,34 @@ export function resolveWalletByCustodyWalletId(
   return wallet;
 }
 
+/**
+ * The access check for a route that names a wallet by its provider wallet ID
+ * (HOO-1918, ADR 0008): the key's snapshot binding, and that binding read
+ * fresh where the handler reads it fresh (`freshness`). Resolving the wallet (ownership, whether it is active) stays in the
+ * handler: a stored response is scoped to this project and credential, so only
+ * the credential's access can change before a replay.
+ */
+export async function authorizeProviderWallet(
+  c: AppContext,
+  walletId: string,
+  requiredWalletPermissions: Permission[],
+  freshness: "snapshot" | "fresh"
+): Promise<void> {
+  const auth = getAuth(c);
+  assertApiKeyWalletAccess(auth, walletId, requiredWalletPermissions);
+  if (freshness === "snapshot") return;
+  const custodyWalletId = resolveApiKeyCustodyWalletId(auth, walletId, requiredWalletPermissions);
+  if (custodyWalletId !== null) {
+    await assertFreshApiKeyCustodyWalletAccess(
+      getDb(c.env),
+      auth,
+      custodyWalletId,
+      requiredWalletPermissions,
+      "any"
+    );
+  }
+}
+
 export async function assertFreshPaymentWalletAccess(
   c: AppContext,
   wallet: CustodyWallet,

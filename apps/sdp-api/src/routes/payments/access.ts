@@ -1,0 +1,100 @@
+import { getAuth, requireProjectId } from "@/lib/auth";
+import { notFound } from "@/lib/errors";
+import type { AuthorizeInput } from "@/middleware/authorize";
+import {
+  type AppContext,
+  getCounterpartiesRepository,
+  getPaymentSubscriptionsRepository,
+} from "./context";
+import { authorizeProviderWallet } from "./wallets";
+
+/**
+ * Access checks for the payment routes that name wallets, plans and
+ * counterparties (HOO-1918, ADR 0008). Each loads what the request names in the
+ * caller's project, whatever its status, and checks the key's wallet access
+ * fresh. State (an archived plan, an inactive wallet) stays in the handler.
+ */
+
+function body<T>(input: AuthorizeInput): T {
+  // SAFETY: each check is mounted after validateBody with the route's schema.
+  return input.body as T;
+}
+
+function planIdParam(input: AuthorizeInput): string {
+  // SAFETY: mounted after validateParams(subscriptionPlanIdParamsSchema).
+  return (input.params as { planId: string }).planId;
+}
+
+/** Payment-request create: the receiving wallet. */
+export async function authorizePaymentRequest(c: AppContext, input: AuthorizeInput) {
+  // The handler reads the binding fresh, so the check does too.
+  await authorizeProviderWallet(
+    c,
+    body<{ walletId: string }>(input).walletId,
+    ["payments:write"],
+    "fresh"
+  );
+}
+
+async function authorizePlanWallets(
+  c: AppContext,
+  ownerWalletId: string,
+  pullerWalletId: string | null | undefined
+): Promise<void> {
+  // The plan handlers check the key's snapshot binding only, so the check does too.
+  await authorizeProviderWallet(c, ownerWalletId, ["payments:write"], "snapshot");
+  if (typeof pullerWalletId === "string") {
+    await authorizeProviderWallet(c, pullerWalletId, ["payments:write"], "snapshot");
+  }
+}
+
+/** Plan create: the owner wallet and any puller wallet the body names. */
+export async function authorizeSubscriptionPlanCreate(c: AppContext, input: AuthorizeInput) {
+  const { ownerWalletId, pullerWalletId } = body<{
+    ownerWalletId: string;
+    pullerWalletId?: string;
+  }>(input);
+  await authorizePlanWallets(c, ownerWalletId, pullerWalletId);
+}
+
+/** Plan update: the plan in the caller's project, its owner wallet, and any new puller wallet. */
+export async function authorizeSubscriptionPlanUpdate(c: AppContext, input: AuthorizeInput) {
+  const plan = await getPaymentSubscriptionsRepository(c).getPlanById({
+    planId: planIdParam(input),
+    organizationId: getAuth(c).organizationId,
+    projectId: requireProjectId(c),
+  });
+  if (!plan) {
+    throw notFound("Subscription plan");
+  }
+  const { pullerWalletId } = body<{ pullerWalletId?: string | null }>(input);
+  await authorizePlanWallets(c, plan.owner_wallet_id, pullerWalletId);
+  return plan;
+}
+
+/** Subscription create: the plan and the counterparty it names, in the caller's project. */
+export async function authorizeSubscriptionCreate(c: AppContext, input: AuthorizeInput) {
+  const { planId, counterpartyId } = body<{ planId: string; counterpartyId: string }>(input);
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const [plan, counterparty] = await Promise.all([
+    getPaymentSubscriptionsRepository(c).getPlanById({
+      planId,
+      organizationId: auth.organizationId,
+      projectId,
+    }),
+    getCounterpartiesRepository(c).getCounterpartyById({
+      counterpartyId,
+      organizationId: auth.organizationId,
+      projectId,
+      status: "any",
+    }),
+  ]);
+  if (!plan) {
+    throw notFound("Subscription plan");
+  }
+  if (!counterparty) {
+    throw notFound("Counterparty");
+  }
+  return { plan, counterparty };
+}

@@ -6,10 +6,19 @@
 
 import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
+import { authorize } from "@/middleware/authorize";
+import { idempotent } from "@/middleware/idempotency";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
+import {
+  authorizeCreateWallet,
+  authorizeDeleteWallet,
+  authorizeInitializeSigning,
+  authorizeSignerCheck,
+  authorizeUpdateWallet,
+} from "./access";
 import {
   createWallet,
   deleteWallet,
@@ -41,30 +50,41 @@ wallets.post(
   "/initialize",
   requirePermissions("custody:admin"),
   validateBody(initializeSigningSchema),
+  authorize(authorizeInitializeSigning),
+  idempotent({ key: "accepted", serverErrors: "store" }),
   initializeSigning
 );
 wallets.post(
   "/",
   requirePermissions("custody:admin"),
   validateBody(createWalletSchema),
+  authorize(authorizeCreateWallet),
+  idempotent({ key: "accepted", serverErrors: "store" }),
   createWallet
 );
 wallets.delete(
   "/",
   requirePermissions("custody:admin"),
   validateBody(deleteWalletSchema),
+  authorize(authorizeDeleteWallet),
+  idempotent({ key: "accepted", serverErrors: "store" }),
   deleteWallet
 );
 wallets.patch(
   "/:walletId",
   requirePermissions("custody:admin"),
   validateBody(updateWalletSchema),
+  authorize(authorizeUpdateWallet),
+  idempotent({ key: "accepted", serverErrors: "store" }),
   updateWallet
 );
 wallets.post(
   "/signer-check",
   requirePermissions("wallets:write"),
   validateBody(signerCheckSchema),
+  authorize(authorizeSignerCheck),
+  // Before the quota, so a replayed check is never counted again.
+  idempotent({ key: "accepted", serverErrors: "store" }),
   meteredQuota({ name: "signer-check", actorMax: 2, orgMax: 10 }),
   signerCheck
 );

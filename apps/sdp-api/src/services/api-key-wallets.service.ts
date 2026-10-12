@@ -25,6 +25,7 @@ export interface ApiKeyWalletPermissionRow {
 interface CustodyWalletCandidateRow {
   custody_wallet_id: string;
   wallet_id: string;
+  status: string;
 }
 
 export const DEFAULT_API_KEY_WALLET_PERMISSIONS: Permission[] = ["*"];
@@ -111,7 +112,7 @@ export async function loadApiKeyWalletAuthorization(
   const placeholders = walletIds.map(() => "?").join(", ");
   const candidates = await db
     .prepare(
-      `SELECT w.id AS custody_wallet_id, w.wallet_id
+      `SELECT w.id AS custody_wallet_id, w.wallet_id, w.status
        FROM custody_wallets w
        JOIN custody_configs c ON c.id = w.custody_config_id
        WHERE c.organization_id = ?
@@ -122,7 +123,7 @@ export async function loadApiKeyWalletAuthorization(
 
        UNION ALL
 
-       SELECT w.id AS custody_wallet_id, w.wallet_id
+       SELECT w.id AS custody_wallet_id, w.wallet_id, w.status
        FROM custody_wallets w
        JOIN custody_connections c ON c.id = w.custody_connection_id
        WHERE c.organization_id = ?
@@ -134,15 +135,19 @@ export async function loadApiKeyWalletAuthorization(
     .bind(organizationId, projectId, ...walletIds, organizationId, projectId, ...walletIds)
     .all<CustodyWalletCandidateRow>();
 
-  const candidatesByWalletId = new Map<string, string[]>();
+  const candidatesByWalletId = new Map<string, CustodyWalletCandidateRow[]>();
   for (const candidate of candidates.results ?? []) {
     const matches = candidatesByWalletId.get(candidate.wallet_id) ?? [];
-    matches.push(candidate.custody_wallet_id);
+    matches.push(candidate);
     candidatesByWalletId.set(candidate.wallet_id, matches);
   }
 
   const resolvedRows = permissionRows.map((row): ApiKeyWalletPermissionRow => {
-    const matches = candidatesByWalletId.get(row.wallet_id) ?? [];
+    const all = candidatesByWalletId.get(row.wallet_id) ?? [];
+    // With every status included, an active wallet wins over inactive ones that
+    // share its provider wallet id; only a tie at one status is ambiguous.
+    const active = all.filter((candidate) => candidate.status === "active");
+    const matches = (active.length > 0 ? active : all).map((c) => c.custody_wallet_id);
     if (matches.length !== 1) {
       // The binding hydrates as deny-only (selected scope, no usable wallet),
       // so the key silently loses access; surface it for operators.
