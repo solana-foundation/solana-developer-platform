@@ -12,6 +12,7 @@ import { generateEarnPositionId } from "@/db/repositories/earn-movements.reposit
 import app from "@/index";
 import { badRequest, conflict } from "@/lib/errors";
 import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
+import { anonymousExitNeedsStrategy } from "@/routes/earn/handlers/external-wallet";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -460,6 +461,26 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(res.status).toBe(200);
     expect(observedScopes).toEqual([
       { projectId: null, environment: "sandbox", cluster: "devnet" },
+    ]);
+  });
+
+  it("builds anonymously in the mainnet scope of a production strategy", async () => {
+    const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+    const observedScopes: ClusterScope[] = [];
+    buildExternalWalletDepositTransaction.mockImplementation(async () => {
+      observedScopes.push(currentClusterScope());
+      return { kind: "built", built: builtRow() };
+    });
+
+    const res = await post(
+      "deposit-transactions",
+      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
+      { apiKey: null }
+    );
+
+    expect(res.status).toBe(200);
+    expect(observedScopes).toEqual([
+      { projectId: null, environment: "production", cluster: "mainnet-beta" },
     ]);
   });
 
@@ -1183,6 +1204,21 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
 
     expect(res.status).toBe(400);
     expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses an anonymous position-only preview before quoting", async () => {
+    await seedAuth();
+    const positionId = await seedExternalWalletPosition();
+
+    const res = await post("withdrawal-previews", { positionId, shares: "10" }, { apiKey: null });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error).toMatchObject({
+      code: "BAD_REQUEST",
+      message: anonymousExitNeedsStrategy().message,
+    });
+    expect(quoteVaultWithdrawal).not.toHaveBeenCalled();
   });
 
   it("keeps the authenticated exit body position-based", async () => {
