@@ -175,6 +175,19 @@ describe("fundDvpTradeLeg", () => {
     expect(sendTransaction).toHaveBeenCalledTimes(1);
   });
 
+  it("asks for sponsorship on mainnet-beta when funding from a Production project", async () => {
+    await runInClusterScope({ projectId: FUNDER_A.projectId, environment: "production" }, () =>
+      fundDvpTradeLeg(context, trade(), FUNDER_A)
+    );
+
+    expect(createProjectSponsorshipFeePayment).toHaveBeenCalledWith(env, {
+      organizationId: FUNDER_A.organizationId,
+      projectId: FUNDER_A.projectId,
+      actor: { type: "wallet", id: FUNDER_A.custodyWalletId },
+      cluster: "mainnet-beta",
+    });
+  });
+
   // A retry with the same key has to be able to ask the chain what this send
   // did, so the transaction is on the idempotency record before it goes out.
   it("records the signed transfer for its idempotency key before broadcasting it", async () => {
