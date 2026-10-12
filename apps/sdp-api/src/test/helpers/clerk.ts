@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import type { InvitationStatus, OrganizationRole } from "@sdp/types";
 import { exportJWK, generateKeyPair, type JWTPayload, SignJWT } from "jose";
 import type { afterAll } from "vitest";
 import { getCurrentTest } from "vitest/suite";
@@ -140,6 +141,75 @@ export async function seedClerkIdentity(db: DatabaseClient, input: ClerkIdentity
         input.role
       ),
   ]);
+}
+
+export interface InvitationSeed {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: OrganizationRole;
+  invitedBy: string;
+  status: InvitationStatus;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/**
+ * Inserts an invitation row whose token hash derives from its id.
+ *
+ * @param db - Test database client
+ * @param invitation - The invitation to insert
+ * @returns Resolves once the row is inserted
+ */
+export async function seedInvitation(
+  db: DatabaseClient,
+  invitation: InvitationSeed
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO invitations
+         (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      invitation.id,
+      invitation.organizationId,
+      invitation.email,
+      invitation.role,
+      invitation.invitedBy,
+      `hash_${invitation.id}`,
+      invitation.expiresAt,
+      invitation.status,
+      invitation.createdAt
+    )
+    .run();
+}
+
+/**
+ * Flips a seeded membership to removed, as SDP member removal leaves it, and
+ * seeds the re-invitation issued afterwards when one is given.
+ *
+ * @param db - Test database client
+ * @param input - The membership to remove and its re-invitation
+ * @param input.organizationId - Organization the member belongs to
+ * @param input.userId - SDP user whose membership is removed
+ * @param input.invitation - Invitation issued after the removal, or null for none
+ * @returns Resolves once the membership is removed and the invitation inserted
+ */
+export async function seedRemovedMember(
+  db: DatabaseClient,
+  input: { organizationId: string; userId: string; invitation: InvitationSeed | null }
+): Promise<void> {
+  const removed = await db
+    .prepare(
+      "UPDATE organization_members SET status = 'removed' WHERE organization_id = ? AND user_id = ?"
+    )
+    .bind(input.organizationId, input.userId)
+    .run();
+  assert.equal(removed, 1, "Expected one seeded membership to remove");
+  if (input.invitation) {
+    await seedInvitation(db, input.invitation);
+  }
 }
 
 export function clerkHeadersWithoutProject(token: string): Record<string, string> {
