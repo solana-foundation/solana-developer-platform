@@ -41,7 +41,15 @@ export type IdempotencyKeyClaim =
    * partly executed, so releasing it must keep the row bound to its
    * fingerprint.
    */
-  | { kind: "claimed"; fresh: boolean }
+  | {
+      kind: "claimed";
+      fresh: boolean;
+      /**
+       * The key's earlier row had expired while still `in_progress`: a request
+       * that never recorded an outcome. The new claim replaces it; callers alert.
+       */
+      replacedUnfinished: boolean;
+    }
   | { kind: "completed"; response: StoredIdempotentResponse }
   /** The key was first used for a different request or by another credential. */
   | { kind: "mismatch" }
@@ -58,8 +66,11 @@ export interface IdempotencyKeyRepository {
   discard(id: string, claimToken: string): Promise<void>;
   /** Ends the lease now, keeping the row bound to its fingerprint. */
   unlock(id: string, claimToken: string): Promise<void>;
-  /** Deletes up to `limit` expired rows. Returns how many went. */
-  pruneExpired(limit: number): Promise<number>;
+  /**
+   * Deletes up to `limit` expired rows. Returns how many went, and how many of
+   * those never recorded an outcome (still `in_progress`), which callers alert on.
+   */
+  pruneExpired(limit: number): Promise<{ deleted: number; unfinished: number }>;
 }
 
 const existingRowSchema = z.discriminatedUnion("status", [
@@ -102,9 +113,17 @@ export function createPostgresIdempotencyKeyRepository(
   async function tryClaim(input: IdempotencyKeyClaimInput): Promise<IdempotencyKeyClaim | null> {
     // A new key, or one whose row expired and was not pruned yet: either way
     // nothing it recorded still counts, so the row starts over.
+    const scope = scopeMatch(input);
+    // A new key, or one whose row expired and was not pruned yet: either way
+    // nothing it recorded still counts, so the row starts over. The CTE reads
+    // the expired row's status from before the statement, to report an
+    // unfinished request being replaced.
     const inserted = await db
       .prepare(
-        `INSERT INTO idempotency_keys
+        `WITH expired AS (
+           SELECT status FROM idempotency_keys WHERE ${scope.sql} AND expires_at <= now()
+         )
+         INSERT INTO idempotency_keys
            (id, organization_id, project_id, operation, idempotency_key, principal, fingerprint,
             status, claim_token, locked_until, expires_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'in_progress', ?,
@@ -123,9 +142,10 @@ export function createPostgresIdempotencyKeyRepository(
                updated_at = sdp_iso_now(),
                expires_at = EXCLUDED.expires_at
            WHERE idempotency_keys.expires_at <= now()
-         RETURNING id`
+         RETURNING id, (SELECT status FROM expired) = 'in_progress' AS replaced_unfinished`
       )
       .bind(
+        ...scope.params,
         input.id,
         input.organizationId,
         input.projectId,
@@ -137,12 +157,15 @@ export function createPostgresIdempotencyKeyRepository(
         input.leaseSeconds,
         input.retentionSeconds
       )
-      .first<{ id: string }>();
+      .first<{ id: string; replaced_unfinished: boolean | null }>();
     if (inserted !== null) {
-      return { kind: "claimed", fresh: true };
+      return {
+        kind: "claimed",
+        fresh: true,
+        replacedUnfinished: inserted.replaced_unfinished === true,
+      };
     }
 
-    const scope = scopeMatch(input);
     // An earlier attempt with this request crashed or failed and its lease is
     // over: this request takes the row over and runs again.
     const takenOver = await db
@@ -165,7 +188,7 @@ export function createPostgresIdempotencyKeyRepository(
       )
       .first<{ id: string }>();
     if (takenOver !== null) {
-      return { kind: "claimed", fresh: false };
+      return { kind: "claimed", fresh: false, replacedUnfinished: false };
     }
 
     const existing = await db
@@ -260,19 +283,24 @@ export function createPostgresIdempotencyKeyRepository(
     },
 
     async pruneExpired(limit) {
-      return db
+      const row = await db
         .prepare(
-          `DELETE FROM idempotency_keys
-            WHERE id IN (
-              SELECT id FROM idempotency_keys
-               WHERE expires_at <= now()
-               ORDER BY expires_at
-               LIMIT ?
-               FOR UPDATE SKIP LOCKED
-            )`
+          `WITH doomed AS (
+             SELECT id FROM idempotency_keys
+              WHERE expires_at <= now()
+              ORDER BY expires_at
+              LIMIT ?
+              FOR UPDATE SKIP LOCKED
+           ), deleted AS (
+             DELETE FROM idempotency_keys WHERE id IN (SELECT id FROM doomed) RETURNING status
+           )
+           SELECT count(*)::int AS deleted,
+                  count(*) FILTER (WHERE status = 'in_progress')::int AS unfinished
+             FROM deleted`
         )
         .bind(limit)
-        .run();
+        .first<{ deleted: number; unfinished: number }>();
+      return { deleted: row?.deleted ?? 0, unfinished: row?.unfinished ?? 0 };
     },
   };
 }

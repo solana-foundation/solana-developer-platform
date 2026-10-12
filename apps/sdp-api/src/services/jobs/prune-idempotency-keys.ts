@@ -13,6 +13,8 @@ export const IDEMPOTENCY_KEY_PRUNE_MAX_BATCHES = 20;
 
 export interface PruneIdempotencyKeysResult {
   deleted: number;
+  /** Deleted rows that never recorded an outcome (still `in_progress`). */
+  unfinished: number;
   /** True when the sweep stopped at its batch cap with expired rows left. */
   capped: boolean;
 }
@@ -21,20 +23,38 @@ export interface PruneIdempotencyKeysResult {
  * Deletes Idempotency-Key records whose 24-hour retention has passed
  * (HOO-1918). Expired rows are already ignored by every claim, so a missed
  * sweep only costs disk, never correctness.
+ *
+ * A deleted row still `in_progress` is a request that never recorded an
+ * outcome for a whole day: a crash the route's own row has to answer for. It is
+ * logged as `sdp_idempotency_unfinished_pruned` at error level, for alerting.
  */
 export async function pruneIdempotencyKeys(
   env: Env,
   repository: IdempotencyKeyRepository = createPostgresIdempotencyKeyRepository(getDb(env))
 ): Promise<PruneIdempotencyKeysResult> {
   let deleted = 0;
+  let unfinished = 0;
+  let capped = true;
   for (let batch = 0; batch < IDEMPOTENCY_KEY_PRUNE_MAX_BATCHES; batch += 1) {
-    const count = await repository.pruneExpired(IDEMPOTENCY_KEY_PRUNE_BATCH);
-    deleted += count;
-    if (count < IDEMPOTENCY_KEY_PRUNE_BATCH) {
-      if (deleted > 0) getLogger().info({ deleted }, "idempotency keys pruned");
-      return { deleted, capped: false };
+    const pruned = await repository.pruneExpired(IDEMPOTENCY_KEY_PRUNE_BATCH);
+    deleted += pruned.deleted;
+    unfinished += pruned.unfinished;
+    if (pruned.deleted < IDEMPOTENCY_KEY_PRUNE_BATCH) {
+      capped = false;
+      break;
     }
   }
-  getLogger().info({ deleted }, "idempotency keys pruned; more remain for the next run");
-  return { deleted, capped: true };
+  if (unfinished > 0) {
+    getLogger().error(
+      { event: "sdp_idempotency_unfinished_pruned", unfinished, deleted },
+      "idempotency keys pruned that never recorded an outcome"
+    );
+  }
+  if (deleted > 0) {
+    getLogger().info(
+      { deleted, capped },
+      capped ? "idempotency keys pruned; more remain for the next run" : "idempotency keys pruned"
+    );
+  }
+  return { deleted, unfinished, capped };
 }

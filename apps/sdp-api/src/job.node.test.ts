@@ -225,7 +225,9 @@ describe("runCronJob", () => {
     vi.mocked(runEarnCatalogueSyncIfDue).mockReset().mockResolvedValue("synced");
     vi.mocked(runEarnMetricsRefreshTick).mockReset().mockResolvedValue(undefined);
     vi.mocked(retireOrphanedSecrets).mockReset().mockResolvedValue({ retired: 0, failed: 0 });
-    vi.mocked(pruneIdempotencyKeys).mockReset().mockResolvedValue({ deleted: 0, capped: false });
+    vi.mocked(pruneIdempotencyKeys)
+      .mockReset()
+      .mockResolvedValue({ deleted: 0, unfinished: 0, capped: false });
     vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReset().mockResolvedValue({
       cleaned: 0,
       skipped: 0,

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IdempotencyKeyRepository } from "@/db/repositories/idempotency-keys.repository";
+import { getLogger } from "@/runtime/logger";
 import { env } from "@/test/helpers/env";
 import {
   IDEMPOTENCY_KEY_PRUNE_BATCH,
@@ -7,7 +8,7 @@ import {
   pruneIdempotencyKeys,
 } from "./prune-idempotency-keys";
 
-function repositoryDeleting(counts: number[]): IdempotencyKeyRepository {
+function repositoryDeleting(counts: number[], unfinished: number[] = []): IdempotencyKeyRepository {
   const unused = () => Promise.reject(new Error("not used by the prune"));
   return {
     claim: unused,
@@ -15,7 +16,10 @@ function repositoryDeleting(counts: number[]): IdempotencyKeyRepository {
     complete: unused,
     discard: unused,
     unlock: unused,
-    pruneExpired: vi.fn(async () => counts.shift() ?? 0),
+    pruneExpired: vi.fn(async () => ({
+      deleted: counts.shift() ?? 0,
+      unfinished: unfinished.shift() ?? 0,
+    })),
   };
 }
 
@@ -24,6 +28,7 @@ describe("pruneIdempotencyKeys", () => {
     const repository = repositoryDeleting([IDEMPOTENCY_KEY_PRUNE_BATCH, 7]);
     expect(await pruneIdempotencyKeys(env, repository)).toEqual({
       deleted: IDEMPOTENCY_KEY_PRUNE_BATCH + 7,
+      unfinished: 0,
       capped: false,
     });
     expect(repository.pruneExpired).toHaveBeenCalledTimes(2);
@@ -38,7 +43,22 @@ describe("pruneIdempotencyKeys", () => {
     );
     expect(await pruneIdempotencyKeys(env, repository)).toEqual({
       deleted: IDEMPOTENCY_KEY_PRUNE_BATCH * IDEMPOTENCY_KEY_PRUNE_MAX_BATCHES,
+      unfinished: 0,
       capped: true,
     });
+  });
+
+  it("alerts when it deletes a request that never recorded an outcome", async () => {
+    const error = vi.spyOn(getLogger(), "error");
+    const repository = repositoryDeleting([3], [2]);
+    expect(await pruneIdempotencyKeys(env, repository)).toEqual({
+      deleted: 3,
+      unfinished: 2,
+      capped: false,
+    });
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "sdp_idempotency_unfinished_pruned", unfinished: 2 }),
+      expect.any(String)
+    );
   });
 });

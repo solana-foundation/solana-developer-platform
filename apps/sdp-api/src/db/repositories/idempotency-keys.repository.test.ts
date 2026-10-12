@@ -65,14 +65,22 @@ describe("idempotency keys repository", () => {
 
   it("lets a request take over an expired lease only with the same fingerprint", async () => {
     const first = claimInput();
-    expect(await repository().claim(first)).toEqual({ kind: "claimed", fresh: true });
+    expect(await repository().claim(first)).toEqual({
+      kind: "claimed",
+      fresh: true,
+      replacedUnfinished: false,
+    });
     await repository().unlock(first.id, first.claimToken);
 
     expect(await repository().claim(claimInput({ fingerprint: "fp-2" }))).toEqual({
       kind: "mismatch",
     });
     const second = claimInput();
-    expect(await repository().claim(second)).toEqual({ kind: "claimed", fresh: false });
+    expect(await repository().claim(second)).toEqual({
+      kind: "claimed",
+      fresh: false,
+      replacedUnfinished: false,
+    });
 
     // The first request outlived its lease: it can no longer record an outcome.
     expect(await repository().complete(first.id, first.claimToken, RESPONSE)).toBe(false);
@@ -124,6 +132,21 @@ describe("idempotency keys repository", () => {
     expect(await repository().claim(claimInput({ fingerprint: "fp-2" }))).toEqual({
       kind: "claimed",
       fresh: true,
+      replacedUnfinished: false,
+    });
+  });
+
+  it("reports an expired unfinished row its claim replaces", async () => {
+    const abandoned = claimInput();
+    await repository().claim(abandoned);
+    await getDb(env).execute(
+      `UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE id = ?`,
+      [abandoned.id]
+    );
+    expect(await repository().claim(claimInput())).toEqual({
+      kind: "claimed",
+      fresh: true,
+      replacedUnfinished: true,
     });
   });
 
@@ -131,6 +154,7 @@ describe("idempotency keys repository", () => {
     expect(await repository().claim(claimInput({ projectId: null }))).toEqual({
       kind: "claimed",
       fresh: true,
+      replacedUnfinished: false,
     });
     expect(await repository().claim(claimInput({ projectId: null }))).toMatchObject({
       kind: "in_flight",
@@ -146,7 +170,7 @@ describe("idempotency keys repository", () => {
       [expired.id]
     );
 
-    expect(await repository().pruneExpired(100)).toBe(1);
+    expect(await repository().pruneExpired(100)).toEqual({ deleted: 1, unfinished: 1 });
     const left = await getDb(env).queryMany<{ idempotency_key: string }>(
       "SELECT idempotency_key FROM idempotency_keys"
     );
