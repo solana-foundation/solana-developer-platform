@@ -31,7 +31,7 @@ vi.mock("./observe", async (importOriginal) => ({
   deriveDvpTradeState: () => ({ status: "funded" }),
 }));
 
-const { observeDvpTradeIfStale, observeDvpTradeNow } = await import("./observe-now");
+const { observeDvpTradeIfStale } = await import("./observe-now");
 
 const NOW = Date.parse("2026-09-03T21:00:00.000Z");
 const NEVER_REREAD_STATUSES = ["create_failed"] as const satisfies readonly DvpTradeStatus[];
@@ -176,18 +176,14 @@ describe("observeDvpTradeIfStale", () => {
 
     expect(result.status).toBe("partially_funded");
   });
-});
 
-describe("observeDvpTradeNow", () => {
-  const rpc = installClusterRpcStub();
+  it("rejects instead of answering from the row when the scope's cluster has no endpoint", async () => {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "");
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("returns null without reading either cluster when no cluster scope is open", async () => {
-    await expect(observeDvpTradeNow(env, trade())).resolves.toBeNull();
-
+    await expect(observeIfStale(trade(), NOW)).rejects.toMatchObject({
+      code: "RPC_NOT_CONFIGURED",
+      details: { cluster: "devnet" },
+    });
     expect(rpc.calls).toEqual([]);
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
     expect(recordObservation).not.toHaveBeenCalled();

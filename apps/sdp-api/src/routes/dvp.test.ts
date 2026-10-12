@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { CachedApiKey, Permission } from "@sdp/types";
+import { type CachedApiKey, GENESIS_HASH_BY_CLUSTER, type Permission } from "@sdp/types";
 import { getAddressDecoder, getBase64Decoder } from "@solana/kit";
 import { getMintEncoder, getMintSize, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,7 @@ import { getDb } from "@/db";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
 import app from "@/index";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { CLUSTER_RPC_URLS, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -632,6 +632,42 @@ describe("DvP routes", () => {
       });
       expect(rpc.calls).toContainEqual({ cluster: "mainnet-beta", method: "getAccountInfo" });
       expect(rpc.calls.filter((call) => call.cluster !== "mainnet-beta")).toEqual([]);
+    });
+
+    it("500s with RPC_CLUSTER_MISMATCH when the devnet pool serves mainnet-beta", async () => {
+      vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", CLUSTER_RPC_URLS["mainnet-beta"]);
+
+      const res = await app.request(
+        `/v1/dvp/mints/${INSPECTED_MINT}`,
+        { headers: authHeaders() },
+        env
+      );
+
+      expect(res.status).toBe(500);
+      await expect(res.json()).resolves.toMatchObject({
+        error: {
+          code: "RPC_CLUSTER_MISMATCH",
+          details: { cluster: "devnet", genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] },
+        },
+      });
+      expect(rpc.calls.filter((call) => call.method === "getAccountInfo")).toEqual([]);
+    });
+
+    it("keeps a failed mint read a retryable 502", async () => {
+      const res = await app.request(
+        `/v1/dvp/mints/${INSPECTED_MINT}`,
+        { headers: authHeaders() },
+        env
+      );
+
+      expect(res.status).toBe(502);
+      await expect(res.json()).resolves.toMatchObject({
+        error: {
+          code: "SOLANA_RPC_ERROR",
+          message: "Could not read the mint from Solana. Try again.",
+        },
+      });
+      expect(rpc.calls).toContainEqual({ cluster: "devnet", method: "getAccountInfo" });
     });
   });
 
