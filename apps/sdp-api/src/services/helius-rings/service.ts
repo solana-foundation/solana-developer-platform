@@ -87,6 +87,8 @@ export interface HeliusRingsActor {
 }
 
 export interface HeliusRingsServiceDependencies {
+  /** The API key acting for this request; recorded on every operation it reserves. */
+  initiatedByKeyId?: string | null;
   gateway?: RingsGatewayPort;
   resolveGateway?: (connectionId?: string) => Promise<RingsGatewayPort>;
   resolveConnectionId?: () => Promise<string>;
@@ -200,6 +202,7 @@ export class HeliusRingsService {
   private readonly signOuterTransaction: typeof signRingsOuterTransaction;
   private readonly submitOuterTransaction: typeof submitRingsOuterTransaction;
   private readonly now: () => string;
+  private readonly initiatedByKeyId: string | null;
 
   constructor(
     private readonly env: Env,
@@ -211,6 +214,7 @@ export class HeliusRingsService {
     if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
     }
+    this.initiatedByKeyId = dependencies.initiatedByKeyId ?? null;
     this.projectRings = dependencies.projectRings ?? createHeliusRingsProjectRingRepository(env);
     // The bring-up hook persists a ring's lookup table the moment it lands, so
     // a crash before markActive resumes by adoption instead of renting twice.
@@ -804,6 +808,7 @@ export class HeliusRingsService {
       transferMode: input.transferMode ?? null,
       ringProgramId,
       retryOfOperationId: retry?.ofOperationId ?? null,
+      initiatedByKeyId: this.initiatedByKeyId,
       timelock: input.timelock
         ? { unlockAt: input.timelock.unlockAt, beneficiaryAddr: input.timelock.beneficiary }
         : null,

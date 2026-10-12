@@ -56,6 +56,7 @@ function mapRow(row: Record<string, unknown>): HeliusRingsOperationRow {
     failure_message: (row.failure_message ?? null) as string | null,
     retryable: (row.retryable ?? null) as boolean | null,
     retry_of_operation_id: (row.retry_of_operation_id ?? null) as string | null,
+    initiated_by_key_id: (row.initiated_by_key_id ?? null) as string | null,
     timelock_unlock_at: (row.timelock_unlock_at ?? null) as string | null,
     input_notes: mapInputNotes(row.input_notes),
     signed_transaction: (row.signed_transaction ?? null) as string | null,
@@ -181,8 +182,9 @@ export function createPostgresHeliusRingsOperationRepository(
                transfer_mode,
                ring_program_id,
                retry_of_operation_id,
+               initiated_by_key_id,
                timelock_unlock_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (intent_key)
              -- Self-assignment rather than DO NOTHING: DO NOTHING returns zero
              -- rows on a replay, which is indistinguishable from a failed
@@ -207,6 +209,7 @@ export function createPostgresHeliusRingsOperationRepository(
             input.transferMode ?? null,
             input.ringProgramId ?? null,
             input.retryOfOperationId ?? null,
+            input.initiatedByKeyId ?? null,
             input.timelock?.unlockAt ?? null
           )
           .first<Record<string, unknown>>();

@@ -87,6 +87,17 @@ Remove the policy engine and keep one small per-key control.
   ledger row per refusal is a small follow-up with no schema change.
 - Between the removal deploy and the table drop, the policy tables exist but
   nothing reads or writes them.
+- Helius Rings now records who started an operation. Migration 0127 adds a
+  nullable `helius_rings_operations.initiated_by_key_id` (bare text, no foreign
+  key). It is set once when the intent is first reserved and is NULL for
+  dashboard-session operations and older rows. The removed `wallet_operations`
+  row was the only other place this was recorded for Rings. No API response
+  exposes it.
+- `approval_required` stays in `HELIUS_RINGS_OPERATION_STATUSES` only because
+  the DB CHECK constraints still allow it. `@sdp/types` lists it in
+  `HELIUS_RINGS_RETIRED_OPERATION_STATUSES`. The table-drop change (part 4)
+  must drop `approval_required` from the CHECK constraints and from the retired
+  list.
 
 ## Alternatives considered
 

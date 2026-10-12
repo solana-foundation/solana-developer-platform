@@ -194,6 +194,17 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       expect(replay.operation.ring_program_id).toBe(RING_PROGRAM);
     });
 
+    it("records the initiating key once and keeps it on a replay", async () => {
+      const first = await repo.reserveIntent(shieldIntent({ initiatedByKeyId: "key_first" }));
+      const replay = await repo.reserveIntent(shieldIntent({ initiatedByKeyId: "key_other" }));
+      const session = await repo.reserveIntent(shieldIntent({ intentKey: "sha256:session" }));
+
+      expect(first.operation.initiated_by_key_id).toBe("key_first");
+      expect(replay.reserved).toBe(false);
+      expect(replay.operation.initiated_by_key_id).toBe("key_first");
+      expect(session.operation.initiated_by_key_id).toBeNull();
+    });
+
     it("returns the existing operation on a replay instead of opening a second one", async () => {
       const first = await repo.reserveIntent(shieldIntent());
       // Same intent key, different everything else: a replay must be decided by

@@ -4,6 +4,7 @@
  * render and its hydration agree.
  */
 
+import { type HeliusRingsLiveOperationStatus, isLiveHeliusRingsOperationStatus } from "@sdp/types";
 import {
   type ProjectRing,
   RINGS_ALLOWLISTED_ASSETS,
@@ -33,26 +34,21 @@ const SETTLING: ReadonlySet<RingsOperationState> = new Set<RingsOperationState>(
   "indexing",
 ]);
 
-/** Every state this build can label; anything else read from the API is shown verbatim. */
-const KNOWN_STATES: ReadonlySet<string> = new Set<RingsOperationState>([
-  "draft",
-  "preparing",
-  "proving",
-  "ready_to_sign",
-  "submitted",
-  "indexing",
-  "completed",
-  "failed",
-  "voided",
-]);
+/**
+ * Compile-time guard: the dashboard's label union must be exactly the statuses
+ * an operation can still reach. It fails to build when either side drifts.
+ */
+type SameStates<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+const labelsCoverLiveStatuses: SameStates<RingsOperationState, HeliusRingsLiveOperationStatus> =
+  true;
 
 /**
  * Narrows a stored state to one with a label. A row can carry a state this
- * build no longer names (for example one a retired flow wrote), and it must
- * render rather than crash the list.
+ * build no longer names (for example `approval_required`, which a retired flow
+ * wrote), and it must render rather than crash the list.
  */
 export function isKnownOperationState(state: string): state is RingsOperationState {
-  return KNOWN_STATES.has(state);
+  return labelsCoverLiveStatuses && isLiveHeliusRingsOperationStatus(state);
 }
 
 export function isSettling(state: RingsOperationState): boolean {
