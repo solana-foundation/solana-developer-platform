@@ -1,5 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
-import type { Organization } from "@sdp/types";
+import type { InvitationStatus, Organization } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -15,6 +15,53 @@ const TEST_PROJECT = {
   id: "prj_test_organizations",
   slug: "test-test-org-project",
 };
+
+const OTHER_ORG = {
+  id: "org_test_organizations_other",
+  name: "Other Organization",
+  slug: "test-organizations-other",
+};
+
+function daysFromNow(days: number): string {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+const DELETION_INVITATIONS: {
+  id: string;
+  organizationId: string;
+  email: string;
+  expiresAt: string;
+  status: InvitationStatus;
+}[] = [
+  {
+    id: "inv_org_delete_pending",
+    organizationId: TEST_ORG.id,
+    email: "pending@example.com",
+    expiresAt: daysFromNow(7),
+    status: "pending",
+  },
+  {
+    id: "inv_org_delete_accepted",
+    organizationId: TEST_ORG.id,
+    email: "accepted@example.com",
+    expiresAt: daysFromNow(7),
+    status: "accepted",
+  },
+  {
+    id: "inv_org_delete_expired",
+    organizationId: TEST_ORG.id,
+    email: "expired@example.com",
+    expiresAt: daysFromNow(-7),
+    status: "expired",
+  },
+  {
+    id: "inv_org_delete_other_org_pending",
+    organizationId: OTHER_ORG.id,
+    email: "pending@example.com",
+    expiresAt: daysFromNow(7),
+    status: "pending",
+  },
+];
 
 describe("Organizations routes", () => {
   let validKeyHash: string;
@@ -287,9 +334,30 @@ describe("Organizations routes", () => {
         ...TEST_CACHED_API_KEY,
         permissions: ["*"],
       });
+      await getDb(env)
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+        .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug, "individual", "active")
+        .run();
+      for (const invitation of DELETION_INVITATIONS) {
+        await getDb(env)
+          .prepare(
+            `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
+             VALUES (?, ?, ?, 'member', ?, ?, ?, ?)`
+          )
+          .bind(
+            invitation.id,
+            invitation.organizationId,
+            invitation.email,
+            TEST_USER.id,
+            `hash_${invitation.id}`,
+            invitation.expiresAt,
+            invitation.status
+          )
+          .run();
+      }
     });
-    it("soft deletes organization", async () => {
-      const res = await app.request(
+    function deleteOrganization() {
+      return app.request(
         `/v1/organizations/${TEST_ORG.id}`,
         {
           method: "DELETE",
@@ -299,56 +367,86 @@ describe("Organizations routes", () => {
         },
         env
       );
+    }
+    it("soft deletes organization", async () => {
+      const res = await deleteOrganization();
       expect(res.status).toBe(204);
       const org = await getDb(env)
-        .prepare("SELECT status FROM organizations WHERE id = ?")
+        .prepare("SELECT id, status FROM organizations WHERE id = ?")
         .bind(TEST_ORG.id)
         .first<{
+          id: string;
           status: string;
         }>();
-      expect(required(org).status).toBe("deleted");
+      expect(required(org)).toEqual({ id: TEST_ORG.id, status: "deleted" });
     });
     it("revokes all API keys on delete", async () => {
-      await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-        },
-        env
-      );
+      expect((await deleteOrganization()).status).toBe(204);
       const keys = await getDb(env)
-        .prepare("SELECT status FROM api_keys WHERE organization_id = ?")
+        .prepare("SELECT id, status, revoked_at FROM api_keys WHERE organization_id = ?")
         .bind(TEST_ORG.id)
         .all<{
+          id: string;
           status: string;
+          revoked_at: string | null;
         }>();
-      for (const key of keys.results) {
-        expect(key.status).toBe("revoked");
-      }
+      expect(keys.results).toEqual([
+        { id: TEST_API_KEY.id, status: "revoked", revoked_at: expect.any(String) },
+      ]);
     });
     it("marks organization members removed on delete", async () => {
-      await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-        },
-        env
-      );
+      expect((await deleteOrganization()).status).toBe(204);
       const members = await getDb(env)
-        .prepare("SELECT status FROM organization_members WHERE organization_id = ?")
+        .prepare("SELECT id, user_id, status FROM organization_members WHERE organization_id = ?")
         .bind(TEST_ORG.id)
         .all<{
+          id: string;
+          user_id: string;
           status: string;
         }>();
-      for (const member of members.results) {
-        expect(member.status).toBe("removed");
-      }
+      expect(members.results).toEqual([
+        { id: TEST_MEMBER.id, user_id: TEST_USER.id, status: "removed" },
+      ]);
+    });
+    it("revokes the organization's pending invitations and leaves every other invitation alone", async () => {
+      expect((await deleteOrganization()).status).toBe(204);
+      const invitations = await getDb(env)
+        .prepare(
+          "SELECT id, organization_id, email, status FROM invitations WHERE organization_id IN (?, ?) ORDER BY id"
+        )
+        .bind(TEST_ORG.id, OTHER_ORG.id)
+        .all<{
+          id: string;
+          organization_id: string;
+          email: string;
+          status: InvitationStatus;
+        }>();
+      expect(invitations.results).toEqual([
+        {
+          id: "inv_org_delete_accepted",
+          organization_id: TEST_ORG.id,
+          email: "accepted@example.com",
+          status: "accepted",
+        },
+        {
+          id: "inv_org_delete_expired",
+          organization_id: TEST_ORG.id,
+          email: "expired@example.com",
+          status: "expired",
+        },
+        {
+          id: "inv_org_delete_other_org_pending",
+          organization_id: OTHER_ORG.id,
+          email: "pending@example.com",
+          status: "pending",
+        },
+        {
+          id: "inv_org_delete_pending",
+          organization_id: TEST_ORG.id,
+          email: "pending@example.com",
+          status: "revoked",
+        },
+      ]);
     });
     it("requires org:admin permission", async () => {
       await clearKVStores(env);

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
+import type { InvitationStatus } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -23,6 +24,8 @@ const CALLER_EMAIL = "caller@example.com";
 const INVITER_USER_ID = "usr_test_acceptance_inviter";
 
 const OTHER_EMAIL = "someone-else@example.com";
+
+const IDENTITY_EMAIL = "Caller.Identity@example.com";
 
 const INVITATION_TOKEN = "acceptance-token";
 
@@ -298,10 +301,54 @@ describe("POST /v1/members/accept", () => {
     expect(await invitationStatus(INVITATION_ID)).toBe("revoked");
     const res = await accept(clerkToken, INVITATION_TOKEN);
     expect(res.status).toBe(400);
-    const memberships = await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID);
-    expect(memberships).toHaveLength(1);
-    expect(memberships[0].status).toBe("removed");
-    expect(memberships[0].role).toBe("member");
+    expect(await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID)).toEqual([
+      { id: "mem_acceptance_stale", role: "member", status: "removed" },
+    ]);
+  });
+  it("revokes a pending invitation addressed to the removed member's auth identity email", async () => {
+    await seedCaller(CALLER_EMAIL);
+    await getDb(env)
+      .prepare("UPDATE auth_user_identities SET email = ? WHERE user_id = ?")
+      .bind(IDENTITY_EMAIL, CALLER_USER_ID)
+      .run();
+    await getDb(env)
+      .prepare(`INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('mem_acceptance_identity', ?, ?, 'member', 'active')`)
+      .bind(INVITING_ORG_ID, CALLER_USER_ID)
+      .run();
+    await seedInvitation({ ...invitationFixture(), email: IDENTITY_EMAIL.toUpperCase() });
+    await seedInvitation({
+      ...invitationFixture(),
+      id: "inv_acceptance_unrelated",
+      email: OTHER_EMAIL,
+      token: "unrelated-token",
+    });
+    await seedCachedApiKey(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_CACHED_API_KEY,
+      organizationId: INVITING_ORG_ID,
+      permissions: ["*"],
+    });
+    const removal = await app.request(
+      "/v1/members/mem_acceptance_identity",
+      { method: "DELETE", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(removal.status).toBe(204);
+    const invitations = await getDb(env)
+      .prepare("SELECT id, email, status FROM invitations WHERE organization_id = ? ORDER BY id")
+      .bind(INVITING_ORG_ID)
+      .all<{
+        id: string;
+        email: string;
+        status: InvitationStatus;
+      }>();
+    expect(invitations.results).toEqual([
+      { id: INVITATION_ID, email: IDENTITY_EMAIL.toUpperCase(), status: "revoked" },
+      { id: "inv_acceptance_unrelated", email: OTHER_EMAIL, status: "pending" },
+    ]);
+    expect(await membershipsIn(INVITING_ORG_ID, CALLER_USER_ID)).toEqual([
+      { id: "mem_acceptance_identity", role: "member", status: "removed" },
+    ]);
   });
   it("applies the invited role when a membership already exists at a lower one", async () => {
     const clerkToken = await seedCaller(CALLER_EMAIL);
