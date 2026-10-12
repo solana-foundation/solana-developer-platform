@@ -420,6 +420,16 @@ export async function resolveAuthorityWallet(params: {
 /** The issuance movements: compliance controls are exits, everything else a start. */
 export type IssuanceMovement = MovementOf<"issuance">;
 
+/**
+ * A custody signer together with the movement it was resolved for. The Mosaic
+ * and Token-2022 services take this pair, so the sponsor is handed the same
+ * movement the signer decides on and the two cannot disagree (HOO-1955).
+ */
+export interface IssuanceAuthority {
+  signer: TransactionSigner;
+  movement: IssuanceMovement;
+}
+
 async function loadResolvedAuthoritySigner(params: {
   env: Env;
   auth: ApiKeyContext;
@@ -447,7 +457,7 @@ export async function resolveAuthoritySigner(params: {
   currentAuthority: string;
   requiredWalletPermissions: Permission[];
   movement: IssuanceMovement;
-}): Promise<ResolvedIssuanceWallet & { signer: TransactionSigner }> {
+}): Promise<ResolvedIssuanceWallet & IssuanceAuthority> {
   const resolved = await resolveAuthorityWallet(params);
   const signer = await loadResolvedAuthoritySigner({
     env: params.env,
@@ -457,7 +467,7 @@ export async function resolveAuthoritySigner(params: {
     movement: params.movement,
   });
 
-  return { ...resolved, signer };
+  return { ...resolved, signer, movement: params.movement };
 }
 
 /** Load a persisted exact authority signer for execution or Approval replay. */
@@ -468,12 +478,12 @@ export async function createResolvedAuthoritySigner(params: {
   currentAuthority: string;
   requiredWalletPermissions: Permission[];
   movement: IssuanceMovement;
-}): Promise<TransactionSigner> {
+}): Promise<IssuanceAuthority> {
   const wallet = await resolveIssuanceWallet(params);
   if (wallet.publicKey !== params.currentAuthority) {
     throw badRequest("Selected custody wallet does not control the current authority");
   }
-  return loadResolvedAuthoritySigner(params);
+  return { signer: await loadResolvedAuthoritySigner(params), movement: params.movement };
 }
 
 /**
@@ -497,7 +507,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
   currentAuthority?: string | null;
   expectedCustodyWalletId?: string | null;
   movement: IssuanceMovement;
-}): Promise<TransactionSigner> {
+}): Promise<IssuanceAuthority> {
   const { env, auth, walletId, currentAuthority, expectedCustodyWalletId, movement } = params;
   if (walletId === null) {
     throw badRequest("signingWalletId is required for the legacy issuance prepare flow");
@@ -540,7 +550,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     throw badRequest("Current authority is not controlled by custody");
   }
 
-  return signer;
+  return { signer, movement };
 }
 
 export function getInitialPermanentDelegateAuthority(

@@ -156,7 +156,7 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     custodyWalletId: body.signingCustodyWalletId,
     requiredWalletPermissions: ["tokens:write"],
   });
-  const signer = await createResolvedAuthoritySigner({
+  const authority = await createResolvedAuthoritySigner({
     movement: "issuance.control",
     env: c.env,
     auth,
@@ -164,6 +164,7 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     currentAuthority: wallet.publicKey,
     requiredWalletPermissions: ["tokens:write"],
   });
+  const signer = authority.signer;
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.burn.source, "source");
   const { amountBaseUnits, mosaicAmount } = parsePositiveTokenAmount(
@@ -180,7 +181,7 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   );
 
   // Build unsigned transaction
-  const token2022 = createIssuanceToken2022Service(c, signer, "issuance.control");
+  const token2022 = createIssuanceToken2022Service(c, authority);
   const prepared = await (async () => {
     try {
       return await token2022.prepareBurn(
@@ -360,7 +361,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   });
   let onChainEffectCompleted = false;
   try {
-    const signer = await createResolvedAuthoritySigner({
+    const authority = await createResolvedAuthoritySigner({
       movement: "issuance.control",
       env: c.env,
       auth,
@@ -368,6 +369,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       currentAuthority: wallet.publicKey,
       requiredWalletPermissions: ["tokens:write"],
     });
+    const signer = authority.signer;
     const normalizedSource = await resolveValidatedBurnSource(
       c.env,
       signer.address,
@@ -378,7 +380,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     );
 
     // Execute burn on Solana
-    const token2022 = createIssuanceToken2022Service(c, signer, "issuance.control");
+    const token2022 = createIssuanceToken2022Service(c, authority);
 
     const result = await token2022.burn({
       mint: mintAddress,

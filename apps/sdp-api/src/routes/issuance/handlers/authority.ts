@@ -227,7 +227,7 @@ export const prepareUpdateAuthority = async (
     ? assertValidAddress(body.authority.newAuthority, "newAuthority")
     : null;
 
-  const { custodyWalletId, signer } = await resolveAuthoritySigner({
+  const authority = await resolveAuthoritySigner({
     movement: "issuance.authority",
     env: c.env,
     auth,
@@ -235,7 +235,9 @@ export const prepareUpdateAuthority = async (
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.authority");
+
+  const { signer, custodyWalletId } = authority;
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
 
   const prepared = await mosaic.prepareUpdateAuthority({
     mint: mintAddress,
@@ -395,7 +397,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     },
   } = gate;
 
-  const signer = await createResolvedAuthoritySigner({
+  const authority = await createResolvedAuthoritySigner({
     movement: "issuance.authority",
     env: c.env,
     auth,
@@ -403,6 +405,8 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     currentAuthority: currentAuthorityRaw,
     requiredWalletPermissions: ["tokens:admin"],
   });
+
+  const signer = authority.signer;
 
   const idempotencyMetadata = updateAuthorityIdempotencyMetadata(
     c.req.header("Idempotency-Key"),
@@ -447,7 +451,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
     });
   }
 
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored", "issuance.authority");
+  const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
   const auditIntent = await auditService.beginCritical(c, {
     action: "update_authority",
     resourceType: "token_transaction",
