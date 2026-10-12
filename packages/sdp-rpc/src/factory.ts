@@ -7,14 +7,17 @@ import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
   type RpcTransport,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
 import { SdpRpcError } from "./errors";
-import {
-  createFailoverTransport,
-  DEFAULT_RPC_REQUEST_TIMEOUT_MS,
-  type SolanaRpc,
-  withRequestTimeout,
-} from "./solana";
+import { currentClusterScope } from "./scope";
+import { withReadSocketRetry } from "./socket-retry";
+import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc, withRequestTimeout } from "./solana";
+import { isTransientRpcError } from "./transient";
 import type { ManagedRpcEnv } from "./types";
 
 /**
@@ -45,8 +48,68 @@ const MANAGED_RPC_ENV_KEYS = {
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
 const GENESIS_PROOF_TTL_MS = 30_000;
 
+/** The probe's own deadline; it never runs under a caller's signal, since its result is shared. */
+const GENESIS_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * JSON-RPC errors a node answers with HTTP 200 when it can't serve the request yet (unhealthy,
+ * behind the requested slot, missing history or block status). Kit's HTTP transport only throws
+ * on non-2xx, so the pool reads these from the body and asks the next endpoint.
+ */
+const FAILOVER_JSON_RPC_ERROR_CODES: ReadonlySet<number> = new Set([
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
+]);
+
 /** `<cluster> <endpointUrl>` to the time its last genesis match expires; only matches are recorded. */
 const genesisProofExpiry = new Map<string, number>();
+
+/** `<cluster> <endpointUrl>` to the probe in flight, so concurrent requests share one probe. */
+const genesisProbes = new Map<string, Promise<void>>();
+
+/** Pool key to the index of the endpoint that last answered, so requests start on a healthy one. */
+const lastAnsweringEndpoint = new Map<string, number>();
+
+/** Pool key (cluster plus its endpoint URLs) to the memoized client. */
+const clusterRpcs = new Map<string, SolanaRpc>();
+
+/**
+ * Prove `endpointTransport` serves `cluster`, sharing one in-flight probe per endpoint.
+ *
+ * @param endpointTransport - The endpoint's transport below the caller deadline.
+ * @param cluster - The cluster the endpoint is configured for.
+ * @param genesisProofKey - The endpoint's proof cache key.
+ * @returns Resolves once the endpoint's genesis hash matches `cluster`.
+ * @throws SdpRpcError `RPC_CLUSTER_MISMATCH` when the endpoint serves another cluster.
+ */
+function proveGenesis(
+  endpointTransport: RpcTransport,
+  cluster: SolanaCluster,
+  genesisProofKey: string
+): Promise<void> {
+  const probeInFlight = genesisProbes.get(genesisProofKey);
+  if (probeInFlight) return probeInFlight;
+  const probe = (async () => {
+    const servedGenesisHash = await createSolanaRpcFromTransport(
+      withRequestTimeout(endpointTransport, GENESIS_PROBE_TIMEOUT_MS)
+    )
+      .getGenesisHash()
+      .send();
+    if (servedGenesisHash !== GENESIS_HASH_BY_CLUSTER[cluster]) {
+      throw new SdpRpcError(
+        "RPC_CLUSTER_MISMATCH",
+        `An RPC endpoint configured for ${cluster} serves a different cluster`,
+        { cluster, genesisHash: servedGenesisHash }
+      );
+    }
+    genesisProofExpiry.set(genesisProofKey, Date.now() + GENESIS_PROOF_TTL_MS);
+  })().finally(() => genesisProbes.delete(genesisProofKey));
+  genesisProbes.set(genesisProofKey, probe);
+  return probe;
+}
 
 /**
  * Wrap one endpoint's transport so it proves the endpoint serves `cluster` before the first
@@ -68,40 +131,73 @@ function withGenesisGuard(
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]) => {
     const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
     if (proofExpiresAt === undefined || proofExpiresAt <= Date.now()) {
-      const servedGenesisHash = await createSolanaRpcFromTransport(endpointTransport)
-        .getGenesisHash()
-        .send({ abortSignal: rpcRequest.signal });
-      if (servedGenesisHash !== GENESIS_HASH_BY_CLUSTER[cluster]) {
-        throw new SdpRpcError(
-          "RPC_CLUSTER_MISMATCH",
-          `An RPC endpoint configured for ${cluster} serves a different cluster`,
-          { cluster, genesisHash: servedGenesisHash }
-        );
-      }
-      genesisProofExpiry.set(genesisProofKey, Date.now() + GENESIS_PROOF_TTL_MS);
+      await proveGenesis(endpointTransport, cluster, genesisProofKey);
     }
     return await endpointTransport<TResponse>(rpcRequest);
   };
 }
 
 /**
- * The Solana RPC client for `cluster`, over that cluster's managed provider pool with
- * per-request failover, a per-attempt deadline, and a genesis guard on every endpoint.
- * Callers needing a tighter deadline pass `abortSignal` to `.send()`.
+ * Whether a JSON-RPC response body says the node can't serve the request yet.
  *
- * Request code never calls this: it reads `c.get("clusterContext").rpc`, which
- * `projectContextMiddleware` builds from the project's environment. The only callers are that
- * middleware, Earn's anonymous context, and the job helper `clusterFor(row)`, each deriving
- * `cluster` from a persisted row, never from caller input.
+ * @param response - The decoded JSON-RPC response.
+ * @returns `true` when its `error.code` is in `FAILOVER_JSON_RPC_ERROR_CODES`.
+ */
+function asksForAnotherEndpoint(response: unknown): boolean {
+  if (typeof response !== "object" || response === null || !("error" in response)) return false;
+  const { error } = response;
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "number" &&
+    FAILOVER_JSON_RPC_ERROR_CODES.has(error.code)
+  );
+}
+
+/**
+ * Per-request failover across a cluster's endpoints, starting at the endpoint that last answered.
+ * A transient transport failure or a `FAILOVER_JSON_RPC_ERROR_CODES` body moves to the next
+ * endpoint; the last endpoint's answer is returned as-is so kit raises its typed error.
+ * `sendTransaction` never fails over: a failure can arrive after the transaction reached the
+ * leader, and resubmitting elsewhere is the send primitive's decision, not the pool's.
  *
- * @param env - Process env carrying the per-cluster managed pool.
- * @param cluster - The cluster every request must reach.
- * @returns The RPC client.
+ * @param endpointTransports - The guarded endpoint transports, in failover order.
+ * @param poolKey - The pool's identity for the last-answering index.
+ * @returns The pool transport.
+ */
+function createPoolTransport(endpointTransports: readonly RpcTransport[], poolKey: string) {
+  return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]): Promise<TResponse> => {
+    const payload = rpcRequest.payload as { method?: unknown } | null | undefined;
+    const attempts = payload?.method === "sendTransaction" ? 1 : endpointTransports.length;
+    const startIndex = lastAnsweringEndpoint.get(poolKey) ?? 0;
+    for (let attempt = 0; ; attempt += 1) {
+      const endpointIndex = (startIndex + attempt) % endpointTransports.length;
+      const isLastAttempt = attempt === attempts - 1;
+      let response: TResponse;
+      try {
+        response = await endpointTransports[endpointIndex]<TResponse>(rpcRequest);
+      } catch (error) {
+        if (isLastAttempt || !isTransientRpcError(error)) throw error;
+        continue;
+      }
+      if (!isLastAttempt && asksForAnotherEndpoint(response)) continue;
+      if (endpointIndex !== startIndex) lastAnsweringEndpoint.set(poolKey, endpointIndex);
+      return response;
+    }
+  };
+}
+
+/**
+ * The configured endpoint URLs for `cluster`, in failover order.
+ *
+ * @param cluster - The cluster whose pool to read.
+ * @returns Every non-empty `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value.
  * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
  */
-export function createRpc(env: ManagedRpcEnv, cluster: SolanaCluster): SolanaRpc {
+function managedEndpointUrls(cluster: SolanaCluster): string[] {
   const endpointUrls = Object.values(MANAGED_RPC_ENV_KEYS[cluster]).flatMap((envKey) => {
-    const endpointUrl = env[envKey];
+    const endpointUrl = process.env[envKey];
     return endpointUrl ? [endpointUrl] : [];
   });
   if (endpointUrls.length === 0) {
@@ -109,13 +205,37 @@ export function createRpc(env: ManagedRpcEnv, cluster: SolanaCluster): SolanaRpc
       cluster,
     });
   }
-  const guardedEndpointTransports = endpointUrls.map((endpointUrl) =>
+  return endpointUrls;
+}
+
+/**
+ * The Solana RPC client for the open cluster scope, over that cluster's managed provider pool
+ * with per-request failover, a per-attempt deadline, and a genesis guard on every endpoint.
+ * Memoized per process by cluster and pool, so every caller on a cluster shares one client;
+ * nothing below the client may read the cluster scope. Callers needing a tighter deadline pass
+ * `abortSignal` to `.send()`.
+ *
+ * @returns The RPC client for the scope's cluster.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+ */
+export function createClusterRpc(): SolanaRpc {
+  const { cluster } = currentClusterScope();
+  const endpointUrls = managedEndpointUrls(cluster);
+  const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
+  const memoizedRpc = clusterRpcs.get(poolKey);
+  if (memoizedRpc) return memoizedRpc;
+  const endpointTransports = endpointUrls.map((endpointUrl) =>
     withRequestTimeout(
-      withGenesisGuard(createDefaultRpcTransport({ url: endpointUrl }), cluster, endpointUrl),
+      withGenesisGuard(
+        withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
+        cluster,
+        endpointUrl
+      ),
       DEFAULT_RPC_REQUEST_TIMEOUT_MS
     )
   );
-  return createSolanaRpcFromTransport(
-    createFailoverTransport(guardedEndpointTransports, { stickyKey: endpointUrls.join("|") })
-  );
+  const rpc = createSolanaRpcFromTransport(createPoolTransport(endpointTransports, poolKey));
+  clusterRpcs.set(poolKey, rpc);
+  return rpc;
 }
