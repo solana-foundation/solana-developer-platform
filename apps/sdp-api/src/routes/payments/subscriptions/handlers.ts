@@ -1,4 +1,4 @@
-import * as solanaRpc from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
   ListPaymentSubscriptionCollectionAttemptsResponse,
@@ -81,12 +81,9 @@ function mapSubscription(row: PaymentSubscriptionRow): PaymentSubscription {
   };
 }
 
-async function getExpectedSubscriptionExpiresAtTs(
-  c: AppContext,
-  subscriptionPda: Address
-): Promise<bigint> {
+async function getExpectedSubscriptionExpiresAtTs(subscriptionPda: Address): Promise<bigint> {
   const onChainSubscription = await fetchMaybeSubscriptionDelegation(
-    solanaRpc.createRpc(c.env),
+    createClusterRpc(),
     subscriptionPda,
     { commitment: "confirmed" }
   );
@@ -412,7 +409,7 @@ async function prepareSubscriptionLifecycle(
           subscriptionPda,
         })
       : await getResumeSubscriptionOverlayInstructionAsync({
-          expectedExpiresAtTs: await getExpectedSubscriptionExpiresAtTs(c, subscriptionPda),
+          expectedExpiresAtTs: await getExpectedSubscriptionExpiresAtTs(subscriptionPda),
           planPda,
           subscriber: subscriberSigner,
           subscriptionPda,

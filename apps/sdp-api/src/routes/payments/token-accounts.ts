@@ -1,4 +1,4 @@
-import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
+import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
@@ -7,6 +7,7 @@ import {
   address,
   createNoopSigner,
   type JsonParsedTokenAccount,
+  type Slot,
   type TransactionSigner,
 } from "@solana/kit";
 import {
@@ -24,8 +25,54 @@ const SPL_TOKEN_PROGRAM_IDS = [SPL_TOKEN_PROGRAM_ID, SPL_TOKEN_2022_PROGRAM_ID] 
 
 export type TokenLabelsByMint = ReadonlyMap<string, string>;
 
-interface GetSplTokenBalancesOptions {
+/**
+ * Bounds on a balance read. `minContextSlot` scopes the read to chain state at or after an
+ * observed confirmation: the RPC refuses an older bank, and the answer's context slot is
+ * checked as well, since a provider can ignore the parameter.
+ */
+export interface BalanceReadBounds {
+  abortSignal?: AbortSignal;
+  minContextSlot?: Slot;
+}
+
+interface GetSplTokenBalancesOptions extends BalanceReadBounds {
   tokenLabelsByMint?: TokenLabelsByMint;
+}
+
+/**
+ * Rejects an answer served from a bank older than the read's minimum context slot.
+ *
+ * @param contextSlot - The slot the RPC answered at.
+ * @param minContextSlot - The slot the read required, if any.
+ * @throws When `contextSlot` is before `minContextSlot`.
+ */
+function assertReadAtOrAfterSlot(contextSlot: Slot, minContextSlot: Slot | undefined): void {
+  if (minContextSlot !== undefined && contextSlot < minContextSlot) {
+    throw new Error("RPC balance read is behind the confirmed transaction slot");
+  }
+}
+
+/**
+ * The lamports `owner` holds at confirmed commitment; an address with no account holds 0.
+ *
+ * @param rpc - The cluster to read.
+ * @param owner - The address to read.
+ * @param bounds - The read's deadline and minimum context slot.
+ * @param bounds.abortSignal - Aborts the read.
+ * @param bounds.minContextSlot - The oldest slot the answering bank may be at.
+ * @returns The lamports held.
+ * @throws When the answer was served from a bank older than `bounds.minContextSlot`.
+ */
+export async function getLamportsBalance(
+  rpc: SolanaRpc,
+  owner: Address,
+  bounds: BalanceReadBounds
+): Promise<bigint> {
+  const response = await rpc
+    .getBalance(owner, { commitment: "confirmed", minContextSlot: bounds.minContextSlot })
+    .send({ abortSignal: bounds.abortSignal });
+  assertReadAtOrAfterSlot(response.context.slot, bounds.minContextSlot);
+  return response.value;
 }
 
 function issuedTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string | null {
@@ -54,10 +101,7 @@ export function withIssuedTokenLabels<T extends { mint: string; token: string }>
   });
 }
 
-export async function resolveMintDecimals(
-  rpc: ReturnType<typeof createRpc>,
-  mint: Address
-): Promise<number> {
+export async function resolveMintDecimals(rpc: SolanaRpc, mint: Address): Promise<number> {
   const response = await rpc.getTokenSupply(mint, { commitment: "confirmed" }).send();
   const decimals = response.value.decimals;
 
@@ -83,7 +127,7 @@ function parseTokenAmountInfo(info: JsonParsedTokenAccount): {
 }
 
 export async function getSplTokenBalances(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   options?: GetSplTokenBalancesOptions
 ): Promise<
@@ -97,13 +141,18 @@ export async function getSplTokenBalances(
         .getTokenAccountsByOwner(
           owner,
           { programId },
-          { encoding: "jsonParsed", commitment: "confirmed" }
+          {
+            encoding: "jsonParsed",
+            commitment: "confirmed",
+            minContextSlot: options?.minContextSlot,
+          }
         )
-        .send()
+        .send({ abortSignal: options?.abortSignal })
     )
   );
 
   for (const response of responses) {
+    assertReadAtOrAfterSlot(response.context.slot, options?.minContextSlot);
     for (const account of response.value) {
       const parsed = parseTokenAmountInfo(account.account.data.parsed.info);
       if (parsed.amount <= 0n) {
@@ -136,7 +185,7 @@ export async function getSplTokenBalances(
 }
 
 export async function getSplTokenAccountAddresses(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address
 ): Promise<Address[]> {
   const addresses: Address[] = [];
@@ -175,10 +224,7 @@ function assertSupportedTokenProgram(program: string): Address {
   throw badRequest("Unsupported token program for mint");
 }
 
-export async function resolveMintTokenProgram(
-  rpc: ReturnType<typeof createRpc>,
-  mint: Address
-): Promise<Address> {
+export async function resolveMintTokenProgram(rpc: SolanaRpc, mint: Address): Promise<Address> {
   const mintAccountInfo = await getAccountInfo(rpc, mint);
   if (!mintAccountInfo) {
     throw badRequest("Token mint account does not exist");
@@ -187,7 +233,7 @@ export async function resolveMintTokenProgram(
 }
 
 export async function resolveSourceTokenAccount(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address
@@ -205,7 +251,7 @@ export async function resolveSourceTokenAccount(
 }
 
 export async function resolveSourceTokenAccountOrAta(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address
@@ -233,7 +279,7 @@ export async function resolveSourceTokenAccountOrAta(
  * transferChecked from the authority's largest token account.
  */
 export async function buildSplTransferInstructions(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   input: {
     authority: TransactionSigner;
     destination: Address;
@@ -283,7 +329,7 @@ export async function buildSplTransferInstructions(
 }
 
 async function findSourceTokenAccount(
-  rpc: ReturnType<typeof createRpc>,
+  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address
