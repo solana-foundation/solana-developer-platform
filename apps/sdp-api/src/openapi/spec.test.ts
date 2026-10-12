@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { ERROR_CODES } from "../lib/errors";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 interface TestJsonSchema {
@@ -593,6 +594,14 @@ describe("OpenAPI spec", () => {
       expect(operation?.responses?.["409"]).toBeDefined();
       expect(operation?.responses?.["503"]).toBeDefined();
     }
+  });
+
+  it("documents every runtime error code in the public error envelope", () => {
+    const doc = createPublicOpenApiDocument();
+    const forbidden = doc.paths?.["/v1/payments/transfers"]?.post?.responses?.["403"];
+    const code = getJsonSchema(forbidden).properties?.error?.properties?.code;
+    expect(code?.enum).toEqual(ERROR_CODES);
+    expect(code?.enum).toContain("OPERATION_NOT_ALLOWED");
   });
 
   it("documents the 422 SIGNING_REJECTED response on sponsored submit operations", () => {

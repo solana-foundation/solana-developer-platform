@@ -7,6 +7,7 @@ import {
   TOKEN_TRANSACTION_STATUSES,
 } from "@sdp/types";
 import { z } from "zod";
+import { ERROR_CODES } from "../../lib/errors";
 import { IDEMPOTENCY_KEY_PATTERN } from "../../middleware/idempotency-key";
 
 extendZodWithOpenApi(z);
@@ -168,44 +169,7 @@ export const magicLinkTokenQuerySchema = z.string().openapi({
 });
 
 export const errorCodeSchema = z
-  .enum([
-    "BAD_REQUEST",
-    "UNAUTHORIZED",
-    "FORBIDDEN",
-    "NOT_FOUND",
-    "CONFLICT",
-    "RATE_LIMITED",
-    "SERVICE_UNAVAILABLE",
-    "INTERNAL_ERROR",
-    "NOT_ALLOWLISTED",
-    "INVALID_API_KEY",
-    "EXPIRED_API_KEY",
-    "REVOKED_API_KEY",
-    "INSUFFICIENT_PERMISSIONS",
-    "INVALID_INVITATION",
-    "EXPIRED_INVITATION",
-    "INVALID_TOKEN",
-    "TOKEN_NOT_FOUND",
-    "TOKEN_NOT_ACTIVE",
-    "TOKEN_NOT_MINTABLE",
-    "TOKEN_NOT_DEPLOYED",
-    "TOKEN_PAUSED",
-    "NOT_ON_TOKEN_ALLOWLIST",
-    "ON_TOKEN_BLOCKLIST",
-    "ACCOUNT_FROZEN",
-    "ACCOUNT_NOT_FROZEN",
-    "MAX_SUPPLY_EXCEEDED",
-    "INSUFFICIENT_TOKEN_BALANCE",
-    "SOLANA_RPC_ERROR",
-    "CUSTODY_ERROR",
-    "TRANSACTION_FAILED",
-    "SIGNING_FAILED",
-    "SIGNING_REJECTED",
-    "PROVIDER_NOT_CONFIGURED",
-    "PROVIDER_UNAVAILABLE",
-    "UNSUPPORTED_CORRIDOR",
-    "VAULT_EXPOSURE_CAP",
-  ])
+  .enum(ERROR_CODES)
   .openapi({ description: "Machine-readable error code." });
 
 export const errorSchema = z

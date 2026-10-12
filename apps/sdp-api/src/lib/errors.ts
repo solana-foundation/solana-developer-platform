@@ -120,6 +120,9 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   VAULT_EXPOSURE_CAP: 409,
 };
 
+/** Every error code the API can return; the OpenAPI error-code enum is built from it. */
+export const ERROR_CODES = Object.keys(ERROR_STATUS_CODES) as [ErrorCode, ...ErrorCode[]];
+
 export const PUBLIC_INTERNAL_ERROR_MESSAGE = "An internal error occurred";
 
 const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {

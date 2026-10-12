@@ -35,7 +35,7 @@ export const projectScopeWithRequiredIdempotencyHeaders = projectScopeHeaders.ex
 const ERROR_RESPONSE_DESCRIPTIONS: Readonly<Record<number, string>> = {
   400: "Bad request. The body, path, query, or a header failed validation, or the operation is not valid for the resource's current state (for example `TOKEN_PAUSED` or `INSUFFICIENT_TOKEN_BALANCE`).",
   401: "Unauthorized. The API key or session is missing, invalid, revoked, or expired (`UNAUTHORIZED`, `INVALID_API_KEY`, `REVOKED_API_KEY`, `EXPIRED_API_KEY`).",
-  403: "Forbidden. The caller lacks a required permission (`INSUFFICIENT_PERMISSIONS`), or a policy, IP allowlist, or token access rule refused the request (`FORBIDDEN`, `NOT_ON_TOKEN_ALLOWLIST`).",
+  403: "Forbidden. The caller lacks a required permission (`INSUFFICIENT_PERMISSIONS`), the API key's allowed operations exclude the operation (`OPERATION_NOT_ALLOWED`), or an IP allowlist, wallet scope, or token access rule refused the request (`FORBIDDEN`, `NOT_ON_TOKEN_ALLOWLIST`).",
   404: "Not found. The resource does not exist, or it belongs to another project.",
   409: "Conflict. The request conflicts with the resource's current state, or an `Idempotency-Key` was reused with a different payload (`CONFLICT`).",
   413: "Payload too large (`PAYLOAD_TOO_LARGE`).",
