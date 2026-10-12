@@ -40,7 +40,10 @@ dropped.
 4. **CI pins what could bypass the waists**: the constructors that turn a
    stored secret into a signing adapter, keypair or fee payer
    (`scripts/check-value-movement.mjs`, TypeScript checker, shrink-only
-   allowlists).
+   allowlists). It scans the API and every package the API loads; the
+   packages that define the constructors (`sdp-custody`, the fee-payment
+   module) own them. A file it allows can still wrap a pinned constructor in
+   a new function, so those files are trusted and reviewed like the waists.
 
 ## Consequences
 

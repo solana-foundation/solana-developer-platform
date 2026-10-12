@@ -48,7 +48,7 @@ function violations(files, capabilities = [CAPABILITY]) {
       rootDir,
       tsconfig: path.join(rootDir, "tsconfig.json"),
       capabilities,
-      scanRoot: "src/",
+      scanRoots: ["src/"],
     });
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
@@ -293,4 +293,25 @@ declare var require: (id: string) => unknown;
     [...flagged].sort(),
     ["src/aliased-eval.ts", "src/aliased-require.ts", "src/global-eval.ts", "src/renamed.ts"].sort()
   );
+});
+
+test("lets a defining package use its own constructors and checks every other one", () => {
+  const PACKAGE = {
+    id: "package",
+    why: "package capability",
+    symbols: [{ file: "src/pkg/adapter.ts", name: "Adapter" }],
+    owners: ["src/pkg/"],
+    allow: [],
+  };
+  const found = violations(
+    {
+      "src/pkg/adapter.ts": `export class Adapter {}\n`,
+      "src/pkg/sub.ts": `import { Adapter } from "./adapter";\nexport class Sub extends Adapter {}\nexport const make = () => new Adapter();\n`,
+      "src/other/uses.ts": `import { Adapter } from "../pkg/adapter";\nnew Adapter();\n`,
+    },
+    [PACKAGE]
+  );
+
+  const flagged = new Set(found.map((violation) => violation.split(":")[0]));
+  assert.deepEqual([...flagged], ["src/other/uses.ts"]);
 });

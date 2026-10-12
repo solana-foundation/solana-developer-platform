@@ -23,6 +23,12 @@
  * constant, an object entry, a subclass, an argument) fails. Tests may
  * reference anything: they exercise these constructors.
  *
+ * It scans the API and every package the API loads. The packages that define
+ * these constructors own them and use them freely; any other package is held
+ * to the same lists as API code. What it cannot see is a file it already
+ * allows wrapping a pinned constructor in a new function: those files are
+ * trusted, so a change inside one is reviewed like the waists themselves.
+ *
  * Adding a file to any list below is a security-reviewed change.
  */
 
@@ -34,6 +40,13 @@ import ts from "typescript";
 const API = "apps/sdp-api/src";
 const FEE_PAYMENT = "packages/sdp-payments/src/fee-payment";
 const KEYCHAIN = "packages/sdp-custody/src/keychain";
+/**
+ * The packages that define these constructors. They build, subclass and pass
+ * their own adapters around freely; every other package is checked like API
+ * code. A trailing slash makes an owner a directory.
+ */
+const CUSTODY_PACKAGE = "packages/sdp-custody/src/";
+const FEE_PAYMENT_PACKAGE = `${FEE_PAYMENT}/`;
 
 /** Provider keychain SDKs: each export can hold a provider secret and sign. */
 const KEYCHAIN_SDKS = [
@@ -91,14 +104,14 @@ export const CAPABILITIES = [
       { file: `${FEE_PAYMENT}/index.ts`, name: "createKoraAdapter" },
       { file: `${FEE_PAYMENT}/kora.adapter.ts`, name: "KoraAdapter" },
     ],
-    owners: [],
+    owners: [FEE_PAYMENT_PACKAGE],
     allow: [`${API}/services/sponsorship.service.ts`],
   },
   {
     id: "keychain-signing-adapter",
     why: "Holds a provider secret and can sign; only the adapter factory and the wallet lifecycle may build one.",
     symbols: [{ file: `${KEYCHAIN}/index.ts`, name: "*" }],
-    owners: [],
+    owners: [CUSTODY_PACKAGE],
     allow: [
       `${API}/services/adapters/index.ts`,
       `${API}/services/adapters/signing/index.ts`,
@@ -114,7 +127,7 @@ export const CAPABILITIES = [
       { file: "packages/sdp-custody/src/dfns/index.ts", name: "*" },
       ...KEYCHAIN_SDKS.map((module) => ({ module, name: "*" })),
     ],
-    owners: [],
+    owners: [CUSTODY_PACKAGE],
     allow: [
       `${API}/services/domain/signing.service.ts`,
       `${API}/services/domain/signing/provider-adapter-factory.ts`,
@@ -129,7 +142,7 @@ export const CAPABILITIES = [
       { file: `${FEE_PAYMENT}/index.ts`, name: "createNativeAdapter" },
       { file: `${FEE_PAYMENT}/index.ts`, name: "KoraClient" },
     ],
-    owners: [],
+    owners: [FEE_PAYMENT_PACKAGE],
     allow: [],
   },
   {
@@ -145,7 +158,12 @@ export const CAPABILITIES = [
       { module: "@solana/kit", name: "createKeyPairFromBytes" },
     ],
     owners: [],
-    allow: [`${API}/services/domain/signing.service.ts`],
+    allow: [
+      `${API}/services/domain/signing.service.ts`,
+      // Each builds the keypair inside a constructor that is pinned itself.
+      `${KEYCHAIN}/keychain-memory.adapter.ts`,
+      `${FEE_PAYMENT}/native.adapter.ts`,
+    ],
   },
 ];
 
@@ -358,10 +376,10 @@ function resolveSymbol(checker, program, rootDir, capabilitySymbol) {
  * Finds every capability reference outside its allowlist, and every stale
  * allowlist entry. Returns human-readable violations.
  *
- * @param {{ rootDir: string, tsconfig: string, capabilities: Capability[], scanRoot: string }} options
+ * @param {{ rootDir: string, tsconfig: string, capabilities: Capability[], scanRoots: string[] }} options
  */
-export function findValueMovementViolations({ rootDir, tsconfig, capabilities, scanRoot }) {
-  for (const [name, value] of Object.entries({ rootDir, tsconfig, capabilities, scanRoot })) {
+export function findValueMovementViolations({ rootDir, tsconfig, capabilities, scanRoots }) {
+  for (const [name, value] of Object.entries({ rootDir, tsconfig, capabilities, scanRoots })) {
     if (value === undefined) throw new Error(`findValueMovementViolations needs ${name}`);
   }
   const configFile = ts.readConfigFile(tsconfig, ts.sys.readFile);
@@ -387,7 +405,7 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
     if (source.isDeclarationFile) continue;
     const relativePath = path.relative(rootDir, source.fileName).split(path.sep).join("/");
     if (relativePath.startsWith("..") || relativePath.includes("node_modules/")) continue;
-    if (!relativePath.startsWith(scanRoot)) continue;
+    if (!scanRoots.some((scanRoot) => relativePath.startsWith(scanRoot))) continue;
     if (isTestFile(relativePath)) continue;
 
     const report = (node, symbol, label, viaModule) => {
@@ -396,6 +414,12 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
       }
       const capability = symbol ? targets.get(symbol) : undefined;
       if (!capability) return;
+      // A defining package may use its own constructors however it likes.
+      if (
+        capability.owners.some((owner) => owner.endsWith("/") && relativePath.startsWith(owner))
+      ) {
+        return;
+      }
       const owner = capability.owners.includes(relativePath);
       const allowed = capability.allow.includes(relativePath);
       if (allowed) used.get(capability.id).add(relativePath);
@@ -508,7 +532,9 @@ if (isMain) {
     rootDir,
     tsconfig,
     capabilities: CAPABILITIES,
-    scanRoot: `${API}/`,
+    // The API and every package it loads: a package other than the defining
+    // ones gets no more room than API code.
+    scanRoots: [`${API}/`, "packages/"],
   });
   if (violations.length > 0) {
     console.error("Value movement check failed (HOO-1955):");
