@@ -54,7 +54,9 @@ Access is checked before the key on every request, so a retry passes exactly the
 | Same key, original still running | `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. Wait, then retry with the same key. |
 | Same key, different request or different credential | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
 | Same key, but the credential has since lost access to the wallet or resource | `403`. The stored response is not returned. |
-| Original returned `400`, `401`, `403`, `409` or `429` | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
+| Original was refused with `400`, `401`, `403`, `409` or `429` before it wrote anything | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
+| A transfer or transfer batch failed after writing its record (for example `400 TRANSACTION_FAILED`, or `409` for a signer mismatch) | Stored: the same error, with `Idempotent-Replayed: true`. After 24 hours the record answers with the same status and code. The key is spent: send the request again with a new key to try again. |
+| A recurring-payment action failed | Not stored. A failed attempt leaves the schedule as it was, so a same-key retry runs the action again. |
 | Original returned a `5xx` | Stored and replayed: use a new key to try again. The routes that move money, and `PATCH /v1/payments/recurring-payments/{id}`, are the exception: a same-key retry runs again and answers from the record the first attempt wrote, so it never sends twice. That answer carries no `Idempotent-Replayed` header. |
 
 "Same request" means the same path, query parameters, body and credential. Recipient order in a transfer batch, and `"1.0"` versus `"1"` for an amount, do not change the request.
@@ -71,7 +73,11 @@ When the answer comes from the original record instead (a same-key retry after a
 
 ## Retention
 
-Keys are kept for 24 hours after the original request. After that, a same-key retry on an accepted route starts a new request. On the routes that move money, the record the first attempt wrote still holds its key, so a late retry is answered from that record, or refused if the request differs.
+Keys are kept for 24 hours after the original request. After that, a same-key retry on most accepted routes starts a new request. On the routes that move money, the record the first attempt wrote still holds its key, so a late retry is answered from that record, or refused if the request differs; a failed transfer answers with the status and code it failed with.
+
+## Creating wallets
+
+`POST /v1/wallets` with a key never provisions a second wallet for one operation: a retry returns the wallet an earlier attempt created, within 24 hours or after, and the same key on a different request returns `422`. Privy and Coinbase CDP also dedupe the request at the provider. A provider failure is stored as a `503` for 24 hours, so try again with a new key.
 
 ## The dashboard and the Postman collection
 

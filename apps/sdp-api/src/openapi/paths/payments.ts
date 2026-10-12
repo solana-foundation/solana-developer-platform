@@ -64,6 +64,12 @@ import {
 } from "./responses";
 
 // Each matches the route's `idempotent()` step (ADR 0008); spec.test.ts checks.
+// Transfers and batches store any answer once their row is written.
+const movementKeyHeaders = projectScopeWithDeclaredIdempotencyHeaders({
+  key: "required",
+  serverErrors: "rerun",
+  storesAnswerAfterRecord: true,
+});
 const keyRequiredRerunHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "required",
   serverErrors: "rerun",
@@ -129,7 +135,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: keyRequiredRerunHeaders,
+      headers: movementKeyHeaders,
       body: {
         required: true,
         content: jsonContent(createTransferRequestSchema),
@@ -222,7 +228,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: keyRequiredRerunHeaders,
+      headers: movementKeyHeaders,
       body: {
         required: true,
         content: jsonContent(createTransferBatchRequestSchema),

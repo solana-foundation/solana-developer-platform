@@ -36,6 +36,11 @@ export const projectScopeWithRequiredIdempotencyHeaders = projectScopeHeaders.ex
 export interface IdempotencyDocumentation {
   key: IdempotencyKeyMode;
   serverErrors: "store" | "rerun";
+  /**
+   * The handler marks its domain row written (`markIdempotencyCommitted`), so
+   * from then on any status is stored: transfers and transfer batches.
+   */
+  storesAnswerAfterRecord?: boolean;
 }
 
 const IDEMPOTENCY_CONTRACT =
@@ -44,7 +49,7 @@ const IDEMPOTENCY_CONTRACT =
   "Keys are scoped to the credential: the same key with a different request, or from a different credential, returns 422 `IDEMPOTENCY_KEY_REUSED`. " +
   "A rotated API key is a new credential, so after a rotation read the resource with GET to learn whether the original request ran before sending it again. " +
   "A key whose original request is still running returns 409 `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. " +
-  "A 400, 401, 403, 409 or 429 is not stored, so the same key runs again once the cause is fixed. " +
+  "A 400, 401, 403, 409 or 429 refusal is not stored, so the same key runs again once the cause is fixed. " +
   "Access is checked before the key on every request, so a refused request never claims the key, and a credential that has since lost access to the named resource gets 403 instead of the stored response. " +
   "A replay is a snapshot of the original response: read the current state with GET instead of sending the request again.";
 
@@ -54,13 +59,21 @@ const SERVER_ERROR_RETRY: Record<IdempotencyDocumentation["serverErrors"], strin
     "After a 5xx, a retry with the same key runs again and answers from the original record instead of acting twice; that answer carries no `Idempotent-Replayed` header.",
 };
 
+const ANSWER_AFTER_RECORD =
+  "Once the request has written its record, its answer is stored whatever its status: a transfer that fails after that (such as 400 `TRANSACTION_FAILED` or a 409 signer mismatch) answers a same-key retry with the same error and `Idempotent-Replayed: true`, and after 24 hours the record answers with the same status and code. To try again, send the request with a new key.";
+
 /** The `Idempotency-Key` header description for a route's declared mode. */
-export function idempotencyKeyDescription({ key, serverErrors }: IdempotencyDocumentation) {
+export function idempotencyKeyDescription({
+  key,
+  serverErrors,
+  storesAnswerAfterRecord,
+}: IdempotencyDocumentation) {
   const lead =
     key === "required"
       ? "Required: a request without one returns 400 `IDEMPOTENCY_KEY_REQUIRED`."
       : "Optional, and honored when sent.";
-  return `${lead} ${IDEMPOTENCY_CONTRACT} ${SERVER_ERROR_RETRY[serverErrors]}`;
+  const afterRecord = storesAnswerAfterRecord ? ` ${ANSWER_AFTER_RECORD}` : "";
+  return `${lead} ${IDEMPOTENCY_CONTRACT}${afterRecord} ${SERVER_ERROR_RETRY[serverErrors]}`;
 }
 
 /**
